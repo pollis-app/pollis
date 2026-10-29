@@ -1,55 +1,22 @@
 // The Expo Updates protocol v1 (https://docs.expo.dev/technical-specs/expo-updates-1/),
 // server side, for Pollis's over-the-air JS updates (#1250).
 //
-// Served by the DS front-door Worker (index.ts) under `/updates/` on
-// api.pollis.com, and answered HERE, in the Worker, straight from R2: an
-// update request never reaches the DS container or its Durable Object, so app
-// launches and multi-MB bundle downloads never queue behind message traffic on
-// the single serialized instance.
+// Answered in the Worker straight from R2, so updates never queue behind the single DS instance.
 //
 //   GET /updates/api/manifest          the live manifest or directive
 //   GET|HEAD /updates/assets/<sha256>  content-addressed bundles and assets
 //
-// This module is a DUMB PIPE on purpose. It never holds the code-signing key
-// and never builds, edits or re-serializes a manifest: the publish pipeline
-// (mobile/scripts/ota-publish.ts) signs each manifest or directive behind an
-// approval gate and stores the exact bytes plus their `expo-signature` value in
-// R2, and this file passes both through unchanged. A compromised Worker can
-// therefore withhold an update or serve an old signed one, but it cannot make
-// a phone run code that the signing key did not sign — the app refuses any
-// manifest whose signature does not verify against the certificate compiled
-// into it.
+// A DUMB PIPE: it never holds the signing key or edits a manifest, so it can withhold but not forge.
 //
-// R2 layout (the public release bucket `pollis`, under OTA_KEY_PREFIX; written
-// only by the publish pipeline, which uses the same prefix):
+// R2 layout under OTA_KEY_PREFIX: current/<channel>/<platform>/<rv>.json pointers, assets/<sha256>.
 //
-//   ota/current/<channel>/<platform>/<runtimeVersion>.json   the live pointer:
-//       { "kind": "manifest" | "directive", "body": "<exact signed JSON>",
-//         "signature": "sig=\"…\", keyid=\"main\", alg=\"rsa-v1_5-sha256\"" }
-//   ota/assets/<sha256 hex>                                  content-addressed
-//       bundles and assets, immutable
-//   ota/updates/…, ota/groups/…                              the publish archive
-//       (rollback/republish source); never served here
+// Privacy: only the protocol headers are read, and nothing is logged.
 //
-// The bucket is public (cdn.pollis.com), so these objects are also readable
-// there. That is fine: nothing under ota/ is secret (the bundle is the same JS
-// every store build ships, and every manifest is signed and logged), and the
-// app only ever asks api.pollis.com/updates.
-//
-// Privacy: the only request data read is the protocol headers below. Nothing
-// is logged, and the DS wrangler configs keep Workers Logs and Logpush off, so
-// no client IP is recorded anywhere (worker-tests/updates-no-client-ip.test.ts).
-//
-// This module imports nothing Cloudflare-specific so it runs under `node
-// --test` exactly as it runs in workerd.
+// Imports nothing Cloudflare-specific so it runs under `node --test`.
 
-// Every key this module reads lives under this prefix of the shared bucket.
-// The publish pipeline writes under the same one (mobile/scripts/ota/lib.ts
-// OTA_KEY_PREFIX; mobile/tests/ota-worker.test.ts pins that they agree).
+// The publish pipeline writes under the same prefix (mobile/tests/ota-worker.test.ts pins it).
 export const OTA_KEY_PREFIX = "ota/";
 
-// Every route this module owns. index.ts hands any path under it here and
-// never forwards one to the container.
 export const UPDATES_PATH_PREFIX = "/updates/";
 
 export interface StoredObject {
@@ -64,17 +31,14 @@ export interface BucketLike {
   get(key: string): Promise<StoredObject | null>;
 }
 
-// What the protocol handlers see: a bucket whose keys are already relative to
-// OTA_KEY_PREFIX, and the one channel this deployment serves.
+// Keys already relative to OTA_KEY_PREFIX, plus the one served channel.
 export interface UpdatesEnv {
   UPDATES: BucketLike;
-  // Requests naming any other channel are refused, so a build configured for
-  // some other channel gets nothing.
+  // Requests naming any other channel are refused.
   CHANNEL: string;
 }
 
-// The DS Worker's bindings this module needs. Both optional: an environment
-// that binds no bucket (dev) serves no updates at all.
+// Both optional: with no bucket bound (dev) no updates are served.
 export interface UpdatesBindings {
   UPDATES?: BucketLike;
   OTA_CHANNEL?: string;
@@ -91,13 +55,10 @@ export interface Pointer {
 export const PLATFORMS = ["ios", "android"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
-// A fingerprint runtime version is 40 hex chars; anything key-safe and short is
-// accepted so the policy can change without a Worker deploy, but nothing that
-// could walk the R2 key space (no `/`, no `..`).
+// Key-safe and short; no `/` or `..` that could walk the R2 key space.
 const RUNTIME_VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ASSET_PATH_RE = /^\/updates\/assets\/([0-9a-f]{64})$/;
-// Exactly what the publish pipeline writes: three sf-string members, the
-// algorithm the app's codeSigningMetadata names.
+// Exactly what the publish pipeline writes.
 const SIGNATURE_RE = /^sig="[A-Za-z0-9+/]+={0,2}", keyid="[A-Za-z0-9_-]{1,64}", alg="rsa-v1_5-sha256"$/;
 const DIRECTIVE_TYPES = new Set(["noUpdateAvailable", "rollBackToEmbedded"]);
 
@@ -121,9 +82,7 @@ export function pointerKey(channel: string, platform: Platform, runtimeVersion: 
   return `current/${channel}/${platform}/${runtimeVersion}.json`;
 }
 
-// Validate a stored pointer before serving it. A pointer the pipeline did not
-// write correctly is a 500, never a half-formed protocol response: the publish
-// job's live re-fetch then fails loudly instead of phones quietly erroring.
+// A malformed pointer is a 500, never a half-formed protocol response.
 export function parsePointer(raw: string, runtimeVersion: string): Pointer {
   const value = JSON.parse(raw) as Partial<Pointer>;
   if (value.kind !== "manifest" && value.kind !== "directive") {
@@ -137,8 +96,7 @@ export function parsePointer(raw: string, runtimeVersion: string): Pointer {
   }
   const body = JSON.parse(value.body) as Record<string, unknown>;
   if (value.kind === "manifest") {
-    // A manifest filed under the wrong runtime version would be refused by the
-    // app anyway; refusing it here makes the mistake visible at publish time.
+    // Refused here so a wrong runtime version shows up at publish time.
     if (body.runtimeVersion !== runtimeVersion) {
       throw new Error("pointer runtimeVersion");
     }
@@ -164,8 +122,7 @@ function randomBoundary(): string {
   return `pollis-${hex}`;
 }
 
-// multipart/mixed per the protocol: the signed part carries its signature in a
-// part header, byte-for-byte as the pipeline stored it.
+// multipart/mixed; the signature is passed through byte-for-byte.
 export function multipartBody(pointer: Pointer, boundary: string): string {
   if (pointer.body.includes(boundary)) {
     throw new Error("boundary collision");
@@ -277,14 +234,11 @@ export async function handle(request: Request, env: UpdatesEnv): Promise<Respons
   return textResponse(404, "not found");
 }
 
-// True for every path this module owns (and so the container never sees).
 export function isUpdatesPath(pathname: string): boolean {
   return pathname === "/updates" || pathname.startsWith(UPDATES_PATH_PREFIX);
 }
 
-// Confine every read to OTA_KEY_PREFIX. The handlers' key shapes already
-// cannot leave it (runtime versions and hashes admit no `/`), and R2 keys are
-// literal strings with no path normalisation; this makes the bound structural.
+// Confine every read to OTA_KEY_PREFIX structurally.
 export function prefixedBucket(bucket: BucketLike, prefix: string): BucketLike {
   return {
     get(key: string) {
@@ -293,7 +247,6 @@ export function prefixedBucket(bucket: BucketLike, prefix: string): BucketLike {
   };
 }
 
-// Entry point from index.ts.
 export async function handleUpdates(request: Request, bindings: UpdatesBindings): Promise<Response> {
   if (!bindings.UPDATES || !bindings.OTA_CHANNEL) {
     return textResponse(404, "updates are not served by this deployment");

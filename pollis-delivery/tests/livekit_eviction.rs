@@ -1,18 +1,4 @@
 //! Losing access ends the LiveKit session you already hold.
-//!
-//! A LiveKit token is verified ONCE, at join. Nothing that happens afterwards
-//! reaches the SFU on its own, so a member who was removed, left, was blocked,
-//! or whose device was revoked kept their realtime and voice connections —
-//! typing indicators, presence, control nudges, the voice channel itself — until
-//! they chose to disconnect. Refusing them the NEXT token (which the broker
-//! already did) does nothing about the one they are using.
-//!
-//! These tests drive the real router with device-signed requests against a local
-//! libsql DB and a fake LiveKit Twirp endpoint that records every
-//! `RemoveParticipant` it is handed, so the eviction is asserted where it
-//! actually has to happen — on the wire to the SFU — and per identity, since the
-//! identity is a per-`(room, user, device, kind)` pseudonym and missing one of
-//! them leaves that session live.
 
 use std::sync::{Arc, Mutex};
 
@@ -34,8 +20,6 @@ use tower::ServiceExt as _;
 mod common;
 
 const LK_SECRET: &str = "secret-secret-secret-secret";
-
-// ── Fixtures ─────────────────────────────────────────────────────────────────
 
 fn gen_signing_key() -> SigningKey<MlDsa44> {
     let mut seed = [0u8; 32];
@@ -59,7 +43,6 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// A user with a live device whose key signs this test's requests.
 struct Actor {
     user_id: String,
     device_id: String,
@@ -78,8 +61,7 @@ async fn seed_user(db: &Db, user_id: &str) {
         .unwrap();
 }
 
-/// Register one more device on an existing account, without a signing key of its
-/// own — enough to be enumerated by the eviction.
+/// One more device, unsigned, enough to be enumerated by the eviction.
 async fn seed_device(db: &Db, user_id: &str, device_id: &str) {
     let key = gen_signing_key();
     db.conn()
@@ -113,7 +95,6 @@ async fn seed_actor(db: &Db, user_id: &str) -> Actor {
     }
 }
 
-/// A group with one text channel and the given members, all admins.
 async fn seed_group(db: &Db, group: &str, channel: &str, members: &[&str]) {
     let conn = db.conn().await.unwrap();
     conn.execute(
@@ -202,7 +183,6 @@ fn signed(actor: &Actor, path: &str, body: serde_json::Value) -> Request<Body> {
         .unwrap()
 }
 
-/// A stand-in LiveKit Twirp server recording every `RemoveParticipant` body.
 async fn fake_livekit() -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
     let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
@@ -256,9 +236,7 @@ async fn send(h: &Harness, req: Request<Body>) -> StatusCode {
     status
 }
 
-/// Was `(room, user, device, kind)` kicked? Both halves of the wire pair are
-/// derived here exactly as the DS derives them, so the assertion pins the real
-/// pseudonymous addressing rather than a stringly-typed stand-in.
+/// Was `(room, user, device, kind)` kicked? Derived exactly as the DS derives it.
 fn kicked(
     seen: &Arc<Mutex<Vec<serde_json::Value>>>,
     room: &str,
@@ -273,14 +251,7 @@ fn kicked(
     })
 }
 
-// ── Removal ──────────────────────────────────────────────────────────────────
-
-/// The defect: `POST /v1/members/remove` deleted the membership row and told
-/// LiveKit nothing at all, so the ex-member's open connection outlived it.
-///
-/// Every device and every capability has to go, in the group room AND in the
-/// group's channels (a voice participant joins the CHANNEL as the room), or the
-/// eviction is only partial — which for the one that is missed is no eviction.
+/// Every device and capability goes, in the group room and its channels.
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_a_member_kicks_all_their_identities_from_every_room_of_the_group() {
     let db = fresh_db().await;
@@ -315,8 +286,7 @@ async fn removing_a_member_kicks_all_their_identities_from_every_room_of_the_gro
             }
         }
     }
-    // The removal is bob's alone: kicking the admin out of the room they still
-    // belong to would be a self-inflicted outage.
+    // The removal is bob's alone.
     assert!(
         !kicked(
             &h.seen,
@@ -329,8 +299,7 @@ async fn removing_a_member_kicks_all_their_identities_from_every_room_of_the_gro
     );
 }
 
-/// A refused removal must not evict either — otherwise anyone who can reach the
-/// endpoint can knock a member offline without being able to remove them.
+/// A refused removal must not evict either.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_forbidden_removal_evicts_nobody() {
     let db = fresh_db().await;
@@ -355,9 +324,6 @@ async fn a_forbidden_removal_evicts_nobody() {
     );
 }
 
-/// Leaving is a removal the member performs themselves, and a stale or hostile
-/// client that stops short of disconnecting keeps the session unless the DS
-/// closes it.
 #[tokio::test(flavor = "multi_thread")]
 async fn leaving_a_group_kicks_the_leaver_out_of_its_rooms() {
     let db = fresh_db().await;
@@ -381,11 +347,7 @@ async fn leaving_a_group_kicks_the_leaver_out_of_its_rooms() {
     }
 }
 
-// ── Blocks ───────────────────────────────────────────────────────────────────
-
-/// Blocking does not delete the DM's membership rows, so the eviction has to be
-/// paired with a token refusal — otherwise the blocked client reconnects within
-/// its backoff and is let straight back in, and the kick was theatre.
+/// Blocking keeps the DM rows, so the kick must pair with a token refusal.
 #[tokio::test(flavor = "multi_thread")]
 async fn blocking_kicks_the_blocked_peer_and_the_token_endpoint_keeps_them_out() {
     let db = fresh_db().await;
@@ -414,7 +376,6 @@ async fn blocking_kicks_the_blocked_peer_and_the_token_endpoint_keeps_them_out()
         "the blocker keeps their own session"
     );
 
-    // And cannot come back.
     let status = send(
         &h,
         signed(
@@ -430,8 +391,7 @@ async fn blocking_kicks_the_blocked_peer_and_the_token_endpoint_keeps_them_out()
         "a blocked peer must not be able to re-mint a token for the DM"
     );
 
-    // The blocker's own access to the same room is untouched — the block is
-    // one-directional, and so is the refusal.
+    // The block is one-directional, and so is the refusal.
     let status = send(
         &h,
         signed(
@@ -444,12 +404,7 @@ async fn blocking_kicks_the_blocked_peer_and_the_token_endpoint_keeps_them_out()
     assert_eq!(status, StatusCode::OK);
 }
 
-// ── Device revocation ────────────────────────────────────────────────────────
-
-/// Revoking a device stops it signing new requests — including new token
-/// requests — but says nothing to the SFU about the connection it is holding.
-/// The account's OTHER devices must be left alone: this is a device eviction,
-/// not an account one.
+/// A device eviction, not an account one: other devices are left alone.
 #[tokio::test(flavor = "multi_thread")]
 async fn revoking_a_device_kicks_that_device_out_of_every_room_and_no_other() {
     let db = fresh_db().await;

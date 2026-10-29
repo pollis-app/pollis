@@ -6,27 +6,16 @@ import type { BuildVerifyStatus } from "../../types";
 
 interface BuildVerifyLineProps {
   status: BuildVerifyStatus;
-  // One-line, human-readable explanation from the report. Surfaced as the reason
-  // on `mismatch` and `unavailable`; ignored for the other (self-explanatory)
-  // statuses.
+  // Shown as the reason on `mismatch` and `unavailable`.
   detail: string;
   testId?: string;
 }
 
-// The public, third-party verification story the honest caveat links out to: the
-// in-app check proves inclusion + hash match, NOT that the payload reproduces
-// from source. That step is the independent rebuilders'.
+// The in-app check proves inclusion + hash match, not reproducibility; that's for rebuilders.
 const VERIFY_DOCS_URL =
   "https://pollis.com/artifacts.html";
 
-// Terse copy + tone per status, mirroring AccountKeyAuditLine. Quiet and
-// advisory — these alert, they never block launch/update. `mismatch` is the only
-// danger-toned case (solid danger color — NO neon/glow per repo rules); the rest
-// sit in accent/muted text.
-//
-// `labelKey` is a `settings` translation key rather than the copy itself: this
-// table is module-level, so a `t()` here would snapshot the language at import
-// time. It is resolved in the component below, on every render.
+// Advisory, never blocking; only `mismatch` is danger-toned. `labelKey` resolves at render.
 const statusConfig: Record<
   BuildVerifyStatus,
   { icon: React.ReactElement; labelKey: string; color: string }
@@ -53,13 +42,7 @@ const statusConfig: Record<
   },
 };
 
-// A small, advisory status line surfacing the result of an in-app "verify this
-// build" check (issue #484). Same deliberately-quiet pattern as
-// AccountKeyAuditLine. On `mismatch` and `unavailable` it renders the report's
-// reason and a link out to the third-party verification guide — for the install
-// shapes that can't reproduce their own payload hash in-app (macOS .app,
-// Windows NSIS, deb/rpm) that guide IS the verification path, so it has to be
-// reachable from the quiet status too, not just the alarm.
+// "Verify this build" status (#484); the guide link shows on `unavailable` too, since some installs can't self-verify.
 export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
   status,
   detail,
@@ -82,8 +65,7 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
         {icon}
         {t(labelKey)}
       </span>
-      {/* Append the report's reason and the verify-guide link so the user can
-          act on it. */}
+      {/* Reason plus the verify-guide link. */}
       {showReason && (
         <>
           {detail && (

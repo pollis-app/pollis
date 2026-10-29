@@ -1,18 +1,4 @@
-/*
- * Persistent voice-strip controls — push-to-talk / mute / deafen (#849, #891).
- *
- * The subject is the strip that is on screen for the WHOLE call, whichever
- * page you are on: terminal draws it as the bottom `VoiceBar`, refined as row 2
- * of `SidebarProfilePanel`. Both must show the same four mic states and both
- * must offer a way back out of deafen — #891 was refined's strip having neither.
- *
- * These assertions are deliberately about what RENDERS, not about which
- * component rendered it: a `data-mic-state` that never reaches the DOM (the
- * `PillButton` closed-props bug) and a mic that draws `live` while push-to-talk
- * is idle are the same defect to a user, and both fail here.
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js
- */
+// Persistent voice-strip controls (#849, #891): both skins show four distinct mic states and can undeafen.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -26,12 +12,7 @@ const VOICE_CHANNEL_NAME = "standup";
 const SKINS = ["terminal", "refined"] as const;
 type Skin = (typeof SKINS)[number];
 
-/**
- * Where each skin keeps the always-present controls. Terminal mounts the
- * bottom `VoiceBar`; refined hides it (see `AppShell`) and puts the strip in
- * the sidebar profile panel instead. Same information, different chrome —
- * which is exactly why the tests below run over both.
- */
+/** Where each skin keeps the always-present controls (terminal VoiceBar, refined sidebar panel). */
 const STRIP = {
   terminal: {
     strip: "voice-bar",
@@ -115,11 +96,7 @@ async function boot(
   await expect(page.getByTestId("sidebar")).toBeVisible();
 }
 
-/**
- * Join the seeded voice channel through the UI, then wait for the persistent
- * strip. The strip only mounts once the join COMPLETES (not while `joining`),
- * so its presence is the join signal.
- */
+/** Join via the UI and wait for the strip, which mounts only once the join completes. */
 async function joinVoice(page: Page, skin: Skin) {
   await page
     .getByTestId("sidebar")
@@ -129,13 +106,7 @@ async function joinVoice(page: Page, skin: Skin) {
   await expect(page.getByTestId(STRIP[skin].strip)).toBeVisible();
 }
 
-/**
- * How one control LOOKS: which lucide glyph it draws (the icon name is in the
- * svg's class) plus the resolved paint. Both are captured because the skins
- * carry emphasis differently — refined tints the glyph, terminal fills the pill
- * behind it — and a state that only differs by a property this misses is a
- * state the user cannot see either.
- */
+/** How one control looks: lucide glyph plus resolved paint (skins carry emphasis differently). */
 interface ControlAppearance {
   icon: string;
   color: string;
@@ -143,13 +114,7 @@ interface ControlAppearance {
   borderStyle: string;
 }
 
-/**
- * Everything the strip says about the mic and the ear.
- *
- * Both halves together, because that is how a user tells the states apart:
- * `muted` and `deafened` share a crossed-out mic and are separated by what
- * the DEAFEN control is doing.
- */
+/** Mic and deafen together: muted and deafened differ only by the deafen control. */
 interface StripAppearance {
   micState: string | null;
   deafened: string | null;
@@ -157,13 +122,7 @@ interface StripAppearance {
   deafen: ControlAppearance;
 }
 
-/**
- * Park the pointer away from the controls.
- *
- * Clicking leaves the mouse ON the button, so anything measured straight
- * afterwards is the hover paint, not the resting one — which is how "muted
- * looks exactly like live" hides from a test that only ever looks post-click.
- */
+/** Park the pointer away so readings are the resting paint, not the hover one. */
 async function restPointer(page: Page) {
   await page.mouse.move(0, 0);
 }
@@ -344,9 +303,7 @@ for (const skin of SKINS) {
         expect(appearance.micState).toBe(name);
       }
 
-      // …and, more importantly, each one LOOKS different. Comparing the full
-      // appearance (icon shapes + resolved colours of both halves) is what
-      // catches "deafened draws exactly like a plain mute".
+      // …and each one LOOKS different (full appearance of both halves).
       const signatures = Object.values(seen).map((a) => JSON.stringify(a));
       expect(new Set(signatures).size).toBe(4);
 
@@ -371,10 +328,7 @@ for (const skin of SKINS) {
       await page.getByTestId(ids.mic).hover();
       const mutedHovered = await readStrip(page, skin);
 
-      // Mute is a state you can be pointing at — the pointer lands on the
-      // button the moment you click it. A generic icon-button hover rule that
-      // repaints everything accent would erase the distinction exactly when
-      // the user is looking straight at it.
+      // Read while hovered: a generic hover repaint must not erase the mute distinction.
       expect(mutedHovered.micState).toBe("muted");
       expect(JSON.stringify(mutedHovered.mic)).not.toBe(
         JSON.stringify(liveHovered.mic),
@@ -383,20 +337,7 @@ for (const skin of SKINS) {
   });
 }
 
-/**
- * #888 — a gate command that returns nothing must not be mistaken for one that
- * returned a gate.
- *
- * `applyGate` read `gate.transmitting` straight off the resolved value, so a
- * command returning nothing threw a `TypeError` into its own catch. The catch
- * logged at warn level and carried on, which made a genuine backend fault
- * indistinguishable from a successful no-op.
- *
- * Asserted on the console rather than on pixels on purpose: leaving the last
- * good state up is the CORRECT outcome and the screen looks the same either
- * way, so the only honest signal is whether the failure was reported or
- * swallowed as a type error.
- */
+/** #888: a gate command returning nothing is reported, not swallowed as a TypeError (asserted on the console). */
 test("a gate command returning nothing is reported, not swallowed as a TypeError", async ({
   page,
 }) => {
@@ -423,9 +364,7 @@ test("a gate command returning nothing is reported, not swallowed as a TypeError
       (m) => m.includes("returned no gate state") && m.startsWith("error:"),
     ),
   ).toBe(true);
-  // And it is not a deref blowing up inside the handler. Scoped to the gate's
-  // own fields: the browser harness emits unrelated `unregisterListener`
-  // teardown noise that has nothing to do with this path.
+  // Not a deref blowing up in the handler (scoped to gate fields; ignore unregisterListener noise).
   expect(
     messages.filter(
       (m) => m.includes("transmitting") || m.includes("self_muted"),

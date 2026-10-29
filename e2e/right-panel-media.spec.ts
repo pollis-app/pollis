@@ -1,17 +1,4 @@
-/*
- * The right panel's media grid draws the message log's own thumbnails.
- *
- * It used to have a tile of its own — no blurhash placeholder, a hairline
- * border, quarter-rounded corners, not clickable — that looked nothing like
- * the thumb the same attachment had in the chat two inches to the left. Both
- * are `AttachmentDisplay` now; these tests pin the parts that differed.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`, so
- * `@tauri-apps/api/core` resolves to `frontend/src/__mocks__/tauri-core.ts`.
- * The mock has no media server (`get_media_url` answers null and the byte
- * fallback fails), so a thumbnail here can only ever be its blurhash — which
- * is exactly the state the old tile got wrong.
- */
+// The right panel's media grid uses the message log's own thumbnails.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -91,7 +78,6 @@ const boxOf = (locator: ReturnType<Page["getByTestId"]>) =>
   });
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`right panel media — ${skin} skin`, () => {
     agnosticTest("the grid shows pictures and videos, not audio", async ({ page }) => {
@@ -111,7 +97,6 @@ for (const skin of SKINS) {
       await expect(tile).toBeVisible();
       await expect(chatThumb).toBeVisible();
 
-      // The placeholder is the blurhash, in the panel as in the log.
       await expect(tile.locator("canvas")).toHaveCount(1);
       await expect(chatThumb.locator("canvas")).toHaveCount(1);
 

@@ -2,19 +2,11 @@
 //!
 //! A message body is either plain text or the attachment envelope
 //! `{"_att":[{"key":"media/…","name":"…","ct":"…","size":N,…}],"_txt":"caption"}`.
-//! The terminal client used to print that envelope verbatim, hiding the
-//! caption. [`parse_content`] is a line-for-line port of the shared reader —
-//! `parseContent` in `mobile/lib/messageContent.ts`, itself kept in lockstep
-//! with desktop's in `frontend/src/hooks/queries/useMessages.ts` — so all three
-//! clients agree on what a body means: same `{` gate, same legacy
-//! `_txt`-only reduction, same fall-back to the raw string on anything that
-//! does not parse.
+//! [`parse_content`] is a line-for-line port of mobile's `parseContent` (itself in lockstep
+//! with desktop), so all three clients agree.
 //!
-//! The CLI is text-only (no R2 download), so an attachment becomes a readable
-//! line — `[image: photo.png, 2 KB]` — rather than a preview.
-//!
-//! Also here: the other pure text helpers the message pane needs (the
-//! `@mention` scan, the reply-preview snippet), so `ui.rs` stays layout only.
+//! Attachments render as a text line (`[image: photo.png, 2 KB]`); the mention scan and reply
+//! preview live here too.
 
 use serde::Deserialize;
 
@@ -34,9 +26,7 @@ pub struct Content {
 }
 
 /// Wire shape of one `_att` entry. Every field optional on the way in: a
-/// malformed entry still renders as *an* attachment rather than discarding the
-/// message, and fields this client does not show (`key`, `hash`, `bh`, `w`,
-/// `h`) are ignored.
+/// malformed entry still renders as an attachment rather than dropping the message.
 #[derive(Deserialize)]
 struct AttachmentWire {
     #[serde(default)]
@@ -47,8 +37,7 @@ struct AttachmentWire {
     size: Option<serde_json::Value>,
 }
 
-/// Split a content string into its caption and attachments. Plain-text content
-/// passes through as-is. See the module comment for the contract.
+/// Split a content string into caption and attachments; plain text passes through.
 pub fn parse_content(raw: &str) -> Content {
     let plain = || Content {
         text: raw.to_string(),
@@ -62,7 +51,6 @@ pub fn parse_content(raw: &str) -> Content {
     };
     let caption = parsed.get("_txt").and_then(|v| v.as_str());
     let Some(list) = parsed.get("_att").and_then(|v| v.as_array()) else {
-        // Legacy `_txt`-only envelopes still reduce to their caption.
         return match caption {
             Some(text) => Content {
                 text: text.to_string(),
@@ -119,9 +107,7 @@ fn attachment_kind(content_type: &str) -> &'static str {
 }
 
 /// Human file size: powers of 1024, one decimal place where it matters, empty
-/// for zero — the same rule as desktop's `formatFileSize`
-/// (`frontend/src/utils/format.ts`), with a space before the unit for a
-/// terminal.
+/// for zero, as desktop's `formatFileSize`, with a space before the unit.
 pub fn format_file_size(bytes: u64) -> String {
     if bytes == 0 {
         return String::new();
@@ -173,8 +159,7 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// Fit `s` into `cols` terminal columns, ending in `…` when it had to be cut
-/// — the sidebar used to clip long names mid-character with no sign anything
-/// was missing (`@ pollis-e2e_peer1619_f8`).
+/// (#1337).
 pub fn fit_width(s: &str, cols: usize) -> String {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
     if UnicodeWidthStr::width(s) <= cols {
@@ -187,7 +172,6 @@ pub fn fit_width(s: &str, cols: usize) -> String {
     let mut used = 0;
     for c in s.chars() {
         let w = UnicodeWidthChar::width(c).unwrap_or(0);
-        // Leave one column for the ellipsis.
         if used + w > cols - 1 {
             break;
         }
@@ -199,11 +183,7 @@ pub fn fit_width(s: &str, cols: usize) -> String {
 }
 
 /// Byte ranges of the `@mentions` in `text` that address `username` (or
-/// `@all`). Same rule as `mention_tokens` in pollis-core's `send.rs` and
-/// `findMentions` in `frontend/src/utils/mentions.ts`: an `@` opens a mention
-/// only at the start of the text or after whitespace, the body is letters,
-/// digits, `_`, `-`, `.`, trailing `.`/`-`/`_` are not part of it, and the
-/// comparison ignores case.
+/// `@all`), the same rule as pollis-core's `mention_tokens` and desktop's `findMentions`.
 pub fn mention_ranges(text: &str, username: &str) -> Vec<(usize, usize)> {
     let me = username.to_lowercase();
     let mut out = Vec::new();
@@ -239,8 +219,7 @@ pub fn mention_ranges(text: &str, username: &str) -> Vec<(usize, usize)> {
 }
 
 /// The body an edit should store: `new_text` as the caption of `raw`'s
-/// attachment envelope when it has one — so editing a captioned photo changes
-/// the caption and keeps the photo — else `new_text` itself.
+/// attachment envelope when it has one, else `new_text` itself.
 pub fn replace_caption(raw: &str, new_text: &str) -> String {
     if raw.starts_with('{') {
         if let Ok(serde_json::Value::Object(mut map)) = serde_json::from_str(raw) {
@@ -258,8 +237,7 @@ pub fn replace_caption(raw: &str, new_text: &str) -> String {
 }
 
 /// The shortcode table desktop's emoji picker is generated from
-/// (`scripts/emoji-shortcodes.json`, gemoji v4.1.0, MIT), vendored rather than
-/// re-typed so `:joy:` means the same emoji here as there.
+/// (`scripts/emoji-shortcodes.json`), vendored so `:joy:` means the same emoji here.
 const SHORTCODES_JSON: &str = include_str!("../../scripts/emoji-shortcodes.json");
 
 fn shortcodes() -> &'static std::collections::HashMap<String, String> {
@@ -278,12 +256,8 @@ fn shortcodes() -> &'static std::collections::HashMap<String, String> {
 
 /// What the user typed at the react prompt, as the emoji to react with.
 ///
-/// `:joy:`, `joy`, `+1` resolve through the shortcode table; a literal emoji is
-/// taken as typed. Either way the result is the bare base form — U+FE0F
-/// stripped — because that is the form desktop and mobile store (the picker's
-/// `char`, see `frontend/src/components/Emoji/emojiData.ts`), and a reaction
-/// is matched by exact string: `❤` and `❤️` would otherwise be two different
-/// reactions. `None` for text that is neither.
+/// Resolved through the shortcode table or taken literally, with U+FE0F stripped: reactions
+/// match by exact string, as desktop and mobile store them. `None` for neither.
 pub fn resolve_reaction(input: &str) -> Option<String> {
     let trimmed = input.trim();
     let name = trimmed.trim_matches(':').to_lowercase();
@@ -297,7 +271,6 @@ pub fn resolve_reaction(input: &str) -> Option<String> {
             .collect();
         return emoji;
     }
-    // A literal emoji: no ASCII letters/digits in it.
     if trimmed.chars().any(|c| c.is_ascii_alphanumeric()) {
         return None;
     }
@@ -338,9 +311,7 @@ mod tests {
         assert_eq!(c.text, "new caption");
         assert_eq!(c.attachments.len(), 1);
         assert!(edited.contains("media/k"), "{edited}");
-        // Clearing the caption leaves just the attachment.
         assert_eq!(parse_content(&replace_caption(raw, "")).text, "");
-        // Plain text is simply replaced.
         assert_eq!(replace_caption("old", "new"), "new");
     }
 
@@ -352,7 +323,6 @@ mod tests {
             fit_width("@ pollis-e2e_peer1619_f8", 12).chars().count(),
             12
         );
-        // Wide characters count as two columns.
         assert_eq!(fit_width("日本語テキスト", 5), "日本…");
         assert_eq!(fit_width("abc", 0), "");
     }
@@ -398,8 +368,7 @@ mod tests {
         assert_eq!(parse_content(r#"{"_txt":"just words"}"#).text, "just words");
     }
 
-    /// Anything that merely looks like JSON stays the user's text, exactly as
-    /// `parseContent` keeps it.
+    /// Anything that merely looks like JSON stays the user's text, as `parseContent` keeps it.
     #[test]
     fn text_that_is_not_an_envelope_is_kept_verbatim() {
         for raw in ["{not json", r#"{"a":1}"#, "{}", r#"{"_att":"nope"}"#] {
@@ -449,7 +418,6 @@ mod tests {
             .map(|(s, e)| &text[s..e])
             .collect();
         assert_eq!(found, vec!["@Dana", "@all"]);
-        // Trailing sentence punctuation is not part of the name.
         assert_eq!(mention_ranges("thanks @dana.", "dana"), vec![(7, 12)]);
         assert!(mention_ranges("@ dana", "dana").is_empty());
     }

@@ -1,78 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client 1:1 SCREENSHARE E2E — the screenshare slice of the media
- * milestone (issue #570, M3c) and the LAST media slice, completing the #568
- * voice/video/screenshare surface. One client shares its SCREEN in a live call,
- * the OTHER client sees the remote screenshare tile render.
- *
- * Builds on the M3a call test (two-client-call.js) + the M3b camera test
- * (two-client-camera.js): the signup + DM-establish + place/accept-call
- * choreography is reused verbatim (copied, matching how M3a/M3b themselves
- * copied from two-client.js — these e2e flow helpers are duplicated per test
- * rather than shared). The screenshare step happens AFTER the call is connected
- * (both sides see two participants).
- *
- * NO extra fixture over M3a: unlike the camera slice (which needs a
- * v4l2loopback /dev/video0), screenshare needs nothing but the Xvfb display the
- * desktop-e2e composite action already provides. On Linux the app captures the
- * X11 ROOT window via xcb + MIT-SHM `XGetImage` (pollis-capture-linux/src/x11.rs),
- * driven by the backend probe in src/linux.rs. Under xvfb-run there is a real
- * X server ($DISPLAY set) and NO Wayland ($WAYLAND_DISPLAY unset), so the probe
- * selects `Backend::X11` — NO xdg-desktop-portal / PipeWire session is needed or
- * used. appEnvFor also pins GDK_BACKEND=x11 + XDG_SESSION_TYPE=x11 to make the
- * X11 branch explicit and bulletproof. The app's own WebKitGTK window is on that
- * same Xvfb display, so the root grab is non-blank — there's real content to send.
- *
- * On Linux `enumerate_screen_sources` returns an EMPTY list (start_unix.rs), so
- * the frontend's toggleScreenShare skips its in-app picker and goes straight to
- * `screenShareSession.start()` (the OS portal dialog IS the picker on Linux, and
- * there is none under X11/Xvfb) — the helper subprocess spawns, probes X11, and
- * streams frames. So clicking the screenshare button is the whole trigger; no
- * picker UI appears. (If a picker ever DOES appear — e.g. a future backend
- * change — we handle it defensively by selecting the first display source.)
- *
- * Choreography:
- *   1..7. Identical to two-client-call.js / two-client-camera.js: A + B sign up,
- *         A DMs B, B accepts, A places the call, B accepts it, both converge on
- *         two participants.
- *   8. A starts a SCREEN SHARE (the screenshare toggle — the VoiceBar pill
- *      `voice-bar-screenshare-button`, or the stage tray's
- *      `voice-tray-screenshare`). On Linux this enumerates empty → no picker →
- *      start() directly, spawning the capture helper (X11/SHM root grab) and
- *      publishing a `TrackSource::Screenshare` track into the call room.
- *   9. Sanity on A: A's own local self-preview tile
- *      (`remote-video-tile-__local_preview__`) mounts — proof A's capture+publish
- *      engaged (isolates an A-side capture failure from a B-side delivery one).
- *  10. ASSERT on B: poll until A's REMOTE SCREENSHARE tile renders — a
- *      `remote-video-tile-<trackKey>` element nested inside A's participant tile
- *      (`voice-tile-voice-<A>`) that ALSO carries a `voice-tile-stream-stats-<A>`
- *      badge. That badge (a res·fps label) is present on a SCREENSHARE tile and
- *      ABSENT on a camera tile — this is the exact mirror-inverse of M3b's camera
- *      assertion (which EXCLUDES screenshare via that same badge), so the two
- *      stay unambiguous. Generous eventual timeout; no fixed sleeps.
- *  11. A stops the share + hangs up.
- *
- * Why that signal: on B, a remote participant's screenshare lands as
- * `screenshareOf(p.video)` (VoiceStage.tsx) → the tile's `streamTrackKey`, which
- * StageTile renders through RemoteVideoTile as
- * `data-testid="remote-video-tile-<trackKey>"` (a <canvas> on the Tauri /
- * WebKitGTK path) AND — because it `hasFeed` and is in-call — a
- * `voice-tile-stream-stats-<identity>` res·fps badge. So the tile's presence WITH
- * that badge proves A's screenshare track was published, subscribed by B, and
- * mounted for render. A camera tile renders the same `remote-video-tile-` prefix
- * but never the stream-stats badge, so requiring the badge makes the assertion
- * screenshare-specific.
- *
- * Assumes the media + backend fixtures are already up (the workflow runs
- * start-audio.sh → start-livekit.sh → start-backend.sh first). Screenshare needs
- * audio + LiveKit like the call; it needs NO camera fixture.
- *
- * FAILS LOUDLY if the share never starts (e.g. the app took a portal path and
- * errored, or capture never produced a frame): the A-side local-preview poll
- * throws with a clear message before B is ever consulted.
- *
- * On failure, dumps per-client screenshots + page source into e2e/artifacts/.
- */
+// Two-client screenshare (#570 M3c): B sees A's remote screenshare tile; on Xvfb capture is the X11 root grab.
 
 const fs = require("fs");
 const path = require("path");
@@ -83,12 +10,7 @@ const shot = h.makeShot(ARTIFACTS);
 
 const PIN = "1357";
 
-// Reserved local-preview frame-WS keys the backend mirrors the SHARER's own
-// outgoing video under (for their self-view). These are the local user's own
-// tiles, never a remote feed — exclude them from the remote-screenshare
-// assertion. `__local_preview__` is the SCREENSHARE self-preview key
-// (screenShareSession.ts / pollis-core screenshare LOCAL_PREVIEW_KEY);
-// `__local_camera_preview__` is the camera one (cameraSession.ts).
+// Local self-preview keys (screenshare and camera), never a remote feed.
 const LOCAL_PREVIEW_KEY = "__local_preview__";
 const LOCAL_CAMERA_PREVIEW_KEY = "__local_camera_preview__";
 
@@ -101,24 +23,12 @@ const CONVERGE_TIMEOUT_MS = 120_000;
 // A's capture helper must spawn, probe X11, grab the root window, and the app
 // must publish the track locally (local self-preview tile mounts).
 const LOCAL_SHARE_TIMEOUT_MS = 60_000;
-// B must subscribe to A's published screenshare track and mount the tile — a
-// full SFU publish→subscribe round trip plus the first decoded frame, so
-// generous.
+// B needs a full SFU publish/subscribe round trip plus the first frame.
 const REMOTE_SHARE_TIMEOUT_MS = 120_000;
-// How long we give a (Linux-unexpected) in-app picker to appear before deciding
-// the app auto-started without one. Short — on Linux enumerate returns empty so
-// no picker ever renders; this only covers a defensive future-proofing branch.
+// Defensive: how long to wait for an in-app picker (Linux enumerates empty, so none).
 const PICKER_PROBE_MS = 6_000;
 
-// Build the app env for one client — identical to two-client-call.js /
-// two-client-camera.js, plus it makes the LINUX X11 CAPTURE PATH explicit:
-// GDK_BACKEND=x11 keeps WebKitGTK on X11, and XDG_SESSION_TYPE=x11 forces the
-// capture helper's backend probe (pollis-capture-linux/src/linux.rs) down the
-// X11/xcb/SHM branch rather than trying an xdg-desktop-portal ScreenCast session
-// (which is not feasible headless). Under xvfb-run the probe would already pick
-// X11 (DISPLAY set, no WAYLAND_DISPLAY); pinning it removes all ambiguity. The
-// LiveKit + PulseAudio env (LIVEKIT_URL / PULSE_*) flows through via
-// ...process.env.
+// App env as in two-client-call.js, plus GDK_BACKEND / XDG_SESSION_TYPE=x11 to pin the X11 capture path.
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
@@ -133,7 +43,6 @@ function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   };
 }
 
-// Full signup through the real UI — copied verbatim from two-client-call.js.
 async function signUp(browser, email, tag) {
   console.log(`[two-client-screenshare] ${tag}: signing up ${email}`);
   await h.waitTestId(browser, "auth-screen", 30000);
@@ -159,8 +68,7 @@ async function signUp(browser, email, tag) {
   console.log(`[two-client-screenshare] ${tag}: reached app-ready`);
 }
 
-// A: open "New Message", DM the target by email, land on the DM page. Copied
-// verbatim from two-client-call.js.
+// A: DM the target by email, landing on the DM page.
 async function startDmTo(browser, targetEmail) {
   await h.clickTestId(browser, "sidebar-row-dms");
   await h.clickTestId(browser, "menu-item-new-dm");
@@ -170,8 +78,7 @@ async function startDmTo(browser, targetEmail) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
-// B: poll the DMs list until the incoming request surfaces and accept it.
-// Copied verbatim from two-client-call.js.
+// B: poll the DMs list for the request and accept it.
 async function acceptIncomingDm(browser, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let attempt = 0;
@@ -196,8 +103,7 @@ async function acceptIncomingDm(browser, timeoutMs) {
   throw new Error("B: DM request never appeared");
 }
 
-// A: re-open the DM so DM.tsx remounts and React Query refetches — how A picks
-// up B's acceptance metadata past the staleTime. Copied verbatim from M3a/M3b.
+// A: re-open the DM so it refetches B's acceptance past the staleTime.
 async function reopenDm(browser) {
   await h.clickTestId(browser, "sidebar-row-dms").catch(() => {});
   await h.sleep(1000);
@@ -207,8 +113,7 @@ async function reopenDm(browser) {
   }
 }
 
-// A: poll until the DM-header call button appears (canCall = 1:1 && B accepted
-// && B online). Copied verbatim from two-client-call.js.
+// A: poll until the call button appears (1:1, B accepted and online).
 async function waitForCallButton(browser, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let attempt = 0;
@@ -227,8 +132,7 @@ async function waitForCallButton(browser, timeoutMs) {
   );
 }
 
-// Distinct call participants visible on this client, by user id. Copied
-// verbatim from two-client-call.js (mirrors userIdFromVoiceIdentity).
+// Distinct call participants by user id (mirrors userIdFromVoiceIdentity).
 async function callParticipantUserIds(browser) {
   return browser.execute(() => {
     const ids = new Set();
@@ -245,8 +149,7 @@ async function callParticipantUserIds(browser) {
   });
 }
 
-// Poll until this client's call stage shows at least two distinct participants.
-// Copied verbatim from two-client-call.js.
+// Poll until this client's call stage shows two distinct participants.
 async function waitForRemoteParticipant(browser, tag, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
@@ -260,11 +163,7 @@ async function waitForRemoteParticipant(browser, tag, timeoutMs) {
   throw new Error(`${tag}: the other call participant never appeared (no second voice tile)`);
 }
 
-// Click A's screenshare toggle. The global VoiceBar pill
-// (`voice-bar-screenshare-button`) is the primary control; on the full-screen
-// call stage the footer tray offers the same action as `voice-tray-screenshare`.
-// Both call toggleScreenShare() identically, so click whichever is present
-// (prefer the bar pill, per the milestone spec).
+// Click the VoiceBar screenshare pill, else the stage tray's.
 async function clickScreenShareToggle(browser, tag) {
   if (await h.present(browser, "voice-bar-screenshare-button")) {
     console.log(`[two-client-screenshare] ${tag}: clicking voice-bar-screenshare-button`);
@@ -279,20 +178,10 @@ async function clickScreenShareToggle(browser, tag) {
   throw new Error(`${tag}: no screenshare toggle (voice-bar-screenshare-button / voice-tray-screenshare) on screen`);
 }
 
-// A: start the screen share. Click the toggle, then handle the two possible
-// outcomes:
-//   - Linux X11 (the expected path): enumerate returns empty, so
-//     toggleScreenShare skips the in-app picker and calls start() directly — no
-//     `screen-share-picker` ever renders; capture begins immediately.
-//   - A picker DID appear (defensive, non-Linux / future backend change): the
-//     ScreenSharePicker took over the stage. Select the first DISPLAY source
-//     (whole-monitor share — its default tab) so the share still starts.
+// A: start the share; Linux starts directly, but if a picker appears pick the first display.
 async function startScreenShare(browser, tag) {
   await clickScreenShareToggle(browser, tag);
 
-  // Give a picker a brief chance to appear. On Linux it won't (empty enumerate
-  // → direct start), so this just times out and we fall through to the
-  // local-preview poll.
   const end = Date.now() + PICKER_PROBE_MS;
   while (Date.now() < end) {
     if (await h.present(browser, "screen-share-picker")) {
@@ -300,9 +189,7 @@ async function startScreenShare(browser, tag) {
         `[two-client-screenshare] ${tag}: a screen-share picker appeared ` +
           "(unexpected on Linux/X11) — selecting the first display source"
       );
-      // ScreenSharePicker.tsx exposes no per-source testid; its source cards are
-      // plain <button>s inside the scrollable grid (`.grid > button`). The
-      // Displays tab is the default, so the first grid button is a display.
+      // The picker's source cards have no testid; the first grid button is a display (default tab).
       const picked = await browser.execute(() => {
         const picker = document.querySelector('[data-testid="screen-share-picker"]');
         if (!picker) {
@@ -333,10 +220,7 @@ async function startScreenShare(browser, tag) {
   );
 }
 
-// A: poll until A's OWN local screenshare self-preview tile mounts — proof the
-// capture (spawn helper, probe X11, grab the root window) + local publish
-// engaged. If this never appears the failure is A-side (capture/publish), not
-// B-side (delivery) — so we fail LOUDLY here before ever consulting B.
+// A: poll for A's own share self-preview; fail loudly here on an A-side capture failure.
 async function waitForLocalSharePreview(browser, tag, timeoutMs) {
   const end = Date.now() + timeoutMs;
   const testId = `remote-video-tile-${LOCAL_PREVIEW_KEY}`;
@@ -355,14 +239,7 @@ async function waitForLocalSharePreview(browser, tag, timeoutMs) {
   );
 }
 
-// Remote SCREENSHARE tiles visible on this client: a participant SCREENSHARE
-// tile — a `voice-tile-voice-<id>` root (class `vs-tile`) whose key ends in
-// `:screen` (a camera tile ends `:cam`) — that contains a non-local
-// `remote-video-tile-<trackKey>`. Camera and screenshare tiles are otherwise
-// identical (both carry the res·fps badge, both spotlightable), so the
-// `:screen`/`:cam` key suffix — not the badge — distinguishes them. Returns the
-// owning tiles' identities + track keys. Mirror of the M3b camera assertion
-// (two-client-camera.js `remoteCameraTiles`, which matches `:cam`).
+// Remote screenshare tiles: `vs-tile` roots keyed `:screen` (not `:cam`) holding a non-local remote-video-tile.
 async function remoteScreenshareTiles(browser) {
   return browser.execute((localKeys) => {
     const out = [];
@@ -459,35 +336,29 @@ async function main() {
     });
     clients.push(B);
 
-    // Both sign up.
     await signUp(A.browser, emailA, "A");
     await shot(A.browser, "two-client-screenshare-A-ready.png");
     await signUp(B.browser, emailB, "B");
     await shot(B.browser, "two-client-screenshare-B-ready.png");
 
-    // A → DM B; B → accept. Establishes the DM + MLS group both directions.
     console.log(`[two-client-screenshare] A: starting DM to ${emailB}`);
     await startDmTo(A.browser, emailB);
     console.log("[two-client-screenshare] B: waiting for the DM request…");
     await acceptIncomingDm(B.browser, REQUEST_TIMEOUT_MS);
     console.log("[two-client-screenshare] B: DM request accepted");
 
-    // A → wait until B is seen online + accepted (call button renders).
     console.log("[two-client-screenshare] A: waiting to see B online + accepted…");
     await waitForCallButton(A.browser, CALL_BUTTON_TIMEOUT_MS);
 
-    // A → place the call.
     console.log("[two-client-screenshare] A: placing the call");
     await h.clickTestId(A.browser, "dm-header-call");
     await h.waitTestId(A.browser, "call-hang-up", 30000);
 
-    // B → accept the incoming-call alert.
     console.log("[two-client-screenshare] B: waiting for the incoming-call alert…");
     await h.waitTestId(B.browser, "status-bar-incoming-call-accept", INCOMING_CALL_TIMEOUT_MS);
     await h.clickTestId(B.browser, "status-bar-incoming-call-accept");
     await h.waitTestId(B.browser, "call-hang-up", 30000);
 
-    // Both sides see each other in the call (2 participants).
     console.log("[two-client-screenshare] waiting for both sides to converge in the call…");
     await waitForRemoteParticipant(A.browser, "A", CONVERGE_TIMEOUT_MS);
     await waitForRemoteParticipant(B.browser, "B", CONVERGE_TIMEOUT_MS);
@@ -495,7 +366,6 @@ async function main() {
     await shot(B.browser, "two-client-screenshare-B-in-call.png");
     console.log("[two-client-screenshare] both clients are in the call");
 
-    // ── M3c: A starts a SCREEN SHARE ───────────────────────────────────────
     console.log("[two-client-screenshare] A: starting a screen share");
     await startScreenShare(A.browser, "A");
 
@@ -503,7 +373,6 @@ async function main() {
     await waitForLocalSharePreview(A.browser, "A", LOCAL_SHARE_TIMEOUT_MS);
     await shot(A.browser, "two-client-screenshare-A-sharing.png");
 
-    // ASSERT: B renders A's REMOTE screenshare tile (video tile + stats badge).
     console.log("[two-client-screenshare] B: waiting for A's remote screenshare tile…");
     await waitForRemoteShare(B.browser, "B", REMOTE_SHARE_TIMEOUT_MS);
     await shot(B.browser, "two-client-screenshare-B-sees-share.png");

@@ -1,30 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client DELETE-FOR-EVERYONE E2E (delete-for-everyone / E2EE redaction).
- *
- * two-client-dm-reply.js proves A<->B DM delivery. This proves the redaction
- * leg: after A's message has CONVERGED into B (B already holds a local copy), A
- * deletes its own message and B's already-delivered copy must flip to the
- * "[deleted]" tombstone — the whole point of "delete for everyone". A one-client
- * or send-then-delete-before-fetch test would NOT catch the bug this guards; the
- * message has to reach B FIRST, then be redacted.
- *
- * Same isolation + backend assumptions as two-client-dm-reply.js (two isolated
- * instances, one shared external backend from start-backend.sh, one Vite server;
- * no LiveKit — convergence is by re-opening the DM to re-fire the debounced
- * ingest pull).
- *
- * Choreography:
- *   1. A + B sign up.
- *   2. A DMs B by email; B accepts the request.
- *   3. A sends msg; both A (local) and B (converged) render it.
- *   4. A deletes msg via the message hover toolbar's delete button + confirm bar.
- *   5. A's OWN view flips to "[deleted]" (soft-delete tombstone, not a vanish).
- *   6. B — who ALREADY received it — polls until its copy is "[deleted]" and the
- *      original token is gone: the redaction reached an already-delivered device.
- *
- * On failure, dumps per-client A-FAIL.* / B-FAIL.* into e2e/artifacts/.
- */
+// Delete for everyone: B's already-delivered copy must flip to "[deleted]" (it must reach B first).
 
 const fs = require("fs");
 const path = require("path");
@@ -109,7 +84,6 @@ async function acceptIncomingDm(browser, timeoutMs) {
   throw new Error("B: DM request never appeared");
 }
 
-// Does some message-content node contain `token`?
 async function messageVisible(browser, token) {
   return browser.execute((tok) => {
     const nodes = document.querySelectorAll('[data-testid="message-content"]');
@@ -120,7 +94,6 @@ async function messageVisible(browser, token) {
   }, token);
 }
 
-// Open the (only) DM conversation on this client — Home -> DMs -> first option.
 async function openDm(browser) {
   await h.clickTestId(browser, "sidebar-row-dms").catch(() => {});
   await h.sleep(1000);
@@ -149,11 +122,8 @@ async function sendMessage(browser, text) {
   await h.clickTestId(browser, "message-send-button");
 }
 
-// Delete the message currently carrying `token` from this client (the sender).
-// Drives the real UI: the hover toolbar's delete button opens the confirm bar
-// that replaces the composer (NO MODALS), then the confirm button commits.
+// Delete via the "more" menu; the confirm bar replaces the composer.
 async function deleteMessage(browser) {
-  // Delete moved into the per-message "more" menu — open it first.
   await h.clickTestId(browser, "message-actions-more");
   await h.clickTestId(browser, "delete-button");
   await h.waitTestId(browser, "delete-message-bar", 15000);
@@ -162,7 +132,6 @@ async function deleteMessage(browser) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
-// True once SOME message-content shows the "[deleted]" tombstone.
 async function deletedMarkerVisible(browser) {
   return browser.execute((marker) => {
     const nodes = document.querySelectorAll('[data-testid="message-content"]');
@@ -173,9 +142,7 @@ async function deletedMarkerVisible(browser) {
   }, DELETED_MARKER);
 }
 
-// Poll until the message is redacted here: the "[deleted]" tombstone renders AND
-// the original token is gone. Re-opens the DM each round to re-fire ingest, so
-// an already-delivered recipient pulls the redaction envelope.
+// Poll until "[deleted]" renders and the token is gone, re-opening the DM to re-fire ingest.
 async function waitForRedacted(browser, token, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
@@ -245,12 +212,10 @@ async function main() {
     console.log("[delete] message converged into B (already delivered)");
     await shot(B.browser, "delete-B-got-message.png");
 
-    // A deletes its own message — delete for everyone.
     console.log("[delete] A: deleting the message for everyone");
     await openDm(A.browser);
     await deleteMessage(A.browser);
 
-    // A's own view is a tombstone (soft-delete, not a silent vanish).
     await waitForRedacted(A.browser, token, 30000);
     console.log("[delete] A's own view shows the tombstone");
     await shot(A.browser, "delete-A-redacted.png");

@@ -12,17 +12,9 @@ pub(crate) use crate::commands::livekit_identity::{
 /// Translate the opaque LiveKit identities in `wire` into the internal
 /// identities the rest of the app speaks (#836).
 ///
-/// Returns a map from wire identity to `(internal_identity, display_name)`, with
-/// an entry for EVERY input. Identities already translated this process are
-/// answered from `state.livekit_identities`; the rest go to the DS in one
-/// batched request, because it holds the per-room key and no client does.
+/// Returns `wire -> (internal_identity, display_name)` for EVERY input; cached or one DS batch.
 ///
-/// Resolution is best-effort by design. If the DS is unreachable the caller
-/// still gets a usable identity for every input — the pseudonym itself, which is
-/// stable, unique and perfectly good as a UI key — so an unresolvable peer shows
-/// up as an unattributed tile rather than not showing up at all. That ordering
-/// matters: this sits on the participant-joined path, and "you cannot see who
-/// that is" is a far better failure than "they did not join".
+/// Best-effort: unresolved peers keep their pseudonym (unattributed, not missing).
 pub(crate) async fn resolve_participants(
     state: &Arc<AppState>,
     logical_room: &str,
@@ -81,16 +73,9 @@ pub(crate) async fn resolve_participant(
 /// Pin the LOCAL participant's translation for `logical_room`, reading its wire
 /// identity straight out of the token the DS just minted for us.
 ///
-/// LiveKit reports our own participant's events under its wire pseudonym —
-/// `TrackMuted` fires on every push-to-talk keypress — and those must land on the
-/// local tile, which the renderer keys by the `voice-{user}:{device}` string it
-/// builds from `get_device_id`. Resolving our own pseudonym through the DS would
-/// hand back a *synthetic*-device identity instead (the device id is deliberately
-/// not recoverable from a pseudonym), quietly detaching the local tile from its
-/// own mute state. So the mapping is pinned, not derived.
+/// Pinned, not DS-resolved: the device id isn't recoverable from a pseudonym.
 ///
-/// No-ops if the token has no readable `sub`, in which case the local
-/// participant simply resolves like anyone else.
+/// No-op if the token has no readable `sub`.
 pub(crate) async fn pin_local_identity(
     state: &Arc<AppState>,
     logical_room: &str,
@@ -122,10 +107,7 @@ pub(crate) async fn lookup_avatar_url(
         .and_then(|u| u.avatar_url)
 }
 
-/// Look up the avatar_url for an INTERNAL participant identity
-/// (`voice-{user}:{device}` / `{user}:{device}`). Returns None if the identity
-/// has no recognised user — which since #836 also covers a wire pseudonym that
-/// could not be resolved — or if the lookup fails.
+/// avatar_url for an internal identity; `None` if no user or on failure.
 pub(crate) async fn lookup_avatar_url_for_identity(
     state: &Arc<AppState>,
     identity: &str,
@@ -136,12 +118,7 @@ pub(crate) async fn lookup_avatar_url_for_identity(
 
 /// The distinct user ids an avatar batch should actually ask the DS about.
 ///
-/// Split out of [`lookup_avatar_urls_for_identities`] because it is the half
-/// that can silently go wrong: an identity with no recognised user (an
-/// unresolved `v-…`/`w-…` pseudonym, or an internal participant like `server`)
-/// must be dropped rather than forwarded as if it were a user id, and two
-/// devices of the same person must collapse to one id instead of widening the
-/// request. Both are invisible in a passing happy path.
+/// Drops identities naming no user and collapses a user's devices to one id.
 fn avatar_lookup_user_ids(identities: &[String]) -> Vec<String> {
     let mut user_ids: Vec<String> = identities
         .iter()
@@ -155,14 +132,7 @@ fn avatar_lookup_user_ids(identities: &[String]) -> Vec<String> {
 /// Avatar URLs for a BATCH of internal participant identities, keyed by the
 /// identity that was passed in. ONE request, whatever the size of the room.
 ///
-/// The join path seeds a whole roster at once, and calling
-/// [`lookup_avatar_url_for_identity`] in a loop there cost one DS round trip per
-/// person already in the channel — sequential, and squarely between the user and
-/// a usable call. Identities with no recognised user, and users with no avatar,
-/// are simply absent from the map.
-///
-/// Best-effort: on a failed lookup every caller gets `None`, because a missing
-/// avatar must never cost the roster.
+/// Best-effort: a failed lookup yields `None` for everyone.
 pub(crate) async fn lookup_avatar_urls_for_identities(
     state: &Arc<AppState>,
     identities: &[String],
@@ -192,10 +162,7 @@ pub(crate) async fn lookup_avatar_urls_for_identities(
         .collect()
 }
 
-/// Fill in `avatar_url` for each participant. ONE request per call, not per
-/// participant. Best-effort — if the lookup fails the participants are returned
-/// with `avatar_url = None`, because a missing avatar must never cost the
-/// roster.
+/// Fill in `avatar_url` per participant in ONE request; best-effort.
 pub(super) async fn enrich_participants_with_avatars(
     state: &Arc<AppState>,
     mut participants: Vec<VoiceParticipantInfo>,
@@ -238,19 +205,14 @@ mod tests {
 
     #[test]
     fn avatar_batch_collapses_a_users_two_devices_into_one_id() {
-        // The join path seeds the local participant plus every remote one, and
-        // one person on two devices is two identities. The request must not
-        // grow because of it.
+        // One person on two devices must not widen the request.
         let got = avatar_lookup_user_ids(&ids(&["voice-u1:dev-a", "voice-u1:dev-b"]));
         assert_eq!(got, ids(&["u1"]));
     }
 
     #[test]
     fn avatar_batch_drops_identities_that_name_no_user() {
-        // Unresolved wire pseudonyms and the DS's own participants are not
-        // people. Forwarding them would ask the directory about ids that cannot
-        // exist — a failure the per-identity helper used to absorb by returning
-        // None before any request was built.
+        // Unresolved pseudonyms and DS participants are not people.
         let got = avatar_lookup_user_ids(&ids(&[
             "v-abcdef",
             "w-abcdef",

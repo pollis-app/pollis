@@ -1,41 +1,10 @@
 //! # pollis-relay
 //!
-//! Slice 1a of the closed-overlay relay (design `docs/relay-overlay-design.md`
-//! §14). A self-contained transport core + minimal relay server.
+//! The closed-overlay relay (design `docs/relay-overlay-design.md` §14).
 //!
-//! The overlay's transport primitive is a **generic anonymized stream**:
-//! `CONNECT(host, port)` inside a QUIC circuit. The first-party destination
-//! allowlist is enforced as **relay-side policy** (config data), never baked
-//! into the protocol — so a future in-app browser / VPN can reuse the same shim
-//! (§14.0).
+//! The primitive is a generic `CONNECT(host, port)` stream; the allowlist is relay-side config, not protocol.
 //!
-//! Layout:
-//! - [`proto`] — the wire protocol + the offline device-CERTIFICATE handshake.
-//! - [`anchor`] — offline transparency-log account anchoring (#813 Phase E2).
-//! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe,
-//!   or → extend to the next relay when it is a middle hop.
-//! - [`client`] — the QUIC relay client.
-//! - [`circuit`] — an n-hop `Circuit` + a [`circuit::CircuitFactory`].
-//! - [`onion`] — the per-hop layer: one nested TLS 1.3 session per hop (§6.2).
-//! - [`park`] — parked peer-hosted relays: the reverse hop a NATed peer opens,
-//!   and the tunnel an `Extend` is spliced into (#813).
-//! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
-//! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
-//!   and the fail-closed **live relay revocation** store (#813).
-//! - [`nexthop`] — the fail-closed signed-directory bound on where an `Extend`
-//!   may dial: relays the pool published, public unicast only, never us.
-//! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
-//! - [`revocation_sync`] — keeps a deployed node's revocation store loaded.
-//! - [`config`] — the deployable bin's TOML config.
-//! - [`health`] — the opt-in HTTP/1.1 health/version probe endpoint.
-//! - [`http`] — the shared reqwest client helper.
-//! - [`tls`] — cert generation/persistence + the pinned-cert QUIC verifier.
-//! - [`stream`] — the byte-pipe stream types.
-//!
-//! The relay only ever forwards opaque bytes inside the client's own TLS to a
-//! first-party host; it never terminates that TLS and never sees plaintext or
-//! keys (§8). Auth is the OFFLINE device-cert chain (`pollis-device-cert`), so
-//! the relay makes no metadata-plane query per connection (§11.1).
+//! Relays forward opaque bytes inside the client's own TLS; auth is the offline device-cert chain (§11.1).
 
 pub mod anchor;
 pub mod backoff;
@@ -56,7 +25,6 @@ pub mod shim;
 pub mod stream;
 pub mod tls;
 
-// Re-export the load-bearing types at the crate root for ergonomic consumers.
 pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory, StaticPathFactory, MAX_HOPS};
 pub use client::{ClientIdentity, RelayClient, RelayLink};
 pub use anchor::{AccountAnchor, AccountKeyLeaf, AnchorError, AnchorPolicy, AnchorVerifier};

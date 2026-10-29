@@ -1,13 +1,4 @@
-/**
- * Runtime host detection.
- *
- * Imported by every bridge module + the top-level `bridge.ts` so the same
- * `hasTauri()` answer is used everywhere.
- *
- * There is exactly one host: Tauri (`src-tauri/`). The bridge modules used to
- * branch on a second Electron host; that shell was reverted (#386 / #389) and
- * those branches are gone.
- */
+/** Host detection; Tauri is the only host (#386 / #389). */
 
 export type DragDropPayload = {
   type: "enter" | "over" | "drop" | "leave";
@@ -20,11 +11,7 @@ declare global {
   }
 }
 
-/**
- * True under the real Tauri runtime. False in browser-only dev
- * (`pnpm dev:frontend`) and under Playwright, where `@tauri-apps/api/*` is
- * vite-aliased to `src/__mocks__/`.
- */
+/** False in browser-only dev and under Playwright. */
 export function hasTauri(): boolean {
   return (
     typeof window !== "undefined" &&

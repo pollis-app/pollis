@@ -33,16 +33,7 @@ export const SettingsPage: React.FC = observer(() => {
   const [preferredName, setPreferredName] = useState("");
   const [email, setEmail] = useState("");
 
-  // Email-change flow lives entirely in this component:
-  //   'idle'    → display current email + "Change" button
-  //   'request' → input new address, send OTP
-  //   'verify'  → input BOTH OTPs, swap email
-  // Distinct mutations would obscure the linear UX, so we hold state locally.
-  //
-  // Two codes, not one (#1161): one to the new address (you control where you
-  // are going) and one to the current address (you control the account you are
-  // moving). The second is the only proof a borrowed unlocked device cannot
-  // satisfy on its own, so the flow cannot complete without it.
+  // Email change (#1161): codes to the new AND the current address; the second stops a borrowed unlocked device.
   const [emailChangeStep, setEmailChangeStep] = useState<"idle" | "request" | "verify">("idle");
   const [pendingNewEmail, setPendingNewEmail] = useState("");
   const [emailOtpCode, setEmailOtpCode] = useState("");
@@ -68,7 +59,6 @@ export const SettingsPage: React.FC = observer(() => {
 
   useEffect(() => { setCurrentAvatarUrl(avatarDownloadUrl || null); }, [avatarDownloadUrl]);
 
-  // Accept image files dropped anywhere on the window while on this page.
   useEffect(() => {
     const handlePathDrop = (e: Event) => {
       const paths: string[] = (e as CustomEvent<{ paths: string[] }>).detail?.paths ?? [];
@@ -76,12 +66,7 @@ export const SettingsPage: React.FC = observer(() => {
       if (!imagePath) {
         return;
       }
-      // Read the dropped file's bytes and wrap them as a `File`. This used to
-      // go through `fetch(convertFileSrc(path))`, i.e. the asset protocol —
-      // which is switched off now (`src-tauri/tauri.conf.json`), because it was
-      // a second way to read an arbitrary path that the path scope did not
-      // cover. A drop is one of the two gestures Rust records, so the read
-      // below is in scope.
+      // Read the dropped path directly; the asset protocol is off (`src-tauri/tauri.conf.json`).
       const name = imagePath.split(/[\\/]/).pop() ?? "image";
       readFile(imagePath)
         .then((bytes) => {
@@ -157,10 +142,7 @@ export const SettingsPage: React.FC = observer(() => {
   const handleSave = async () => {
     if (!currentUser) { return; }
     const nextUsername = username.trim();
-    // The DS refuses a username outside its rule (`is_valid_username`) and
-    // passes an UNCHANGED one through, because default names that predate the
-    // rule must still be able to save a display name. Same carve-out here, so
-    // the form explains the refusal before the round trip rather than after.
+    // Like the DS, an unchanged legacy username passes.
     if (nextUsername !== (userData?.username ?? "") && !isValidUsername(nextUsername)) {
       setUsernameError(t("user.usernameInvalid"));
       return;
@@ -224,13 +206,7 @@ export const SettingsPage: React.FC = observer(() => {
         code: emailOtpCode.trim(),
         currentCode: currentEmailOtpCode.trim(),
       });
-      // The address the form renders comes from `appStore.currentUser`, NOT
-      // from the profile row — `useUserProfile` takes `email` off the session,
-      // because the row does not carry one. So invalidating refetched a value
-      // that had not changed and the page kept showing the old address until a
-      // reload. Update the store (the source) and write the cached profile
-      // through; a refetch would only re-derive the same two values. Mobile
-      // already updated its store here.
+      // The email comes from `appStore.currentUser`, so update the store and the cached profile.
       const changedTo = pendingNewEmail.trim();
       appStore.setCurrentUser({ ...currentUser, email: changedTo });
       queryClient.setQueryData(

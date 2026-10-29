@@ -1,14 +1,4 @@
-// Shared screen-share toggle action. Drives the enumerate → pick → start
-// flow (and the stop / cancel / recover branches) from a single place so
-// the green VoiceBar and the in-call voice stage tray behave identically.
-//
-// macOS and Windows both enumerate and route through the in-app picker
-// (macOS via SCShareableContent — the system SCContentSharingPicker has
-// an upstream crate bug that crashes on selection, #283; Windows via the
-// windows-rs Monitor/Window APIs with GDI thumbnails). Linux's
-// xdg-desktop-portal dialog IS the picker, signalled by an empty source
-// list from enumerate() — in that case we skip our picker and go
-// straight to start().
+// Shared screen-share toggle: enumerate → pick → start, plus stop/cancel/recover. Linux's empty list means the portal picks.
 
 import { appStore } from "../stores/appStore";
 import {
@@ -18,7 +8,6 @@ import {
 import type { ShareState } from "../types/voice-state";
 
 export function toggleScreenShare(share: ShareState): void {
-  // Already sharing → stop.
   if (share.kind === "active") {
     screenShareSession
       .stop()
@@ -37,10 +26,7 @@ export function toggleScreenShare(share: ShareState): void {
     return;
   }
 
-  // Any other non-idle state (e.g. a 'starting' that wedged because
-  // publishTrack hung on a dead Wayland-portal track, or 'failed') —
-  // let the button recover by force-stopping. shareStopped() is safe
-  // from any joined-state.
+  // Any other non-idle state (wedged 'starting', 'failed'): force-stop to recover.
   if (share.kind !== "idle") {
     screenShareSession
       .stop()
@@ -48,23 +34,11 @@ export function toggleScreenShare(share: ShareState): void {
     return;
   }
 
-  // Engage enumerate → pick → start. The backend returns an empty list on
-  // Linux; in that case we skip our picker and go straight to start()
-  // (the xdg-desktop-portal dialog handles selection).
   (async () => {
     try {
       const list = await screenShareSession.enumerate();
       if (list.displays.length + list.windows.length === 0) {
-        // Linux: the portal dialog is the picker, so there is no in-app
-        // step to carry an audio toggle. The stored preference is the
-        // only place the choice can come from — set in Voice settings.
-        //
-        // Deliberately does NOT move the share to `starting` first.
-        // Cancelling the portal dialog is a normal flow that the backend
-        // reports as a plain `Ok` with no event, so a pre-set `starting`
-        // would never be cleared and the share pill would sit wedged on
-        // "stop" until clicked again. The state advances when
-        // `local_started` actually arrives.
+        // Linux: the stored preference is the only audio choice. Not `starting` yet: a cancelled portal emits no event.
         const withAudio = await screenShareSession.resolveWithAudio();
         await screenShareSession.start(undefined, withAudio);
         return;

@@ -9,13 +9,6 @@ use ulid::Ulid;
 const DEVICE_ID_KEY: &str = "device_id";
 
 /// Per-user keystore slot holding this account's login address (#997).
-///
-/// It used to sit in plaintext in `accounts.json` — the one field on the device
-/// that maps an opaque account id to a person, and the only one outside every
-/// protection the product has. The keystore is the right home and costs nothing:
-/// every reader of the address already runs at a moment where the keystore is
-/// reachable, including [`stable_device_id_for_reenrollment`], which reads
-/// [`DEVICE_ID_KEY`] from it at exactly this pre-unlock point.
 const LOGIN_EMAIL_KEY: &str = "login_email";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -23,17 +16,10 @@ pub struct UserProfile {
     pub id: String,
     pub email: String,
     pub username: String,
-    /// Only populated on first-device signup (`verify_otp` / `dev_login`).
-    /// The backend clears this field before persisting the profile to the
-    /// OS keystore so the Secret Key is never written to disk as part of
-    /// the session blob. Frontend is expected to read it once off the
-    /// auth response, show the Emergency Kit screen, then forget it.
+    /// Only populated on first-device signup; cleared before the profile is persisted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_secret_key: Option<String>,
-    /// True when this device has signed in against a user that already
-    /// has an `account_id_pub` on the server BUT no local
-    /// `account_id_key` in this device's keystore. The frontend must
-    /// route to the enrollment gate before showing the main app.
+    /// The account has an identity but this device has no key: route to enrollment.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub enrollment_required: bool,
 }
@@ -59,10 +45,7 @@ pub async fn initialize_identity(
         Err(e) => crate::diag!("[identity] MLS key package error (non-fatal): {e}"),
     }
 
-    // Re-process any pending MLS Welcome messages. This is a no-op when the
-    // local MLS state is intact, but recovers group membership after the local
-    // DB is wiped (e.g. schema version bump) because load_user_db resets
-    // delivered = 0 for this user's welcomes in that case.
+    // Re-process pending Welcomes: recovers membership after a local DB wipe.
     match crate::commands::mls::poll_mls_welcomes_inner(state, &user_id, &device_id).await {
         Ok(()) => {}
         Err(e) => crate::diag!("[identity] poll_mls_welcomes (non-fatal): {e}"),
@@ -72,10 +55,7 @@ pub async fn initialize_identity(
 }
 
 /// Request an OTP to be sent to the given email address.
-///
-/// The OTP is generated, stored, and emailed server-side by the Delivery
-/// Service (`POST /v1/auth/request-otp`) — the client never touches
-/// `state.otp_store` or a Resend key. See `docs/otp-server-bootstrap-design.md`.
+/// Generated, stored and emailed server-side by the DS.
 pub async fn request_otp(
     state: &Arc<AppState>,
     email: String,
@@ -103,11 +83,6 @@ pub async fn request_otp(
 
 /// Verify an OTP code, create or load the user, and complete first-device
 /// onboarding.
-///
-/// The OTP validation, account create/load, account-identity establishment, and
-/// device registration all run server-side behind a server-validated
-/// OTP-session token ([`verify_otp_ds`]). See
-/// `docs/otp-server-bootstrap-design.md`.
 pub async fn verify_otp(
     state: &Arc<AppState>,
     email: String,
@@ -117,46 +92,14 @@ pub async fn verify_otp(
 }
 
 /// First-device-signup onboarding routed through the Delivery Service.
-///
-/// `verify-otp` (DS) validates the code, creates/loads the account, and mints a
-/// short-lived OTP-session token. With that token the client then orchestrates
-/// the credential-establishing bootstrap writes — none of which can be
-/// device-signed because they *establish* the device's signing credential:
-///
-///   1. `establish-identity` (session-gated) — the version-1 account identity.
-///      The client keeps the private `account_id_key` (in `state.unlock`) and
-///      sends only the public + Secret-Key-wrapped material.
-///   2. `register-device` (session-gated) — the `user_device` row + watermarks.
-///   3. the session token is stashed in `state.bootstrap_session` so the
-///      pivot write — the first `publish-device-cert`, driven later by `set_pin`
-///      → `ensure_device_cert` — can present it.
-///
-/// A returning device with an established identity (`has_identity`) is a
-/// re-login / enrollment, which is OUT OF SCOPE for the DS bootstrap this slice:
-/// it registers its device on the direct path and obtains the account key via
-/// the existing sibling-approval / Secret-Key flows.
+/// The bootstrap writes are session-gated: they *establish* the device's signing credential.
 async fn verify_otp_ds(
     state: &Arc<AppState>,
     email: String,
     code: String,
 ) -> Result<UserProfile> {
-    // The device_id the session binds to. Normally a fresh candidate (a
-    // brand-new signup has no keystore slot yet, so this becomes the device's
-    // stable id once persisted below).
-    //
-    // EXCEPTION — a returning device that is NOT yet locally enrolled: bind the
-    // session to its EXISTING stable id instead. The returning-device branch
-    // below only mints an `enrollment_session` when the session's device
-    // matches the keystore, and a fresh throwaway candidate never matches after
-    // the first login — which left a device that registered once but never
-    // finished sibling-approval enrollment UNABLE to ever restart it (the
-    // enrollment-request write is session-gated and the session was bound to
-    // the wrong device). Binding to the stable id fixes that; `register-device`
-    // is an idempotent upsert, so re-registering the existing row is safe.
-    // Already-enrolled and brand-new devices keep the fresh candidate (unchanged).
-    // An email sign-in is never a link sign-in: drop any claimed-link state
-    // left from an abandoned QR attempt, or its tag would ride on this OTP
-    // session's enrollment request and the DS would rightly refuse it (#1207).
+    // A not-yet-enrolled returning device binds the session to its stable id, so it can restart enrollment.
+    // Drop claimed-link state, or its tag rides on this enrollment request (#1207).
     *state.device_link_pending.lock().await = None;
     // Nor is it the QR this device may still be showing (#1361).
     *state.device_offer.lock().await = None;
@@ -164,8 +107,7 @@ async fn verify_otp_ds(
         .await
         .unwrap_or_else(|| Ulid::new().to_string());
 
-    // 1. verify-otp: DS validates the OTP, creates/loads the account, mints a
-    //    session. Unauthenticated (the OTP itself is the proof).
+    // 1. verify-otp: unauthenticated; the OTP is the proof.
     crate::diag!(
         "[auth] verify_otp: email={} → delivery_url={:?}",
         crate::util::mask_email(&email),
@@ -177,8 +119,7 @@ async fn verify_otp_ds(
             email: email.clone(),
             code,
             device_id: candidate_device_id.clone(),
-            // verify-otp never writes the identity key — `establish-identity`
-            // does, under its CAS guard. Accepted here and ignored.
+            // Ignored: `establish-identity` writes the key under its CAS guard.
             account_id_pub: None,
         },
     )
@@ -198,10 +139,6 @@ async fn verify_otp_ds(
         let txt = resp.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!("verify-otp failed ({status}): {txt}").into());
     }
-    // Typed through `pollis-api` (#922) rather than indexed out of a
-    // `serde_json::Value`. `v["session_token"]` compiled whatever the DS chose
-    // to call that field, so a rename reached users as "response missing
-    // session_token" on every sign-in; now it does not build.
     let v =
         crate::commands::mls::decode_response::<pollis_api::otp::VerifyOtpBody>(resp).await?;
 
@@ -218,19 +155,8 @@ async fn verify_otp_ds(
 
     let new_secret_key = if !has_identity {
         crate::diag!("[auth] verify_otp: first-device path (has_identity=false) user_id={user_id}");
-        // FORCE this device's id to the session-bound candidate — do NOT preserve
-        // whatever the keystore holds. On a genuine first signup the slot is empty,
-        // so this is identical to `ensure_device_id`. But on a RETRY after a
-        // partial-bootstrap failure (a transient establish-identity error, a
-        // dropped connection, etc.) the keystore still holds the ABORTED attempt's
-        // candidate, while this call's verify-otp minted a session bound to a FRESH
-        // candidate. Preserving the stale id makes register-device send a device_id
-        // the session doesn't authorize, which the DS rejects as Forbidden — and it
-        // stays wedged on every retry until the keychain is cleared by hand.
-        // `has_identity == false` guarantees no device was ever registered
-        // (register-device runs AFTER establish-identity, which is what sets the
-        // identity), so the stale id is worthless and overwriting it is safe. This
-        // makes first-device signup idempotent under retry.
+        // FORCE the session-bound id: a retry after a partial bootstrap must not reuse the stale one.
+        // Safe: `has_identity == false` means no device was ever registered.
         state
             .keystore
             .store_for_user(DEVICE_ID_KEY, &user_id, candidate_device_id.as_bytes())
@@ -248,8 +174,7 @@ async fn verify_otp_ds(
                 })?;
         crate::diag!("[auth] verify_otp: identity material ready (device_id={device_id}) → establish-identity");
 
-        // 2. establish-identity (session-gated): the DS does the CAS UPDATE +
-        //    account_key_log v1 + account_recovery insert.
+        // 2. establish-identity (session-gated).
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
         crate::commands::mls::ds_post_session_ok(
@@ -269,8 +194,7 @@ async fn verify_otp_ds(
         })?;
         crate::diag!("[auth] verify_otp: establish-identity OK → register-device");
 
-        // 3. register-device (session-gated): the DS inserts the user_device row
-        //    + seeds watermarks.
+        // 3. register-device (session-gated).
         // OS + form factor only — never the hostname (see `util::device_label`).
         let device_name = crate::util::device_label();
         crate::commands::mls::ds_post_session_ok(
@@ -294,15 +218,7 @@ async fn verify_otp_ds(
 
         Some(secret_key)
     } else {
-        // Re-login / subsequent device for an EXISTING account. The DS just minted
-        // a session (verify-otp). Resolve this device's id and route its
-        // `register-device` write through the session-gated DS endpoint — the
-        // device has no signing credential yet (its `mls_signature_pub` is NULL),
-        // so it cannot device-sign. The account key arrives next via sibling
-        // approval (`start_device_enrollment`) or Secret-Key recovery; the FIRST
-        // cert publish is then gated by cert-validity ALONE (not this session),
-        // since approval can outlast the session TTL. See
-        // `docs/otp-server-bootstrap-design.md` §5.
+        // Existing account: register via the session (no signing credential yet); the key arrives by enrollment.
         bootstrap_existing_identity_device(state, &user_id, &candidate_device_id, &session_token).await?;
         None
     };
@@ -310,11 +226,7 @@ async fn verify_otp_ds(
     finish_login_profile(state, user_id, email, username, new_secret_key, has_identity).await
 }
 
-/// Sign in with the enrollment-only session a claimed QR device link minted
-/// (#1207). The account necessarily has an identity (an enrolled device showed
-/// the QR), so this is exactly verify-otp's existing-account path: reconcile
-/// the identity, register this device under the session, and hand back a
-/// profile that requires enrollment.
+/// Sign in with the enrollment-only session a claimed QR device link minted (#1207).
 pub(crate) async fn sign_in_with_link_session(
     state: &Arc<AppState>,
     v: pollis_api::links::ClaimLinkResponse,
@@ -326,12 +238,7 @@ pub(crate) async fn sign_in_with_link_session(
     finish_login_profile(state, user_id, v.email, v.username, None, true).await
 }
 
-/// The existing-account half of signing a new device in, shared by email OTP
-/// (`verify_otp_ds`) and the QR device link (`device_link::claim_device_link`,
-/// #1207): resolve this device's id, register it through the session-gated DS
-/// endpoint (it has no signing credential yet), and hold the session for the
-/// enrollment request that follows. The account key itself arrives later, by
-/// sibling approval or Secret-Key recovery.
+/// The existing-account half of signing a new device in (OTP and QR link, #1207).
 pub(crate) async fn bootstrap_existing_identity_device(
     state: &Arc<AppState>,
     user_id: &str,
@@ -342,36 +249,15 @@ pub(crate) async fn bootstrap_existing_identity_device(
     let session_token = session_token.to_string();
     let stored_device_id = ensure_device_id(state, &user_id, candidate_device_id).await?;
 
-    // Whether this device already holds the account key. That — not the id
-    // comparison below on its own — is what decides which branch is right
-    // (#1099).
+    // Holding the account key, not the id comparison alone, picks the branch (#1099).
     let enrolled = crate::commands::account_identity::has_local_account_identity(
         state, &user_id,
     )
     .await
     .unwrap_or(false);
 
-    // A NOT-yet-enrolled device carrying a stale local id adopts the session's
-    // instead. The keystore has a `device_id` for this account, but
-    // `stable_device_id_for_reenrollment` could not find it from the typed
-    // address, so verify-otp bound the session to a fresh candidate — which
-    // happens when the local accounts index does not know the address, after an
-    // email change made on another device, say.
-    //
-    // Every session-gated write that follows is bound to the CANDIDATE, and the
-    // pre-enrollment soft reset is the one that matters: the DS keeps exactly
-    // the session's device (`account::reset_recover_in_tx`, taken from the
-    // session record and never from the request body — trusting the body would
-    // reopen the account-takeover finding). Keep the stale id and the reset
-    // deletes this device's own row, after which its cert publish fails and the
-    // only way out is a manual re-enroll.
-    //
-    // Nothing is lost by adopting: an unenrolled device's row carries no cert
-    // and no MLS state, and a soft reset orphans every other device regardless.
-    // The id comparison alone would be wrong — an already-enrolled device also
-    // sees a mismatch (`stable_device_id_for_reenrollment` returns `None` for it
-    // by design) and there keeping the stored id is correct, which is what
-    // `enrolled` distinguishes.
+    // An unenrolled device with a stale id adopts the session's: the pre-enrollment soft reset
+    // keeps only the session's device, so a stale id would delete its own row.
     let device_id = if !enrolled && stored_device_id != candidate_device_id {
         state
             .keystore
@@ -384,9 +270,7 @@ pub(crate) async fn bootstrap_existing_identity_device(
     };
 
     if device_id == candidate_device_id {
-        // Brand-new device for this account (nothing in the keystore yet), or
-        // one that just adopted the session's id above: the session minted
-        // above is bound to exactly this device_id, so it can authorize the row.
+        // New device, or one that adopted the session's id: the session authorizes the row.
         // OS + form factor only — never the hostname (see `util::device_label`).
         let device_name = crate::util::device_label();
         crate::commands::mls::ds_post_session_ok(
@@ -398,19 +282,10 @@ pub(crate) async fn bootstrap_existing_identity_device(
             },
         )
         .await?;
-        // Hold the session for the session-gated enrollment REQUEST write that
-        // a sibling-approval enrollment performs next (also pre-credential).
-        // NOT stashed in `bootstrap_session`: the cert publish must stay on the
-        // cert-validity-alone path.
+        // For the enrollment request; NOT `bootstrap_session` (cert publish stays cert-validity-only).
         *state.enrollment_session.lock().await = Some(session_token.to_string());
     } else {
-        // A device already known to this account (its registered device_id
-        // predates this session, which is bound to a fresh candidate). The
-        // session can't authorize it and the local DB is still closed (no
-        // signing key), so `register_device` no-ops its remote write under a DS
-        // (bucket-C C2) — the row already exists with a cert from a prior
-        // login; the `last_seen` touch it skips is non-critical. It still
-        // resolves + sets `state.device_id`.
+        // Known device the session can't authorize: `register_device` no-ops its remote write.
         register_device(state, &user_id).await?;
     }
     Ok(())
@@ -443,18 +318,7 @@ pub(crate) async fn finish_login_profile(
 }
 
 /// Whether this device must go through the enrollment gate for `user_id`.
-///
-/// Two ways to need it, and both are here rather than at the three call sites
-/// that used to spell out only the first:
-///   1. The account HAS an identity and this device holds no copy of the key.
-///   2. This device holds a copy, but the server has told it that copy is no
-///      longer the account's identity ([`reconcile_account_identity`]). That
-///      used to be expressed by DELETING the key so (1) became true; the key now
-///      survives, so the marker has to be consulted directly.
-///
-/// A keystore error reads as "not superseded": the gate is driven by (1) in that
-/// case, exactly as before, rather than trapping a working device behind a
-/// failed read.
+/// Needed when the account has an identity and this device has no key, or its key is superseded.
 async fn enrollment_required_for(
     state: &Arc<AppState>,
     user_id: &str,
@@ -477,32 +341,7 @@ async fn enrollment_required_for(
 /// Reconcile this device's local account key against the account identity the
 /// server says is current — the signature of a reset performed on another
 /// device.
-///
-/// `account_id_pub` is the value the just-completed verify-otp reported for this
-/// account (#987); it used to be a second, direct `SELECT` from the client.
-///
-/// # This does NOT delete the local key
-///
-/// It used to. A mismatch called `wipe_local_account_identity`, which removes
-/// both the wrapped and the legacy keystore slots — and NOTHING authenticates
-/// the value that decides it. It arrives in a `verify-otp` response, at a moment
-/// when the local database is still closed (so there is no TOFU pin to check it
-/// against) and the transparency log has not been consulted. The old doc comment
-/// claimed the function "fails SAFE in both directions", but the safe direction
-/// only ever covered an ABSENT or UNDECODABLE value; a FORGED one was the
-/// destructive branch. One response from a hostile or broken Delivery Service
-/// destroyed a user's only copy of their account identity key and left them
-/// needing their Secret Key.
-///
-/// So a mismatch now MARKS the device instead. `enrollment_required` picks the
-/// marker up, so the user still lands on the enrollment gate and the practical
-/// flow is unchanged — but the key stays until they actually re-enroll or
-/// recover, at which point `adopt_recovered_account_identity` clears both. A
-/// match clears the marker, so a server that retracts the claim heals the
-/// device.
-///
-/// Absent and undecodable values keep their genuinely-safe old behaviour: leave
-/// everything alone.
+/// A mismatch MARKS the device rather than deleting the key: the value is unauthenticated.
 async fn reconcile_account_identity(
     state: &Arc<AppState>,
     user_id: &str,
@@ -517,9 +356,7 @@ async fn reconcile_account_identity(
         return;
     };
 
-    // Record it either way: this is the value a later enrollment or Secret-Key
-    // unwrap on this device is checked against
-    // (`account_identity::adopt_recovered_account_identity`).
+    // Recorded either way: later enrollment / Secret-Key unwraps check against it.
     if let Err(e) = crate::commands::account_identity::remember_published_account_id_pub(
         state, user_id, &pub_bytes,
     )
@@ -557,18 +394,7 @@ async fn reconcile_account_identity(
 }
 
 /// The chokepoint where a Delivery-Service-minted `user_id` enters the client.
-///
-/// `verify-otp` is the only response whose `user_id` the client has not seen
-/// before, and everything downstream treats that string as a directory name:
-/// `accounts.json` → `set_pin` / `unlock` / `logout` →
-/// `r2::clear_media_cache(CacheScope::User(id))` → `root.join(id)` →
-/// `remove_dir_all` per entry, plus `pollis_<id>.db` and the per-user keystore
-/// slots. `Path::join` with an absolute id REPLACES the cache root, so a DS
-/// answering `{"user_id": "/home/alice", ...}` used to have the mandatory
-/// set-PIN step empty the home directory. The server is untrusted for exactly
-/// this kind of thing, so the id is checked here, before it is persisted or
-/// joined onto anything, and a bad one ends the sign-in. `r2` and `db::local`
-/// re-check at the join as defense in depth.
+/// The id becomes a directory name, so an absolute one could empty `$HOME`; reject it here.
 fn accept_server_user_id(user_id: String) -> Result<String> {
     if !crate::util::is_safe_id(&user_id) {
         // Deliberately not echoing the value: it is attacker-chosen bytes.
@@ -583,9 +409,6 @@ fn accept_server_user_id(user_id: String) -> Result<String> {
 
 /// Resolve this device's stable `device_id` for `user_id`, persisting `candidate`
 /// in the keystore if none exists yet, and store it in `AppState.device_id`.
-/// Extracted so the DS bootstrap path can determine the device_id (to bind the
-/// OTP session to) without doing the remote `user_device` write that
-/// [`register_device`] does directly.
 async fn ensure_device_id(
     state: &Arc<AppState>,
     user_id: &str,
@@ -607,12 +430,7 @@ async fn ensure_device_id(
 }
 
 /// Read a user's login address out of the per-user keystore (#997).
-///
-/// `None` on ANY failure, deliberately. The whitepaper §4 records that transient
-/// keychain / secret-service errors used to bounce returning users back to OTP,
-/// so a hiccup here must degrade — to "type your email", which is the screen a
-/// brand-new device sees anyway — and never propagate as an error out of a call
-/// whose other results are perfectly good.
+/// `None` on ANY failure: a keychain hiccup must degrade to "type your email".
 async fn login_email_for_user(state: &Arc<AppState>, user_id: &str) -> Option<String> {
     let bytes = state
         .keystore
@@ -624,15 +442,7 @@ async fn login_email_for_user(state: &Arc<AppState>, user_id: &str) -> Option<St
 
 /// Persist a user's login address in the per-user keystore, next to every other
 /// per-user secret. Called by each site that also calls `upsert_account`.
-///
-/// Best-effort for the same reason [`login_email_for_user`] is: a keystore
-/// hiccup must not fail a login that has otherwise fully succeeded. A miss costs
-/// the login screen's one-click chip and the returning-device `device_id` reuse,
-/// and both re-establish on the next successful login.
-///
-/// Returns whether the address actually landed, which only the upgrade path
-/// below cares about — it must not erase the plaintext copy on disk until the
-/// keystore has taken one.
+/// Best-effort; returns whether it landed (the upgrade must not erase the file copy first).
 async fn store_login_email(state: &Arc<AppState>, user_id: &str, email: &str) -> bool {
     match state
         .keystore
@@ -649,19 +459,7 @@ async fn store_login_email(state: &Arc<AppState>, user_id: &str, email: &str) ->
 
 /// Read the accounts index, first moving any pre-#997 plaintext login address it
 /// still carries into the per-user keystore and erasing it from the file.
-///
-/// This is the upgrade path, and it is load-bearing rather than cosmetic. Every
-/// install that predates #997 has the address in `accounts.json` and nowhere
-/// else; without this it would lose the pre-unlock email → `user_id` resolution
-/// — #419's returning-device path — and the login screen's "continue as" chip
-/// until the user signed in by OTP again. It runs at the three places that need
-/// the address, all of which are already async with `state` in hand.
-///
-/// Ordering is deliberate: keystore write first, disk erase second. An address
-/// already in the keystore wins over the file's copy, because every writer since
-/// the upgrade has kept the keystore current. If ANY account's keystore write
-/// fails, nothing is erased and the next launch simply tries again — a failed
-/// migration must never be a lost address.
+/// Keystore write first, disk erase second: a failed migration must never lose an address.
 async fn read_accounts_index_migrated(
     state: &Arc<AppState>,
 ) -> Result<crate::accounts::AccountsIndex> {
@@ -677,12 +475,7 @@ async fn read_accounts_index_migrated(
 }
 
 /// Move every pre-#997 address these accounts still carry into the keystore.
-///
-/// Returns whether the file is now safe to rewrite without them: true only when
-/// at least one legacy address was seen AND every one of them is now in the
-/// keystore. Split from [`read_accounts_index_migrated`] at the index read, for
-/// the same reason [`user_id_for_email_among`] is — the keystore is hermetic per
-/// `AppState`, the on-disk index is process-global.
+/// True only when a legacy address was seen AND every one is now in the keystore.
 async fn adopt_legacy_login_emails(
     state: &Arc<AppState>,
     accounts: &[crate::accounts::AccountInfo],
@@ -695,9 +488,7 @@ async fn adopt_legacy_login_emails(
             continue;
         };
         saw_legacy = true;
-        // A keystore entry wins over the file's copy: every writer since the
-        // upgrade has kept the keystore current, and the file's is frozen at
-        // whatever the last pre-upgrade login wrote.
+        // A keystore entry wins: the file's copy is frozen at the upgrade.
         if login_email_for_user(state, &account.user_id).await.is_some() {
             continue;
         }
@@ -710,14 +501,6 @@ async fn adopt_legacy_login_emails(
 }
 
 /// Match an email against the login addresses the keystore holds for `accounts`.
-///
-/// Split off from [`local_user_id_for_email`] at the index read so the matching
-/// rule itself is testable: the index lives at the process-global data dir,
-/// which unit tests in this crate cannot claim without fighting each other over
-/// it, while the keystore is per-`AppState` and therefore hermetic.
-///
-/// N is the number of accounts that have signed in on this device — three or so
-/// at the outside — so the linear scan of keystore reads is not worth indexing.
 async fn user_id_for_email_among(
     state: &Arc<AppState>,
     accounts: &[crate::accounts::AccountInfo],
@@ -735,35 +518,13 @@ async fn user_id_for_email_among(
 }
 
 /// Resolve an email address to a `user_id` using only local state.
-///
-/// The only such lookup available pre-unlock: the local DB is closed (so there
-/// is no device signer) and no OTP has run (so there is no session), which
-/// leaves no credential for a DS read — and #987 removed the direct
-/// `SELECT id FROM users WHERE email = ?` that used to serve these call sites.
-/// `None` means "this machine has not signed into that address before", which is
-/// exactly the condition under which both callers want the fresh-device path.
-///
-/// The candidate `user_id`s come from `accounts.json`; the addresses they are
-/// matched against come from the keystore (#997), which is readable at this
-/// moment for exactly the reason [`stable_device_id_for_reenrollment`] — the
-/// caller below — can already read [`DEVICE_ID_KEY`] out of it here.
+/// The only lookup available pre-unlock (no signer, no session); `None` = never signed in here.
 async fn local_user_id_for_email(state: &Arc<AppState>, email: &str) -> Option<String> {
     let index = read_accounts_index_migrated(state).await.ok()?;
     user_id_for_email_among(state, &index.accounts, email).await
 }
 
-/// For a RETURNING, not-yet-enrolled device, return its existing stable
-/// `device_id` so `verify_otp_ds` can bind the OTP session to it (rather than a
-/// throwaway candidate) — the prerequisite for minting an `enrollment_session`
-/// on a device that already registered once. Returns `None` — so the caller
-/// falls back to a fresh id — when there's no local account for this email (a
-/// brand-new device), when the device is already enrolled (preserve the current
-/// fresh-candidate path), or when no keystore device_id exists yet.
-///
-/// user_id is resolved from the LOCAL accounts index (a returning device has an
-/// entry from a prior login), so this adds no network round-trip. The
-/// enrollment check reads the keystore, not the still-locked DB, so it is valid
-/// here pre-unlock (same call site semantics as the `enrollment_required` calc).
+/// For a RETURNING, not-yet-enrolled device, its existing `device_id` so the OTP session binds to it.
 async fn stable_device_id_for_reenrollment(state: &Arc<AppState>, email: &str) -> Option<String> {
     let user_id = local_user_id_for_email(state, email).await?;
 
@@ -783,21 +544,7 @@ async fn stable_device_id_for_reenrollment(state: &Arc<AppState>, email: &str) -
 }
 
 /// Send an OTP to a new email address as part of the email-change flow.
-///
-/// The request is DEVICE-SIGNED and routed to
-/// `POST /v1/auth/request-email-change-otp` — the DS records `(authed user →
-/// new_email)`, generates/stores/emails the OTP keyed on the new email, and the
-/// client never touches `state.otp_store`, the Resend key, or `users`. The DS
-/// always 200s (anti-enumeration), so the uniqueness check happens at verify
-/// time. See `docs/otp-server-bootstrap-design.md`.
-///
-/// #987 deleted the no-DS fallback that used to sit below this. It pre-checked
-/// uniqueness with a direct `SELECT id FROM users WHERE email = ?` and then ran
-/// the client-side OTP path — a path unreachable in any real deployment since
-/// #419 moved OTP server-side, and one that cannot exist at all now the client
-/// holds no database credential. Nothing is lost by its removal: the pre-check
-/// was a TOCTOU against a mailbox another account could claim in the interval,
-/// so verify time is where uniqueness has to be decided regardless.
+/// Device-signed; the DS always 200s (anti-enumeration), so uniqueness is decided at verify time.
 pub async fn request_email_change_otp(
     state: &Arc<AppState>,
     user_id: String,
@@ -821,20 +568,8 @@ pub async fn request_email_change_otp(
     Ok(())
 }
 
-/// Verify the OTP sent to a new email address and atomically swap
-/// `users.email` for the calling user. Three proofs, and they bind different
-/// facts: the device's signing identity proves the account is asking, `code`
-/// (sent to the new address) proves the caller controls the mailbox they are
-/// moving to, and `current_code` (sent to the address the account is on today,
-/// #1161) proves they control the mailbox that owns the account. Only the last
-/// is out of reach of somebody holding a borrowed unlocked device, which is why
-/// it exists.
-///
-/// The OTP validation, requester binding, and `UPDATE users` all run server-side
-/// behind the device-signature gate (`POST /v1/auth/verify-email-change`) — the
-/// authed user is bound from the signature, never the body. The client then
-/// mirrors the new address into the local `accounts.json` index (a device-local
-/// file the DS can't touch).
+/// Verify the OTP sent to a new email address and atomically swap `users.email`.
+/// `current_code` (to today's address, #1161) is what a borrowed unlocked device can't supply.
 pub async fn verify_email_change(
     state: &Arc<AppState>,
     user_id: String,
@@ -855,10 +590,7 @@ pub async fn verify_email_change(
     .await?;
     let username: Option<String> = match resp.status().as_u16() {
         200 => {
-            // The username rides on the swap (#987): the accounts-index mirror
-            // below needs it, and reading it back afterwards was a round trip
-            // for a row the DS had just written — one that could observe a
-            // rename in between and stamp it as part of this change.
+            // The username rides on the swap (#987), avoiding a racy read-back.
             let pollis_api::email_change::EmailChanged::Ok { username } =
                 crate::commands::mls::decode_response::<
                     pollis_api::email_change::VerifyEmailChangeBody,
@@ -867,9 +599,7 @@ pub async fn verify_email_change(
             username
         }
         401 => {
-            // The DS distinguishes the two codes (#1161) and says which one
-            // failed; surfacing "invalid code" for both would leave the user
-            // retyping the wrong field.
+            // The DS says which code failed (#1161).
             let txt = resp.text().await.unwrap_or_default();
             if txt.contains("current-address") {
                 return Err(anyhow::anyhow!(
@@ -898,11 +628,7 @@ pub async fn verify_email_change(
         }
     };
 
-    // Mirror the new email into the keystore so the login screen's "continue as"
-    // picker offers the new address, and so the pre-unlock
-    // `local_user_id_for_email` resolution follows the account. Runs after the
-    // swap succeeds. Touch the accounts index too — it carries the `last_seen`
-    // and username this flow can also have changed.
+    // Mirror into the keystore and accounts index for the login picker and pre-unlock lookup.
     if let Some(username) = username {
         if let Err(e) = crate::accounts::upsert_account(&user_id, &username, None) {
             crate::diag!("[auth] email-change accounts.json mirror failed: {e}");
@@ -933,25 +659,13 @@ pub async fn dev_login(
     }
 }
 
-/// Rehydrate the current user's profile on app boot.
-///
-/// Reads `accounts.json` (durable, crash-safe) for `last_active_user`
-/// and reconstructs the `UserProfile` from that entry. Previously this
-/// also read a `session_{uid}` keystore blob — a redundant second
-/// source of truth whose transient read failures were a direct cause
-/// of issue #184 kicking users back to OTP. The blob is gone.
-/// Return this device's stable `device_id` (the one registered in
-/// `user_device` and used to scope per-device identities), or `None` if the
-/// device hasn't been registered yet this process. The frontend uses it to
-/// build its own per-device voice identity (`voice-{user_id}:{device_id}`) so
-/// it can tell which voice participant is itself (#140).
+/// This device's stable `device_id`, or `None` if not registered this process (#140).
 pub async fn get_device_id(state: &Arc<AppState>) -> Result<Option<String>> {
     Ok(state.device_id.lock().await.clone())
 }
 
 pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
-    // In development, DEV_EMAIL bypasses the normal session check and logs in directly.
-    // Set DEV_EMAIL=user@example.com in .env.development to auto-login on every startup.
+    // Dev: DEV_EMAIL in .env.development auto-logs in on every startup.
     #[cfg(debug_assertions)]
     if let Ok(dev_email) = std::env::var("DEV_EMAIL") {
         let dev_email = dev_email.trim().to_string();
@@ -963,7 +677,6 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         }
     }
 
-    // Identify the last active user from the local accounts index.
     let index = read_accounts_index_migrated(state).await?;
     let account = match index
         .last_active_user
@@ -976,9 +689,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         }
     };
 
-    // The address is a keystore read now (#997), not a field of the index. Empty
-    // on a keystore miss, exactly as an absent `email` field used to be — the
-    // downstream `UserProfile.email` contract is unchanged.
+    // Empty on a keystore miss (#997).
     let email = login_email_for_user(state, &account.user_id)
         .await
         .unwrap_or_default();
@@ -991,21 +702,8 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         enrollment_required: false,
     };
 
-    // Verify the user still exists, and recompute the enrollment gate — ONE
-    // probe for both (#987 §6.5).
-    //
-    // This runs before PIN entry, so there is no credential of any kind: the
-    // local DB is closed (no signer), `device_id` is unset, and no OTP has run.
-    // Hence the unauthenticated probe. Both answers keep the biases they had:
-    //
-    //   * "user exists" fails OPEN — a network failure is "assume valid", so a
-    //     flaky connection at startup does not force re-authentication (#247).
-    //     Only a CONFIRMED `exists: false` removes the local record, which is
-    //     what a genuine account deletion elsewhere looks like.
-    //   * "has identity" fails to `false` — an unknown remote state skips the
-    //     enrollment gate this launch rather than trapping a logged-in user
-    //     behind it. An un-enrolled device still cannot read history (the keys
-    //     are not local); it is simply not *forced* through the gate offline.
+    // One pre-PIN, unauthenticated probe (#987 §6.5). "exists" fails OPEN (#247): only a
+    // confirmed `false` removes the account. "has identity" fails to `false`: no gate offline.
     let probe = match crate::commands::ds_reads::account_probe(state, &profile.id).await {
         Ok(p) => Some(p),
         Err(e) => {
@@ -1018,35 +716,11 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         return Ok(None);
     }
 
-    // The local DB is NOT opened here. The frontend's next call is
-    // get_unlock_state; if pin_set && !is_unlocked it routes to the
-    // PIN entry screen, where unlock opens the DB under the
-    // unwrapped db_key. The orphan recompute (was here before #194)
-    // moves with it — has_matching_local_account_identity can't
-    // verify against a still-locked key anyway.
-    // Device registration is a fire-and-forget Turso/keystore refresh
-    // whose return value is unused here. A transient failure at launch
-    // must NOT bounce a logged-in user back to OTP (issue #247) — the
-    // row re-registers on the next reachable launch. This mirrors the
-    // network-tolerant user-existence check above.
+    // Fire-and-forget; a launch failure must not bounce the user to OTP (#247).
     if let Err(e) = register_device(state, &profile.id).await {
         crate::diag!("[session] register_device failed for user {} ({e}); proceeding from accounts.json", profile.id);
     }
 
-    // Conservative: if the wrapped slot is absent AND no plaintext
-    // copy exists, this device is orphaned/unenrolled. has_local_
-    // account_identity returns true for the wrapped-only (locked)
-    // case, so we don't false-positive an enrollment gate just
-    // because the user hasn't entered their PIN yet.
-    // A transient Turso failure here must NOT bounce a logged-in user
-    // back to OTP (issue #247). Unknown remote state is treated as
-    // `None`, which yields `enrollment_required = false` below: the user
-    // proceeds to PIN unlock and the enrollment gate recomputes on the
-    // next reachable launch. An un-enrolled device still cannot read
-    // history (keys are not local) — it is simply not *forced* through
-    // the gate while offline. Consistent with the network-tolerant
-    // user-existence check above; only a confirmed `None` row (user
-    // genuinely has no remote pubkey) and a present row are decisive.
     let has_remote_identity = probe.as_ref().is_some_and(|p| p.has_identity);
     profile.enrollment_required =
         enrollment_required_for(state, &profile.id, has_remote_identity).await;
@@ -1055,38 +729,13 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
 }
 
 /// DEV_EMAIL auto-login entry point.
-///
-/// The Delivery Service OWNS auth/bootstrap (#419): it authorizes every write by
-/// the device's registered `mls_signature_pub`, so a device that never ran the
-/// bootstrap handshake (verify-otp → register-device → publish-device-cert) has
-/// no DS-recognized credential and every DS write 401s. This drives that real
-/// handshake ([`dev_login_ds`]) and nothing else.
-///
-/// It used to have a second path: a `dev_login_inner` that INSERTed the `users`
-/// row straight into Turso, taken when no DS was configured and as a fall-back
-/// when DS enrollment failed. #910 removed it. It was the last client-side
-/// remote write in the codebase — the one live counter-example to a rule
-/// (`CLAUDE.md`: "Never add a client-side remote INSERT/UPDATE/DELETE — extend a
-/// DS endpoint") that everything else follows — and as a fall-back it actively
-/// hid the misconfiguration it warned about, producing a device that looked
-/// signed in and 401'd on every subsequent write.
+/// Drives the real DS bootstrap handshake; no Turso-direct fallback (#910).
 #[cfg(debug_assertions)]
 async fn dev_login_dispatch(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
-    // Canonicalize once, up front, so every downstream use — the `users`
-    // lookup, the DS verify-otp body, `accounts.json`, the returned profile —
-    // sees the same address.
+    // Canonicalize once so every downstream use sees the same address.
     let email = canonical_login_email(&email);
 
-    // No DS, no login (#910). The Turso-direct shortcut this replaces was the
-    // one client-side remote INSERT left in the codebase, and CLAUDE.md bans
-    // those outright — the DS is the sole writer.
-    //
-    // Nothing is lost by refusing. A DS-less client cannot send a message,
-    // create a group, or register a device either: every one of those is a
-    // `POST /v1/...`. So "logged in without a DS" was never a working state, it
-    // was a state that looked like one until the first write failed. Failing
-    // here, with the reason, is strictly more useful than a local account that
-    // 401s on everything.
+    // No DS, no login (#910): a DS-less client can't write anything anyway.
     if state.config.pollis_delivery_url.is_none() {
         return Err(crate::error::Error::Other(anyhow::anyhow!(
             "DEV_EMAIL/dev_login needs a Delivery Service: set POLLIS_DELIVERY_URL \
@@ -1094,10 +743,7 @@ async fn dev_login_dispatch(state: &Arc<AppState>, email: String) -> Result<User
              so there is nothing a client can do without one."
         )));
     }
-    // A DS enrollment failure is now an ERROR, not a silent fall-back. The old
-    // fall-back masked exactly the misconfiguration it printed about — a DS
-    // running with a different DEV_OTP produced a device that looked signed in
-    // and 401'd on every write.
+    // A DS enrollment failure is an error, not a fallback that looks signed in.
     dev_login_ds(state, email).await.map_err(|e| {
         crate::error::Error::Other(anyhow::anyhow!(
             "DEV_EMAIL DS enrollment failed: {e}. Ensure the Delivery Service is running \
@@ -1117,34 +763,11 @@ fn dev_otp_code() -> String {
         .unwrap_or_else(|| "000000".to_string())
 }
 
-/// DEV_EMAIL auto-login that ENROLLS the device with the Delivery Service, so a
-/// pre-#419 dev device (or a fresh dev machine) obtains a DS-recognized credential
-/// instead of 401ing on every DS write.
-///
-/// Mirrors the production [`verify_otp_ds`] handshake, with one dev-only twist that
-/// makes it work for a RETURNING device (the case production leaves to
-/// sibling-approval / Secret-Key enrollment): it binds the OTP session to this
-/// device's EXISTING `device_id` (resolved from the keystore before verify-otp),
-/// so the subsequent session-gated `register-device` can create the DS
-/// `user_device` row for a device that already exists locally. Production's
-/// returning-device branch can't do this — its session is bound to a throwaway
-/// candidate id — which is why a pre-#419 device never gets a DS row and its
-/// cert-validity `publish-device-cert` 401s.
-///
-/// Strictly dev-only (`#[cfg(debug_assertions)]`); it does not touch the
-/// production bootstrap invariants.
+/// DEV_EMAIL auto-login that ENROLLS the device with the DS, binding the OTP session
+/// to a returning device's EXISTING `device_id` so `register-device` can create its row.
 #[cfg(debug_assertions)]
 async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
-    // Pre-resolve the account so we can reuse this device's stable device_id and
-    // bind the OTP session to it. Resolved from the LOCAL accounts index (#987):
-    // this runs pre-unlock, where no credential of any kind exists, and the
-    // index is written by every prior successful login on this machine.
-    //
-    // A miss means this machine has never signed into that address — so the
-    // keystore holds no device_id for it either, the "returning device" twist
-    // below would degenerate into a fresh candidate anyway, and the standard
-    // first-device DS bootstrap (verify_otp_ds via verify_otp) is the correct
-    // path. That covers both a brand-new dev account and a clean dev machine.
+    // Resolved from the local accounts index (pre-unlock); a miss takes the first-device path.
     let user_id = match local_user_id_for_email(state, &email).await {
         Some(uid) => uid,
         None => {
@@ -1157,9 +780,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
         }
     };
 
-    // Bind the session to this device's existing id (or a fresh candidate on a
-    // clean machine). Sending it in the verify-otp body is what lets the
-    // session-gated register-device below authorize THIS device's row.
+    // Bind the session to this device's existing id (or a fresh candidate).
     let bound_device_id = match state.keystore.load_for_user(DEVICE_ID_KEY, &user_id).await? {
         Some(bytes) => String::from_utf8(bytes)
             .map_err(|e| anyhow::anyhow!("corrupt device_id in keystore: {e}"))?,
@@ -1174,8 +795,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
             email: email.clone(),
             code: dev_otp_code(),
             device_id: bound_device_id.clone(),
-            // verify-otp never writes the identity key — `establish-identity`
-            // does, under its CAS guard. Accepted here and ignored.
+            // Ignored: `establish-identity` writes the key under its CAS guard.
             account_id_pub: None,
         },
     )
@@ -1191,7 +811,6 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     let has_identity = v.has_identity;
     let session_token = v.session_token;
 
-    // Persist + publish the bound device_id into state.
     let device_id = ensure_device_id(state, &user_id, &bound_device_id).await?;
 
     // Orphan-detection: a reset elsewhere leaves a stale local key, so the
@@ -1200,8 +819,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
         reconcile_account_identity(state, &user_id, v.account_id_pub.as_deref()).await;
     }
 
-    // register-device (session-gated): creates/upserts the DS `user_device` row —
-    // the row a pre-#419 device is missing. Idempotent.
+    // register-device (session-gated): the row a pre-#419 device is missing.
     // OS + form factor only — never the hostname (see `util::device_label`).
     let device_name = crate::util::device_label();
     crate::commands::mls::ds_post_session_ok(
@@ -1214,10 +832,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     )
     .await?;
 
-    // Stash the session so the cert pivot (set_pin / unlock → ensure_device_cert)
-    // publishes via the session path — which both authorizes the write and, with
-    // the row now present, lands `mls_signature_pub` so later device-signed DS
-    // writes (GroupInfo, external-join) authenticate.
+    // Stash the session so the cert pivot (`ensure_device_cert`) can present it.
     *state.bootstrap_session.lock().await = Some(session_token);
 
     let enrollment_required = enrollment_required_for(state, &user_id, has_identity).await;
@@ -1236,84 +851,36 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
 }
 
 /// The canonical spelling of a login address for the `users` table.
-///
-/// `users.email` is `NOT NULL UNIQUE`, so the *string* is the account's
-/// identity. The Delivery Service trims before it touches that table
-/// (`pollis_delivery::otp::verify_otp`); the client path did not, so
-/// `" a@x.com "` missed the row `"a@x.com"` owns and then INSERTed a **second**
-/// account for the same person — an invalid state UNIQUE cannot catch, because
-/// the two strings genuinely differ.
-///
-/// Trim only. The DS deliberately does *not* lowercase for `users` (it
-/// lowercases only the OTP store key — see `otp::normalize_email`), and the
-/// point of this function is to match the DS exactly, not to be independently
-/// sensible.
+/// Trim only, matching the DS exactly; untrimmed input once created a second account.
 #[doc(hidden)]
 pub fn canonical_login_email(email: &str) -> String {
     email.trim().to_string()
 }
 
-/// Register this device for the given user. Generates a stable device_id on first
-/// call (persisted in the OS keystore), inserts/updates the remote `user_device`
-/// table, and stores the id in `AppState.device_id`.
+/// Resolve this device's stable `device_id`; the remote row is the DS's.
 async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String> {
-    // Resolve-or-create the stable device_id (also sets `state.device_id`).
     let device_id = ensure_device_id(state, user_id, &Ulid::new().to_string()).await?;
 
-    // The remote `user_device` + watermark writes are owned by the Delivery
-    // Service now. A brand-new device's row is created by the session-gated
-    // `/v1/auth/register-device` in `verify_otp_ds`; every caller that reaches
-    // *this* fn does so at a PRE-UNLOCK point (the known-device re-login branch of
-    // `verify_otp_ds`, the session-resume `get_session`) where the local DB is
-    // still closed and no device signing key is loadable. The old direct
-    // `last_seen` touch + watermark backfill on an ALREADY-existing row could
-    // neither be device-signed nor performed under a read-only Turso token, so it
-    // is dropped: the DS now bumps `last_seen` itself on the device's first
-    // verified signed call after unlock (`pollis-delivery/src/last_seen.rs`).
-    // `ensure_device_id` above already set `state.device_id`, so the
-    // rest of the flow (and later DS calls) still have it.
+    // No remote write: callers are pre-unlock; the DS bumps `last_seen` on the first signed call.
     crate::diag!("[auth] device registered: {device_id}");
-
-    // Device-cert publish moved out of register_device. It needs the
-    // unwrapped account_id_key, which post-#194 lives in AppState.unlock
-    // and isn't populated until set_pin / unlock runs. set_pin and
-    // unlock both invoke ensure_device_cert as part of the same
-    // roundtrip so the cert lands at the natural moment.
 
     Ok(device_id)
 }
 
 /// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.
 pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
-    // If the index is corrupt we still want the user to be able to log out.
-    // `accounts.json` has already been renamed to `.bad-<ts>.json` by the
-    // read path, so a default (empty) index is the honest state of the world.
+    // A corrupt index has already been renamed aside; log out with an empty one.
     let index = crate::accounts::read_accounts_index().unwrap_or_default();
     let user_id = index.last_active_user;
 
-    // A revoked device is wiped whatever the caller asked for (#1338): keeping
-    // its device id would sign the next login in as the same revoked device,
-    // and keeping its account keys on a device the account removed is the one
-    // thing revocation exists to stop. Only when the account being signed out
-    // IS the one whose device was revoked — never another account the index
-    // happens to name.
+    // A revoked device is wiped whatever the caller asked for (#1338).
     let revoked = user_id.is_some() && state.revoked_user() == user_id;
     let delete_data = delete_data || revoked;
 
-    // Snapshot the device_id WITHOUT clearing it yet — a DS-routed device
-    // removal (below) is device-signed and needs `state.device_id` still set.
+    // Snapshot, not clear: the device-signed removal below needs it set.
     let device_id = state.device_id.lock().await.clone();
 
-    // Remove this device from the remote registry FIRST, while the local DB, the
-    // device signing key, and the in-memory session are all still live.
-    //
-    // Bucket-C C4: this is a DEVICE-SIGNED `POST /v1/auth/logout` — a self-scoped
-    // DELETE of THIS device's `user_device` row (the DS binds it to the
-    // authenticated signer, so a caller can only log out their own account's
-    // device). It MUST run before `unload_user_db` / the `unlock` clear below:
-    // once those run the signer is gone and a device-signed request is impossible.
-    // Best-effort: a stale row left behind on a network failure is harmless
-    // (re-registered/overwritten on next login).
+    // Device-signed removal FIRST, while the signer is still live. Best-effort.
     if delete_data {
         if let (Some(uid), Some(did)) = (user_id.as_ref(), device_id.as_ref()) {
             let body = pollis_api::account::LogoutDeviceBody {
@@ -1326,39 +893,24 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
         }
     }
 
-    // Now tear down local state.
     *state.device_id.lock().await = None;
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
 
-    // Wipe the on-disk media cache. Files are AES-GCM-encrypted under
-    // the active session's db_key, so they would already be opaque to
-    // any future user — but logout is the natural lifecycle boundary
-    // and an empty cache costs nothing.
-    //
-    // Named explicitly, from the `user_id` this function read out of the
-    // accounts index at the top: `unload_user_db` above has already cleared the
-    // ambient cache user, and a wipe that read it would resolve the empty
-    // `_anon` directory and leave this user's media exactly where it was. An
-    // index too corrupt to name anyone means nobody can say which directory is
-    // this session's, so all of them go.
+    // Named explicitly: `unload_user_db` already cleared the ambient cache user.
     crate::commands::r2::clear_media_cache(match user_id.as_deref() {
         Some(uid) => crate::commands::r2::CacheScope::User(uid),
         None => crate::commands::r2::CacheScope::Everything,
     });
 
-    // Release any attachment the composer had staged but not sent. These are
-    // plaintext bytes the user pasted; they live in memory only, and a session
-    // ending is exactly when they stop being anyone's business.
+    // Release attachments the composer had staged but not sent.
     crate::commands::staging::discard_all_staged();
 
-    // Clear the media-server token. Any URL handed to the webview
-    // during this session 403s from here on.
+    // Any media URL handed out this session 403s from here on.
     *state.media_server_token.lock().await = None;
 
     if delete_data {
         if let Some(ref uid) = user_id {
-            // Remote device removal already ran above (while the signer was live).
             let _ = state.keystore.delete_for_user("db_key", uid).await;
             let _ = state.keystore.delete_for_user("db_key_wrapped", uid).await;
             let _ = state.keystore.delete_for_user("account_id_key", uid).await;
@@ -1378,44 +930,22 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
         let _ = crate::accounts::clear_last_active_user();
     }
 
-    // Whatever the reason for this sign-out, the revoked device (if any) is no
-    // longer this process's device; whoever signs in next starts clean.
     state.clear_revoked_device();
 
     Ok(())
 }
 
-/// Permanently delete the account: rotate MLS keys for all groups/DMs the user
-/// belongs to, then wipe all remote data, clear keystore, and delete local DB.
-///
-/// MLS key rotation is done first (while the local DB is still open) so that
-/// remaining group members receive a remove commit and advance their epoch.
-/// This ensures forward secrecy: the deleted user's key material cannot decrypt
-/// any messages sent after the rotation.
-///
-/// See: https://github.com/pollis-app/pollis/issues/103
+/// Permanently delete the account: notify conversations, wipe remote via the DS, then local (#103).
 pub async fn delete_account(
     state: &Arc<AppState>,
     user_id: String,
 ) -> Result<()> {
-    // ── Phase 1: Signal membership change ────────────────────────────
-    // Broadcast membership_changed to all groups and DM channels the user
-    // belongs to. Remaining online members will reconcile and remove the
-    // deleting user's stale MLS leaves asynchronously. The user's local DB
-    // (including MLS state) is wiped in Phase 3, so they can't decrypt
-    // regardless.
-    //
-    // The enumeration is one DS read (#987) — the DS scopes it to the signer,
-    // so this can only ever list the caller's OWN conversations. It runs BEFORE
-    // the wipe below, which is the last moment the memberships still exist.
+    // Phase 1: wake every conversation so members evict the leaf; one DS read (#987), before the wipe.
     let mine = crate::commands::ds_reads::conversations(state, &user_id).await?;
 
     {
         for gid in &mine.group_ids {
-            // `publish_to_room_server`, not `publish_membership_changed_to_room`:
-            // the latter no-ops unless this client happens to be connected to the
-            // group's room, and a leaf nobody evicts is exactly the #1081 defect.
-            // Routed through the DS, the wake-up reaches the members regardless.
+            // Via the DS: a room-connected-only publish would miss members (#1081).
             if let Err(e) = crate::commands::livekit::publish_to_room_server(
                 state,
                 gid,
@@ -1440,27 +970,14 @@ pub async fn delete_account(
         }
     }
 
-    // ── Phase 2: remote data cleanup ───────────────────────────────────
-    //
-    // Route the entire remote wipe through the DS (#419 domains E+G) as ONE
-    // transaction when configured: the group-ownership handoff, the sent-envelope
-    // / key-package / membership deletes, and the final `users` delete all commit
-    // together or not at all — a half-deleted account is a corrupt state. The
-    // device is still fully enrolled here (the local DB is unloaded only in Phase
-    // 3 below), so it can sign the request.
+    // Phase 2: one DS transaction; a half-deleted account is a corrupt state.
     let body = pollis_api::account::DeleteAccountBody {
-        // The DS's no-auth fallback for the acting user
-        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
-        // user and this must EQUAL it; auth off → this IS the actor, and a
-        // body without it is refused outright. Sending it never widens what
-        // the caller may do.
+        // The DS's no-auth fallback actor (`resolve_actor`); never widens access.
         user_id: Some(user_id.clone()),
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // ── Phase 3: local cleanup ─────────────────────────────────────────
-
-    // Close and delete the per-user local database
+    // Phase 3: local cleanup.
     state.unload_user_db().await;
     {
         let data_dir = state.local_data_dir();
@@ -1471,7 +988,6 @@ pub async fn delete_account(
         }
     }
 
-    // Clear all keystore entries.
     let _ = state.keystore.delete_for_user("db_key", &user_id).await;
     let _ = state.keystore.delete_for_user("db_key_wrapped", &user_id).await;
     let _ = state.keystore.delete_for_user("account_id_key", &user_id).await;
@@ -1482,15 +998,11 @@ pub async fn delete_account(
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
-    // Everything `logout` drops at the end of a session, an account deletion
-    // must drop too (#1256): the media cache (it lives outside the data
-    // directory, so removing the user DB above leaves it), the media-server
-    // token, and anything the composer had staged but not sent.
+    // Everything `logout` drops, deletion drops too (#1256).
     crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(&user_id));
     *state.media_server_token.lock().await = None;
     crate::commands::staging::discard_all_staged();
 
-    // Remove from local accounts index
     let _ = crate::accounts::remove_account(&user_id);
 
     crate::diag!("[account] deleted account for user {user_id}");
@@ -1499,16 +1011,7 @@ pub async fn delete_account(
 
 /// Return the list of accounts that have previously signed in on this device.
 /// Used by the login screen to show a "continue as" picker.
-///
-/// The index supplies the identity and display fields; the login address is
-/// rehydrated per account from the keystore (#997), which is why this is async
-/// and takes `state`. The JSON it produces is identical to what the raw index
-/// serialized to before that move, so the renderer is untouched.
-///
-/// A per-account keystore read that fails yields `email: None` for that account
-/// and nothing more — see [`login_email_for_user`]. The picker then renders that
-/// chip disabled and the user types their address, which is strictly better than
-/// failing the whole call and hiding every OTHER account's chip too.
+/// A failed keystore read yields `email: None` for that account only (#997).
 pub async fn list_known_accounts(state: &Arc<AppState>) -> Result<crate::accounts::KnownAccounts> {
     let index = read_accounts_index_migrated(state).await?;
 
@@ -1533,20 +1036,14 @@ pub async fn list_known_accounts(state: &Arc<AppState>) -> Result<crate::account
 /// entries (device_id, wrapped keys, pin_meta, legacy unwrapped keys),
 /// and the accounts index. Does NOT touch the remote Turso database —
 /// users can re-authenticate on this device later.
-///
-/// Intended for the login screen "wipe this computer" action or for
-/// preparing a clean uninstall across platforms.
 pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
-    // 1. Close the active local DB if one is loaded.
     state.unload_user_db().await;
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
-    // 2. Read accounts index to enumerate user_ids for keystore cleanup.
-    //    A corrupt index here is survivable — we're nuking everything anyway.
+    // A corrupt index is survivable; everything goes anyway.
     let index = crate::accounts::read_accounts_index().unwrap_or_default();
 
-    // 3. Delete per-user keystore entries.
     let per_user_keys = [
         DEVICE_ID_KEY,
         "db_key",
@@ -1562,24 +1059,15 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
         }
     }
 
-    // 4. Delete all files in the data directory.
     let data_dir = crate::db::local::dirs_path();
     if data_dir.exists() {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
-    // 5. And the media cache, which is NOT under that directory. The shell
-    //    installs the cache root from Tauri's `app_data_dir().join("media-cache")`
-    //    — `~/.local/share/pollis/…` on Linux and `%APPDATA%\pollis\…` on
-    //    Windows against a `dirs_path()` that resolves elsewhere (only macOS
-    //    happens to make the two coincide). Removing the data directory alone
-    //    therefore left every cached image, video and voice clip on the disk of a
-    //    computer whose owner asked for all of it to be gone.
+    // The media cache, which is NOT under that directory on Linux/Windows.
     crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::Everything);
 
-    // Release any attachment the composer had staged but not sent. These are
-    // plaintext bytes the user pasted; they live in memory only, and a session
-    // ending is exactly when they stop being anyone's business.
+    // Release attachments the composer had staged but not sent.
     crate::commands::staging::discard_all_staged();
 
     crate::diag!("[wipe] local data wiped for {} account(s)", index.accounts.len());
@@ -1593,9 +1081,7 @@ pub async fn list_user_devices(
     user_id: String,
 ) -> Result<Vec<serde_json::Value>> {
     let current_device_id = state.device_id.lock().await.clone();
-    // Live devices only (`include_revoked: false`), oldest first — the DS
-    // preserves both the `revoked_at IS NULL` filter and the `created_at`
-    // ordering this list has always had.
+    // Live devices only, oldest first.
     let rows = crate::commands::ds_reads::devices(state, Some(&user_id), Vec::new(), false).await?;
 
     let devices = rows
@@ -1615,12 +1101,8 @@ pub async fn list_user_devices(
     Ok(devices)
 }
 
-/// Revoke one of the calling user's devices. Tombstones the `user_device` row
-/// and drops any unclaimed key packages, then returns; the MLS reconcile that
-/// removes the device's leaf from every group + DM tree continues in the
-/// background (see the comment above `spawn_revoked_leaf_removal`). The
-/// current device cannot revoke itself — `logout(delete_data: true)` is the
-/// path for that.
+/// Revoke one of the calling user's devices; leaf removal continues in the background.
+/// The current device cannot revoke itself — `logout(delete_data: true)` is the path for that.
 pub async fn revoke_device(
     state: &Arc<AppState>,
     user_id: String,
@@ -1633,28 +1115,13 @@ pub async fn revoke_device(
         )));
     }
 
-    // Drop the revoked device's unclaimed key packages (one-time-use, useless
-    // now) and tombstone its row (issue #372 — a tombstone, not a hard-delete,
-    // so other members' leaf cross-signing check (`IdentityDirectory::leaf_verdict`) can tell "revoked, drop rejoin"
-    // from "lagging, keep commits" and the row stays available for historical
-    // cert verification). Routed through the DS (#419 domains E+G) as one
-    // transaction when configured — the CURRENT device drives this and is fully
-    // enrolled, so it can sign; the DS binds both writes to the signer
-    // (`WHERE user_id = actor`).
+    // Tombstone, not hard-delete (#372): `leaf_verdict` must tell revoked from lagging.
     let body = pollis_api::account::RevokeDeviceBody {
         device_id: device_id.clone(),
-        // The DS's no-auth fallback for the acting user
-        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
-        // user and this must EQUAL it; auth off → this IS the actor, and a
-        // body without it is refused outright. Sending it never widens what
-        // the caller may do.
+        // The DS's no-auth fallback actor (`resolve_actor`); never widens access.
         user_id: Some(user_id.clone()),
     };
-    // The response carries the name the device had at the moment it was revoked
-    // (#987) — the audit entry below is the only place it can still be read once
-    // the row is tombstoned, and it used to be a separate client SELECT that ran
-    // BEFORE the write, so a device revoked concurrently was named by a read
-    // that had already gone stale.
+    // The name at revoke time (#987): the audit entry is the last place it can be read.
     let device_name = match crate::commands::mls::ds_post_json(state, &body).await? {
         pollis_api::account::DeviceRevoked::Ok { device_name } => device_name,
         pollis_api::account::DeviceRevoked::NotFound => {
@@ -1664,47 +1131,20 @@ pub async fn revoke_device(
         }
     };
 
-    // Append the revocation to the account's own security log (#947).
-    //
-    // Written HERE — immediately after the tombstone lands, before the
-    // reconcile loop below, which walks every conversation and only logs its
-    // failures. "I revoked the stolen laptop, did it take effect?" is the
-    // first question this flow produces and the Security page is where it is
-    // asked; an audit trail that is contingent on N MLS commits succeeding
-    // would be missing exactly when the user most needs it.
-    //
-    // Best-effort, like the enrollment events (`device_enrolled` /
-    // `device_rejected`) it sits beside: the revocation itself has already
-    // committed and is authoritative, so failing the command on a flaky audit
-    // write would report "revocation failed" for a device that is, in fact,
-    // revoked — which is the more dangerous of the two lies.
+    // Security log (#947), written before the slow reconcile. Best-effort: the revoke already committed.
     let ev = pollis_api::account::SecurityEventBody {
         kind: "device_revoked".to_string(),
         device_id: Some(device_id.clone()),
-        // The device's name at the moment it was revoked. `user_device` keeps
-        // the tombstoned row, but a log that says only "device 01HQ7Z…" is not
-        // the answer to "was it the laptop or the phone?". A legacy
-        // "{hostname} ({os})" name is reduced to its OS label first, so a
-        // hostname (which can embed an IP) is never copied into the log.
+        // Legacy "{hostname} ({os})" names are reduced to the OS label; a hostname can embed an IP.
         metadata: device_name.map(|n| format!("name={}", crate::util::public_device_name(&n))),
-        // The DS's no-auth fallback for the acting user
-        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
-        // user and this must EQUAL it; auth off → this IS the actor, and a
-        // body without it is refused outright. Sending it never widens what
-        // the caller may do.
+        // The DS's no-auth fallback actor (`resolve_actor`); never widens access.
         user_id: Some(user_id.clone()),
     };
     if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
         crate::diag!("[revoke_device] DS security-event failed (non-fatal): {e}");
     }
 
-    // Cooperative "you've been signed out" nudge. The inbox is per-user, so
-    // this reaches every device; each one re-checks its own registration via
-    // `is_current_device_registered` and only the revoked device logs out.
-    // Advisory UX only — a hostile/offline device that ignores this is still
-    // evicted at the MLS layer (honest members reject its self-add). Non-fatal.
-    // Sent before the leaf removals, not after them: the device is already
-    // revoked, so there is no reason to keep it signed in while N commits land.
+    // Advisory "signed out" nudge; MLS evicts a device that ignores it. Sent before the removals.
     let payload = crate::commands::livekit_signalling::device_revoked_payload();
     if let Err(e) =
         crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
@@ -1712,45 +1152,23 @@ pub async fn revoke_device(
         crate::diag!("[revoke_device] inbox nudge failed (non-fatal): {e}");
     }
 
-    // Removing the revoked device's leaf from every group and DM tree runs in
-    // the background, and the command returns now. The revocation itself is
-    // the tombstone above: from that write on, the DS refuses every request
-    // the device signs, so it can neither read nor post. The removals are one
-    // MLS commit per conversation, each a DS round trip under that group's MLS
-    // lock, so waiting for them held "Revoking…" on screen for minutes with a
-    // handful of groups on a slow link, and made clearing several stale
-    // devices impractical. Nothing depends on them finishing before the caller
-    // continues: every member's MLS sweep evicts a revoked leaf on its own
-    // (`leaf_verdict`), so a removal this task does not reach (the app closed,
-    // a commit lost to a race) is still made, by this device or another.
+    // Leaf removals run detached: the tombstone already locks the device out, and every
+    // member's sweep (`leaf_verdict`) evicts a leaf this task misses.
     spawn_revoked_leaf_removal(state, user_id);
 
     Ok(())
 }
 
-/// How many conversations a leaf-removal pass reconciles at once. Each group
-/// has its own MLS lock and its own commit chain, so there is no ordering
-/// between them; the bound only keeps a pass from arriving at the DS as a
-/// burst.
+/// Conversations a leaf-removal pass reconciles at once (no ordering between groups).
 const REVOKE_RECONCILE_CONCURRENCY: usize = 4;
 
-/// Per-`AppState` state of the background leaf-removal pass: `true` while a
-/// pass runs, and whether another revoke landed during it. Keyed by the
-/// state's address, not the user, so two devices of one user in the flows
-/// harness never share it.
+/// `true` while a pass runs, then whether another revoke landed. Keyed by state address.
 static REVOKE_PASSES: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, bool>>,
 > = std::sync::LazyLock::new(Default::default);
 
-/// Reconcile every group and DM `user_id` belongs to, so every revoked device's
-/// leaf is removed from each tree. See [`revoke_device`] for why this runs
-/// detached. Failures are logged and left to the sweep.
-///
-/// One pass removes EVERY device revoked by the time it reaches a conversation
-/// — the reconcile diffs the tree against the live device list — so revokes
-/// coalesce: one made while a pass runs only asks for one more pass after it,
-/// instead of starting a second walk over the same conversations. Clearing ten
-/// stale devices is then two passes, not ten.
+/// Reconcile every conversation of `user_id`, removing revoked leaves. Revokes during a
+/// pass coalesce into one more pass.
 fn spawn_revoked_leaf_removal(state: &Arc<AppState>, user_id: String) {
     let key = Arc::as_ptr(state) as usize;
     {
@@ -1806,21 +1224,6 @@ async fn revoked_leaf_removal_pass(state: &Arc<AppState>, user_id: &str) {
     );
 }
 
-/// Whether the current device (`state.device_id`) is still an ACTIVE device of
-/// `user_id`. `false` means this device was revoked (or removed) and the caller
-/// should log out. Authoritative + spoof-resistant: a forged `device_revoked`
-/// inbox nudge cannot force a logout unless the device is genuinely gone.
-/// Returns `true` when the device id isn't known yet (early boot) so it never
-/// logs out a device that simply hasn't initialized.
-///
-/// The `revoked_at IS NULL` predicate is load-bearing (#685). Since #372
-/// revocation is a TOMBSTONE, not a hard delete — the row is deliberately
-/// retained so `IdentityDirectory::leaf_verdict` can tell "revoked, drop rejoin" from
-/// "lagging, keep commits", and so historical certs stay verifiable. A bare
-/// existence check therefore returns `true` for a revoked device, which silently
-/// disabled the entire graceful sign-out path: `revoke_device` publishes a
-/// `device_revoked` nudge specifically so each device re-checks here and only
-/// the revoked one logs out, and that check could never fail.
 /// The recording half of the `device_revoked` answer, exposed for the flows
 /// harness's late-response test (#1338).
 #[doc(hidden)]
@@ -1847,11 +1250,8 @@ pub async fn is_current_device_registered(
         Some(d) => d,
         None => return Ok(true),
     };
-    // `include_revoked: false` IS the `revoked_at IS NULL` predicate, now
-    // applied server-side (#987) — see the note above for why it is load-bearing.
-    // Asking for one id keeps this a point lookup rather than a device-list scan.
-    // A revoked device's own signed read is refused as `device_revoked` — which
-    // is exactly the answer this asks for, not a transient error (#1338).
+    // `include_revoked: false` is the load-bearing `revoked_at IS NULL` (#685): revoke is a tombstone.
+    // A revoked device's own read is refused as `device_revoked`: the answer, not an error (#1338).
     let rows = match crate::commands::ds_reads::devices(
         state,
         Some(&user_id),
@@ -1869,11 +1269,6 @@ pub async fn is_current_device_registered(
 
 /// The pre-unlock email → `user_id` resolution, after #997 moved the address
 /// out of `accounts.json` and into the per-user keystore.
-///
-/// Everything here runs against a bare `AppState`: `local_db` is `None`,
-/// `unlock` is `None`, `device_id` is `None`. That is not incidental — it is the
-/// exact state the callers run in (no signer, no session, no DS credential), and
-/// it is the whole reason a locally-resolvable address has to exist at all.
 #[cfg(test)]
 mod prelock_email_resolution {
     use super::*;
@@ -1934,10 +1329,7 @@ mod prelock_email_resolution {
         );
     }
 
-    /// Case-insensitivity is the property that made a masked address unusable
-    /// here: `***@example.com` would compare equal for BOTH accounts below and
-    /// resolve to an arbitrary one. Real addresses cannot collide, so the
-    /// resolution stays exact even when two accounts share a domain.
+    /// Real addresses (not masked ones) can't collide on a shared domain.
     #[tokio::test]
     async fn matching_is_case_insensitive_and_never_collides_on_the_domain() {
         let state = locked_state();
@@ -1969,10 +1361,7 @@ mod prelock_email_resolution {
         );
     }
 
-    /// An account present in the index but with no keystore entry — a legacy
-    /// install whose address is only in the pre-#997 `accounts.json`, or a
-    /// keystore that failed to answer — must not stall the scan or resolve to
-    /// the wrong account. It is skipped, and the account behind it still wins.
+    /// An indexed account with no keystore entry is skipped, not matched.
     #[tokio::test]
     async fn an_account_without_a_stored_address_is_skipped_not_matched() {
         let state = locked_state();
@@ -1989,9 +1378,7 @@ mod prelock_email_resolution {
         );
     }
 
-    /// The whole point of the move: the address lives in the keystore, and
-    /// `AccountInfo` — everything `accounts.json` serializes — has no field that
-    /// can hold it. This is the invalid state the change makes unrepresentable.
+    /// `AccountInfo` has no field that can hold the address.
     #[tokio::test]
     async fn the_address_is_readable_from_the_keystore_and_absent_from_the_index() {
         let state = locked_state();
@@ -2010,10 +1397,7 @@ mod prelock_email_resolution {
         );
     }
 
-    /// The upgrade path. An install that predates #997 has the address on disk
-    /// and nowhere else; after one migrated read it is in the keystore and the
-    /// returning-device resolution works from there — which is the whole reason
-    /// the move could not simply DROP the field.
+    /// The upgrade path: a pre-#997 address is adopted, then resolves.
     #[tokio::test]
     async fn a_legacy_address_is_adopted_into_the_keystore_and_then_resolves() {
         let state = locked_state();
@@ -2045,9 +1429,7 @@ mod prelock_email_resolution {
         );
     }
 
-    /// An index with nothing legacy in it must not authorize a rewrite — the
-    /// erase step is for files that actually carry an address, and a launch that
-    /// finds none should leave the file untouched.
+    /// An index with nothing legacy in it must not authorize a rewrite.
     #[tokio::test]
     async fn an_index_with_no_legacy_address_authorizes_no_rewrite() {
         let state = locked_state();
@@ -2056,9 +1438,7 @@ mod prelock_email_resolution {
         assert!(!adopt_legacy_login_emails(&state, &accounts).await);
     }
 
-    /// The keystore is the newer copy once the upgrade has run: a stale address
-    /// still sitting in the file must not overwrite the one a later email change
-    /// wrote to the keystore.
+    /// A stale file address never overwrites a newer keystore one.
     #[tokio::test]
     async fn a_stale_file_address_never_overwrites_the_keystore() {
         let state = locked_state();
@@ -2095,12 +1475,7 @@ mod prelock_email_resolution {
     }
 }
 
-/// The pure half of the account-creation contract. The DB-touching half lives in
-/// `tests/auth_account_creation.rs`, which needs its own process (libsql's local
-/// backend cannot initialise SQLite after rusqlite already has).
-/// The `user_id` a Delivery Service answers verify-otp with is a directory name
-/// to everything downstream, so a DS that chooses it maliciously must be
-/// stopped at the response — before `accounts.json`, before the keystore.
+/// A DS-chosen `user_id` is a directory name downstream; a malicious one stops at the response.
 #[cfg(test)]
 mod server_user_id_is_not_a_path {
     use super::*;
@@ -2110,10 +1485,7 @@ mod server_user_id_is_not_a_path {
 
     const HOSTILE_ID: &str = "/home/alice";
 
-    /// A Delivery Service that answers verify-otp with whatever `user_id` it
-    /// likes. Only that route exists: a sign-in that gets PAST the id check
-    /// fails on the next bootstrap post with a 404, which is how the tests tell
-    /// "refused at the chokepoint" from "refused for some other reason".
+    /// A DS answering verify-otp with any `user_id`; past the check, the next post 404s.
     async fn hostile_ds(user_id: &'static str) -> String {
         use axum::{routing::post, Json, Router};
         let app = Router::new().route(
@@ -2150,10 +1522,7 @@ mod server_user_id_is_not_a_path {
         )
     }
 
-    /// The finding: `{"user_id": "/home/alice"}` used to be accepted, written to
-    /// `accounts.json` as `last_active_user`, and handed to the media-cache
-    /// wipe at the mandatory set-PIN step. Now the sign-in ends here, and
-    /// nothing under that id exists anywhere on the device.
+    /// `{"user_id": "/home/alice"}` ends the sign-in with nothing persisted.
     #[tokio::test]
     async fn a_path_like_user_id_ends_the_sign_in_before_anything_is_persisted() {
         let (state, keystore) = state_against(hostile_ds(HOSTILE_ID).await).await;
@@ -2170,8 +1539,7 @@ mod server_user_id_is_not_a_path {
             "the attacker-chosen id must not be echoed into the error: {err}"
         );
 
-        // Nothing was persisted under the hostile id: no device slot in the
-        // keystore, no account, and it is not who the next launch unlocks as.
+        // Nothing was persisted under the hostile id.
         assert!(keystore
             .load_for_user(DEVICE_ID_KEY, HOSTILE_ID)
             .await
@@ -2183,10 +1551,7 @@ mod server_user_id_is_not_a_path {
         assert_ne!(index.last_active_user.as_deref(), Some(HOSTILE_ID));
     }
 
-    /// Positive control: the same hostile DS answering with a well-formed id
-    /// gets past the check — the sign-in then fails on `establish-identity`,
-    /// which this DS does not serve. Without this the test above could pass
-    /// because verify-otp was broken for everyone.
+    /// Positive control: a well-formed id gets past the check (then fails on establish-identity).
     #[tokio::test]
     async fn a_well_formed_user_id_gets_past_the_check() {
         let (state, _keystore) = state_against(hostile_ds("01JWELLFORMEDULIDFORTEST00").await).await;
@@ -2244,8 +1609,7 @@ mod identity_reconciliation_tests {
         ))
     }
 
-    /// `(seed, base64 of the published public half)` for a real account
-    /// identity.
+    /// `(seed, base64 public half)` for a real account identity.
     fn identity(seed_byte: u8) -> ([u8; 32], String) {
         let seed = [seed_byte; 32];
         let encoded = base64::engine::general_purpose::STANDARD.encode(
@@ -2264,9 +1628,7 @@ mod identity_reconciliation_tests {
             .unwrap();
     }
 
-    /// M2, the finding itself: a `verify-otp` response is not authenticated, so
-    /// a forged `account_id_pub` used to be enough to make a device delete its
-    /// only copy of the account identity key.
+    /// M2: an unauthenticated forged `account_id_pub` must not delete the local key.
     #[tokio::test]
     async fn a_forged_account_id_pub_does_not_destroy_the_local_key() {
         let state = test_state();
@@ -2322,8 +1684,7 @@ mod identity_reconciliation_tests {
         assert!(!enrollment_required_for(&state, "u1", true).await);
     }
 
-    /// The genuinely-safe directions the old comment claimed for the whole
-    /// function: an absent or undecodable value changes nothing at all.
+    /// An absent or undecodable value changes nothing at all.
     #[tokio::test]
     async fn an_absent_or_undecodable_value_changes_nothing() {
         let state = test_state();

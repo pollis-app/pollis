@@ -1,8 +1,7 @@
 //! Device and key-package lifecycle: publish/claim/replenish key packages,
 //! re-sign device certs, register push tokens.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,22 +32,13 @@ pub struct ClaimKeyPackageBody {
     /// added to the MLS group). NOT the caller — claiming a *peer's* package is
     /// how you add them, so this is intentionally not bound to the signer.
     pub target_user_id: String,
-    /// When present, narrow the claim to one of the target user's specific
-    /// devices (the live `reconcile` add path always supplies this). When absent,
-    /// any of the target user's unclaimed packages is eligible (the user-scoped
-    /// `fetch_mls_key_package` path).
+    /// Narrow the claim to one of the target's devices; absent → any unclaimed package.
     #[serde(default)]
     pub target_device_id: Option<String>,
     /// Narrow the claim to packages published in this MLS ciphersuite. Optional:
     /// absent means [`CIPHERSUITE_PQ`], the only suite in use.
     ///
-    /// Suite pools do not contaminate each other. Asking for a suite the target
-    /// has no unclaimed package in yields `ClaimOutcome::NoKeyPackage`, the
-    /// same ordinary control-flow result as an exhausted pool — never a package
-    /// in the wrong suite. Since #669 there is one live pool, but the narrowing
-    /// is what keeps a stale package from a retired code point from being handed
-    /// out as if it were current, and it is how a future renumber stays a query
-    /// rather than a guess.
+    /// A suite with no unclaimed package yields `NoKeyPackage`, never a wrong-suite package.
     #[serde(default)]
     pub ciphersuite: Option<i64>,
 }
@@ -77,14 +67,7 @@ pub struct PushTokenBody {
 /// The DS only ever uses this as a routing/label value; it never parses the
 /// opaque `key_package` blob to confirm the suite.
 ///
-/// #454 shipped this as `0x004D` (X-Wing KEM, Ed25519 signatures) alongside the
-/// classic `0x0001`; #668 moved it to `0x0052`, which keeps the same X-Wing KEM
-/// but signs ML-DSA-44, so the authentication half is post-quantum too; #669
-/// retired `0x0001`. These are provisional `draft-ietf-mls-pq-ciphersuites` code
-/// points and the draft may renumber them again — this constant and `CS_PQ` in
-/// `pollis-core` must move together, because the client tags its published pool
-/// with exactly what the DS matches on. Pools published under the old point are
-/// simply never claimed and age out.
+/// Provisional draft code point (#668); must move together with `CS_PQ` in `pollis-core`.
 pub const CIPHERSUITE_PQ: i64 = 0x0052;
 
 /// One published key package: its hex hash-ref and the TLS-serialized
@@ -97,22 +80,14 @@ pub struct KeyPackageEntry {
     /// MLS ciphersuite code point this package was built with. Optional: absent
     /// means [`CIPHERSUITE_PQ`], the only suite in use.
     ///
-    /// Client-supplied, so this is a ROUTING HINT and nothing more — the real
-    /// suite lives inside the opaque `key_package` blob and MLS rejects a
-    /// mismatch at validation. Mistagging can at worst cost a failed add; it
-    /// cannot bypass anything.
+    /// Client-supplied routing hint only; MLS rejects a mismatch at validation.
     #[serde(default)]
     pub ciphersuite: Option<i64>,
     /// This is the device's LAST-RESORT package in its suite (#1571, RFC 9420
     /// §16.8): handed out only when the device has no unclaimed regular package
     /// left, and never consumed, so a registered device can always be added.
     ///
-    /// ADDITIVE in both directions. A client that predates it never sends it,
-    /// so every package it publishes is a regular one, exactly as before; a
-    /// Delivery Service that predates it ignores the field and stores the
-    /// package as a regular one, which costs nothing but its reuse. Omitted on
-    /// the wire when false, so a regular package serializes byte-for-byte as it
-    /// did.
+    /// Additive: omitted on the wire when false, so old clients and DSes are unaffected.
     #[serde(default, skip_serializing_if = "is_false")]
     pub last_resort: bool,
 }
@@ -141,9 +116,7 @@ impl KeyPackageEntry {
 
 /// `POST /v1/key-packages/claim` — the claimed KeyPackage.
 ///
-/// A 404 (no unclaimed package for the target) carries no body and is NOT this
-/// type: it is the documented "skip this device" signal the add path branches
-/// on, and a status code is where that belongs.
+/// A 404 (nothing to claim) carries no body: the add path's skip signal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimKeyPackageResponse {
     /// The claimed row's hash-ref, so a caller can correlate the claim with the
@@ -153,17 +126,11 @@ pub struct ClaimKeyPackageResponse {
     pub key_package: String,
 }
 
-// ── POST /v1/push/resolve ────────────────────────────────────────────────────
-
 /// Resolve an opaque push handle to the conversation it was minted for (#1122).
 ///
-/// The push payload carries only `h`, so Expo/APNs/FCM never see which
-/// conversation a notification is for. The client trades the handle for the
-/// routing information over its own authenticated channel.
+/// The push payload carries only `h`, so providers never see the conversation.
 ///
-/// Device-signed, and scoped to the authenticated user: a handle belonging to
-/// someone else answers **not found**, never forbidden — a distinct error would
-/// confirm the handle exists.
+/// Scoped to the caller: someone else's handle answers not found, never forbidden.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvePushHandleBody {
     pub handle: String,
@@ -181,8 +148,6 @@ pub struct ResolvePushHandleResponse {
     pub kind: Option<String>,
 }
 
-// ── POST /v1/push/dismiss + /v1/push/dismissed (#1508) ───────────────────────
-
 /// Most conversations one dismiss request may name. A client sends the
 /// conversations whose read cursor moved in one short debounce window, which
 /// is a handful; anything past this is refused as a bad request.
@@ -194,10 +159,7 @@ pub const DISMISSED_QUERY_MAX_HANDLES: usize = 100;
 
 /// One conversation a client read, and how long ago.
 ///
-/// An AGE rather than a timestamp, so the two clocks never have to agree: the
-/// DS subtracts it from its own clock and clears only the notifications it
-/// minted before then. A message that lands after the read keeps its
-/// notification.
+/// An age, not a timestamp, so the clocks never have to agree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DismissEntry {
     pub conversation_id: String,
@@ -209,10 +171,7 @@ pub struct DismissEntry {
 /// "I read these conversations": clear their notifications on every device of
 /// mine (#1508).
 ///
-/// Device-signed; `user_id` must equal the signer (you dismiss only your own
-/// notifications). The DS stamps the matching `push_handle` rows dismissed and
-/// sends the user's devices one silent, data-only push carrying the handles to
-/// clear — never a conversation id, never content.
+/// Device-signed and self-scoped; the silent push carries only handles, never conversation ids.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DismissPushBody {
     pub user_id: String,
@@ -229,11 +188,7 @@ pub struct DismissPushResponse {
 
 /// "Which of these notifications in my tray have been read since?" (#1508)
 ///
-/// The catch-up for a device that missed the silent dismissal push (iOS does
-/// not wake a force-quit app; Android may hold a normal-priority push in
-/// Doze). Asked on foreground and unlock with the handles still in the tray.
-/// Scoped to the signer: a handle that is not theirs is simply not returned,
-/// exactly like one that was never minted.
+/// Catch-up for a missed silent push, asked on foreground; scoped to the signer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DismissedPushHandlesBody {
     pub user_id: String,

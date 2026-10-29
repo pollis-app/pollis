@@ -1,15 +1,6 @@
 import { makeAutoObservable } from "mobx";
 
-// Which sensitive attachments (#1568) the user has revealed, by attachment id.
-//
-// In memory only, so a restart hides everything again — the point of marking
-// media sensitive is that it is not on screen when someone looks over your
-// shoulder, and a reveal that outlived the session would defeat that. One
-// store rather than component state so every surface that draws the same
-// attachment — the message, the right panel's media grid, the gallery and its
-// viewer — agrees: reveal it in the message and the gallery does not re-blur
-// it. Keyed per attachment, never per message: revealing one picture in a
-// message leaves its neighbours hidden.
+// Revealed sensitive attachments (#1568) by id: in memory only, shared by every surface, per attachment.
 class SensitiveRevealStore {
   revealed = new Set<string>();
 

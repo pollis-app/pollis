@@ -14,18 +14,10 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Switch } from "../ui/Switch";
 
-/** Inline in-app picker for screen-share sources. Replaces the voice
- *  participant grid when `share.kind === 'picking'` — no modal, no
- *  overlay, just a full-pane takeover that gives the user a grid of
- *  displays + windows. The source list comes from each platform's
- *  enumerator (macOS: SCShareableContent in the helper subprocess;
- *  Windows: windows-rs Monitor/Window enumeration + GDI thumbnails).
- *  Industry-standard pattern — what Slack/Discord/Zoom do. */
+/** Inline screen-share source picker replacing the participant grid (no modal). */
 export const ScreenSharePicker: React.FC = observer(() => {
   const { t } = useTranslation("voice");
-  // Picker only renders when shareState.kind === 'picking', so sources are
-  // guaranteed present. Narrowed via the union; bail to null defensively
-  // for the brief frame where state may have transitioned away.
+  // Null for the brief frame after leaving 'picking'.
   const sources =
     appStore.voiceState.kind === 'joined' && appStore.voiceState.share.kind === 'picking'
       ? appStore.voiceState.share.sources
@@ -35,19 +27,12 @@ export const ScreenSharePicker: React.FC = observer(() => {
   const shareFailed = appStore.shareFailed;
   const [busy, setBusy] = useState(false);
 
-  // Tab between Displays and Windows. Default to Displays — most
-  // screen shares are whole-monitor.
   const [tab, setTab] = useState<"displays" | "windows">("displays");
 
-  // Off by default, matching Slack/Discord/Zoom. Sharing sound you did not
-  // mean to share is a privacy surprise, so it is always an explicit act.
-  // Seeded from the stored preference so the choice sticks between shares
-  // — the same preference the Linux path reads, since it has no picker.
+  // Off by default (privacy); seeded from the stored preference.
   const [withAudio, setWithAudio] = useState(false);
   const audioScope = screenShareSession.audioScope();
-  // The stored preference arrives asynchronously. If the user flips the
-  // switch before it lands, their explicit choice wins over the remembered
-  // default (#1040) — the preference only seeds an untouched switch.
+  // A flip before the preference lands wins (#1040).
   const audioTouched = useRef(false);
 
   useEffect(() => {
@@ -67,7 +52,6 @@ export const ScreenSharePicker: React.FC = observer(() => {
     setWithAudio(next);
   }
 
-  // Esc cancels (matches the rest of the app's modal-replacement flows).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) {
@@ -163,11 +147,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
         </div>
       </header>
 
-      {/* What "share sound" captures genuinely differs by OS — macOS
-          follows the picked source, Linux and Windows take the system
-          mix — so the picker states it rather than letting the user
-          discover it after the fact. The second sentence is the one
-          people actually worry about. */}
+      {/* What "share sound" captures differs by OS, so say so. */}
       {withAudio ? (
         <div
           className="px-3 py-2 border-b border-line text-muted"
@@ -223,9 +203,7 @@ interface SourceCardProps {
   testId: string;
   title: string;
   subtitle?: string;
-  /** PNG data URL — when present, renders as the tile preview. When
-   *  absent (Tauri capture helper path, which doesn't ship preview
-   *  frames), the `icon` is shown instead. */
+  /** PNG data URL; the capture-helper path has none, so `icon` shows. */
   thumbnail?: string;
   icon: React.ReactNode;
 }
@@ -251,17 +229,12 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
       <div
         className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted"
         style={{
-          // Fixed aspect for thumbnails so the grid stays even when
-          // sources have wildly different aspect ratios (an ultra-wide
-          // monitor next to a portrait phone screen sharer, etc).
-          // 16:10 matches the 320×200 thumbnail size we request in main.
+          // Fixed 16:10 (the requested thumbnail size) keeps the grid even.
           aspectRatio: "16 / 10",
         }}
       >
         {thumbnail ? (
-          // alt="" because the title below carries the accessible label.
-          // object-contain rather than cover so we don't crop windows
-          // whose aspect ratio differs from the thumbnail frame.
+          // alt="": the title labels it. object-contain avoids cropping.
           <img
             src={thumbnail}
             alt=""
@@ -299,9 +272,7 @@ const DisplayCard: React.FC<{
     onPick={onPick}
     testId={`screen-share-source-display-${display.id}`}
     title={display.name}
-    // Suppress the dim subtitle when the backend didn't supply real
-    // dimensions (0×0 looked broken; "—" would be noise) — i.e. under
-    // capture-helper paths that don't enumerate display sizes.
+    // No subtitle without real dimensions.
     subtitle={
       display.width > 0 && display.height > 0
         ? `${display.width} × ${display.height}`
@@ -318,8 +289,7 @@ const WindowCard: React.FC<{
   onPick: () => void;
 }> = ({ window, disabled, onPick }) => {
   const { t } = useTranslation("voice");
-  // Title fallback: most chat apps name a window after their conversation;
-  // if the OS gave us no title, use the app name.
+  // Fall back to the app name.
   const primary = window.title || window.app_name || t("share.untitledWindow");
   const secondary =
     window.title && window.app_name && window.title !== window.app_name
@@ -331,9 +301,7 @@ const WindowCard: React.FC<{
       onPick={onPick}
       testId={`screen-share-source-window-${window.id}`}
       title={primary}
-      // Never show "0 × 0" for window sources; the thumbnail is the
-      // primary visual identifier, and per-window size is only knowable
-      // after capture starts.
+      // Window size is only knowable after capture starts.
       subtitle={secondary}
       thumbnail={window.thumbnail_data_url}
       icon={<Square size={32} />}

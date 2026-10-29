@@ -1,20 +1,4 @@
 //! #1095: a display name must not be able to carry notification markup.
-//!
-//! Group names and `preferred_name` are interpolated into OS notification
-//! bodies. On Linux a body is not plain text — the freedesktop spec allows a
-//! small HTML subset and `notify-rust` passes it verbatim, so a daemon that
-//! renders body markup acts on it. A group called
-//! `<img src="http://attacker/p.png">` therefore turned every message receipt
-//! into a request from the victim's machine.
-//!
-//! The renderer escapes every notification title and body at the bridge
-//! (`frontend/src/utils/notificationText.ts`, pinned by
-//! `frontend/tests/notificationText.test.ts`) — that is the fix. These tests pin
-//! the other half: the DS refuses to *store* such a name in the first place, so
-//! the escaping is defence in depth rather than the only thing standing there.
-//!
-//! Driven at the `apply_*` level against a local libsql DB, mirroring
-//! `username_shape.rs`.
 
 use pollis_delivery::groups::{apply_create_group, apply_update_group};
 use pollis_delivery::profile::{apply_update_profile, ProfileOutcome};
@@ -25,7 +9,6 @@ use pollis_api::profile::UpdateProfileBody;
 mod common;
 
 const ADMIN: &str = "admin-1";
-/// The finding's concrete payload.
 const MARKUP: &str = "<img src=\"http://attacker.test/p.png\">";
 
 async fn fresh() -> common::TempDb {
@@ -65,7 +48,6 @@ async fn a_group_cannot_be_created_with_notification_markup_in_its_name() {
         matches!(out, WriteOutcome::Forbidden),
         "a group name carrying markup must be refused"
     );
-    // And nothing was stored under it.
     let mut rows = conn
         .query("SELECT COUNT(*) FROM groups WHERE id = 'grp-new'", ())
         .await
@@ -128,8 +110,7 @@ async fn a_preferred_name_cannot_carry_notification_markup() {
     );
 }
 
-/// The rule must not have become "ASCII only" — a display name is rendered, not
-/// resolved, and rejecting real names would be a bug rather than hardening.
+/// A display name is rendered, not resolved: real non-ASCII names must pass.
 #[tokio::test]
 async fn ordinary_names_still_go_through() {
     let db = fresh().await;

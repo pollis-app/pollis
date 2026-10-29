@@ -2,7 +2,6 @@ import { invoke, discardStagedAttachment } from "../bridge";
 import { blurhashFromUrl } from "./imageProcessing";
 import type { Attachment } from "../components/ui/ChatInput";
 
-/** Shape `upload_media` returns. Mirrors the Rust command's result struct. */
 export type MediaUploadResult = {
   key: string;
   url: string;
@@ -13,18 +12,14 @@ export type MediaUploadResult = {
   content_hash: string;
   /** Which ring key sealed it; always `0` for these Vault uploads. */
   key_version: number;
-  /** Plaintext SHA-256, carried only inside the encrypted envelope. */
+  /** Plaintext SHA-256, only inside the encrypted envelope. */
   sha256: string;
   blurhash?: string;
   width?: number;
   height?: number;
 };
 
-/**
- * An attachment as `send_message` takes it when the durable outbox uploads it
- * itself (#1335). Mirrors `pollis_core::commands::messages::OutgoingAttachment`:
- * exactly one of `path` / `stagedId`.
- */
+/** Mirrors `pollis_core::commands::messages::OutgoingAttachment` (#1335): exactly one of `path` / `stagedId`. */
 export type OutgoingAttachment = {
   path?: string;
   stagedId?: string;
@@ -37,15 +32,7 @@ export type OutgoingAttachment = {
   sensitive?: boolean;
 };
 
-/**
- * Hand a composer's attachments to the outbox instead of uploading them here
- * (#1335). The message row is on screen from the moment the user sends, so
- * the upload has to be as durable as the send: the core reads the bytes (a
- * file the user chose, or the staged paste) into its encrypted local database
- * together with the row, before any network work, and the outbox uploads them
- * — after a restart if it has to. Only a video's poster blurhash is still
- * worked out here, because only the renderer has the poster frame.
- */
+/** Hand attachments to the durable outbox (#1335); only a video's poster blurhash is computed here. */
 export async function outgoingAttachments(
   attachments: Attachment[],
 ): Promise<OutgoingAttachment[]> {
@@ -62,8 +49,7 @@ export async function outgoingAttachments(
       ...(att.source.kind === "staged" ? { stagedId: att.source.id } : { path: att.source.path }),
       filename: att.name,
       contentType: att.mimeType,
-      // An image's own blurhash comes from the upload; the one the composer
-      // drew a sensitive cover with (#1568) stands in until then.
+      // The composer's sensitive-cover blurhash (#1568) until the upload's own.
       blurhash: meta?.hash ?? att.blurhash,
       width: meta?.width,
       height: meta?.height,
@@ -73,11 +59,7 @@ export async function outgoingAttachments(
   return out;
 }
 
-/**
- * Release the staged bytes of a send the core never took (it failed before
- * storing them). Once stored they are already released; a second discard is a
- * no-op.
- */
+/** Release staged bytes of a send the core never stored; idempotent. */
 export async function releaseStaged(attachments: Attachment[]): Promise<void> {
   await Promise.all(
     attachments.map((att) =>
@@ -88,31 +70,10 @@ export async function releaseStaged(attachments: Attachment[]): Promise<void> {
   );
 }
 
-/**
- * Uploads that already succeeded, by the composer's attachment object (#1497).
- * A failed draft goes back to the composer as the SAME objects, so a retry
- * finds these and uploads only what failed. Weak, so a draft that is dropped
- * takes its entries with it.
- */
+/** Succeeded uploads by attachment (#1497), so a retry uploads only what failed. */
 const uploaded = new WeakMap<Attachment, MediaUploadResult>();
 
-/**
- * Upload a composer's attachments and encode them into the message body.
- *
- * This is the ENCODE half of the `_att` envelope that
- * `hooks/queries/useMessages.ts` decodes — the two must move together, so the
- * shape is documented there once and not restated here.
- *
- * Extracted from `MainContent`'s send handler when threads (#825) gained their
- * own composer: the channel and the thread both upload and encode identically,
- * and the alternative was a second copy that would drift the moment the wire
- * shape changed. Deliberately NOT the whole send path — the optimistic-update
- * machinery around it is keyed to the channel's query and is genuinely
- * channel-only, since a thread reply lands in its own query.
- *
- * Returns the string to send as message content: the plain text when there are
- * no attachments, otherwise the JSON envelope carrying them plus the caption.
- */
+/** Upload attachments and encode the `_att` envelope (decoded in `hooks/queries/useMessages.ts`). */
 export async function buildMessageContent(
   attachments: Attachment[],
   contentText: string,
@@ -121,9 +82,7 @@ export async function buildMessageContent(
     return contentText;
   }
 
-  // Derive a blurhash for videos from the locally-captured poster frame, so a
-  // receiver sees a placeholder without downloading the video first. Images get
-  // theirs server-side during upload.
+  // Video blurhash from the local poster; images get theirs during upload.
   const videoBlurhashes = new Map<string, { bh: string; w: number; h: number }>();
   await Promise.all(
     attachments
@@ -140,19 +99,7 @@ export async function buildMessageContent(
       }),
   );
 
-  // Two upload commands, one per source kind, because there is exactly one
-  // place an attachment's bytes can be: a file the user already has, or the
-  // in-memory staging area (`pollis_core::commands::staging`). A successful
-  // staged upload releases its own bytes; a failed one leaves them staged so a
-  // retry still has something to send. The caller owns that retry: the Vault
-  // hands the failed draft back to its composer (#1497), and the composer
-  // releases staged bytes when a card is removed — so nothing is discarded
-  // here on failure.
-  // Every upload runs to completion before a failure is reported, and each one
-  // that succeeded is remembered against its attachment (#1497): a retry of
-  // the same draft uploads only what failed. That is also what makes a retry
-  // possible at all for a staged attachment, whose bytes are released the
-  // moment its upload succeeds.
+  // A file path or staged bytes. The caller owns retries (#1497); all uploads settle before failing.
   const settled = await Promise.allSettled(
     attachments.map((att) => {
       const done = uploaded.get(att);
@@ -203,7 +150,6 @@ export async function buildMessageContent(
         bh: r.blurhash ?? vMeta?.bh,
         w: r.width ?? vMeta?.w,
         h: r.height ?? vMeta?.h,
-        // Only when set, as the core's outbox writes it (#1568).
         ...(attachments[i]?.sensitive ? { sens: true } : {}),
       };
     }),

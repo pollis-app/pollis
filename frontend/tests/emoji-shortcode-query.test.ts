@@ -1,22 +1,4 @@
-/*
- * `:shortcode:` parsing, resolution and ranking for the composer.
- *
- * This is the half of the feature a browser spec cannot pin cheaply and the
- * half where the bugs are: what counts as a trigger, what a shortcode may
- * contain, and which of two emoji claiming the same name wins. The rules it
- * has to hold:
- *
- *   - a ':' opens a query only at the start of the string or after whitespace,
- *     which is what makes `http://example.com` and `10:30` inert;
- *   - the body alphabet is `[A-Za-z0-9_+-]` — wider than a CUSTOM shortcode,
- *     which stays `[a-z0-9_]{2,32}` and must not be widened by this;
- *   - custom emoji beat standard ones, in the list and in substitution.
- *
- * The last test walks the REAL generated table, so a regeneration that lost
- * the shortcode column fails here rather than silently in the UI.
- *
- *   node --test frontend/tests/
- */
+/* `:shortcode:` parsing, resolution and ranking: triggers only at word start, body `[A-Za-z0-9_+-]`, custom beats standard. Walks the real table. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -56,13 +38,10 @@ function custom(shortcode: string): ShortcodeEntry {
   };
 }
 
-// ── shortcodeQueryAt ────────────────────────────────────────────────────────
-
 test("a colon at a word start opens a query", () => {
   assert.deepEqual(shortcodeQueryAt(":jo", 3), { start: 0, end: 3, query: "jo" });
   assert.deepEqual(shortcodeQueryAt("nice :ta", 8), { start: 5, end: 8, query: "ta" });
-  // Right after the colon the query is empty but the track IS open — that is
-  // what makes the composer start loading the table before the second letter.
+  // An empty but open query starts loading the table.
   assert.deepEqual(shortcodeQueryAt("hey :", 5), { start: 4, end: 5, query: "" });
 });
 
@@ -98,8 +77,6 @@ test("widening the composer alphabet did not widen a custom shortcode", () => {
   assert.equal(SHORTCODE_RE.test("party_parrot"), true);
 });
 
-// ── completedShortcodeAt ────────────────────────────────────────────────────
-
 test("a closed :name: is found at the caret", () => {
   assert.deepEqual(completedShortcodeAt(":joy:", 5), { start: 0, end: 5, name: "joy" });
   assert.deepEqual(completedShortcodeAt("ship it :tada:", 14), {
@@ -107,8 +84,7 @@ test("a closed :name: is found at the caret", () => {
     end: 14,
     name: "tada",
   });
-  // One-character aliases are real gemoji names — the two-character floor is a
-  // suggestion-list rule, not a validity rule.
+  // One-character aliases are valid; the two-char floor is a suggestion rule.
   assert.deepEqual(completedShortcodeAt(":v:", 3), { start: 0, end: 3, name: "v" });
 });
 
@@ -120,8 +96,6 @@ test("nothing else closes a shortcode", () => {
   assert.equal(completedShortcodeAt(":joy: ", 6), null);
   assert.equal(completedShortcodeAt("", 0), null);
 });
-
-// ── resolution: custom beats standard ───────────────────────────────────────
 
 test("a custom emoji wins its name outright", () => {
   const entries = [standard("tada", "🎉"), custom("tada")];
@@ -139,8 +113,6 @@ test("an unclaimed name still resolves to the standard emoji", () => {
   assert.equal(resolveShortcode(entries, "joy")?.insertText, "😂");
   assert.equal(resolveShortcode(entries, "nope"), undefined);
 });
-
-// ── ranking ─────────────────────────────────────────────────────────────────
 
 test("nothing is suggested below the minimum query length", () => {
   const entries = [standard("joy", "😂")];
@@ -177,8 +149,6 @@ test("ranking is stable and honours the limit", () => {
   );
 });
 
-// ── application ─────────────────────────────────────────────────────────────
-
 test("applying a completion replaces exactly the shortcode run", () => {
   const query = shortcodeQueryAt("ship it :ta", 11)!;
   assert.deepEqual(applyShortcode("ship it :ta", query.start, query.end, "🎉", true), {
@@ -192,8 +162,6 @@ test("applying a completion replaces exactly the shortcode run", () => {
     { text: "ship it 🎉 now", caret: 8 + "🎉".length },
   );
 });
-
-// ── the generated table ─────────────────────────────────────────────────────
 
 test("the generated table carries the shortcodes people actually type", () => {
   const byShortcode = new Map<string, string>();

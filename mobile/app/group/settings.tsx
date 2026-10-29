@@ -50,14 +50,12 @@ function GroupSettings() {
   const deleteChannel = useDeleteChannel(id);
   const leaveGroup = useLeaveGroup();
 
-  // The DS lets any admin edit and delete. The group row's role covers the
-  // moment before the roster loads (same as GroupPanel).
+  // The group row's role covers the moment before the roster loads.
   const iAmAdmin = isGroupAdmin(
     members.find((m) => m.user_id === currentUser?.id)?.role,
     group?.current_user_role,
   );
-  // A non-admin sees the name and description as text, not inputs, and no
-  // description at all when there is none (#1281).
+  // Non-admins see text, not inputs (#1281).
   const nameMode = identityFieldMode(iAmAdmin, group?.name);
   const descriptionMode = identityFieldMode(iAmAdmin, group?.description);
 
@@ -92,7 +90,6 @@ function GroupSettings() {
 
   const onDeleteGroup = () => {
     if (!confirmDeleteGroup) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmDeleteGroup(true);
       return;
@@ -105,10 +102,8 @@ function GroupSettings() {
     });
   };
 
-  // Same two-tap leave as the group menu sheet.
   const onLeaveGroup = () => {
     if (!confirmLeave) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmLeave(true);
       return;
@@ -125,7 +120,6 @@ function GroupSettings() {
 
   const onDeleteChannel = (channelId: string) => {
     if (confirmDeleteChannel !== channelId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmDeleteChannel(channelId);
       return;
@@ -148,8 +142,7 @@ function GroupSettings() {
           </View>
         ) : null}
 
-        {/* A clear gap under the heading, so it does not read as a second
-            label stacked on "Group name". */}
+        {/* A clear gap, so the heading does not read as a second label. */}
         <SectionTitle style={{ paddingHorizontal: 0, paddingBottom: space.xxl }}>
           {t("mobile:group.settings.identitySection")}
         </SectionTitle>
@@ -266,8 +259,7 @@ function GroupSettings() {
           />
         </Group>
 
-        {/* Leave / delete: destructive, on their own after a wide gap, each
-            two taps to confirm. Also in the group menu sheet. */}
+        {/* Leave / delete: destructive, apart, two taps each. */}
         <View style={{ paddingTop: space.xxxl * 2, paddingBottom: space.xxl, gap: space.sm }}>
           <Group>
             <ListRow

@@ -3,30 +3,17 @@
 //!
 //! Two directions, one store:
 //!
-//! - **v1 (#1207), shown by the signed-in device.** An enrolled, PIN-verified
-//!   device `create`s a link and shows its QR; the new device `claim`s it with
-//!   the secret the QR carries.
-//! - **v2 (#1361), shown by the NEW device.** The new device `offer`s a link
-//!   and shows a QR carrying its ephemeral public key (no secret); a signed-in,
-//!   PIN-verified device that scanned it `accept-offer`s, binding it to its own
-//!   account; the new device then collects its session with `poll-offer`, by a
-//!   poll secret only it holds.
+//! - **v1 (#1207):** the signed-in device shows a QR; the new device `claim`s it with its secret.
+//! - **v2 (#1361):** the new device shows its key; a signed-in one accepts; it polls for its session.
 //!
 //! The DS's part is deliberately narrow:
 //!
-//! - It stores hashes (`SHA-256(claim)`, `SHA-256(poll_secret)`) and nothing that
-//!   derives a v1 MAC key or a v2 private key, so it can neither forge a link
-//!   tag nor substitute the key the account identity is wrapped to — the
-//!   approver checks the request against the QR first.
-//! - A claim or a collected offer mints an enrollment-only session
-//!   ([`SessionScope::DeviceLink`] / [`SessionScope::DeviceOffer`]), which the
-//!   OTP-only gates refuse: it can register that one device and file its
-//!   enrollment request, nothing else.
+//! - It stores only hashes, so it can neither forge a link tag nor substitute the wrapped-to key.
+//! - Claiming mints an enrollment-only session ([`SessionScope::DeviceLink`] / [`SessionScope::DeviceOffer`]).
 //! - Lifetimes, single claim, single accept and single session delivery are
 //!   enforced HERE, server-side, not by the clients that display the QR.
 //!
-//! **Store:** in-memory, like the OTP and session stores (the DS is
-//! single-container). A restart drops open links; the user scans a fresh QR.
+//! **Store:** in-memory; a restart drops open links.
 //!
 //! [`SessionScope::DeviceLink`]: crate::session::SessionScope::DeviceLink
 //! [`SessionScope::DeviceOffer`]: crate::session::SessionScope::DeviceOffer
@@ -49,29 +36,19 @@ use crate::AppState;
 
 pub use pollis_api::links::*;
 
-/// How long a freshly created v1 QR stays claimable. Server-set — the creating
-/// client cannot ask for longer.
+/// How long a fresh v1 QR stays claimable (server-set).
 pub const LINK_TTL_SECS: u64 = 60;
 
-/// How long a v2 offer stays acceptable. Longer than v1's minute: the person
-/// has to fetch their phone and open its scanner AFTER the code appears (v1's
-/// creator is already holding the device that shows it). The new device shows
-/// a fresh QR when this passes.
+/// How long a v2 offer stays acceptable; longer, as the approver must first find their phone.
 pub const OFFER_TTL_SECS: u64 = 120;
 
-/// How long a CLAIMED link (or an accepted offer) stays readable by its
-/// approver: long enough for the new device to register, file its enrollment
-/// request (10-minute TTL) and be approved, after which the record is swept.
+/// How long a CLAIMED link (or accepted offer) stays readable by its approver.
 pub const CLAIMED_LINK_TTL_SECS: u64 = 15 * 60;
 
-/// Open (unclaimed) links one account may hold at once. Each costs memory and
-/// is a live QR; a client re-rendering a fresh one every minute never needs
-/// more than one or two.
+/// Open (unclaimed) links one account may hold at once.
 pub const MAX_OPEN_LINKS_PER_ACCOUNT: usize = 3;
 
-/// Unaccepted v2 offers the whole store may hold. An offer is made before any
-/// credential exists, so it cannot be capped per account; the per-client rate
-/// limit sheds volume, and this bounds the memory whatever gets past it.
+/// Unaccepted v2 offers the whole store may hold; pre-credential, so not per account.
 pub const MAX_OPEN_OFFERS: usize = 10_000;
 
 /// Sweep threshold for the map, mirroring the OTP store's amortised collector.
@@ -157,8 +134,7 @@ pub enum CollectOutcome {
     Refused,
 }
 
-/// In-memory link store. `Clone` is shallow (shared `Arc`) so it rides on the
-/// `Clone` `AppState`.
+/// In-memory link store; `Clone` shares it.
 #[derive(Clone, Default)]
 pub struct LinkStore {
     inner: Arc<Mutex<HashMap<String, LinkRecord>>>,
@@ -375,9 +351,7 @@ impl LinkStore {
         true
     }
 
-    /// Enrollment requests of `user_id` currently bound to a live link — the
-    /// typed-code approval list leaves these out (they are approved by the
-    /// device at the other end of the QR).
+    /// Enrollment requests of `user_id` bound to a live link; the typed-code list leaves these out.
     pub fn bound_request_ids(&self, user_id: &str, now: u64) -> std::collections::HashSet<String> {
         let guard = self.inner.lock().expect("link store mutex poisoned");
         guard
@@ -445,8 +419,6 @@ fn decode_32(b64: &str) -> Option<[u8; 32]> {
     }
 }
 
-// ── POST /v1/link/create ─────────────────────────────────────────────────────
-
 pub async fn create_link(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let (authed, parsed) = match gate_and_parse::<CreateLinkBody>(&state, &req).await? {
         Ok(v) => v,
@@ -474,8 +446,6 @@ pub async fn create_link(State(state): State<AppState>, req: RawRequest) -> Resu
         expires_at: now.saturating_add(LINK_TTL_SECS) as i64,
     }))
 }
-
-// ── POST /v1/link/claim ──────────────────────────────────────────────────────
 
 pub async fn claim_link(State(state): State<AppState>, _headers: HeaderMap, body: Bytes) -> Response {
     let parsed: ClaimLinkBody = match serde_json::from_slice(&body) {
@@ -520,8 +490,6 @@ pub async fn claim_link(State(state): State<AppState>, _headers: HeaderMap, body
     })
 }
 
-// ── POST /v1/link/offer (#1361) ──────────────────────────────────────────────
-
 pub async fn offer_link(State(state): State<AppState>, _headers: HeaderMap, body: Bytes) -> Response {
     let parsed: OfferLinkBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
@@ -548,8 +516,6 @@ pub async fn offer_link(State(state): State<AppState>, _headers: HeaderMap, body
     ok_response::<OfferLinkBody>(OfferLinkResponse { expires_at: now.saturating_add(OFFER_TTL_SECS) as i64 })
 }
 
-// ── POST /v1/link/accept-offer (#1361) ───────────────────────────────────────
-
 pub async fn accept_offer(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let (authed, parsed) = match gate_and_parse::<AcceptOfferBody>(&state, &req).await? {
         Ok(v) => v,
@@ -566,8 +532,6 @@ pub async fn accept_offer(State(state): State<AppState>, req: RawRequest) -> Res
         AcceptOutcome::Refused => Ok(refused()),
     }
 }
-
-// ── POST /v1/link/poll-offer (#1361) ─────────────────────────────────────────
 
 pub async fn poll_offer(State(state): State<AppState>, _headers: HeaderMap, body: Bytes) -> Response {
     let parsed: PollOfferBody = match serde_json::from_slice(&body) {
@@ -634,8 +598,6 @@ async fn account_for(conn: &libsql::Connection, user_id: &str) -> anyhow::Result
         account_id_pub: pub_bytes.as_deref().map(crate::util::b64),
     }))
 }
-
-// ── POST /v1/link/status ─────────────────────────────────────────────────────
 
 pub async fn link_status(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let (authed, parsed) = match gate_and_parse::<LinkStatusBody>(&state, &req).await? {
@@ -744,8 +706,6 @@ mod tests {
         // Nor by an offer.
         assert!(!store.offer("l1", verifier(b"p"), "desk", None, 1002));
     }
-
-    // ── v2: the new device shows the QR (#1361) ──────────────────────────────
 
     #[test]
     fn an_offer_signs_in_one_device_for_the_accepting_account_once() {

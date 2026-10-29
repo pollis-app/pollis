@@ -48,7 +48,6 @@ async fn main() -> Result<()> {
     let mine = state.device_id.lock().await.clone().context("device id")?;
     println!("PEER_RECOVERY_KEY={recovery}");
 
-    // The phone enrolls with the recovery key: a second live device appears.
     let started = Instant::now();
     let phone = loop {
         let devices = auth::list_user_devices(&state, me.id.clone()).await?;
@@ -66,7 +65,7 @@ async fn main() -> Result<()> {
     };
     println!("PEER_SAW_PHONE");
 
-    // Revoke only once the phone's app is closed, so no live nudge can reach it.
+    // Revoke only once the phone's app is closed, so no live nudge reaches it.
     let started = Instant::now();
     while !std::path::Path::new(&go).exists() {
         if started.elapsed() > WAIT {

@@ -23,12 +23,7 @@ const NOTIFICATION = {
   error: Haptics.NotificationFeedbackType.Error,
 };
 
-/**
- * Plays the tactile feedback for `event` (#1286; the table is in
- * lib/hapticEvents.ts). Fire-and-forget: feedback is a nicety, so a device
- * without a haptic engine, or any failure, is silent and never blocks the
- * interaction that triggered it.
- */
+/** Plays `event`'s feedback (#1286; table in lib/hapticEvents.ts). Fire-and-forget, never throws. */
 export function haptic(event: HapticEvent): void {
   const spec = HAPTICS[event];
   let p: Promise<void> | undefined;

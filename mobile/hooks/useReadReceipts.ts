@@ -1,17 +1,4 @@
-// Mark-read reporting for the chat screen's inverted FlatList (#892).
-//
-// Mirrors desktop's `frontend/src/hooks/useReadReceipts.ts` thresholds:
-// a row counts as read only when ≥60% of it is visible for ~600ms while the
-// app is foregrounded. On RN, `viewabilityConfig`'s
-// `itemVisiblePercentThreshold` + `minimumViewTime` fold the visibility
-// ratio and the dwell into one config; the desktop's document-focus gate
-// maps to `AppState === "active"`.
-//
-// Ids are batched with a trailing debounce and sent once ever per
-// conversation open (`reported` set) via `mark_messages_read`. The core
-// drops own-messages and enforces the `send_read_receipts` preference at
-// the emit chokepoint, but the caller still gates `enabled` on the
-// preference so a disabled user does no work at all.
+// Mark-read reporting for the chat list (#892): ≥60% visible for ~600ms while active, as desktop; sent once per id per open.
 
 import { useEffect, useMemo, useRef } from "react";
 import { AppState, type ViewToken } from "react-native";
@@ -34,12 +21,9 @@ export function useReadReceipts(
   const pendingRef = useRef<Set<string>>(new Set());
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Live copies for the stable viewability callback.
   const stateRef = useRef({ conversationId, userId, enabled });
   stateRef.current = { conversationId, userId, enabled };
 
-  // A new conversation starts clean — never carry another conversation's
-  // reported set across.
   useEffect(() => {
     reportedRef.current = new Set();
     pendingRef.current = new Set();
@@ -57,7 +41,7 @@ export function useReadReceipts(
       return;
     }
     if (AppState.currentState !== "active") {
-      // Held, not dropped — the AppState listener below re-flushes.
+      // Held, not dropped: the AppState listener re-flushes.
       return;
     }
     const batch = [...pendingRef.current].filter(
@@ -93,7 +77,6 @@ export function useReadReceipts(
   const scheduleFlushRef = useRef(scheduleFlush);
   scheduleFlushRef.current = scheduleFlush;
 
-  // Returning to the foreground flushes whatever is already on screen.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       if (next === "active") {
@@ -108,8 +91,7 @@ export function useReadReceipts(
     };
   }, []);
 
-  // `viewabilityConfigCallbackPairs` must be referentially stable for the
-  // lifetime of the FlatList, so the pair delegates to refs.
+  // Must be referentially stable for the FlatList's lifetime.
   const viewabilityConfigCallbackPairs = useMemo(
     () => [
       {

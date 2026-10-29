@@ -1,36 +1,17 @@
 //! Which addresses this node will open a circuit's next leg to (#813, the
 //! `Extend` half of the closed-overlay guarantee).
 //!
-//! `Connect` has always been bounded by the static destination allowlist
-//! ([`crate::server::Allowlist`]). `Extend` had no equivalent: the frame carries
-//! a bare `SocketAddr` plus a SHA-256 the client also chooses, so a node that
-//! honoured it would open a QUIC connection to **any** address a client named —
-//! a relay tier that dials arbitrary hosts on request, on first-party machines
-//! and on every volunteer's device. The pinned fingerprint bounds who may *talk
-//! back*; it does not bound who gets *dialled*, and the dial itself is the
-//! primitive (an internal port scanner, a reflector, a way to make someone
-//! else's machine originate the packet).
+//! Unlike `Connect`, a bare `Extend` would dial **any** address a client named, making relays a scanner or reflector.
 //!
 //! So the next hop is bounded the same way a destination is — by policy, checked
 //! before a socket is opened:
 //!
-//! 1. **It must be in the currently verified signed directory.** The pool's
-//!    Ed25519-signed directory is the only statement of what a relay *is*
-//!    (design §3/§7), and it is the same artifact the client picks paths from —
-//!    so this refuses exactly the hops no honest client would ever name.
-//! 2. **It must be a public unicast address** ([`is_public_dial_address`]) —
-//!    never loopback, RFC1918, CGNAT, link-local, unique-local, multicast,
-//!    broadcast or unspecified. Redundant while (1) holds, and deliberately so:
-//!    it bounds the blast radius of a mis-signed directory to "relays that do
-//!    not answer" instead of "an intranet scanner in every volunteer's home".
+//! 1. **It must be in the currently verified signed directory** — the same artifact clients pick paths from.
+//! 2. **It must be a public unicast address** ([`is_public_dial_address`]), bounding a mis-signed directory.
 //! 3. **It must not be this node.** The directory entry carrying our own leaf
 //!    names our own address; extending to it is a loop, not a hop.
 //!
-//! [`NextHopDirectory`] is fail-closed in exactly the shape
-//! [`crate::policy::RevocationStore`] is, and for the same reason: a node with
-//! no pinned directory key, or with no fresh directory installed, permits
-//! **nothing**, so it simply stops being a middle hop. A permissive default is
-//! how a check like this quietly stops meaning anything.
+//! [`NextHopDirectory`] is fail-closed like [`crate::policy::RevocationStore`]: no key or no fresh directory permits **nothing**.
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -45,19 +26,13 @@ use serde::Deserialize;
 /// `pollis_core::net::directory::DIRECTORY_TYPE` and the JS reference
 /// (`infra/relay-hydra/lib/directory-verify.mjs`).
 ///
-/// Absence is accepted for the same reason the client accepts it: the
-/// reconciler published directories before the field existed, and requiring it
-/// would couple this build to a Lambda release with no safe ordering. A
-/// present-and-wrong `type` is a hard reject — that is the cross-artifact
-/// confusion guard, since the same key also signs `revocations.json`.
+/// Absence is accepted (older directories); a wrong `type` is rejected, since the same key signs `revocations.json`.
 pub const DIRECTORY_TYPE: &str = "pollis-relay-directory";
 
 /// The only directory payload version this build understands.
 pub const DIRECTORY_VERSION: u32 = 1;
 
-/// Why a directory was rejected. Every variant is fail-closed: a rejected
-/// directory never becomes evidence that an address is dialable, it leaves the
-/// previously-held one in place, and a node holding none extends to nothing.
+/// Why a directory was rejected; all fail-closed, and the held directory stays.
 #[derive(Debug, thiserror::Error)]
 pub enum DirectoryError {
     #[error("malformed directory envelope JSON")]
@@ -94,11 +69,7 @@ struct Envelope {
     signature_b64: String,
 }
 
-/// Only the fields a *relay* needs. The client's [`Directory`] carries more
-/// (regions, the revocation anchor); parsing a subset here keeps the relay's
-/// copy small, and `serde` ignores the rest.
-///
-/// [`Directory`]: https://docs.rs/pollis-core
+/// Only the fields a *relay* needs; `serde` ignores the rest.
 #[derive(Deserialize)]
 struct DirectoryPayload {
     version: u32,
@@ -106,10 +77,7 @@ struct DirectoryPayload {
     kind: Option<String>,
     issued_at: i64,
     expires_at: i64,
-    /// Defaulted so that a payload carrying no `relays` at all reaches the
-    /// `type` guard below and is rejected as the foreign artifact it is, rather
-    /// than as malformed JSON. A directory that really lists none is rejected a
-    /// line later, by [`DirectoryError::EmptyRelays`].
+    /// Defaulted so a foreign payload reaches the `type` guard rather than failing as malformed JSON.
     #[serde(default)]
     relays: Vec<PayloadRelay>,
     #[serde(default)]
@@ -125,9 +93,7 @@ struct PayloadRelay {
 
 #[derive(Deserialize)]
 struct PayloadPeer {
-    /// The first-party relays this peer is parked at. A peer has no address of
-    /// its own — it is reached by splicing into the connection it opened — so
-    /// these are the only dialable addresses a peer entry contributes.
+    /// The first-party relays this peer is parked at, its only dialable addresses.
     #[serde(default)]
     parked_at: Vec<String>,
 }
@@ -136,17 +102,14 @@ struct PayloadPeer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NextHop {
     addr: SocketAddr,
-    /// The DER leaf the directory pins for this address, empty for an address
-    /// that only appeared in a peer's `parked_at` list. Used solely to
-    /// recognise **this** node's own entry.
+    /// The DER leaf pinned for this address (empty for `parked_at`-only), to recognise our own entry.
     cert_der: Vec<u8>,
 }
 
 /// A verified, unexpired directory reduced to the question a relay asks of it:
 /// "may I dial this address?"
 ///
-/// Construct one only via [`verify_next_hops`], so holding one is itself the
-/// proof that the signature, version, type and expiry checks passed.
+/// Only built via [`verify_next_hops`], so holding one proves the checks passed.
 #[derive(Debug, Clone)]
 pub struct NextHops {
     issued_at: i64,
@@ -194,9 +157,7 @@ impl NextHops {
     }
 }
 
-/// Why a next hop was refused — one variant per refusal class, so an operator
-/// (and a test) can tell "the client named a hop we do not know" from "the
-/// client named the loopback interface".
+/// Why a next hop was refused, one variant per refusal class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialVerdict {
     /// A fresh signed directory lists this address and it is dialable.
@@ -236,10 +197,7 @@ impl DialVerdict {
 
 /// Is `addr` an address a relay could legitimately be published at?
 ///
-/// Everything a hosting provider hands out publicly passes; everything that
-/// only resolves to something on the *dialer's* side of the network does not.
-/// IPv4-mapped IPv6 (`::ffff:127.0.0.1`) is unwrapped first — otherwise it is a
-/// one-cast bypass of every IPv4 rule below.
+/// IPv4-mapped IPv6 is unwrapped first, or it would bypass every IPv4 rule.
 pub fn is_public_dial_address(addr: &SocketAddr) -> bool {
     if addr.port() == 0 {
         return false;
@@ -254,10 +212,7 @@ pub fn is_public_dial_address(addr: &SocketAddr) -> bool {
 }
 
 fn is_public_v4(ip: Ipv4Addr) -> bool {
-    // `is_shared` (CGNAT, 100.64.0.0/10) is still unstable, so the range is
-    // spelled out rather than waited for. The documentation ranges are NOT
-    // refused: they are unroutable rather than local, so they reach nothing on
-    // the dialer's side of the network — which is the whole thing this refuses.
+    // CGNAT spelled out (`is_shared` is unstable); documentation ranges are unroutable, so allowed.
     let shared = ip.octets()[0] == 100 && (ip.octets()[1] & 0b1100_0000) == 64;
     !(ip.is_unspecified()
         || ip.is_loopback()
@@ -270,9 +225,7 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 
 fn is_public_v6(ip: Ipv6Addr) -> bool {
     let segments = ip.segments();
-    // fc00::/7 unique-local and fe80::/10 link-local; both predicates are
-    // unstable in std, and both are exactly the "only reachable from where the
-    // dialer sits" shape this function exists to refuse.
+    // fc00::/7 and fe80::/10; both std predicates are unstable.
     let unique_local = (segments[0] & 0xfe00) == 0xfc00;
     let link_local = (segments[0] & 0xffc0) == 0xfe80;
     !(ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() || unique_local || link_local)
@@ -281,11 +234,7 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
 /// Verify a directory envelope against the pinned directory-signing key and
 /// reduce it to the dialable next hops it names.
 ///
-/// The accept set is deliberately **identical** to the client's
-/// (`pollis_core::net::directory::verify_directory`): signature over the exact
-/// decoded payload bytes first, then `version == 1`, then the `type` guard,
-/// then expiry, then non-empty `relays`. A relay that rejected a directory the
-/// fleet accepts would silently stop carrying multi-hop traffic.
+/// The accept set must match the client's `verify_directory`, or multi-hop silently stops.
 pub fn verify_next_hops(
     envelope_bytes: &[u8],
     pinned_pubkey_b64: &str,
@@ -329,10 +278,7 @@ pub fn verify_next_hops(
         return Err(DirectoryError::EmptyRelays);
     }
 
-    // An entry whose address will not parse contributes no dialable hop. That
-    // can only ever REMOVE a permission, so a directory carrying a hostname a
-    // future producer starts publishing degrades to "that relay is not a next
-    // hop here", never to "dial whatever this string resolves to".
+    // An unparseable address only removes a permission, never adds one.
     let mut hops: Vec<NextHop> = Vec::with_capacity(payload.relays.len());
     let mut seen: HashSet<SocketAddr> = HashSet::new();
     for relay in &payload.relays {
@@ -375,17 +321,13 @@ fn verifying_key_from_b64(pinned_pubkey_b64: &str) -> Result<VerifyingKey, Direc
 
 /// The live directory a relay checks `Extend` against.
 ///
-/// Cheap to clone — every clone shares one cell, so a directory installed by a
-/// refresh task is observed immediately by every in-flight `Extend`, and a
-/// volunteer's engine and its reachability loop can hold the same store.
+/// Cheap to clone; every clone shares one cell.
 ///
 /// **Fail-closed by construction:**
 /// - no pinned key ([`NextHopDirectory::unconfigured`]) ⇒ nothing is dialable;
 /// - no directory installed yet ⇒ nothing is dialable;
 /// - the held directory has expired ⇒ nothing is dialable;
-/// - [`NextHopDirectory::install`] never accepts a directory issued before the
-///   one it holds, so a captured older-but-unexpired directory cannot be
-///   replayed to restore a relay that has since left the pool.
+/// - [`NextHopDirectory::install`] refuses a directory older than the one held (no replay).
 #[derive(Clone)]
 pub struct NextHopDirectory {
     inner: Arc<RwLock<Option<NextHops>>>,
@@ -401,17 +343,12 @@ impl NextHopDirectory {
         }
     }
 
-    /// A store that verifies against `pinned_pubkey_b64` — the same
-    /// `POLLIS_OVERLAY_DIRECTORY_KEY` that pins the directory and the
-    /// revocation list.
+    /// A store that verifies against `pinned_pubkey_b64` (`POLLIS_OVERLAY_DIRECTORY_KEY`).
     pub fn enforcing(pinned_pubkey_b64: impl Into<String>) -> NextHopDirectory {
         NextHopDirectory::with_key(Some(Arc::new(pinned_pubkey_b64.into())))
     }
 
-    /// A store for a node that was never given a directory key. It permits
-    /// nothing, so the node serves circuits that terminate on it and refuses
-    /// every `Extend` — the same strict state an unconfigured
-    /// [`crate::policy::RevocationStore`] puts it in.
+    /// A store for a node without a directory key: it permits nothing, so every `Extend` is refused.
     pub fn unconfigured() -> NextHopDirectory {
         NextHopDirectory::with_key(None)
     }
@@ -450,10 +387,7 @@ impl NextHopDirectory {
 
     /// Decide whether this node may open a circuit's next leg to `addr`.
     ///
-    /// `own_leaf_der` is this node's own QUIC leaf, which is how its own
-    /// directory entry is recognised. `allow_private` relaxes only rule (2) —
-    /// it exists for loopback test rigs and lab pools, and never lets an
-    /// address the directory does not name through.
+    /// `own_leaf_der` recognises our own entry; `allow_private` relaxes only rule (2), for test rigs.
     pub fn verdict(
         &self,
         addr: SocketAddr,
@@ -471,9 +405,7 @@ impl NextHopDirectory {
         let Some(directory) = guard.as_ref() else {
             return DialVerdict::Unevaluable;
         };
-        // Freshness at USE time, not just at install time: a directory that has
-        // lapsed is no longer a statement about who is in the pool, and treating
-        // it as one is the whole failure mode the expiry exists to prevent.
+        // Freshness at use time: a lapsed directory is no longer evidence.
         if !directory.is_fresh(now_secs) {
             return DialVerdict::Unevaluable;
         }
@@ -506,16 +438,10 @@ impl std::fmt::Debug for NextHopDirectory {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Keeping a deployed node's directory loaded
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// How long a single directory fetch may take before it is abandoned.
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Cap on the artifact size we will read, matching
-/// [`crate::revocation_sync`]'s: the published directory is a few KB, and a
-/// hostile origin does not get to feed a node an unbounded body.
+/// Cap on the artifact size we will read (the directory is a few KB).
 const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 
 /// Fetch the signed directory once and install it. Every failure mode leaves
@@ -544,15 +470,9 @@ pub async fn refresh_once(store: &NextHopDirectory, url: &str) -> anyhow::Result
     Ok(hops)
 }
 
-/// Run the directory refresh loop until `shutdown` resolves, on the same
-/// cadence and backoff as [`crate::revocation_sync::spawn`] — and for the same
-/// reason it is allowed to be a loop: the artifact this node must hold is
-/// short-lived and checked at use time, so there is no event to be driven by,
-/// and a missed refresh degrades the node to "no longer a middle hop" rather
-/// than to "extending on a stale directory".
+/// Run the directory refresh loop until `shutdown`, as [`crate::revocation_sync::spawn`] does.
 ///
-/// Spawns nothing for an unconfigured store: there is nothing to install into
-/// one, and it is already in its strictest state.
+/// Spawns nothing for an unconfigured store.
 pub fn spawn<F>(
     store: NextHopDirectory,
     url: String,

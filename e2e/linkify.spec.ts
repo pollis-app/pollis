@@ -1,31 +1,4 @@
-/*
- * URL detection in message bodies (#874).
- *
- * WHY THIS EXISTS
- * ---------------
- * The pattern and `ensureProtocol` used to be duplicated verbatim in
- * `LinkifiedText` (which turns URLs into anchors) and `MediaLinkUnfurl` (which
- * previews the ones pointing at an image or video). They now share one
- * `findUrls` in `utils/links.ts`.
- *
- * That share creates a hazard the two copies did not have. The pattern is `/g`
- * and lives at module scope, so it carries `lastIndex` between calls — and now
- * BOTH components advance the same one, interleaved, several times per message,
- * for every message in the log. `findUrls` resets `lastIndex` before every
- * scan, which is the entire reason sharing is safe; drop the reset and the
- * second scan starts from wherever the first stopped and silently loses the
- * leading link.
- *
- * Silently is the operative word: a dropped link renders as ordinary text, so
- * nothing throws and nothing looks broken unless you know what you are looking
- * at. Hence a test that reads the DOM.
- *
- * The fixture is built to fail loudly if the reset goes: several messages in a
- * row, each STARTING with a URL, and each with both an unfurlable URL and a
- * plain one so the two components take turns on the shared regex.
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js
- */
+// URL detection (#874): findUrls shares a /g regex, so it must reset lastIndex or a leading link drops.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -37,11 +10,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const SKINS = ["terminal", "refined"] as const;
 type Skin = (typeof SKINS)[number];
 
-/**
- * Every body starts with a URL — the character position a stale `lastIndex`
- * skips past first — and mixes an image URL (which `MediaLinkUnfurl` also
- * scans for) with a plain one.
- */
+/** Each body starts with a URL (what a stale lastIndex skips) and mixes image and plain URLs. */
 const BODIES = [
   "https://example.com/one.png and https://example.com/first",
   "https://example.com/two.png plus https://example.com/second",
@@ -116,7 +85,6 @@ async function boot(page: Page, skin: Skin) {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`link detection — ${skin} skin`, () => {
     agnosticTest("every message keeps the link it starts with", async ({ page }) => {
@@ -127,9 +95,7 @@ for (const skin of SKINS) {
       const links = page.getByTestId("message-list").locator("a.message-link");
       await expect(links).toHaveCount(BODIES.length * 2);
 
-      // Named explicitly as well as counted, so a regression that dropped the
-      // first link from every body and gained a spurious one somewhere else
-      // could not balance the books.
+      // Named as well as counted, so a dropped link cannot be balanced by a spurious one.
       for (const url of [
         "https://example.com/one.png",
         "https://example.com/two.png",
@@ -143,9 +109,7 @@ for (const skin of SKINS) {
     agnosticTest("the media unfurl sees the same URLs the linkifier did", async ({
       page,
     }) => {
-      // The other consumer of the shared scanner. Both run over every body in
-      // the same render pass, so this is the interleaving that makes the reset
-      // load-bearing rather than merely tidy.
+      // The other consumer of the shared scanner, interleaved in the same render pass.
       await boot(page, skin);
       await expect(page.getByTestId("media-link-unfurl")).toHaveCount(
         BODIES.length,
@@ -158,8 +122,7 @@ for (const skin of SKINS) {
     });
 
     agnosticTest("a bare www link is given a protocol", async ({ page }) => {
-      // `ensureProtocol` moved into the shared module with the pattern. The
-      // `www.` body is the only one that exercises it.
+      // The `www.` body is the only one that exercises ensureProtocol.
       await boot(page, skin);
       const bare = page
         .getByTestId("message-list")

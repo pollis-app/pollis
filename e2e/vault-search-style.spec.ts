@@ -1,15 +1,4 @@
-/*
- * Vault + search + chrome style regressions, in BOTH skins.
- *
- * These are visual defects, so every one is asserted on a COMPUTED style or a
- * rendered node — never on a class string. A class assertion passes while the
- * pixel is still wrong (a later rule wins, a token resolves differently per
- * skin), which is exactly the failure mode this file exists to catch. Each
- * test also drops a screenshot under `artifacts/` for eyeballing.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`, so
- * `@tauri-apps/api/core` resolves to `frontend/src/__mocks__/tauri-core.ts`.
- */
+// Vault/search/chrome style regressions, both skins: asserted on computed styles, never class strings.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -99,12 +88,7 @@ const styleOf = (page: Page, testId: string, prop: string) =>
 
 for (const skin of SKINS) {
   test.describe(`vault + search style — ${skin} skin`, () => {
-    /*
-     * ChatInput draws its own top hairline and owns its spacing; the vault
-     * wrapped it in a second `border-t` plus `p-2`. Asserting on the wrapper's
-     * computed border is what distinguishes "one line" from "two lines that
-     * happen to sit 8px apart".
-     */
+    // ChatInput owns its hairline; the vault must not add a second border-t.
     test("the vault composer draws exactly one top border", async ({ page }) => {
       await openVault(page, skin);
 
@@ -142,13 +126,7 @@ for (const skin of SKINS) {
       await page.screenshot({ path: `artifacts/vault-view-toggle-${skin}.png` });
     });
 
-    /*
-     * The empty state carried no font class, so it rendered in the body face
-     * identically in both skins while its surroundings switched. `font-mono`
-     * is the skin-aware utility: mono in terminal, swapped to the sans face in
-     * refined by index.css. The cross-skin comparison is done by the test that
-     * follows this describe block.
-     */
+    // `font-mono` is the skin-aware face; the cross-skin check is the last test.
     test("the vault empty state uses the skin's own face", async ({ page }) => {
       await openVault(page, skin);
 
@@ -162,12 +140,7 @@ for (const skin of SKINS) {
       await page.screenshot({ path: `artifacts/vault-empty-${skin}.png` });
     });
 
-    /*
-     * "Search your vault…" and "Secure notes…" sit one above the other, so any
-     * difference in face, size or weight reads as a mistake. One is a native
-     * `::placeholder`, the other a `::before` on a contentEditable — different
-     * mechanisms that must resolve to the same type.
-     */
+    // A native ::placeholder and a contentEditable ::before must resolve to the same type.
     test("both vault placeholders render in the same face", async ({ page }) => {
       await openVault(page, skin);
 
@@ -185,11 +158,6 @@ for (const skin of SKINS) {
       expect(search.weight).toBe(composer.weight);
     });
 
-    /*
-     * The vault composer's hint is the plain sentence, on ONE line: it
-     * ellipsizes in a narrow window instead of wrapping under the caret, so
-     * the empty field stays one line tall (mobile's Composer does the same).
-     */
     test("the vault composer hint is one line, even when narrow", async ({ page }) => {
       await openVault(page, skin);
 
@@ -249,11 +217,6 @@ for (const skin of SKINS) {
         .toEqual([]);
     });
 
-    /*
-     * A search hit used to print a custom emoji as its raw
-     * `<:shortcode:hash>` source. The snippet is now rendered through the same
-     * EmojiText the message log uses.
-     */
     test("search results render emoji as images, not source text", async ({ page }) => {
       await boot(page, skin);
 
@@ -298,12 +261,7 @@ test.describe("chrome", () => {
     await page.screenshot({ path: "artifacts/sidebar-no-search.png" });
   });
 
-  /*
-   * The bar names whoever is talking. It excluded only the identity flagged
-   * `isLocal`, so the user's OWN second device counted as somebody else — and
-   * `disambiguateVoiceNames`, seeing the name twice, suffixed it. That is the
-   * stray "(1)" on a bar for a room the user is sitting in alone.
-   */
+  // Excluding only `isLocal` counted your own second device as someone (a stray "(1)").
   test("the voice bar names nobody when only your own devices are present", async ({ page }) => {
     await boot(page, "terminal");
 
@@ -344,11 +302,7 @@ test.describe("chrome", () => {
   });
 });
 
-/*
- * The empty state must not look identical in both skins — that sameness was
- * the reported defect, so it gets its own cross-skin assertion rather than
- * being implied by the two per-skin checks above.
- */
+// Sameness across skins was the reported defect, so it gets its own assertion.
 test("the vault empty state differs between skins", async ({ page }) => {
   await openVault(page, "terminal");
   const terminal = await styleOf(page, "vault-empty", "font-family");

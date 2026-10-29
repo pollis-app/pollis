@@ -13,17 +13,14 @@ interface SummaryItemProps {
   icon: React.ReactNode;
   count: number;
   to: string;
-  /** Already-translated, count-aware accessible name. */
   label: string;
   color: string;
   testId: string;
 }
 
-// Reserve space for two digits whether or not the count is rendered, so the
-// row doesn't reflow as unread counts tick in and out.
+// Space for two digits always, so the row doesn't reflow.
 const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color, testId }) => {
   const router = useRouter();
-  // Cap visible count at 99 — we only have space for two digits.
   const display = count <= 0 ? "" : count > 99 ? "99" : String(count);
 
   return (
@@ -57,12 +54,7 @@ interface StatusBarSummaryProps {
   color: string;
 }
 
-/**
- * At-a-glance unread counts rendered on the left side of the bottom bar:
- * unread channel messages across groups, unread DMs, and pending group
- * join requests you need to act on. Zeros render as blank space so the
- * row doesn't jitter as counts change.
- */
+/** Unread channels, unread DMs and pending join requests; zeros render blank. */
 export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ color }) => {
   const { t } = useTranslation("nav");
   const unreadCounts = appStore.unreadCounts;
@@ -72,21 +64,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
   const { data: pendingInvites = [] } = usePendingInvites();
   const { data: dmRequests = [] } = useDMRequests();
 
-  // ── Reconcile pending DM-requests / group-invites into the status-bar alert ──
-  // The bottom-bar alert (AppShell) is otherwise purely event-driven — it's only
-  // ever set from notify.ts when a `dm_created` / `membership_changed` realtime
-  // event lands. Anything that arrived while offline, or before connect_rooms
-  // subscribed the inbox, shows up in the badges above (these queries refetch on
-  // window focus / reconnect and load at cold launch) but never lights the alert.
-  // Mirroring the query result here seeds the alert for whatever the live event
-  // stream missed, with the real inviter / requester name (issue #396).
-  //
-  // The effect re-runs whenever the pending data changes — cold launch (undefined
-  // → loaded), a focus/reconnect refetch that surfaces a new item — so no extra
-  // focus/reconnect plumbing is needed. It only seeds when no alert is already
-  // showing, so a fresher event-driven alert is never clobbered and an alert the
-  // user dismissed isn't re-raised until the next refetch brings genuinely new
-  // pending data.
+  // Seed the alert from pending requests/invites the realtime stream missed (#396), only when no alert is showing.
   useEffect(() => {
     if (appStore.statusBarAlert) {
       return;

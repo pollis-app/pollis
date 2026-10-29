@@ -1,8 +1,4 @@
-//! Message send / receive / edit / delete / reactions commands — split into
-//! cohesive submodules. Public surface is preserved via the `pub use`
-//! re-exports below so every external caller (Tauri shims, sibling
-//! `commands::*` modules, integration tests) keeps resolving names at
-//! `pollis_core::commands::messages::*`.
+//! Message send / receive / edit / delete / reactions commands.
 
 mod delete_capability;
 mod edit_delete;
@@ -22,55 +18,17 @@ mod seal;
 mod search;
 mod send;
 mod types;
-// `watermark` (the `next_watermark` pure fn + `EnvKind`) is `pub` — not because
-// any runtime caller needs the module path (they go through `pub use` below), but
-// so the out-of-workspace `fuzz/` crate (Track B, #481) can fuzz the SAME
-// production function Kani proves. Only `next_watermark` / `EnvKind` are `pub`
-// inside it; `is_handled` stays private, so this widens no real API surface.
+// `pub` so the out-of-workspace `fuzz/` crate can fuzz `next_watermark` (#481).
 pub mod watermark;
 
 /// The `sent_at` stamp for a `message_envelope` row this device writes — the ONE
 /// place the client's envelope timestamp format is decided.
-///
-/// **Why a chokepoint for a one-liner.** `message_envelope.sent_at` is compared
-/// **lexically**, not as a date: ingest fetches `sent_at > last_fetched_at`,
-/// envelope GC deletes `sent_at < MIN(last_fetched_at)`, and the DS stamps
-/// tombstones relative to `MAX(sent_at)`. The column holds both client stamps and
-/// DS ones, so their two formats have to sort against each other correctly — and
-/// a value that sorts below a recipient's cursor is not delayed, it is **lost**
-/// (the cursor never rewinds), which is not one of the three losses `CLAUDE.md`
-/// allows. That is a property of the *format*, so it belongs to one function
-/// rather than to five call sites that each look like an innocent `now()`.
-///
-/// **The format, and why it is right.** `to_rfc3339()` is
-/// `SecondsFormat::AutoSi`: 0, 3, 6 or 9 fraction digits, omitting the fraction
-/// only when the nanoseconds are genuinely zero. It never TRUNCATES. So a
-/// fraction-less stamp denotes `.000000000` — the earliest instant of its second
-/// — and sorting below every fractional stamp in that second (`'+'` 0x2B <
-/// `'.'` 0x2E) is the correct answer, not a bug. Across all four widths lexical
-/// order equals chronological order, and it matches the DS's
-/// `SecondsFormat::Nanos` stamps (`pollis_delivery::messages::now_rfc3339`) the
-/// same way.
-///
-/// **What must never happen here** is truncation — writing `…T09:00:00+00:00`
-/// for an instant that was really `…T09:00:00.789`.
-///
-/// Since #1087 that is a DISPLAY bug rather than a delivery one: `sent_at` is no
-/// longer the cursor, so a truncated stamp mis-sorts a message in the UI instead
-/// of burying it under recipients' watermarks. The chokepoint and
-/// `sent_at_never_truncates_a_real_fraction` stay — the local history pagination
-/// in `read.rs` still compares these lexically, and "the timeline shows messages
-/// in the wrong order" is a bug worth keeping out even when it is no longer the
-/// #692 catastrophe it once was.
+/// `sent_at` is compared lexically, so this must never truncate a real fraction.
 pub(crate) fn envelope_sent_at() -> String {
     stamp_envelope_sent_at(chrono::Utc::now())
 }
 
-/// [`envelope_sent_at`] with the clock lifted out, so the format itself is
-/// testable at chosen instants (`envelope_sent_at` can only ever be called at
-/// "now", whose nanoseconds are not ours to pick). This is the function the
-/// format tests below actually exercise — keeping them from asserting against a
-/// re-implementation that could drift from the shipped one.
+/// [`envelope_sent_at`] with the clock lifted out, so tests can pick the instant.
 fn stamp_envelope_sent_at(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339()
 }
@@ -86,10 +44,7 @@ mod sent_at_format_tests {
         )
     }
 
-    /// The invariant the chokepoint exists for: a real sub-second fraction is
-    /// never thrown away. A truncating formatter (`SecondsFormat::Secs`) writes
-    /// `…T08:00:00+00:00` for `.789`, which sorts BELOW everything else in that
-    /// second and so under every recipient's watermark — a silently lost message.
+    /// A real sub-second fraction is never thrown away.
     #[test]
     fn sent_at_never_truncates_a_real_fraction() {
         for nanos in [1u32, 1_000, 1_000_000, 123_456_789, 999_999_999] {
@@ -99,14 +54,11 @@ mod sent_at_format_tests {
                 "a nonzero fraction ({nanos}ns) must survive into the stamp, got {s}"
             );
         }
-        // ...and a genuinely-zero fraction is OMITTED, not padded. That is what
-        // makes the no-fraction shape mean `.000000000` rather than "unknown".
+        // ...and a genuinely-zero fraction is omitted, not padded.
         assert!(!stamp(0).contains('.'), "got {}", stamp(0));
     }
 
-    /// Lexical order — the only order the watermark ever applies — must match
-    /// chronological order across every width AutoSi emits, including the
-    /// fraction-less one.
+    /// Lexical order must match chronological order across every AutoSi width.
     #[test]
     fn lexical_order_matches_chronological_order() {
         let stamps = [
@@ -122,11 +74,7 @@ mod sent_at_format_tests {
         }
     }
 
-    /// A fraction-less client stamp must also outsort a DS stamp
-    /// (`SecondsFormat::Nanos`) from the PREVIOUS second — the mixed-format
-    /// comparison that actually happens when a message follows an admin
-    /// tombstone. The DS half of this lives in
-    /// `pollis_delivery::messages::admin_delete_visibility_tests`.
+    /// A fraction-less client stamp must outsort a DS `Nanos` stamp from the previous second.
     #[test]
     fn a_fraction_less_stamp_outsorts_the_previous_seconds_ds_stamp() {
         let ds = chrono::DateTime::from_timestamp(1_800_000_000, 999_999_999)
@@ -143,9 +91,7 @@ mod sent_at_format_tests {
         assert!(client < ds, "{client} is earlier and must sort below {ds}");
     }
 
-    /// `envelope_sent_at` really is [`stamp_envelope_sent_at`] at `now` —
-    /// otherwise every assertion above is about a formatter the shipped call
-    /// sites do not use.
+    /// `envelope_sent_at` really is [`stamp_envelope_sent_at`] at `now`.
     #[test]
     fn envelope_sent_at_delegates_to_the_tested_formatter() {
         let live = envelope_sent_at();
@@ -157,37 +103,31 @@ mod sent_at_format_tests {
     }
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{
     ChannelMessage, ChannelPreview, Message, MessageCursor, MessagePage, MessageWithContext,
     SearchCorpus, SearchCursor, SearchPage, SearchResult, SearchSnippet, SearchSort, ThreadSummary,
 };
 
-// ── Send ─────────────────────────────────────────────────────────────────────
 pub use send::{send_message, send_message_with_id};
 pub use send::test_hooks;
 
-// ── Durable outbox (#1335) ──────────────────────────────────────────────────
 pub use outbox::{
     discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,
 };
 pub(crate) use outbox::{spawn_outbox_flush, sweep_orphan_attachments_on};
 pub use outbox::OutgoingAttachment;
 
-// ── Read / list / search ─────────────────────────────────────────────────────
 pub use read::{
     get_channel_messages, get_dm_messages, list_messages, list_thread_summaries,
     read_channel_messages, read_dm_messages, read_last_messages, read_messages_after,
     read_messages_around, read_thread_messages,
 };
 
-// ── Search (on-device FTS5 — #850) ───────────────────────────────────────────
 pub use search::{
     cache_conversations, invalidate_corpus_cache, rebuild_search_index, search_messages,
     CachedConversation,
 };
 
-// ── Ingest (envelope pull + watermark + cleanup) ─────────────────────────────
 pub use ingest::{
     catch_up_mls_group_interleaved, ingest_channel_envelopes, ingest_channel_envelopes_inner,
     ingest_dm_envelopes, ingest_dm_envelopes_inner,
@@ -195,26 +135,21 @@ pub use ingest::{
 // The committer's pre-merge sweep (#1041), for the MLS publish path only.
 pub(crate) use ingest::{sweep_current_epoch, SweptEnvelopes};
 
-// ── Edit / delete ────────────────────────────────────────────────────────────
 pub use edit_delete::{delete_message, edit_message};
-// The vault (#107) parses the same `_att` envelope out of its entries to
-// declare attachment references on save — one parser, not two.
+// Shared with the vault (#107): one attachment-ref parser.
 pub(crate) use edit_delete::{parse_attachment_refs, spawn_attachment_ref_backfill, AttachmentRef};
 #[cfg(feature = "test-harness")]
 pub use edit_delete::{delete_message_body, edit_message_as, send_redaction_as};
 
-// ── Receipts (delivery / read, DMs only — #857) ──────────────────────────────
 pub use read_state::{
     get_unread_counts, mark_conversation_read, sync_read_cursors, ReadCursor, UnreadCount,
 };
 pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts};
 
-// ── Reactions ────────────────────────────────────────────────────────────────
 pub use reactions::{
     add_reaction, get_reactions, get_reactions_for_messages, remove_reaction, Reaction,
 };
 
-// ── Retention / local eviction ───────────────────────────────────────────────
 pub use retention::{get_message_retention, run_message_eviction, set_message_retention};
 
 #[cfg(test)]

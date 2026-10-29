@@ -1,36 +1,17 @@
 //! On-device diagnostics log (#1305).
 //!
-//! **Why:** a first-device signup failed for a tester after the DS had already
-//! accepted the code, and nothing anywhere could say which step broke — the
-//! core's progress lines went to stderr, which nobody sees in a packaged app.
+//! Every [`crate::diag!`] line goes to stderr and, after [`init`], to owner-only `logs/pollis.log` (rotated at [`MAX_FILE_BYTES`]); nothing is sent anywhere.
 //!
-//! **What:** every [`crate::diag!`] line goes to stderr (unchanged from the
-//! `eprintln!` it replaces) and, once a host calls [`init`], to a small
-//! owner-only file under the data directory: `logs/pollis.log`, rotated to
-//! `logs/pollis.log.1` at [`MAX_FILE_BYTES`], so the whole log never exceeds
-//! twice that. Nothing is sent anywhere — the user copies it out through
-//! `get_diagnostics` ("Copy diagnostics" in the app) if and when they choose.
+//! Every line passes [`redact`] first; that is the backstop, and `tests/diag_discipline.rs` enforces call-site discipline.
 //!
-//! **Not PII:** every line passes [`redact`] before it is written: the home
-//! directory becomes `~`, email addresses keep only their domain, IP addresses
-//! go, and any long token-shaped run (session tokens, keys, signatures,
-//! loopback media URLs' secrets) is replaced by its length — the same
-//! [`pollis_api::redact::scrub`] the DS applies to its failed-request log. That is the backstop, not the
-//! policy: call sites must not log message content, file names, display names,
-//! keys or tokens in the first place, and `tests/diag_discipline.rs` fails the
-//! build on the obvious ways to do so.
-//!
-//! **Only a host opens the file.** Tests, the CLI and the TUI never call [`init`],
-//! so they write stderr only — a test run must never append to a real data
-//! directory's log.
+//! Only a host calls [`init`]; tests, CLI and TUI write stderr only.
 
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// Size at which `pollis.log` rotates to `pollis.log.1`. The log on disk is
-/// therefore at most twice this.
+/// Size at which `pollis.log` rotates to `pollis.log.1`.
 pub const MAX_FILE_BYTES: u64 = 512 * 1024;
 
 const FILE_NAME: &str = "pollis.log";
@@ -44,9 +25,7 @@ struct Sink {
 
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 
-/// Open (or reopen) the log under `dir`, creating it owner-only, and install a
-/// panic hook that records the panic before the default hook runs. Idempotent
-/// in effect: a second call re-points the sink at `dir`.
+/// Open (or reopen) the log under `dir`, owner-only, and install a panic hook that records panics.
 pub fn init(dir: &Path) -> std::io::Result<()> {
     crate::private_fs::create_dir_all(dir)?;
     let path = dir.join(FILE_NAME);
@@ -68,9 +47,7 @@ pub fn log_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("logs")
 }
 
-/// The backing function of [`crate::diag!`]. Never fails and never panics: a
-/// log that cannot be written must not take the operation it describes down
-/// with it.
+/// Backing function of [`crate::diag!`]. Never fails or panics.
 pub fn emit(args: std::fmt::Arguments<'_>) {
     let line = redact(&args.to_string());
     eprintln!("{line}");
@@ -79,19 +56,14 @@ pub fn emit(args: std::fmt::Arguments<'_>) {
     write_line(&mut lock(), &line);
 }
 
-/// Test-harness only (#1524): every `[loss]` line this process has written
-/// since the last [`loss_tap::take`], so an integration suite can fail a run
-/// that lost a message it did not set out to lose. Compiled out of every
-/// shipping build.
+/// Test-harness only (#1524): `[loss]` lines since the last [`loss_tap::take`].
 #[cfg(feature = "test-harness")]
 pub mod loss_tap {
     use std::sync::Mutex;
 
     static LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-    /// The accepted loss (1) in the root `CLAUDE.md`: envelopes sealed before
-    /// this device joined the tree. Logged under `[loss]` so a field log shows
-    /// the cursor passed them, but not a loss this device could have avoided.
+    /// Accepted loss (1): sealed before this device joined; logged but not avoidable.
     const PRE_JOIN: &str = "sealed before this device joined";
 
     pub(super) fn observe(line: &str) {
@@ -103,7 +75,6 @@ pub mod loss_tap {
         }
     }
 
-    /// Drain the recorded lines.
     pub fn take() -> Vec<String> {
         std::mem::take(&mut *LINES.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -125,8 +96,7 @@ fn write_line(guard: &mut Option<Sink>, line: &str) {
     }
 }
 
-/// The whole log — the rotated file, then the current one — for the user to
-/// copy out. Empty when no host has called [`init`].
+/// The whole log (rotated file first). Empty when no host has called [`init`].
 pub fn read_log() -> String {
     let dir = match lock().as_ref() {
         Some(sink) => sink.dir.clone(),
@@ -141,17 +111,13 @@ pub fn read_log() -> String {
     out
 }
 
-/// Strip what must never sit in a log the user may hand to someone: the home
-/// directory (it usually carries the account name), then everything
-/// [`pollis_api::redact::scrub`] removes — email local parts, IP addresses,
-/// long token-shaped runs.
+/// Strip the home directory, then everything [`pollis_api::redact::scrub`] removes.
 pub fn redact(line: &str) -> String {
     pollis_api::redact::scrub(&redact_home(line))
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Sink>> {
-    // A panic while holding the lock leaves the sink intact (every write is a
-    // single `write_all`), so a poisoned lock is still safe to use.
+    // Every write is a single `write_all`, so a poisoned lock is still safe.
     SINK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -182,8 +148,7 @@ fn install_panic_hook() {
     INSTALLED.call_once(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            // `try_lock`, never `lock`: a panic raised while this thread holds
-            // the sink would otherwise deadlock inside its own hook.
+            // `try_lock`: a panic while this thread holds the sink would deadlock here.
             let line = redact(&format!("[panic] {info}"));
             match SINK.try_lock() {
                 Ok(mut guard) => write_line(&mut guard, &line),
@@ -208,9 +173,7 @@ fn redact_home(line: &str) -> String {
     line.to_string()
 }
 
-/// Write a line to stderr and, once a host has called [`diag::init`], to the
-/// on-device diagnostics log. Same arguments as `eprintln!`. See [`crate::diag`]
-/// for what may and may not be logged.
+/// Write a line to stderr and, once [`diag::init`] ran, to the diagnostics log.
 #[macro_export]
 macro_rules! diag {
     () => {

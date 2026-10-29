@@ -3,94 +3,54 @@
 //!
 //! # File format (TOML)
 //!
-//! Point the binary at a file with `--config <path>` / `POLLIS_RELAY_CONFIG`.
-//! Every field is optional; omitted fields take the documented default. CLI flags
-//! and env vars still work and **override** the file (env overrides file, CLI
-//! overrides env — resolved in the binary).
+//! `--config <path>` / `POLLIS_RELAY_CONFIG`; every field optional; env and CLI override the file.
 //!
 //! ```toml
 //! # UDP socket the QUIC endpoint binds. Default "0.0.0.0:9444".
 //! bind = "0.0.0.0:9444"
 //!
-//! # Static destination allowlist — the closed-overlay guarantee (§1.2). Each
-//! # entry is `host[:port]`: the host is an exact name, a "*.suffix" glob, or
-//! # "*" (any host; NOT v0), and the port is a number, "*" (any port), or
-//! # omitted — which means 443 and ONLY 443. A `Connect` must match both.
-//! # Empty/omitted ⇒ the relay dials nothing (never fails open). A malformed
-//! # entry aborts startup rather than silently matching nothing.
+//! # Destination allowlist (§1.2): `host[:port]`; no port ⇒ 443 only. Empty ⇒ dials nothing.
 //! allowlist = ["*.turso.io", "api.pollis.com", "api.pollis.com:8443"]
 //!
-//! # Path to the persisted QUIC identity keypair. Generated on first start if
-//! # absent (the DER cert is written alongside as "<path>.crt"). Default
-//! # "relay-identity.key" in the working directory.
+//! # Persisted QUIC identity; generated if absent (cert at "<path>.crt").
 //! identity_path = "/var/lib/pollis-relay/identity.key"
 //!
-//! # Global cap on simultaneously-open QUIC connections whose handshake has
-//! # COMPLETED. Default 4096. Handshakes in flight are bounded separately by the
-//! # same number, so half-open connections can never evict established ones.
+//! # Cap on handshake-completed QUIC connections (in-flight handshakes capped separately).
 //! max_concurrent_connections = 4096
 //!
-//! # Cap on simultaneously-open QUIC connections from ONE source IP, enforced at
-//! # accept after QUIC address validation (Retry). Default 32. Each circuit —
-//! # from a client, or from a previous relay extending into this node — rides
-//! # its own connection, so size this for the fan-in you expect from a single
-//! # address (a busy guard, a large NAT).
+//! # Per-source-IP QUIC connection cap; size for a busy guard's or NAT's fan-in.
 //! max_connections_per_ip = 32
 //!
-//! # How long a freshly-opened stream may take to finish negotiating (opening
-//! # frame, handshake, anchor, terminal command) before it is refused. Default
-//! # 10. A stream that never sends its first frame otherwise parks a task and a
-//! # circuit slot forever.
+//! # Seconds a new stream may take to negotiate before it is refused.
 //! first_frame_timeout_secs = 10
 //!
-//! # Act as a MIDDLE HOP of a multi-hop circuit: honour `Extend` by dialing the
-//! # next relay (design §6.2). Default true. Set false to make this node
-//! # last-hop-only — it will still serve circuits that terminate here. Being a
-//! # middle hop ALSO needs `directory_key_b64` + a reachable `directory_url`:
-//! # an `Extend` may only name a relay the signed directory published.
+//! # Honour `Extend` as a middle hop; also needs `directory_key_b64` + `directory_url`.
 //! allow_extend = true
 //!
 //! # Seconds the next leg of a circuit (dial, QUIC handshake, `Layer` ack) may
 //! # take before the `Extend` is refused. Default 5.
 //! extend_dial_timeout_secs = 5
 //!
-//! # Let an `Extend` name a loopback/private/link-local address the directory
-//! # lists. Default false. TEST RIGS AND LAB POOLS ONLY — a public pool's relays
-//! # are on public addresses, and leaving this off is what keeps a mis-signed
-//! # directory from turning this node into an intranet dialer.
+//! # Let `Extend` name directory-listed private addresses. TEST RIGS AND LAB POOLS ONLY.
 //! allow_private_next_hops = false
 //!
-//! # Opt-in HTTP/1.1 health/version endpoint (TCP). Orchestrators/load-balancers
-//! # probe this (the relay itself is QUIC/UDP-only). Omitted ⇒ NOT started.
+//! # Opt-in HTTP health/version endpoint (TCP). Omitted ⇒ NOT started.
 //! health_bind = "0.0.0.0:9445"
 //!
-//! # Base64 (STANDARD) of the 32-byte Ed25519 key that signs the relay directory
-//! # AND the revocation list — the same POLLIS_OVERLAY_DIRECTORY_KEY clients pin.
-//! # REQUIRED to act as a middle hop: without it this node cannot evaluate
-//! # revocation, and "cannot evaluate" resolves the same way as "revoked", so it
-//! # will refuse every `Extend`. Omitting it is safe, never permissive.
+//! # Base64 Ed25519 key signing the directory and revocation list. Required to extend.
 //! directory_key_b64 = "…"
 //!
 //! # Where the signed revocation list is published. Only used when
 //! # `directory_key_b64` is set.
 //! revocation_url = "https://relays.pollis.com/revocations.json"
 //!
-//! # Where the signed relay directory is published — the SAME artifact clients
-//! # pin, and the only statement of which addresses this node may extend a
-//! # circuit to. Only used when `directory_key_b64` is set; without a fresh
-//! # directory this node refuses every `Extend`.
+//! # Where the signed relay directory is published; without a fresh one, no `Extend`.
 //! directory_url = "https://relays.pollis.com/v1/directory.json"
 //!
-//! # Hex of the account-key transparency log's ML-DSA-44 public key (what
-//! # https://verify.pollis.com/v1/account-keys/public_key.json serves, and what
-//! # PINNED_LOG_PUBLIC_KEYS pins in the client). Omitted ⇒ this node makes no
-//! # anchoring claim: it neither requires an anchor nor judges one (#813 E2).
+//! # Hex ML-DSA-44 account-key log public key. Omitted ⇒ no anchoring claim (#813 E2).
 //! transparency_key_hex = "…"
 //!
-//! # Refuse a client that presents no transparency-log account anchor. Requires
-//! # `transparency_key_hex`. Default false — turning it on before clients send
-//! # the frame, or before a new account reaches the log's daily publish, locks
-//! # those users out. Publish first, enforce second.
+//! # Refuse clients with no account anchor; needs `transparency_key_hex`. Publish first.
 //! require_account_anchor = false
 //!
 //! # How stale a presented signed tree head may be, in seconds. Default 7 days.
@@ -115,8 +75,7 @@ pub const DEFAULT_MAX_CONCURRENT_CONNECTIONS: u32 = 4096;
 pub const DEFAULT_MAX_CONNECTIONS_PER_IP: u32 = 32;
 /// How long a stream may take to negotiate before it is refused, by default.
 pub const DEFAULT_FIRST_FRAME_TIMEOUT_SECS: u64 = 10;
-/// Where the signed relay revocation list is published by default. Matches the
-/// client-side `POLLIS_OVERLAY_REVOCATION_URL` default (`infra/relay-hydra`).
+/// Default revocation list URL (matches the client's `POLLIS_OVERLAY_REVOCATION_URL`).
 pub const DEFAULT_REVOCATION_URL: &str = "https://relays.pollis.com/revocations.json";
 /// Where the signed relay directory is published by default — the same artifact
 /// the client's `POLLIS_OVERLAY_DIRECTORY_URL` points at.
@@ -125,8 +84,7 @@ pub const DEFAULT_DIRECTORY_URL: &str = "https://relays.pollis.com/v1/directory.
 /// refused, by default.
 pub const DEFAULT_EXTEND_DIAL_TIMEOUT_SECS: u64 = 5;
 
-/// The relay bin's on-disk config, as parsed from TOML. Optional fields let the
-/// binary layer env / CLI overrides on top (env overrides file).
+/// The relay bin's on-disk config; env / CLI override it.
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelayFileConfig {

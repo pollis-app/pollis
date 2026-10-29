@@ -1,15 +1,4 @@
 //! Windows stub for the in-app terminal pane.
-//!
-//! The real implementation in `terminal_unix.rs` uses `nix::pty::openpty` +
-//! `pre_exec` + `libc` ioctls, none of which exist on Windows. ConPTY would
-//! be the right Windows path (CreatePseudoConsole / CreateProcess with
-//! STARTUPINFOEX), but it isn't wired yet. Until it is, every terminal
-//! command returns a clear error and the frontend's TerminalView surfaces
-//! "terminal pane unavailable on Windows" instead of crashing the build.
-//!
-//! The `PtySession` type and the five `terminal_*` async fns mirror the
-//! Unix signatures so `AppState::terminals` and the dispatch arms in
-//! `pollis-node` / `src-tauri` compile unchanged on Windows.
 
 use std::sync::Arc;
 

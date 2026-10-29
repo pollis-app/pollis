@@ -1,13 +1,6 @@
 //! Signing-key loading and dev keygen.
 //!
-//! Real key custody (HSM / KMS) is a later slice. Here a key comes from either
-//! an env var (32-byte hex) or a key file (32-byte hex). If neither is present
-//! the build **refuses** rather than inventing a key, so a prod bundle can
-//! never be signed with an accidental ephemeral key.
-//!
-//! The key is ML-DSA-44 since #668. An ML-DSA private key IS its 32-byte seed,
-//! so the *secret* custody format did not change at all — only the public half
-//! grew (32 → 1312 bytes), and it is published, not stored.
+//! A key comes from an env var or key file (32-byte hex seed); with neither the build refuses.
 
 use std::path::Path;
 

@@ -1,26 +1,4 @@
-/*
- * The bars along the bottom of the window line up with the composer.
- *
- * `--composer-h` is the height of the composer's INPUT ROW. `ChatInput` draws
- * its top hairline on the root *above* that row, so the composer's real
- * footprint is `--composer-h` + 1px.
- *
- * The sidebar Close bar, the right-panel Close bar and refined's profile strip
- * each draw their own `border-t` on the SAME element that carries the height —
- * and under `box-sizing: border-box` that hairline comes out of the height
- * rather than adding to it. All three were therefore exactly 1px shorter than
- * the composer they sit beside, which is visible as a broken seam where the
- * sidebar meets the chat pane.
- *
- * `--composer-flush-h` is the same height with the hairline added back. The
- * rule this test enforces is the one that is easy to get wrong at a glance,
- * because both class names look equally plausible at the call site:
- *
- *   borders itself  → min-h-composer-flush
- *   border on an ancestor → min-h-composer
- *
- *   node --test frontend/tests/
- */
+/* Bottom bars line up with the composer: a self-bordered bar uses `min-h-composer-flush` (`--composer-h` + 1px), else `min-h-composer`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

@@ -1,39 +1,18 @@
 //! Keeping a relay node's [`RevocationStore`] loaded (#813 Phase C, relay half).
 //!
-//! The store is pure — bytes in, verdict out — so something has to put bytes in
-//! it. On a deployed node that is this task: fetch the signed `revocations.json`
-//! the reconciler publishes, hand it to [`RevocationStore::install`], repeat.
+//! Fetch the signed `revocations.json`, [`RevocationStore::install`] it, repeat.
 //!
 //! # Why a loop is allowed here
 //!
-//! `CLAUDE.md` bans periodic polling — but that rule is about the *app*: a
-//! renderer keepalive burns a user's battery and radio to learn nothing. This is
-//! a server daemon whose whole job is to hold fresh evidence, and the artifact it
-//! holds carries a **5-minute TTL** that is enforced at *use* time. There is no
-//! event to be driven by; the only alternatives to a refresh are holding stale
-//! evidence (forbidden — `admit` rejects it) or refusing every extend.
+//! A server daemon holding evidence with a 5-minute TTL enforced at use time; no event exists to drive it.
 //!
-//! The cadence is [`REFRESH_INTERVAL`] (60s) against a 5-minute TTL re-signed
-//! every 2 minutes, i.e. ~5× margin, with jitter so a pool of nodes does not
-//! stampede the CDN in lockstep. Failures back off exponentially from
-//! [`MIN_BACKOFF`] to [`MAX_BACKOFF`] rather than hammering. That is an
-//! exponential backoff loop, not a reconnect-and-retry-once seam like the
-//! `RemoteDb::with_retry` #987 deleted; the two solve different problems and
-//! this file never used the latter.
+//! [`REFRESH_INTERVAL`] gives ~5× margin, with jitter; failures back off exponentially.
 //!
-//! **A missed refresh is safe by construction.** The store enforces expiry when
-//! `admit` is called, not when a list is installed, so a wedged fetch degrades to
-//! "this node stops being a middle hop" — never to "this node keeps trusting a
-//! stale list". That is why this task never needs to be reliable, only usually
-//! working.
+//! **A missed refresh is safe by construction:** expiry is enforced at `admit`, so a wedged fetch just stops extends.
 //!
 //! # What it does not do
 //!
-//! It fetches over the **direct** HTTP client. A relay must not route its own
-//! control traffic through the overlay: it would be dialling its own tier, and a
-//! revocation list fetched through a relay that may itself be revoked is circular.
-//! It also stores nothing on disk — the store is in-memory, and a restarted node
-//! simply refuses to extend until its first successful fetch (§5.2, §11.7).
+//! It fetches directly (never through the overlay) and stores nothing on disk.
 
 use std::future::Future;
 use std::time::Duration;
@@ -42,7 +21,7 @@ use crate::backoff::jittered;
 use crate::policy::RevocationStore;
 use crate::proto;
 
-/// Steady-state refresh cadence. See the module docs for why this is 60s.
+/// Steady-state refresh cadence.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// First retry delay after a failed fetch or a rejected list.
@@ -58,9 +37,7 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// stops a hostile or misconfigured origin from feeding a node an unbounded body.
 const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 
-/// The next delay after `failures` consecutive failures: exponential from
-/// [`MIN_BACKOFF`], clamped at [`MAX_BACKOFF`]. Pure, so the schedule is testable
-/// without waiting for it.
+/// Exponential from [`MIN_BACKOFF`], clamped at [`MAX_BACKOFF`].
 pub fn backoff_after(failures: u32) -> Duration {
     if failures == 0 {
         return REFRESH_INTERVAL;
@@ -75,9 +52,7 @@ pub fn backoff_after(failures: u32) -> Duration {
 
 /// Fetch the signed revocation list once and install it.
 ///
-/// Returns the accepted sequence number. Every failure mode — transport, HTTP
-/// status, oversize body, bad signature, expired, rolled back — is an `Err`, and
-/// none of them mutate the store's held list.
+/// Returns the accepted sequence number; no failure mutates the held list.
 pub async fn refresh_once(store: &RevocationStore, url: &str) -> anyhow::Result<u64> {
     let client = crate::http::http_client(None);
     let response = client
@@ -99,19 +74,14 @@ pub async fn refresh_once(store: &RevocationStore, url: &str) -> anyhow::Result<
             bytes.len()
         ));
     }
-    // `directory_seq_floor` is 0 here: this node has no signed directory of its
-    // own to anchor against (the directory is a CLIENT artifact — the relay is
-    // listed in it, it does not consume it). The store's own high-water mark
-    // still provides rollback protection across refreshes.
+    // Floor 0: relays do not consume the directory; the store's high-water mark still blocks rollback.
     let seq = store.install(&bytes, proto::now_unix(), 0)?;
     Ok(seq)
 }
 
 /// Run the refresh loop until `shutdown` resolves.
 ///
-/// Returns immediately (spawning nothing) if `store` cannot evaluate revocation
-/// at all — there is nothing to install into an unconfigured store, and it is
-/// already in its strictest state.
+/// Returns immediately if `store` is unconfigured (already strictest).
 pub fn spawn<F>(
     store: RevocationStore,
     url: String,
@@ -141,9 +111,7 @@ where
                 }
                 Err(e) => {
                     failures = failures.saturating_add(1);
-                    // Not an error-level event on its own: the store fails closed
-                    // by itself, so the consequence is a node that stops
-                    // extending, not a node that trusts something stale.
+                    // Warn only: the store fails closed by itself.
                     tracing::warn!("revocation refresh failed ({failures} in a row): {e}");
                 }
             }

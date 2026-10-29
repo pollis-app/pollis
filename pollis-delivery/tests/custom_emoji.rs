@@ -1,28 +1,4 @@
-//! Custom per-group emoji (#848) — the rules, pinned.
-//!
-//! Four properties the ticket is explicit about, each with a test that fails if
-//! the property stops holding:
-//!
-//!   * **The cross-group permission matrix.** A adds an emoji to group A; B (in
-//!     group A) may use it in group B; C (only in group B) may NOT use it, but
-//!     must still be able to RENDER it. This is Discord's rule verbatim, and it
-//!     is the one an implementation gets wrong by scoping "use" to the
-//!     conversation instead of to the user's membership set.
-//!   * **Dedup.** Fifteen uploads of party-parrot are one stored object. Here:
-//!     the same bytes registered by two different users into two different
-//!     groups produce two `group_emoji` rows and exactly ONE
-//!     `custom_emoji_object`.
-//!   * **GC reclaims.** Removing the last reference collects the object; a
-//!     deleted group releases its references and the sweep reclaims them,
-//!     returning the R2 keys so the blobs go too.
-//!   * **Bounds hold.** A per-USER quota (there is deliberately no per-group
-//!     cap), a size ceiling the DS re-checks, and — the part that actually
-//!     enforces it — a presigned PUT whose signature binds the exact body
-//!     length, so R2 refuses an oversized upload the DS never sees.
-//!
-//! Driven against a local libsql DB exactly as the DS runs, mirroring
-//! `attachment_refs.rs`: `apply_*` fns directly for the write rules, and the
-//! real router via `tower::oneshot` for the R2 chokepoint.
+//! Custom per-group emoji (#848).
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -46,16 +22,13 @@ async fn fresh() -> common::TempDb {
     db
 }
 
-/// A well-formed content hash. Distinct `seed`s give distinct objects.
 fn hash(seed: char) -> String {
     seed.to_string().repeat(64)
 }
 
 async fn add_group(db: &Db, group: &str) {
     let conn = db.conn().await.unwrap();
-    // Registry claim first (also OR IGNORE — this helper is re-entrant per
-    // group): 000017's guard triggers refuse a groups row the `conversation`
-    // registry did not grant (#948).
+    // Registry claim first: 000017's triggers refuse an ungranted groups row (#948).
     conn.execute(
         "INSERT OR IGNORE INTO conversation (id, kind) VALUES (?1, 'group')",
         libsql::params![group.to_string()],
@@ -94,7 +67,6 @@ fn create_body(group: &str, shortcode: &str, content_hash: &str) -> CreateEmojiB
     }
 }
 
-/// Add an emoji as `actor` (auth ON — the authorized path).
 async fn create_as(
     db: &Db,
     actor: &str,
@@ -149,32 +121,17 @@ async fn can_use(db: &Db, user: &str, content_hash: &str) -> bool {
         .unwrap()
 }
 
-// ── 1. The cross-group permission matrix (the ticket's worked example) ────────
-
-/// **The rule, exactly as #848 states it.**
-///
-/// > user A adds an emoji to group A; user B (in group A) can send it in group
-/// > B; user C (only in group B) cannot use it — but must still render it when
-/// > B sends it.
-///
-/// The whole matrix in one test, because the interesting part is the
-/// *relationship* between the three answers, not any one of them. In particular
-/// B's `true` is the assertion that would fail under the obvious-but-wrong
-/// implementation ("you may use an emoji registered to the conversation you are
-/// typing in") — that rule gives B `false` in group B, which is precisely the
-/// Discord behaviour the ticket asks for.
+/// #848: use follows the user's memberships, not the conversation; C can't use it but must render it.
 #[tokio::test]
 async fn cross_group_use_follows_discords_rule() {
     let db = fresh().await;
     let parrot = hash('a');
 
-    // A and B share group A. B and C share group B. A and C share nothing.
     add_member(&db, "group_a", "user_a", "admin").await;
     add_member(&db, "group_a", "user_b", "member").await;
     add_member(&db, "group_b", "user_b", "member").await;
     add_member(&db, "group_b", "user_c", "admin").await;
 
-    // A adds the emoji to group A.
     assert!(matches!(
         create_as(&db, "user_a", "group_a", "parrot", &parrot).await,
         EmojiOutcome::Ok
@@ -196,11 +153,7 @@ async fn cross_group_use_follows_discords_rule() {
         "C is in no group that registered this emoji, so C may NOT use it"
     );
 
-    // ...and C must still RENDER it. Rendering consults nothing in this module:
-    // the object row is readable and its R2 key resolvable with no membership
-    // predicate anywhere in the path, which is exactly why these objects are
-    // stored unencrypted (an encrypted emoji is one that cannot cross a group
-    // boundary at all — there is no key C could hold).
+    // Rendering has no membership predicate, which is why emoji are stored unencrypted.
     assert!(
         object_exists(&db, &parrot).await,
         "the object C must render exists and is not scoped to any group"
@@ -215,8 +168,6 @@ async fn cross_group_use_follows_discords_rule() {
         "one plainly-stored object, fetchable by anyone — the render path for C"
     );
 
-    // Once B adds the same emoji to group B (its bytes are already stored), C
-    // gains use rights the same way anyone else would: through membership.
     assert!(matches!(
         create_as(&db, "user_b", "group_b", "parrot", &parrot).await,
         EmojiOutcome::Ok
@@ -227,8 +178,7 @@ async fn cross_group_use_follows_discords_rule() {
     );
 }
 
-/// A user who is not a member of the target group cannot add an emoji to it.
-/// The "use" rule is deliberately generous across groups; the "add" rule is not.
+/// "Use" is generous across groups; "add" is not.
 #[tokio::test]
 async fn a_non_member_cannot_add_an_emoji_to_a_group() {
     let db = fresh().await;
@@ -249,9 +199,6 @@ async fn a_non_member_cannot_add_an_emoji_to_a_group() {
     );
 }
 
-/// #1280: ANY member may add. The role a member holds is irrelevant to the add
-/// path — a plain `member` gets the same `Ok` and the same two rows an admin
-/// would.
 #[tokio::test]
 async fn a_plain_member_can_add_an_emoji() {
     let db = fresh().await;
@@ -277,12 +224,7 @@ async fn a_plain_member_can_add_an_emoji() {
     assert!(object_exists(&db, &hash('a')).await);
 }
 
-/// #1280: removal is ADMIN-ONLY. Adding costs the adder (quota); removing costs
-/// everyone who was using it, so it is a moderation action. The creator gets no
-/// exemption — a plain member cannot remove even their OWN emoji, and a refused
-/// remove leaves both the binding and the shared object exactly as they were.
-/// There is no edit/rename endpoint, so this is also what keeps a non-admin from
-/// "editing" an emoji by removing and re-adding it.
+/// #1280: removal is admin-only, even for the creator; a refused remove changes nothing.
 #[tokio::test]
 async fn removal_is_admin_only_even_for_the_creator() {
     let db = fresh().await;
@@ -336,8 +278,7 @@ async fn removal_is_admin_only_even_for_the_creator() {
     );
 }
 
-/// A member who LOSES admin loses removal with it — the role is re-derived per
-/// request, never cached from when the emoji was added.
+/// The role is re-derived per request, never cached.
 #[tokio::test]
 async fn a_demoted_admin_can_no_longer_remove() {
     let db = fresh().await;
@@ -360,13 +301,7 @@ async fn a_demoted_admin_can_no_longer_remove() {
     assert_eq!(count(&db, "SELECT COUNT(*) FROM group_emoji").await, 1);
 }
 
-/// **L3 — the existence oracle.** A missing shortcode answers `Ok` (a retried
-/// remove is idempotent, not a 404) and one the caller may not touch answers
-/// `Forbidden`. For a NON-MEMBER that difference read out the group's whole
-/// emoji set one shortcode at a time.
-///
-/// Membership is now checked before the row is read, so both answers are the
-/// same refusal and the probe learns nothing.
+/// L3: membership is checked before the row is read, so a non-member can't probe shortcodes.
 #[tokio::test]
 async fn a_non_member_cannot_tell_an_existing_emoji_from_a_missing_one() {
     let db = fresh().await;
@@ -385,14 +320,10 @@ async fn a_non_member_cannot_tell_an_existing_emoji_from_a_missing_one() {
          tell the two apart"
     );
 
-    // And the probe changed nothing.
     assert_eq!(count(&db, "SELECT COUNT(*) FROM group_emoji").await, 1);
 }
 
-/// The control: for an ADMIN the idempotent-`Ok`-on-missing behaviour is
-/// unchanged — a retried remove must not start failing. A plain member gets
-/// `Forbidden` whether or not the shortcode exists (#1280), because the admin
-/// check runs before the row is read.
+/// An admin's retried remove of a missing shortcode stays `Ok`.
 #[tokio::test]
 async fn an_admin_still_gets_an_idempotent_ok_for_a_missing_shortcode() {
     let db = fresh().await;
@@ -408,15 +339,7 @@ async fn an_admin_still_gets_an_idempotent_ok_for_a_missing_shortcode() {
     ));
 }
 
-// ── 2. Dedup — "no fifteen party-parrots" ────────────────────────────────────
-
-/// The same bytes registered twice — by two different users, into two different
-/// groups — must produce ONE stored object.
-///
-/// This is a property of the schema, not of a dedup pass: `content_hash` is the
-/// primary key of `custom_emoji_object`, and the second registration's `INSERT
-/// OR IGNORE` writes nothing. The R2 side follows from the same fact — the
-/// uploader finds the hash already present and skips the PUT entirely.
+/// `content_hash` is the primary key, so the second `INSERT OR IGNORE` writes nothing.
 #[tokio::test]
 async fn the_same_bytes_twice_are_one_stored_object() {
     let db = fresh().await;
@@ -438,8 +361,7 @@ async fn the_same_bytes_twice_are_one_stored_object() {
         "…backed by exactly ONE stored object — no fifteen party-parrots (#848)"
     );
 
-    // And the key is DERIVED from the hash, so both registrations necessarily
-    // agree on where the bytes live; a client cannot name a different one.
+    // The key derives from the hash, so a client cannot name another.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
@@ -452,9 +374,7 @@ async fn the_same_bytes_twice_are_one_stored_object() {
     assert_eq!(stored, emoji_r2_key(&parrot, "webp"));
 }
 
-/// Within ONE group a shortcode is unique, and a collision is REPORTED rather
-/// than silently swallowed — otherwise a user would believe they had added their
-/// image when `:parrot:` still resolves to somebody else's.
+/// A shortcode collision is reported, not swallowed.
 #[tokio::test]
 async fn a_colliding_shortcode_is_reported_not_swallowed() {
     let db = fresh().await;
@@ -467,18 +387,11 @@ async fn a_colliding_shortcode_is_reported_not_swallowed() {
         EmojiOutcome::ShortcodeTaken
     ));
 
-    // The loser's object must not linger: it has no reference, so the sweep
-    // reclaims it rather than leaving a paid-for blob nobody can reach.
     let collected = sweep_unreferenced_emoji(&db.conn().await.unwrap()).await.unwrap();
     assert_eq!(collected, vec![emoji_r2_key(&hash('b'), "webp")]);
 }
 
-// ── 3. GC ────────────────────────────────────────────────────────────────────
-
-/// Removing the LAST reference collects the object; removing a non-last one does
-/// not. Same derived-count discipline as attachment refs (#690): the object goes
-/// only when no `group_emoji` row names its hash, expressed as one conditional
-/// DELETE so two concurrent removes cannot each conclude "still referenced".
+/// One conditional DELETE, so two concurrent removes can't both see "still referenced".
 #[tokio::test]
 async fn gc_reclaims_an_unreferenced_emoji_and_only_then() {
     let db = fresh().await;
@@ -504,13 +417,7 @@ async fn gc_reclaims_an_unreferenced_emoji_and_only_then() {
     assert!(!object_is_referenced(&db.conn().await.unwrap(), &parrot).await.unwrap());
 }
 
-/// A deleted group releases its emoji references, and the sweep then reclaims
-/// whatever that orphaned — returning the R2 keys so the blobs go too.
-///
-/// This is why release and collect are separate operations. The group-delete
-/// path knows nothing about emoji objects and should not: it deletes its own
-/// rows, and the references disappear as a consequence. Nothing has to remember
-/// to decrement a counter, which is the failure mode a maintained refcount has.
+/// Group delete only drops its rows; the sweep reclaims orphans and returns R2 keys.
 #[tokio::test]
 async fn deleting_a_group_releases_its_emoji_and_the_sweep_reclaims_them() {
     let db = fresh().await;
@@ -523,7 +430,6 @@ async fn deleting_a_group_releases_its_emoji_and_the_sweep_reclaims_them() {
     create_as(&db, "u1", "doomed", "shared", &shared).await;
     create_as(&db, "u1", "survivor", "shared", &shared).await;
 
-    // What `apply_delete_group` now does before dropping the group row.
     release_group_emoji(&db.conn().await.unwrap(), "doomed").await.unwrap();
 
     let collected = sweep_unreferenced_emoji(&db.conn().await.unwrap()).await.unwrap();
@@ -538,27 +444,19 @@ async fn deleting_a_group_releases_its_emoji_and_the_sweep_reclaims_them() {
         "the survivor group still uses the shared object — it must not be collected"
     );
 
-    // The sweep is idempotent: running it again finds nothing.
     assert!(sweep_unreferenced_emoji(&db.conn().await.unwrap())
         .await
         .unwrap()
         .is_empty());
 }
 
-// ── 4. Bounds ────────────────────────────────────────────────────────────────
-
-/// The per-USER quota. #848 forbids a per-group cap, so this is the only thing
-/// standing between one account and unbounded rows. The bound is stated in the
-/// module as `EMOJI_MAX_PER_USER * EMOJI_MAX_BYTES` (48 MiB) of worst-case
-/// storage attributable to one person.
+/// #848 forbids a per-group cap, so the per-user quota is the only bound.
 #[tokio::test]
 async fn one_user_is_bounded_but_a_group_is_not() {
     let db = fresh().await;
     add_member(&db, "g", "hog", "admin").await;
     add_member(&db, "g", "someone_else", "member").await;
 
-    // Fill the hog's quota directly (the API path is exercised elsewhere; this
-    // is about the ceiling, not the write).
     db.conn().await
         .unwrap()
         .execute(
@@ -587,10 +485,7 @@ async fn one_user_is_bounded_but_a_group_is_not() {
     );
 }
 
-/// Everything about the object that a client could lie about is rejected here.
-/// The MIME allowlist matters most: the re-encoder emits exactly two types, and
-/// accepting a third would mean storing something no decoder in the render path
-/// expects.
+/// Only the re-encoder's two MIME types are allowed.
 #[tokio::test]
 async fn a_malformed_registration_is_refused() {
     let db = fresh().await;
@@ -643,8 +538,6 @@ async fn a_malformed_registration_is_refused() {
     );
 }
 
-// ── The R2 chokepoint, through the real router ───────────────────────────────
-
 fn r2_broker() -> pollis_delivery::broker::BrokerConfig {
     pollis_delivery::broker::BrokerConfig {
         r2_endpoint: Some("https://acct.r2.cloudflarestorage.com".into()),
@@ -673,14 +566,7 @@ async fn presign(
     (status, json)
 }
 
-/// A `put` for an emoji object must declare its exact size, within the ceiling,
-/// and that size must end up SIGNED into the URL.
-///
-/// This is the difference between a bound and a wish. The DS validates
-/// `size_bytes` at registration, but registration happens *after* the upload —
-/// nothing there could stop a PUT that carried a gigabyte. Signing
-/// `content-length` hands the check to R2, the only party that sees the bytes:
-/// a body of any other length fails the signature.
+/// R2 enforces the size: a signed `content-length` fails any other body length.
 #[tokio::test]
 async fn an_emoji_put_presign_binds_the_exact_body_length() {
     let db = fresh().await;
@@ -724,10 +610,7 @@ async fn an_emoji_put_presign_binds_the_exact_body_length() {
         "the length must be part of the SIGNATURE, not a hint: {url}"
     );
 
-    // A MEDIA put is bound the same way now. #848 signed the length only for
-    // emoji, on the reasoning that those objects are public and hard-capped; an
-    // unbounded presign is an unbounded object whatever the object is, so every
-    // put declares a length and every declared length is signed.
+    // Media puts are length-signed too: an unbounded presign is an unbounded object.
     let media_key = format!("media/{}.enc", "d".repeat(64));
     let (status, _) = presign(
         &router,
@@ -753,15 +636,7 @@ async fn an_emoji_put_presign_binds_the_exact_body_length() {
         .contains("X-Amz-SignedHeaders=content-length%3Bhost"));
 }
 
-/// One emoji blob backs every group that registered its hash, and it is
-/// UNENCRYPTED and served to anyone — so an ungated `put` would let any
-/// authenticated user replace an image that every member of every referencing
-/// group renders. The same reference evidence gates `delete`: collecting the
-/// blob while a group still uses it would 404 that group's emoji.
-///
-/// `get` is never gated. That is not an oversight — it is the render half of the
-/// #848 rule: a user in none of the registering groups must still be able to
-/// fetch the bytes.
+/// Emoji blobs are public and shared, so `put` and `delete` are reference-gated; `get` never is.
 #[tokio::test]
 async fn emoji_put_and_delete_presigns_are_refused_while_referenced() {
     let db = fresh().await;
@@ -806,8 +681,6 @@ async fn emoji_put_and_delete_presigns_are_refused_while_referenced() {
          path for a user who is in none of the registering groups (#848)"
     );
 
-    // Release the last reference — the object is collectable, and the gate opens
-    // for both the delete and a fresh upload of the same hash.
     remove_as(&db, "u1", "g", "parrot").await;
     for op in ["delete", "put"] {
         let (status, _) = presign(

@@ -2,18 +2,8 @@
 //! UI, and every message key (reply / edit / delete / react / thread) driven
 //! through it — two clients over the in-process Delivery Service.
 //!
-//! Bob plays "the other client": he writes through `pollis_tui::send`, which is
-//! the same `pollis_core::commands::messages::send_message` desktop and mobile
-//! call, with the same fields they set — an `_att` envelope for a photo, a
-//! `reply_to_id` for a quote reply, a `thread_id` for a thread reply, an
-//! `add_reaction`. Alice uses only keystrokes, and every assertion about what
-//! she sees is on her RENDERED screen.
-//!
-//! Before #1337 this conversation rendered as raw `{"_att":…}` JSON, with the
-//! multi-line message run together, the long one cut off, the thread reply
-//! mixed into the timeline, no quote context, no reactions, no timestamps, and
-//! no way to reply, edit, delete, react or open a thread at all. It also lands
-//! focus on the DM Alice starts and shows the key hints from the first frame.
+//! Bob writes through `pollis_tui::send` with the fields the other clients set; Alice uses only
+//! keystrokes and every assertion is on her rendered screen.
 //!
 //! One `#[tokio::test]` per file: the data dir is process-global (see the
 //! crate wiki, "every test file here holds exactly one").
@@ -54,8 +44,7 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
     alice.signup_dev("alice@e2e.local").await;
     bob.signup_dev("bob@e2e.local").await;
 
-    // ── The key hints are on screen from the first frame of Home, next to the
-    //    "You're signed in." status that used to hide them. ──
+    // The key hints are on screen from Home's first frame.
     let first = alice.buffer_text();
     assert!(
         first.contains("You're signed in.")
@@ -64,8 +53,7 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         "the hint bar must show on first entry to Home:\n{first}"
     );
 
-    // ── Alice starts the DM through the UI. Focus LANDS on it: the message pane
-    //    is focused (its hints are showing) and the DM is open. ──
+    // Alice starts the DM through the UI and focus lands on it.
     let bob_name = bob.username();
     key(&mut alice, 'd').await;
     alice.send_keys(&bob_name).await;
@@ -80,13 +68,11 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         Some(bob_name.as_str())
     );
 
-    // Bob accepts through his UI.
     bob.wait_for("pending", SIDEBAR_TIMEOUT).await;
     key(&mut bob, 'a').await;
     bob.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
     bob.enter().await;
 
-    // ── Bob, "the other client", sends one of each shape. ──
     let dm_id = alice.app().home.open.as_ref().unwrap().conv_id.clone();
     let bob_state = bob.state();
     let bob_id = bob.user_id();
@@ -132,11 +118,9 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         .await
         .expect("bob reacts");
 
-    // ── What Alice sees. ──
     alice.wait_for("QUOTE_REPLY_BODY", SURFACE_TIMEOUT).await;
     let screen = alice.buffer_text();
 
-    // Attachment: caption + a readable line, never the envelope.
     assert!(screen.contains("CAPTION_HERE"), "{screen}");
     assert!(screen.contains("[image: photo.png, 2 KB]"), "{screen}");
     assert!(
@@ -144,7 +128,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         "{screen}"
     );
 
-    // Newlines are kept: each line of the message on its own screen row.
     let second = line_with(&screen, "second line");
     assert!(
         !second.contains("ROOT") && !second.contains("third line"),
@@ -152,7 +135,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
     );
     assert!(line_with(&screen, "third line").contains("third line"));
 
-    // The long message wraps instead of being cut off at the pane edge.
     assert!(
         screen.contains("LONGSTART") && screen.contains("LONGEND"),
         "{screen}"
@@ -163,17 +145,14 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         "a long message must wrap onto several lines:\n{screen}"
     );
 
-    // The thread reply is filed under its root, not in the timeline.
     assert!(!screen.contains("THREAD_REPLY_ONE"), "{screen}");
     assert!(screen.contains("↪ 1 reply"), "{screen}");
 
-    // Quote reply context.
     assert!(
         line_with(&screen, "↳").contains(&format!("{bob_name}: ROOT first line")),
         "{screen}"
     );
 
-    // Timestamps and a date separator.
     assert!(screen.contains("── Today"), "{screen}");
     let header = line_with(&screen, "ROOT first line").replace(['┃', '│'], " ");
     let hhmm = header.split_whitespace().find(|w| {
@@ -183,18 +162,16 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
     });
     assert!(hhmm.is_some(), "a message must carry its time: {header:?}");
 
-    // The mention of Alice is highlighted.
     assert_eq!(
         alice.bg_of(&format!("@{alice_name}")),
         Some(Color::Yellow),
         "{screen}"
     );
 
-    // Bob's reaction (reactions are read once per completed sync round).
+    // Reactions are read once per completed sync round.
     alice.wait_for("🎉", SURFACE_TIMEOUT).await;
 
-    // ── Alice's message keys. Select the root: from nothing, ↑ walks up from
-    //    the newest displayed message (the thread reply is not one of them). ──
+    // Select the root: ↑ walks up from the newest displayed message.
     for _ in 0..5 {
         press(&mut alice, KeyCode::Up).await;
     }
@@ -214,7 +191,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         "the selected message is highlighted"
     );
 
-    // Editing someone else's message is refused.
     key(&mut alice, 'e').await;
     assert!(
         alice.buffer_text().contains("only edit your own"),
@@ -222,7 +198,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         alice.buffer_text()
     );
 
-    // Open the thread: the root and its reply.
     key(&mut alice, 't').await;
     let thread = alice.buffer_text();
     assert!(
@@ -231,7 +206,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
     );
     assert!(thread.contains("Esc close thread"), "{thread}");
 
-    // Reply inside the thread.
     key(&mut alice, 'i').await;
     alice.send_keys("ALICE_IN_THREAD").await;
     alice.enter().await;
@@ -240,7 +214,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         "{}",
         alice.buffer_text()
     );
-    // Esc leaves compose, Esc closes the thread.
     press(&mut alice, KeyCode::Esc).await;
     press(&mut alice, KeyCode::Esc).await;
     let back = alice.buffer_text();
@@ -249,7 +222,6 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         "{back}"
     );
 
-    // Bob's client files Alice's reply under the thread too.
     bob.wait_for("2 replies", SURFACE_TIMEOUT).await;
     assert!(
         !bob.buffer_text().contains("ALICE_IN_THREAD"),
@@ -257,14 +229,12 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         bob.buffer_text()
     );
 
-    // React to the root (still selected after closing the thread).
     key(&mut alice, '+').await;
     alice.send_keys(":+1:").await;
     alice.enter().await;
     alice.wait_for("👍", SURFACE_TIMEOUT).await;
     bob.wait_for("👍", SURFACE_TIMEOUT).await;
 
-    // Quote-reply to the root.
     key(&mut alice, 'r').await;
     assert!(
         alice
@@ -283,7 +253,7 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         bob.buffer_text()
     );
 
-    // Edit her own message: ↑ selects the newest, which is hers.
+    // ↑ selects the newest, which is hers.
     press(&mut alice, KeyCode::Up).await;
     key(&mut alice, 'e').await;
     alice.send_keys(" EDITED").await;
@@ -293,7 +263,7 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
         .await;
     bob.wait_for("ALICE_QUOTES EDITED", SURFACE_TIMEOUT).await;
 
-    // Delete it (an edit leaves it selected): x asks in the input bar, y deletes.
+    // An edit leaves it selected: x asks in the input bar, y deletes.
     key(&mut alice, 'x').await;
     assert!(
         alice.buffer_text().contains("y delete"),

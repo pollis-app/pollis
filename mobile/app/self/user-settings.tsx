@@ -32,8 +32,7 @@ function UserSettings() {
   const [displayName, setDisplayName] = useState("");
   const [handle, setHandle] = useState("");
 
-  // Seed local form state once the profile loads, then leave it alone so
-  // the user's in-progress edits aren't clobbered by a background refetch.
+  // Seed once, so a background refetch never clobbers in-progress edits.
   const [seeded, setSeeded] = useState(false);
   useEffect(() => {
     if (!seeded && profile) {
@@ -48,10 +47,7 @@ function UserSettings() {
     (displayName !== (profile.preferred_name ?? "") ||
       handle !== (profile.username ?? ""));
 
-  // The DS refuses a username outside its rule (`is_valid_username`) and
-  // passes an UNCHANGED one through, because default names that predate the
-  // rule must still be able to save a display name. Same carve-out here, so
-  // the screen explains the refusal before the round trip rather than after.
+  // As the DS: an UNCHANGED pre-rule username passes, so a display name can still save.
   const nextHandle = handle.trim();
   const handleInvalid =
     nextHandle !== (profile?.username ?? "") && !isValidUsername(nextHandle);

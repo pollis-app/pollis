@@ -1,13 +1,4 @@
-/*
- * The rename page for someone who cannot edit (#1281): name and description
- * as text, an empty description not shown at all, no Save.
- *
- * `src/utils/identityFields.ts` holds the rule (mobile/tests/identity-fields
- * pins its mobile mirror equal); this also pins that RenameEntity routes a
- * non-admin to the read-only view instead of the form.
- *
- *   node --test frontend/tests/
- */
+/* The rename page for a non-editor (#1281): text, no empty description, no Save, read-only branch first. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

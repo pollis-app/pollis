@@ -1,5 +1,4 @@
-//! Tauri-side adapter that lets `pollis-core` push events through a
-//! `tauri::ipc::Channel<T>` without depending on Tauri itself.
+//! Lets `pollis-core` push events through a Tauri `Channel`.
 
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -19,9 +18,7 @@ where
     }
 }
 
-/// Adapter for the binary frame channel. Wraps a `Channel<InvokeResponseBody>`
-/// so pollis-core can push raw `Vec<u8>` (zero-copy frame payloads) without
-/// depending on tauri.
+/// Binary frame channel: raw `Vec<u8>` payloads.
 pub struct RawChannelSink(pub Channel<InvokeResponseBody>);
 
 impl RawSink for RawChannelSink {

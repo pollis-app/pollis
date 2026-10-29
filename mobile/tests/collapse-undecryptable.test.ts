@@ -1,5 +1,4 @@
-// Runs of lost-message placeholders collapse into one row (#1312) — the same
-// rule desktop's MessageList applies.
+// Runs of lost-message placeholders collapse into one row (#1312).
 import test from "node:test";
 import assert from "node:assert/strict";
 

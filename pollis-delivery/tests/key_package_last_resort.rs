@@ -1,23 +1,5 @@
 //! #1571: the last-resort KeyPackage, against a real (local) libsql DB with the
 //! real schema.
-//!
-//! A device publishes one last-resort package per suite beside its pool. The DS
-//! hands it out only when the pool is empty and never marks it claimed, so a
-//! registered device can always be added to a conversation. Pinned here:
-//!
-//! * the pool is spent first; the last-resort package only after;
-//! * it is never claimed, by this DS's claim or by any UPDATE (the schema
-//!   trigger), so any number of adds can use it;
-//! * it is not part of the count a refill tops up, and its presence is
-//!   reported separately;
-//! * it keeps a device on the claimable list after its pool is spent;
-//! * one per device per suite: a new one replaces the old, and a request with
-//!   two is refused;
-//! * a login rotation replaces it with the one it carries, and a rotation from
-//!   a client that predates last-resort packages leaves the device with a
-//!   regular pool only — exactly today's state;
-//! * a client that predates the field publishes regular packages, as before,
-//!   and serializes byte-for-byte as before.
 
 use pollis_delivery::account_reads::{has_last_resort_key_package, unclaimed_key_package_count};
 use pollis_delivery::db::Db;
@@ -127,13 +109,11 @@ async fn the_pool_is_spent_first_and_the_last_resort_package_is_never_consumed()
     got.sort();
     assert_eq!(got, vec!["r1", "r2"], "regular packages go first");
 
-    // Pool empty: the last-resort package, every time, and it stays unclaimed.
     for _ in 0..4 {
         assert_eq!(claim(&db, "alice", "bob", "d1").await.as_deref(), Some("lr"));
     }
     assert_eq!(refs(&db, "last_resort = 1 AND claimed = 0").await, vec!["lr"]);
 
-    // Every serve is still an audited, budgeted claim.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT COUNT(*) FROM mls_key_package_claim WHERE target_device_id = 'd1'", ())
@@ -146,9 +126,7 @@ async fn the_pool_is_spent_first_and_the_last_resort_package_is_never_consumed()
 async fn no_update_can_mark_a_last_resort_package_claimed() {
     let db = fresh_db().await;
     publish(&db, "bob", "d1", vec![entry("r1", false), entry("lr", true)]).await;
-    // A Delivery Service that predates #1571 claims with a bare
-    // `UPDATE … SET claimed = 1 … RETURNING`, and may pick the last-resort row.
-    // It gets the bytes, and the row stays claimable.
+    // A pre-#1571 DS's bare claim UPDATE gets the bytes; the row stays claimable.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
@@ -188,8 +166,7 @@ async fn a_spent_pool_with_a_last_resort_package_stays_claimable() {
     publish(&db, "bob", "d2", vec![entry("s1", false)]).await;
     claim(&db, "alice", "bob", "d1").await.unwrap();
     claim(&db, "alice", "bob", "d2").await.unwrap();
-    // The predicate of the claimable-devices read reconcile and the sweep use
-    // (`account_reads::key_packages`: `claimed = 0`).
+    // The claimable-devices predicate (`claimed = 0`).
     let claimable = refs(&db, "user_id = 'bob' AND claimed = 0").await;
     assert_eq!(claimable, vec!["lr"], "d1 is still addable; d2 (no last-resort) is not");
 }
@@ -207,7 +184,6 @@ async fn one_per_device_per_suite_a_new_one_replaces_the_old_and_two_are_refused
     }
     assert_eq!(refs(&db, "last_resort = 1").await, vec!["lr-new"], "nothing written");
 
-    // The schema refuses a second one however it is written.
     let conn = db.conn().await.unwrap();
     let dup = conn
         .execute(
@@ -218,7 +194,6 @@ async fn one_per_device_per_suite_a_new_one_replaces_the_old_and_two_are_refused
         .await;
     assert!(dup.is_err(), "the partial unique index admits one per device per suite");
 
-    // Another device has its own.
     publish(&db, "bob", "d2", vec![entry("lr-d2", true)]).await;
     assert_eq!(refs(&db, "last_resort = 1").await, vec!["lr-d2", "lr-new"]);
 }
@@ -230,20 +205,16 @@ async fn a_rotation_replaces_it_and_an_old_clients_rotation_leaves_a_regular_poo
     rotate(&db, "bob", "d1", vec![entry("r2", false), entry("lr2", true)]).await;
     assert_eq!(refs(&db, "device_id = 'd1'").await, vec!["lr2", "r2"]);
 
-    // A shipped client (no last-resort field): its rotation clears what it
-    // cannot vouch for and publishes its pool — today's state exactly.
+    // A shipped client's rotation leaves a regular pool only.
     rotate(&db, "bob", "d1", vec![entry("r3", false)]).await;
     assert_eq!(refs(&db, "device_id = 'd1'").await, vec!["r3"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_client_that_predates_the_field_is_unchanged() {
-    // An old client's body has no `last_resort` key: it is a regular package.
     let json = r#"{"device_id":"d1","packages":[{"ref_hash":"r1","key_package":"cjE=","ciphersuite":82}],"user_id":"bob"}"#;
     let body: PublishKeyPackagesBody = serde_json::from_str(json).unwrap();
     assert!(!body.packages[0].last_resort);
-    // And a regular package serializes exactly as it did, so an old DS sees
-    // nothing new.
     let wire = serde_json::to_string(&entry("r1", false)).unwrap();
     assert!(!wire.contains("last_resort"), "got {wire}");
 

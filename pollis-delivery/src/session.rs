@@ -3,17 +3,9 @@
 //! (account-identity establishment, device registration, the first cert
 //! publish). See `docs/otp-server-bootstrap-design.md`.
 //!
-//! A session is minted by [`verify-otp`](crate::otp) once the OTP is proven and
-//! carries a capability scoped to exactly one `user_id`. The token is an opaque
-//! 256-bit bearer (NOT a JWT): the raw token is returned to the client once and
-//! the DS stores only its SHA-256 hash, so a dump of this map never yields a
-//! usable token. TTL is short (default 10 min). The gate binds `user_id` from
-//! the stored record — NEVER from the request body — the same property
-//! `resolve_actor` gives the device-signature path.
+//! An opaque 256-bit bearer stored only as its SHA-256; `user_id` binds from the record, never the body.
 //!
-//! **Store:** in-memory (the DS is single-container, mirroring the OTP store).
-//! Behind a small struct so a horizontally-scaled DS can swap it for a Turso
-//! `otp_session` table without touching the handlers.
+//! **Store:** in-memory; the DS is single-container.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -30,14 +22,7 @@ pub const SESSION_HEADER: &str = "x-pollis-session";
 
 /// What a session may authorize (#1207).
 ///
-/// An OTP session can do everything the bootstrap path needs, including the
-/// pre-enrollment soft reset (`rotate-identity` under a session wipes devices
-/// and memberships). A session minted by claiming a QR device link must not:
-/// all it exists for is enrolling ONE new device, whose key still only moves
-/// when an enrolled device approves. The scope travels with the record so a
-/// gate can refuse by type rather than by convention — see
-/// [`verify_session`] (OTP only) vs [`verify_session_for_enrollment`].
-/// `docs/qr-device-link-design.md`.
+/// A QR device-link session may only enroll ONE device; the scope lets a gate refuse by type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionScope {
     /// Minted by `verify-otp`: proved control of the mailbox.
@@ -45,16 +30,11 @@ pub enum SessionScope {
     /// Minted by `link/claim`: proved possession of a QR shown by an enrolled,
     /// PIN-verified device of this account. Enrollment-only.
     DeviceLink { link_id: String },
-    /// Minted by `link/poll-offer` (#1361): this device showed a QR that an
-    /// enrolled, PIN-verified device of this account scanned and accepted.
-    /// Enrollment-only, exactly like `DeviceLink`; the difference is that its
-    /// enrollment request carries no link tag (the approver compares the key
-    /// it read off the QR instead).
+    /// Minted by `link/poll-offer` (#1361): enrollment-only, like `DeviceLink`, with no link tag.
     DeviceOffer { link_id: String },
 }
 
-/// One live session. Minted on a verified OTP (or a claimed device link),
-/// consumed by the bootstrap endpoints. `expires_at` is unix seconds.
+/// One live session; `expires_at` is unix seconds.
 #[derive(Clone)]
 pub struct SessionRecord {
     pub user_id: String,
@@ -74,9 +54,7 @@ pub struct SessionClaims {
     pub scope: SessionScope,
 }
 
-/// In-memory session store keyed by `SHA-256(token)` so the raw token is never
-/// at rest. `Clone` is shallow (shared `Arc`) so it rides on the `Clone`
-/// `AppState`.
+/// Keyed by `SHA-256(token)` so the raw token is never at rest.
 #[derive(Clone, Default)]
 pub struct SessionStore {
     inner: Arc<Mutex<HashMap<[u8; 32], SessionRecord>>>,
@@ -89,9 +67,7 @@ fn hash_token(token: &str) -> [u8; 32] {
 }
 
 impl SessionStore {
-    /// Mint a fresh session for `(user_id, email, device_id)` valid for
-    /// `ttl_secs` from `now`. Returns the raw token to hand the client exactly
-    /// once; only its hash is retained here.
+    /// Mint a session valid for `ttl_secs`; returns the raw token, keeping only its hash.
     pub fn mint(
         &self,
         user_id: &str,
@@ -159,8 +135,7 @@ impl SessionStore {
         token
     }
 
-    /// Resolve a raw token to its live claims, or `None` if unknown/expired. An
-    /// expired record is removed on lookup.
+    /// Resolve a raw token to its live claims; an expired record is removed.
     pub fn resolve(&self, token: &str, now: u64) -> Option<SessionClaims> {
         let key = hash_token(token);
         let mut guard = self.inner.lock().expect("session store mutex poisoned");
@@ -179,8 +154,7 @@ impl SessionStore {
         }
     }
 
-    /// Single-use teardown: drop the token so it can't be replayed (called when
-    /// the bootstrap sequence completes at cert publish).
+    /// Single-use teardown so the token can't be replayed.
     pub fn invalidate(&self, token: &str) {
         self.inner
             .lock()
@@ -189,21 +163,13 @@ impl SessionStore {
     }
 }
 
-/// Pull the raw session token off the request headers.
 pub fn session_token(headers: &HeaderMap) -> Option<&str> {
     headers.get(SESSION_HEADER)?.to_str().ok()
 }
 
-/// The session gate, sibling to [`crate::auth::verify_request`]. Returns the
-/// authenticated [`SessionClaims`] (bind `user_id` from here, never the body) or
-/// [`AuthRejection::Unauthorized`] for a missing/unknown/expired token. Never
-/// fails open.
+/// The session gate; bind `user_id` from the returned claims, never the body. Never fails open.
 ///
-/// **OTP sessions only.** A [`SessionScope::DeviceLink`] session is refused here
-/// with the same 401 as an unknown token, so every gate written before QR links
-/// existed — establish-identity, the soft reset, reset-and-recover — keeps
-/// exactly the powers it had, and a new session-gated endpoint is OTP-only
-/// unless it deliberately calls [`verify_session_for_enrollment`] (#1207).
+/// **OTP sessions only.** Device-link sessions get the same 401 as an unknown token (#1207).
 pub fn verify_session(
     headers: &HeaderMap,
     store: &SessionStore,
@@ -216,9 +182,7 @@ pub fn verify_session(
     Ok(claims)
 }
 
-/// The session gate for the enrollment path a linked device walks:
-/// `register-device`, `enrollment-request`, and the new device's enrollment
-/// read. Accepts an OTP **or** a device-link session; nothing else may call it.
+/// The enrollment-path gate: accepts an OTP **or** a device-link session.
 pub fn verify_session_for_enrollment(
     headers: &HeaderMap,
     store: &SessionStore,
@@ -267,9 +231,7 @@ mod tests {
         h
     }
 
-    /// #1207: a device-link session must not pass the OTP gate that guards the
-    /// soft reset, reset-and-recover and establish-identity — it is
-    /// enrollment-only.
+    /// #1207: a device-link session must not pass the OTP gate.
     #[test]
     fn a_device_link_session_is_refused_by_the_otp_gate() {
         let store = SessionStore::default();
@@ -294,7 +256,6 @@ mod tests {
         assert_eq!(claims.scope, SessionScope::DeviceOffer { link_id: "offer-1".into() });
     }
 
-    /// An OTP session passes both gates, unchanged.
     #[test]
     fn an_otp_session_passes_both_gates() {
         let store = SessionStore::default();

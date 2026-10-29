@@ -172,10 +172,7 @@ async fn other_schemes_are_refused() {
     }
 }
 
-/// The shape `pollis-delivery`'s `Db::connect_remote` uses: libsql built
-/// without its own `tls` feature, dialing an `https` URL through
-/// [`Connector`]. The request reaching the server over a verified TLS session
-/// is the proof — the double answers 500, so the statement itself errors.
+/// libsql without `tls`, dialing `https` through [`Connector`]; the double answers 500.
 #[tokio::test]
 async fn libsql_remote_dials_through_the_connector() {
     let pki = pki(&["localhost"]);

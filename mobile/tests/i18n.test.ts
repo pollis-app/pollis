@@ -1,14 +1,4 @@
-/*
- * Mobile localization plumbing (#1074).
- *
- * The catalogues are the desktop's own files, so what can drift is the
- * mobile-side bookkeeping around them: the language registry, the namespace
- * list, and the generated static resource table Metro needs in place of a
- * glob. Each is pinned here against the directory listing that actually
- * ships, plus the pure resolution rules a device locale goes through.
- *
- *   cd mobile && pnpm test
- */
+/* Mobile localization plumbing (#1074): the registry, namespaces and generated resource table vs what ships. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

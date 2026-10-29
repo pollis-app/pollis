@@ -5,11 +5,7 @@
 //! key set signed by a pinned root names its signer for the account tree, and
 //! must refuse it (or alarm) otherwise.
 //!
-//! The dev server trusts the key of any log it can see at spawn time (a
-//! convenience for the crate's other tests). The trees here are written AFTER
-//! the server starts, so that allowance never sees their key and the only thing
-//! that can make the verifier trust it is the key set. The exception is the last
-//! test, which needs the allowance and uses its own key.
+//! Trees are written after the server spawns, so only the key set can make the verifier trust them.
 
 use std::path::Path;
 
@@ -99,18 +95,15 @@ fn a_log_signed_by_a_root_authorised_key_verifies_and_one_outside_the_set_does_n
     write_account_tree(dir.path(), &rotated);
     write_key_set(dir.path(), &root, &rotated, &[STH_CONTEXT_ACCOUNT_KEYS]);
 
-    // Rotate-in: the signer is in no compiled pin, only in the root-signed set.
     let t = trust_under(&base, &root);
     assert_eq!(t.alarm, None);
     let report = account::verify_account_via_trusting(&base, "u-alice", None, &t).unwrap();
     assert!(report.chain_valid, "violations: {:?}", report.violations);
     assert_eq!(report.keys.len(), 2);
 
-    // Without the key set the same log is refused at the fetch boundary.
     assert!(account::verify_account_via_trusting(&base, "u-alice", None, &KeySetTrust::default()).is_err());
 
-    // The production entry point resolves against the COMPILED root, which did
-    // not sign this test set: the set is untrusted and the signer is refused.
+    // The production entry point uses the compiled root, which did not sign this set.
     assert!(account::verify_account_via(&base, "u-alice", None).is_err());
 
     server.shutdown();
@@ -123,7 +116,6 @@ fn a_key_set_from_an_unpinned_root_does_not_authorise_its_signer() {
     let base = server.base_url();
     let attacker = sk(41);
     write_account_tree(dir.path(), &attacker);
-    // Self-signed by the attacker's own root.
     write_key_set(dir.path(), &sk(66), &attacker, &[STH_CONTEXT_ACCOUNT_KEYS]);
 
     let t = trust_under(&base, &sk(1));
@@ -157,8 +149,7 @@ fn a_signer_the_set_authorises_only_for_another_tree_is_refused() {
 #[test]
 fn compiled_trust_survives_a_missing_key_set_and_an_unverifiable_one_fails_the_verdict() {
     let dir = tempfile::tempdir().unwrap();
-    // Written BEFORE spawn, so the dev allowance trusts this key the way a
-    // compiled pin would.
+    // Written before spawn, so the dev allowance trusts this key.
     write_account_tree(dir.path(), &sk(50));
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
     let base = server.base_url();

@@ -1,15 +1,4 @@
-//! Known-answer tests for the authorized-secrets broker's pure signing
-//! functions (#393). Both take an injected clock/timestamp precisely so the
-//! output is deterministic and lockable:
-//!
-//!   - `sign_livekit_token` — decode the HS256 JWT, assert header + claim shape,
-//!     and re-verify the signature against the secret.
-//!   - `presign_r2_url` — a SigV4 golden test: every input pinned, the exact
-//!     resulting URL string asserted, so any drift in canonical-request
-//!     construction, encoding, or the signature breaks the test.
-//!
-//! No DB / router here — these are the pure functions, tested directly (the
-//! request-path auth is covered by `auth.rs`).
+//! Known-answer tests for the broker's pure signing functions (#393), with an injected clock.
 
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
@@ -17,8 +6,6 @@ use pollis_delivery::broker::{
     presign_r2_url, sign_livekit_admin_token, sign_livekit_token, LIVEKIT_TOKEN_TTL_SECS,
 };
 use sha2::Sha256;
-
-// ── LiveKit JWT ────────────────────────────────────────────────────────────
 
 const LK_KEY: &str = "APIexampleKey";
 const LK_SECRET: &str = "livekit-signing-secret-do-not-log";
@@ -29,7 +16,6 @@ fn b64url_decode(s: &str) -> Vec<u8> {
         .expect("valid base64url")
 }
 
-/// Split a JWT into (header_json, payload_json, signature_b64url).
 fn split_jwt(token: &str) -> (serde_json::Value, serde_json::Value, String) {
     let parts: Vec<&str> = token.split('.').collect();
     assert_eq!(parts.len(), 3, "JWT has three dot-separated parts");
@@ -40,8 +26,6 @@ fn split_jwt(token: &str) -> (serde_json::Value, serde_json::Value, String) {
     (header, payload, parts[2].to_string())
 }
 
-/// Recompute the HS256 signature over `header.payload` and assert it matches the
-/// token's third segment — proves the token verifies against `secret`.
 fn assert_hs256_signature(token: &str, secret: &str) {
     let last_dot = token.rfind('.').expect("has signature segment");
     let signing_input = &token[..last_dot];
@@ -71,18 +55,14 @@ fn livekit_token_claim_shape_and_signature() {
         sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", true, now).unwrap();
     let (_, payload, _) = split_jwt(&token);
 
-    // iss = api key; sub = identity; times pinned off the injected clock.
     assert_eq!(payload["iss"], LK_KEY);
     assert_eq!(payload["sub"], "alice");
-    // #836: the display name is gone. It used to be the user's Pollis username,
-    // which handed the SFU the account behind every participant regardless of
-    // what the identity said.
+    // #836: no display name; the username would name the account to the SFU.
     assert_eq!(payload["name"], "");
     assert_eq!(payload["iat"], now);
     assert_eq!(payload["nbf"], now);
     assert_eq!(payload["exp"], now + LIVEKIT_TOKEN_TTL_SECS);
 
-    // Video grants — a normal publisher.
     let v = &payload["video"];
     assert_eq!(v["room"], "room-1");
     assert_eq!(v["roomJoin"], true);
@@ -93,12 +73,7 @@ fn livekit_token_claim_shape_and_signature() {
     assert_hs256_signature(&token, LK_SECRET);
 }
 
-/// Membership is checked when a token is MINTED and never again — LiveKit
-/// verifies it at join and the SFU is told nothing about a later removal. So the
-/// TTL is exactly the window in which a token issued to a member who has since
-/// been removed, left, been blocked or had their device revoked can still be
-/// redeemed. It used to be an hour. The client re-mints on every reconnect, so a
-/// short one costs nothing; an hour is a whole hour of re-entry.
+/// Membership is checked only at mint, so the TTL bounds re-entry after removal.
 #[test]
 fn a_participant_token_expires_in_minutes_not_hours() {
     let ttl = LIVEKIT_TOKEN_TTL_SECS;
@@ -123,7 +98,6 @@ fn a_participant_token_expires_in_minutes_not_hours() {
 
 #[test]
 fn livekit_view_variant_disables_publish_data() {
-    // The screenshare `:view` participant: can_publish_data = false.
     let token = sign_livekit_token(
         LK_KEY,
         LK_SECRET,
@@ -136,7 +110,6 @@ fn livekit_view_variant_disables_publish_data() {
     let (_, payload, _) = split_jwt(&token);
     assert_eq!(payload["sub"], "alice:view");
     assert_eq!(payload["video"]["canPublishData"], false);
-    // Everything else stays a full grant.
     assert_eq!(payload["video"]["roomJoin"], true);
     assert_eq!(payload["video"]["canPublish"], true);
     assert_eq!(payload["video"]["canSubscribe"], true);
@@ -145,9 +118,7 @@ fn livekit_view_variant_disables_publish_data() {
 
 #[test]
 fn livekit_admin_token_grants_room_admin_and_verifies() {
-    // The admin token (SendData / ListParticipants) must carry roomAdmin +
-    // roomList scoped to the room, a short (+300s) expiry, and verify against the
-    // secret. `sub` is the internal DS identity (filtered out of rosters).
+    // `sub` is the internal DS identity, filtered out of rosters.
     let now = 1_700_000_000u64;
     let token = sign_livekit_admin_token(LK_KEY, LK_SECRET, "inbox-u_123", now).unwrap();
     let (header, payload, _) = split_jwt(&token);
@@ -158,18 +129,11 @@ fn livekit_admin_token_grants_room_admin_and_verifies() {
     assert_eq!(payload["video"]["roomAdmin"], true);
     assert_eq!(payload["video"]["roomList"], true);
     assert_eq!(payload["video"]["room"], "inbox-u_123");
-    // Must NOT carry participant grants (it never joins as a participant).
     assert!(payload["video"].get("roomJoin").is_none());
     assert_hs256_signature(&token, LK_SECRET);
 }
 
-// ── R2 SigV4 presign (known-answer) ─────────────────────────────────────────
-//
-// Every input pinned so the signature is reproducible. Endpoint/bucket/key/
-// region/keys/datetime/expires are all fixed; the resulting URL string is
-// asserted byte-for-byte. AWS's documented example secret key is reused for
-// familiarity, but this is path-style (host = endpoint, `/bucket/key`), so the
-// signature is specific to THIS canonical request, not AWS's virtual-hosted one.
+// R2 SigV4 known-answer: path-style, so the signature is not AWS's documented one.
 
 const R2_ENDPOINT: &str = "https://accountid.r2.cloudflarestorage.com";
 const R2_BUCKET: &str = "pollis-media";
@@ -191,7 +155,6 @@ fn presign_get_is_locked() {
         900,
         R2_DATE,
     );
-    // Signature cross-checked against an independent SigV4 implementation.
     assert_eq!(
         url,
         "https://accountid.r2.cloudflarestorage.com/pollis-media/media/abc123/file.enc\
@@ -206,8 +169,7 @@ fn presign_get_is_locked() {
 
 #[test]
 fn presign_put_encodes_key_slash_and_space() {
-    // PUT + a key with a slash (preserved) and a space (percent-encoded) —
-    // locks the URI-encoding of the canonical path.
+    // Locks URI-encoding of the canonical path: slash kept, space as %20.
     let url = presign_r2_url(
         R2_ENDPOINT,
         R2_BUCKET,
@@ -219,8 +181,6 @@ fn presign_put_encodes_key_slash_and_space() {
         3600,
         R2_DATE,
     );
-    // Slash preserved in the path; space becomes %20. Expires differs (3600) so
-    // the signature is distinct from the GET case.
     assert_eq!(
         url,
         "https://accountid.r2.cloudflarestorage.com/pollis-media/media/sub%20dir/my%20file.enc\
@@ -235,10 +195,7 @@ fn presign_put_encodes_key_slash_and_space() {
 
 #[test]
 fn presign_delete_signature_binds_the_method() {
-    // DELETE (attachment cleanup) presign — the HTTP method is part of the SigV4
-    // canonical request, so a DELETE URL must carry a signature distinct from an
-    // otherwise-identical GET. Guards against the handler ever mapping delete to
-    // the wrong verb.
+    // The method is part of the canonical request: DELETE must sign differently from GET.
     let common = |method| {
         presign_r2_url(
             R2_ENDPOINT, R2_BUCKET, R2_REGION, R2_ACCESS, R2_SECRET, method,
@@ -249,8 +206,6 @@ fn presign_delete_signature_binds_the_method() {
     let get = common("GET");
     let sig = |u: &str| u.rsplit_once("X-Amz-Signature=").unwrap().1.to_string();
     assert_ne!(sig(&del), sig(&get), "DELETE must not reuse the GET signature");
-    // Everything up to the signature (path + canonical query) is method-agnostic,
-    // so the two URLs are identical there.
     assert_eq!(
         del.split_once("&X-Amz-Signature=").unwrap().0,
         get.split_once("&X-Amz-Signature=").unwrap().0,
@@ -259,8 +214,7 @@ fn presign_delete_signature_binds_the_method() {
 
 #[test]
 fn presign_canonical_query_is_sorted() {
-    // SigV4 requires the canonical query params sorted by name. X-Amz-Signature
-    // is appended AFTER signing, so it's the only param allowed out of order.
+    // SigV4 sorts query params; X-Amz-Signature is appended after signing.
     let url = presign_r2_url(
         R2_ENDPOINT, R2_BUCKET, R2_REGION, R2_ACCESS, R2_SECRET, "GET", "k", 900, R2_DATE,
     );
@@ -273,16 +227,10 @@ fn presign_canonical_query_is_sorted() {
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted, "canonical query params must be name-sorted");
-    // And the signature is genuinely last (never part of what was signed).
     assert!(query.split('&').next_back().unwrap().starts_with("X-Amz-Signature="));
 }
 
-// ─── #828: pseudonymous room names ───────────────────────────────────────────
-
-/// The acceptance criterion: a token minted for a conversation must not carry
-/// that conversation's id in its grant. This is asserted on the *decoded JWT*,
-/// not on the helper, because the grant is the thing LiveKit actually reads —
-/// a mapping applied anywhere short of it would still leak.
+/// Asserted on the decoded JWT: the grant is what LiveKit reads.
 #[test]
 fn minted_grant_never_carries_the_raw_conversation_id() {
     let conv = "01KZVDFR5Z9DKJ27YN91S3KS6N";
@@ -298,20 +246,10 @@ fn minted_grant_never_carries_the_raw_conversation_id() {
     assert!(granted.starts_with("r-"), "grant should be an opaque pseudonym, got {granted}");
 }
 
-// Determinism (all members of a conversation resolve to ONE room) and inbox
-// rooms not exposing the user id are pinned on the pure function itself:
-// `room_id::tests::stable_for_a_given_secret` and
-// `room_id::tests::never_leaks_the_logical_name` (which covers `inbox-<id>`).
-
-// ─── #836: pseudonymous participant identities ───────────────────────────────
-
 use pollis_delivery::participant_id::{
     participant_pseudonym, resolve_participant, ParticipantKind,
 };
 
-/// The acceptance criterion, asserted on the **decoded JWT** rather than the
-/// helper — the `sub` claim is the thing LiveKit actually reads, so a
-/// pseudonym applied anywhere short of it would still leak the account.
 #[test]
 fn minted_sub_never_carries_the_raw_user_or_device_id() {
     let user = "01KZT7RW4RXQGT943Q05C7NW8A";
@@ -330,30 +268,18 @@ fn minted_sub_never_carries_the_raw_user_or_device_id() {
         assert!(!sub.contains(device), "sub must not embed the device id: {sub}");
         assert!(!sub.contains(conv), "sub must not embed the room: {sub}");
         assert!(sub.starts_with(kind.prefix()), "sub should keep its capability prefix: {sub}");
-        // And the whole token — header, claims, signature — carries neither id.
         assert!(!token.contains(user));
         assert!(!token.contains(device));
     }
 }
 
-// Cross-room unlinkability (#836's residual) and a user's two devices staying
-// distinct participants that resolve to one person (#140) are pinned on the pure
-// function itself: `participant_id::tests::unlinkable_across_rooms`,
-// `resolves_back_to_the_user_and_kind` and `devices_of_one_user_stay_distinct`.
-
-/// A client cannot obtain a token identifying as another user. The identity is
-/// a pure function of the room, the VERIFIED signer and the signer's device —
-/// there is no input a caller controls that moves it — so the property is
-/// pinned here as "nothing a client sends can produce Bob's identity except
-/// being Bob".
+/// The identity derives from room, verified signer and device: no client input moves it.
 #[test]
 fn identity_is_determined_by_the_signer_not_the_request() {
     let room = "01KZVDFR5Z9DKJ27YN91S3KS6N";
     let alice = participant_pseudonym(LK_SECRET, room, "alice", "dev-a", ParticipantKind::Voice);
     let bob = participant_pseudonym(LK_SECRET, room, "bob", "dev-a", ParticipantKind::Voice);
     assert_ne!(alice, bob);
-    // Alice cannot reach Bob's identity by varying the one thing she supplies
-    // (`kind`) — every kind she can ask for still resolves to Alice.
     for kind in [ParticipantKind::Realtime, ParticipantKind::Voice, ParticipantKind::View] {
         let id = participant_pseudonym(LK_SECRET, room, "alice", "dev-a", kind);
         assert_ne!(id, bob);

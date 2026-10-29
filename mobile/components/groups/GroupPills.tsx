@@ -11,12 +11,7 @@ export interface GroupPill {
   unread: boolean;
 }
 
-// The horizontal strip of group-name pills at the top of the Groups tab: 32pt
-// pills in 44pt targets, no borders. Selected = accent fill + dark (onAccent)
-// text; the rest are the inverse, a dark fill + accent text. Unread = a dot
-// before the name, plus a bolder label, so it is not told by colour alone.
-// Ends with "+" (create or find a group) as an accent circle with a dark
-// glyph. Tapping a pill selects that group in place.
+// The Groups tab's pill strip; unread is a dot plus a bolder label, never colour alone.
 export function GroupPills({
   groups,
   selectedId,
@@ -29,7 +24,7 @@ export function GroupPills({
   onAdd: () => void;
 }) {
   const { t } = useTranslation("mobile");
-  // Re-render on a live accent change; the colours below are getters.
+  // Re-render on a live accent change.
   useTheme();
   return (
     <View accessibilityLabel={t("groups.stripLabel")} style={{ flexShrink: 0 }}>

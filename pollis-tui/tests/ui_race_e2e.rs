@@ -1,8 +1,5 @@
 //! The `ui_e2e` scenario forced into the ordering the flake was first blamed
-//! on (#1041). ONE test per binary, like every other file in this directory:
-//! the client's data dir is process-global (`set_data_dir`), so two tests in
-//! one binary — which cargo runs on parallel threads — clobber each other's
-//! `accounts.json` mid-signup ("no active user; call verify_otp first").
+//! on (#1041). One test per binary: the data dir is process-global.
 
 mod common;
 
@@ -16,11 +13,7 @@ const SURFACE_TIMEOUT: Duration = Duration::from_secs(120);
 const SIDEBAR_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The `ui_e2e` scenario, forced into the ordering the flake was first blamed
-/// on (#1041): B's sync loop external-joins onto A's epoch-0 GroupInfo BEFORE A's
-/// reconcile adds B, and A's Add wins the epoch. Locally B nearly always wins
-/// that race, so without the rendezvous this ordering was only ever seen on
-/// CI. A lost join converges (it defers to the Welcome); the loss itself was
-/// the committer window pinned by `dms::message_sealed_*` in the flows suite.
+/// on (#1041): B external-joins onto A's epoch-0 GroupInfo before A's reconcile adds B.
 #[tokio::test(flavor = "multi_thread")]
 async fn message_surfaces_when_the_recipient_loses_the_epoch_zero_race() {
     use pollis_core::commands::mls::rendezvous::{self, Point};
@@ -31,8 +24,7 @@ async fn message_surfaces_when_the_recipient_loses_the_epoch_zero_race() {
     alice.signup_dev("alice@e2e.local").await;
     bob.signup_dev("bob@e2e.local").await;
 
-    // A's reconcile parks at entry (after `init_mls_group` published the epoch-0
-    // GroupInfo); B's external join parks with its commit built and unsent.
+    // A's reconcile and B's external join each park at their rendezvous.
     let mut reconcile_parked = rendezvous::arm(Point::ReconcileEntry);
     let mut join_parked = rendezvous::arm(Point::ExternalJoinBeforeSubmit);
 
@@ -53,8 +45,7 @@ async fn message_surfaces_when_the_recipient_loses_the_epoch_zero_race() {
         .await
         .expect("alice never reached reconcile")
         .expect("rendezvous closed");
-    // B's sync loop sees the membership row + GroupInfo and no Welcome, so it
-    // external-joins; pump B's UI meanwhile as the real app would.
+    // B's sync loop external-joins; pump B's UI meanwhile.
     let release_join = loop {
         bob.refresh().await;
         match tokio::time::timeout(Duration::from_millis(50), join_parked.recv()).await {

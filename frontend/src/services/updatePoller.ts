@@ -1,26 +1,12 @@
 import { check as checkForUpdate } from "../bridge";
 import { appStore } from "../stores/appStore";
 
-// Update checks live outside React on purpose: a singleton is resilient to
-// StrictMode double-mounts, route changes, and component unmount/remount churn
-// that would otherwise duplicate or drop checks. The only thing React touches
-// is the resulting store field.
-//
-// EVENT-DRIVEN, not periodic (#874). This used to be a 15-minute
-// `setInterval`, which CLAUDE.md bans outright — and a timer is the wrong
-// shape for the question anyway: nobody is helped by an update discovered
-// while the window is hidden, and a machine left running for a week fired ~670
-// checks nobody read. Now the trigger is the user coming back to the window,
-// rate-limited so tabbing in and out doesn't turn into a check per switch.
+// Update checks run outside React, on window focus and rate-limited; never on an interval (#874).
 
-/// Don't re-check more often than this, however many focus events arrive.
-/// Same budget the old interval spent, just spent on demand.
+/// Minimum gap between checks.
 const MIN_CHECK_GAP_MS = 15 * 60 * 1000;
 
-// Wait briefly after sign-in before the first check so we don't pile on top of
-// the startup update gate in App.tsx (which already ran a check). If THAT check
-// found something the app is already on the UpdateScreen; if it didn't, give
-// the network a moment before we re-ask. A one-shot delay, not a poll.
+// One-shot delay after sign-in; App.tsx's startup gate just checked.
 const FIRST_CHECK_DELAY_MS = 30 * 1000;
 
 let firstCheckTimeoutId: number | null = null;
@@ -34,8 +20,7 @@ async function runCheck(): Promise<void> {
     const setAvailable = appStore.setAvailableUpdateVersion;
     setAvailable(update ? update.version : null);
   } catch (err) {
-    // Network blips are expected; log once and move on. Don't clear an
-    // already-known available version on a transient failure.
+    // Keep a known version across transient failures.
     console.warn("[updatePoller] check failed:", err);
   }
 }

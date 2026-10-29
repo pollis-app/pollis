@@ -1,22 +1,5 @@
-// What accepting a group invite does to the cached lists, before the accept
-// has answered (#1560).
-//
-// `useAcceptGroupInvite` used to await `accept_group_invite` and
-// `poll_mls_welcomes`, then fire the invalidations without awaiting them. The
-// busy state ended, and the invite row and the group list only changed when
-// those refetches came back — a visible pause with nothing happening. Now the
-// invite leaves the pending list and the group joins the group lists on the
-// same frame as the tap, and a failure puts every list back as it was.
-//
-// The rule that matters: the UI never shows NEITHER the invite nor the group.
-// So the group goes into every loaded group list in the same pass that takes
-// the invite out, and a rollback restores all of them together.
-//
-// Kept pure and free of React Query so the rules can be tested with a plain
-// in-memory cache (mobile/tests/invite-accept-optimistic.test.ts). The desktop
-// twin is frontend/src/hooks/queries/inviteAcceptOptimistic.ts.
+// Accepting a group invite, applied to the cached lists before the accept answers (#1560): never show NEITHER the invite nor the group. Pure.
 
-/** The slice of a QueryClient this module needs. */
 export interface CacheLike {
   getQueryData(key: readonly unknown[]): unknown;
   setQueryData(key: readonly unknown[], data: unknown): unknown;
@@ -28,20 +11,17 @@ export interface InviteLike {
   group_name: string;
 }
 
-/** One group list cache and the row to put into it for the accepted group. */
 export interface GroupListTarget<G extends { id: string }> {
   key: readonly unknown[];
   row: (invite: InviteLike) => G;
 }
 
-/** The caches as they were before the accept, so a failure can restore them. */
 export interface AcceptSnapshot {
   entries: Array<{ key: readonly unknown[]; data: unknown }>;
-  /** The accepted group, whose own caches (channels, roster) the settle refreshes. */
+  /** The accepted group, whose own caches the settle refreshes. */
   groupId?: string;
 }
 
-/** The pending list without one invite. Same array if it was not there. */
 export function withoutInvite<I extends { id: string }>(invites: readonly I[], inviteId: string): I[] {
   if (!invites.some((i) => i.id === inviteId)) {
     return invites as I[];
@@ -49,10 +29,7 @@ export function withoutInvite<I extends { id: string }>(invites: readonly I[], i
   return invites.filter((i) => i.id !== inviteId);
 }
 
-/**
- * A group list with the accepted group in it, appended at the end. Same array
- * if the group is already listed (a refetch beat the accept, or a second tap).
- */
+/** Same array if the group is already listed. */
 export function withGroup<G extends { id: string }>(groups: readonly G[], group: G): G[] {
   if (groups.some((g) => g.id === group.id)) {
     return groups as G[];
@@ -60,12 +37,7 @@ export function withGroup<G extends { id: string }>(groups: readonly G[], group:
   return [...groups, group];
 }
 
-/**
- * Apply the accept to the cache: drop the invite from the pending list and put
- * the group into every loaded group list. Returns what was there before, for
- * `rollbackAcceptedInvite`. A list that was never loaded is left alone — it
- * will load with the group in it.
- */
+/** Returns the previous state for `rollbackAcceptedInvite`; unloaded lists are left alone. */
 export function applyAcceptedInvite(
   cache: CacheLike,
   opts: {
@@ -99,7 +71,6 @@ export function applyAcceptedInvite(
   return snapshot;
 }
 
-/** Put every cache `applyAcceptedInvite` changed back as it was. */
 export function rollbackAcceptedInvite(cache: CacheLike, snapshot: AcceptSnapshot | undefined): void {
   for (const entry of snapshot?.entries ?? []) {
     cache.setQueryData(entry.key, entry.data);

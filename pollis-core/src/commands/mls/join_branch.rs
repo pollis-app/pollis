@@ -1,52 +1,16 @@
 //! Unconfirmed external-join branches, and who may replace a local group (#1220).
 //!
-//! An external join builds and MERGES its commit locally before the commit-log
-//! compare-and-swap decides whether it won. Until then the stored group is a
-//! *branch*: if another member's commit took the same epoch, it was never part
-//! of the canonical log and has to go. Every other local group, however it got
-//! here (a Welcome, our own creation, an external join that won), is
-//! *confirmed*: it sits on the canonical log, and under `max_past_epochs = 0` it
-//! holds the only keys this device will ever have for its current epoch.
-//!
-//! Before #1220 the two looked the same, so both join paths replaced whatever
-//! was stored:
-//!
-//! * A recipient that lost the epoch-0 race dropped its branch and, on the
-//!   retry, external-joined again. If its Welcome had been applied in between,
-//!   that retry deleted the confirmed Welcome group (epoch 1) and joined at
-//!   epoch 2. Anything the creator sealed at epoch 1 was undecryptable from then
-//!   on, and the ingest cursor (correctly, for an epoch the device no longer
-//!   holds) moved past it: the message was lost.
-//! * The same Welcome, polled while the doomed branch was still stored at its
-//!   epoch, was refused as a replay and acknowledged — gone for good — and the
-//!   retry ended in the same place.
+//! An external join merges its commit before the log's CAS decides; until then the stored group is an unconfirmed *branch*. Every other local group is *confirmed* and holds the only keys for its epoch.
 //!
 //! The marker here tells the two apart, and two predicates decide every
 //! replacement:
 //!
-//! * [`external_join_may_replace`]: an external join replaces nothing but its
-//!   own unconfirmed branch. A confirmed group is never thrown away to build
-//!   another branch; the join stands down instead (the device is already a
-//!   member). Callers that genuinely need to rebuild a broken group say so by
-//!   deleting it first (`forget_local_mls_group_at`).
-//! * [`welcome_may_replace`]: a Welcome replaces a strictly older group, as
-//!   before, and ALSO an unconfirmed branch at the same epoch. A Welcome at or
-//!   above a branch's epoch was produced by a commit at or above the epoch the
-//!   branch is trying to claim, so the branch's compare-and-swap cannot win.
+//! * [`external_join_may_replace`]: only its own unconfirmed branch; a confirmed group makes the join stand down.
+//! * [`welcome_may_replace`]: a strictly older group, or an unconfirmed branch at the same epoch.
 //!
-//! Together they make "a device discards a group the canonical log carries,
-//! for a branch it does not" unrepresentable on these paths, which is what the
-//! watermark's rule "an envelope below the epoch this pass started at is
-//! permanently undecryptable" relies on.
-//!
-//! Stored in `mls_kv` beside the group state it describes, under its own scope,
-//! so it needs no local schema change and travels with the MLS state in every
-//! database that has one.
+//! Together they make discarding a log-carried group for a branch unrepresentable.
 
-/// `mls_kv` scope for the marker rows. Key: the raw MLS GroupId bytes of the
-/// lineage (`mls_group_id(conversation_id, generation)`). Value: the epoch the
-/// branch was built at, little-endian — kept for diagnostics only; the
-/// decisions below need only the marker's presence.
+/// `mls_kv` scope for the marker rows, keyed by lineage GroupId; the stored epoch is diagnostic only.
 const UNCONFIRMED_JOIN_SCOPE: &str = "pollis_unconfirmed_join";
 
 fn key(conversation_id: &str, generation: i64) -> Vec<u8> {
@@ -86,10 +50,7 @@ pub(super) fn clear(conn: &rusqlite::Connection, conversation_id: &str, generati
     }
 }
 
-/// Is the group stored for `(conversation_id, generation)` an unconfirmed
-/// external-join branch? A failed read answers `false`: treating a branch as
-/// confirmed only ever keeps a group, never destroys one, and a doomed branch
-/// that is kept is caught by the replay's fork recovery.
+/// Is the stored group an unconfirmed external-join branch? A failed read answers `false`, which only ever keeps a group.
 pub(super) fn is_unconfirmed(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -108,11 +69,6 @@ pub(super) fn is_unconfirmed(
 }
 
 /// May an external join replace what is stored for its lineage?
-///
-/// `stored` = a group exists for the lineage; `unconfirmed` = it is this
-/// device's own branch that the log has not accepted. Only nothing, or an
-/// unconfirmed branch, may be replaced. A confirmed group means the device is
-/// already a member, and the join must stand down rather than delete it.
 pub(super) fn external_join_may_replace(stored: bool, unconfirmed: bool) -> bool {
     !stored || unconfirmed
 }
@@ -120,12 +76,7 @@ pub(super) fn external_join_may_replace(stored: bool, unconfirmed: bool) -> bool
 /// May a Welcome at `welcome_epoch` replace the group stored for its lineage at
 /// `local_epoch`?
 ///
-/// A confirmed group is replaced only by a STRICTLY newer Welcome; one at or
-/// below it is a replay or a fabrication (#1161 C1). An unconfirmed branch is
-/// also replaced by a Welcome at its own epoch: the branch was built on the
-/// GroupInfo at `local_epoch - 1` and is trying to claim that epoch, and a
-/// Welcome at `local_epoch` or above comes from a commit that already holds it,
-/// so the branch is doomed and the Welcome is the canonical way in.
+/// Confirmed: only a STRICTLY newer Welcome (#1161 C1). Unconfirmed: also one at its own epoch, since the branch is doomed.
 pub(super) fn welcome_may_replace(local_epoch: u64, welcome_epoch: u64, unconfirmed: bool) -> bool {
     if unconfirmed {
         welcome_epoch >= local_epoch
@@ -138,18 +89,10 @@ pub(super) fn welcome_may_replace(local_epoch: u64, welcome_epoch: u64, unconfir
 /// lineage (#1312). Key: as [`UNCONFIRMED_JOIN_SCOPE`]. Value: the epoch,
 /// little-endian.
 ///
-/// It separates the one loss this device was never entitled to avoid — a
-/// message sealed while it was not in the tree — from every other. Two ways in
-/// set it, deliberately differently:
+/// It separates the never-sent loss from real losses. Two ways in:
 ///
-/// * **Added** (a Welcome, [`record_added`]): someone put this device in the
-///   tree at that epoch. Whatever was sealed before it — first join, or the gap
-///   while it was removed and before it was re-added — it was never sent to
-///   this device. Replaces any earlier value.
-/// * **Held** (creating the group, an external join, [`record_first_join`]):
-///   only the FIRST is kept. A group rebuilt by recovery keeps the original
-///   floor, because what the device missed in between was sent while it was a
-///   member and is a real loss.
+/// * **Added** ([`record_added`]): replaces any earlier value; earlier messages were never sent to it.
+/// * **Held** ([`record_first_join`]): only the FIRST is kept, so a recovery rebuild's gap stays a real loss.
 const FIRST_JOIN_SCOPE: &str = "pollis_first_join";
 
 fn write_join(
@@ -220,34 +163,15 @@ pub(crate) fn first_join(
 /// `mls_kv` scope for the "entitled since" marker (#1571). Key: as
 /// [`UNCONFIRMED_JOIN_SCOPE`]. Value: an RFC 3339 UTC instant, UTF-8.
 ///
-/// [`FIRST_JOIN_SCOPE`]'s floor says what this device never HELD; it cannot say
-/// whether that was an accepted loss. For a NEW device it is (loss #2), and for
-/// anything sent before the USER joined it is (loss #1). But a device that was
-/// already registered when its user became a member here was supposed to be in
-/// the tree all along: if it first holds the group later — a peer's add skipped
-/// it, its Welcome failed to apply, nothing re-added it, and it external-joined
-/// at the head of the log — what was sent in between is a real loss and must be
-/// shown, not passed silently. This marker records that the device was in that
-/// position, and from when (the user's membership), so the ingest's loss check
-/// can tell the two apart (`messages::ingest::record_losses`).
+/// A device registered before its user joined should have been in the tree all along, so a later first hold's gap is a real loss; this marks that case for `messages::ingest::record_losses`.
 const ENTITLED_SINCE_SCOPE: &str = "pollis_entitled_since";
 
-/// Parse the two timestamp shapes the Delivery Service stores: RFC 3339
-/// (client-stamped columns such as `dm_channel_member.added_at` and an
-/// envelope's `sent_at`) and SQLite's `datetime('now')`, `YYYY-MM-DD HH:MM:SS`
-/// in UTC (server-defaulted columns such as `user_device.created_at` and
-/// `group_member.joined_at`). Answers the START of the window the stamp names;
-/// see [`ds_instant_window`].
+/// Parse the DS's two timestamp shapes: RFC 3339 and SQLite `datetime('now')` (UTC). Answers the start of the window; see [`ds_instant_window`].
 pub(crate) fn parse_ds_instant(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     ds_instant_window(raw).map(|(start, _)| start)
 }
 
-/// The window a stored stamp names: an instant for a stamp with sub-second
-/// digits, the whole second for one without. `datetime('now')` truncates, so
-/// "01:49:21" means "some time during that second", and comparing it as the
-/// instant 01:49:21.000 would read an event later in the same second as
-/// earlier than it. Every comparison below takes the side of the window that
-/// keeps an undecidable case silent (the pre-#1571 behaviour).
+/// The window a stored stamp names: `datetime('now')` truncates to the second. Comparisons take the side that keeps an undecidable case silent.
 pub(crate) fn ds_instant_window(
     raw: &str,
 ) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
@@ -269,16 +193,7 @@ pub(crate) fn ds_instant_window(
         })
 }
 
-/// The instant from which this device was entitled to the conversation's
-/// messages despite not holding its group, or `None` when it was not: the pure
-/// rule behind [`record_entitlement`]. Entitled only when the device was
-/// registered strictly BEFORE its user became a member (the whole window of the
-/// registration stamp ends by the start of the membership's); a device
-/// registered after is a new device (loss #2) and gets nothing earlier than its
-/// own join. The answer is the END of the membership stamp's window, so nothing
-/// sent in the second the membership began is claimed for it. Either input
-/// missing or unreadable answers `None`: the pre-#1571 behaviour, a silent
-/// pass.
+/// The instant from which this device was entitled despite not holding the group: only when registered strictly before its user's membership. Answers the end of the membership window; missing input is `None`.
 pub(crate) fn entitlement(
     device_registered_at: Option<&str>,
     member_since: Option<&str>,
@@ -296,10 +211,7 @@ pub(crate) fn entitlement(
 /// (#1571), written just before the join records its floor and consumed by
 /// [`record_entitlement`]. Value: empty.
 ///
-/// The entitlement is only for a device that never held the lineage — the
-/// incident's shape. A device that held it, was evicted while its user stayed a
-/// member, and was re-added keeps #1524's rule that the gap "while you were
-/// out" was never sent to it; a recovery rebuild keeps its original floor.
+/// Only a never-held lineage qualifies; a re-add keeps #1524's silent gap.
 const FRESH_JOIN_SCOPE: &str = "pollis_fresh_join";
 
 /// Mark the join about to record its floor as this device's first hold of
@@ -330,10 +242,7 @@ pub(crate) fn take_fresh(conn: &rusqlite::Connection, conversation_id: &str, gen
 
 /// Record, for the lineage this device just joined, whether (and since when) it
 /// was entitled to what was sent before that join — see [`ENTITLED_SINCE_SCOPE`].
-/// Called with the snapshot that admitted the join (an external join, or the
-/// corroboration read behind a Welcome). Only a FIRST hold of the lineage
-/// qualifies (`fresh`, from [`take_fresh`]). Best-effort: a missing marker only
-/// keeps a late join's gap silent, as it was before #1571.
+/// Only a FIRST hold (`fresh`) qualifies. Best-effort.
 pub(crate) fn record_entitlement(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -348,12 +257,7 @@ pub(crate) fn record_entitlement(
     let Some(since) = entitlement(device_registered_at, member_since) else {
         return;
     };
-    // The floor this first hold just recorded. The entitlement covers only what
-    // was sealed BELOW it — the gap before the device ever held the lineage.
-    // A later removal and re-add moves the floor (`record_added`) but not this
-    // bound, so the "while you were out" gap stays #1524's silent pass rather
-    // than reading as owed to the device on the strength of a membership that
-    // has since ended.
+    // Only what was sealed below the first-hold floor; a later re-add moves the floor but not this bound (#1524).
     let Some(below_epoch) = first_join(conn, conversation_id, generation) else {
         return;
     };
@@ -406,9 +310,7 @@ pub(crate) fn entitled_since(
 mod tests {
     use super::*;
 
-    /// #1571: only a device registered BEFORE its user's membership is entitled
-    /// to a late join's gap; a newer device (loss #2) and an unreported input
-    /// stay silent. Both stored timestamp shapes are read.
+    /// #1571: only a device registered before its user's membership is entitled.
     #[test]
     fn only_a_device_registered_before_the_membership_is_entitled() {
         let since = "2026-10-20T01:49:21.000+00:00";
@@ -471,9 +373,7 @@ mod tests {
         assert!(!take_fresh(&conn, "c", 0), "a lineage held before is not fresh");
     }
 
-    /// A rebuild (external join) keeps the first floor — what the device missed
-    /// in between is a real loss — but being ADDED again (a Welcome after a
-    /// removal) moves it: the gap was never sent to this device.
+    /// A rebuild keeps the first floor; being ADDED again moves it.
     #[test]
     fn a_rebuild_keeps_the_floor_and_a_re_add_moves_it() {
         let conn = kv();

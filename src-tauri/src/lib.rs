@@ -5,20 +5,14 @@ pub use pollis_core::keystore;
 pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
-// The registry of paths a human actually chose, and the gate the path-taking
-// command shims call before they touch one.
 pub mod pathscope;
-// The system tray is built from Wry-typed handles (TrayIcon<Wry>, Menu<Wry>);
-// only compiled with the native shell.
 #[cfg(feature = "native-shell")]
 pub mod tray;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
 
-// These imports are only used by the native-shell helpers + run() below, all
-// gated on `native-shell`. Gate the imports too so the headless lib builds
-// warning-free (the test harness pulls in AppState via its own `use`).
+// Gated so the headless lib builds warning-free.
 #[cfg(feature = "native-shell")]
 use std::sync::Arc;
 #[cfg(feature = "native-shell")]
@@ -29,10 +23,7 @@ use config::Config;
 #[cfg(feature = "native-shell")]
 use state::AppState;
 
-/// Tear down every live capture: screen share, camera, and camera preview. All
-/// three are idempotent no-ops when nothing is running, so this is safe on any
-/// shutdown path — and keeping the set in one place stops a new capture kind
-/// from being torn down on two paths out of three.
+/// Tear down every live capture (screen share, camera, preview); idempotent.
 #[cfg(feature = "native-shell")]
 async fn stop_all_capture(state: &Arc<AppState>) {
     let _ = pollis_core::commands::screenshare::stop_screen_share(state).await;
@@ -40,17 +31,11 @@ async fn stop_all_capture(state: &Arc<AppState>) {
     let _ = pollis_core::commands::camera::stop_camera_preview(state).await;
 }
 
-/// On macOS, intercept the window close request (Cmd+W / red traffic light)
-/// and hide the window instead of destroying it. The app keeps running in
-/// the dock and can be re-opened without a cold start.
+/// macOS: hide the window on close instead of destroying it.
 #[cfg(all(feature = "native-shell", target_os = "macos"))]
 fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-        // Cmd+W only hides the window (real quit is Cmd+Q →
-        // ExitRequested), so an active screen-share would otherwise keep
-        // capturing forever with no way to stop it. Tear it down before
-        // hiding. stop_screen_share is idempotent — a no-op when nothing
-        // is sharing.
+        // Cmd+W only hides, so stop an active screen-share or it captures forever.
         if let Some(state) = window.app_handle().try_state::<Arc<AppState>>() {
             let state = state.inner().clone();
             tauri::async_runtime::spawn(async move {
@@ -62,19 +47,7 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
     }
 }
 
-/// Apply rounded corners to an NSWindow using only public AppKit APIs.
-/// Technique: make the window non-opaque with a clear background, then set
-/// the contentView's CALayer cornerRadius + masksToBounds so the rendered
-/// content is clipped to a rounded rect.
-///
-/// Titlebar: we keep the macOS "hidden inset" style — a transparent,
-/// title-hidden titlebar with the native traffic lights visible, sitting over
-/// the full-size content view. This matches the Electron build
-/// (`titleBarStyle: "hidden"`) and the frontend `TitleBar`, which reserves a
-/// 68px slot at top-left for the native controls. The window config sets
-/// `decorations: false` (borderless, no buttons), so we re-add the
-/// titled/closable/miniaturizable/resizable masks here to bring the traffic
-/// lights back; without them the reserved 68px slot renders empty.
+/// Rounded corners via public AppKit APIs; re-adds the titled masks so the traffic lights exist despite `decorations: false`.
 #[cfg(all(feature = "native-shell", target_os = "macos"))]
 fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
     use cocoa::appkit::{NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
@@ -86,11 +59,6 @@ fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
         Err(_) => return,
     };
     unsafe {
-        // Merge in FullSizeContentView so the webview paints under the
-        // titlebar region, and restore the titled/closable/miniaturizable/
-        // resizable masks so the native traffic lights exist (decorations:false
-        // strips them). The titlebar itself stays transparent + title-hidden,
-        // so only the three buttons show over the rounded content below.
         let mut mask = ns_window.styleMask();
         mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask
             | NSWindowStyleMask::NSTitledWindowMask
@@ -135,8 +103,6 @@ fn apply_windows_rounded_corners(window: &tauri::WebviewWindow) {
     }
 }
 
-/// On macOS, re-show the main window when the user clicks the dock icon
-/// (RunEvent::Reopen).
 #[cfg(all(feature = "native-shell", target_os = "macos"))]
 fn show_on_reopen(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -145,19 +111,10 @@ fn show_on_reopen(app: &tauri::AppHandle) {
     }
 }
 
-/// Read the OS clipboard and return any file paths found in it.
-///
-/// On macOS, Finder puts file references on the clipboard using
-/// `public.file-url` (NSPasteboard), not as plain text with file:// URIs.
-/// The clipboard-manager plugin's `read_text()` can't see those, so we
-/// shell out to `osascript` to read NSPasteboard file URLs directly.
-///
-/// On Linux, file managers use the text/uri-list MIME type with file:// URIs,
-/// which `read_text()` picks up fine.
+/// Clipboard file paths. macOS Finder uses `public.file-url`, which `read_text()` can't see, hence `osascript`.
 #[cfg(feature = "native-shell")]
 #[tauri::command]
 fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
-    // macOS: read file URLs from NSPasteboard via AppleScript-ObjC bridge
     #[cfg(target_os = "macos")]
     {
         let _ = &app; // suppress unused warning
@@ -193,7 +150,6 @@ fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
         };
     }
 
-    // Linux/Windows: read text clipboard for file:// URIs (text/uri-list)
     #[cfg(not(target_os = "macos"))]
     {
         use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -213,20 +169,7 @@ fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
     }
 }
 
-/// Read a raster image from the OS clipboard and return it as PNG bytes.
-/// Empty when the clipboard holds no image data.
-///
-/// Used as a fallback for clipboard content that the WebKit paste event
-/// doesn't expose as `DataTransferItem` files — notably screenshots and
-/// images copied from a browser on Linux. macOS WebKit surfaces these as
-/// JS File objects directly, so this is mainly a Linux/Windows path.
-///
-/// It used to save the PNG into the OS temp directory as
-/// `pollis-paste-<nanos>.png` and hand back the path. Nothing ever deleted it,
-/// so every screenshot a user had ever pasted stayed in `/tmp` in the clear.
-/// Returning the bytes means the renderer can build its preview and hand them
-/// straight to `stage_attachment`, and the image never touches a disk at all —
-/// see `pollis_core::commands::staging`.
+/// Clipboard image as PNG bytes, returned rather than written to temp so it never touches disk.
 #[cfg(feature = "native-shell")]
 #[tauri::command]
 async fn read_clipboard_image(app: tauri::AppHandle) -> tauri::ipc::Response {
@@ -257,11 +200,7 @@ async fn read_clipboard_image(app: tauri::AppHandle) -> tauri::ipc::Response {
     tauri::ipc::Response::new(png.into_inner())
 }
 
-/// Write plain text to the OS clipboard.
-///
-/// Used by "copy link" (#854). Goes through the clipboard-manager plugin rather
-/// than `navigator.clipboard` because the latter is unreliable on WebKitGTK,
-/// which is the Linux webview this app ships on.
+/// Via the clipboard plugin: `navigator.clipboard` is unreliable on WebKitGTK (#854).
 #[cfg(feature = "native-shell")]
 #[tauri::command]
 fn write_clipboard_text(app: tauri::AppHandle, text: String) -> bool {
@@ -270,8 +209,7 @@ fn write_clipboard_text(app: tauri::AppHandle, text: String) -> bool {
     app.clipboard().write_text(text).is_ok()
 }
 
-/// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
-/// or close it on Windows/Linux.
+/// Cmd+W: hide on macOS, close elsewhere.
 #[cfg(feature = "native-shell")]
 #[tauri::command]
 fn hide_window(window: tauri::Window) {
@@ -285,16 +223,7 @@ fn hide_window(window: tauri::Window) {
 #[cfg(feature = "native-shell")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // macOS launches GUI apps with a soft `RLIMIT_NOFILE` of 256, which is
-    // not enough once realtime LiveKit rooms (one per group), libsql
-    // websockets, reqwest connection pools, the local media-cache HTTP
-    // server, and CoreAudio AudioUnits all coexist. Hitting the cap surfaces
-    // as `EMFILE` (`Too many open files`) inside CoreAudio (`UpdateStreamFormats:
-    // 0 output streams`), `libsystem_dnssd` (`socketpair failed 24`), and
-    // websocket reconnects — i.e. voice silently failing to publish, devices
-    // disappearing from enumeration, and random kicks from voice channels.
-    // Raise the soft limit to the hard max; the hard max on macOS is
-    // typically `unlimited` (OPEN_MAX, 10240 in practice).
+    // macOS GUI apps get a soft RLIMIT_NOFILE of 256; EMFILE breaks CoreAudio, DNS and websockets.
     #[cfg(unix)]
     unsafe {
         let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
@@ -312,33 +241,13 @@ pub fn run() {
         }
     }
 
-    // WebKitGTK 2.42+ attempts DMA-BUF rendering and aborts if GBM/EGL is
-    // unavailable (e.g. certain GPU drivers, VMs, Wayland compositors without
-    // DRM). Disable it so the app doesn't crash on launch.
-    //
-    // NOT unconditional, despite what this comment used to say. `main.rs`
-    // deliberately skips both WebKit disables when POLLIS_ENABLE_COMPOSITING is
-    // set, and this line then set one of them straight back — so the documented
-    // escape hatch could not actually be exercised, and nobody could measure
-    // the accelerated path even by asking for it. Honouring the same opt-in
-    // here is what makes that flag mean something.
-    //
-    // The perf stake is real: with WebKitGTK's accelerated compositing off
-    // there is no WebGL, so the in-app terminal falls back to a slower renderer
-    // (see TerminalView.tsx). Launching at all still wins over launching fast,
-    // which is why the conservative path remains the default.
+    // WebKitGTK DMA-BUF rendering aborts without GBM/EGL; honour POLLIS_ENABLE_COMPOSITING like main.rs.
     #[cfg(target_os = "linux")]
     if std::env::var("POLLIS_ENABLE_COMPOSITING").is_err() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 
-    // WebKit uses GStreamer for media playback. The `autoaudiosink` element
-    // (gst-plugins-good) is not always installed. When it is missing, GStreamer
-    // returns NULL and WebKitWebProcess crashes with a GLib NULL-pointer assertion
-    // instead of degrading gracefully. Setting GST_AUDIO_SINK to `pulsesink`
-    // (provided by gst-plugins-good on PulseAudio/PipeWire systems) is safer;
-    // on PipeWire the PulseAudio compatibility layer handles it transparently.
-    // We only override if the user hasn't set it themselves.
+    // A missing `autoaudiosink` crashes WebKitWebProcess; default to `pulsesink` unless the user set one.
     #[cfg(target_os = "linux")]
     if std::env::var("GST_AUDIO_SINK").is_err() {
         std::env::set_var("GST_AUDIO_SINK", "pulsesink");
@@ -354,24 +263,16 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            // Load .env.development in dev builds (no-op if file doesn't exist)
             #[cfg(debug_assertions)]
             let _ = dotenvy::from_filename(".env.development");
 
             let config = Config::from_env().map_err(|e| e.to_string())?;
 
-            // Owned app handle captured before `app` is moved into the async
-            // block below — used to set up the system tray afterwards.
             let tray_handle = app.handle().clone();
 
-            // Capture the window handle before app is moved into the async block.
             #[cfg(target_os = "linux")]
             let main_window = app.get_webview_window("main");
 
-            // Round the window corners using public APIs only (App Store
-            // compliant). We set the contentView's CALayer cornerRadius and
-            // mask it, then make the NSWindow non-opaque with a clear
-            // background so the area outside the rounded rect isn't drawn.
             // Radius matches `border-radius: 10px` in index.css.
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
@@ -381,25 +282,18 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             tauri::async_runtime::spawn_blocking(commands::install_kind::heal_self_quarantine_at_startup);
 
-            // Windows 11 rounds decorated windows via DWM. Since we use
-            // decorations: false we must opt in explicitly. Windows 10 has
-            // no API for this and falls back to square corners.
+            // decorations: false needs an explicit DWM opt-in for rounding (Windows 11 only).
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
                 apply_windows_rounded_corners(&window);
             }
 
-            // Initialise the on-disk media cache. The frontend renders
-            // attachments by file path (via convertFileSrc) instead of
-            // pumping decrypted bytes through the JSON IPC.
             if let Ok(data_dir) = app.path().app_data_dir() {
                 let cache_dir = data_dir.join("media-cache");
                 let _ = pollis_core::private_fs::create_dir_all(&cache_dir);
                 pollis_core::commands::r2::set_media_cache_dir(cache_dir);
             }
 
-            // On-device diagnostics log (#1305). Opened before AppState so the
-            // startup path is in it; a failure leaves logging on stderr only.
             let log_dir = pollis_core::diag::log_dir(&pollis_core::db::local::dirs_path());
             if let Err(e) = pollis_core::diag::init(&log_dir) {
                 pollis_core::diag!("[diag] could not open the diagnostics log: {e}");
@@ -409,10 +303,7 @@ pub fn run() {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
                 let state = Arc::new(state);
 
-                // Honor POLLIS_OVERLAY at boot through the runtime apply path
-                // (design §14: construct DBs direct, then apply the mode). A
-                // failure here must not block startup — it leaves the overlay off
-                // (direct), the safe default.
+                // A failure must not block startup; it leaves the overlay off (direct).
                 let boot_mode = state.config.overlay_mode;
                 if let Err(e) =
                     pollis_core::commands::overlay::apply_overlay_mode(&state, boot_mode).await
@@ -420,11 +311,7 @@ pub fn run() {
                     pollis_core::diag!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
                 }
 
-                // Loopback HTTP server for cached media. The webview
-                // embeds `http://127.0.0.1:<port>/<token>/<hash>` URLs
-                // for every `<img>/<audio>/<video>` element. Spawned
-                // before `manage` so the port is on `AppState` by the
-                // time any frontend code runs.
+                // Spawned before `manage` so the port is set before any frontend code runs.
                 match pollis_core::media_server::spawn(state.clone()).await {
                     Ok(port) => {
                         *state.media_server_port.lock().await = Some(port);
@@ -434,45 +321,27 @@ pub fn run() {
                     }
                 }
 
-                // Hand the relay-serving manager the signed directory + device
-                // identity it needs to park outbound connections (#813). Without
-                // this a consenting device runs its node but nothing can reach
-                // it, and the status line says exactly that.
+                // Without this a consenting device runs a node nothing can reach (#813).
                 pollis_core::commands::relay_serving::attach_app_state(&state);
 
                 app.manage(state);
                 Ok::<(), String>(())
             })?;
 
-            // System tray (Linux/Windows created now; macOS opt-in via the
-            // renderer's "Menu bar icon" preference → tray_set_enabled).
             tray_handle.manage(tray::TrayState::default());
             tray::setup(&tray_handle);
 
-            // Push relay-serving status changes to the renderer as a global
-            // event. Required rather than optional: CLAUDE.md bans polling, so
-            // without this the "Run a relay for others" status line would only
-            // refresh when Preferences remounts.
+            // Pushed as an event because polling is banned.
             commands::relay_serving::install_status_sink(tray_handle.clone());
 
-            // Push the idle auto-lock to the renderer as a global event (#851).
-            // The deadline is owned by Rust because a WebView throttles its own
-            // timers exactly when the window is hidden — the case auto-lock
-            // exists for.
+            // Rust owns the deadline: a hidden WebView throttles its timers (#851).
             commands::autolock::install_auto_lock_sink(tray_handle.clone());
 
-            // The registry of paths a human actually chose (`pathscope`).
-            // Written only from inside this process — the Rust-driven file
-            // pickers and the DragDrop window event below — and read by the
-            // four command shims that take a path off the IPC.
+            // Written only by Rust-driven pickers and DragDrop, so only a human grows it.
             tray_handle.manage(crate::pathscope::PathScope::default());
 
-            // Holds the "revoke media permissions on quit" preference so the
-            // ExitRequested hook can read it synchronously at shutdown.
             tray_handle.manage(commands::media_permissions::MediaPermissionsState::default());
 
-            // WebRTC is disabled by default in WebKitGTK and must be explicitly enabled.
-            // Without this, RTCPeerConnection is undefined in the JS context on Linux.
             #[cfg(target_os = "linux")]
             if let Some(window) = main_window {
                 use webkit2gtk::{SettingsExt, WebViewExt};
@@ -601,22 +470,18 @@ pub fn run() {
             commands::blocks::unblock_user,
             commands::blocks::report_user,
             commands::blocks::list_blocked_users,
-            // Saved messages + permalinks (#854). Device-local; no DS endpoint
-            // backs any of these, and resolve_message_permalink deliberately
-            // only ever consults the local database.
+            // Saved messages + permalinks (#854); device-local only.
             commands::bookmarks::save_message,
             commands::bookmarks::unsave_message,
             commands::bookmarks::toggle_saved_message,
             commands::bookmarks::list_saved_messages,
             commands::bookmarks::resolve_message_permalink,
-            // On-device plaintext export (#856). Device-local; no network.
+            // On-device export (#856).
             commands::export::export_archive,
             commands::export::fetch_export_attachments,
-            // Pinned messages (#99)
             commands::pinned_messages::pin_message,
             commands::pinned_messages::unpin_message,
             commands::pinned_messages::list_pinned_messages,
-            // Vault (#107)
             commands::vault::get_vault_messages,
             commands::vault::send_vault_message,
             commands::vault::edit_vault_message,
@@ -741,31 +606,17 @@ pub fn run() {
             commands::terminal::terminal_close,
             commands::terminal::terminal_ack,
         ])
-        // On macOS, hide the window on close instead of quitting.
-        //
-        // The media-cache cap is deliberately NOT re-evaluated here (#930).
-        // It used to be: every alt-tab walked the whole cache directory to
-        // total its size, which scales with months of accumulated media rather
-        // than with anything the user just did, and after #874 removed the
-        // seven focus-time IPC calls it was the only work left on focus. The
-        // cap is enforced by `pollis_core::commands::r2` on every cache write
-        // instead — a cache nobody is writing to cannot grow past it.
+        // No media-cache sweep on focus (#930): the cap is enforced on cache writes.
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
             hide_on_close(_window, _event);
-            // A drop is the other consent gesture that legitimately names a
-            // path (the picker is the first). The paths come from the OS in
-            // the event itself, so recording them here — rather than trusting
-            // the renderer to report what it was handed — is what keeps
-            // `pathscope` a set only a human can grow.
+            // Paths come from the OS event, not the renderer, so only a human grows `pathscope`.
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = _event {
                 let app = _window.app_handle();
                 if let Some(scope) = app.try_state::<crate::pathscope::PathScope>() {
                     crate::pathscope::remember_dropped(&scope, paths);
                 }
-                // The fs plugin keeps a second, separate runtime allowlist, and
-                // the renderer reads a dropped image through it to build the
-                // pre-send preview. Grant it here for the same paths.
+                // The fs plugin keeps its own allowlist; the preview reads through it.
                 if let Some(fs) = tauri_plugin_fs::FsExt::try_fs_scope(app) {
                     for path in paths {
                         let _ = if path.is_dir() {
@@ -777,9 +628,7 @@ pub fn run() {
                 }
             }
             if let tauri::WindowEvent::Focused(true) = _event {
-                // Bounded local history: evict messages past the device-local
-                // retention window on focus. This one is bounded by the
-                // retention window, not by the size of anything on disk.
+                // Evict messages past the local retention window.
                 if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
@@ -787,15 +636,7 @@ pub fn run() {
                     });
                 }
             }
-            // On Linux/Windows closing the window either hides it to the
-            // tray (when "Close to tray" is on and a tray exists) or really
-            // quits. When it hides, the app keeps running — so we must NOT
-            // tear down the screen-share. When it really closes, Tauri runs
-            // CloseRequested before ExitRequested gets a chance, and the
-            // helper child can briefly outlive the parent (PR_SET_PDEATHSIG
-            // catches it eventually but the portal screencast indicator /
-            // red dot lingers). Stop the share synchronously in that case so
-            // the user sees an immediate clean shutdown.
+            // Only tear down the share on a real close; hiding to tray keeps the app running.
             #[cfg(not(target_os = "macos"))]
             if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
                 if crate::tray::should_hide_on_close(_window.app_handle()) {
@@ -814,49 +655,25 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
         .run(|_app, _event| {
-            // On macOS, re-show the window when the dock icon is clicked.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 show_on_reopen(_app);
             }
-            // Wipe the media cache on app exit. Its files are AES-GCM
-            // encrypted under the session's `db_key`, but exit is a lifecycle
-            // boundary and media the user viewed has no reason to outlive the
-            // process that fetched it.
-            //
-            // `Everything`, not one user: this is the process going away, so
-            // there is no session left to keep a cache warm for. A second
-            // instance signed in as somebody else simply re-fetches — every
-            // read path treats a missing cache file as a cache miss.
+            // Wipe the whole media cache on exit; readers treat a missing file as a miss.
             if let tauri::RunEvent::ExitRequested { .. } = _event {
                 pollis_core::commands::r2::clear_media_cache(
                     pollis_core::commands::r2::CacheScope::Everything,
                 );
-                // Also kill any active screen-share helper subprocess.
-                // kill_on_drop on the Child handle would normally take
-                // care of this when AppState is dropped, but Tauri does
-                // not guarantee state drop ordering before _exit, so we
-                // explicitly nuke it here. Belt-and-suspenders: the
-                // helper also installs PR_SET_PDEATHSIG=SIGTERM so a
-                // hard parent crash still cleans it up.
+                // Tauri does not guarantee state drop order before _exit, so kill the helper here.
                 if let Some(state) = _app.try_state::<Arc<AppState>>() {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
                         stop_all_capture(&state).await;
-                        // Close the LiveKit rooms (realtime + voice) so the
-                        // server evicts us immediately instead of waiting out its
-                        // RTC timeout — otherwise our voice card lingers as a
-                        // ghost for everyone still in the channel. Tauri fires
-                        // no teardown hook of its own, so this is the only place
-                        // `AppState::shutdown` gets called — call it explicitly.
+                        // Close LiveKit rooms so we don't linger as a voice ghost; nothing else calls shutdown.
                         state.shutdown().await;
                     });
                 }
-                // If the user opted into "revoke system permissions when Pollis
-                // quits", best-effort clear the macOS TCC grants now. Reads the
-                // atomic synchronously — no async prefs fetch at exit. No-op on
-                // Linux/Windows. Runs after the capture teardown above so we
-                // never clear a grant out from under a still-live capture.
+                // After capture teardown, so a grant is never cleared under a live capture.
                 if let Some(mp) =
                     _app.try_state::<commands::media_permissions::MediaPermissionsState>()
                 {

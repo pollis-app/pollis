@@ -36,11 +36,7 @@ export const UpdatePage: React.FC = observer(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Managed-install probe goes first. A user on an AUR / .deb / .rpm
-        // install can't use the in-app updater regardless of whether a new
-        // version exists; we want to render the "use your package manager"
-        // banner even when no update is pending so they have one place to
-        // confirm how this app gets updated.
+        // Managed installs see the package-manager banner even with no update pending.
         const m = await invoke<ManagedInstallInfo | null>("detect_managed_install").catch(() => null);
         if (cancelled) {
           return;
@@ -48,8 +44,6 @@ export const UpdatePage: React.FC = observer(() => {
         if (m) {
           setManaged(m);
           setStatus("managed");
-          // Run the version check in the background so the "Update
-          // available: vX" line still appears on the managed screen.
           checkForUpdate()
             .then((update) => {
               if (cancelled) {

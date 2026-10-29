@@ -72,32 +72,20 @@ function MainApp() {
 
   const [appState, setAppState] = useState<AppState>("initializing");
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
-  // Pending Secret Key (first-device signup) — held in component state ONLY
-  // for the duration of the SaveSecretKeyScreen, never persisted.
+  // First-device Secret Key; component state only, never persisted.
   const [pendingSecretKey, setPendingSecretKey] = useState<string | null>(null);
-  // The user we're enrolling. Set when an enrollment-required login happens
-  // so the EnrollmentGateScreen knows whose account it's joining.
   const [pendingEnrollmentUser, setPendingEnrollmentUser] = useState<User | null>(null);
-  // Signed in by a QR device link (#1207): the gate auto-starts and shows no
-  // code, since approval happens on the device that showed the QR.
+  // QR device link (#1207): approval happens on the QR's device, so no code.
   const [pendingEnrollmentLinked, setPendingEnrollmentLinked] = useState(false);
-  // User queued for PIN setup (post-signup, post-enrollment, or
-  // post-upgrade when `pin_set` is false but the user already has a
-  // session) or PIN entry (returning user whose PIN is set but has not
-  // been entered this boot).
+  // User queued for PIN setup or entry.
   const [pendingPinUser, setPendingPinUser] = useState<User | null>(null);
   // Why the last session ended when the user did not end it (#1338).
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
 
 
-  /// Final phase of any successful sign-in (resume or fresh OTP). Loads
-  /// preferences, debug data, and transitions to "ready". Assumes the
-  /// user has account_id_key locally — call only AFTER first-device
-  /// signup or device enrollment has completed.
+  /// Final phase of any sign-in; call only after signup or enrollment completes.
   const completeSignIn = useCallback(async (user: User) => {
-    // Adopt this user's device-local language before the shell renders, so a
-    // shared OS account switches languages at sign-in rather than showing the
-    // previous user's choice until Preferences is opened.
+    // Before the shell renders, so a shared OS account switches language at sign-in.
     await adoptUserLanguage(user.id);
     try {
       await api.initializeIdentity(user.id);
@@ -123,7 +111,6 @@ function MainApp() {
       // Font size is device-local; the legacy remote field (if any) seeds it once.
       applyDeviceFontSize(user.id, prefs);
     } catch {
-      // Preferences are optional
     }
     setCurrentUser(user);
     setAppState("ready");
@@ -131,14 +118,7 @@ function MainApp() {
 
   const checkStoredSession = useCallback(async () => {
     try {
-      // Launch-time auto-update: only runs for user-installed binaries
-      // (manual .dmg/.exe/.AppImage). If a system package manager owns
-      // this install (AUR today; MAS / Microsoft Store / Flatpak in the
-      // future), the in-app updater can't replace the binary — skip the
-      // gate entirely and let the user into the app. The 15-min poller
-      // surfaces the "Update available" badge in the status bar, which
-      // routes to /update where the package-manager instructions live.
-      // Dev builds skip the whole thing.
+      // Launch-time auto-update, skipped for package-manager installs and dev builds.
       if (!import.meta.env.DEV) {
         const managed = await invoke<ManagedInstallInfo | null>(
           "detect_managed_install",
@@ -156,36 +136,23 @@ function MainApp() {
 
       const session = await api.getSession();
       if (session) {
-        // If this device was revoked while offline it never received the
-        // realtime "device_revoked" nudge — confirm registration on startup
-        // and sign out if its row is gone. Errors (offline) fall through, so a
-        // transient blip never signs anyone out.
+        // Revoked while offline: confirm registration; errors fall through.
         const stillRegistered = await api
           .isCurrentDeviceRegistered(session.user.id)
           .catch(() => true);
         if (!stillRegistered) {
-          // Revoked while this app was closed (#1338): the same sign-out, with
-          // the same notice, as any other way of learning it.
           deviceWasRevoked();
           return;
         }
 
         if (session.enrollmentRequired) {
-          // Returning device that has never been enrolled (e.g. user
-          // signed in once before the enrollment system shipped, or the
-          // OS keystore got wiped). Route to the gate before any other
-          // UI renders.
+          // Never enrolled (or keystore wiped): the gate comes first.
           setPendingEnrollmentUser(session.user);
           setAppState("enrollment-required");
           return;
         }
 
-        // PIN gate.  `is_unlocked` resets on every boot since it only
-        // lives in memory.  `pin_set` tells us whether there's a PIN
-        // to enter in the first place — users who upgraded from a
-        // pre-PIN build land here with `pin_set=false` and are routed
-        // to the create screen, which wraps their existing `db_key` /
-        // `account_id_key` in place.
+        // `is_unlocked` is in-memory; pre-PIN upgrades (`pin_set=false`) go to create.
         const unlockState = await api.getUnlockState();
         if (unlockState.pin_set && !unlockState.is_unlocked) {
           setPendingPinUser(session.user);
@@ -200,12 +167,10 @@ function MainApp() {
 
         await completeSignIn(session.user);
       } else {
-        // No active session — load known accounts for the login screen
         try {
           const index = await api.listKnownAccounts();
           setKnownAccounts(index.accounts);
         } catch {
-          // Non-critical — fall through to email auth without the list
         }
         setAppState("email-auth");
       }
@@ -227,7 +192,6 @@ function MainApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Escape on logout-confirm goes back to ready
   useEffect(() => {
     if (appState !== "logout-confirm") {
       return;
@@ -244,15 +208,9 @@ function MainApp() {
 
   useWindowState();
 
-  // Re-apply visual preferences whenever the prefs query resolves. Covers
-  // both the login path and the app-reopen path (stored session) — without
-  // this, prefs only applied via completeSignIn's one-shot fetch, which
-  // could silently miss on reopen if the request raced the UI.
   useApplyPreferences();
 
-  // Wire the voice session manager's lifecycle events to side effects (SFX,
-  // query invalidation, presence broadcasts). Done once per app lifetime; the
-  // bridge holds a stable reference to queryClient and the prefs query.
+  // Wire voice lifecycle side effects once per app lifetime.
   const queryClient = useQueryClient();
   const prefsQuery = usePreferences().query;
   const prefsRef = useRef(prefsQuery.data);
@@ -269,36 +227,19 @@ function MainApp() {
     };
   }, [queryClient]);
 
-  // Safety net: if currentUser is cleared (e.g. account deletion) but appState
-  // is still "ready", redirect to auth so the user isn't stuck on a blank screen.
+  // currentUser cleared while "ready" (e.g. account deletion): go to auth.
   useEffect(() => {
     if (appState === "ready" && !currentUser) {
       setAppState("email-auth");
     }
   }, [appState, currentUser]);
 
-  // Drop every in-memory message draft on any transition of the active user
-  // id — login (null → id), logout (id → null), account switch (id → other
-  // id). Drafts are intentionally not persisted, so this is the only thing
-  // a second user logging in on the same machine ever sees: an empty
-  // composer in every channel, including ones both users are members of.
+  // Drafts aren't persisted; drop them on any active-user change.
   useEffect(() => {
     clearAllDrafts();
   }, [currentUser?.id]);
 
-  // Locking has to empty the React Query cache, not just stop rendering it.
-  // `pin::lock` drops the keys and closes the local DB, but every message body
-  // the user had already read stays decrypted in the query cache — which is
-  // module-level and outlives AppShell — so without this the plaintext this
-  // feature exists to protect is still sitting in the heap, one devtools
-  // snapshot or one bug that re-renders a stale list away from being readable.
-  //
-  // Keyed on the transition into "pin-entry" so it covers Cmd/Ctrl+L, the
-  // idle auto-lock (#851), and the boot-time PIN gate alike — and into
-  // "email-auth", where every session end lands (sign-out, account deletion,
-  // revoked device; #1256). It runs after React has committed that tree, so
-  // AppShell is already unmounted and no observer is left to refetch against
-  // a locked or signed-out backend.
+  // Locking must empty the query cache, which holds decrypted bodies and outlives AppShell (#851, #1256).
   useEffect(() => {
     if (clearsQueryCache(appState)) {
       queryClient.clear();
@@ -306,8 +247,7 @@ function MainApp() {
   }, [appState, queryClient]);
 
   const handleAuthSuccess = useCallback(async (result: api.AuthResult) => {
-    // Branch 1: first-device signup. Show the Secret Key screen and gate
-    // navigation until the user types it back to confirm they saved it.
+    // First-device signup: confirm the Secret Key was saved.
     if (result.newSecretKey) {
       setPendingSecretKey(result.newSecretKey);
       setPendingEnrollmentUser(result.user);
@@ -315,8 +255,7 @@ function MainApp() {
       return;
     }
 
-    // Branch 2: returning device that has no local account_id_key.
-    // Must run the enrollment gate before the main app.
+    // Returning device without account_id_key: enrollment gate.
     if (result.enrollmentRequired) {
       setPendingEnrollmentUser(result.user);
       setPendingEnrollmentLinked(result.linked ?? false);
@@ -324,8 +263,7 @@ function MainApp() {
       return;
     }
 
-    // Branch 3: normal returning user. Gate on PIN — either enter it
-    // (if one has been set on this device) or create one.
+    // Normal returning user: PIN entry or create.
     try {
       const unlockState = await api.getUnlockState();
       setPendingPinUser(result.user);
@@ -340,10 +278,7 @@ function MainApp() {
   const handleSecretKeySaved = useCallback(async () => {
     setPendingSecretKey(null);
     if (pendingEnrollmentUser) {
-      // Fresh signup / soft recovery flow: hand off to PIN create
-      // before the main app. `initialize_identity` has already run (or
-      // is about to), so `account_id_key_{uid}` exists in the keystore
-      // and `set_pin` can wrap it.
+      // Hand off to PIN create; `account_id_key` exists so `set_pin` can wrap it.
       const user = pendingEnrollmentUser;
       setPendingEnrollmentUser(null);
       setPendingPinUser(user);
@@ -369,12 +304,7 @@ function MainApp() {
       const user = pendingPinUser;
       setPendingPinUser(null);
       setAppState("identity-setup");
-      // Run after set_pin (already done in PinCreateScreen) so the
-      // local DB is open and AppState.unlock carries the
-      // account_id_key. Idempotent for fresh signup; required for
-      // enrollment / Secret-Key recovery / identity-reset paths so
-      // the device cert is published and the device external-joins
-      // the user's existing groups + DMs.
+      // After set_pin; publishes the device cert and joins existing groups + DMs. Idempotent.
       try {
         await api.finalizeDeviceEnrollment(user.id);
       } catch (err) {
@@ -398,10 +328,7 @@ function MainApp() {
   }, [pendingPinUser, completeSignIn]);
 
   const handlePinForgot = useCallback(async () => {
-    // "Forgot PIN" bails to Secret-Key recovery. We treat it as an
-    // enrollment-required flow for the same user: the backend will
-    // wipe the wrapped blobs on successful recovery and the user will
-    // set a new PIN at the end of that flow.
+    // "Forgot PIN" runs Secret-Key recovery, which sets a new PIN.
     if (pendingPinUser) {
       setPendingEnrollmentUser(pendingPinUser);
       setPendingPinUser(null);
@@ -423,7 +350,6 @@ function MainApp() {
       const index = await api.listKnownAccounts();
       setKnownAccounts(index.accounts);
     } catch {
-      // Non-critical
     }
     setAppState("email-auth");
   }, []);
@@ -441,19 +367,15 @@ function MainApp() {
       const index = await api.listKnownAccounts();
       setKnownAccounts(index.accounts);
     } catch {
-      // Non-critical
     }
     setAppState("email-auth");
   }, []);
 
-  // Navigate to the confirmation view instead of using window.confirm
   const handleLogout = useCallback(() => {
     setAppState("logout-confirm");
   }, []);
 
-  // Cmd/Ctrl+L "screen lock": clear the in-memory unlock state and route
-  // back to the PIN entry screen without dropping the session. AppShell
-  // unmounts as a side effect, which closes LiveKit rooms cleanly.
+  // Cmd/Ctrl+L: lock without dropping the session.
   const handleLock = useCallback(async () => {
     if (!currentUser) {
       return;
@@ -467,10 +389,7 @@ function MainApp() {
     setAppState("pin-entry");
   }, [currentUser]);
 
-  // Idle auto-lock (#851): Rust owns the deadline and has already locked by the
-  // time this fires — all that is left is to leave the unlocked UI. Routed
-  // through the very same `handleLock` Cmd/Ctrl+L uses so there is one lock
-  // path, not two that can drift apart.
+  // Rust already locked (#851); reuse `handleLock` so there is one path.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let disposed = false;
@@ -489,8 +408,6 @@ function MainApp() {
     };
   }, [handleLock]);
 
-  // After delete_account succeeds in Settings, transition to auth screen.
-  // Zustand logout() is called in Settings.tsx before this fires.
   const handleDeleteAccount = useCallback(() => {
     setAppState("email-auth");
   }, []);
@@ -502,25 +419,19 @@ function MainApp() {
       console.error("Failed to logout:", error);
     }
     appStore.logout();
-    // Re-fetch known accounts so the login screen shows the switcher
     try {
       const index = await api.listKnownAccounts();
       setKnownAccounts(index.accounts);
     } catch {
-      // Non-critical
     }
     setAppState("email-auth");
   }, []);
 
-  // #1338: this device was revoked from another device on the account. The
-  // core has already refused the command that found out; end the session here
-  // (the core wipes a revoked device's keys and id whatever `deleteData` says)
-  // and say why on the sign-in screen, instead of leaving every page empty.
+  // #1338: revoked elsewhere; end the session and say why on sign-in.
   useEffect(
     () =>
       onDeviceRevoked(async () => {
-        // A rejection can land late, after a sign-out or another account's
-        // sign-in: act only if the core says THIS device is the revoked one.
+        // Late rejections: act only if THIS device is the revoked one.
         const revoked = await invoke<boolean>("is_current_device_revoked").catch(() => false);
         if (!revoked) {
           return;
@@ -540,7 +451,6 @@ function MainApp() {
           const index = await api.listKnownAccounts();
           setKnownAccounts(index.accounts);
         } catch {
-          // Non-critical
         }
         setSessionNotice(t("login.deviceRemoved"));
         setAppState("email-auth");
@@ -718,9 +628,7 @@ function MainApp() {
         onEnrolled={handleEnrolled}
         onCancel={handleEnrollmentCancelled}
         onResetComplete={(newKey) => {
-          // Soft recovery succeeded. The new Secret Key must be shown
-          // once before the user reaches the main app — reuse the
-          // first-device SaveSecretKeyScreen.
+          // Show the new Secret Key once before the main app.
           setPendingSecretKey(newKey);
           setAppState("save-secret-key");
         }}
@@ -751,7 +659,6 @@ function MainApp() {
     );
   }
 
-  // Fallback loading
   return (
     <div
       data-testid="loading-screen"

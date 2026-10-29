@@ -1,18 +1,4 @@
-/*
- * IPC / query-layer efficiency (#874).
- *
- * These specs assert COUNTS, not appearances. A round-trip fix with no number
- * behind it is a guess, so every test here reads
- * `window.__tauriInvokeCounts` — the per-command tally the shared Tauri mock
- * keeps (`frontend/src/__mocks__/tauri-core.ts`) — and pins the exact number of
- * calls an interaction is allowed to make.
- *
- * Most of it is skin-agnostic: an IPC call costs the same whatever the CSS says.
- * The two tests that also assert something RENDERS — preview rows, and the
- * people list inside Cmd+K — run in both skins.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// IPC efficiency (#874): pins exact call counts from window.__tauriInvokeCounts.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -57,9 +43,7 @@ function preloadState(skin: Skin) {
       {
         id: `m-${id}`,
         conversation_id: id,
-        // The signed-in user is the sender, so the refined skin's
-        // `MessageAvatar` asks for THEIR public profile — the exact path that
-        // used to poison the private one.
+        // The signed-in user is the sender, so the refined skin asks for THEIR public profile.
         sender_id: USER.id,
         content: `channel ${i} newest line`,
         sent_at: `2026-08-01T1${i}:00:00.000Z`,
@@ -204,10 +188,7 @@ async function setVisibility(page: Page, state: "hidden" | "visible") {
       configurable: true,
       get: () => value === "hidden",
     });
-    // `bubbles: true` is load-bearing: React Query's focus manager listens on
-    // WINDOW, and a real `visibilitychange` reaches it only by bubbling up from
-    // document. A default non-bubbling Event is delivered to nobody, which
-    // makes a focus-refetch test pass on any setting at all.
+    // `bubbles: true` is load-bearing: React Query's focus manager listens on window.
     document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
     window.dispatchEvent(new Event(value === "hidden" ? "blur" : "focus"));
   }, state);
@@ -217,8 +198,6 @@ async function openSearch(page: Page) {
   await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
   await expect(page.getByTestId("search-panel")).toBeVisible();
 }
-
-// ── Finding 1: batched last-message previews ────────────────────────────────
 
 for (const skin of SKINS) {
   test.describe(`sidebar previews — ${skin} skin`, () => {
@@ -269,16 +248,12 @@ test("a deleted-message event refreshes all five previews with one call", async 
   expect((await counts(page)).read_last_messages).toBe(1);
 });
 
-// ── Finding 4: the global refetchOnWindowFocus:false is respected ───────────
-
 test("returning to the window refetches nothing (guard)", async ({ page }) => {
   await boot(page, "terminal");
   await openGroupA(page);
   await expect(page.getByText("channel 0 newest line")).toBeVisible();
 
-  // Mark every cached query STALE without refetching. Focus-refetch only ever
-  // fires for stale queries, so without this the test would pass on nothing but
-  // the staleTime window and prove nothing about the setting.
+  // Mark every query stale: focus-refetch only fires for stale queries.
   await page.evaluate(() =>
     (
       window as unknown as {
@@ -289,10 +264,7 @@ test("returning to the window refetches nothing (guard)", async ({ page }) => {
     ).__pollisQueryClient.invalidateQueries({ refetchType: "none" }),
   );
 
-  // A real away-and-back. React Query's focus manager reads
-  // `document.visibilityState` and only reacts to a TRANSITION, so dispatching
-  // `visibilitychange` while the page was never hidden is a no-op that would
-  // make this pass on any setting at all.
+  // A real away-and-back: the focus manager reacts only to a transition.
   await setVisibility(page, "hidden");
   await page.waitForTimeout(100);
   await resetCounts(page);
@@ -318,8 +290,6 @@ test("returning to the window refetches nothing (guard)", async ({ page }) => {
   }
 });
 
-// ── Finding 2: the CLOSED Cmd+K panel fans out to nothing ──────────────────
-
 for (const skin of SKINS) {
   test.describe(`Cmd+K member fan-out — ${skin} skin`, () => {
     test("a never-opened search panel costs zero member queries; opening it pays for them", async ({
@@ -342,8 +312,6 @@ for (const skin of SKINS) {
   });
 }
 
-// ── Finding 7: membership_changed is narrow ────────────────────────────────
-
 test("a membership change in one group does not refetch the other group's roster", async ({
   page,
 }) => {
@@ -361,14 +329,8 @@ test("a membership change in one group does not refetch the other group's roster
   expect((await counts(page)).get_group_members).toBe(1);
 });
 
-// ── Finding 5: own-profile and public-profile are different cache entries ───
-
 test("viewing your own messages cannot blank out your own settings", async ({ page }) => {
-  // Refined skin: `MessageAvatar` renders per message and asks for the
-  // SENDER's public profile. The sender here is the signed-in user, so before
-  // #874 that public row landed on `["user","profile",<self>]` — the key the
-  // settings form reads — and the form lost the fields only the private shape
-  // carries.
+  // Refined: MessageAvatar asks for the sender's (self's) public profile; it must not land on the private key.
   await boot(page, "refined");
   await openGroupA(page);
   await page.getByTestId(`channel-option-${CHANNELS_A[0]}`).click();
@@ -388,8 +350,6 @@ test("viewing your own messages cannot blank out your own settings", async ({ pa
   await expect(page.getByTestId("settings-email-input")).toHaveValue(USER.email);
   await expect(page.getByTestId("settings-username-input")).toHaveValue(USER.username);
 });
-
-// ── Finding 6: join requests are keyed by group id, not by group COUNT ─────
 
 test("pending join requests are cached per group id, with no count-keyed aggregate", async ({
   page,
@@ -412,16 +372,11 @@ test("pending join requests are cached per group id, with no count-keyed aggrega
   expect((await counts(page)).get_group_join_requests ?? 0).toBe(0);
 });
 
-// ── Finding 3: public objects go through the loopback resolver first ───────
-
 test("avatars ask the media-server resolver before falling back to bytes", async ({ page }) => {
   await boot(page, "terminal");
   await openDMs(page);
   await expect(page.getByTestId(`dm-avatar-${DM_IDS[0]}`)).toBeVisible();
 
-  // The browser build has no media server, so the resolver returns its
-  // empty-string sentinel and the byte path runs — but it must be ASKED, which
-  // is what makes the desktop build serve avatars off disk instead of
-  // re-downloading them through the JSON IPC on every launch.
+  // No media server here, so the byte path runs, but the loopback resolver must still be asked.
   await expect.poll(async () => (await counts(page)).get_public_file_url ?? 0).toBeGreaterThan(0);
 });

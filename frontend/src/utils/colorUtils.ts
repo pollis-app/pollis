@@ -47,7 +47,6 @@ export function applyBackgroundColor(hex: string): void {
   document.documentElement.style.setProperty("--bg-h", String(h));
   document.documentElement.style.setProperty("--bg-s", `${s}%`);
   document.documentElement.style.setProperty("--bg-l", `${l}%`);
-  // Notify subscribers (e.g. username coloring) that contrast target shifted.
   setBackgroundLightness(l);
 }
 
@@ -56,14 +55,7 @@ export function applyFontSize(px: number): void {
   document.documentElement.style.setProperty("--font-size-base", `${px}px`);
 }
 
-/**
- * UI skin. `terminal` is the default IRC/monospace look; `refined` is the
- * friendlier, proportional-sans, Slack/Discord-shaped alternate. Both share
- * the same `--c-*` token names — `refined` overrides them (and inverts the
- * mono default) via a `:root[data-skin="refined"]` block in `index.css`.
- * Unlike font size, the skin choice syncs across the user's devices (see
- * `PreferencesData.skin` in `usePreferences.ts`).
- */
+/** UI skin; `refined` overrides the `--c-*` tokens in `index.css`. Synced, unlike font size. */
 export type Skin = "terminal" | "refined";
 
 export const SKINS: readonly Skin[] = ["terminal", "refined"] as const;
@@ -103,14 +95,7 @@ export function readFontSizePx(): number {
   return v ? parseInt(v, 10) : 15;
 }
 
-/**
- * Device-local font-size storage.
- *
- * Font size is per-device, not synced across the user's account — see
- * `usePreferences.ts` for the wider preferences mechanism. We key the
- * localStorage entry by user id so a shared OS account with multiple
- * Pollis users keeps each user's chosen size separate.
- */
+/** Device-local font size, keyed by user id. */
 const FONT_SIZE_KEY_PREFIX = "pollis-font-size:";
 
 function fontSizeKey(userId: string | null | undefined): string {
@@ -139,6 +124,5 @@ export function saveDeviceFontSize(userId: string | null | undefined, px: number
   try {
     localStorage.setItem(fontSizeKey(userId), String(px));
   } catch {
-    // localStorage unavailable / quota exceeded — fall through silently
   }
 }

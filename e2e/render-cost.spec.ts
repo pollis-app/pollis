@@ -1,24 +1,4 @@
-/*
- * Message-log render cost — browser-level e2e (#874).
- *
- * These are REGRESSION GUARDS, not proof that the app is fast. They pin one
- * specific property that is easy to lose by accident and invisible when lost:
- * a component that only shows message content must not re-render because
- * something unrelated changed. The evidence is a render counter
- * (`frontend/src/utils/renderProbe.ts`) incremented at the top of the
- * component body, so a `React.memo` bail-out shows up as "no new renders" —
- * which is exactly the thing being asserted.
- *
- * The second half is the other side of the same coin and matters MORE: a memo
- * that never updates is a stale UI, which is worse than a slow one. So every
- * "must not re-render" case is paired with a "must still re-render" case.
- *
- * Counts are relative on purpose. The e2e build runs under StrictMode, which
- * double-invokes render in dev, so absolute numbers are 2x and must never be
- * hard-coded.
- *
- *   pnpm --filter @pollis/e2e exec playwright test render-cost
- */
+// Message-log render cost (#874): memoised rows must not re-render needlessly, yet must still update.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -111,26 +91,13 @@ async function renders(page: Page, name: string): Promise<number> {
   }, name);
 }
 
-/**
- * The probe must exist at all — otherwise every "no new renders" assertion
- * below passes vacuously against a counter that is stuck on zero, and the
- * whole file becomes a guard that guards nothing.
- */
+/** The probe must exist, or every "no new renders" assertion passes vacuously. */
 async function assertProbeLive(page: Page) {
   expect(await renders(page, "MessageItem")).toBeGreaterThan(0);
   expect(await renders(page, "MessageList")).toBeGreaterThan(0);
 }
 
-/**
- * Wait until the log has stopped re-rendering of its own accord.
- *
- * Since the log is windowed (#874) it renders once more after any layout
- * change, when the virtualizer measures the rows it has just mounted. That
- * settle is legitimate and is not what these tests are about — they are about
- * what the NEXT interaction costs — so the baseline must be taken after it,
- * not in the middle of it. Polling for a stable counter rather than sleeping
- * keeps the assertions below exact instead of merely likely.
- */
+/** Wait for the windowed log's post-layout re-render to settle before taking a baseline. */
 async function settleRenders(page: Page) {
   let previous = -1;
   let stableFor = 0;
@@ -157,7 +124,6 @@ for (const skin of SKINS) {
       await gotoChannel(page);
       await assertProbeLive(page);
 
-      // Open the edit bar on the viewer's own message.
       const own = page.getByTestId(`message-${OWN_ID}`);
       await own.hover();
       await own.getByTestId("edit-button").click();
@@ -219,13 +185,7 @@ for (const skin of SKINS) {
       await assertProbeLive(page);
       await settleRenders(page);
 
-      // Not a settle: a fixed window with the app left alone. The ChannelPage
-      // used to depend on a `useMutation` result object — new every render —
-      // from an effect whose cleanup nulled the selected channel, so an open
-      // channel re-rendered the whole tree and fired an IPC hundreds of times a
-      // second for as long as it stayed open. Every keystroke in the composer
-      // competed with that, which is what "typing feels slow" was. Nothing in
-      // this window is allowed to render, at any level of the tree.
+      // Not a settle: a fixed idle window in which nothing may render (an effect loop once re-rendered constantly).
       const before = await Promise.all(
         ["AppShell", "MainContent", "MessageList", "MessageItem", "ChatInput"].map((p) =>
           renders(page, p),
@@ -274,10 +234,7 @@ for (const skin of SKINS) {
       const shellBefore = await renders(page, "AppShell");
       const sidebarBefore = await renders(page, "Sidebar");
 
-      // Cmd+K flips `isSearchOpen`, which is AppShell's own state. The sidebar
-      // (group tree, DM list, unread badges) has nothing to do with the search
-      // panel, and it is memoised — so it must absorb this at its own boundary
-      // rather than re-rendering because the shell handed it a fresh callback.
+      // Cmd+K flips AppShell's own state; the memoised sidebar must absorb it.
       await page.keyboard.press(
         process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
       );
@@ -288,17 +245,11 @@ for (const skin of SKINS) {
       expect(await renders(page, "Sidebar")).toBe(sidebarBefore);
     });
 
-    // ── The other half: memoised rows MUST still update ──────────────────
-
     test("flipping the skin restructures the rows", async ({ page }) => {
       await boot(page, skin);
       await gotoChannel(page);
 
-      // The row's own structure, not just its colors: refined lays each row out
-      // as a two-column CSS grid (avatar gutter + content), terminal does not.
-      // `skin` used to be a per-row subscription; it now arrives as a prop on a
-      // MEMOISED component, so this is the assertion that the memo cannot
-      // swallow a skin change and leave the log rendering the old structure.
+      // Refined rows are a two-column grid; the memoised row must not swallow a skin change.
       const rowDisplay = async () =>
         await page
           .getByTestId(`message-${OWN_ID}`)
@@ -307,9 +258,7 @@ for (const skin of SKINS) {
       expect(await rowDisplay()).toBe(skin === "refined" ? "grid" : "block");
 
       const other = skin === "terminal" ? "refined" : "terminal";
-      // In-app navigation via the sidebar — a bare `page.goto` on a
-      // client-side route just re-serves the SPA shell at its root. Located by
-      // `data-testid`, not by the row's translated label (#932).
+      // Navigate via the sidebar's testid (page.goto would re-serve the SPA root).
       await page.getByTestId("sidebar-row-preferences").click();
       await page.getByTestId(`pref-skin-${other}`).click();
       await expect(page.locator("html")).toHaveAttribute("data-skin", other);

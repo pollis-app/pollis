@@ -7,25 +7,13 @@ import { CustomEmojiImage } from "./CustomEmojiImage";
 interface EmojiCellProps {
   item: PickerEmoji;
   toneIndex: number;
-  /** Localized names for the label; the Unicode name is the fallback. */
   annotations: EmojiAnnotationStack;
-  /** Position in the picker's flattened navigation order. */
   index: number;
   onSelect: (item: PickerEmoji) => void;
   onPreview: (item: PickerEmoji | null) => void;
 }
 
-/**
- * One cell in the emoji grid.
- *
- * A real `<button>` rather than a styled `<div>`, so keyboard focus, Enter, and
- * screen-reader semantics come for free; the picker's arrow-key navigation just
- * moves focus between them.
- *
- * `data-emoji-index` is what that navigation addresses — it is the cell's
- * position in the flattened render order, which the picker recomputes whenever
- * the visible set changes.
- */
+/** A real `<button>`; `data-emoji-index` is its flat nav position. */
 export const EmojiCell: React.FC<EmojiCellProps> = ({
   item,
   toneIndex,

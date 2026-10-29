@@ -1,16 +1,4 @@
-/**
- * Device-local language preference.
- *
- * Same contract as desktop's `i18n/storage.ts` — device-scoped, with a
- * per-user override so two Pollis users on one device keep separate choices,
- * and never the synced preferences blob: that needs a signed-in user and an
- * unlocked local DB, and the sign-in, OTP and PIN screens are the first thing
- * a user who does not read English sees.
- *
- * Stored in `expo-secure-store`, which is already how the auto-lock timeout
- * persists (`lib/autolock.tsx`). Its keys may not contain `:`, so the desktop
- * key shape is spelled with dots here.
- */
+/** Device-local language preference, per user, never the synced blob: the pre-auth screens need it. */
 
 import * as SecureStore from "expo-secure-store";
 import { languageKey, normalizeLanguage } from "./languages";
@@ -23,7 +11,6 @@ async function read(key: string): Promise<string | null> {
   }
 }
 
-/** The stored choice for `userId`, falling back to the device-wide one. */
 export async function loadDeviceLanguage(userId?: string | null): Promise<string | null> {
   const scoped = await read(languageKey(userId));
   if (scoped) {
@@ -49,6 +36,6 @@ export async function saveDeviceLanguage(
       await SecureStore.setItemAsync(languageKey(null), normalized);
     }
   } catch {
-    // A lost preference costs the user one re-pick and nothing else.
+    // A lost preference costs one re-pick.
   }
 }

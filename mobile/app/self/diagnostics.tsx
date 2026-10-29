@@ -8,12 +8,7 @@ import { semantic, type as ty, space, r } from "../../theme/tokens";
 import { getDiagnostics } from "../../lib/diagnostics";
 import { useThemeRerender } from "../../components/theme";
 
-/**
- * The on-device diagnostics log (#1305): what it holds, what it never holds,
- * and the exact text "Copy diagnostics" puts on the clipboard — shown in
- * full, so nobody has to take the description on trust. Desktop's
- * `DiagnosticsPage`, same copy.
- */
+/** The on-device diagnostics log (#1305), shown in full; desktop's DiagnosticsPage. */
 export default function Diagnostics() {
   useThemeRerender();
   const { t } = useTranslation("settings");

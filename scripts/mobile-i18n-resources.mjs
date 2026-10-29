@@ -1,17 +1,5 @@
 #!/usr/bin/env node
-/**
- * Generate `mobile/i18n/resources.ts`.
- *
- * Metro has no `import.meta.glob`, so the catalogue table the desktop builds
- * at bundle time (`frontend/src/i18n/resources.ts`) has to be a static list of
- * requires on mobile — one per `<locale>/<namespace>.json`. Hand-maintaining
- * a hundred lines that must match a directory listing is how a locale ships
- * on desktop and silently renders English on mobile, so the file is generated
- * from the listing and `scripts/i18n-check.mjs` fails when it is stale.
- *
- *   node scripts/mobile-i18n-resources.mjs          # rewrite
- *   node scripts/mobile-i18n-resources.mjs --check  # exit 1 if stale
- */
+// Generates mobile/i18n/resources.ts (Metro has no import.meta.glob); --check exits 1 if stale.
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

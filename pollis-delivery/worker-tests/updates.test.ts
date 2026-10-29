@@ -2,15 +2,7 @@
  * worker/updates.ts — the Expo Updates protocol v1 responses the DS front-door
  * Worker gives under api.pollis.com/updates/ (mobile OTA, #1250).
  *
- * Pinned: a published pointer comes back as multipart/mixed with the protocol
- * headers and the stored signature passed through byte-for-byte on the signed
- * part; nothing published is a 204 (v1's "no update"); directives are served
- * as directive parts; malformed requests are 400s that never touch R2; a
- * malformed pointer is a 500, never a half-formed update; assets are served by
- * content address only; every other path/method is refused; the DS bindings
- * confine every read to the `ota/` prefix of the shared bucket, and an
- * environment with no bucket bound serves nothing; only /updates paths are
- * claimed from the container.
+ * Pinned: manifest/directive/204 responses, 400/500 handling, asset addressing, prefix, paths.
  *
  *   node --test pollis-delivery/worker-tests/*.test.ts   (or `pnpm test:worker` in pollis-delivery/)
  */

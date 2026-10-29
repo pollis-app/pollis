@@ -1,19 +1,6 @@
 use rusqlite::Connection;
 
-// #987 removed the first half of this file. It exercised the SQL behind
-// `list_messages_by_sender` and `list_channel_previews`, two commands #987
-// deleted: both keyed on `message_envelope.sender_id`, which sealed sender
-// (#607) has written as the literal string "sealed" for every send since, so
-// neither could match a real user any more. The queries went with the commands
-// and the fixtures went with the queries.
-
-// ── #874: batched last-message previews ──────────────────────────────────────
-//
-// The sidebar's preview rows used to issue one `read_channel_messages` /
-// `read_dm_messages` IPC call EACH. `read_last_messages` collapses them into a
-// single call whose entire correctness lives in one SQL string, so that string
-// is what these exercise — against the LOCAL schema, which is where the
-// `message` table actually lives.
+// #874: `read_last_messages` previews, against the local schema.
 
 use super::read::last_messages_sql;
 
@@ -67,8 +54,7 @@ fn last_messages_omits_conversations_with_no_messages() {
 
     let rows = last_messages(&conn, &["conv-a", "conv-empty"]);
 
-    // Absence IS the answer for an empty conversation — the caller keys by
-    // conversation_id, so a null placeholder would be a second spelling of it.
+    // Absence is the answer for an empty conversation.
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, "conv-a");
 }
@@ -76,9 +62,7 @@ fn last_messages_omits_conversations_with_no_messages() {
 #[test]
 fn last_messages_breaks_sent_at_ties_the_same_way_the_page_read_does() {
     let conn = local_db();
-    // Identical timestamps: the page read orders `sent_at DESC, id DESC`, so
-    // the higher id wins. A preview disagreeing with the top of the opened
-    // conversation is the bug this pins shut.
+    // Identical timestamps: the higher id wins, matching the page read.
     insert_local_message(&conn, "m-aaa", "conv-a", "lower id",  "2024-01-01T10:00:00Z");
     insert_local_message(&conn, "m-zzz", "conv-a", "higher id", "2024-01-01T10:00:00Z");
 
@@ -106,17 +90,11 @@ fn last_messages_covers_every_requested_conversation_in_one_statement() {
     let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let rows = last_messages(&conn, &refs);
 
-    // 25 conversations, ONE prepared statement. This is the whole point of the
-    // command: the previous shape was 25 separate IPC round trips.
+    // 25 conversations, one prepared statement.
     assert_eq!(rows.len(), 25);
 }
 
-// ── #1039: the forward page read ─────────────────────────────────────────────
-//
-// `read_messages_after` is what fills the hole a jump-to-message leaves
-// between the anchor's page and the live newest page. Its contract is a paging
-// one — feed `next_cursor` back in and you visit every row once, then stop —
-// so that is what is pinned, not any single page.
+// #1039: `read_messages_after` must visit every row once across pages, then stop.
 
 use super::read::read_after_on;
 use super::types::MessageCursor;

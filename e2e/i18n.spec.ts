@@ -1,28 +1,4 @@
-/*
- * Localization (#855) — infrastructure e2e.
- *
- * Runs against the browser-rendered frontend with the Tauri IPC mock
- * (`frontend/src/__mocks__/tauri-core.ts`), same as the other browser-tier
- * specs.
- *
- * Phase 1 ships only the English catalogue, so "does switching language work"
- * is not assertable against a real locale yet. The spec therefore injects a
- * SYNTHETIC locale through `window.__POLLIS_TEST_LOCALE__`, which
- * `frontend/src/i18n/index.ts` registers only under `VITE_PLAYWRIGHT`. That
- * keeps these assertions true regardless of which real locales land in later
- * phases — a test that hardcoded "German" would start failing the day someone
- * reordered the language list.
- *
- * The injected catalogue is deliberately PARTIAL: it translates
- * `settings:language.heading` and nothing else. Everything the app renders
- * beyond that key must therefore still come out in English, which is exactly
- * the fallback guarantee this feature rests on.
- *
- * Every test runs in BOTH skins, per the repo convention that visual features
- * stay consistent across `terminal` and `refined`.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// Localization (#855), both skins: a synthetic PARTIAL locale (`qtt`) proves switching and the English fallback.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -34,19 +10,12 @@ const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";
 const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 
-/*
- * A private-use language subtag (BCP-47 `qtt`), so it can never collide with
- * a real locale a later phase adds.
- */
+// A private-use subtag (BCP-47 `qtt`), so it never collides with a real locale.
 const TEST_LANG = "qtt";
 const TEST_LANG_LABEL = "Tèstish";
 const TEST_HEADING = "IDIOMA-TEST";
 
-/*
- * The English strings this spec pins. Both live in `settings:language.*`.
- * `heading` is translated by the injected catalogue; `description` is NOT,
- * and so proves the English fallback.
- */
+// `heading` is translated by the injected catalogue; `description` is not (proves the fallback).
 const EN_HEADING = "Language";
 const EN_DESCRIPTION_FRAGMENT = "Only changes this device";
 
@@ -74,12 +43,7 @@ function preloadState(skin: Skin) {
   };
 }
 
-/**
- * The synthetic locale. Only `settings.language.heading` is translated —
- * `ariaLabel` and `description` are omitted on purpose, and every other
- * namespace is absent entirely, so the spec can tell "missing key" and
- * "missing namespace" apart.
- */
+/** Only `settings.language.heading` is translated, so "missing key" and "missing namespace" differ. */
 const TEST_LOCALE = {
   code: TEST_LANG,
   label: TEST_LANG_LABEL,
@@ -93,13 +57,7 @@ const TEST_LOCALE = {
   },
 };
 
-/**
- * Boot the app.
- *
- * `osLanguages` seeds `navigator.languages` so the first-run OS-locale default
- * can be exercised; it must be installed before any app module evaluates,
- * hence `addInitScript`.
- */
+/** Boot the app; `osLanguages` seeds navigator.languages for the first-run default. */
 interface TestLocaleShape {
   code: string;
   label: string;
@@ -115,12 +73,7 @@ async function boot(
     withTestLocale?: boolean;
     /** Extra preload state merged over the default fixture. */
     preload?: Record<string, unknown>;
-    /**
-     * A synthetic catalogue other than the module-level `TEST_LOCALE`. The
-     * default one translates exactly ONE key on purpose — the tests below
-     * that need a different key bring their own rather than widening it and
-     * quietly weakening the fallback assertions that depend on its gaps.
-     */
+    /** A catalogue other than TEST_LOCALE, so its one-key gaps stay intact. */
     locale?: TestLocaleShape;
   } = {},
 ) {
@@ -170,23 +123,13 @@ async function boot(
   await expect(page.getByTestId("sidebar")).toBeVisible();
 }
 
-/**
- * Navigate to Preferences through Cmd+K.
- *
- * Deliberately not a direct URL visit: the router runs on `createMemoryHistory`
- * (see `frontend/src/router.tsx`) so the browser URL is meaningless, and going
- * through the palette also proves the page is still registered in
- * `PAGE_RESULTS` after the search labels were moved into a catalogue.
- */
+/** Go to Preferences via Cmd+K (proves it is still in PAGE_RESULTS). */
 async function gotoPreferences(page: Page) {
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
   );
   await expect(page.getByTestId("search-panel")).toBeVisible();
-  // "appearance" rather than "Preferences": the Settings hub lists
-  // "preferences" among its own keywords and sorts ahead of the Preferences
-  // page, so the obvious query lands on the wrong screen. "appearance" is
-  // unique to the Preferences entry.
+  // "appearance", not "Preferences": the Settings hub sorts ahead for the obvious query.
   await page.getByTestId("search-panel-input").fill("appearance");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("preferences-page")).toBeVisible();
@@ -249,19 +192,7 @@ function englishKeyPaths(): string[] {
   return [...out];
 }
 
-/**
- * Rendered text that is actually one of our translation keys.
- *
- * Matching against the real catalogue rather than a "looks dotted" regex
- * matters both ways round: it cannot be fooled by legitimate dotted content
- * the app renders (hostnames, filenames, version strings), and it cannot
- * silently stop working when the catalogues grow — a key added tomorrow is
- * covered the moment it exists.
- *
- * Covers `aria-label`, `title`, `placeholder` and `alt` as well as text
- * nodes; roughly 150 of the extracted strings live in attributes, and a key
- * leaking into a screen-reader label is no less broken for being invisible.
- */
+/** Rendered text or a11y attribute that is one of our real catalogue keys. */
 async function rawKeyLeaks(page: Page): Promise<string[]> {
   return page.evaluate((keyPaths: string[]) => {
     const keys = new Set(keyPaths);
@@ -289,7 +220,6 @@ async function rawKeyLeaks(page: Page): Promise<string[]> {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`i18n — ${skin} skin`, () => {
     agnosticTest("the language selector renders every available language", async ({ page }) => {
@@ -329,11 +259,7 @@ for (const skin of SKINS) {
 
       await page.getByTestId(`pref-language-${TEST_LANG}`).click();
 
-      // The one key the synthetic catalogue translates. Asserted on the
-      // heading element specifically — the English description below it
-      // legitimately contains the word "Language" via the fallback, so a
-      // section-wide `not.toContainText` would be asserting the opposite of
-      // what this feature promises.
+      // Asserted on the heading only: the English description below legitimately says "Language".
       await expect(heading).toHaveText(TEST_HEADING);
 
       // Selection moved with it.
@@ -395,10 +321,7 @@ for (const skin of SKINS) {
     });
 
     agnosticTest("first run defaults to the OS locale when we ship it", async ({ page }) => {
-      // The synthetic locale stands in for "a locale we ship". A fresh profile
-      // with no stored choice should start there. `-XX` also exercises the
-      // region-subtag degrade: `qtt-XX` has no catalogue of its own but must
-      // still land on `qtt` rather than dropping to English.
+      // A fresh profile starts in the OS locale; `qtt-XX` must degrade to `qtt`, not English.
       await boot(page, skin, { osLanguages: [`${TEST_LANG}-XX`, "en-US"] });
       await expect(page.locator("html")).toHaveAttribute("lang", TEST_LANG);
       await gotoPreferences(page);
@@ -417,20 +340,7 @@ for (const skin of SKINS) {
   });
 }
 
-/**
- * Every SHIPPED locale actually renders — not just the synthetic one.
- *
- * The tests above all drive `qtt`, which proves the machinery works but says
- * nothing about the real catalogues. That gap is not theoretical: Simplified
- * Chinese was very nearly shipped as `zh-Hans`, a tag this app's own
- * `normalizeLanguage` and i18next's canonicalization reject from opposite
- * ends. The catalogue would have been complete, the key validator green, the
- * type checker happy, and every user would have seen English.
- *
- * So this walks the registry itself rather than a hardcoded list — a locale
- * added later is covered the moment it is registered — and asserts each one
- * renders its OWN word for "Language", which is distinct in all seven.
- */
+/** Every registered locale renders its own word for "Language" (zh-Hans once nearly shipped as all-English). */
 const SHIPPED = JSON.parse(
   JSON.stringify(
     (() => {
@@ -493,29 +403,13 @@ test.describe("shipped locales", () => {
   }
 });
 
-/*
- * ────────────────────────────────────────────────────────────────────────────
- * #902 — four surfaces #855 left speaking the wrong language.
- * ────────────────────────────────────────────────────────────────────────────
- */
+// #902: four surfaces #855 left speaking the wrong language.
 
 /** Any Arabic-script character. */
 const ARABIC_SCRIPT = /[؀-ۿ]/;
 const LATIN_LETTER = /[A-Za-z]/;
 
-/**
- * Dates must follow the APP language, not the OS one.
- *
- * `test.use({ locale })` pins the BROWSER's locale — i.e. the machine's — and
- * pinning it to English is the entire point of the fixture. `toLocaleDateString([])`
- * resolves against exactly that, so on an English machine the old code rendered
- * "Mon, Jun 7" underneath a translated "اليوم". A test that let the browser
- * locale follow the app language would pass on the unfixed code.
- *
- * The assertion is on SCRIPT, not on a specific string: the exact rendering of
- * a weekday is CLDR's business and changes between ICU versions, but "did any
- * Arabic come out at all" is the property under test and is stable.
- */
+/** Dates follow the APP language, not the (English-pinned) browser locale; asserted on script, not strings. */
 test.describe("dates follow the app language, not the OS locale", () => {
   test.use({ locale: "en-US" });
 
@@ -599,15 +493,7 @@ test.describe("dates follow the app language, not the OS locale", () => {
   });
 });
 
-/**
- * Keyboard glyphs that are WORDS are copy.
- *
- * Driven through a synthetic locale rather than a real one because the six
- * shipped locales have not been translated for these keys yet (#902 ships
- * English only, by design) — so against `ar` this would assert the English
- * fallback and prove nothing. The synthetic catalogue is the same mechanism
- * the tests above use.
- */
+/** Keyboard glyphs that are words are copy (synthetic locale: shipped ones lack these keys). */
 test.describe("keyboard glyphs are translated", () => {
   const KEYS_LANG = "qtk";
   const ESC_TRANSLATED = "ESC-TEST";
@@ -675,15 +561,7 @@ test.describe("keyboard glyphs are translated", () => {
 
 });
 
-/**
- * A member's role is a wire value, and the list rendered it straight to screen.
- *
- * Again synthetic, and for a sharper reason than usual: the English copy for
- * this key is deliberately the SAME WORD as the wire value it replaces
- * ("member"), so under any real locale — which falls back to English — a
- * reverted build renders an identical string and the test would pass on
- * unfixed code.
- */
+/** Roles are translated, not echoed from the wire (synthetic: English copy equals the wire value). */
 test.describe("member roles are translated, not echoed from the wire", () => {
   const ROLE_LANG = "qtr";
   const MEMBER_TRANSLATED = "ROLE-MEMBER-TEST";
@@ -717,12 +595,7 @@ test.describe("member roles are translated, not echoed from the wire", () => {
     },
   };
 
-  /**
-   * Members is a parameterized route, so it is not in `PAGE_RESULTS` and
-   * cannot be reached from Cmd+K at all (the palette indexes channels, not
-   * groups). Go the way a user does: the sidebar's group row opens the group
-   * menu, and Members is on it.
-   */
+  /** Members is a parameterized route, not in PAGE_RESULTS: go via the sidebar's group menu. */
   async function gotoMembers(page: Page) {
     await page
       .getByTestId("sidebar")
@@ -758,19 +631,7 @@ test.describe("member roles are translated, not echoed from the wire", () => {
   });
 });
 
-/*
- * Navigation must not depend on a translated label (#932).
- *
- * The sidebar's settings rows are the only sidebar rows whose text comes from
- * a catalogue — groups, channels and DMs are labelled with user-generated
- * names. They carried no `data-testid`, so every spec that navigated to one
- * matched on its English label, and since #855 a locale change could therefore
- * break navigation tests for reasons that had nothing to do with navigation.
- * Worse, the failure reads as a routing bug rather than a selector bug.
- *
- * This is the assertion that pins it: under a locale that renames every one of
- * those rows, the testids still reach the pages.
- */
+// Navigation must not depend on a translated label (#932): settings rows are found by testid.
 test.describe("sidebar settings rows are located by testid, not by label", () => {
   const NAV_LANG = "qtn";
   const NAV_TRANSLATED: Record<string, string> = {
@@ -811,9 +672,7 @@ test.describe("sidebar settings rows are located by testid, not by label", () =>
       const row = page.getByTestId(`sidebar-row-${rowId}`);
       // The row is findable by id…
       await expect(row).toBeVisible();
-      // …and its text really did change, so a label-based selector would be
-      // looking for a string that is no longer on the page. Without that, this
-      // test would pass just as well in English and prove nothing.
+      // …and its text really changed, so a label selector would miss it.
       await expect(row).toContainText(NAV_TRANSLATED[labelKey]);
     }
 

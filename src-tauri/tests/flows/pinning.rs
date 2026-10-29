@@ -1,19 +1,8 @@
 //! Pinned messages (#99), end to end through the real command pipeline.
-//!
-//! The design's client-visible promises, each pinned by a scenario:
-//!
-//!   * a member who joins AFTER a pin was created — by Welcome or by
-//!     external-join recovery — still reads it (the wrapped-Kpin model's whole
-//!     point versus per-epoch keys);
-//!   * unpinning by any member removes the pin for everyone;
-//!   * a removed member can no longer list pins at all;
-//!   * the server-side rows are ciphertext: neither the pin content nor the
-//!     pin key ever appears in what a Turso breach would dump.
 
 use crate::harness::{arm_ds_fault, ds_fault_armed, wipe, writable_remote, DsFault, TestClient};
 use serial_test::serial;
 
-/// Read the pin rows as a Turso breach would.
 async fn stored_pin_blobs(conversation_id: &str) -> Vec<Vec<u8>> {
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("remote conn");
@@ -35,10 +24,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// The issue's headline scenario: pin first, join second, read anyway — plus
-/// the at-rest checks that the server holds only ciphertext and that the stored
-/// pin key state is a wrap, not a key (formerly
-/// `the_stored_keystate_is_a_wrap_not_a_key`, a one-client copy of this pin).
+/// Pin first, join second, read anyway; the server holds only ciphertext and a wrapped key.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_member_joining_after_the_pin_still_reads_it() {
@@ -55,7 +41,6 @@ async fn a_member_joining_after_the_pin_still_reads_it() {
         .send_channel_message_id(&channel_id, "the load-bearing decision")
         .await;
 
-    // Pin BEFORE bob exists in the tree.
     alice
         .invoke_json(
             "pin_message",
@@ -67,7 +52,6 @@ async fn a_member_joining_after_the_pin_still_reads_it() {
         )
         .await;
 
-    // At rest: the pin row must carry neither the words nor the key.
     let blobs = stored_pin_blobs(&channel_id).await;
     assert_eq!(blobs.len(), 1);
     assert!(
@@ -75,11 +59,7 @@ async fn a_member_joining_after_the_pin_still_reads_it() {
         "pin plaintext appears in the server-side row"
     );
 
-    // The pin key state at rest: the server row is a ~48-byte wrap, not the
-    // key. A breach dump of `pin_keystate` must not contain any 32-byte value
-    // that decrypts the pins (we can't test decryption directly here, but we
-    // can pin the row's shape: wrapped blob = key + AEAD tag, never the bare
-    // key size).
+    // A wrap is key + AEAD tag, never the bare key size.
     {
         let remote = writable_remote().await;
         let conn = remote.conn().await.expect("conn");
@@ -105,9 +85,7 @@ async fn a_member_joining_after_the_pin_still_reads_it() {
         assert_eq!(nonce.len(), 12);
     }
 
-    // Bob joins via the normal Welcome path. Alice's invite commit advanced
-    // the epoch, and her committer hook re-wrapped Kpin under the new
-    // exporter — the same epoch bob's Welcome lands him at.
+    // The invite commit re-wrapped Kpin at bob's Welcome epoch.
     alice.invite(&group_id, &bob_p.username).await;
     let invite_id = bob.first_pending_invite().await.expect("invite")["id"]
         .as_str()
@@ -137,9 +115,7 @@ async fn a_member_joining_after_the_pin_still_reads_it() {
     drop(bob);
 }
 
-/// The recovery path: bob's Welcome is dropped, he external-joins, and reads
-/// the pre-existing pin once a key-holding member has processed his join
-/// (whose re-wrap is exactly what an external joiner waits on).
+/// Bob's Welcome is dropped; he external-joins and reads once a member re-wraps.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_external_joiner_reads_existing_pins_after_a_member_rewraps() {
@@ -166,7 +142,6 @@ async fn an_external_joiner_reads_existing_pins_after_a_member_rewraps() {
         )
         .await;
 
-    // Drop bob's Welcome so his only way in is the external-join recovery.
     arm_ds_fault(DsFault::DropWelcome);
     alice.invite(&group_id, &bob_p.username).await;
     assert!(!ds_fault_armed(), "DropWelcome should have fired on bob's add");
@@ -179,10 +154,7 @@ async fn an_external_joiner_reads_existing_pins_after_a_member_rewraps() {
     bob.poll().await;
     bob.process_commits_for(&channel_id).await;
 
-    // Bob's own external commit advanced the epoch past the stored wrap, and
-    // he has never held Kpin — so the pins are UNAVAILABLE to him until a
-    // key-holding member processes his join and re-wraps. That is the honest
-    // intermediate state, not a failure.
+    // Pins are unavailable to bob until a key-holder re-wraps; not a failure.
     // Alice processes bob's join; her backstop re-wraps at the new epoch.
     alice.process_commits_for(&channel_id).await;
 
@@ -204,11 +176,7 @@ async fn an_external_joiner_reads_existing_pins_after_a_member_rewraps() {
     drop(bob);
 }
 
-/// Any member may unpin, and the unpin is for everyone. Then: a removed
-/// member's pin reads are refused outright — the DS's membership gate is what
-/// stands between an ex-member's retained key and future pin ciphertext. (The
-/// two scenarios built the identical two-member pinned channel, so they share
-/// it; the refusal does not depend on a pin still being present.)
+/// Any member may unpin for everyone; a removed member's pin reads are refused by the DS.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn any_member_can_unpin_and_a_removed_member_can_no_longer_list_pins() {
@@ -242,7 +210,6 @@ async fn any_member_can_unpin_and_a_removed_member_can_no_longer_list_pins() {
         .await;
     bob.process_commits_for(&channel_id).await;
 
-    // While a member, bob reads pins fine.
     let pins = bob
         .invoke_json(
             "list_pinned_messages",
@@ -251,7 +218,6 @@ async fn any_member_can_unpin_and_a_removed_member_can_no_longer_list_pins() {
         .await;
     assert_eq!(pins.as_array().unwrap().len(), 1);
 
-    // Bob — who did not pin it — unpins it.
     bob.invoke_json(
         "unpin_message",
         serde_json::json!({

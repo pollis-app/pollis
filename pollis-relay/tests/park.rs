@@ -1,30 +1,14 @@
 //! Parked peer-relay proof tests (#813 Phase P1, design §7.1).
 //!
-//! A peer-hosted relay is a device behind NAT. It cannot be dialled, so it opens
-//! a connection outbound, parks it, and a first-party relay splices an `Extend`
-//! into that connection instead of dialling. Every test here is written to fail
-//! if a property that makes that safe stops holding — the same way
-//! `tests/onion.rs` proves a hop never saw the destination by giving it an empty
-//! allowlist:
+//! A NAT'd peer relay parks an outbound connection; a first-party relay splices `Extend`s into it.
 //!
-//! - P1: a full circuit `client → first-party guard → parked peer → first-party
-//!   exit` carries bytes, **while the peer's advertised address is a dead port**
-//!   and the guard's allowlist is empty. A dial cannot have happened, and the
-//!   guard cannot have seen the destination.
-//! - P2: a parked peer whose cert is **revoked** is refused. Parking buys no
-//!   exemption, and the check runs on the cert selector, which is the one that
-//!   binds a per-peer identity.
-//! - P3: a parked connection that **dies** is evicted from the registry, and a
-//!   later `Extend` for it falls back to dialling (and fails) rather than
-//!   splicing into a corpse.
-//! - P4: a **v3** stream cannot park, even hand-rolling the frame — the version
-//!   gate is at the reader, not just at our writer.
+//! - P1: a circuit through a parked peer works with a dead advertised address and empty guard allowlist.
+//! - P2: a parked peer with a revoked cert is refused.
+//! - P3: a dead parked connection is evicted; a later `Extend` dials (and fails).
+//! - P4: a v3 stream cannot park, even with a hand-rolled frame.
 //! - P5: parking **twice** under one fingerprint does not displace the incumbent
 //!   or leave two entries.
-//! - P6: the health port publishes the **parked peers' own leaf certs and
-//!   nothing else** — the shape P3's reconciler reads.
-//!
-//! Everything runs headless on loopback, with certs generated in-test.
+//! - P6: the health port publishes only the parked peers' leaf certs.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -52,12 +36,7 @@ const DEVICE: &str = "d_park";
 const ORIGIN_NAME: &str = "origin.test";
 const DEVICE_ED_PUB: [u8; 32] = [11u8; 32];
 
-/// The address a client advertises for a parked peer. Port 0 is **not
-/// dialable** — quinn refuses it outright — so a circuit that works cannot have
-/// been dialled (P1), and a fallback dial fails immediately rather than waiting
-/// out a handshake timeout (P3). A real client would send the peer's `parked_at`
-/// relay address here; the relay ignores it either way, because a parked peer is
-/// selected by fingerprint.
+/// Undialable (quinn refuses port 0): success proves a splice, and a fallback dial fails fast.
 const DEAD_ADDR: &str = "127.0.0.1:0";
 
 const B64: base64::engine::general_purpose::GeneralPurpose =
@@ -83,18 +62,12 @@ fn client_identity() -> Arc<ClientIdentity> {
     ))
 }
 
-// ---- signed revocation artifacts -------------------------------------------
-
 fn directory_key() -> Ed25519SigningKey {
     Ed25519SigningKey::from_bytes(&[42u8; 32])
 }
 
 /// A store keyed on the directory key, holding a fresh list revoking `revoked`
 /// (a JSON fragment — empty for "nobody").
-///
-/// Every relay here needs one: a node that cannot evaluate revocation refuses to
-/// extend at all (#813 Phase C), so "keyed, with a current list" is the
-/// production shape of a middle hop and the shape these tests run.
 fn store_revoking(revoked: &str) -> RevocationStore {
     let sk = directory_key();
     let now = proto::now_unix();
@@ -123,8 +96,6 @@ fn cert_selector(cert: &CertificateDer<'static>) -> String {
     use sha2::{Digest, Sha256};
     B64.encode(Sha256::digest(cert.as_ref()))
 }
-
-// ---- test relays -----------------------------------------------------------
 
 struct TestRelay {
     addr: SocketAddr,
@@ -183,32 +154,16 @@ fn spawn_relay(allow: &[&str], resolve_origin: bool, revocations: RevocationStor
     }
 }
 
-// ---- the peer --------------------------------------------------------------
-
 /// A peer-hosted relay: a relay engine on loopback with an **empty destination
 /// allowlist** (so it can never be an exit), reached only through the connection
 /// it parked at a first-party relay.
-///
-/// A deliberate stand-in for the shipped device side, which lives in
-/// `pollis-core`'s `net::peer::park` (phase P2) and cannot be reached from here
-/// — `pollis-core` depends on this crate, not the other way round. It speaks the
-/// same wire byte for byte: handshake + `Park` on one stream it opens, then every
-/// stream the relay opens back is a splice carrying length-delimited packets for
-/// the loopback engine. The mirror image of P2's own `StandInRelay`.
 struct TestPeer {
     cert: CertificateDer<'static>,
     engine_addr: SocketAddr,
     stats: Arc<RelayStats>,
     /// Whether anything ever completed a QUIC handshake with the peer's engine.
-    /// The peer's own `peer_observer`, used the same way `tests/revocation.rs`
-    /// uses it.
     contacted: Arc<Mutex<Vec<SocketAddr>>>,
-    /// Streams the relay has opened on the parked connection. Every one is a
-    /// splice, so this counts how many times this device was actually used as a
-    /// hop — and, at zero, proves a refusal happened BEFORE the relay reached
-    /// for the peer at all. It moves on the tunnel's very first packet, well
-    /// before any handshake could complete, which is what makes it a reliable
-    /// signal where "did the engine see a connection" is a race.
+    /// Streams the relay opened on the parked connection; zero proves a refusal came before any splice.
     splices_seen: Arc<AtomicUsize>,
     /// Holding these holds the parking: the park stream keeps the registration,
     /// and dropping the endpoint closes the connection.
@@ -237,9 +192,7 @@ impl TestPeer {
     fn start() -> TestPeer {
         let mut config =
             RelayConfig::new("127.0.0.1:0".parse().unwrap(), Allowlist::default()).unwrap();
-        // Forwarding to the next relay is the peer's whole job, so it needs a
-        // usable revocation store AND the signed directory that says which
-        // addresses are relays; the empty allowlist is what stops it exiting.
+        // Needs revocations and the directory to forward; the empty allowlist stops it exiting.
         config.revocations = healthy_revocations();
         config.next_hops = common::test_directory();
         config.allow_private_next_hops = true;
@@ -310,9 +263,7 @@ impl TestPeer {
         Ok(())
     }
 
-    /// The hop a client puts in a path for this peer. The address is deliberately
-    /// undialable: a parked peer is selected by fingerprint, never reached by
-    /// dialling.
+    /// The hop a client puts in a path for this peer; the address is undialable.
     fn hop(&self) -> Hop {
         Hop::new(DEAD_ADDR.parse().unwrap(), self.cert.clone())
     }
@@ -362,9 +313,7 @@ async fn dial(relay: &TestRelay) -> anyhow::Result<(quinn::Endpoint, quinn::Conn
 /// Serve one spliced stream: unframe packets onto the loopback engine, frame
 /// what comes back.
 ///
-/// The two directions are separate tasks, never one `select!` — a framed read is
-/// not cancel-safe, and a cancelled `read_exact` mid length-prefix would
-/// resynchronise the tunnel onto garbage.
+/// Separate tasks, never `select!`: a framed read is not cancel-safe.
 async fn serve_splice(mut send: quinn::SendStream, mut recv: quinn::RecvStream, engine: SocketAddr) {
     let Ok(socket) = UdpSocket::bind(("127.0.0.1", 0)).await else {
         return;
@@ -389,8 +338,6 @@ async fn serve_splice(mut send: quinn::SendStream, mut recv: quinn::RecvStream, 
     }
     reader.abort();
 }
-
-// ---- loopback target -------------------------------------------------------
 
 async fn spawn_echo() -> (SocketAddr, Arc<AtomicUsize>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -439,16 +386,8 @@ fn assert_extend_failed(result: anyhow::Result<BoxedStream>, context: &str) {
     );
 }
 
-// ---- P1 --------------------------------------------------------------------
-
 /// The whole feature, end to end: a circuit through a peer that could not
 /// possibly have been dialled.
-///
-/// Three things are arranged so that only a splice can explain success:
-/// the peer's advertised address is a **dead port**; the peer's engine is on
-/// loopback with an **empty allowlist**, so it could not have served the
-/// destination either; and the guard's allowlist is **empty** too, so it never
-/// saw one. The counters then pin down which node did what.
 #[tokio::test]
 async fn p1_a_parked_peer_is_spliced_into_rather_than_dialled() {
     let (origin, origin_conns) = spawn_echo().await;
@@ -498,22 +437,15 @@ async fn p1_a_parked_peer_is_spliced_into_rather_than_dialled() {
     assert_ne!(seen[0], guard.addr);
 }
 
-// ---- P2 --------------------------------------------------------------------
-
 /// A parked peer whose leaf cert is revoked is refused, and nothing is spliced.
 ///
-/// The selector is the **cert digest**, not the address: a parked peer has no
-/// dialable address to revoke, which is precisely the per-peer identity case
-/// phase C built that selector for. Delete the parked branch of the revocation
-/// check in `serve_extend` and this test fails.
+/// The selector is the cert digest: a parked peer has no dialable address.
 #[tokio::test]
 async fn p2_a_revoked_parked_peer_is_refused() {
     let (origin, origin_conns) = spawn_echo().await;
     let exit = spawn_relay(&[ORIGIN_NAME], true, healthy_revocations());
 
-    // Stand the peer up FIRST, so the guard's list can name the very cert this
-    // peer parks under. (Same peer, same cert — the revocation has to bite on
-    // the identity that is actually parked.)
+    // Start the peer first so the guard's list can name its cert.
     let mut peer = TestPeer::start();
     let revoked = format!(
         r#"{{"cert_sha256_b64":"{}","reason":"seized"}}"#,
@@ -536,10 +468,7 @@ async fn p2_a_revoked_parked_peer_is_refused() {
     assert_eq!(guard.stats.splices(), 0);
     assert_eq!(guard.stats.extends(), 0);
     assert!(guard.stats.rejected() >= 1, "the refusal must be recorded");
-    // The peer was never handed anything — and, the part only the PRE-splice
-    // check can deliver, was never even reached for: no stream was opened on its
-    // parked connection. Give anything in flight time to land first, so this is
-    // about the refusal happening early rather than about winning a race.
+    // No stream was even opened on the parked connection: the pre-splice check refused.
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(
         peer.splices_seen(),
@@ -555,14 +484,8 @@ async fn p2_a_revoked_parked_peer_is_refused() {
     assert_eq!(guard.parked.len(), 1);
 }
 
-// ---- P3 --------------------------------------------------------------------
-
 /// A parked connection that dies is evicted, and the fingerprint stops being
 /// splice-able — no leaked entry, and no splicing into a corpse.
-///
-/// The follow-up `Extend` proves the eviction is real rather than cosmetic: with
-/// nothing parked, the relay falls back to dialling the address the client gave,
-/// which is dead, so it refuses.
 #[tokio::test]
 async fn p3_a_dead_parked_connection_is_evicted() {
     let (origin, _origin_conns) = spawn_echo().await;
@@ -594,14 +517,9 @@ async fn p3_a_dead_parked_connection_is_evicted() {
     assert_eq!(guard.stats.splices(), 0);
 }
 
-// ---- P4 --------------------------------------------------------------------
-
 /// A v3-negotiated stream cannot park, even though the frame is hand-rolled to
 /// carry a v3 version byte — the gate is at the relay's reader, not only at our
 /// writer.
-///
-/// The v4 half of the same exchange is P1, so this is pinning the version gate
-/// rather than a malformed frame.
 #[tokio::test]
 async fn p4_a_v3_stream_cannot_park() {
     use quinn::crypto::rustls::QuicClientConfig;
@@ -654,8 +572,6 @@ async fn p4_a_v3_stream_cannot_park() {
     );
 }
 
-// ---- P5 --------------------------------------------------------------------
-
 /// Parking twice under one fingerprint leaves exactly one entry, and the
 /// incumbent keeps serving: the second attempt is refused rather than silently
 /// displacing a peer that is carrying traffic.
@@ -682,8 +598,6 @@ async fn p5_parking_twice_does_not_displace_the_incumbent() {
         "the incumbent's registration must survive"
     );
 }
-
-// ---- P6 --------------------------------------------------------------------
 
 /// The health port publishes the parked peers in the shape P3's reconciler
 /// reads — and nothing else about them. Not an address, not a client count, not

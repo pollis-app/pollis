@@ -1,13 +1,4 @@
-/*
- * Touch-down activation where an accidental press is free to undo (#1529).
- *
- * The guard is pure (lib/pressIn.ts), so its rule is pinned directly: a
- * finger runs the action once, on touch-down; a screen reader's click (no
- * touch-down) runs it once, on press; a touch that slid off never swallows a
- * later screen-reader activation. The call sites are pinned at the source
- * level: the fixed chrome the issue lists carries `pressIn`, and the controls
- * it excludes (send, destructive, confirms, rows inside a scroller) do not.
- */
+/* Touch-down activation where an accidental press is free to undo (#1529): the guard, and the call sites at the source level. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -40,8 +31,7 @@ test("a tap runs the action once, on touch-down", () => {
   const action = () => runs++;
   g.onPressIn(action);
   assert.equal(runs, 1, "touch-down acts at once");
-  // Pressable's order on a short tap: onPress, then onPressOut after its
-  // minimum press duration.
+  // Pressable's order on a short tap: onPress, then onPressOut.
   g.onPress(action);
   g.onPressOut();
   tick.flush();
@@ -54,8 +44,7 @@ test("a long hold runs it once whichever order Pressable reports", () => {
   let runs = 0;
   const action = () => runs++;
   g.onPressIn(action);
-  // A hold past the minimum press duration: onPressOut first, synchronously,
-  // then onPress in the same handler, before any tick.
+  // A long hold: onPressOut first, then onPress, before any tick.
   g.onPressOut();
   g.onPress(action);
   tick.flush();
@@ -112,8 +101,7 @@ test("pressIn is refused together with a long press", () => {
 });
 
 test("Android keeps every control inside a sheet on release", () => {
-  // Dismissing a Modal on touch-down strands that touch on Android, and the
-  // next tap on the screen underneath was lost (the tour's first Back).
+  // A Modal dismissed on touch-down stranded its touch on Android.
   assert.equal(pressInSupported("android", true), false);
   assert.equal(pressInSupported("android", false), true);
   assert.equal(pressInSupported("ios", true), true);
@@ -138,8 +126,7 @@ test("the shared primitives take pressIn and keep onPress for screen readers", (
   ]) {
     assert.ok(ui.includes(call), `ui.tsx must call ${call}`);
   }
-  // The hook always hands Pressable an onPress (TalkBack activates through
-  // it), and adds onPressIn only when opted in.
+  // The hook always hands Pressable an onPress (TalkBack's path).
   const hook = ui.slice(ui.indexOf("export function usePressIn"), ui.indexOf("export function PressInPressable"));
   assert.match(hook, /if \(!enabled \|\| !onPress \|\| !pressInSupported\(Platform\.OS, inSheet\)\) \{\s*return \{ onPress \};/);
   assert.match(hook, /onPress: \(\) => g\.onPress\(run\)/);
@@ -150,8 +137,7 @@ test("the shared primitives take pressIn and keep onPress for screen readers", (
   assert.match(header, /testID=\{backTestID\}[\s\S]*?pressIn\n/);
 });
 
-// The fixed chrome #1529 converts: file → the testIDs (or markers) that must
-// carry `pressIn` on the line after them or within the same element.
+// The fixed chrome #1529 converts: file → testIDs that must carry `pressIn`.
 const CONVERTED: Record<string, string[]> = {
   "components/TabBar.tsx": ["<PressInPressable\n            key={tab.name}\n            pressIn"],
   "components/chat/SheetOverlay.tsx": [
@@ -189,8 +175,7 @@ test("the fixed chrome #1529 lists acts on touch-down", () => {
   }
 });
 
-// The opening tag around a testID: from its `<` to the `>` that closes it
-// at brace depth 0 (so `icon={<Icon />}` and arrow functions stay inside).
+// The opening tag around a testID, to its `>` at brace depth 0.
 function openingTagAround(src: string, testID: string): string {
   const at = src.indexOf(`testID="${testID}"`);
   assert.ok(at >= 0, `testID ${testID} not found`);
@@ -236,10 +221,7 @@ test("sending, destructive and confirming controls stay on release", () => {
 });
 
 test("rows inside a scroller and message surfaces stay on release", () => {
-  // Touch-down lands before a scroll takes the touch, so a row in a
-  // ScrollView / FlatList would open on every scroll that starts on it; the
-  // message sheet's actions notify others; long-press surfaces must not act
-  // on touch-down at all.
+  // Rows in a scroller, the message sheet and long-press surfaces stay on release.
   for (const rel of [
     "app/(tabs)/groups.tsx",
     "app/(tabs)/self.tsx",

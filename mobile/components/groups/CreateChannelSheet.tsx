@@ -9,8 +9,7 @@ import { semantic, type as ty } from "../../theme/tokens";
 import { useCreateChannel } from "../../hooks/queries";
 import type { Channel } from "../../types";
 
-// "+" next to "Text channels": name a new text channel (admins only, as on
-// desktop's group menu). Voice is not offered — mobile has no voice.
+// Name a new text channel (admins only). No voice on mobile.
 export function CreateChannelSheet({
   groupId,
   existingNames,
@@ -18,7 +17,7 @@ export function CreateChannelSheet({
   onCreated,
 }: {
   groupId: string;
-  // Lower-cased names already in the group, to refuse a duplicate up front.
+  // Lower-cased, to refuse a duplicate up front.
   existingNames: string[];
   onClose: () => void;
   onCreated: (channel: Channel) => void;

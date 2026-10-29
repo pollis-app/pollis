@@ -7,16 +7,10 @@ interface SkinTonePickerProps {
   onChange: (toneIndex: number) => void;
 }
 
-// The hand each swatch shows. Index 0 is the default (no modifier).
+// Index 0 is the default (no modifier).
 const SWATCH_BASE = "\u{270B}";
 
-/**
- * The six skin-tone swatches, as Discord has them.
- *
- * Inline rather than behind a disclosure: six small buttons cost less room than
- * the popover that would hide them, and a popover inside a popover is exactly
- * the layered-overlay pattern this codebase does not do.
- */
+/** Six inline skin-tone swatches (no popover-in-popover). */
 export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onChange }) => {
   const { t } = useTranslation("emoji");
 
@@ -47,10 +41,7 @@ export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onCha
               background: selected ? "var(--c-active)" : undefined,
             }}
           >
-            {/* One string, one text node: adjacent JSX expressions become
-                separate DOM text nodes, and the font shaper won't combine a
-                skin-tone modifier with a base across that boundary — the
-                modifier renders as a standalone colored square. */}
+            {/* One text node: the shaper won't join a modifier across nodes. */}
             {SWATCH_BASE + tone}
           </button>
         );

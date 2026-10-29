@@ -1,15 +1,6 @@
 //! #1305 — what may reach the on-device diagnostics log (`src/diag.rs`).
 //!
-//! The log is a file a user may hand to someone, so it must not carry message
-//! content, file names, display names, emails, keys or tokens. `diag::redact`
-//! scrubs emails, IPs and token-shaped runs as a backstop; this file guards the
-//! call sites, by reading the source, against the obvious ways around it:
-//!
-//!   1. Every log line goes through `diag!`. A stray `eprintln!` bypasses the
-//!      file AND the scrubber, and would be invisible in a packaged app anyway.
-//!   2. No `diag!` interpolates a value whose name says it is content or a
-//!      secret. A rule that fires on something legitimate is fixed by logging a
-//!      length, a count or an id instead — not by renaming the variable.
+//! A false positive is fixed by logging a length, count or id — not by renaming.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -110,8 +101,7 @@ fn interpolated_names(call: &str) -> Vec<String> {
             names.push(name);
         }
     }
-    // Positional arguments: everything after the closing quote of the format
-    // string, split on commas.
+    // Positional arguments.
     if let Some(close) = call.rfind('"') {
         for arg in call[close + 1..].split(',') {
             let ident: String = arg

@@ -2,57 +2,13 @@
 //! function so it can be (1) exercised by the real ingest path and (2) proved
 //! by Kani over symbolic inputs.
 //!
-//! ## What this decides (the safety property)
-//!
-//! During interleaved catch-up ([`super::ingest`]) each conversation gets a new
-//! watermark: an EXCLUSIVE cursor that the next fetch uses as
-//! `cursor > watermark`. Advancing it past an envelope means "never fetch it
-//! again". So it MUST NOT advance to or past any envelope we still have to retry
-//! (an MLS message whose epoch this pass never reached) — otherwise a current
-//! member permanently loses a decryptable message (failure class F3; the exact
-//! property #442 was a false alarm about).
-//!
-//! **The cursor is the DS-assigned delivery sequence since #1087** — an integer,
-//! unique and strictly increasing per conversation — not the client's `sent_at`.
-//! This module never had to change for that: it is generic over the key type, so
-//! the swap moved a `&str` to an `(i64, String)` ordered by its sequence and the
-//! proofs below carried over untouched. What did change is that TIES are now
-//! impossible, which makes the `>=` rule below belt-and-braces rather than
-//! load-bearing. It stays, because a rule that is correct for a weaker
-//! precondition is worth keeping when it costs nothing.
-//!
-//! The rule, preserved verbatim from the original inline logic:
-//! * `stop_at` = the cursor of the FIRST un-handled envelope (in the given,
-//!   cursor-ordered, slice order).
-//! * the candidate loop walks the slice and adopts each cursor as the running
-//!   watermark, but BREAKS as soon as it reaches an envelope with
-//!   `cursor >= stop_at`. The `>=` (not `>`) is deliberate: on a tie between a
-//!   handled and an un-handled envelope the cursor must stop STRICTLY BELOW the
-//!   shared value, or the next `cursor > watermark` fetch would skip the
-//!   un-handled one. The watermark is therefore always strictly less than the
-//!   first un-handled cursor, even on a tie.
-//!
-//! The Kani harnesses at the bottom of this file prove exactly that (P1), plus
-//! monotonicity (P2) and handled-liveness (P3). Each proof is paired with a
-//! deliberately-broken mutant harness (`p{1,2,3}_mutant_refuted`, all
-//! `#[kani::should_panic]`) demonstrating that proof still has teeth.
+//! The watermark is an exclusive fetch cursor, so it must stop strictly below the first un-handled envelope (F3).
+//! Kani proves this (P1), monotonicity (P2) and handled-liveness (P3), each paired with a mutant.
 
 /// The only distinction the watermark cares about: whether an envelope's
 /// deliverability is gated on reaching its MLS epoch this pass.
 ///
-/// `Message` / `Edit` carry an MLS epoch and are epoch-gated (handled only once
-/// the shared group's replay reached — or provably can never reach — their
-/// epoch). A delete tombstone is epoch-independent but is NOT unconditionally
-/// handled: its handled-ness is the outcome of applying its redaction on this
-/// device (#693 / #661 WS1), so the caller resolves it to one of two kinds:
-///   * `Delete` — the redaction took effect (applied now, already applied, or
-///     the target is permanently absent) ⇒ handled, the cursor may advance.
-///   * `DeletePending` — the redaction did NOT take effect and can still take
-///     effect on a later pass (target not yet ingested, or a transient local-DB
-///     error) ⇒ NOT handled, treated exactly like an unreached message so the
-///     cursor stops STRICTLY BELOW it and the next fetch re-applies it.
-///
-/// `Other` (unknown types) stay epoch-independent and always handled.
+/// `Delete` is a redaction that took effect; `DeletePending` one that still can, held back like an unreached message (#693).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnvKind {
     Message,
@@ -63,13 +19,7 @@ pub enum EnvKind {
 }
 
 impl EnvKind {
-    /// Map a `message_envelope.type` string to the watermark's kind. This is the
-    /// STRING mapping only; a `"delete"` maps to `Delete` (the applied/handled
-    /// default) because a raw type string cannot know whether the redaction
-    /// landed. The real ingest path (`ingest_group_envelopes_interleaved`)
-    /// re-classifies a tombstone whose redaction did NOT take effect to
-    /// `DeletePending` before feeding it to [`next_watermark`]. `"message"` /
-    /// `"edit"` are epoch-gated; unknown types are always handled.
+    /// The string mapping only; ingest re-classifies an unapplied tombstone to `DeletePending`.
     pub fn from_type(env_type: &str) -> Self {
         match env_type {
             "message" => EnvKind::Message,
@@ -80,16 +30,7 @@ impl EnvKind {
     }
 }
 
-/// Is this envelope definitively handled (so the watermark may advance over it),
-/// or must a later pass retry it? `max_fired_epoch` is the furthest point the
-/// shared group's replay reached this pass (`None` = no local group, nothing
-/// could be decrypted). `pub(crate)` (not public API) so the ingest path can ask
-/// the SAME question about a tombstone's target envelope when deciding whether a
-/// zero-row redaction is "not caught up yet" vs "permanently absent" — the arms
-/// are otherwise identical to the original inline `is_handled` closure.
-///
-/// Generic over the epoch key `E` (see [`next_watermark`]): the only thing this
-/// asks of it is `<=`.
+/// Is this envelope definitively handled, or must a later pass retry it? `max_fired_epoch` is how far replay reached.
 pub(crate) fn is_handled<E: Ord + Copy>(
     kind: EnvKind,
     epoch: Option<E>,
@@ -97,9 +38,7 @@ pub(crate) fn is_handled<E: Ord + Copy>(
 ) -> bool {
     match kind {
         EnvKind::Message | EnvKind::Edit => match (epoch, max_fired_epoch) {
-            // Epoch within this pass's reach: decrypted now, or an unreachable
-            // pre-join epoch we will never decrypt. Either way permanently
-            // handled — advancing past it can't drop a message.
+            // Within reach: decrypted now, or a pre-join epoch never decryptable — handled.
             (Some(e), Some(max)) => e <= max,
             // Unparseable bytes are never MLS-decryptable → permanently handled
             // (advancing past avoids wedging on a corrupt row).
@@ -110,51 +49,17 @@ pub(crate) fn is_handled<E: Ord + Copy>(
         },
         // An applied tombstone / unknown type is epoch-independent and handled.
         EnvKind::Delete | EnvKind::Other => true,
-        // A tombstone whose redaction did not take effect this pass is held back
-        // exactly like an unreached message — the cursor must not advance past it
-        // (#693 / #661 WS1). Epoch is irrelevant: a tombstone carries none.
+        // An unapplied tombstone is held back like an unreached message (#693).
         EnvKind::DeletePending => false,
     }
 }
 
-/// One envelope as the watermark rule sees it: its sort key (`sent_at`), what
-/// kind of envelope it is, and — for a message — the `(generation, epoch)`
-/// position it needs before it can be decrypted. Both halves are generic for the
-/// reason spelled out on [`next_watermark`]; the alias exists so the shape is
-/// named once instead of respelled at every call and every proof.
+/// One envelope as the watermark rule sees it: sort key, kind, and `(generation, epoch)`.
 pub type EnvView<S, E> = (S, EnvKind, Option<E>);
 
-/// Compute the `sent_at` a conversation's watermark may advance to, given its
-/// `sent_at`-ordered envelopes and the highest MLS epoch this pass reached.
+/// The greatest key in the handled prefix strictly below the first un-handled envelope, or `None`.
 ///
-/// Returns the greatest `sent_at` in the contiguous prefix that is definitively
-/// handled and strictly below the first un-handled envelope's `sent_at`, or
-/// `None` if nothing may advance (empty slice, or the very first envelope must
-/// be retried). Generic over the `sent_at` key `S` so the real callers pass
-/// `&str`/`String` while the proofs pass bounded integers (Kani cannot make a
-/// `String` symbolic).
-///
-/// ## Why the epoch key is generic too
-///
-/// Since #454 P4 a conversation's MLS position is a `(generation, epoch)` PAIR,
-/// not an epoch — a migrated group restarts at epoch 0 of the next generation, so
-/// an epoch-only comparison would read the successor lineage as being behind the
-/// one it replaced. The real caller therefore passes `(i64, u64)`, whose derived
-/// `Ord` is lexicographic and gives exactly the intended order: any position in an
-/// older generation is permanently handled, any position in a newer one must be
-/// retried.
-///
-/// The logic never inspects the key beyond `<=`, so it is generic over `E: Ord`
-/// and the Kani harnesses below keep proving it over a small `u64` domain. That
-/// is not a weakening: the proofs exercise `<`, `=` and `>` on a totally-ordered
-/// domain, which is the entire surface `E` is used through, and CBMC's cost is
-/// superlinear in the symbolic state space — widening the proof key to a pair
-/// would buy no additional coverage of *this* function's decision.
-///
-/// Abstracted by the `Advance` action / `NextWatermark` operator in the TLA+
-/// design model `specs/tla/Delivery.tla` (Spec B, I3+I4; see
-/// `docs/machine-checked-correctness-design.md` §3). Keep the "stop strictly
-/// below the first un-handled envelope" rule here in sync with that spec.
+/// Keep in sync with `NextWatermark` in `specs/tla/Delivery.tla`.
 pub fn next_watermark<S: Ord + Clone, E: Ord + Copy>(
     envs: &[EnvView<S, E>],
     max_fired_epoch: Option<E>,
@@ -181,37 +86,11 @@ pub fn next_watermark<S: Ord + Clone, E: Ord + Copy>(
 
 #[cfg(test)]
 mod delete_consumption_tests {
-    //! #693 / #661 (WS1): why a `delete` tombstone COULD be dropped where a
-    //! `message` never is — and the fix that closes the hole. These tests pin the
-    //! ASYMMETRY that `ingest_group_envelopes_interleaved` relies on, plus its
-    //! correction.
-    //!
-    //! A `message`/`edit` at an epoch this pass has not reached is NOT handled, so
-    //! `next_watermark` stops STRICTLY BELOW it and the next fetch re-delivers it
-    //! until it decrypts (message delivery is retried to success). A tombstone
-    //! whose redaction has APPLIED (`EnvKind::Delete`) is `is_handled == true`, so
-    //! the cursor advances past it — correct, it is done. The bug (now fixed) was
-    //! that ingest classified EVERY tombstone as `Delete` regardless of whether
-    //! its redaction `UPDATE` actually landed: a redaction matching zero rows, or
-    //! hitting a transient local-DB error, was consumed-and-lost and never
-    //! retried, leaving the deleted message readable on that device forever.
-    //!
-    //! The fix gives ingest a second classification, `EnvKind::DeletePending`, for
-    //! a tombstone whose redaction did NOT take effect but still can on a later
-    //! pass. `is_handled(DeletePending) == false`, so — exactly like an unreached
-    //! message — the cursor stops strictly below it and the next fetch re-applies
-    //! it. Which of the two a tombstone gets is decided by the redaction's outcome
-    //! (see `ingest::delete_resolution_tests`). The flows instrumentation
-    //! (`sealed_admin_delete_of_other_member_works`) still reports this live, and
-    //! the DS-side delivery is proven flake-free offline (`pollis_delivery`'s
-    //! `admin_delete_visibility_tests`).
+    //! Pins the tombstone asymmetry (#693 / #661 WS1): an unapplied redaction is `DeletePending` and retried.
 
     use super::{next_watermark, EnvKind, EnvView};
 
-    /// An APPLIED delete tombstone (`EnvKind::Delete`) is CONSUMED on the first
-    /// pass regardless of group state — the cursor jumps to its `sent_at`, because
-    /// its redaction is done. Contrast `a_pending_delete_...` (retry) and
-    /// `a_message_at_an_...` (retry).
+    /// An applied tombstone is consumed on the first pass regardless of group state.
     #[test]
     fn a_delete_tombstone_is_consumed_unconditionally() {
         // No group state reached this pass (`max_fired_epoch = None`).
@@ -224,13 +103,7 @@ mod delete_consumption_tests {
         );
     }
 
-    /// THE FIX (#693 / #661 WS1): a tombstone whose redaction did NOT take effect
-    /// is classified `DeletePending` and is NOT consumed — the watermark refuses
-    /// to advance onto it, so the next fetch re-delivers and re-applies it. This
-    /// is the retry-to-success a dropped tombstone previously never got. Against
-    /// the pre-fix code (which had only `EnvKind::Delete`, `is_handled == true`
-    /// unconditionally) this same tombstone would have returned `Some("t1")` —
-    /// consumed and lost.
+    /// The fix (#693): an unapplied tombstone is `DeletePending` and not consumed.
     #[test]
     fn a_pending_delete_is_retried_not_consumed() {
         let envs: [EnvView<&str, (i64, u64)>; 1] = [("t1", EnvKind::DeletePending, None)];
@@ -242,11 +115,7 @@ mod delete_consumption_tests {
         );
     }
 
-    /// A `DeletePending` tombstone stamped ABOVE an already-applied `Delete` holds
-    /// the cursor strictly below itself: the applied tombstone below it is not
-    /// re-consumed past the pending one, so the pending tombstone (and everything
-    /// at/above it) is re-fetched next pass. Mirrors the message/unreached-message
-    /// shape but with two tombstones.
+    /// A `DeletePending` above an applied `Delete` holds the cursor below itself.
     #[test]
     fn a_pending_delete_holds_the_cursor_below_itself() {
         let envs: [EnvView<&str, (i64, u64)>; 2] = [
@@ -261,10 +130,7 @@ mod delete_consumption_tests {
         );
     }
 
-    /// The contrast: a message at an epoch the replay has not reached is NOT
-    /// consumed — the watermark refuses to advance onto it, so it is re-fetched
-    /// until decryptable. This is the retry-to-success a delete tombstone does NOT
-    /// get.
+    /// A message at an unreached epoch is not consumed.
     #[test]
     fn a_message_at_an_unreached_epoch_is_retried_not_consumed() {
         let envs: [EnvView<&str, (i64, u64)>; 1] =
@@ -277,12 +143,7 @@ mod delete_consumption_tests {
         );
     }
 
-    /// The concrete #661 ordering: a delete tombstone stamped ABOVE a
-    /// still-undecryptable message is consumed while the message is held back, so
-    /// the cursor stops below the message and the tombstone is (correctly)
-    /// re-fetched next pass — the watermark logic itself never strands the
-    /// tombstone. The drop can therefore only come from the APPLICATION step
-    /// discarding the redaction outcome, not from the cursor.
+    /// #661: a tombstone above an undecryptable message is re-fetched, never stranded by the cursor.
     #[test]
     fn a_tombstone_above_an_unreached_message_does_not_advance_past_the_message() {
         let envs: [EnvView<&str, (i64, u64)>; 2] = [
@@ -299,30 +160,17 @@ mod delete_consumption_tests {
     }
 }
 
-// ─── Kani proof harnesses ────────────────────────────────────────────────────
-//
-// Behind `#[cfg(kani)]` only — never compiled into the runtime crate. Bounded to
-// `envs.len() <= 4` with `#[kani::unwind(5)]`; keys/epochs/kinds are symbolic
-// over a small integer domain. The slices are built sorted-ascending by key to
-// match the real caller's `ORDER BY sent_at ASC, id ASC`.
+// Kani proof harnesses (`#[cfg(kani)]` only), bounded to `envs.len() <= 4`.
 #[cfg(kani)]
 mod proofs {
     use super::*;
 
-    // Small symbolic domains: keys and epochs live in `0..=3` so CBMC's state
-    // space stays exhaustive-but-bounded while still exercising ties, gaps, and
-    // ordering. Bounded at 4: the no-skip / tie counterexamples this proves are
-    // 2-3-element phenomena, so len-4 finds them. NOTE: CBMC is memory-hungry
-    // here (Vec heap modelling) and OOMs a 7 GB box even at len-3, so these
-    // proofs run in CI (the `kani.yml` job, on a 16 GB runner), not in-box.
+    // Keys and epochs in `0..=3`; CBMC OOMs small boxes, so these run in CI (`kani.yml`).
     const MAX_LEN: usize = 4;
 
     impl kani::Arbitrary for EnvKind {
         fn any() -> Self {
-            // Cover all five kinds so the proofs exercise the `DeletePending`
-            // (never-handled) arm alongside the epoch-gated and always-handled
-            // ones — it participates in `is_handled` exactly like an unreached
-            // message, so P1/P2/P3 must hold with it in the mix.
+            // Cover all five kinds, including `DeletePending`.
             match kani::any::<u8>() % 5 {
                 0 => EnvKind::Message,
                 1 => EnvKind::Edit,
@@ -333,16 +181,7 @@ mod proofs {
         }
     }
 
-    /// Build a symbolic, `sent_at`-ascending (ties allowed) envelope table into a
-    /// FIXED-SIZE stack array plus a symbolic valid length `0..=MAX_LEN`. The
-    /// harnesses use `&arr[..len]`. Using an array rather than a `Vec` is
-    /// load-bearing: CBMC models `Vec`'s heap allocation at ruinous memory/time
-    /// cost (it OOMs/​times-out even at small bounds), while a stack array is
-    /// cheap. Every slot is constrained, so the used prefix is a valid ascending
-    /// sequence. `distinct_keys` forces strictly-increasing keys for the
-    /// harnesses (P2/P3) whose statement is only clean without `sent_at` ties;
-    /// with keys in `0..=3` and `MAX_LEN == 4` a distinct fill is exactly
-    /// `[0,1,2,3]` (satisfiable — do not raise MAX_LEN past the key domain).
+    /// A symbolic ascending envelope table in a stack array (CBMC chokes on `Vec`); keep MAX_LEN within the key domain.
     fn symbolic_envs(distinct_keys: bool) -> ([EnvView<u8, u64>; MAX_LEN], usize) {
         let len: usize = kani::any();
         kani::assume(len <= MAX_LEN);
@@ -386,10 +225,7 @@ mod proofs {
         }
     }
 
-    /// P1 (no-skip / anti-F3): the returned watermark is STRICTLY LESS than the
-    /// `sent_at` of the first un-handled envelope. ⇒ the next
-    /// `sent_at > watermark` fetch cannot drop an un-decrypted message. The
-    /// headline proof.
+    /// P1 (no-skip): the watermark is strictly below the first un-handled envelope's key.
     #[kani::proof]
     #[kani::unwind(5)]
     fn p1_no_skip() {
@@ -413,11 +249,7 @@ mod proofs {
         }
     }
 
-    /// P2 (monotone): `next_watermark` over a prefix `<=` over the full slice — a
-    /// superset never regresses the cursor. Stated over strictly-increasing keys
-    /// (distinct `sent_at`); under a handled/un-handled `sent_at` TIE the cursor
-    /// is *correctly* pulled back below the shared timestamp, so monotonicity is
-    /// only a clean property when keys are distinct.
+    /// P2 (monotone): a prefix's watermark never exceeds the full slice's; distinct keys only.
     #[kani::proof]
     #[kani::unwind(5)]
     fn p2_monotone() {
@@ -437,9 +269,7 @@ mod proofs {
         assert!(wm_prefix <= wm_full);
     }
 
-    /// P3 (handled-liveness): if EVERY envelope is handled, the watermark equals
-    /// the max `sent_at` — nothing decryptable is retried forever. Stated over
-    /// strictly-increasing keys so "max" is the last element.
+    /// P3 (handled-liveness): all handled ⇒ watermark is the max key.
     #[kani::proof]
     #[kani::unwind(5)]
     fn p3_handled_liveness() {
@@ -461,15 +291,7 @@ mod proofs {
         }
     }
 
-    // ─── Negative test: the harness has teeth ────────────────────────────────
-    //
-    // A deliberately-broken variant of `next_watermark` that breaks on
-    // `sent_at > stop` instead of `sent_at >= stop`. On a `sent_at` tie between a
-    // handled and an un-handled envelope it lets the cursor advance ONTO the
-    // shared timestamp, so the next `sent_at > watermark` fetch skips the
-    // un-handled envelope — exactly the F3 message-loss bug. `p1_mutant_refuted`
-    // asserts P1 on it; Kani must find a counterexample (see the report). This is
-    // test-only and unreachable from any runtime code.
+    // Mutant: breaks on `>` instead of `>=`, so a tie skips an un-handled envelope (F3).
     fn next_watermark_mutant<S: Ord + Clone, E: Ord + Copy>(
         envs: &[EnvView<S, E>],
         max_fired_epoch: Option<E>,
@@ -492,14 +314,7 @@ mod proofs {
         candidate
     }
 
-    /// Asserts P1 on the mutant. `#[kani::should_panic]`: the harness PASSES
-    /// exactly when Kani finds the P1 assertion can fail — i.e. it produces the
-    /// counterexample (a `sent_at` tie between a handled and an un-handled
-    /// envelope) that the real code's `>=` avoids. Without `should_panic` this
-    /// (correctly) reports FAILED and would redden CI; with it, a green run
-    /// certifies the harness still has teeth. If the mutant ever stopped
-    /// violating P1, this harness would FAIL (nothing panicked) — catching a
-    /// toothless proof.
+    /// `should_panic`: passes exactly when Kani refutes P1 on the mutant.
     #[kani::proof]
     #[kani::should_panic]
     #[kani::unwind(5)]
@@ -522,17 +337,7 @@ mod proofs {
         }
     }
 
-    // ─── Negative test for P2 (monotone) ─────────────────────────────────────
-    //
-    // A deliberately-broken variant that, on reaching the first un-handled
-    // envelope, BAILS OUT to `None` — discarding the fully-handled run below it —
-    // instead of returning that run's greatest `sent_at`. This is a plausible
-    // "over-conservative" bug: "if anything is un-handled, don't advance at all".
-    // It preserves P1 (returning `None` never skips past an un-handled envelope)
-    // and P3 (never triggers when all envelopes are handled), so ONLY P2 catches
-    // it: a prefix that stops short of the un-handled envelope keeps its cursor,
-    // while the full slice — which sees the un-handled envelope — collapses to
-    // `None`, making `wm_prefix > wm_full`. Test-only, unreachable from runtime.
+    // P2 mutant: bails to `None` at the first un-handled envelope; only P2 catches it.
     fn next_watermark_p2_mutant<S: Ord + Clone, E: Ord + Copy>(
         envs: &[EnvView<S, E>],
         max_fired_epoch: Option<E>,
@@ -548,11 +353,7 @@ mod proofs {
         candidate
     }
 
-    /// Asserts P2 on the P2-mutant. `#[kani::should_panic]`: PASSES exactly when
-    /// Kani finds a state where the mutant regresses the cursor across a superset
-    /// (a handled prefix followed by an un-handled envelope the prefix excluded),
-    /// certifying P2 has teeth. If the mutant ever stopped regressing, this would
-    /// FAIL (nothing panicked) — catching a vacuous monotonicity proof.
+    /// `should_panic`: passes exactly when Kani refutes P2 on the mutant.
     #[kani::proof]
     #[kani::should_panic]
     #[kani::unwind(5)]
@@ -571,14 +372,7 @@ mod proofs {
         assert!(wm_prefix <= wm_full);
     }
 
-    // ─── Negative test for P3 (handled-liveness) ─────────────────────────────
-    //
-    // A deliberately-broken variant with an off-by-one that refuses to advance
-    // ONTO the final envelope even when it is handled — the cursor lags one short
-    // of a fully-handled prefix. This preserves P1 (stopping short never skips an
-    // un-handled envelope), so ONLY P3 catches it: when every envelope is handled
-    // the watermark must equal the max `sent_at`, but the mutant returns the
-    // second-to-last (or `None` for a single element). Test-only.
+    // P3 mutant: never adopts the final envelope; only P3 catches it.
     fn next_watermark_p3_mutant<S: Ord + Clone, E: Ord + Copy>(
         envs: &[EnvView<S, E>],
         max_fired_epoch: Option<E>,
@@ -596,8 +390,7 @@ mod proofs {
                     break;
                 }
             }
-            // BUG: never adopt the last envelope, even when it is handled — the
-            // cursor gets stuck one below a fully-handled prefix.
+            // BUG: never adopt the last envelope, even when handled.
             if i + 1 == n {
                 break;
             }
@@ -606,10 +399,7 @@ mod proofs {
         candidate
     }
 
-    /// Asserts P3 on the P3-mutant. `#[kani::should_panic]`: PASSES exactly when
-    /// Kani finds an all-handled slice whose watermark falls short of the max
-    /// `sent_at`, certifying P3 has teeth. If the mutant ever stopped lagging,
-    /// this would FAIL (nothing panicked) — catching a vacuous liveness proof.
+    /// `should_panic`: passes exactly when Kani refutes P3 on the mutant.
     #[kani::proof]
     #[kani::should_panic]
     #[kani::unwind(5)]

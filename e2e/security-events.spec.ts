@@ -1,20 +1,4 @@
-/*
- * Security events (#1548) — the renderer's half.
- *
- * The keyset query, the kind filter and the clamp are the DS's
- * (`pollis-delivery/tests/security_events_page.rs`); the mock answers
- * `list_security_events` with the same keyset semantics. What this tier pins:
- *
- *   1. Security shows only the newest three, and asks for exactly three,
- *   2. "View all" opens the Security events page, which is also reachable from
- *      Cmd+K and the sidebar,
- *   3. the page loads more as its end scrolls into view, a page at a time,
- *      until the cursor runs out,
- *   4. a filter chip narrows the list to its kinds, and the previous rows stay
- *      on screen (dimmed) until the new rows land.
- *
- *   pnpm --filter @pollis/e2e e2e:ui -- security-events.spec.ts
- */
+// Security events (#1548), renderer half: newest three, paged list, filter chips.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";

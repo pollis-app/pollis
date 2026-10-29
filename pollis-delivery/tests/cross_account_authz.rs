@@ -1,19 +1,6 @@
 //! **Cross-account refusal is a property, not an accident.**
 //!
-//! Every endpoint in this service that acts on "the caller's own" resource is
-//! bound to the authenticated signer. Those bindings were all correct — and
-//! none of them were encoded by a test, so nothing would have noticed one going
-//! away. C1 is what that costs: `/v1/commits` checked only that the SUBMITTER
-//! was a member and wrote the bundle's Welcome rows with a recipient taken
-//! verbatim from the request body, so any authenticated user could park a
-//! forged MLS Welcome on any device of any account — and the sibling path
-//! (`/v1/welcomes/resubmit`) had the exact check that was missing, with a doc
-//! comment naming the exact attack.
-//!
-//! So this file is deliberately shaped as "user B cannot act on user A's
-//! resource", one test per family, driven through the REAL router with REAL
-//! ML-DSA-44 signatures and `require_auth = true`. A binding that regresses
-//! fails here rather than in an audit.
+//! "User B cannot act on user A's resource", one test per family, with real signatures and auth on.
 
 use std::sync::Arc;
 
@@ -29,8 +16,6 @@ use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
 mod common;
-
-// ── signing fixtures (the client contract, mirrored from `auth.rs`) ──────────
 
 fn gen_signing_key() -> SigningKey<MlDsa44> {
     let mut seed = [0u8; 32];
@@ -54,8 +39,6 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// One signed-in account: a user row, a live device row, and the signing key
-/// that device's public key belongs to.
 struct Account {
     user_id: String,
     device_id: String,
@@ -85,8 +68,7 @@ async fn seed_account(db: &Db, user_id: &str) -> Account {
     }
 }
 
-/// Put `user` in `group_id`'s roster with `role`. A group id is a valid MLS
-/// conversation id (a group's text channels share one MLS group keyed by it).
+/// Put `user` in `group_id`'s roster; a group id is a valid MLS conversation id.
 async fn seed_member(db: &Db, group_id: &str, user: &str, role: &str) {
     let conn = db.conn().await.unwrap();
     conn.execute(
@@ -109,7 +91,6 @@ async fn seed_member(db: &Db, group_id: &str, user: &str, role: &str) {
     .unwrap();
 }
 
-/// A device-signed POST, exactly as `pollis-core`'s `ds_post` builds one.
 fn signed(path: &str, who: &Account, body: &serde_json::Value) -> Request<Body> {
     let bytes = serde_json::to_vec(body).unwrap();
     let ts = pollis_delivery::util::now_unix() as i64;
@@ -165,9 +146,6 @@ async fn count(db: &Db, sql: &str, params: impl libsql::params::IntoParams) -> i
     rows.next().await.unwrap().unwrap().get(0).unwrap()
 }
 
-// ── C1: a commit bundle's Welcomes are checked against the roster ────────────
-
-/// A commit bundle carrying a Welcome for a recipient/device pair.
 fn bundle(conv: &str, epoch: i64, sender: &str, recipient: &str, welcome: &[u8]) -> serde_json::Value {
     serde_json::json!({
         "conversation_id": conv,
@@ -183,16 +161,7 @@ fn bundle(conv: &str, epoch: i64, sender: &str, recipient: &str, welcome: &[u8])
     })
 }
 
-/// **C1.** Mallory makes a group of her own, so she passes `/v1/commits`'
-/// submitter-membership gate, and submits a commit whose Welcome is addressed to
-/// a device belonging to an account that is not in it. `/v1/welcomes/fetch` is
-/// scoped by `recipient_id` alone, so that row would be handed to the victim's
-/// device — inviting it into a group nobody added it to, and (with the MLS
-/// GroupId inside the blob set to the victim's real conversation) replacing the
-/// real group with the attacker's.
-///
-/// Before the fix this returned 200 and wrote the row. Now the whole bundle is
-/// refused: not the Welcome, not the commit, not the GroupInfo.
+/// C1: a commit bundle's Welcome for a non-member device is refused whole.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_commit_bundle_cannot_park_a_welcome_on_a_non_member() {
     let db = fresh_db().await;
@@ -236,9 +205,7 @@ async fn a_commit_bundle_cannot_park_a_welcome_on_a_non_member() {
     );
 }
 
-/// The control: the same bundle, for a recipient who IS a member, still lands.
-/// Without this the test above would pass just as well if `/v1/commits` were
-/// broken outright.
+/// The control: a member recipient still lands.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_welcome_to_a_current_member_still_lands() {
     let db = fresh_db().await;
@@ -255,18 +222,13 @@ async fn a_welcome_to_a_current_member_still_lands() {
     );
 }
 
-/// The gate is the DESIRED roster, not `is_member`. An invitee's devices are
-/// added to the MLS tree and Welcomed at INVITE time — that is what makes
-/// accepting independent of the inviter being online — so a pending
-/// `group_invite` row is enough, and a gate that demanded membership would
-/// refuse the staged Welcome the shipped invite flow exists to produce.
+/// The gate is the desired roster: an invitee is Welcomed at invite time.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_welcome_to_a_pending_invitee_is_admitted() {
     let db = fresh_db().await;
     let alice = seed_account(&db, "alice").await;
     let _dave = seed_account(&db, "dave").await;
     seed_member(&db, "grp", "alice", "admin").await;
-    // Dave is invited but has NOT accepted — no `group_member` row.
     db.conn()
         .await
         .unwrap()
@@ -289,9 +251,6 @@ async fn a_welcome_to_a_pending_invitee_is_admitted() {
     );
 }
 
-/// The blob bound `/v1/welcomes/resubmit` has always had, now on the primary
-/// path too: a Welcome is bounded by `WELCOME_MAX_BYTES`, so the commit bundle
-/// is not an unbounded write primitive for any member.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_oversize_welcome_is_refused() {
     let db = fresh_db().await;
@@ -309,11 +268,7 @@ async fn an_oversize_welcome_is_refused() {
     );
 }
 
-/// The `submitted_by` gate, ported from the resubmit path: the
-/// `(conversation, recipient, device)` tuple is UNIQUE, so writing it IS an
-/// overwrite. Bob may not replace the PENDING Welcome Alice published for
-/// Dave — that Welcome is the one Dave needs to join, and swapping it for
-/// Bob's bytes keeps Dave out.
+/// The tuple is UNIQUE, so writing it overwrites: Bob may not replace Alice's pending Welcome.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_member_cannot_steal_another_members_pending_welcome() {
     let db = fresh_db().await;
@@ -328,7 +283,6 @@ async fn a_member_cannot_steal_another_members_pending_welcome() {
         post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"alice-welcome")).await,
         StatusCode::OK
     );
-    // Bob is at the head (epoch 1), so his commit would otherwise win the CAS.
     assert_eq!(
         post(&db, &bob, "/v1/commits", bundle("grp", 1, "bob", "dave", b"bob-welcome")).await,
         StatusCode::FORBIDDEN
@@ -353,10 +307,7 @@ async fn a_member_cannot_steal_another_members_pending_welcome() {
     );
 }
 
-/// The escape hatch the resubmit path also has: an ADMIN of the conversation's
-/// group may re-drive a Welcome another member published. Without this, a
-/// genuinely stuck join could only be repaired by the member that first
-/// attempted it.
+/// An admin of the group may re-drive another member's Welcome.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_admin_may_re_drive_another_members_pending_welcome() {
     let db = fresh_db().await;
@@ -377,14 +328,7 @@ async fn an_admin_may_re_drive_another_members_pending_welcome() {
     );
 }
 
-/// **C1's client half needs a field to compare against.** `/v1/welcomes/fetch`
-/// returned `{id, welcome}` and nothing else, so a client had no way to check
-/// the `GroupId` inside the (server-opaque) Welcome blob against the
-/// conversation the row was filed under — `join_from_welcome`'s guard had
-/// nothing to bind to. The row's `conversation_id` now rides along.
-///
-/// Additive: the field is `Option` with `#[serde(default)]`, so an older client
-/// ignores it and an older server decodes as `None`.
+/// `/v1/welcomes/fetch` carries `conversation_id` so clients can check the blob's GroupId.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fetched_welcome_names_the_conversation_it_was_filed_under() {
     let db = fresh_db().await;
@@ -415,11 +359,7 @@ async fn a_fetched_welcome_names_the_conversation_it_was_filed_under() {
     );
 }
 
-/// #1412: the drain reports the SIGNING device's own unclaimed KeyPackages in
-/// the asked suite, so a device learns its pool is low on the call every wake-up
-/// already makes. Scoped to the verified device — another device's pool, or a
-/// claimed or other-suite package, never counts — and absent unless asked, so
-/// an older client sees the response it always did.
+/// #1412: the drain reports the signing device's own unclaimed packages in the asked suite.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_welcome_drain_reports_the_signing_devices_own_pool() {
     let db = fresh_db().await;
@@ -466,8 +406,6 @@ async fn the_welcome_drain_reports_the_signing_devices_own_pool() {
     );
 }
 
-// ── cross-account 403s: enrollment ───────────────────────────────────────────
-
 async fn seed_enrollment_request(db: &Db, id: &str, user_id: &str) {
     let conn = db.conn().await.unwrap();
     conn.execute(
@@ -489,8 +427,6 @@ async fn enrollment_status(db: &Db, id: &str) -> Option<String> {
     .await
 }
 
-/// Approving somebody else's pending enrollment would hand the attacker's own
-/// device key an account it does not own. Bob names Alice's request id.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_approve_as_enrollment_request() {
     let db = fresh_db().await;
@@ -513,8 +449,6 @@ async fn b_cannot_approve_as_enrollment_request() {
     assert_eq!(enrollment_status(&db, "req-a").await.as_deref(), Some("pending"));
 }
 
-/// Rejecting somebody else's pending enrollment is a denial of service against
-/// their new device, and is refused by the same `WHERE user_id = actor`.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_reject_as_enrollment_request() {
     let db = fresh_db().await;
@@ -533,8 +467,7 @@ async fn b_cannot_reject_as_enrollment_request() {
     assert_eq!(enrollment_status(&db, "req-a").await.as_deref(), Some("pending"));
 }
 
-/// A signed request may not *declare* another account in the body either — the
-/// signer and the claimed `user_id` must agree before anything is read.
+/// The signer and the claimed `user_id` must agree before anything is read.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_read_as_pending_enrollments() {
     let db = fresh_db().await;
@@ -551,8 +484,6 @@ async fn b_cannot_read_as_pending_enrollments() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // And with no claim at all, Bob sees only his own (empty) set — never
-    // Alice's request leaking through an unscoped query.
     let (status, body) = post_json(
         &db,
         &bob,
@@ -566,16 +497,13 @@ async fn b_cannot_read_as_pending_enrollments() {
 
 // ── cross-account 403s: devices ──────────────────────────────────────────────
 
-/// Revoking another account's device locks them out of their own messages. The
-/// revoke is scoped `WHERE device_id = ? AND user_id = actor`, so Bob naming
-/// Alice's device must change nothing.
+/// The revoke is scoped `WHERE device_id = ? AND user_id = actor`.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_revoke_as_device() {
     let db = fresh_db().await;
     let alice = seed_account(&db, "alice").await;
     let bob = seed_account(&db, "bob").await;
 
-    // Declaring Alice's user_id is refused outright.
     assert_eq!(
         post(
             &db,
@@ -586,8 +514,6 @@ async fn b_cannot_revoke_as_device() {
         .await,
         StatusCode::FORBIDDEN
     );
-    // And naming only the device id silently scopes to Bob's own account, so
-    // Alice's device is untouched.
     let _ = post(
         &db,
         &bob,
@@ -607,7 +533,6 @@ async fn b_cannot_revoke_as_device() {
     );
 }
 
-/// Logout deletes a `user_device` row, so it is the same shape of hazard.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_log_out_as_device() {
     let db = fresh_db().await;
@@ -633,11 +558,6 @@ async fn b_cannot_log_out_as_device() {
     );
 }
 
-// ── cross-account 403s: the security-event audit log ─────────────────────────
-
-/// The audit log is the evidence a user reads after a compromise. Writing a row
-/// into somebody else's log — to fabricate or to bury — is refused, and reading
-/// somebody else's is refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_write_or_read_as_security_events() {
     let db = fresh_db().await;
@@ -664,7 +584,6 @@ async fn b_cannot_write_or_read_as_security_events() {
         0
     );
 
-    // An unclaimed write lands on the SIGNER's log, never the named account's.
     assert_eq!(
         post(&db, &bob, "/v1/security-events", serde_json::json!({ "kind": "own" })).await,
         StatusCode::OK
@@ -684,18 +603,12 @@ async fn b_cannot_write_or_read_as_security_events() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// **L3 — flooding evicts evidence.** `/v1/read/security-events` was
-/// `ORDER BY created_at DESC LIMIT n` with `n` clamped to 500 and no cursor, so
-/// the log was a fixed-size window onto the newest rows (it pages by cursor since
-/// #1548, but a flood still buries evidence below the fold). Appending was unbounded,
-/// which made eviction an available move for a device that had just done
-/// something the log records. The append is now budgeted per account per hour.
+/// L3: the append is budgeted per account per hour, so a flood cannot bury evidence.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_flood_of_security_events_is_refused_before_it_can_evict() {
     let db = fresh_db().await;
     let bob = seed_account(&db, "bob").await;
 
-    // The DS-authored evidence a flood would try to bury.
     db.conn()
         .await
         .unwrap()
@@ -747,8 +660,6 @@ async fn a_flood_of_security_events_is_refused_before_it_can_evict() {
     );
 }
 
-/// The control: an ordinary client's handful of events is nowhere near the
-/// bound, so the cap never costs a real report.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_ordinary_run_of_security_events_is_unaffected() {
     let db = fresh_db().await;
@@ -761,10 +672,6 @@ async fn an_ordinary_run_of_security_events_is_unaffected() {
     }
 }
 
-// ── cross-account 403s: directory reads ──────────────────────────────────────
-
-/// The conversation directory is the map of who talks to whom. Asking for
-/// another account's is refused; asking for your own returns only your own.
 #[tokio::test(flavor = "multi_thread")]
 async fn b_cannot_read_as_conversation_directory() {
     let db = fresh_db().await;

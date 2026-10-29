@@ -1,8 +1,7 @@
 //! Message envelopes, edits/deletes, reactions, watermarks, envelope GC and
 //! attachment reference rows.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,13 +20,7 @@ pub struct SendMessageBody {
     pub ciphertext: String,
     #[serde(default)]
     pub reply_to_id: Option<String>,
-    /// The envelope's delivery-cursor stamp, as the client wrote it
-    /// (`pollis_core::commands::messages::envelope_sent_at`). Stored verbatim
-    /// when admitted, and admitted ONLY as a canonical UTC RFC 3339 stamp no
-    /// further ahead of the DS clock than the request-signature window
-    /// (`pollis_delivery::messages::check_cursor_stamp`, → 400 otherwise): every
-    /// recipient adopts it as its fetch cursor and the GC floor reads it, so a
-    /// far-future value would black out the conversation for everyone.
+    /// The delivery-cursor stamp; admitted only as canonical UTC RFC 3339 within the signature window (a future value blacks out the conversation).
     pub sent_at: String,
     /// Sealed sender flag (issue #331, `docs/metadata-minimization-design.md`
     /// §2). `1` → `sender_id` is a blinded sentinel; the true sender lives in the
@@ -36,71 +29,25 @@ pub struct SendMessageBody {
     pub sealed: i64,
     /// Who to WAKE with a content-free push (#987, #843).
     ///
-    /// The push fan-out moved server-side with this field: the DS already knows
-    /// the conversation and the sender, so all it was missing was the mention
-    /// list. Doing it here removes the client's need to read other people's
-    /// `push_token` rows — the most identifying row it had any reason to read
-    /// about someone else — and takes two dependent round trips off the hot send
-    /// path.
-    ///
     /// * `None` → do not push at all (a suppressed send).
     /// * `Some([])` → every member. The DM and `@all` behaviour.
     /// * `Some([ids])` → only those, INTERSECTED with real membership
     ///   server-side, so this can only ever narrow the audience — never widen it
     ///   past the conversation.
     ///
-    /// The push itself carries `{ conversationId, kind }` and nothing else.
-    ///
-    /// Since #1431 a current client sends `Some([])` for EVERY group-channel
-    /// message, not only `@all`: channel chatter pushes by default, and the DS
-    /// drops each recipient who muted the channel (`channel_mute`) unless
-    /// `push_mentions` names them. A client from before #1431 still sends `None`
-    /// for chatter, which keeps meaning "no push".
+    /// Since #1431 clients send `Some([])` for every group-channel message; muted recipients are dropped unless mentioned.
     #[serde(default)]
     pub push_to: Option<Vec<String>>,
-    /// The members this message names directly by `@username` (#1431) — the
-    /// ones who are pushed even if they muted the channel (Slack semantics: a
-    /// muted channel stays silent for chatter and `@all`, but a direct mention
-    /// still reaches you). Narrows nothing and widens nothing on its own: a
-    /// recipient must still be in the `push_to` audience and a member.
-    ///
-    /// Absent (a client from before #1431) → the non-empty `push_to` list
-    /// itself, because such a client sends a non-empty list only for
-    /// `@username` mentions.
+    /// Members named by `@username` (#1431), pushed even if they muted the channel; absent → the non-empty `push_to`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub push_mentions: Option<Vec<String>>,
-    /// The MLS lineage the ciphertext was sealed at, as the client read it off
-    /// its own envelope (#1041). Together with `epoch` this is the envelope's
-    /// position in the commit log; the DS refuses to keep an envelope whose
-    /// position is not the log's head at the moment it lands, because with
-    /// `max_past_epochs = 0` every member that has already applied the next
-    /// commit could never decrypt it. See `EpochBehind`.
-    ///
-    /// Absent (an older client) → ungated, exactly the pre-#1041 write. A client
-    /// that lies here only hurts its own message.
+    /// The MLS lineage the ciphertext was sealed at (#1041); with `epoch`, the DS refuses a non-head position. Absent → ungated.
     #[serde(default)]
     pub generation: Option<i64>,
     /// The MLS epoch the ciphertext was sealed at. See `generation`.
     #[serde(default)]
     pub epoch: Option<i64>,
-    /// `SHA-256(delete_token)`, base64 — the per-envelope **deletion capability**
-    /// (#1086), stored alongside the row and required to remove it later.
-    ///
-    /// Sealed sender means the DS cannot tell whose envelope this is, so the
-    /// self-delete branch trusted the caller's own claim and any member could
-    /// remove any envelope in a conversation before slower recipients fetched it
-    /// — an attacker-controlled fourth message loss, on top of the three
-    /// CLAUDE.md allows. Possession of the preimage replaces the claim: the DS
-    /// authorizes nobody, it just checks a hash.
-    ///
-    /// The token is derived, not stored: `HMAC-SHA256(k, message_id)` under a key
-    /// HKDF'd from the account identity key, so **every device of the author**
-    /// can recompute it and nobody else can. The hash reveals nothing linkable —
-    /// it is a fresh-looking 32 bytes per message.
-    ///
-    /// Absent (an older client) → the row keeps a NULL hash and deletes fall back
-    /// to the membership-only check. That is the rollout: the DS cannot require a
-    /// capability for envelopes written before clients produced one.
+    /// `SHA-256(delete_token)`, base64 — the per-envelope **deletion capability** (#1086); absent → membership-only deletes.
     #[serde(default)]
     pub delete_token_hash: Option<String>,
 }
@@ -122,26 +69,12 @@ pub struct EditMessageBody {
     /// See [`SendMessageBody::epoch`].
     #[serde(default)]
     pub epoch: Option<i64>,
-    /// The TARGET message's deletion capability, base64 (#1086).
-    ///
-    /// An edit replaces any pending edit of the same target, which is a delete —
-    /// so without this, one member could clobber another author's unfetched
-    /// edit exactly the way they could delete an unfetched message. Required
-    /// whenever the target row has a hash; the edit's own new envelope carries
-    /// the target's hash too, so a later edit can replace it in turn.
+    /// The TARGET message's deletion capability, base64 (#1086): an edit replaces a pending edit, which is a delete.
     #[serde(default)]
     pub delete_token: Option<String>,
 }
 
-/// The `409 Conflict` body `/v1/messages/send` and `/v1/messages/edit` answer
-/// when the envelope's asserted `(generation, epoch)` is not the commit log's
-/// head (#1041). Nothing was stored. The client's only correct move is to catch
-/// up (apply the commit(s) it is missing), re-seal at the new epoch, and post
-/// again — the same convergence a lost commit race demands.
-///
-/// `error` is the constant [`EpochBehind::ERROR`], so a 409 from a different
-/// cause (a lost commit race on `/v1/commits` is also a 409) can never be
-/// mistaken for this one.
+/// The `409 Conflict` body for an envelope not at the log head (#1041); catch up, re-seal and post again.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EpochBehind {
     pub error: String,
@@ -157,25 +90,13 @@ impl EpochBehind {
 pub struct DeleteMessageBody {
     pub message_id: String,
     pub conversation_id: String,
-    /// The original author the client resolved (from its local cache). Selects
-    /// the self-vs-admin branch (Solution A, #607): the DS can no longer re-derive
-    /// authorship from the sealed envelope, so it trusts this hint for BRANCHING
-    /// only. It is never trusted for a permission grant — the admin branch
-    /// re-derives the admin role independently, and the self branch grants nothing
-    /// beyond envelope removal that membership doesn't already permit.
+    /// The original author the client resolved (#607); trusted only for branching, never for a permission grant.
     #[serde(default)]
     pub msg_sender_id: Option<String>,
     /// No-auth fallback for the acting user.
     #[serde(default)]
     pub actor_id: Option<String>,
-    /// The per-envelope deletion capability, base64 (#1086) — the preimage of
-    /// the `delete_token_hash` stored at send time. Required by the self-delete
-    /// branch whenever the target row HAS a hash; ignored by the admin branch,
-    /// which is a re-derived permission and not a claim of authorship.
-    ///
-    /// Absent, or wrong, against a row that has a hash → `Forbidden`. Absent
-    /// against a row with no hash → the pre-#1086 membership-only path, for
-    /// envelopes older clients wrote.
+    /// The deletion-capability preimage (#1086), required by the self-delete branch when the row has a hash.
     #[serde(default)]
     pub delete_token: Option<String>,
 }
@@ -187,26 +108,7 @@ pub struct ReactionBody {
     /// No-auth fallback for the reacting user.
     #[serde(default)]
     pub user_id: Option<String>,
-    /// The conversation the reacted-to message belongs to — what the DS checks
-    /// membership against (#1161).
-    ///
-    /// Reactions are membership-gated through the message's `message_envelope`
-    /// row, and envelope GC collects that row as soon as every member device has
-    /// fetched it, so for anything but a very recent message there is nothing
-    /// left to resolve the conversation from. The gate used to be SKIPPED in
-    /// that case, which is the common case — a non-member who knows a message id
-    /// could write a reaction row for it. The client knows the conversation from
-    /// its own local copy of the message, so it declares it here and the DS
-    /// checks membership without needing the envelope.
-    ///
-    /// `#[serde(default)]` for shape compatibility only, NOT as a way to opt out
-    /// of the check: when the envelope is gone and no conversation is declared,
-    /// the DS refuses. An optional-and-ignored field would close nothing — an
-    /// attacker composes the body and would simply omit it.
-    ///
-    /// A declared value is cross-checked against the envelope whenever one still
-    /// exists, so it cannot be used to have the membership question asked about
-    /// some other conversation.
+    /// The conversation the reacted-to message belongs to, for the membership check (#1161); required once the envelope is GC'd.
     #[serde(default)]
     pub conversation_id: Option<String>,
 }
@@ -221,22 +123,10 @@ pub struct WatermarkBody {
     /// When signed it must equal the SIGNING device (→ 403); the row is keyed
     /// on the verified device, never on this field alone.
     pub device_id: String,
-    /// The DS-assigned delivery position this device has handled up to (#1087).
-    /// The cursor the next fetch uses: `seq > last_seq`. Monotone — the upsert
-    /// takes `MAX(existing, reported)`, so a cursor never rewinds.
-    ///
-    /// `None` from a client that predates #1087; such a report advances only the
-    /// legacy timestamp and is what keeps `last_fetched_at` alive for one
-    /// release. See `apply_advance_watermark`.
+    /// The DS-assigned position handled up to (#1087); the next fetch uses `seq > last_seq`, and it never rewinds.
     #[serde(default)]
     pub last_seq: Option<i64>,
-    /// **Legacy**, and no longer the cursor (#1087): the highest envelope
-    /// `sent_at` this device has handled.
-    /// Admitted only through `check_cursor_stamp` (canonical UTC RFC 3339,
-    /// within the signature window of the DS clock, → 400 otherwise) — the
-    /// upsert is monotone and never rewinds, so a far-future cursor would be a
-    /// permanent blackout for this device and, once every device reported one,
-    /// GC of the whole conversation.
+    /// **Legacy** (#1087): the highest envelope `sent_at` handled, admitted only via `check_cursor_stamp`.
     pub last_fetched_at: String,
 }
 
@@ -250,39 +140,16 @@ pub struct EnvelopeGcBody {
     pub actor_id: Option<String>,
 }
 
-/// `POST /v1/attachments/register` — the two things this endpoint is asked to do.
-///
-/// One body served both operations, with `message_id: Option<String>` as the
-/// only thing telling them apart (#925). That made the send path's failure mode
-/// — forgetting the message id, so the object is registered with no reference
-/// and is collectable the moment anything sweeps — a `None` that typechecks.
-/// Two variants make it unrepresentable instead: the send path cannot express
-/// "reference this message" without naming the message.
-///
-/// `#[serde(untagged)]`, so the WIRE FORM is unchanged in both directions: a
-/// send-path body still serializes as `{content_hash, r2_key, message_id}` and a
-/// dedup body as `{content_hash, r2_key}`. A pre-#690 client (object only) still
-/// deserializes, as [`ObjectOnly`](AttachmentRegisterBody::ObjectOnly) — which
-/// matters, because this is a deployed endpoint.
+/// `POST /v1/attachments/register` — two variants, so the send path cannot omit the message id (#925). Untagged: wire form unchanged.
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AttachmentRegisterBody {
-    /// Send path: register the object AND a `(content_hash, message_id)`
-    /// reference, so the shared convergent object is reference-counted (#690).
-    ///
-    /// Declared FIRST because `untagged` tries variants in order: a body
-    /// carrying a `message_id` must match here, not fall through to
-    /// [`ObjectOnly`](AttachmentRegisterBody::ObjectOnly) with the field ignored.
+    /// Send path: register the object AND a reference (#690); declared FIRST because `untagged` tries variants in order.
     ForMessage {
         content_hash: String,
         r2_key: String,
         message_id: String,
-        /// The message's deletion capability (#1086) — what proves the caller
-        /// wrote it. Under sealed sender the envelope's `sender_id` is a
-        /// sentinel, so the DS cannot bind the declaration to an account by
-        /// name; it checks this token against the envelope's
-        /// `delete_token_hash` instead. Absent on a client that predates it,
-        /// which the DS can then only accept for an unsealed envelope.
+        /// The message's deletion capability (#1086), proving authorship under sealed sender.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delete_token: Option<String>,
     },
@@ -329,22 +196,14 @@ impl AttachmentRegisterBody {
 #[derive(Serialize, Deserialize)]
 pub struct AttachmentDeleteBody {
     pub content_hash: String,
-    /// The id of the message being deleted (#690). Present → release that
-    /// message's `(content_hash, message_id)` reference before the (now
-    /// conditional) object collection. Absent (pre-#690 client) → release
-    /// nothing; the object is still only collected when NO reference remains, so
-    /// an old client can no longer strand a hash a newer client references.
+    /// The message being deleted (#690): release its reference first; absent → release nothing.
     #[serde(default)]
     pub message_id: Option<String>,
 }
 
 /// `POST /v1/reactions/add` — add the authenticated user's reaction.
 ///
-/// A `#[serde(transparent)]` newtype over [`ReactionBody`], not a second copy of
-/// its fields: add and remove take byte-identical JSON, but a path is a property
-/// of the TYPE here, so one type cannot address two endpoints. The wrapper keeps
-/// one field list while still making "which endpoint" a compile-time fact — and
-/// stops a caller reaching for the remove path with an add body.
+/// A transparent newtype over [`ReactionBody`], so each endpoint has its own path type.
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AddReaction(pub ReactionBody);

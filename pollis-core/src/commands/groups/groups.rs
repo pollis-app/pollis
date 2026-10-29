@@ -9,10 +9,7 @@ use super::authz;
 
 /// The sidebar tree: every group the user belongs to, each carrying its
 /// channels and the user's role in it.
-///
-/// Derived from `group_member` server-side, NOT from `user_groups`: that table
-/// was the #532 directory index, reverted by #540, and now holds a one-time
-/// backfill minus deletions. Reading it would serve a confidently wrong sidebar.
+/// Derived from `group_member`, not the stale `user_groups` table (#540).
 pub async fn list_user_groups_with_channels(
     user_id: String,
     state: &Arc<AppState>,
@@ -32,10 +29,7 @@ pub async fn list_user_groups_with_channels(
         })
         .collect();
 
-    // Remember what these channel ids mean, so on-device search can render a
-    // name instead of a UUID and route a hit to the right page (#850). Channel
-    // names are remote-only and there is no embedded replica, so this is the
-    // moment they are knowable locally.
+    // Cache channel names for on-device search (#850).
     cache_channels(state, &groups).await;
 
     Ok(groups)
@@ -61,10 +55,6 @@ async fn cache_channels(state: &Arc<AppState>, groups: &[GroupWithChannels]) {
 }
 
 /// Every group the user belongs to, without their channels.
-///
-/// Same source as [`list_user_groups_with_channels`] — one bootstrap read,
-/// projected down. Kept as a separate command because mobile and the flows
-/// suite drive it; it is not a second query.
 pub async fn list_user_groups(user_id: String, state: &Arc<AppState>) -> Result<Vec<Group>> {
     Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
         .await?
@@ -80,8 +70,6 @@ pub async fn list_user_groups(user_id: String, state: &Arc<AppState>) -> Result<
         .collect())
 }
 
-/// Wire → domain for one channel row. One conversion, so a field added to the
-/// wire type cannot be picked up by one call site and missed by another.
 pub(super) fn channel_from_wire(c: pollis_api::directory::ChannelWire) -> Channel {
     Channel {
         id: c.id,
@@ -96,9 +84,7 @@ pub async fn create_group(
     name: String,
     description: Option<String>,
     owner_id: String,
-    // Opt-in to auto-creating a #General text channel. Defaults to false
-    // — the user is expected to set these toggles in the create-group
-    // form. Tauri elides the param entirely when omitted by the caller.
+    // Opt-in to auto-creating a #General text channel.
     create_default_text_channel: Option<bool>,
     // Opt-in to auto-creating a Voice Chat voice channel.
     create_default_voice_channel: Option<bool>,
@@ -106,15 +92,11 @@ pub async fn create_group(
 ) -> Result<Group> {
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
-    // Default channel ids are generated up front so the same value goes into the
-    // DB write (direct or DS) regardless of which path runs.
     let text_channel_id =
         create_default_text_channel.unwrap_or(false).then(|| Ulid::new().to_string());
     let voice_channel_id =
         create_default_voice_channel.unwrap_or(false).then(|| Ulid::new().to_string());
 
-    // Route the group + admin-member + default-channel inserts through the
-    // Delivery Service (one transactional, server-authorized write).
     let body = pollis_api::groups::CreateGroupBody {
         id: id.clone(),
         name: name.clone(),
@@ -139,14 +121,7 @@ pub async fn create_group(
         Err(e) => crate::diag!("[mls] create_group: mls group init failed (non-fatal): {e}"),
     }
 
-    // Wake the creator's OTHER devices. They are not in this group's room —
-    // they do not know it exists — so the inbox is the only room that reaches
-    // them, and without this the group showed up there only after a hard
-    // refresh. A bare `membership_changed` (no `kind`, so no invite alert) is
-    // what every client already answers by pulling its Welcomes and refetching
-    // the group list. Sent after the reconcile above so the Welcomes it queued
-    // are there to pull. Best-effort, like every wake-up: a device that misses
-    // it catches up on its next launch or reconnect.
+    // Wake the creator's other devices via their inbox; they are not in the group room.
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
         state,
         &owner_id,
@@ -170,10 +145,7 @@ pub async fn update_group(
 ) -> Result<Group> {
     authz::require_admin(state, &group_id, &requester_id, "update group settings").await?;
 
-    // Route the column updates through the Delivery Service (which re-derives the
-    // admin role server-side) and take the UPDATED ROW from its response (#987).
-    // Re-reading it afterwards was a second round trip, and worse: the read could
-    // observe a LATER concurrent update and report it as the result of this one.
+    // Use the updated row from the response; a re-read could see a later update (#987).
     let body = pollis_api::groups::UpdateGroupBody {
         group_id: group_id.clone(),
         requester_id: Some(requester_id),
@@ -189,9 +161,7 @@ pub async fn update_group(
         created_at,
     } = crate::commands::mls::ds_post_json(state, &body).await?;
 
-    // Announce the rename/icon change to the group (#874). Without this the
-    // only thing that refreshed another member's sidebar was a window-focus
-    // refetch — a poll wearing an event's clothes.
+    // Announce the change so other members' sidebars refresh (#874).
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
         state,
         &group_id,
@@ -215,8 +185,7 @@ pub async fn delete_group(
 ) -> Result<()> {
     authz::require_admin(state, &group_id, &requester_id, "delete the group").await?;
 
-    // CASCADE deletes group_member and channels entries. Route the delete through
-    // the Delivery Service (admin re-checked server-side).
+    // CASCADE deletes group_member and channels entries.
     let body = pollis_api::groups::DeleteGroupBody {
         group_id,
         requester_id: Some(requester_id),
@@ -227,35 +196,7 @@ pub async fn delete_group(
 }
 
 /// Find a group whose name derives to the given slug.
-/// Returns an error if no match is found.
-///
-/// #917: deliberately NOT membership-gated, and deliberately narrowed instead.
-///
-/// This is the discovery step of the join flow — `SearchGroupPage` calls it,
-/// then offers `request_group_access` on what it finds. A `require_member`
-/// guard here would mean you could only find groups you were already in, which
-/// is not a stricter version of the feature, it is the removal of the feature.
-/// Discord's vanity-invite lookup and Slack's workspace-URL lookup make the
-/// same trade: the existence of a group at a guessed name is public, its
-/// contents are not.
-///
-/// So the fix is the projection. This used to hand back the whole [`Group`] row
-/// — including `owner_id`, a named user — to anyone who guessed a slug. It now
-/// returns [`GroupPreview`], which carries exactly what the join prompt
-/// renders. See that type for the field-by-field reasoning.
-///
-/// What this endpoint still discloses, unavoidably, is whether a group with a
-/// given slug exists; that is inherent to slug lookup and is the same bet the
-/// products above take.
-///
-/// The scan is O(rows) per query — `derive_slug` is Rust, not SQL, so it cannot
-/// be an indexed lookup. Since #987 it runs on the DS
-/// (`POST /v1/directory/group-by-slug`), which is what finally makes the rate
-/// limit meaningful: the old note here said a limit applied at this function was
-/// one the caller could simply decline to apply, because the query ran on the
-/// client under its own read token. There is no such token now, and the DS puts
-/// slug lookup on its own tight `probe` tier — the same treatment invite-link
-/// redemption gets, and for the same reason: guessable input.
+/// Deliberately not membership-gated (join-flow discovery); returns only [`GroupPreview`] (#917).
 pub async fn search_group_by_slug(
     slug: String,
     state: &Arc<AppState>,

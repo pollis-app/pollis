@@ -1,9 +1,4 @@
-// The stale-node detection predicate (reconciler/staleness.mjs) — #703.
-// Pure logic over a parsed /version body + the pool's expected identity. This is
-// the thing that MUST NOT misfire: a false positive cycles a healthy node or
-// hides it from clients, so the tests lean hard on the "positive identification,
-// never absence of evidence" invariant.
-//
+// Stale-node detection (#703): a false positive cycles a healthy node, so only positive identification counts.
 // Run: node --test   (from infra/relay-hydra/)
 
 import { test } from "node:test";
@@ -17,8 +12,6 @@ import {
 } from "../reconciler/staleness.mjs";
 
 const PROTO = "pollis-relay/3";
-
-// --- parseVersion ------------------------------------------------------------
 
 test("parses a full /version body", () => {
   const v = parseVersion('{"service":"pollis-relay","sha":"abc123","protocol":"pollis-relay/3","protocol_version":3}');
@@ -43,8 +36,6 @@ test("tolerates wrong-typed fields by dropping them, not throwing", () => {
   const v = parseVersion('{"sha":123,"protocol":true,"protocol_version":"3"}');
   assert.deepEqual(v, { sha: undefined, protocol: undefined, protocolVersion: undefined });
 });
-
-// --- protocolMismatch / directoryEligible ------------------------------------
 
 test("a positive protocol mismatch excludes the node", () => {
   const v = { sha: "x", protocol: "pollis-relay/2" };
@@ -76,8 +67,6 @@ test("no expected protocol configured never gates membership", () => {
   assert.equal(directoryEligible({ protocol: "anything" }, ""), true);
 });
 
-// --- isBuildStale ------------------------------------------------------------
-
 test("a concrete sha that differs from the intended sha is stale", () => {
   assert.equal(isBuildStale({ sha: "old000" }, "new111"), true);
 });
@@ -100,8 +89,6 @@ test("an unreachable / sha-less node is never stale (unreachable != stale)", () 
   assert.equal(isBuildStale({ sha: "" }, "new111"), false);
   assert.equal(isBuildStale({ sha: "unknown" }, "new111"), false);
 });
-
-// --- selectCycleTargets: bounded + floor-guarded -----------------------------
 
 const stale = (id, sha = "old") => ({ instanceId: id, region: "us-west-2", version: { sha, protocol: PROTO } });
 const current = (id) => ({ instanceId: id, region: "us-west-2", version: { sha: "new", protocol: PROTO } });
@@ -175,8 +162,6 @@ test("no intended sha => nothing is stale => nothing cycled", () => {
   assert.equal(buildStale.length, 0);
   assert.equal(targets.length, 0);
 });
-
-// --- the two axes are independent: a wrong-protocol node is also build-stale --
 
 test("wrong-generation node: excluded from directory AND build-stale", () => {
   // The real split-brain node — old build, old ALPN. Both axes fire: it is hidden

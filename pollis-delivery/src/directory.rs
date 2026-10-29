@@ -1,29 +1,12 @@
 //! The directory and conversation READ handlers (#987).
 //!
-//! Every query in this module used to run on the client, against a whole-database
-//! read token baked into the shipped binary. Moving them here does three things
-//! at once: it removes that credential, it collapses chains of *dependent* round
-//! trips into single requests, and it puts each read behind the very
-//! authorization predicate the DS already enforces on the write half of the same
-//! table — so a read and a write can no longer disagree about who may touch a
-//! row.
+//! Moved off the client (#987), behind the same authz predicate as each table's write half.
 //!
 //! Two rules hold throughout:
 //!
-//! **Non-membership is data, not an error.** Most handlers answer
-//! `authorized: false` with empty payloads rather than 403. That is what the
-//! reads they replace did — a membership-joined `SELECT` simply returned no row —
-//! and several callers treat it as an ordinary short-circuit. Where a 403 would
-//! be an existence oracle (`/v1/messages/lookup`), the refusal is deliberately
-//! indistinguishable from absence.
+//! **Non-membership is data, not an error:** `authorized: false` with empty payloads, never an oracle.
 //!
-//! **`user_groups` / `user_dms` are retired (#1085).** They were the #532
-//! directory index, reverted by #540, and for a long time held a one-time
-//! backfill minus deletions — never inserted into, never read, only deleted
-//! from, so an endpoint reading them would have served a confidently wrong
-//! sidebar. Migration 000025 empties them and the DS no longer names them at
-//! all; `tests/retired_directory_mirror.rs` fails if any SQL here starts to.
-//! Everything in this module derives from `group_member` / `dm_channel_member`.
+//! **`user_groups` / `user_dms` are retired (#1085);** all derives from `group_member` / `dm_channel_member`.
 
 use axum::{
     extract::State,
@@ -42,21 +25,12 @@ use crate::util::{BIND_CHUNK, placeholders};
 
 pub use pollis_api::directory::*;
 
-/// Cap on how many groups one [`members`] call may name. The batch exists so the
-/// command palette opens in one round trip instead of `1 + 2N`; it is not an
-/// invitation to enumerate.
+/// Cap on how many groups one [`members`] call may name.
 const MAX_GROUPS: usize = 128;
-
-// ── POST /v1/conversations/catch-up ──────────────────────────────────────────
 
 /// POST `/v1/conversations/catch-up` — resolve a conversation to its MLS group,
 /// enumerate what that group backs, and optionally return the envelopes this
 /// device has not fetched.
-///
-/// This is the request that replaces the longest dependent chain in the client:
-/// resolve → membership → is-DM → channel enumerate → envelope fetch, each step
-/// needing the previous step's answer, so none of them could be pipelined. Five
-/// serial round trips become one.
 pub async fn catch_up(
     State(state): State<AppState>,
     req: RawRequest,
@@ -74,9 +48,7 @@ pub async fn catch_up(
     let conn = state.db.conn().await?;
     let Some((mls_group_id, kind)) = resolve_conversation(&conn, &parsed.conversation_id).await?
     else {
-        // Unknown id. Historically the channel lookup fell through to "treat the
-        // id as its own MLS group", which is what a DM id does — so an id that
-        // names nothing is reported as unauthorized rather than invented.
+        // Unknown id: unauthorized, never invented.
         return Ok(ok_response::<CatchUpBody>(CatchUpResponse {
             authorized: false,
             mls_group_id: parsed.conversation_id.clone(),
@@ -107,11 +79,7 @@ pub async fn catch_up(
         _ => channel_ids_of(&conn, &mls_group_id).await?,
     };
 
-    // The log head is read BEFORE the envelopes (#1041). An envelope sealed at
-    // epoch `e` can be decrypted only by a member still at `e`, so a replay that
-    // applied a commit this response does not yet know about could strand an
-    // envelope this response carries. Ordering the two reads lets the client
-    // bound its replay to `head` and leave the rest to its next pass.
+    // The log head is read BEFORE the envelopes (#1041), so the client bounds its replay to `head`.
     let (head, envelopes) = if parsed.want_envelopes {
         let log = state.log_db.conn().await?;
         let generation = crate::commit::head_generation(&log, &mls_group_id).await?;
@@ -153,9 +121,7 @@ pub async fn catch_up(
 /// `dm_channel_member` when neither yields anything (a DM has no group rows).
 /// Pending invitees are included so their devices get a Welcome at invite time.
 ///
-/// This is THE definition of "desired roster" — `reconcile` diffs the tree
-/// against it, `migrate` moves exactly this set into the successor group, and
-/// the two must never disagree about who belongs.
+/// THE definition of "desired roster": `reconcile` and `migrate` must never disagree.
 pub async fn desired_roster(conn: &Connection, conversation_id: &str) -> anyhow::Result<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     let push = |id: String, out: &mut Vec<String>| {
@@ -193,10 +159,7 @@ pub async fn desired_roster(conn: &Connection, conversation_id: &str) -> anyhow:
 
 /// Resolve an id in the shared conversation namespace to `(mls_group_id, kind)`.
 ///
-/// The three shapes, in the order the client's own resolve used: a `channels`
-/// row maps to its owning group (all of a group's channels share ONE MLS group,
-/// keyed by the group id), a `dm_channel` row is its own MLS group, and a
-/// `groups` row is addressed directly by the MLS paths.
+/// A `channels` row maps to its group, a `dm_channel` is its own group, a `groups` row is direct.
 pub async fn resolve_conversation(
     conn: &Connection,
     id: &str,
@@ -250,22 +213,13 @@ async fn channel_ids_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec
 }
 
 /// This device's watermark for each of `conversation_ids`, by conversation.
-///
-/// Read separately from the envelopes rather than as a subquery inside them —
-/// see [`fetch_envelopes`] for why. A conversation with no row is absent from
-/// the map and the caller substitutes `""`, which is the same "everything"
-/// floor the old `COALESCE` produced.
 async fn fetch_watermarks(
     conn: &Connection,
     conversation_ids: &[String],
     user_id: &str,
     device_id: &str,
 ) -> anyhow::Result<HashMap<String, i64>> {
-    // `last_seq`, not `last_fetched_at` (#1087): the cursor is the DS-assigned
-    // delivery sequence. A row with no `last_seq` — a device that has only ever
-    // reported through a pre-#1087 client — reads as 0, i.e. "has seen nothing",
-    // so it re-fetches rather than skipping. Re-delivery is absorbed by ingest's
-    // `INSERT OR IGNORE`; skipping would be message loss.
+    // `last_seq`, not `last_fetched_at` (#1087); NULL reads as 0, re-fetching rather than skipping.
     let sql = format!(
         "SELECT conversation_id, COALESCE(last_seq, 0) FROM conversation_watermark \
          WHERE user_id = ?1 AND device_id = ?2 AND conversation_id IN ({})",
@@ -285,44 +239,9 @@ async fn fetch_watermarks(
     Ok(out)
 }
 
-/// Envelopes past each conversation's OWN watermark for this device.
-///
-/// The bound has to be per conversation — one query serves all of them, and
-/// each has its own cursor — but it must also be a value the planner can use as
-/// an index RANGE, and those two requirements pull apart.
-///
-/// Expressing it as a correlated subquery (`WHERE sent_at > (SELECT …  WHERE
-/// conversation_id = message_envelope.conversation_id)`) reads correctly and is
-/// what this did until now. It cannot use `idx_envelope_channel_time`'s
-/// `sent_at` column, because the comparison value is not known until the outer
-/// row exists: SQLite plans it `SEARCH … (conversation_id=?)` plus a
-/// `CORRELATED SCALAR SUBQUERY`, i.e. **every retained envelope in the
-/// conversation is read and then discarded**. Measured on the real schema at
-/// 200k envelopes, for a caught-up device returning zero rows: 36 ms and ~200k
-/// rows read. Those are billed rows on Turso, on the path every client takes to
-/// ask "anything new?" — so the idle case, which should be free, was the
-/// expensive one.
-///
-/// Reading the watermarks first and binding each conversation's own value makes
-/// every branch a real range seek (`MULTI-INDEX OR`, each
-/// `conversation_id=? AND seq>?`, served by `idx_envelope_conv_seq`): 0.1 ms, no
-/// rows read, same one round trip. `pollis-delivery/tests/envelope_query_plan.rs` pins the plan, because
-/// this regressed silently once already — #875 batched the per-channel queries
-/// into one and turned a bound `?1` into a correlation without anything noticing.
-///
-/// Splitting the read in two is safe in the only direction that matters. The
-/// watermark for `(conversation, user, device)` is advanced by this device
-/// alone, so a concurrent advance between the two reads can only leave this
-/// query using an OLDER cursor — re-sending an envelope the client already has,
-/// which `ingest.rs`'s `INSERT OR IGNORE INTO message` absorbs. It can never
-/// skip one.
+/// Bound per-conversation watermarks, not a correlated subquery, so each is a range seek (#875).
 /// [`fetch_envelopes`] for ONE conversation — the production delivery query,
 /// exposed so tests assert against the real predicate instead of a copy of it.
-///
-/// A duplicated fetch rule is how a delivery test stops testing delivery: the
-/// #661 tombstone tests carried their own `sent_at > last_fetched_at` inline, so
-/// when #1087 moved the cursor to `seq` they failed for a reason unrelated to
-/// what they assert. There is one predicate now, and it lives here.
 #[cfg(test)]
 pub(crate) async fn envelopes_for_conversations(
     conn: &Connection,
@@ -420,13 +339,9 @@ async fn dm_channel(
     }))
 }
 
-// ── POST /v1/messages/lookup ─────────────────────────────────────────────────
-
 /// POST `/v1/messages/lookup` — which conversation an envelope belongs to.
 ///
-/// Answers `None` both for "no such envelope" and for "you are not a member of
-/// its conversation". Distinguishing them would turn this into an existence
-/// oracle for message ids, and the caller cannot act on either answer.
+/// `None` for both "no such envelope" and "not a member": no existence oracle.
 pub async fn message_lookup(
     State(state): State<AppState>,
     req: RawRequest,
@@ -447,9 +362,7 @@ pub async fn message_lookup(
         envelope_conversation(&conn, &parsed.message_id, &who).await?
     };
 
-    // Reactions are gated on the same question — membership of the message's
-    // conversation — per row (see `visible_reactions`). A message the caller
-    // may not see is simply absent, never a distinguishable refusal.
+    // Reactions are gated per row on the same membership.
     let mut reactions = Vec::new();
     let mut membership = HashMap::new();
     for message_id in &parsed.reactions_for {
@@ -470,10 +383,6 @@ pub async fn message_lookup(
 
 /// The conversation an envelope belongs to, or `None` when it does not exist OR
 /// the caller is not a member of it.
-///
-/// The two cases are deliberately indistinguishable: separating them would make
-/// this an existence oracle for message ids, and no caller can act on the
-/// difference.
 async fn envelope_conversation(
     conn: &Connection,
     message_id: &str,
@@ -500,19 +409,9 @@ async fn envelope_conversation(
 /// The reactions on one message that `user_id` may see, grouped by emoji in
 /// insertion order.
 ///
-/// A row is visible to a member of the conversation it was gated against when
-/// it was written (`message_reaction.conversation_id`, #1433), or — for a row
-/// that predates that column — to a member of the envelope's conversation while
-/// the envelope survives. Gating on the envelope alone, as this did before,
-/// hid every reaction on a message as soon as envelope GC (#689) collected it,
-/// which for an active conversation is shortly after everyone has read it: a
-/// tapped pill appeared optimistically and the refetch took it away again.
+/// Visible to members of the conversation it was gated against (#1433), or the envelope's.
 ///
-/// Per row, not per message: once the envelope is gone the DS cannot tell
-/// which conversation a message id belongs to, and the add gate trusted the
-/// writer's declaration. A row declared against some OTHER conversation is
-/// therefore shown only to members of that one — never mixed into the real
-/// conversation's pills, and never a way to read the real conversation's rows.
+/// Per row: one declared against another conversation shows only to that one's members.
 pub async fn visible_reactions(
     conn: &Connection,
     message_id: &str,
@@ -561,8 +460,6 @@ pub async fn visible_reactions(
     }
     Ok(out)
 }
-
-// ── POST /v1/directory/bootstrap ─────────────────────────────────────────────
 
 /// POST `/v1/directory/bootstrap` — the whole sidebar, actor-scoped, in one
 /// request.
@@ -652,12 +549,7 @@ pub async fn groups_with_channels(
 /// The caller's DMs, `accepted = true` for the sidebar list and `false` for the
 /// request list.
 ///
-/// The block filter is deliberately ASYMMETRIC and must stay so: it hides
-/// channels whose other members the caller has blocked, but NOT channels where
-/// the caller is the blocked party. A blocked user keeps seeing the
-/// conversation, so the block produces no observable signal on their side —
-/// their messages simply stay pending, indistinguishable from a recipient who
-/// has not accepted.
+/// The block filter is deliberately ASYMMETRIC: a blocked user sees no sign of the block.
 pub async fn dm_channels(
     conn: &Connection,
     user_id: &str,
@@ -829,14 +721,9 @@ async fn preferences(conn: &Connection, user_id: &str) -> anyhow::Result<Option<
     }
 }
 
-// ── POST /v1/directory/group ─────────────────────────────────────────────────
-
 /// POST `/v1/directory/group` — one group's detail, gated per section.
 ///
-/// Members see the roster, the channels and (on request) the emoji set. Invite
-/// links and join requests are admin-only, and an unauthorized section comes back
-/// EMPTY rather than as a refusal for the whole request — the member half is
-/// still legitimately theirs.
+/// Admin-only sections come back EMPTY for members rather than refusing the request.
 pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let parsed: DirectoryGroupBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
@@ -848,9 +735,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
     };
 
     let conn = state.db.conn().await?;
-    // The id may name a group or one of its channels. Resolving here is what
-    // lets the moderation preflight ask one question instead of two, and it
-    // matches `writes::is_member`'s tolerance of the shared id namespace.
+    // The id may name a group or one of its channels (one id namespace).
     let group_id = match resolve_conversation(&conn, &parsed.group_id).await? {
         Some((id, ConversationKind::Group)) | Some((id, ConversationKind::Channel)) => id,
         // A DM, or nothing at all. Neither is a group, and `exists: false` is
@@ -1130,13 +1015,9 @@ pub async fn collect_emoji(rows: &mut libsql::Rows) -> anyhow::Result<Vec<Custom
     Ok(out)
 }
 
-// ── POST /v1/directory/members ───────────────────────────────────────────────
-
 /// POST `/v1/directory/members` — member lists for several groups at once.
 ///
-/// Each group is authorized independently, so one group the caller has left does
-/// not fail the batch. That matters because the caller is the command palette,
-/// whose group list can be a moment stale.
+/// Each group is authorized independently; the palette's list can be stale.
 pub async fn members(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let parsed: DirectoryMembersBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
@@ -1169,22 +1050,11 @@ pub async fn members(State(state): State<AppState>, req: RawRequest) -> Result<R
     ))
 }
 
-// ── POST /v1/directory/users ─────────────────────────────────────────────────
-
 /// Resolve ONE person from a username-or-email identifier — the single lookup
 /// behind `/v1/directory/users` (and so the client's `search_user_by_username`)
 /// and `groups::apply_create_invite`.
 ///
-/// The identifier is matched against exactly one column, chosen by shape: an
-/// `@` makes it an email and it is compared with `users.email` ONLY; without
-/// one it is compared with `users.username` ONLY. It used to be
-/// `WHERE username = ?1 OR email = ?1`, first row wins — and SQLite's
-/// multi-index OR scans the `username` term first, so an account that had set
-/// its username to `alice@corp.com` was what an invite or DM for Alice's
-/// address resolved to, whether or not Alice had an account yet. Dispatching on
-/// `@` removes the ambiguity outright; `profile::is_valid_username` and the
-/// `000021` triggers make sure no username can carry an `@` to begin with, so a
-/// username never competes for an email-shaped identifier and vice versa.
+/// Matched against ONE column by shape: `@` means `users.email`, else `users.username`.
 ///
 /// Matching is exact, as it always was — a lookup, not a search index.
 pub async fn user_by_identifier(
@@ -1193,11 +1063,7 @@ pub async fn user_by_identifier(
 ) -> anyhow::Result<Option<UserWire>> {
     let is_email = identifier.contains('@');
     let column = if is_email { "email" } else { "username" };
-    // Mailboxes are case-insensitive and `users.email` now stores the canonical
-    // `trim(lower(..))` form (#1088), so an email identifier is canonicalized
-    // before the compare — otherwise `Alice@x.com` would not resolve to Alice.
-    // Usernames are left as typed: `is_valid_username` already restricts them to
-    // `a-z0-9_.-`, so there is no case to fold.
+    // Emails compare in canonical `trim(lower(..))` form (#1088); usernames as typed.
     let needle = if is_email {
         crate::otp::normalize_email(identifier)
     } else {
@@ -1220,24 +1086,15 @@ pub async fn user_by_identifier(
 
 /// Identifier lookups allowed per user per UTC day (#1089).
 ///
-/// Sized for humans: you look up the handful of people you are trying to reach.
-/// An attacker gets 50 addresses a day per account they control, which turns a
-/// mailing list into a multi-year job instead of an afternoon.
+/// 50 a day turns harvesting a mailing list into a multi-year job.
 pub const IDENTIFIER_LOOKUPS_PER_DAY: i64 = 50;
 
 /// Charge one identifier lookup against `user`'s daily budget and report whether
 /// it may proceed.
 ///
-/// Keyed on the authenticated user and read from the database, not memory: the
-/// per-IP middleware tier sheds floods but an attacker rotates IPs, so a
-/// restart-proof, instance-shared bound is the one that binds here. Same
-/// reasoning `groups::apply_redeem_invite_link` writes down for redemption.
+/// Keyed on the user, in the DB: attackers rotate IPs, so only a durable bound binds.
 ///
-/// Charges BEFORE deciding, so a refused attempt still costs — otherwise the cap
-/// is a speed bump that resets on every 429.
-///
-/// `pub` so the tests drive the budget directly against a local DB, as the
-/// `apply_*` writes elsewhere are.
+/// Charges BEFORE deciding, so a refused attempt still costs.
 pub async fn charge_identifier_lookup(conn: &Connection, user: &str) -> anyhow::Result<bool> {
     conn.execute(
         "INSERT INTO directory_lookup_budget (user_id, day, lookups) \
@@ -1262,17 +1119,13 @@ pub async fn charge_identifier_lookup(conn: &Connection, user: &str) -> anyhow::
 
 /// POST `/v1/directory/users` — profile hydration and username/email lookup.
 ///
-/// The projection deliberately omits `phone`: nothing renders it, and it is the
-/// most re-identifying column on the row, so it does not cross this boundary at
-/// all rather than crossing it and being ignored.
+/// Omits `phone`: nothing renders it, and it is the most re-identifying column.
 pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let parsed: DirectoryUsersBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    // The block check is answered for the AUTHENTICATED caller, never for a
-    // body-named one: "is A blocked by B" for arbitrary A and B would publish
-    // the block graph.
+    // Block checks are for the AUTHENTICATED caller only, or the block graph leaks.
     let who = match authed_user(&state, &req, None).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
@@ -1299,10 +1152,7 @@ pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Res
     }
 
     if let Some(identifier) = parsed.identifier.as_deref().filter(|s| !s.is_empty()) {
-        // #1089: resolving an identifier — a username or an EMAIL — to an
-        // account is the enumeration surface on this endpoint. Bulk hydration by
-        // `user_ids` is not: those ids are already known to the caller. So the
-        // budget is charged only here, and only the lookup is refused.
+        // #1089: only identifier lookups are charged; bulk id hydration isn't enumeration.
         if !charge_identifier_lookup(&conn, &who).await? {
             return Ok(crate::ratelimit::too_many_requests());
         }
@@ -1342,16 +1192,9 @@ pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Res
     }))
 }
 
-// ── POST /v1/directory/group-by-slug ─────────────────────────────────────────
-
 /// POST `/v1/directory/group-by-slug` — the join flow's discovery step.
 ///
-/// Deliberately not membership-gated (#917) and, unlike every other endpoint
-/// here, reachable by any authenticated caller for any group: gating it would
-/// mean you could only find groups you were already in, which removes the
-/// feature rather than tightening it. What protects it is the projection —
-/// [`GroupPreview`] carries no `owner_id` — plus the per-IP rate limit the router
-/// applies, because guessing slugs is the only way to use it.
+/// Not membership-gated (#917); guarded by the narrow [`GroupPreview`] and the per-IP limit.
 pub async fn group_by_slug(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1366,9 +1209,7 @@ pub async fn group_by_slug(
 
     let target = parsed.slug.trim().to_lowercase();
     let conn = state.db.conn().await?;
-    // Only the three columns the preview carries are SELECTed. Narrowing the
-    // query as well as the struct means a future edit to the mapping cannot
-    // reach a sensitive column without also editing the SQL.
+    // Only the preview's three columns are SELECTed.
     let mut rows = conn
         .query("SELECT id, name, description FROM groups", ())
         .await?;
@@ -1388,8 +1229,6 @@ pub async fn group_by_slug(
         group: found,
     }))
 }
-
-// ── POST /v1/directory/conversations ─────────────────────────────────────────
 
 /// POST `/v1/directory/conversations` — id-only enumeration of everything the
 /// caller participates in.
@@ -1421,10 +1260,7 @@ pub async fn conversations(
 
 /// The 1:1 DM channel shared by two users, if any.
 ///
-/// `HAVING COUNT(*) = 2` guards against a group DM accidentally matching — a
-/// three-person DM containing both users is not the 1:1 channel, and using it
-/// for a call's MLS group would export a key to a third party. Ordered by id so
-/// the answer is deterministic if two ever existed.
+/// `HAVING COUNT(*) = 2` keeps a group DM from matching, which would leak a call key.
 async fn one_to_one_dm(
     conn: &Connection,
     user_id: &str,
@@ -1482,13 +1318,9 @@ pub async fn user_dm_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec
     Ok(out)
 }
 
-/// Every emoji the caller may USE — the picker's source and the send-permission
-/// rule in one query, which is the point: the set the UI offers and the set the
-/// rule permits cannot drift because they are the same set.
+/// Every emoji the caller may USE: the picker and the send rule in one query.
 ///
-/// Discord's rule (#848): membership of ANY registering group grants use in ANY
-/// conversation. Note the absence of a conversation argument — scoping this to
-/// the conversation is the obvious-looking rule and the wrong one.
+/// Discord's rule (#848): no conversation argument.
 pub async fn usable_emoji(
     conn: &Connection,
     user_id: &str,

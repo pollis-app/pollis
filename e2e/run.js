@@ -1,23 +1,9 @@
 #!/usr/bin/env node
-/*
- * Single entry point for every e2e scenario, so package.json carries ONE script
- * ("e2e") instead of one line per test case — the list of scenarios lives on
- * disk (the *.js files here), not duplicated into package.json.
- *
- * Each scenario is still its own self-contained program that stands up its own
- * process tree (Vite + per-client tauri-driver/WebKitWebDriver + backend); this
- * only ROUTES a name to its file. It is not a test runner — there is deliberately
- * no shared session/lifecycle across scenarios (see e2e/README.md).
- *
- *   pnpm e2e smoke
- *   pnpm e2e two-client-delete
- *   node e2e/run.js two-client-dm-reply     # equivalent, without pnpm
- */
+// Routes `pnpm e2e <scenario>` to e2e/<scenario>.js; not a test runner.
 const fs = require("fs");
 const path = require("path");
 
-// Scenarios are the top-level *.js files here, minus this dispatcher. (lib/ and
-// node_modules are directories, so they never match the .js name filter.)
+// Scenarios are the top-level *.js files here, minus this dispatcher.
 function scenarios() {
   return fs
     .readdirSync(__dirname)

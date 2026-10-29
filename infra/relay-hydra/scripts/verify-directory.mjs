@@ -1,16 +1,7 @@
 #!/usr/bin/env node
-// Fetch the live signed directory (and, when the directory anchors one, the
-// signed revocation list) and run the client's verification path against them
-// (§7 acceptance: prove the published artifacts validate exactly).
-//
+// Runs the client's verification path on the live directory and revocation list; fails closed.
 // Usage:
 //   node scripts/verify-directory.mjs <directory-url> <POLLIS_OVERLAY_DIRECTORY_KEY>
-//
-// Exits 0 and prints the usable relay set on success; non-zero with the rejection
-// reason on failure — exactly what the client does (fail closed). A directory
-// whose relays are all revoked, or whose revocation list is missing/stale, is a
-// FAILURE here, not a warning: that is precisely the state in which a client has
-// nothing it may safely dial.
 
 import { verifyDirectory, revocationAnchor, admitRelays, directoryPeers, admitPeers } from "../lib/directory-verify.mjs";
 import { verifyRevocations } from "../lib/revocation-verify.mjs";
@@ -37,8 +28,7 @@ try {
 }
 console.log(`OK — directory valid. version=${dir.version} expires_at=${dir.expires_at} relays=${dir.relays.length}`);
 
-// Revocation (#813). A pool that has not enabled it publishes no anchor, and the
-// pre-#813 output above is the whole answer.
+// Revocation (#813): a pool that has not enabled it publishes no anchor.
 let anchor;
 try {
   anchor = revocationAnchor(dir);
@@ -86,10 +76,7 @@ if (suppressed > 0) {
 reportPeers(dir, list);
 process.exit(0);
 
-// Peer-hosted relays (#813 wave 3). Advisory: peers are middle hops only, so an
-// empty set means shorter paths, never an unusable pool — this is NOT a reason to
-// exit non-zero. `admitPeers` runs the same revocation rule the shipping client
-// runs, so a revoked or unevaluable peer shows up here as suppressed.
+// Peer relays (#813 wave 3) are advisory: an empty set is not a failure.
 function reportPeers(directory, list) {
   const advertised = directoryPeers(directory);
   if (advertised.length === 0) {

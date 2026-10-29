@@ -1,21 +1,7 @@
 //! On-device message search (#850).
 //!
-//! **Server-side search is impossible here by construction and must never be
-//! proposed.** Message bodies are E2EE; the only plaintext that exists anywhere
-//! is the `content` column of this device's own SQLCipher database. Everything
-//! in this module runs against that, locally, offline-capable.
-//!
-//! What replaced the old `content LIKE '%q%'` full table scan:
-//!
-//! * an FTS5 contentless index kept in sync by triggers (`local_schema.sql`),
-//! * a **parsed** query — `from:`, `in:`, `before:`/`after:`/`on:`,
-//!   `has:attachment`, `has:link` — re-emitted as a well-formed FTS5
-//!   expression. Raw user text NEVER reaches `MATCH`: a stray quote, `*`, `AND`
-//!   or `NEAR` would either error or silently mean something else,
-//! * two orderings — bm25 relevance rescored in Rust with a recency decay, and
-//!   plain recency — defaulting to relevance globally and recency inside one
-//!   conversation, because that is where each is the right answer,
-//! * cursor pagination and a total hit count, replacing a hardcoded `limit: 50`.
+//! Bodies are E2EE, so search runs only against this device's local database; never propose server-side search.
+//! Raw user text never reaches `MATCH`: queries are parsed and re-emitted as well-formed FTS5.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -39,30 +25,17 @@ const DEFAULT_LIMIT: i64 = 25;
 const MAX_LIMIT: i64 = 200;
 
 /// How many bm25-ranked candidates the Rust rescorer considers.
-///
-/// Relevance ordering is not expressible in SQL alone — the recency decay is —
-/// so the top slice is pulled out and re-sorted here. 500 is far past what
-/// anyone pages through, and it is what keeps a pathological term (present in
-/// half the corpus) from materialising 50k rows.
+/// Relevance needs a Rust rescore; 500 caps what a pathological term materialises.
 const RESCORE_CANDIDATES: i64 = 500;
 
 /// Half-life-ish constant for the relevance recency decay, in days.
-///
-/// `score = bm25 / (1 + age_days / 90)`. bm25 is negative and lower is better,
-/// so dividing by a number that grows with age pulls an old hit TOWARDS zero,
-/// i.e. down the list. A good hit from last week outranks an equally good hit
-/// from two years ago; a much better old hit still wins.
+/// `score = bm25 / (1 + age_days / 90)`; bm25 is negative, so age pulls a hit down.
 const RECENCY_DECAY_DAYS: f64 = 90.0;
 
 /// Characters of context either side of the first match in a snippet.
 const SNIPPET_RADIUS: usize = 60;
 
-// ── Query parsing ────────────────────────────────────────────────────────────
-
 /// A search query after parsing: free text separated from filters.
-///
-/// The whole point of this type is that nothing downstream ever sees the raw
-/// string again.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ParsedQuery {
     /// Bare words, in order. Sentinels are already stripped.
@@ -144,10 +117,7 @@ fn tokenize(query: &str) -> Vec<(String, bool)> {
 }
 
 /// Parse Slack-style operators out of a raw query string.
-///
-/// Unknown `word:value` shapes are left as ordinary search terms — a message
-/// really can contain `http://x` or `note:` and pretending otherwise would make
-/// text unfindable.
+/// Unknown `word:value` shapes stay ordinary terms, so `note:` stays findable.
 pub fn parse_query(query: &str) -> ParsedQuery {
     let mut parsed = ParsedQuery::default();
 
@@ -239,11 +209,7 @@ fn next_day(date: &str) -> Option<String> {
 }
 
 /// Turn one search term into a well-formed FTS5 expression fragment.
-///
-/// Latin text becomes a quoted string (so `AND`, `NEAR`, `*` and friends are
-/// literal). CJK becomes the same overlapping-bigram sequence the index holds,
-/// issued as a phrase, which is what makes a two-character Chinese word
-/// findable at all.
+/// Latin text is quoted (operators become literals); CJK becomes the index's bigram phrase.
 fn term_expression(term: &str, allow_prefix: bool) -> Option<String> {
     if has_cjk(term) {
         let segmented = segment_cjk(term);
@@ -293,9 +259,7 @@ pub fn match_expression(parsed: &ParsedQuery) -> Option<String> {
 
     let last = parsed.terms.len().saturating_sub(1);
     for (i, term) in parsed.terms.iter().enumerate() {
-        // Only the final term is a prefix match: the earlier ones are words the
-        // user finished typing, and prefixing them makes `the cat` match
-        // `theatre catalogue`.
+        // Only the final term is a prefix match, so `the cat` doesn't match `theatre catalogue`.
         if let Some(expr) = term_expression(term, i == last) {
             parts.push(expr);
         }
@@ -313,8 +277,6 @@ pub fn match_expression(parsed: &ParsedQuery) -> Option<String> {
     }
     Some(parts.join(" AND "))
 }
-
-// ── Filter resolution ────────────────────────────────────────────────────────
 
 /// The filters, with names resolved to ids.
 #[derive(Debug, Default)]
@@ -357,10 +319,6 @@ async fn resolve_sender(state: &Arc<AppState>, username: &str) -> Result<Option<
 }
 
 /// Resolve `in:#channel` / `in:@person` against `conversation_cache`.
-///
-/// Local only, deliberately: the cache is written by the two reads that already
-/// list channels and DMs, so anything the user can see in their sidebar is
-/// resolvable here without a round trip.
 fn resolve_conversation(conn: &rusqlite::Connection, raw: &str) -> Option<String> {
     let (kind, name) = match raw.chars().next() {
         Some('#') => (Some("channel"), &raw[1..]),
@@ -396,8 +354,6 @@ fn resolve_conversation(conn: &rusqlite::Connection, raw: &str) -> Option<String
     })
 }
 
-// ── The command ──────────────────────────────────────────────────────────────
-
 /// One row as it comes back from SQLite, before enrichment.
 struct RawHit {
     message_id: String,
@@ -410,11 +366,7 @@ struct RawHit {
 }
 
 /// Search this device's decrypted message history.
-///
-/// `conversation_id` scopes the search to one conversation, which is also what
-/// flips the default ordering to recency — inside a conversation people are
-/// looking for "that thing from last week", globally they are looking for the
-/// best match.
+/// `conversation_id` scopes the search and flips the default ordering to recency.
 pub async fn search_messages(
     query: String,
     conversation_id: Option<String>,
@@ -445,8 +397,7 @@ pub async fn search_messages(
         });
     }
 
-    // Filters first: an unresolvable `from:`/`in:` means zero results, and
-    // finding that out before touching the index saves the query entirely.
+    // Filters first: an unresolvable `from:`/`in:` means zero results without querying.
     let mut filters = ResolvedFilters {
         conversation_id: conversation_id.clone(),
         ..Default::default()
@@ -484,10 +435,7 @@ pub async fn search_messages(
 
     let match_expr = match_expression(&parsed);
 
-    // Terms were typed but none survived tokenisation (`???`, `!!!`): nothing
-    // the index can answer. Zero results is the honest answer — falling
-    // through would run the filter-only scan and present the entire corpus
-    // as "matches" for a query that matched nothing.
+    // Terms typed but none survived tokenisation: zero results, not the whole corpus.
     if parsed.has_match_terms() && match_expr.is_none() {
         let corpus = read_corpus(state).await?;
         return Ok(SearchPage {
@@ -499,9 +447,7 @@ pub async fn search_messages(
         });
     }
 
-    // The rusqlite connection and its statements are not `Send`, so all of them
-    // have to be dropped before the awaits below — scoping the whole DB read in
-    // a block is what keeps this command `Send`.
+    // Scoped so the non-`Send` rusqlite statements drop before the awaits.
     let (hits, total) = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -516,9 +462,7 @@ pub async fn search_messages(
         result.snippet.highlights = highlight_ranges(&result.snippet.text, &parsed);
     }
 
-    // Relevance mode rescores the best RESCORE_CANDIDATES bm25 hits and can
-    // page no deeper — `total` stays the honest match count, but the cursor
-    // must stop at the pageable ceiling instead of handing out one empty page.
+    // Relevance can page no deeper than RESCORE_CANDIDATES; `total` stays the true count.
     let pageable = if sort == SearchSort::Relevant && match_expr.is_some() {
         total.min(RESCORE_CANDIDATES)
     } else {
@@ -531,8 +475,7 @@ pub async fn search_messages(
         None
     };
 
-    // Only the first page pays for the corpus stats — the footer that renders
-    // them does not change while paging.
+    // Only the first page pays for corpus stats.
     let corpus = if offset == 0 {
         read_corpus(state).await?
     } else {
@@ -621,9 +564,7 @@ fn run_query(
         "0.0"
     };
     let (order_sql, row_limit, row_offset) = if use_relevance {
-        // Pull the best candidates, then rescore in Rust: the recency decay is
-        // not expressible in the SQL ordering without ugly date arithmetic in
-        // every query, and keeping the formula in Rust keeps it testable.
+        // Pull the best candidates, then rescore in Rust where the formula is testable.
         ("ORDER BY bm25(message_fts)", RESCORE_CANDIDATES, 0)
     } else {
         ("ORDER BY m.sent_at DESC, m.id DESC", limit, offset)
@@ -664,10 +605,6 @@ fn run_query(
 }
 
 /// Re-sort bm25 candidates so recency counts for something.
-///
-/// bm25 is negative and lower is better. Dividing by `1 + age/90` moves an old
-/// hit towards zero, i.e. down the list, without ever letting age alone beat a
-/// substantially better match.
 fn rescore_by_recency(hits: &mut [RawHit]) {
     let now = chrono::Utc::now();
     let mut scored: Vec<(usize, f64)> = hits
@@ -770,8 +707,7 @@ async fn enrich(
         (conversations, usernames)
     };
 
-    // One request for whatever the cache could not name. Offline just means the
-    // id renders, exactly as it did before this ticket.
+    // One request for whatever the cache could not name; offline, the id renders.
     let missing: Vec<String> = sender_ids
         .iter()
         .filter(|id| !usernames.contains_key(*id))
@@ -854,14 +790,7 @@ async fn read_corpus(state: &Arc<AppState>) -> Result<SearchCorpus> {
 }
 
 /// How long a corpus reading stays good enough to reuse.
-///
-/// `count(*) … WHERE content IS NOT NULL` cannot use an index — it is a full
-/// scan of the `message` table, ~10–20 ms at 100k rows. Cheap once; charged on
-/// EVERY debounced keystroke it would dominate a 2–3 ms query and undo the
-/// point of the whole ticket. The number it produces is a footer describing how
-/// much history this device holds, which moves by single messages over minutes,
-/// so a bounded staleness is not a correctness compromise — it is the honest
-/// shape of the quantity.
+/// The count is a full scan (~10–20 ms at 100k rows): too costly per keystroke, and it moves slowly.
 const CORPUS_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
 static CORPUS_CACHE: std::sync::Mutex<Option<(std::time::Instant, SearchCorpus)>> =
@@ -896,17 +825,12 @@ fn store_corpus(corpus: &SearchCorpus) {
 }
 
 /// Drop the cached corpus reading.
-///
-/// Called on sign-out, because the next user's history is a different corpus and
-/// showing them the previous account's message count would be both wrong and a
-/// small leak.
+/// Called on sign-out: the next user's corpus differs, and showing the old count would leak.
 pub fn invalidate_corpus_cache() {
     if let Ok(mut guard) = CORPUS_CACHE.lock() {
         *guard = None;
     }
 }
-
-// ── The conversation-name cache ──────────────────────────────────────────────
 
 /// What a conversation id means, as the caller learned it from a remote list.
 #[derive(Debug, Clone)]
@@ -921,11 +845,7 @@ pub struct CachedConversation {
 }
 
 /// Remember what these conversation ids mean, locally.
-///
-/// Called from the two reads that already list channels and DMs, mirroring the
-/// way `hydrate_rows` writes `user_cache`. Without it a search
-/// result can only render a UUID, `pages/Search.tsx` cannot tell a channel from
-/// a DM (and so routed EVERY hit to a DM route), and search is useless offline.
+/// Lets results show a name and route to the right page, including offline.
 ///
 /// Best-effort: a failed write costs a name, never a read.
 pub async fn cache_conversations(state: &Arc<AppState>, entries: &[CachedConversation]) {
@@ -954,12 +874,7 @@ pub async fn cache_conversations(state: &Arc<AppState>, entries: &[CachedConvers
 }
 
 /// Throw the search index away and build it again from `message`.
-///
-/// The Settings escape hatch for the one failure a contentless FTS5 index can
-/// have that nothing else repairs: if `pollis_search_text` ever produces
-/// different bytes for a body it has already indexed, the delete side stops
-/// matching and the index drifts. Startup repairs that silently when
-/// `integrity-check` catches it; this is the button for when it does not.
+/// Settings escape hatch for index drift if `pollis_search_text` ever changes its output.
 pub async fn rebuild_search_index(state: &Arc<AppState>) -> Result<()> {
     let guard = state.local_db.lock().await;
     let db = guard
@@ -968,14 +883,8 @@ pub async fn rebuild_search_index(state: &Arc<AppState>) -> Result<()> {
     crate::db::local::rebuild_search_index(db.conn())
 }
 
-// ── Snippets ─────────────────────────────────────────────────────────────────
-
 /// Cut a window of context around the first match.
-///
-/// Built in Rust from `message.content`, never by FTS5's `snippet()`: a
-/// contentless table has no column text to return, and the indexed body is
-/// JSON-stripped and bigram-segmented anyway — a CJK snippet straight from the
-/// index would read `今天 天天 天气 气很 很好`.
+/// Built from `message.content`: a contentless FTS5 table has no text for `snippet()`.
 pub fn build_snippet(content: &str, parsed: &ParsedQuery) -> SearchSnippet {
     let text = plain_text(content);
     let lower = text.to_lowercase();
@@ -1024,13 +933,6 @@ fn needles(parsed: &ParsedQuery) -> Vec<String> {
 }
 
 /// Where to draw `<mark>`, as **UTF-16 code-unit** ranges.
-///
-/// UTF-16 rather than Unicode scalars because the only consumer is JavaScript,
-/// whose string indices are code units: an emoji earlier in the snippet would
-/// otherwise shift every subsequent highlight by one. Returning ranges rather
-/// than HTML also means React renders `<mark>` without
-/// `dangerouslySetInnerHTML`, and retires the reused-`lastIndex` regex bug the
-/// old client-side highlighter had.
 pub fn highlight_ranges(text: &str, parsed: &ParsedQuery) -> Vec<(usize, usize)> {
     let lower = text.to_lowercase();
     let mut spans: Vec<(usize, usize)> = Vec::new();
@@ -1125,9 +1027,7 @@ mod tests {
         assert_eq!(half.phrases, vec!["still typing"]);
     }
 
-    /// The security-shaped half of the parser: NOTHING the user types reaches
-    /// `MATCH` unquoted. `AND`, `NEAR`, `*` and a stray quote are all either
-    /// literals or gone.
+    /// Nothing the user types reaches `MATCH` unquoted.
     #[test]
     fn fts_syntax_in_user_input_is_neutralised() {
         let expr = match_expression(&parse_query("cat AND NEAR* \"quo\"te")).expect("expr");
@@ -1210,12 +1110,6 @@ mod tests {
         let ranges = highlight_ranges(text, &parse_query("party"));
         assert_eq!(ranges, vec![(3, 8)]);
     }
-
-    // ── The SQL, against a real index ────────────────────────────────────────
-    //
-    // `search_messages` itself needs an `AppState`; `run_query` is the half that
-    // actually talks to SQLite, and running it for real is what stops a
-    // malformed `MATCH` join or a bad bind order from shipping.
 
     fn indexed_db() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().expect("open");
@@ -1351,10 +1245,7 @@ mod tests {
         );
     }
 
-    /// Diacritics fold (the tokeniser's job) and two-character Mandarin words
-    /// are findable (the bigram transform's job). Both are localisation
-    /// requirements from #855, and both are properties of the SHIPPED pipeline
-    /// rather than of either half alone.
+    /// Diacritics fold and two-character Mandarin words are findable (#855).
     #[test]
     fn accents_fold_and_cjk_is_findable() {
         let conn = indexed_db();

@@ -1,57 +1,8 @@
 //! Windows webcam capture (Media Foundation) — IN-PROCESS.
 //!
-//! ── Why in-process (NOT a helper subprocess like macOS/Linux) ─────────────
+//! In-process: MF is clean COM, unlike the macOS/Linux camera stacks.
 //!
-//! The macOS (`pollis-capture-macos`) and Linux (`pollis-capture-linux`)
-//! camera helpers exist because their platforms FORCE isolation:
-//!   - macOS: an AVFoundation/CoreMediaIO ObjC `@throw` is uncatchable by
-//!     Rust `catch_unwind` and aborts the whole app (#283).
-//!   - Linux: libpipewire can't co-link with libwebrtc + cpal + webkit2gtk.
-//!
-//! Windows has neither hazard: Media Foundation is clean in-process COM that
-//! links fine alongside libwebrtc and the webview — exactly like WGC screen
-//! capture (`screenshare/start_windows.rs`), which is also in-process. So
-//! Windows mirrors the WGC pattern: capture on an owned thread, push frames
-//! straight into the LiveKit `NativeVideoSource`, no socket, no proto, no
-//! sidecar. See `.codesight/wiki/capture-split.md`.
-//!
-//! ── Capture flow (mirrors `screenshare/start_windows.rs`) ─────────────────
-//!
-//!   list_video_devices:
-//!     `MFStartup` → `MFCreateAttributes` with
-//!     `MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE = …_VIDCAP_GUID` →
-//!     `MFEnumDeviceSources`. For each `IMFActivate`, read the friendly name
-//!     and the `…_VIDCAP_SYMBOLIC_LINK` — the symbolic link IS the opaque
-//!     `CameraSource::id` the proto documents, echoed back verbatim to
-//!     `start_camera`. Runs on a blocking pool thread (COM + device probe).
-//!
-//!   start_camera(device_id):
-//!     Spawn one owned thread. It re-resolves the device by symbolic link
-//!     (`MFCreateDeviceSource`), builds an `IMFSourceReader` with
-//!     `MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING` so the reader inserts a
-//!     decoder + the Video Processor MFT and hands us **RGB32** (== BGRA ==
-//!     the BGRx `convert_to_i420` expects) regardless of the camera's native
-//!     format (YUY2 / NV12 / MJPG). It picks the best native resolution
-//!     (largest ≤ 1080p) so the color-convert-only processor never has to
-//!     resize, reports the negotiated size back over a oneshot, then loops
-//!     `ReadSample` → `ConvertToContiguousBuffer` → `Lock` → pack top-down
-//!     BGRx → `push_frame` → `Unlock`, gated on the stop fence. The parent
-//!     publishes the `TrackSource::Camera` track (VP8, `is_screencast=false`)
-//!     only after it has the real dimensions.
-//!
-//!   stop_camera: flip the fence (`Release`), detach the thread (it tears
-//!     down its own MF + COM state on the next loop check), unpublish, drop
-//!     the source — the same shape as `screenshare::stop`'s Windows arm.
-//!
-//! Permission: Windows camera privacy (Settings → Privacy → Camera) makes the
-//! device open / first `ReadSample` fail with `E_ACCESSDENIED`; we map that
-//! onto the same friendly "permission" error the frontend already shows
-//! (`friendlyCameraError` matches "permission"/"denied").
-//!
-//! Follow-up (not v1): a native-subtype fallback (negotiate YUY2/NV12/MJPG and
-//! convert in-process, reusing the Linux helper's converters) for the rare
-//! device/driver that refuses RGB32 even through the Video Processor. The
-//! RGB32-via-video-processing path here covers every consumer UVC webcam.
+//! Privacy-blocked cameras fail with `E_ACCESSDENIED`, mapped to "permission".
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -82,12 +33,8 @@ use crate::{error::Result, state::AppState};
 
 use super::{fail_capture, CameraEvent, CAMERA_PREVIEW_MIN_INTERVAL, LOCAL_CAMERA_PREVIEW_KEY};
 
-/// The special stream index that means "first video stream" for the source
-/// reader (`MF_SOURCE_READER_FIRST_VIDEO_STREAM` is an i32 newtype; the
-/// `ReadSample`/`GetNativeMediaType` calls want the raw `u32`).
+/// `MF_SOURCE_READER_FIRST_VIDEO_STREAM` as the raw `u32` the calls want.
 const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
-
-// ── Enumeration ────────────────────────────────────────────────────────────
 
 pub async fn list_video_devices(
     state: &Arc<AppState>,
@@ -134,9 +81,7 @@ fn enumerate_cameras_blocking() -> AnyResult<pollis_capture_proto::CameraList> {
             if let Some(activate) = activate {
                 let name = get_allocated_string(&activate, &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME)
                     .unwrap_or_else(|| "Camera".to_string());
-                // The symbolic link is the opaque, stable device id we echo
-                // back verbatim in `start_camera`. A device with no link is
-                // unusable, so skip it.
+                // Symbolic link = the stable device id; skip devices without one.
                 if let Some(id) = get_allocated_string(
                     &activate,
                     &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
@@ -170,10 +115,7 @@ unsafe fn get_allocated_string(
     s.filter(|s| !s.is_empty())
 }
 
-// ── Capture ────────────────────────────────────────────────────────────────
-
-/// Outcome the dedicated MF thread reports over the oneshot before it enters
-/// its streaming loop: the negotiated size, or a genuine setup failure.
+/// What the MF thread reports before streaming: size or setup failure.
 enum CamStart {
     Size(u32, u32),
     Failed(String),
@@ -197,8 +139,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         crate::error::Error::Other(anyhow!("not in a voice channel — join voice first"))
     })?;
 
-    // Re-start from a clean slate: tear down any lingering thread/track/source
-    // from a previous camera session.
+    // Re-start from a clean slate.
     {
         let has_prev = {
             let cam = state.camera.lock().await;
@@ -209,9 +150,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         }
     }
 
-    // Provisional source resolution — the capture thread reports the true
-    // negotiated size back over the oneshot before we publish, and
-    // NativeVideoSource tolerates per-frame size changes regardless.
+    // Provisional size; the thread reports the real one before publish.
     let source = NativeVideoSource::new(
         VideoResolution {
             width: 1280,
@@ -241,8 +180,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     let (width, height) = match size_rx.await {
         Ok(CamStart::Size(w, h)) => (w, h),
         Ok(CamStart::Failed(msg)) => {
-            // The thread already reported + is returning; fence so a late
-            // frame can't touch the source, then let it drop.
+            // Fence so a late frame can't touch the source.
             active.store(false, Ordering::Release);
             drop(capture_thread);
             return Err(fail_capture(state, msg).await);
@@ -268,9 +206,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         .await);
     }
 
-    // Publish the LiveKit track now that the real size is known.
-    // `is_screencast = false`: camera prefers to preserve frame rate over
-    // resolution when constrained — the opposite of screen share.
+    // `is_screencast = false`: favour frame rate over resolution.
     let track =
         LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
     let (max_framerate, max_bitrate) = resolve_camera_encoding(width, height);
@@ -314,10 +250,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     Ok(())
 }
 
-/// Entry point for the dedicated capture thread: init MF, open the device,
-/// negotiate RGB32, report the size, then stream until fenced. Any setup
-/// failure is reported through `size_tx` so `start_camera`'s await resolves; a
-/// mid-stream failure (after the size report) surfaces as `LocalError`.
+/// Capture thread: open, negotiate RGB32, report size, stream until fenced.
 fn run_capture_thread(
     flags: CameraCaptureFlags,
     size_tx: tokio::sync::oneshot::Sender<CamStart>,
@@ -355,7 +288,6 @@ fn run_capture_thread(
     crate::diag!("[camera] MF negotiated {width}x{height} RGB32 stride={stride}");
     let _ = size_tx.send(CamStart::Size(width, height));
 
-    // Streaming phase.
     if let Err(e) = unsafe { stream_frames(&reader, width, height, stride, &source, &active, &frame_tx) } {
         crate::diag!("[camera] MF capture error: {e}");
         if let Some(ev) = &events {
@@ -398,9 +330,7 @@ unsafe fn open_source_reader(device_id: &str) -> AnyResult<IMFSourceReader> {
     Ok(reader)
 }
 
-/// Select a native resolution, request RGB32 output at that size (color
-/// convert only — no resize, so the size must match a native mode), and read
-/// back the negotiated `(width, height, signed_stride)`.
+/// Request RGB32 at a native size (no resize) and read back (w, h, stride).
 unsafe fn negotiate_rgb32(reader: &IMFSourceReader) -> AnyResult<(u32, u32, i32)> {
     reader.SetStreamSelection(VIDEO_STREAM, true)?;
 
@@ -429,10 +359,7 @@ unsafe fn negotiate_rgb32(reader: &IMFSourceReader) -> AnyResult<(u32, u32, i32)
     Ok((width, height, stride))
 }
 
-/// Pick the best native frame size the reader exposes: the largest area that
-/// still fits within 1080p (a sane call ceiling), or the smallest available if
-/// every mode is larger. Falls back to the reader's current type if the device
-/// enumerates no explicit sizes.
+/// Largest native size within 1080p, else the smallest; else the current type.
 unsafe fn pick_native_size(reader: &IMFSourceReader) -> AnyResult<(u32, u32)> {
     let mut best_fit: Option<(u32, u32, u64)> = None;
     let mut smallest: Option<(u32, u32, u64)> = None;
@@ -471,9 +398,7 @@ unsafe fn pick_native_size(reader: &IMFSourceReader) -> AnyResult<(u32, u32)> {
     Ok((w, h))
 }
 
-/// Blocking `ReadSample` loop. Packs each RGB32 sample into a top-down BGRx
-/// scratch buffer (handling bottom-up DIBs) and pushes it into the LiveKit
-/// source until the stop fence is cleared or the stream ends.
+/// Blocking `ReadSample` loop: pack top-down BGRx and push until fenced.
 unsafe fn stream_frames(
     reader: &IMFSourceReader,
     width: u32,
@@ -487,16 +412,13 @@ unsafe fn stream_frames(
     let abs_stride = (stride.unsigned_abs() as usize).max(row_bytes);
     let bottom_up = stride < 0;
     let needed = abs_stride * height as usize;
-    // Top-down BGRx scratch reused across frames so the hot loop never
-    // reallocates. `convert_to_i420` reads it at `row_bytes` stride.
+    // Top-down BGRx scratch, reused across frames.
     let mut scratch = vec![0u8; row_bytes * height as usize];
     let mut last_preview: Option<Instant> = None;
 
     while active.load(Ordering::Acquire) {
         let mut flags: u32 = 0;
         let mut sample: Option<IMFSample> = None;
-        // Synchronous read: blocks until a sample is ready (~one frame). The
-        // fence is re-checked at the top of the next iteration.
         reader.ReadSample(
             VIDEO_STREAM,
             0,
@@ -513,8 +435,7 @@ unsafe fn stream_frames(
         let Some(sample) = sample else {
             continue;
         };
-        // Re-check the fence right before touching the source (a stop may have
-        // landed while ReadSample was blocked).
+        // Re-check: a stop may have landed during ReadSample.
         if !active.load(Ordering::Acquire) {
             break;
         }
@@ -561,11 +482,7 @@ unsafe fn stream_frames(
     Ok(())
 }
 
-// ── Stop ───────────────────────────────────────────────────────────────────
-
-/// Tear down a live (or partially-started) camera capture. Fences the MF loop,
-/// detaches its thread, unpublishes the track, then drops the source. Safe to
-/// call when nothing is live — the pre-start teardown relies on it.
+/// Tear down the camera capture; safe when nothing is live.
 pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     let track;
     let source_to_drop;
@@ -589,18 +506,13 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
         return Ok(());
     }
 
-    // 1. Fence the MF loop from touching the source; it observes this at the
-    //    top of its next iteration, tears down its own MF + COM state, exits.
+    // 1. Fence the MF loop; it tears itself down on its next iteration.
     if let Some(active) = &active {
         active.store(false, Ordering::Release);
     }
-    // 2. Detach the thread rather than force-joining. The fence guarantees it
-    //    can no longer touch the source, and it holds its own source clone —
-    //    so the backing stays alive until it exits regardless of the drop
-    //    below. Joining could block stop if the device stopped yielding frames.
+    // 2. Detach, don't join: it holds its own source clone; joining could hang.
     drop(thread);
-    // 3. Unpublish before dropping the source (LiveKit's track teardown can
-    //    free the source's webrtc backing).
+    // 3. Unpublish before dropping the source.
     if let (Some(room), Some(track)) = (room, track) {
         let sid = track.sid();
         if let Err(e) = room.local_participant().unpublish_track(&sid).await {
@@ -614,8 +526,6 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     }
     Ok(())
 }
-
-// ── Frame push (mirrors camera/capture.rs::push_frame) ─────────────────────
 
 fn push_frame(
     source: &NativeVideoSource,
@@ -645,24 +555,18 @@ fn push_frame(
     };
     source.capture_frame(&frame);
 
-    // Mirror to the renderer for the local self-preview, reusing the exact
-    // I420 buffer just published — same wire format + WebSocket transport as
-    // the remote tiles and screen-share preview.
+    // Mirror the same I420 buffer to the renderer for self-preview.
     if let Some(tx) = preview {
         let bytes = pack_frame_bytes(LOCAL_CAMERA_PREVIEW_KEY, out_w, out_h, timestamp_us, &frame.buffer);
         let _ = tx.send(Arc::new(bytes));
     }
 }
 
-/// Camera-tuned `(max_framerate, max_bitrate)` — identical to the helper-path
-/// `camera::capture::resolve_camera_encoding` (which isn't compiled on
-/// Windows). 30fps; bitrate ≈ 0.07 bits/pixel/frame, clamped to a sane band.
+/// Same as `camera::capture::resolve_camera_encoding` (not built on Windows).
 fn resolve_camera_encoding(width: u32, height: u32) -> (f64, u64) {
     let max_bitrate = ((width as u64) * (height as u64) * 30 * 7 / 100).clamp(500_000, 5_000_000);
     (30.0, max_bitrate)
 }
-
-// ── MF / COM helpers ───────────────────────────────────────────────────────
 
 /// RAII guard pairing `CoInitializeEx` + `MFStartup` with their shutdowns so
 /// every exit path from the capture thread / enumeration cleans up.
@@ -671,14 +575,9 @@ struct MfScope;
 impl MfScope {
     fn enter() -> AnyResult<Self> {
         unsafe {
-            // MTA: the synchronous source reader + device enumeration are
-            // apartment-agnostic. On a fresh thread this always succeeds; a
-            // prior init with a different model returns RPC_E_CHANGED_MODE,
-            // which we ignore (we never own such a thread here).
+            // MTA; RPC_E_CHANGED_MODE is ignored (we never own such a thread).
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            // Balance the CoInitialize if MFStartup fails — otherwise `Self`
-            // is never built, Drop never runs, and a pooled blocking thread
-            // (enumeration) leaks an unpaired apartment init.
+            // Balance CoInitialize if MFStartup fails, since Drop won't run.
             if let Err(e) = MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET) {
                 CoUninitialize();
                 return Err(anyhow!("MFStartup: {e}"));
@@ -697,9 +596,7 @@ impl Drop for MfScope {
     }
 }
 
-/// Map a raw MF/COM error to the friendly string the frontend understands.
-/// `E_ACCESSDENIED` (privacy toggle off / camera in another app's exclusive
-/// grip) maps onto the "permission" branch of `friendlyCameraError`.
+/// Map MF/COM errors to frontend strings; `E_ACCESSDENIED` → "permission".
 fn friendly_mf_error(e: &anyhow::Error) -> String {
     let s = e.to_string();
     let lower = s.to_lowercase();
@@ -728,9 +625,7 @@ fn now_us() -> i64 {
         .unwrap_or(0)
 }
 
-/// Settings self-preview (issue #434). Windows *capture* is implemented above;
-/// only this preview-only path is still pending — it would open the MF reader and
-/// mirror to `LOCAL_CAMERA_PREVIEW_KEY` without publishing.
+/// Settings self-preview (#434): not yet implemented on Windows.
 pub async fn start_camera_preview(_state: &Arc<AppState>, _device_id: String) -> Result<()> {
     Err(crate::error::Error::Other(anyhow::anyhow!(
         "Windows camera preview is not implemented yet (Media Foundation TODO)"

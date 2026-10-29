@@ -1,11 +1,4 @@
-/*
- * Tab bar badges (#1561), `mobile/lib/tabBadges.ts`.
- *
- * Pending message requests count into the Direct badge and pending group
- * invites into the Groups badge, the way Slack and Discord count requests
- * into the DM badge, so you learn of one without opening the tab. These pin
- * the counting, the spoken label, and the wiring that keeps the badge live.
- */
+/* Tab bar badges (#1561): the counting, the spoken label, the live wiring. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -57,7 +50,6 @@ test("the badge text caps at 99+", () => {
   assert.equal(badgeText(100), "99+");
 });
 
-// A stand-in `t` that shows which keys were chained, in order.
 const t = (key: string, opts: Record<string, unknown>) => `${opts.label} [${key}:${opts.count}]`;
 
 test("the spoken label says what is waiting, not just a number", () => {

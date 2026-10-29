@@ -1,9 +1,4 @@
 //! Abuse reports (#1213), end to end through the real command pipeline.
-//!
-//! What a user can do: report someone with a reason, optionally block them in
-//! the same step. What the server learns: ids and the reason, never a word of
-//! any message. And the operator's one lever: a suspended account's devices
-//! stop authenticating, so it cannot write anything.
 
 use crate::harness::{expire_ds_device_keys, wipe, writable_remote, TestClient};
 use serial_test::serial;
@@ -60,7 +55,6 @@ async fn a_report_reaches_the_server_with_ids_only_and_can_also_block() {
         "report-and-block must block"
     );
 
-    // Invalid reports are refused on the client before anything is sent.
     let me = alice
         .invoke_try("report_user", serde_json::json!({ "reportedId": alice_p.id, "reason": "spam" }))
         .await;
@@ -96,14 +90,9 @@ async fn a_suspended_account_cannot_write() {
         .await
         .expect("suspend");
 
-    // The DS's device-key cache may hold bob's key for up to its TTL
-    // (`DEVICE_KEY_CACHE_TTL_SECS`) — an operator suspension has no eviction
-    // hook and relies on that TTL. Expire it for bob rather than sleeping it
-    // out in real time (this test used to retry for up to 40 s); after that,
-    // the very next signed request must be refused.
+    // Suspension has no device-key cache eviction hook; it relies on the TTL, so expire it.
     expire_ds_device_keys(&bob_p.id);
 
-    // Any signed write will do; a report is the one this ticket added.
     let r = bob
         .invoke_try(
             "report_user",

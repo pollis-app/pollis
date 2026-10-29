@@ -27,25 +27,7 @@ import { haptic } from "../../lib/haptics";
 
 const ARROW = 32;
 
-/**
- * Swipe to reply (#1270), Discord's gesture: drag a message toward the start
- * edge and a reply arrow grows in at the end edge; let go past the threshold
- * and the reply bar opens. A double tap does the same with a short nudge, for
- * anyone who does not drag (or cannot).
- *
- * All of it runs on the UI thread: the pan and the tap are Gesture Handler
- * gestures, the row and the arrow are driven by one shared value, and JS is
- * called only when a reply fires and when a haptic plays (#1286: a tick as
- * the drag crosses the threshold either way, and one for the double tap). The pan claims only horizontal
- * travel toward the start edge, so the list's vertical scroll, the iOS back
- * swipe and Android's back gesture (both the other way) are never taken.
- *
- * `pressFeedback` is the row's touch highlight (#1282): a drag that takes
- * the touch clears it here, on the UI thread, in the same frame the row
- * starts to move.
- *
- * Without `onReply` the children render as they are, with no gesture.
- */
+/** Swipe to reply (#1270): toward the start edge, or a double tap. All on the UI thread; JS only for the reply and haptics. */
 export function SwipeToReply({
   onReply,
   pressFeedback,
@@ -55,8 +37,7 @@ export function SwipeToReply({
   pressFeedback?: SharedValue<number>;
   children: ReactNode;
 }) {
-  // The gestures are built once per row and call the latest handler through
-  // this ref, so a re-render of the list never rebuilds them.
+  // Built once per row; the latest handler is read through this ref.
   const onReplyRef = useRef(onReply);
   onReplyRef.current = onReply;
   const fire = useCallback(() => {
@@ -78,7 +59,6 @@ export function SwipeToReply({
       .activeOffsetX(ranges.activeOffsetX)
       .failOffsetX(ranges.failOffsetX)
       .failOffsetY(ranges.failOffsetY)
-      // The pan has taken the touch: the row is being swiped, not pressed.
       .onStart(() => {
         if (pressFeedback) {
           pressFeedback.value = 0;
@@ -94,10 +74,7 @@ export function SwipeToReply({
           scheduleOnRN(buzz, event);
         }
       })
-      // onEnd, not onFinalize: it runs only for a pan that became active,
-      // so a tap (which also begins the pan) never cancels the double tap's
-      // nudge. A cancelled pan lands here too, unsuccessful, and only springs
-      // home.
+      // onEnd, not onFinalize: a tap also begins the pan and must not cancel the double tap's nudge.
       .onEnd((_e, success) => {
         if (success && armed.value) {
           scheduleOnRN(fire);
@@ -126,8 +103,6 @@ export function SwipeToReply({
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],
   }));
-  // The arrow grows from nothing to full size over the threshold, and fills
-  // with the accent once releasing would send the reply.
   const accent = semantic.accent;
   const raised = semantic.raised;
   const onAccent = semantic.onAccent;
@@ -149,8 +124,7 @@ export function SwipeToReply({
 
   return (
     <View>
-      {/* Behind the row, at the end edge the row slides away from. Not
-          accessible: the row's own "Reply" action is the spoken path. */}
+      {/* Not accessible: the row's "Reply" action is the spoken path. */}
       <View
         pointerEvents="none"
         importantForAccessibility="no-hide-descendants"

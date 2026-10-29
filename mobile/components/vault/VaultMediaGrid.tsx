@@ -17,21 +17,11 @@ import type { MessageAttachment } from "../../types";
 const COLUMNS = 3;
 const GAP = 2;
 
-/**
- * The Vault's media view — desktop's MediaGalleryView: images and videos as a
- * Photos-style grid (newest first), every other file as a list below. A tap
- * opens the full-screen viewer, which walks the same images and videos in
- * the same order (#1492).
- *
- * Virtualised (#1492): a vault of hundreds of photos mounts only the rows
- * near the screen, so only those decrypt, and a row scrolled far away
- * unmounts and releases (unlinks) its plaintext files.
- */
+/** The Vault's media view (#1492): a virtualised grid, so only rows near the screen hold decrypted files. */
 export function VaultMediaGrid({
   attachments,
   onOpen,
 }: {
-  // Newest first — the caller orders.
   attachments: MessageAttachment[];
   onOpen: (attachment: MessageAttachment) => void;
 }) {
@@ -60,7 +50,6 @@ export function VaultMediaGrid({
       testID="vault-media"
       style={{ flex: 1 }}
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      // Nothing to lay out until the width is known.
       data={tile > 0 ? media : []}
       keyExtractor={(a) => a.id}
       numColumns={COLUMNS}
@@ -88,8 +77,7 @@ export function VaultMediaGrid({
   );
 }
 
-// A sensitive tile (#1568) is covered until a tap reveals it (the tap does
-// nothing else), sharing the reveal with the message row and the viewer.
+// A sensitive tile (#1568) is covered until a tap reveals it.
 const VaultMediaTile = observer(function VaultMediaTile({
   attachment,
   size,

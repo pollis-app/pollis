@@ -1,7 +1,5 @@
 /*
  * Runs of lost-message placeholders collapse into one row (#1312).
- *
- *   node --test frontend/tests/
  */
 
 import test from "node:test";

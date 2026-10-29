@@ -1,8 +1,4 @@
-//! What the detached `fuzz/` crate needs to stand up real groups the way this
-//! crate does (#1537), behind the `fuzzing` feature: the one suite, the one
-//! sender-ratchet window and the create / join configurations, plus the crates
-//! a target builds them with — re-exported so the fuzz crate cannot pick up a
-//! second, differently-featured openmls.
+//! What the detached `fuzz/` crate needs to build real groups (#1537); re-exported so it shares this openmls.
 
 pub use openmls;
 pub use openmls_basic_credential;

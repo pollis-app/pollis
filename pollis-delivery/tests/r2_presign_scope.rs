@@ -1,24 +1,6 @@
 //! `POST /v1/r2/presign` mints a credential-free URL for whatever key it is
 //! handed, so the key, the method and the size are the whole of the
 //! authorization.
-//!
-//! Before these tests it checked almost none of that. Any authenticated device
-//! could:
-//!
-//!   * name **any key at all** — a prefix the product does not use, a key with
-//!     `..` in it, a key invented purely to park bytes on someone else's bucket;
-//!   * PUT **any number of bytes**, because `content_length` was optional
-//!     outside the emoji path and only R2 ever counts them;
-//!   * overwrite or delete **another user's avatar** or **another group's icon**,
-//!     which were not gated at all (the reference check only looks at media and
-//!     emoji, and an avatar has no reference count);
-//!   * overwrite or delete **any media object**, because the hash extractor
-//!     handled only the pre-#762 `media/<hash>/<name>` shape and returned
-//!     `"<hash>.enc"` for today's `media/<hash>.enc` — a value matching no stored
-//!     content hash, so the #690 integrity gate never fired for any object
-//!     written since.
-//!
-//! Every test below fails against the pre-fix handler.
 
 
 use axum::body::Body;
@@ -59,8 +41,7 @@ fn broker() -> BrokerConfig {
     }
 }
 
-/// Auth OFF, so the acting user is the body's `user_id` — the same identity the
-/// handler derives from a verified signature when auth is on.
+/// Auth off: the acting user is the body's `user_id`.
 async fn presign(
     db: &common::TempDb,
     user: &str,
@@ -87,10 +68,7 @@ async fn presign(
     app.oneshot(req).await.unwrap().status()
 }
 
-// ── The key allow-list ───────────────────────────────────────────────────────
-
-/// Every shape the product writes parses, including the two legacy ones that
-/// must stay READABLE.
+/// Every shape the product writes parses, including two legacy read-only ones.
 #[test]
 fn the_four_families_parse() {
     let key = format!("media/{HASH_A}.enc");
@@ -123,7 +101,6 @@ fn the_four_families_parse() {
     assert_eq!(icon.owner, Some("g1"));
 }
 
-/// Anything else is not an object this service stores.
 #[test]
 fn keys_outside_the_allow_list_do_not_parse() {
     for key in [
@@ -158,8 +135,6 @@ async fn an_arbitrary_key_is_refused_on_every_operation() {
     }
 }
 
-// ── PUT: content-addressed, and exactly this many bytes ──────────────────────
-
 #[tokio::test]
 async fn a_put_without_a_content_length_is_refused() {
     let db = fresh().await;
@@ -189,8 +164,6 @@ async fn a_put_above_the_cap_is_refused_and_at_the_cap_is_signed() {
     );
 }
 
-/// A public image gets the much smaller ceiling: nothing renders 100 MiB of
-/// avatar.
 #[tokio::test]
 async fn an_avatar_put_uses_the_public_image_cap() {
     let db = fresh().await;
@@ -205,9 +178,7 @@ async fn an_avatar_put_uses_the_public_image_cap() {
     );
 }
 
-/// A legacy mutable key stays readable and stops being writable — overwriting
-/// `avatars/<uid>` replaces that user's picture everywhere, and the key says
-/// nothing about what the bytes should be.
+/// A legacy mutable key stays readable but is no longer writable.
 #[tokio::test]
 async fn a_legacy_key_is_readable_but_not_writable() {
     let db = fresh().await;
@@ -220,8 +191,6 @@ async fn a_legacy_key_is_readable_but_not_writable() {
         StatusCode::BAD_REQUEST
     );
 }
-
-// ── Owned objects ────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn nobody_may_write_or_delete_another_users_avatar() {
@@ -236,12 +205,10 @@ async fn nobody_may_write_or_delete_another_users_avatar() {
         presign(&db, "mallory", "delete", &alices, None).await,
         StatusCode::FORBIDDEN
     );
-    // Reading someone's avatar is the point of an avatar.
     assert_eq!(
         presign(&db, "mallory", "get", &alices, None).await,
         StatusCode::OK
     );
-    // And alice may still manage her own.
     assert_eq!(
         presign(&db, "alice", "put", &alices, Some(1024)).await,
         StatusCode::OK
@@ -276,12 +243,7 @@ async fn only_a_group_admin_may_write_or_delete_its_icon() {
     );
 }
 
-// ── Shared objects ───────────────────────────────────────────────────────────
-
-/// THE DEAD GATE. `media/<hash>.enc` is what every upload since #762 writes, and
-/// the reference check never saw it, so any authenticated user could overwrite
-/// or delete any attachment in the bucket. The key derives from the hash, so a
-/// substituted blob decrypts cleanly for every recipient.
+/// `media/<hash>.enc` must hit the reference gate: a substituted blob decrypts cleanly.
 #[tokio::test]
 async fn a_referenced_media_object_can_be_neither_overwritten_nor_deleted() {
     let db = fresh().await;
@@ -308,8 +270,7 @@ async fn a_referenced_media_object_can_be_neither_overwritten_nor_deleted() {
         "deleting a live attachment 404s it for every conversation holding it"
     );
 
-    // An UNreferenced object is still collectable — that is the cleanup path
-    // after the last message carrying it is deleted.
+    // An unreferenced object is still collectable (the cleanup path).
     assert_eq!(
         presign(&db, "alice", "delete", &format!("media/{HASH_B}.enc"), None).await,
         StatusCode::OK

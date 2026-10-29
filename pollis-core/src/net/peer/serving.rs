@@ -1,51 +1,23 @@
 //! The live relay-serving manager: consent in, a running (or not running) relay
 //! node out, and a pushed status event whenever that answer changes.
 //!
-//! This is the engine behind `get_relay_serving_status` / `set_relay_serving`
-//! (`crate::commands::relay_serving`), the same role
-//! `commands::overlay::apply_overlay_mode` plays for the mode control.
+//! Behind `get_relay_serving_status` / `set_relay_serving` (`crate::commands::relay_serving`).
 //!
 //! # One per process
 //!
-//! Relay serving is a property of the device, not of a session or an account: it
-//! survives login, does not fan out per user, and there must never be two nodes
-//! competing to serve. So the live manager is a process singleton ([`manager`]),
-//! not a field on `AppState`. Tests build their own with
-//! [`RelayServingManager::new`] rather than sharing the global.
+//! A device property, so a process singleton ([`manager`]); tests use [`RelayServingManager::new`].
 //!
 //! # Reading the status is not free of side effects, on purpose
 //!
-//! [`RelayServingManager::status`] re-probes the platform and reconciles the
-//! engine, so what it returns is what the device is actually doing rather than
-//! what it was doing when something last changed. That is also how an unplugged
-//! charger gets noticed without a timer (CLAUDE.md bans polling): every status
-//! read, every apply, and every link coming or going re-evaluates.
+//! [`RelayServingManager::status`] re-probes and reconciles, which is how a charger change is noticed without a timer.
 //!
 //! # Why the engine runs while the status says `Waiting{NoInboundPath}`
 //!
-//! Reachability is the one condition the device earns by *trying*: the node has
-//! to be up and attached to a first-party relay before anything can hand it a
-//! circuit. So consent plus the user's own conditions (Wi-Fi, power) decide
-//! whether the node runs, and reachability decides whether the status says
-//! `Serving`. The user is told the truth either way — "paused: other devices
-//! can't reach this one" is exactly that state.
-//!
-//! Since #813 wave 3 that state is no longer the steady state: starting the node
-//! also starts [`super::reachability`], which parks an outbound connection at
-//! every first-party relay in the signed directory and reports back the moment
-//! one is live. `NoInboundPath` now means what it says — nothing can reach this
-//! device *right now* — rather than "this feature is not finished".
+//! The node must run to become reachable; consent and conditions decide whether it runs, reachability decides `Serving`.
 //!
 //! # The engine's revocation store
 //!
-//! [`PeerEngine::start`] takes a [`RevocationStore`] because a node that cannot
-//! evaluate revocation refuses to extend, and extending is a peer's entire job.
-//! The store built here is **directory-backed**: keyed on the same pinned
-//! `POLLIS_OVERLAY_DIRECTORY_KEY` clients pin the directory with, and kept
-//! current by the reachability loop that already reads that directory. A build
-//! with no directory key gets [`RevocationStore::unconfigured`], which admits
-//! nothing — so such a device runs a node, parks nowhere, and forwards nothing,
-//! which is the honest composition rather than a fail-open shortcut.
+//! [`PeerEngine::start`] gets a directory-backed [`RevocationStore`]; without a key, [`RevocationStore::unconfigured`] admits nothing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -65,16 +37,12 @@ use super::park::LinkAcceptor;
 use super::platform;
 use super::reachability::{Reachability, ReachabilityConfig};
 
-/// The global event name the renderer listens on. Must match
-/// `RELAY_SERVING_EVENT` in `frontend/src/hooks/queries/useRelayServing.ts`.
+/// Must match `RELAY_SERVING_EVENT` in `useRelayServing.ts`.
 pub const RELAY_SERVING_EVENT: &str = "relay-serving-status";
 
 /// Whether this build can serve as a relay at all.
 ///
-/// Mobile is excluded: a backgrounded app cannot hold a socket open on iOS, and
-/// on both platforms the device is usually the metered, battery-powered one the
-/// conditions exist to protect. `Unsupported` says that plainly instead of
-/// leaving a mobile user staring at a toggle that never turns green.
+/// Not mobile: iOS can't hold a background socket, and phones are the metered, battery devices.
 const SUPPORTED: bool = !cfg!(any(target_os = "ios", target_os = "android"));
 
 static MANAGER: OnceLock<Arc<RelayServingManager>> = OnceLock::new();
@@ -84,16 +52,12 @@ pub fn manager() -> &'static Arc<RelayServingManager> {
     MANAGER.get_or_init(RelayServingManager::new)
 }
 
-/// Install the sink the `relay-serving-status` event is pushed through. The
-/// desktop shell wires this to `AppHandle::emit` at setup; a build with no sink
-/// simply pushes nothing and the UI falls back to reading on mount.
+/// Sink for the `relay-serving-status` event; without one the UI reads on mount.
 pub fn set_event_sink(sink: Arc<dyn EventSink<RelayServingStatus>>) {
     manager().set_sink(sink);
 }
 
-/// Give the process-wide manager the app-shaped inputs it needs to become
-/// reachable (the signed directory and the device identity). Called once at
-/// setup; until then the device runs its node but parks nowhere.
+/// Install the directory + identity context. Until then the node parks nowhere.
 pub fn set_serving_context(context: Arc<dyn ServingContext>) {
     manager().set_context(context);
 }
@@ -101,35 +65,25 @@ pub fn set_serving_context(context: Arc<dyn ServingContext>) {
 struct Inner {
     config: RelayServingConfig,
     engine: Option<PeerEngine>,
-    /// Owns the parked connections. Dropped with the engine, which is what makes
-    /// withdrawing consent stop reachability immediately.
+    /// Parked connections; dropped with the engine.
     reachability: Option<Reachability>,
 }
 
 pub struct RelayServingManager {
-    /// Async because reconciling starts and drains a node.
     inner: tokio::sync::Mutex<Inner>,
     sink: Mutex<Option<Arc<dyn EventSink<RelayServingStatus>>>>,
-    /// The last status pushed, so an unchanged reconcile pushes nothing.
     last: Mutex<Option<RelayServingStatus>>,
     counters: Arc<PeerCounters>,
-    /// True once something can hand this device circuits. Set by
-    /// [`super::reachability`] when a parked connection goes live or is lost;
-    /// **false** until then, which is why a consenting device with no directory
-    /// (or a down pool) settles on `Waiting{NoInboundPath}` rather than claiming
-    /// to be serving.
+    /// True once something can hand this device circuits; **false** until a parked link is live.
     inbound_path: AtomicBool,
-    /// Installed at setup by the shell. `None` in a build that never installs
-    /// one — that device runs its node and is simply not reachable.
+    /// Installed by the shell; `None` means not reachable.
     context: Mutex<Option<Arc<dyn ServingContext>>>,
-    /// A handle back to the `Arc` this manager lives in, so a reconcile can hand
-    /// a `Weak` to the tasks it spawns without threading one through every call.
+    /// Back-reference so a reconcile can hand spawned tasks a `Weak`.
     me: OnceLock<Weak<RelayServingManager>>,
 }
 
 impl RelayServingManager {
-    /// A fresh manager, with the counter change-hook already wired so link
-    /// churn pushes a status event.
+    /// A fresh manager whose counter hook pushes status on link churn.
     pub fn new() -> Arc<RelayServingManager> {
         let manager = Arc::new(RelayServingManager {
             inner: tokio::sync::Mutex::new(Inner {
@@ -146,15 +100,13 @@ impl RelayServingManager {
         });
         let _ = manager.me.set(Arc::downgrade(&manager));
 
-        // Weak so the hook never keeps the manager alive, and so a dropped
-        // test-local manager's late-firing hook is a no-op rather than a panic.
+        // Weak, so a late hook on a dropped manager is a no-op.
         let weak = Arc::downgrade(&manager);
         manager.counters.set_on_change(Arc::new(move || {
             let Some(manager) = weak.upgrade() else {
                 return;
             };
-            // The hook fires from a pump task (and from `Drop`), so it must not
-            // block: hand the reconcile to the runtime, if there is one.
+            // Fires from a pump task or `Drop`: must not block.
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
                     manager.refresh().await;
@@ -164,33 +116,28 @@ impl RelayServingManager {
         manager
     }
 
-    /// The CURRENT live status. Re-probes and reconciles first — see the module
-    /// docs for why a read does work.
+    /// The CURRENT status; re-probes and reconciles first.
     pub async fn status(&self) -> RelayServingStatus {
         let config = self.inner.lock().await.config;
         self.reconcile(config).await
     }
 
-    /// Apply `config` live and return the status it settled on. Idempotent, so
-    /// the UI can call it on every toggle and once after login/restart.
+    /// Apply `config` live; idempotent.
     pub async fn apply(&self, config: RelayServingConfig) -> RelayServingStatus {
         self.reconcile(config).await
     }
 
-    /// Reconcile and push an event if anything changed. Used by the counter
-    /// hook; callers that want the value use [`RelayServingManager::status`].
+    /// Reconcile and push an event if anything changed.
     pub async fn refresh(&self) {
         let _ = self.status().await;
     }
 
-    /// Record whether anything can currently hand this device circuits. Called
-    /// by the transport that attaches the device to a first-party relay.
+    /// Record whether anything can currently hand this device circuits.
     pub fn set_inbound_path(&self, present: bool) {
         self.inbound_path.store(present, Ordering::Relaxed);
     }
 
-    /// Hand a link to the running node. Returns false when nothing is running —
-    /// a link offered to a device that is off or on hold is refused, not queued.
+    /// Hand a link to the running node; refused (not queued) when none runs.
     pub async fn attach_link(&self, link: PeerLink) -> bool {
         let inner = self.inner.lock().await;
         match &inner.engine {
@@ -210,9 +157,7 @@ impl RelayServingManager {
         *self.sink.lock().unwrap() = Some(sink);
     }
 
-    /// Install the app-shaped inputs reachability needs. Replaces any previous
-    /// one; a context installed after the node started takes effect at the next
-    /// reconcile, which the caller triggers with an apply or a status read.
+    /// Install the context; takes effect at the next reconcile.
     fn set_context(&self, context: Arc<dyn ServingContext>) {
         *self.context.lock().unwrap() = Some(context);
     }
@@ -221,14 +166,9 @@ impl RelayServingManager {
         self.context.lock().unwrap().clone()
     }
 
-    /// The engine's revocation store, keyed on the same pinned directory key the
-    /// client pins the directory with.
+    /// Revocation store keyed on the pinned directory key.
     ///
-    /// [`RevocationStore::unconfigured`] when there is no key. That admits
-    /// nothing, so such a device forwards nothing — deliberately, and not as an
-    /// oversight: a peer's only job is to extend to a next hop, and extending
-    /// without being able to check whether that hop has been revoked is the
-    /// fail-open this whole phase exists to prevent.
+    /// [`RevocationStore::unconfigured`] without a key: extending without revocation checks is the fail-open this prevents.
     fn revocation_store(&self) -> RevocationStore {
         match self.context().and_then(|c| c.directory()) {
             Some((_, key)) => RevocationStore::enforcing(key),
@@ -236,13 +176,9 @@ impl RelayServingManager {
         }
     }
 
-    /// The engine's next-hop directory, keyed on the same pinned key — the
-    /// bound on WHERE this device may extend a circuit to.
+    /// Next-hop directory keyed on the same key: WHERE this device may extend.
     ///
-    /// [`NextHopDirectory::unconfigured`] when there is no key, which permits
-    /// nothing and (in [`PeerEngine::start`]) turns `allow_extend` off outright.
-    /// A volunteer's device must never be a general-purpose dialer, and the only
-    /// statement of what a relay is comes from the signed directory.
+    /// [`NextHopDirectory::unconfigured`] without a key, turning `allow_extend` off: never a general dialer.
     fn next_hop_directory(&self) -> NextHopDirectory {
         match self.context().and_then(|c| c.directory()) {
             Some((_, key)) => NextHopDirectory::enforcing(key),
@@ -252,8 +188,7 @@ impl RelayServingManager {
 
     /// Start parking outbound connections for the running engine.
     ///
-    /// Returns `None` when there is no context to park with, in which case the
-    /// device stays on `Waiting{NoInboundPath}` — the truthful answer.
+    /// `None` without a context: stays `Waiting{NoInboundPath}`.
     fn start_reachability(
         &self,
         leaf_der: pollis_relay::CertificateDer<'static>,
@@ -263,8 +198,7 @@ impl RelayServingManager {
         let context = self.context()?;
         let me = self.me.get()?.clone();
 
-        // Reachability changed ⇒ push a status event. Event-driven, so an
-        // unplugged relay is noticed without anything polling for it.
+        // Push status on reachability changes.
         let on_change: Arc<dyn Fn(usize) + Send + Sync> = {
             let me = me.clone();
             Arc::new(move |live: usize| {
@@ -272,8 +206,7 @@ impl RelayServingManager {
                     return;
                 };
                 manager.set_inbound_path(live > 0);
-                // The hook fires from a park task (and from `Drop`), so it must
-                // not block: hand the reconcile to the runtime, if there is one.
+                // Must not block: hand the reconcile to the runtime.
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     handle.spawn(async move {
                         manager.refresh().await;
@@ -292,17 +225,15 @@ impl RelayServingManager {
         }))
     }
 
-    /// The whole state machine in one place: probe, decide whether the node
-    /// should be up, make that true, then report what is actually the case.
+    /// Probe, decide whether the node should run, make it so, report.
     async fn reconcile(&self, config: RelayServingConfig) -> RelayServingStatus {
         let link = platform::probe().await;
-        // An engine taken out for shutdown, drained after the lock is released.
+        // Taken out for shutdown, drained after the lock is released.
         let mut draining = None;
         let mut inner = self.inner.lock().await;
         inner.config = config;
 
-        // Consent + the user's own conditions decide whether the node runs;
-        // reachability does not (see the module docs), so it is held true here.
+        // Reachability doesn't gate the node; held true here.
         let engine_wanted = SUPPORTED
             && config.enabled
             && hold_for(
@@ -315,15 +246,9 @@ impl RelayServingManager {
             .is_none();
 
         if engine_wanted && inner.engine.is_none() {
-            // The store is directory-backed and shared with the reachability
-            // loop that keeps it current (see the module docs). It starts empty,
-            // which means the node refuses to extend until it holds a verified,
-            // unexpired list — fail-closed from the first instant, not from the
-            // first refresh.
+            // Starts empty, so the node refuses to extend until a verified list arrives.
             let revocations = self.revocation_store();
-            // Same story for the addresses it may extend to: the reachability
-            // loop already verifies the signed directory, so it installs one
-            // into the store the engine checks every `Extend` against.
+            // The reachability loop installs the verified directory here too.
             let next_hops = self.next_hop_directory();
             match PeerEngine::start(
                 self.counters.clone(),
@@ -331,9 +256,7 @@ impl RelayServingManager {
                 next_hops.clone(),
             ) {
                 Ok(engine) => {
-                    // Parking carries the engine's leaf: that cert IS this
-                    // peer's identity, and it is what a client pins when the
-                    // directory offers this device as a hop.
+                    // Park with the engine's leaf: the cert is this peer's identity.
                     inner.reachability = self.start_reachability(
                         engine.cert_der().clone(),
                         revocations,
@@ -342,33 +265,21 @@ impl RelayServingManager {
                     inner.engine = Some(engine);
                 }
                 Err(e) => {
-                    // Failing to stand the node up is not a reason to claim we
-                    // are serving. Leave it down; the status below reports the
-                    // truth and the UI says we cannot confirm what is happening.
+                    // A failed start is never reported as serving.
                     crate::diag!("[peer-relay] could not start the peer node: {e}");
                 }
             }
         } else if !engine_wanted && inner.engine.is_some() {
             self.inbound_path.store(false, Ordering::Relaxed);
-            // Dropping this closes every parked connection, so the device stops
-            // being reachable at the same moment it stops being willing.
+            // Stop being reachable as soon as consent is gone.
             inner.reachability = None;
-            // Take it out here, drain it below — see `draining`.
             draining = inner.engine.take();
         }
 
         let running = inner.engine.is_some();
         drop(inner);
 
-        // The drain happens OUTSIDE the manager mutex. `PeerEngine::shutdown`
-        // deliberately waits for someone else's in-flight message to finish, and
-        // `attach_link` — the path EVERY inbound circuit takes, driven by the
-        // parking supervisor — wants this same mutex. Draining under the lock
-        // therefore blocked every new inbound link for the whole wait, for no
-        // reason: the engine has already been moved out, so nothing else can
-        // reach it. The observable order is unchanged (drain, then evaluate,
-        // then emit) so the reported link count still reflects the post-drain
-        // state.
+        // Drain OUTSIDE the mutex: `shutdown` waits, and every inbound link's `attach_link` needs this lock.
         if let Some(mut engine) = draining {
             engine.shutdown().await;
         }
@@ -389,10 +300,7 @@ impl RelayServingManager {
         status
     }
 
-    /// Push the status when it differs from the last one pushed. Bytes forwarded
-    /// changes constantly, so it is excluded from the comparison — the UI does
-    /// not need a per-datagram event, and CLAUDE.md's no-polling rule cuts both
-    /// ways: no timer, and no event storm either.
+    /// Push only on change; bytes forwarded is excluded to avoid an event storm.
     fn emit_if_changed(&self, status: RelayServingStatus) {
         let mut last = self.last.lock().unwrap();
         let changed = match *last {
@@ -423,8 +331,7 @@ impl RelayServingManager {
 
 /// Hands a spliced link to whatever node the manager is currently running.
 ///
-/// `Weak`, so an aborted-but-still-draining park task cannot keep a manager (and
-/// with it a relay node) alive after consent is withdrawn.
+/// `Weak`, so a draining park task can't keep a manager alive.
 struct ManagerAcceptor(Weak<RelayServingManager>);
 
 #[async_trait::async_trait]
@@ -443,7 +350,6 @@ mod tests {
     use crate::net::peer::conditions::{RelayServingHold, RelayServingState};
     use std::sync::Mutex as StdMutex;
 
-    /// Captures pushed events.
     struct RecordingSink(Arc<StdMutex<Vec<RelayServingStatus>>>);
 
     impl EventSink<RelayServingStatus> for RecordingSink {
@@ -453,8 +359,7 @@ mod tests {
         }
     }
 
-    /// A context that reports a directory but can never produce an identity —
-    /// enough to exercise the store wiring without standing up a signed pool.
+    /// Reports a directory but never an identity.
     struct FakeContext(Option<(String, String)>);
 
     #[async_trait::async_trait]
@@ -486,8 +391,7 @@ mod tests {
         assert!(!status.config.enabled);
     }
 
-    /// Consent alone never reports `Serving`: with no way to reach this device,
-    /// the honest answer is the reachability hold.
+    /// Consent alone never reports `Serving` without reachability.
     #[tokio::test]
     async fn consent_settles_to_waiting_without_an_inbound_path() {
         let manager = RelayServingManager::new();
@@ -497,9 +401,7 @@ mod tests {
         assert!(status.config.enabled);
     }
 
-    /// The node runs while the status is `Waiting{NoInboundPath}` — that is how
-    /// it gets an inbound path at all — and once one exists the state flips
-    /// without any config change.
+    /// The node runs during `Waiting{NoInboundPath}`; an inbound path flips the state.
     #[tokio::test]
     async fn an_inbound_path_flips_waiting_to_serving() {
         let manager = RelayServingManager::new();
@@ -546,16 +448,12 @@ mod tests {
         let off = manager.apply(RelayServingConfig::default()).await;
         assert_eq!(off.state, RelayServingState::Off);
         assert_eq!(off.hold, None);
-        // A link offered after consent is withdrawn goes nowhere.
         let (_client, peer_end) = super::super::link::loopback_pair();
         assert!(!manager.attach_link(peer_end).await);
-        // And reachability does not survive the node it belonged to.
         assert!(!manager.inbound_path.load(Ordering::Relaxed));
     }
 
-    /// **Contract §5.** The engine is handed the client's *directory-backed*
-    /// store, keyed on the same pinned key the directory is verified with — so a
-    /// serving peer can actually extend once it holds a list.
+    /// **Contract §5.** The engine gets the directory-backed store, keyed like the directory.
     #[tokio::test]
     async fn a_directory_backed_context_gives_the_engine_an_enforcing_store() {
         let manager = RelayServingManager::new();
@@ -573,9 +471,7 @@ mod tests {
         );
     }
 
-    /// And the other half of §5: no directory ⇒ no key ⇒ the store admits
-    /// nothing, so the device runs a node and forwards nothing. Being unable to
-    /// evaluate revocation is a refusal, never a default-open.
+    /// No directory ⇒ no key ⇒ the store admits nothing.
     #[tokio::test]
     async fn without_a_directory_the_engine_cannot_evaluate_revocation() {
         let manager = RelayServingManager::new();
@@ -585,10 +481,7 @@ mod tests {
         assert!(!manager.revocation_store().is_configured());
     }
 
-    /// ...and the same for the next-hop bound: no directory key ⇒ nothing is a
-    /// relay as far as this device is concerned, so `PeerEngine::start` turns
-    /// `allow_extend` off outright rather than dialling addresses it cannot
-    /// vouch for.
+    /// No directory key ⇒ `allow_extend` off.
     #[tokio::test]
     async fn without_a_directory_the_engine_will_not_extend_anywhere() {
         let manager = RelayServingManager::new();
@@ -598,8 +491,7 @@ mod tests {
         assert!(!manager.next_hop_directory().is_configured());
     }
 
-    /// A device with no way to be reached settles on the reachability hold and
-    /// stays there — the honest answer, and the one the UI renders.
+    /// No way to be reached settles on the reachability hold.
     #[tokio::test]
     async fn consent_without_a_directory_settles_on_no_inbound_path() {
         let manager = RelayServingManager::new();
@@ -615,15 +507,12 @@ mod tests {
         let events = Arc::new(StdMutex::new(Vec::new()));
         manager.set_sink(Arc::new(RecordingSink(events.clone())));
 
-        // First reconcile always pushes (nothing has been reported yet).
         manager.status().await;
         assert_eq!(events.lock().unwrap().len(), 1);
 
-        // Same state again: no push.
         manager.status().await;
         assert_eq!(events.lock().unwrap().len(), 1);
 
-        // A real change pushes.
         manager.apply(consent_without_conditions()).await;
         let pushed = events.lock().unwrap().clone();
         assert_eq!(pushed.len(), 2);

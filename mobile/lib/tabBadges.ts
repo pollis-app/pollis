@@ -1,26 +1,15 @@
-// The bottom tab bar's badges (#1561). Each tab's number is its unread
-// messages plus the pending items waiting on the user there, counted in the
-// way Slack and Discord count message requests into the DM badge: Direct adds
-// pending message requests, Groups adds pending group invites. Pure, so the
-// counting and the spoken label are pinned by tests/tab-badges.test.ts.
+// The tab bar's badges (#1561): unread plus pending requests/invites, Slack/Discord style. Pure.
 
-/** What one tab's badge is made of. */
 export interface TabBadge {
   unread: number;
-  /** Message requests (Direct) or group invites (Groups). */
   pending: number;
 }
 
 export interface TabBadgeInput {
-  /** Per-conversation unread counts (the app store's `unreadCounts`). */
   unreadCounts: Record<string, number>;
-  /** Every channel id the Groups tab lists. */
   channelIds: string[];
-  /** Every DM conversation id the Direct tab lists. */
   dmIds: string[];
-  /** Pending message requests (`useDMRequests`). */
   requestCount: number;
-  /** Pending group invites (`usePendingGroupInvites`). */
   inviteCount: number;
 }
 
@@ -41,7 +30,6 @@ export function tabBadges(input: TabBadgeInput): Record<string, TabBadge> {
   };
 }
 
-/** The number drawn on the badge; 0 draws none. */
 export function badgeTotal(badge: TabBadge | undefined): number {
   if (!badge) {
     return 0;
@@ -49,18 +37,13 @@ export function badgeTotal(badge: TabBadge | undefined): number {
   return badge.unread + badge.pending;
 }
 
-/** The text drawn on the badge: the total, capped at "99+". */
 export function badgeText(total: number): string {
   return total > 99 ? "99+" : String(total);
 }
 
 type Translate = (key: string, opts: Record<string, unknown>) => string;
 
-/**
- * The tab's spoken label. The number alone would not say what is waiting, so
- * unread and pending are announced separately: "Direct, 2 unread, 1 message
- * request". Each catalogue entry takes the label built so far as `{{label}}`.
- */
+/** Unread and pending are announced separately: "Direct, 2 unread, 1 message request". */
 export function tabA11yLabel(
   t: Translate,
   tab: string,

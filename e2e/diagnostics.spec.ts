@@ -1,21 +1,4 @@
-/*
- * Diagnostics (#1305).
- *
- * A tester's first-device signup failed AFTER the Delivery Service had
- * accepted their code, and the screen said "Invalid code". Two causes, both
- * pinned here:
- *
- *   1. Tauri rejects a command with the Rust error's text as a plain string,
- *      and `errorMessage` only read `Error`s — so every failure fell through to
- *      the "Invalid code" fallback. The Tauri IPC mock
- *      (`frontend/src/__mocks__/tauri-core.ts`) now rejects `verify_otp` with
- *      strings, exactly as the shell does.
- *   2. Nothing could tell which step failed. Every sign-in error now offers
- *      "Copy diagnostics", and the Diagnostics page shows the on-device log
- *      that button copies.
- *
- *   pnpm --filter @pollis/e2e playwright diagnostics
- */
+// Diagnostics (#1305): OTP errors arrive as plain strings; sign-in errors offer "Copy diagnostics".
 
 import { test, expect, type Page } from "./lib/zero-loss";
 

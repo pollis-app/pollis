@@ -1,21 +1,4 @@
-/*
- * The Android adaptive icon's glyph fills the safe zone and nothing else (#1406).
- *
- * A layer is 108dp; the launcher shows the central 72dp through its mask and
- * only the central 66dp circle is safe on every mask shape. The foreground and
- * monochrome layers are rendered from assets/pollis-logo.svg by
- * scripts/gen-android-adaptive-icon.py. The old pipeline left the amber
- * tile's anti-aliased edge in both layers, so the lock came out 58dp tall and
- * the themed icon carried a faint outline of the tile.
- *
- * Pinned: app.json points at both layers on the brand amber; every painted
- * pixel lies inside the 33dp safe radius (no stray outline, no clipping); the
- * glyph is at least 60dp tall; the lock body's interior holds no ink but the
- * "p" (the shackle leg stays hidden, as in the logo); the monochrome layer is
- * the same shape, in white.
- *
- *   cd mobile && pnpm test
- */
+/* The Android adaptive icon's glyph fills the 66dp safe zone and nothing else (#1406). */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -120,13 +103,7 @@ test("foreground: the glyph fills the safe zone (not the old 58dp lock)", () => 
   assert.ok(heightDp >= 60, `glyph ${heightDp.toFixed(1)}dp tall of 108dp`);
 });
 
-// The lock body's interior is clean amber in the logo: the shackle stops at
-// the body's top edge (its left leg runs on underneath, hidden by the body's
-// amber fill, so a generator that just drops the amber exposes it). Region in
-// assets/pollis-logo.svg units, mapped through the glyph's bounding box
-// (272..752 x 135.5..857.5): the interior is x 320..704 from y 425.5, and the
-// "p" starts at y 528; inset 12 units clear of the anti-aliased edges, and
-// 50 (the inner corner radius) from the sides, clear of the rounded corners.
+// The lock body's interior, in assets/pollis-logo.svg units, inset clear of the anti-aliased edges and corners.
 test("foreground: no ink inside the lock body above the p", () => {
   const LOGO = { x0: 272, y0: 135.5, x1: 752, y1: 857.5 };
   const REGION = { x0: 320 + 50, y0: 425.5 + 12, x1: 704 - 50, y1: 528 - 12 };

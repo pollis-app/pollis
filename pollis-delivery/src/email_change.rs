@@ -1,12 +1,6 @@
-//! Email-change OTP — **device-signed**, the last client-side Resend + direct
-//! `UPDATE users` write to move behind the DS (Goal B #419 final piece). Mirrors
-//! pollis-core `auth::{request_email_change_otp, verify_email_change}`.
+//! Email-change OTP, **device-signed**. Mirrors pollis-core `auth::verify_email_change`.
 //!
-//! Unlike signup bootstrap (which is OTP-session-gated because it *establishes*
-//! the device credential), email change happens when the user is ALREADY fully
-//! authenticated, so these endpoints use the EXISTING device-signature gate
-//! ([`crate::writes::gate`] → `authed`). THREE independent proofs are required,
-//! and they bind different facts:
+//! THREE independent proofs are required, and they bind different facts:
 //!
 //!   - the **device signature** (the gate) proves the CURRENT account (`authed`);
 //!   - the **new-address OTP**, keyed by the NEW email, proves control of the
@@ -14,21 +8,9 @@
 //!   - the **current-address OTP** (#1161), keyed by the address the account is
 //!     on today, proves control of the mailbox that actually owns the account.
 //!
-//! The third is the one a stolen unlocked device does not have. The device
-//! signature and the new-address code are both satisfied by whoever is holding
-//! the phone: they sign as the account because the keystore is unlocked, and
-//! they receive the new-address code because they chose the destination. Without
-//! a challenge to the address being LEFT, the recovery address on an account
-//! could be moved by anyone who picked up an unlocked device, and the real owner
-//! learned of it only afterwards (the notice and audit row added by the previous
-//! pass). A code to the old mailbox is what makes it a change the owner has to
-//! approve rather than one they get told about.
+//! The third is the one a stolen unlocked device lacks; without it, whoever holds it could move the address.
 //!
-//! Step 1 records `(authed → new_email)` and sends both codes; step 2 requires
-//! the verifying `authed` to equal the recorded requester and both codes to be
-//! right. So a different signed user can never consume someone else's pending
-//! change, and the email is ALWAYS bound from the signature — never the body.
-//! The write lands on the MAIN DB (`state.db`).
+//! Step 2 requires the verifying `authed` to be step 1's requester; the email binds from the signature.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -48,47 +30,26 @@ use crate::otp::{
 use crate::writes::{bad_request, gate, RawRequest};
 use crate::AppState;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::email_change::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api`, shared with pollis-core; re-exported here.
 pub use pollis_api::email_change::*;
 
 /// The email-change machinery: a dedicated OTP store plus the requester binding.
 ///
-/// The OTP store is a SEPARATE instance from signup's (`state.otp`) so an
-/// email-change to address X can never collide with a concurrent signup
-/// `request-otp` for X (both key by email). Shallow-`Clone` (shared `Arc`s) so it
-/// rides on the `Clone` `AppState`.
+/// A SEPARATE OTP store from signup's, so a change to X can't collide with a signup for X.
 #[derive(Clone, Default)]
 pub struct EmailChangeStore {
-    /// Reuses the signup OTP machinery (salted hash + constant-time + lockout +
-    /// single-use) verbatim — a private instance keyed by `new_email`.
+    /// The signup OTP machinery, privately, keyed by `new_email`.
     otp: OtpStore,
-    /// The CURRENT-address challenge (#1161), keyed by the account's existing
-    /// email. A third `OtpStore` instance rather than a reuse of `otp`, because
-    /// both are keyed by an address and the two addresses in one change request
-    /// are different codes for different questions: a single store would let the
-    /// answer to one satisfy the other the moment someone requested a change
-    /// TO the address they are already on.
+    /// The CURRENT-address challenge (#1161); its own store so one answer can't satisfy the other.
     current_otp: OtpStore,
-    /// normalized `new_email` → the device-signed `user_id` that requested it.
-    /// Keyed identically to the OTP store so request/verify always agree.
+    /// normalized `new_email` → the device-signed requester.
     requesters: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl EmailChangeStore {
-    /// Record `requester` as the one asking to change to `new_email`, then
-    /// prepare + send BOTH codes (reusing [`process_request_otp`] — DEV_OTP /
-    /// Resend / throttle all honored). The binding is overwritten on each
-    /// request so the latest requester wins.
+    /// Record `requester` for `new_email` (latest wins), then send BOTH codes via [`process_request_otp`].
     ///
-    /// `current_email` is the address the account is on right now, read from the
-    /// database by the handler — never from the body, which would let the caller
-    /// choose which mailbox gets to approve the change. `None` when the row has
-    /// no address at all, in which case there is nothing to re-prove and only
-    /// the new-address code is sent.
+    /// `current_email` comes from the database, never the body; `None` sends only the new code.
     pub async fn request(
         &self,
         cfg: &OtpConfig,
@@ -124,8 +85,7 @@ impl EmailChangeStore {
             .cloned()
     }
 
-    /// Drop the requester binding for `new_email` (after the OTP is consumed or
-    /// the change is finalized/refused).
+    /// Drop the requester binding for `new_email`.
     fn clear(&self, new_email: &str) {
         self.requesters
             .lock()
@@ -151,14 +111,7 @@ fn internal(e: anyhow::Error) -> Response {
         .into_response()
 }
 
-// ── POST /v1/auth/request-email-change-otp ───────────────────────────────────
-
-/// POST /v1/auth/request-email-change-otp — DEVICE-SIGNED. Record the
-/// authenticated requester for `new_email`, generate + store + email an OTP keyed
-/// by `new_email`. **Always 200** (anti-enumeration; mirrors `request-otp`) — the
-/// uniqueness check is deferred to verify time, which can't leak account
-/// existence to an unauthenticated probe. The requester is bound from the
-/// signature, NEVER the body.
+/// POST /v1/auth/request-email-change-otp — DEVICE-SIGNED. **Always 200** (anti-enumeration).
 pub async fn request_email_change_otp(
     State(state): State<AppState>,
     req: RawRequest,
@@ -167,8 +120,7 @@ pub async fn request_email_change_otp(
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
-    // Email change presupposes a credentialed device — there is no signed
-    // identity to bind the change to on the no-auth path, so reject it.
+    // No signed identity to bind the change to on the no-auth path.
     let requester = match authed {
         Some(u) => u,
         None => return Ok(AuthRejection::Unauthorized.into_response()),
@@ -180,9 +132,7 @@ pub async fn request_email_change_otp(
     };
     let new_email = parsed.new_email.trim().to_string();
     if !new_email.is_empty() {
-        // The address to challenge comes from the account row, never the body:
-        // letting the caller name it would let them point the one proof they do
-        // not already hold at a mailbox they do.
+        // The address to challenge comes from the account row, never the body.
         let conn = state.db.conn().await?;
         let current_email = match email_of(&conn, &requester).await {
             Ok(e) => e,
@@ -201,20 +151,14 @@ pub async fn request_email_change_otp(
     Ok(ok_status::<RequestEmailChangeBody>())
 }
 
-// ── POST /v1/auth/verify-email-change ────────────────────────────────────────
-
-/// The outcome of [`apply_verify_email_change`] — the handler maps it to the wire
-/// response (the in-process harness maps it the same way).
+/// The outcome of [`apply_verify_email_change`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum EmailChangeOutcome {
-    /// `users.email` swapped to the new address. Carries the caller's username
-    /// (#987) so the client's `accounts.json` mirror needs no follow-up read.
+    /// `users.email` swapped; carries the username (#987).
     Updated { username: Option<String> },
     /// Wrong / expired / unknown code for the NEW address → 401.
     InvalidCode,
-    /// Missing / wrong / expired code for the CURRENT address (#1161) → 401,
-    /// with its own message so the UI can say which of the two codes is wrong.
-    /// Also what a client that predates the second code receives.
+    /// Missing / wrong / expired code for the CURRENT address (#1161) → 401, with its own message.
     InvalidCurrentCode,
     /// Past the attempt limit → 429.
     LockedOut,
@@ -261,11 +205,7 @@ pub async fn verify_email_change(
     }
 }
 
-/// Validate the OTP + requester binding, then swap `users.email` — all the
-/// store/DB work behind verify-email-change, extracted from the handler so the
-/// in-process integration harness drives the identical logic against the shared
-/// main DB + email-change store. `authed` is the device-signed caller, never a
-/// body field.
+/// Validate the OTP + requester binding, then swap `users.email`; shared with the harness.
 pub async fn apply_verify_email_change(
     conn: &libsql::Connection,
     store: &EmailChangeStore,
@@ -275,31 +215,17 @@ pub async fn apply_verify_email_change(
     code: &str,
     current_code: Option<&str>,
 ) -> anyhow::Result<EmailChangeOutcome> {
-    // Canonical form (trim + lowercase) — the same key the OTP store used to
-    // bind the code, and what `users.email` now holds for every row (#1088).
+    // Canonical form, as the OTP store and `users.email` (#1088) hold it.
     let canonical = normalize_email(new_email);
     let trimmed = canonical.as_str();
 
-    // Binding gate FIRST — the device-signed caller MUST be the one who requested
-    // this change. Checked before the OTP so a different user can't even burn the
-    // attempt counter (or learn anything) against someone else's pending change.
+    // Binding gate FIRST, so another user can't even burn the attempt counter.
     match store.requester_of(trimmed) {
         Some(r) if r == authed => {}
         _ => return Ok(EmailChangeOutcome::Mismatch),
     }
 
-    // ── Re-prove the CURRENT address (#1161) ─────────────────────────────────
-    //
-    // Read before anything is consumed, and checked before the new-address code,
-    // so a caller who cannot answer the challenge never even burns an attempt
-    // against the new mailbox's counter.
-    //
-    // `None` — a row with no address — is the only case that skips this: there
-    // is no mailbox to re-prove and nothing for an attacker to have taken over.
-    // An account that HAS an address always faces the challenge, and a request
-    // that omits `current_code` fails it. That omission is exactly what a client
-    // predating the field sends, and refusing it is the intended direction: the
-    // check is worthless if skipping it is a caller's choice.
+    // Re-prove the CURRENT address (#1161) before anything is consumed; only a row with no address skips it.
     let old_email = email_of(conn, authed).await?;
     if let Some(current) = old_email.as_deref() {
         let current_key = normalize_email(current);
@@ -321,15 +247,11 @@ pub async fn apply_verify_email_change(
         }
     }
 
-    // Validate WITHOUT consuming (see `OtpStore::check`): the code stays valid until
-    // the `users.email` write below succeeds, so a transient/config DB failure
-    // returns a clean 5xx and the same code still works on retry instead of being
-    // burned and disguised as "invalid code" (#518). Wrong-guess accounting stands.
+    // Validate WITHOUT consuming, so a DB failure below leaves the code valid for a retry (#518).
     match store.otp.check(trimmed, code, cfg, crate::util::now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => {
-            // check() already deleted the code on lockout; drop the binding too so a
-            // retry must re-request.
+            // check() already deleted the code on lockout; drop the binding too.
             store.clear(trimmed);
             return Ok(EmailChangeOutcome::LockedOut);
         }
@@ -339,9 +261,7 @@ pub async fn apply_verify_email_change(
         }
     }
 
-    // Race-close: between request and verify, someone else could have claimed this
-    // email. Reject if so — mirrors pollis-core `verify_email_change`. A DB error on
-    // this read `?`-propagates to a 5xx WITHOUT consuming the code.
+    // Race-close: someone else may have claimed this email since the request.
     let mut rows = conn
         .query(
             "SELECT 1 FROM users WHERE email = ?1 AND id != ?2",
@@ -349,8 +269,7 @@ pub async fn apply_verify_email_change(
         )
         .await?;
     if rows.next().await?.is_some() {
-        // Correct code, but the target email is taken. Consume it (the binding is
-        // dropped, so a retry must re-request anyway) and report the conflict.
+        // Correct code, but the email is taken: consume it and report the conflict.
         store.otp.consume(trimmed);
         store.clear(trimmed);
         return Ok(EmailChangeOutcome::EmailTaken);
@@ -368,29 +287,7 @@ pub async fn apply_verify_email_change(
     }
     store.clear(trimmed);
 
-    // ── Tell the account the change happened (L3) ────────────────────────────
-    //
-    // The OTP proves control of the NEW mailbox and the device signature proves
-    // the current account — but a stolen or borrowed unlocked device satisfies
-    // both, and until now the change was completely silent: the old address was
-    // never told, and nothing in the app recorded it. The account's recovery
-    // address could be moved without leaving a trace anywhere the real owner
-    // would look.
-    //
-    // Two notices, neither of which can fail the change (it has already
-    // committed; refusing to report it would only make it quieter):
-    //
-    //   * a DS-AUTHORED `security_event`, which `/v1/read/security-events`
-    //     serves — it is written here rather than by the client so a client that
-    //     simply omits it cannot suppress it, and the append budget on
-    //     `/v1/security-events` does not apply to it, so a flood cannot bury it;
-    //   * an email to the OLD address, so the notice reaches somebody who has
-    //     lost control of the device as well.
-    //
-    // The current address was RE-PROVED above (#1161), so by the time either of
-    // these is sent the owner of the old mailbox has already approved the change
-    // — these report a change they authorized rather than announcing one they
-    // could not stop.
+    // Tell the account (L3): a DS-authored `security_event` and a mail to the OLD address; neither fails the change.
     if let Some(old) = old_email.as_deref() {
         if let Err(e) = conn
             .execute(
@@ -432,8 +329,7 @@ async fn email_of(conn: &libsql::Connection, user_id: &str) -> anyhow::Result<Op
     }
 }
 
-/// The caller's username, for the client's local accounts-index mirror.
-/// Best-effort shape: `None` if the row has none.
+/// The caller's username, for the client's accounts-index mirror.
 async fn username_of(
     conn: &libsql::Connection,
     user_id: &str,
@@ -450,8 +346,7 @@ async fn username_of(
     }
 }
 
-/// Map an [`EmailChangeOutcome`] to the wire response. Shared by the production
-/// handler and the in-process harness so both speak the same status codes.
+/// Map an [`EmailChangeOutcome`] to the wire response (handler and harness).
 pub fn email_change_response(outcome: EmailChangeOutcome) -> Response {
     match outcome {
         EmailChangeOutcome::Updated { username } => crate::writes::ok_response::<

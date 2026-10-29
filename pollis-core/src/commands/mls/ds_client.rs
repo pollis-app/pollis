@@ -1,11 +1,6 @@
 //! Signed HTTP client for the Delivery Service's authenticated write endpoints.
 //!
-//! Pollis has no server-side session/token system: the only credential that maps
-//! to a `user_id` server-side is the device's stable PQ MLS signing key
-//! (`user_device.mls_signature_pub_pq`). So every write the client routes through
-//! the Delivery Service (DS) is signed with that key, and the DS verifies the
-//! signature against the registered public half (see
-//! `pollis_delivery::auth::verify_request`).
+//! The only credential mapping to a `user_id` is the device's PQ MLS signing key, so every DS write is signed with it (`pollis_delivery::auth::verify_request`).
 //!
 //! Each request carries four headers:
 //!
@@ -19,8 +14,6 @@
 //! The signature is ML-DSA-44 over the canonical message
 //! `{METHOD}\n{PATH}\n{TIMESTAMP}\n{lowercase hex sha256(body)}` — byte-for-byte
 //! what `pollis_delivery::auth::canonical_message` reconstructs and verifies.
-//! When the DS has auth disabled (`POLLIS_DS_REQUIRE_AUTH=false`) the headers are
-//! simply ignored, so signing every request is harmless in that mode.
 
 use std::sync::Arc;
 
@@ -43,9 +36,6 @@ use super::provider::PollisProvider;
 fn canonical_message(method: &str, path: &str, timestamp: i64, body: &[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(body);
-    // `hex::encode` is lowercase, unseparated — byte-identical to the loop this
-    // and three DS helpers each used to hand-roll, and the crate already depends
-    // on `hex` so there was never a dependency to avoid.
     let hex = hex::encode(hasher.finalize());
 
     format!("{method}\n{path}\n{timestamp}\n{hex}").into_bytes()
@@ -54,13 +44,7 @@ fn canonical_message(method: &str, path: &str, timestamp: i64, body: &[u8]) -> V
 
 /// The signing user's id for THIS `AppState`.
 ///
-/// Prefer the instance's own authenticated session (`state.unlock`). Co-located
-/// clients (the supported "two clients on one machine" dev workflow) share the
-/// global `accounts.json`, so its `last_active_user` is whoever logged in last —
-/// not reliably *this* client's user. Signing a DS write under the wrong user
-/// makes the device-signature lookup miss its `user_device` row → 401. Fall back
-/// to the accounts index only before a session is unlocked (single-user installs
-/// / early startup).
+/// Prefer this instance's session: co-located dev clients share `accounts.json`, whose `last_active_user` may be another client's (401).
 pub(crate) async fn current_user_id(state: &Arc<AppState>) -> Result<String> {
     if let Some(u) = state.unlock.lock().await.as_ref() {
         if !u.user_id.is_empty() {
@@ -77,12 +61,7 @@ pub(crate) async fn current_user_id(state: &Arc<AppState>) -> Result<String> {
 /// Sign and POST a typed request body to the one endpoint that body addresses,
 /// attaching the four `X-Pollis-*` auth headers.
 ///
-/// There is no `path` argument: the path is [`DsRequest::PATH`], a property of
-/// `B`, so the caller cannot post a body to an endpoint that does not expect it
-/// and cannot misspell the route. `B` is the SAME type `pollis-delivery` parses
-/// the request into (both come from `pollis-api`), so a field this client omits,
-/// renames or invents fails to compile instead of arriving as a silently-absent
-/// JSON key — the bug shape that shipped four broken actor fields and cost #918.
+/// No `path` argument: the path is [`DsRequest::PATH`], and `B` is the type the DS parses, so mismatches fail to compile (#918).
 ///
 /// Returns the raw [`reqwest::Response`] so callers map status codes themselves
 /// (e.g. 409 → `LostRace` on the commit path).
@@ -90,9 +69,7 @@ pub async fn ds_post<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
 ) -> Result<reqwest::Response> {
-    // Serialize in the generic shim, sign and send in a NON-generic core: every
-    // endpoint would otherwise monomorphize the whole signing + overlay path,
-    // which the mobile builds pay for in binary size for no benefit.
+    // Generic shim, non-generic core: saves mobile binary size.
     let body_bytes = serde_json::to_vec(body)
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post serialize: {e}")))?;
     ds_post_bytes(state, B::PATH, B::IDEMPOTENT, body_bytes).await
@@ -118,32 +95,24 @@ async fn ds_post_bytes(
         .clone()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("device_id not set for DS request signing")))?;
 
-    // A device the DS has already called revoked cannot sign anything that will
-    // be accepted; fail here instead of putting every caller's request on the
-    // wire to be refused again (#1338). Bound to this exact device, so it never
-    // blocks another account or a newly enrolled device.
+    // Fail fast for a device the DS already called revoked (#1338); bound to this exact device.
     if state.is_revoked_device(&user_id, &device_id) {
         return Err(Error::DeviceRevoked);
     }
 
-    // The exact bytes we hash MUST be the exact bytes we send — hence `Vec<u8>`
-    // in, serialized once by the caller and never re-encoded here.
+    // Hash exactly the bytes we send.
     // Signed: the DS checks this against its own clock and the skew
     // arithmetic must not wrap when a client is ahead.
     let timestamp = crate::util::now_unix() as i64;
     let message = canonical_message("POST", path, timestamp, &body_bytes);
 
-    // Sign with the device's stable MLS signing key. The provider wraps a !Send
-    // rusqlite connection, so all signing is confined to this scope which ends
-    // (dropping the guard) before any await below.
+    // The provider wraps a !Send connection, so signing stays in this scope, before any await.
     let signature_b64 = {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("not signed in for DS request signing")))?;
-        // The certified device identity's PQ half (#668). Both leaf keys are
-        // covered by the device cert; request auth uses the ML-DSA-44 one so a
-        // future break of Ed25519 cannot forge writes from captured traffic.
+        // Request auth uses the device's ML-DSA-44 key (#668).
         let provider = PollisProvider::new(db.conn());
         let (signer, _pub_bytes) = load_or_create_device_signer(
             &provider,
@@ -180,11 +149,7 @@ async fn ds_post_bytes(
     Ok(resp)
 }
 
-/// Record a `device_revoked` answer to a request signed by `(user_id,
-/// device_id)` (#1338) — but only while that device is still this process's
-/// device. A response that lands late, after a sign-out or after another
-/// account signed in, marks nobody, so it can never short-circuit or wipe the
-/// session that replaced it. Returns whether it newly recorded one.
+/// Record a `device_revoked` answer (#1338) only while that device is still this process's; returns whether it newly recorded one.
 #[doc(hidden)]
 pub async fn note_revoked_response(state: &Arc<AppState>, user_id: &str, device_id: &str) -> bool {
     let still_this_device = state.device_id.lock().await.as_deref() == Some(device_id);
@@ -213,23 +178,11 @@ fn is_device_revoked_response(resp: &reqwest::Response) -> bool {
             == Some("device_revoked")
 }
 
-/// Claim one of `target_user_id`'s (optionally a specific device's) unclaimed
-/// MLS key packages through the DS (`POST /v1/key-packages/claim`) and return its
-/// TLS-serialized bytes. Returns `Ok(None)` when the target has no unclaimed
-/// package — the DS replies `404`, which is the EXACT counterpart of the direct
-/// `UPDATE … RETURNING` path's "no row" outcome, so the add path skips that
-/// device identically either way. Any other non-2xx is a hard error.
+/// Claim one of `target_user_id`'s unclaimed key packages via the DS; `Ok(None)` on 404 (none left), any other non-2xx errors.
 ///
-/// Device-signed via [`ds_post`]: the claimer is a fully-enrolled device, and the
-/// signature is the only thing the DS binds the claim to (any authenticated user
-/// may claim a peer's package — that is how you add them).
+/// Device-signed via [`ds_post`]; any authenticated user may claim a peer's package.
 ///
-/// `ciphersuite` names the suite pool to claim from; the DS never returns a
-/// package from another suite, so a suite the target cannot serve comes back as
-/// `Ok(None)` rather than a silently downgraded package. Passed explicitly so
-/// the choice is visible at the call site — and it is not always `CS_PQ`, even
-/// since #669: a caller adding a device to a group that has not yet migrated
-/// must claim in *that group's* suite or the add will be rejected.
+/// `ciphersuite` is explicit: a not-yet-migrated group must claim in its own suite; the DS never downgrades.
 pub async fn ds_claim_key_package(
     state: &Arc<AppState>,
     target_user_id: &str,
@@ -260,22 +213,14 @@ pub async fn ds_claim_key_package(
     Ok(Some(bytes))
 }
 
-/// Ask the DS to mint a LiveKit **participant** token for `room`. `kind` selects
-/// the identity scheme (`"realtime"` / `"voice"` / `"view"`) — the user+device
-/// halves are always derived server-side from the verified signer, so a client
-/// cannot mint a token as another user/device. Device-signed via [`ds_post`].
-/// Returns `(token, ws_url)`. Replaces the on-device `livekit_jwt::make_token`
-/// (which held the LiveKit API secret).
+/// Ask the DS to mint a LiveKit participant token for `room`; user and device come from the verified signer. Returns `(token, ws_url)`.
 pub async fn ds_livekit_token(
     state: &Arc<AppState>,
     room: &str,
     kind: &str,
 ) -> Result<(String, String)> {
     let device_id = state.device_id.lock().await.clone();
-    // `user_id`/`device_id` are the DS's no-auth fallback (`broker::resolve_user`):
-    // auth on → taken from the verified signature and these are ignored; auth off
-    // → these ARE the identity, and a body without them is a 400. Naming them
-    // grants nothing — `ds_post` signs as this very user.
+    // No-auth fallback identity; `ds_post` signs as this very user, so it grants nothing.
     let body = pollis_api::broker::LivekitTokenBody {
         room: room.to_string(),
         kind: Some(kind.to_string()),
@@ -284,26 +229,15 @@ pub async fn ds_livekit_token(
     };
     let parsed = ds_post_json(state, &body).await?;
 
-    // Resolve the fallback HERE, not at the call sites. The DS's URL is
-    // authoritative — it is the server that will accept this JWT — but every one
-    // of the six callers used to destructure it as `_url` and dial the compiled-in
-    // `config.livekit_url` instead, which baked the SFU address into every shipped
-    // binary and made "move the SFU" a client-release problem. Returning an
-    // already-resolved URL means a caller cannot reintroduce that bug by ignoring
-    // a field, and there is exactly one place the precedence is written down.
+    // Resolve the URL here so no caller can ignore the DS's address and dial the compiled-in one.
     //
-    // Empty is the documented self-host case: a DS with no `LIVEKIT_URL` set. That
-    // degrades to the previous behaviour rather than dialing "".
+    // Empty DS URL (self-host) falls back to config.
     let url = resolve_livekit_url(&parsed.url, &state.config.livekit_url);
     Ok((parsed.token, url))
 }
 
 /// Precedence for which LiveKit address to dial: the DS's answer wins, the
 /// compiled-in config is only a fallback.
-///
-/// Pulled out as a pure function so the rule is testable without a live DS — the
-/// bug this replaces was invisible precisely because it lived inline at six call
-/// sites with nothing asserting it.
 pub fn resolve_livekit_url(ds_url: &str, config_url: &str) -> String {
     if ds_url.trim().is_empty() {
         config_url.to_string()
@@ -316,9 +250,7 @@ pub fn resolve_livekit_url(ds_url: &str, config_url: &str) -> String {
 mod livekit_url_tests {
     use super::resolve_livekit_url;
 
-    /// The whole point: a DS-supplied address must never be discarded in favour
-    /// of the compiled-in one. This is the invalid state that shipped — the SFU
-    /// address baked into every binary, unmovable without a client release.
+    /// A DS-supplied address must never be discarded for the compiled-in one.
     #[test]
     fn ds_url_always_wins_over_config() {
         assert_eq!(
@@ -349,10 +281,7 @@ mod livekit_url_tests {
     }
 }
 
-/// Fan out a **content-free** control `payload` to a LiveKit `room` via the DS's
-/// server-side `RoomService/SendData` (the admin secret stays server-side).
-/// Replaces the on-device `make_admin_token` + Twirp POST. Best-effort — the DS
-/// treats a room with no participants (404) as success.
+/// Fan out a **content-free** control `payload` to a LiveKit `room` via the DS's `SendData`; a 404 (empty room) is success.
 pub async fn ds_livekit_send_data(
     state: &Arc<AppState>,
     room: &str,
@@ -377,11 +306,7 @@ pub async fn ds_livekit_send_data(
 
 /// List a voice room's roster via the DS (server-side `ListParticipants`).
 ///
-/// Returns each participant already resolved to a user (#836): the DS holds the
-/// per-room identity key, so it decrypts the opaque identities LiveKit reports
-/// and attaches the user id and display name on the way back. Internal
-/// participants and `view` clients are filtered server-side. Desktop-only —
-/// mobile has no Rust-side voice roster (see `livekit_stub`).
+/// Participants come back resolved to users (#836); desktop-only.
 #[cfg(feature = "media")]
 pub async fn ds_livekit_participants(
     state: &Arc<AppState>,
@@ -406,29 +331,15 @@ pub async fn ds_livekit_participants(
 }
 
 /// One participant identity resolved back to a Pollis user (#836).
-///
-/// Re-exported from `pollis-api` rather than declared here (#922). It used to be
-/// a local `#[derive(Deserialize)]` mirror alongside an `IdentityResp` that
-/// carried BOTH a `participants` and an `identities` field so one struct could
-/// decode two endpoints — which is precisely the shape #922 exists to remove: it
-/// decodes either response, so it also decodes the WRONG one, silently, as an
-/// empty vec. Each endpoint now names its own response type.
 #[cfg(feature = "media")]
 pub use pollis_api::broker::ResolvedIdentity;
 
 /// Ask the DS to resolve opaque LiveKit participant identities back to users
 /// (#836).
 ///
-/// Identities minted for a room are only meaningful under that room's key, which
-/// lives on the DS and nowhere else — a per-room key shipped in a release binary
-/// could be extracted, and one that resolved every room would hand the whole
-/// social graph back. So a client that learns a peer identity from the LiveKit
-/// event stream asks here.
+/// Only the DS holds the per-room identity key, so clients ask here.
 ///
-/// `room` is the **logical** room (conversation id / `inbox-<user>` /
-/// `call-<ulid>`), not the LiveKit pseudonym. Identities the DS cannot resolve
-/// are simply absent from the result; callers leave those participants
-/// unattributed rather than guessing.
+/// `room` is the **logical** room; unresolvable identities are simply absent.
 #[cfg(feature = "media")]
 pub async fn ds_livekit_identities(
     state: &Arc<AppState>,
@@ -450,16 +361,7 @@ pub async fn ds_livekit_identities(
 
 /// [`ds_post`] plus decoding the ONE response body this endpoint declares (#922).
 ///
-/// The mirror image of what `ds_post` does for the request. Callers used to
-/// declare a private `#[derive(Deserialize)] struct Resp { … }` at each call
-/// site and hand-match it against a `json!{}` literal in the DS — two lists,
-/// nothing forcing them to agree, and a failure mode quieter than the request
-/// side's: a field the server renames does not error here, it simply arrives
-/// absent and becomes a default the caller cannot tell from a real answer.
-///
-/// `B::Response` is the SAME associated type `pollis-delivery` hands to
-/// `writes::ok_response::<B>`, so reading a field the server does not send is a
-/// compile error rather than a `None`.
+/// `B::Response` is the type the DS sends, so a missing field is a compile error.
 ///
 /// Any non-2xx is an `Err` carrying the status and body — a caller that needs to
 /// branch on a specific status (404 on key-package claim, 409 on commit submit)
@@ -474,12 +376,6 @@ pub async fn ds_post_json<B: ClientRequest>(
 
 /// Pass a 2xx response through; turn anything else into an `Err` carrying the
 /// status and the body text.
-///
-/// [`ds_post_json`], [`ds_post_ok`], [`ds_post_signed_or_session_ok`] and
-/// [`ds_post_session_ok`] each carried their own copy of this block. `label` is
-/// the only thing that ever varied between them, and it is a parameter rather
-/// than a hardcoded `"ds_post"` so the messages stay byte-identical to the ones
-/// the copies produced — `ds_post_session_ok` reported under its own name.
 async fn reject_non_2xx(
     resp: reqwest::Response,
     path: &str,
@@ -493,12 +389,7 @@ async fn reject_non_2xx(
     Err(DsRefused::error(label, path, status, txt))
 }
 
-/// A non-2xx answer from the DS, kept typed inside `Error::Other` so a caller
-/// can ask for the status (`downcast_ref::<DsRefused>()`) instead of parsing a
-/// message. Its `Display` is byte-identical to the string these errors always
-/// carried (`"{label} {path} {status}: {body}"`), so nothing that reads the
-/// text changes. The durable outbox (#1335) uses the status to tell a refusal
-/// no retry can fix from one that may pass next time.
+/// A non-2xx DS answer, typed so callers can `downcast_ref` the status; `Display` is unchanged (used by the outbox, #1335).
 #[derive(Debug)]
 pub struct DsRefused {
     pub label: String,
@@ -527,11 +418,6 @@ impl std::fmt::Display for DsRefused {
 impl std::error::Error for DsRefused {}
 
 /// Decode a 2xx body into the endpoint's declared response type.
-///
-/// Split out of [`ds_post_json`] so the handful of callers that must inspect the
-/// status FIRST (a 404 that means "skip this device", a 409 that means "lost the
-/// race") still decode through the one declaration rather than re-deriving a
-/// local mirror of it.
 pub(crate) async fn decode_response<B: DsRequest>(
     resp: reqwest::Response,
 ) -> Result<B::Response> {
@@ -541,11 +427,7 @@ pub(crate) async fn decode_response<B: DsRequest>(
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path} decode: {e}")))
 }
 
-/// [`ds_post`] for writes that must NOT silently fail: any non-2xx becomes an
-/// `Err` carrying the status + body. Use this when the direct-write path it
-/// replaces propagated its error (`conn.execute(...).await?`). For best-effort
-/// writes (the direct path logged and continued) call [`ds_post`] and log
-/// instead.
+/// [`ds_post`] for writes that must NOT silently fail: any non-2xx is an `Err`.
 pub async fn ds_post_ok<B: ClientRequest>(state: &Arc<AppState>, body: &B) -> Result<()> {
     let resp = ds_post(state, body).await?;
     if !resp.status().is_success() {
@@ -561,22 +443,14 @@ pub async fn ds_post_ok<B: ClientRequest>(state: &Arc<AppState>, body: &B) -> Re
 pub enum EnvelopePost {
     /// Stored.
     Landed,
-    /// Refused: the envelope's asserted `(generation, epoch)` was not the commit
-    /// log's head when it landed, so it was deleted. Nothing is stored. The
-    /// sender must catch up, re-seal at the current epoch and post again.
+    /// Refused: the envelope's epoch was not the log head; catch up, re-seal, re-post.
     EpochBehind {
         head_generation: i64,
         head_epoch: i64,
     },
 }
 
-/// [`ds_post_ok`] for `/v1/messages/send` and `/v1/messages/edit`, which have
-/// one expected refusal beyond auth: the 409 [`pollis_api::messages::EpochBehind`]
-/// the DS answers when the envelope's epoch is stale. That one is returned as
-/// [`EnvelopePost::EpochBehind`] so the sender can converge; any other non-2xx
-/// is the `Err` it always was. A 409 whose body is not an `EpochBehind` is also
-/// an `Err`: the commit-race 409 lives on `/v1/commits`, not here, and a body we
-/// cannot read is not a head we can re-seal at.
+/// [`ds_post_ok`] for message send/edit, returning a stale-epoch 409 as [`EnvelopePost::EpochBehind`]; any other non-2xx is an `Err`.
 pub async fn ds_post_envelope<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
@@ -603,25 +477,14 @@ pub async fn ds_post_envelope<B: ClientRequest>(
 
 /// [`ds_post`] when this device can sign (local DB open, device key enrolled);
 /// otherwise fall back to whichever verified-OTP session this sign-in minted.
-/// For the account-lifecycle calls reachable from a PRE-ENROLLMENT device — the
-/// soft reset and the Secret-Key recovery offered on the login gate — where no
-/// signing key exists yet and the user's authorization is the email OTP they
-/// just verified. The DS accepts either credential on these endpoints
-/// (`gate_or_session`).
+/// For pre-enrollment account-lifecycle calls (soft reset, Secret-Key recovery); the DS accepts either (`gate_or_session`).
 ///
-/// BOTH session slots are tried, and which one is populated depends on the
-/// branch `verify_otp` took:
+/// BOTH session slots are tried:
 ///
 ///   * `bootstrap_session` — a FIRST-device signup.
-///   * `enrollment_session` — a re-login on a device the account already knows.
-///     `verify_otp` keeps this one separate on purpose (the subsequent-device
-///     cert publish must not consume a session, because a sibling approval can
-///     outlast the TTL), but for THESE calls the two are interchangeable: each
-///     is a bearer token proving the same freshly-verified mailbox.
+///   * `enrollment_session` — a re-login on a known device.
 ///
-/// Trying only `bootstrap_session` is how Secret-Key recovery on a returning
-/// device failed with "not signed in and no verified-email session" — that
-/// device had an `enrollment_session` and nothing else.
+/// Trying only `bootstrap_session` broke Secret-Key recovery on a returning device.
 pub async fn ds_post_signed_or_session<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
@@ -630,12 +493,7 @@ pub async fn ds_post_signed_or_session<B: ClientRequest>(
     if can_sign {
         return ds_post(state, body).await;
     }
-    // Each guard is bound to a `let` and dropped before the next `.await`: in
-    // edition 2021 a guard taken in a `match` scrutinee lives to the end of the
-    // whole statement, so the obvious `match state.bootstrap_session.lock()...`
-    // would hold that lock across the `enrollment_session.lock().await` below.
-    // `state.rs`'s `no_lock_guard_in_a_scrutinee_spans_an_await` fails the build
-    // on exactly that shape.
+    // Bind each guard to a `let` so it drops before the next await (`no_lock_guard_in_a_scrutinee_spans_an_await`).
     let bootstrap = state.bootstrap_session.lock().await.clone();
     let enrollment = state.enrollment_session.lock().await.clone();
     let token = bootstrap.or(enrollment).ok_or_else(|| {
@@ -661,40 +519,15 @@ pub async fn ds_post_signed_or_session_ok<B: ClientRequest>(
     Ok(())
 }
 
-/// Report this device's applied MLS `since` epoch for a conversation to the DS
-/// (`POST /v1/commits/since`), the signal the server-side retention floor is the
-/// MIN of across current members (#539, I4 Tier 1). `since` is the client's
-/// current local epoch — it still needs every commit `>= since`, so a truthful
-/// report can only ever PROTECT its own history from pruning.
+/// Report this device's applied MLS `since` epoch (`POST /v1/commits/since`); the retention floor is the MIN across members (#539).
 ///
-/// **Device-SIGNED** (via [`ds_post`]). The report is a write — it raises the
-/// retention floor — so it must be authenticated as the device it claims to be.
-/// It used to be an unauthenticated `GET /v1/commits/{conv}?...&user_id&device_id`,
-/// which let anyone raise the floor for any device and, chained with the
-/// unclamped prune floor, wipe a conversation's whole commit log (#681). The
-/// reported `(conversation_id, generation, since)` now lives in the signed JSON
-/// body, so the signature's `sha256(body)` binding authenticates the values
-/// themselves — a signed empty-body GET with them in the query string could not.
-/// `user_id`/`device_id` are included for the DS's no-auth (dev/test) path only;
-/// when the DS enforces auth it derives both from the verified signature.
+/// **Device-SIGNED**: the report raises the floor, so its values ride in the signed body (#681).
 ///
-/// `generation` scopes that position to one suite lineage (#454 P4). The DS keeps
-/// the pair monotone lexicographically, which is what stops a migrated device's
-/// report — epoch 0 of generation `N + 1`, numerically *below* the retired
-/// lineage's last epoch — from reading as a regression and being dropped.
+/// `generation` keeps the pair lexicographically monotone across a migration (#454 P4).
 ///
-/// Fully best-effort and EVENT-DRIVEN (fires once per catch-up, never polls): any
-/// failure — no DS URL, not signed in yet, a network error — is swallowed,
-/// leaving the floor conservatively low (Tier 2's hard cap still bounds storage).
+/// Best-effort and event-driven; failures leave the floor conservatively low.
 ///
-/// A short [`REPORT_TIMEOUT`] keeps it off the catch-up critical path: the report
-/// is best-effort by design, so it must NEVER block the caller — one call site is
-/// `await`ed inline on the suite-migration path (`migrate.rs`), where a
-/// black-holed DS or a stalled overlay relay would otherwise hang migration
-/// indefinitely. The bound lives HERE, wrapping the whole signed round-trip
-/// (`ds_post` sets no timeout, and neither does the shared reqwest client — its
-/// no-timeout default is deliberate, so long-lived media/streaming requests are
-/// never cut off), so no future call site can forget it.
+/// [`REPORT_TIMEOUT`] bounds the whole round-trip here, since `migrate.rs` awaits it inline and nothing else sets a timeout.
 pub async fn ds_report_commit_since(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -715,24 +548,16 @@ pub async fn ds_report_commit_since(
         user_id: Some(user_id.to_string()),
         device_id: Some(device_id),
     };
-    // Bound the whole signed round-trip. A timeout resolves to `Err(_)` and is
-    // swallowed exactly like any other failure — the report is dropped and the
-    // floor stays conservative.
+    // Bound the round-trip; a timeout is swallowed like any failure.
     let _ = tokio::time::timeout(REPORT_TIMEOUT, ds_post(state, &body)).await;
 }
 
-/// Upper bound on a single best-effort high-water report's round-trip. Short by
-/// design: it sits on the catch-up (and inline suite-migration) path, so it must
-/// give up quickly rather than stall real work behind an unreachable DS.
+/// Upper bound on one best-effort report round-trip.
 const REPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Resolve the DS base URL, trailing slash trimmed, or error if it isn't
 /// configured. Shared by every sender: the signed [`ds_post_bytes`] above and the
 /// unauthenticated + session-bearer bootstrap clients below.
-///
-/// Borrows rather than allocating — each caller's next move is to `format!` it
-/// into a URL, so the owned `String` this used to return was thrown away
-/// immediately.
 fn delivery_base(state: &Arc<AppState>) -> Result<&str> {
     state
         .config
@@ -756,13 +581,7 @@ fn with_dev_key(state: &AppState, request: reqwest::RequestBuilder) -> reqwest::
     }
 }
 
-/// [`send_ds`], plus ONE resend for an idempotent request whose first attempt
-/// died on the connection rather than getting an answer (#1497) — what every
-/// HTTP client does for a request it may repeat (RFC 9110 §9.2.2). A pooled
-/// keep-alive connection the far end has already closed is the common case:
-/// nothing about it is the request's fault, and a fresh connection succeeds.
-/// The resend carries the same signature, still inside the DS's replay window.
-/// A non-idempotent request is never resent: the first attempt may have landed.
+/// [`send_ds`] plus ONE resend for an idempotent request whose connection died before answering (#1497); never for a non-idempotent one.
 async fn send_ds_resending(
     path: &str,
     request: reqwest::RequestBuilder,
@@ -778,11 +597,7 @@ async fn send_ds_resending(
     }
 }
 
-/// A transport failure that happened on the CONNECTION — it could not be
-/// opened, or it died before an answer came back (a pooled keep-alive
-/// connection the far end had closed, a reset). Not a timeout: a request that
-/// timed out may still be running on the DS, and waiting the deadline out
-/// twice is no recovery.
+/// A failure on the CONNECTION (could not open, or died before answering); not a timeout, which may still be running on the DS.
 pub(crate) fn is_connection_failure(e: &reqwest::Error) -> bool {
     !e.is_timeout() && (e.is_connect() || e.is_request())
 }
@@ -808,11 +623,7 @@ fn new_request_id() -> String {
     hex::encode(bytes)
 }
 
-/// Send a DS request built by one of the three builders in this file, stamped
-/// with a fresh [`pollis_api::redact::REQUEST_ID_HEADER`] (#1305), so a line in
-/// the user's diagnostics log can be matched to the DS's failed-request log. A non-2xx answer or a transport failure is
-/// written to the diagnostics log with that id; success is not (it would bury
-/// the failures). Callers still map the status themselves.
+/// Send a DS request stamped with a fresh request id (#1305); non-2xx and transport failures are logged with it.
 async fn send_ds(path: &str, request: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
     let request_id = new_request_id();
     let result = request.header(pollis_api::redact::REQUEST_ID_HEADER, &request_id).send().await;
@@ -821,9 +632,7 @@ async fn send_ds(path: &str, request: reqwest::RequestBuilder) -> reqwest::Resul
             crate::diag!("[ds] {path} → {} req={request_id}", resp.status());
         }
         Err(e) => {
-            // reqwest's Display stops at "error sending request for url"; the
-            // cause (a reset, a closed pooled connection, a timeout) is in the
-            // source chain, and without it a failure cannot be diagnosed (#1497).
+            // Log the source chain: reqwest's Display omits the cause (#1497).
             crate::diag!(
                 "[ds] {path} → transport error req={request_id}: {}",
                 error_chain(e)
@@ -834,10 +643,7 @@ async fn send_ds(path: &str, request: reqwest::RequestBuilder) -> reqwest::Resul
     result
 }
 
-/// POST `body` (JSON) to `{pollis_delivery_url}{path}` with NO auth headers — the
-/// pre-identity OTP endpoints (`request-otp` / `verify-otp`), which the DS gates
-/// by the OTP itself, not a device signature or a session. Returns the raw
-/// [`reqwest::Response`] so the caller reads the body / maps the status.
+/// POST with NO auth headers, for the pre-identity OTP endpoints the DS gates by the OTP itself.
 pub async fn ds_post_plain<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
@@ -863,11 +669,7 @@ async fn ds_post_plain_bytes(
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_plain {path}: {e}")))
 }
 
-/// Sign-free sibling of [`ds_post`] for the OTP-session-gated bootstrap writes
-/// (establish-identity / register-device / publish-device-cert). During bootstrap
-/// the device has no MLS signing key yet, so these carry the OTP-session bearer
-/// token in `X-Pollis-Session` instead of the four `X-Pollis-*` signature headers.
-/// Returns the raw [`reqwest::Response`] so the caller maps the status.
+/// Sign-free sibling of [`ds_post`] for OTP-session-gated bootstrap writes (`X-Pollis-Session` bearer).
 pub async fn ds_post_session<B: ClientRequest>(
     state: &Arc<AppState>,
     session_token: &str,
@@ -956,9 +758,7 @@ mod dev_key_tests {
         Arc::new(AppState::new_with_parts(config, keystore))
     }
 
-    /// The pre-credential and the session builders both carry the key to a
-    /// non-prod DS, and send no header at all when no key is configured. (The
-    /// prod-host refusal is `Config::dev_access_key_for_ds`'s own test.)
+    /// The pre-credential and session builders send the key to a non-prod DS, and nothing when none is configured.
     #[tokio::test]
     async fn the_ds_builders_send_the_dev_key_only_when_configured() {
         let (ds, seen) = recording_ds().await;
@@ -1001,19 +801,7 @@ mod dev_key_tests {
 mod tests {
     use super::*;
 
-    /// A hanging DS — one that accepts the TCP connection but never sends a
-    /// response — must not hang the caller. `ds_report_commit_since` wraps its
-    /// signed round-trip in [`REPORT_TIMEOUT`] precisely because the shared
-    /// reqwest client (`net::overlay::http_client`) and `ds_post` both set NO
-    /// timeout of their own, so without the wrap the request would wait forever
-    /// — and one call site (`migrate.rs`) awaits the report INLINE on the
-    /// suite-migration path, so an unreachable DS would freeze migration.
-    ///
-    /// This pins the exact bound the function applies: `timeout(REPORT_TIMEOUT,
-    /// <hanging POST>)` returns `Err(Elapsed)` in about `REPORT_TIMEOUT`, rather
-    /// than pending indefinitely. The control assertion proves the target is
-    /// genuinely hanging (not instantly refused), so the treatment is really
-    /// exercising the bound.
+    /// A hanging DS must not hang the caller: pins the [`REPORT_TIMEOUT`] bound `ds_report_commit_since` applies.
     #[tokio::test]
     async fn report_round_trip_is_bounded_against_a_hanging_ds() {
         // Accept connections and hold them open forever without replying.
@@ -1029,9 +817,7 @@ mod tests {
         let client = crate::net::overlay::http_client(None);
         let url = format!("http://{addr}/v1/commits/since");
 
-        // Control: 200ms in, the request has neither completed nor failed — the
-        // target is truly hanging, so the treatment below exercises the bound
-        // rather than a fast connection-refused.
+        // Control: still pending at 200ms, so the target truly hangs.
         let quick = tokio::time::timeout(
             std::time::Duration::from_millis(200),
             client.post(&url).body("{}").send(),
@@ -1042,9 +828,7 @@ mod tests {
             "hanging DS should not resolve in 200ms — got {quick:?}"
         );
 
-        // Treatment: the exact bound ds_report_commit_since applies. It must
-        // RETURN (as Err(Elapsed)) rather than hang, and do so around
-        // REPORT_TIMEOUT, not far beyond it.
+        // Treatment: returns Err(Elapsed) around REPORT_TIMEOUT.
         let start = std::time::Instant::now();
         let bounded = tokio::time::timeout(
             REPORT_TIMEOUT,

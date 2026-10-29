@@ -12,12 +12,7 @@ import { appStore } from "../stores/appStore";
 import * as api from "../services/api";
 import { errorMessage } from "../utils/errorMessage";
 
-/**
- * Link a new device (#1207), one step per view — the desktop twin of mobile's
- * self/link-device: PIN → the code (QR or copyable text) → waiting → Approve
- * → done. The PIN is verified in Rust; the key moves only on Approve of a
- * request whose link tag Rust verified. Each wait is one awaited Rust call.
- */
+/** Link a new device (#1207): PIN → code → wait → Approve; Rust verifies the PIN and link tag. */
 
 type Step =
   | { kind: "pin" }
@@ -246,7 +241,6 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
   const [mode, setMode] = useState<"qr" | "code">("qr");
   const [copied, setCopied] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(() => Math.max(0, handle.expires_at - Math.floor(Date.now() / 1000)));
-  // A display clock for the countdown; it touches no network.
   useEffect(() => {
     const timer = window.setInterval(() => {
       setSecondsLeft(Math.max(0, handle.expires_at - Math.floor(Date.now() / 1000)));

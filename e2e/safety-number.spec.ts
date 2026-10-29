@@ -1,15 +1,4 @@
-/*
- * Safety number in the DM (#1563), desktop.
- *
- * A safety number belongs to a PAIR (your key with theirs), so it lives in
- * the conversation, not on the other person's profile: the DM's right panel
- * has "Verify safety number", which opens "You & <name>" with the digits. A
- * group DM offers one per other member, never one for the conversation, and
- * the profile no longer shows any.
- *
- * Runs against the browser build with the Tauri IPC mock, whose
- * `get_safety_number` answers deterministic digits per peer.
- */
+// Safety number (#1563) is per pair, so it lives in the DM, not the profile.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -87,8 +76,7 @@ async function boot(page: Page, skin: Skin) {
   await expect(page.getByTestId("sidebar")).toBeVisible();
 }
 
-/** The router runs on memory history, so conversations are reached through
- * the UI: a permalink pasted into Cmd+K. */
+// Memory-history router: conversations are reached via a permalink in Cmd+K.
 async function openConversation(page: Page, conversationId: string, messageId: string) {
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
@@ -124,7 +112,6 @@ for (const skin of SKINS) {
       await page.getByTestId("safety-verify-toggle").click();
       await expect(page.getByTestId("safety-status")).toHaveText("Verified");
 
-      // Back returns to the roster.
       await page.getByTestId("safety-panel-back").click();
       await expect(page.getByTestId("right-panel-verify-safety-u-bob")).toBeVisible();
     });

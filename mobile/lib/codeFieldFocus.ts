@@ -1,13 +1,4 @@
-// Reopens the soft keyboard for a hidden code input (the OTP screen's six
-// boxes are a picture of an opacity:0 TextInput). Pure, so the node tests
-// reach it.
-//
-// React Native's `focus()` is a no-op when the input is already the focused
-// one (`TextInputState.focusTextInput`). Dismissing the keyboard with Android's
-// back gesture/button hides it WITHOUT blurring the input, so a plain
-// `focus()` on the next tap did nothing and the user was stuck. When the field
-// is focused but the keyboard is down, blur first so `focus()` reaches native
-// and shows the keyboard again.
+// Reopens the keyboard for the hidden OTP input: `focus()` is a no-op on an already-focused input, so blur first. Pure.
 
 export interface FocusableInput {
   isFocused(): boolean;

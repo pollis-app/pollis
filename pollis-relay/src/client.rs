@@ -12,14 +12,7 @@ use crate::proto::{self, Connect, DeviceCertMaterial, MlDsaSigningKey};
 use crate::stream::RelayStream;
 use crate::tls::{self, PinnedServerCertVerifier, RELAY_SERVER_NAME};
 
-/// The device identity a client authenticates with (design §9.4). Carries the
-/// device's ML-DSA-44 signing key and its classic Ed25519 leaf public key, AND
-/// the offline cert chain the relay verifies: `account_id_pub` + the
-/// `device_cert` binding both leaf keys to it (+ `identity_version` /
-/// `issued_at`). In `pollis-core` these come from the device's stored cert
-/// material (keystore + `user_device`); a device with no cert yet
-/// (pre-enrollment/OTP bootstrap) simply cannot build a [`ClientIdentity`], so
-/// its traffic stays direct (documented in `docs/relay-operations.md`).
+/// The device identity a client authenticates with (§9.4): signing key plus the offline cert chain.
 pub struct ClientIdentity {
     pub user_id: String,
     pub device_id: String,
@@ -70,10 +63,7 @@ impl ClientIdentity {
 /// An open QUIC connection to one relay, with the wire generation both ends
 /// agreed on.
 ///
-/// Version negotiation lives entirely in ALPN: the client offers every generation
-/// it speaks ([`proto::SUPPORTED_ALPNS`], newest first) and the relay picks. A
-/// peer with no overlap fails the QUIC handshake outright, so a mismatch is a
-/// clean connection error and never a half-spoken stream.
+/// Versions are negotiated in ALPN, so a mismatch fails the QUIC handshake cleanly.
 pub struct RelayLink {
     connection: quinn::Connection,
     endpoint: quinn::Endpoint,
@@ -84,9 +74,7 @@ impl RelayLink {
     /// Dial `relay_addr`, pinning `relay_cert` as the relay's identity, and
     /// resolve the negotiated wire generation.
     ///
-    /// A fresh QUIC endpoint is created per call for v0 simplicity; whatever
-    /// stream is opened from it owns it so it lives as long as the pipe.
-    /// (TODO Slice 1b: pool one endpoint per relay.)
+    /// One QUIC endpoint per call (TODO Slice 1b: pool one per relay).
     pub async fn open(
         relay_addr: SocketAddr,
         relay_cert: &CertificateDer<'static>,
@@ -155,18 +143,14 @@ fn negotiated_version(connection: &quinn::Connection) -> anyhow::Result<u8> {
     })
 }
 
-/// A single relay endpoint: its address and the cert the client pins as its
-/// identity. Building the client config from this keeps the relay's identity
-/// out-of-band (a later slice fetches it from Turso).
+/// A single relay endpoint.
 pub struct RelayClient;
 
 impl RelayClient {
     /// Connect to `relay_addr` (pinning `relay_cert`), authenticate as
     /// `identity`, request `Connect(host, port)`, and return the live byte pipe.
     ///
-    /// This is the single-hop path and speaks whichever generation the relay
-    /// negotiated — against the shipped v3 fleet it emits byte-for-byte the v3
-    /// frames it always did.
+    /// Single-hop; against a v3 relay it emits exactly the v3 frames.
     pub async fn connect(
         relay_addr: SocketAddr,
         relay_cert: &CertificateDer<'static>,

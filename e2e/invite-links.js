@@ -1,39 +1,6 @@
 #!/usr/bin/env node
 /*
- * Shareable invite links — create → copy → redeem, in BOTH skins (issue #847).
- *
- * The unit and DS tests prove the security properties (a revoked/expired/
- * exhausted token is refused, the stored value is a hash, redemption goes
- * through the normal `add_member_rows` admission path). They cannot prove the
- * thing only a real browser can: that an admin can actually mint a link, that
- * the token is really on the clipboard, and that pasting it into another
- * account's client puts that account in the group — in `terminal` AND `refined`,
- * which render the invite surfaces through separate `useSkin()` branches.
- *
- * Isolation + backend assumptions are identical to two-client-channel.js: two
- * isolated app instances (distinct driver ports + POLLIS_DATA_DIR), ONE shared
- * external backend (start-backend.sh — POLLIS_DELIVERY_URL must be set), ONE
- * Vite server.
- *
- * Choreography (run once per skin):
- *   1. A + B sign up (reused verbatim from two-client-channel.js).
- *   2. Both switch to the skin under test via Preferences (pref-skin-<skin>).
- *   3. A creates a group.
- *   4. A opens the group's invite page and creates an invite link
- *      (create-invite-link), then reads the URL out of created-invite-link-url
- *      and clicks copy-invite-link.
- *   5. A asserts the clipboard actually holds that URL — the copy button is the
- *      entire delivery mechanism for a token that can never be shown again, so
- *      "it rendered" is not good enough.
- *   6. B goes to /join (menu-item-join), pastes the URL, and redeems.
- *   7. B lands on the group page and the group is visible in B's group list.
- *   8. A revokes the link, and B2 — a second attempt with the same URL — fails
- *      with the single opaque error. This is the one behaviour a user can
- *      observe that the DS tests assert at the unit level; proving it end to end
- *      is what stops a UI regression from rendering a revoked link as usable.
- *
- * On failure, dumps per-client A-FAIL.* / B-FAIL.* into e2e/artifacts/.
- *
+ * Invite links (#847), both skins: mint, copy (clipboard asserted), redeem; a revoked link fails opaquely.
  * NOTE: not executed in the authoring environment — the harness's reap() does a
  * machine-wide `pkill -9 -f "bin/vite"`, which would kill sibling agents' dev
  * servers. Run it on an idle machine with `node e2e/invite-links.js`.
@@ -67,7 +34,6 @@ function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   };
 }
 
-// Full signup through the real UI — copied verbatim from two-client-channel.js.
 async function signUp(browser, email, tag) {
   console.log(`[invite-links] ${tag}: signing up ${email}`);
   await h.waitTestId(browser, "auth-screen", 30000);
@@ -111,11 +77,7 @@ async function goHome(browser) {
   await h.sleep(500);
 }
 
-/**
- * Switch the skin through the real Preferences UI rather than by writing the
- * preference directly — the point of running twice is to exercise the code path
- * a user actually takes to get there.
- */
+/** Switch skin through the real Preferences UI, the path a user takes. */
 async function setSkin(browser, skin, tag) {
   console.log(`[invite-links] ${tag}: switching to ${skin} skin`);
   await goHome(browser);
@@ -138,11 +100,7 @@ async function createGroup(browser, name, tag) {
   await h.sleep(3000);
 }
 
-/**
- * Mint a link on A and return its URL, asserting the clipboard really received
- * it. The token is unrecoverable after this screen, so a copy button that
- * silently no-ops would lose it for good.
- */
+/** Mint a link on A and return its URL, asserting the clipboard got it (the token is shown once). */
 async function createAndCopyInviteLink(browser, groupName, tag) {
   console.log(`[invite-links] ${tag}: creating invite link`);
   await goHome(browser);
@@ -167,7 +125,6 @@ async function createAndCopyInviteLink(browser, groupName, tag) {
   await h.clickTestId(browser, "copy-invite-link");
   await h.sleep(800);
 
-  // The clipboard is the delivery mechanism — assert it, don't assume it.
   const clip = await browser.execute(async () => {
     try {
       return await navigator.clipboard.readText();

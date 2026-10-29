@@ -1,11 +1,4 @@
-/*
- * `vaultSaveFailure` (#1497). A Vault save that failed used to say nothing on
- * desktop (the upload rejection was unhandled and the composer had already
- * cleared) and only "Couldn't save" on mobile. The reason now comes from the
- * core's own error text — a Tauri rejection is a plain string.
- *
- *   node --test frontend/tests/
- */
+/* `vaultSaveFailure` (#1497): the reason comes from the core's error string. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

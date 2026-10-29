@@ -1,85 +1,42 @@
 //! Marking files that leave the app for the user's own filesystem.
 //!
-//! An attachment is a file a stranger sent. When "save as…" wrote it with a
-//! plain `writeFile`, it landed on the disk indistinguishable from something
-//! the user made themselves — no quarantine attribute on macOS, no
-//! mark-of-the-web on Windows. Both operating systems have a whole layer of
-//! defence keyed on exactly that marker (Gatekeeper's "downloaded from the
-//! internet" prompt and its notarization check; SmartScreen, Office's Protected
-//! View, and the script-host warnings), and every one of them was silently
-//! skipped for anything saved out of Pollis. A `.dmg`, a `.docx` with macros,
-//! an `.hta` — all of them opened as trusted local files.
+//! An attachment is a file a stranger sent; without a provenance marker Gatekeeper/SmartScreen never check it.
 //!
-//! The marker is not something the renderer can be trusted to add afterwards,
-//! and it is not something to remember at each save site. So the write and the
-//! marking are the same function: [`write_downloaded_file`]. There is no way to
-//! use this module to write a downloaded file WITHOUT marking it, which is the
-//! only property that survives the next person adding a save path.
+//! Writing and marking are one function, [`write_downloaded_file`], so no save path can skip the marker.
 //!
 //! ## Per platform
 //!
-//! * **macOS** — `setxattr(2)` of `com.apple.quarantine`. The value is the
-//!   four-field `flags;hex-timestamp;agent;uuid` string LaunchServices parses;
-//!   the flag bits say "web download, not yet approved by the user", which is
-//!   what makes Gatekeeper evaluate the file on first open. `libc` rather than
-//!   the `xattr` crate: it is one call, `libc` is already a dependency on every
-//!   unix target here, and this avoids adding a crate to the supply chain of a
-//!   security-critical binary for a single FFI signature.
-//! * **Windows** — the `Zone.Identifier` alternate data stream, written as a
-//!   plain file at `<path>:Zone.Identifier`. `ZoneId=3` is URLZONE_INTERNET.
-//!   This is the same thing browsers write, and needs no API: NTFS exposes an
-//!   ADS through the ordinary file path syntax.
-//! * **Linux** — nothing to do. There is no OS-level provenance marker with any
-//!   enforcement behind it, so [`Marking::Unsupported`] is the honest answer
-//!   rather than a silent success.
+//! * **macOS** — `setxattr(2)` of `com.apple.quarantine` (via `libc`, no extra crate).
+//! * **Windows** — the `Zone.Identifier` ADS at `<path>:Zone.Identifier`, `ZoneId=3` (internet).
+//! * **Linux** — no marker exists; [`Marking::Unsupported`].
 
 use std::path::Path;
 
 /// What actually happened to the file's provenance marker.
-///
-/// Returned rather than swallowed so a caller (and a test) can tell "the
-/// platform has no marker" apart from "the marker failed", which are very
-/// different facts and used to be indistinguishable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Marking {
-    /// The marker was written.
     Marked,
-    /// This platform has no provenance marker.
     Unsupported,
-    /// The platform has one and it could not be written. The file is still on
-    /// disk — refusing to save someone's attachment because an xattr failed
-    /// would be the wrong trade — but the caller is told.
+    /// The platform has one and it failed. The file is still saved.
     Failed(String),
 }
 
-/// Whether this platform has a provenance marker at all. A value, so tests can
-/// branch on it instead of restating the `cfg` soup.
+/// Whether this platform has a provenance marker at all.
 pub const fn platform_marks_downloads() -> bool {
     cfg!(any(target_os = "macos", target_os = "windows"))
 }
 
 /// The `com.apple.quarantine` value.
 ///
-/// `flags;hex-seconds;agent;uuid`. `0083` = the web-download type plus the
-/// "user has not approved this yet" bit, i.e. what a browser writes. The UUID
-/// field is left empty: it keys an optional LaunchServices database entry that
-/// only matters for the "where did this come from" detail in the prompt, and
-/// inventing one would be inventing provenance we do not have.
-///
-/// Split out as a pure function so its shape is tested on every platform, not
-/// only on the one that can apply it.
+/// `flags;hex-seconds;agent;uuid`; `0083` = web download, not yet approved. UUID left empty.
 pub fn quarantine_value(now_unix_secs: u64) -> String {
     format!("0083;{now_unix_secs:x};Pollis;")
 }
 
-/// The bytes of a Windows `Zone.Identifier` stream. CRLF, because the stream is
-/// an INI file and that is what every reader of it expects.
+/// A Windows `Zone.Identifier` stream; CRLF because it is an INI file.
 pub const ZONE_IDENTIFIER: &[u8] = b"[ZoneTransfer]\r\nZoneId=3\r\n";
 
 /// The ADS path for `path`'s `Zone.Identifier` stream.
-///
-/// Pure and platform-independent so the naming is tested everywhere; only the
-/// Windows arm of [`mark_downloaded`] ever writes to it.
 pub fn zone_identifier_path(path: &Path) -> std::path::PathBuf {
     let mut raw = path.as_os_str().to_owned();
     raw.push(":Zone.Identifier");
@@ -88,8 +45,7 @@ pub fn zone_identifier_path(path: &Path) -> std::path::PathBuf {
 
 /// Apply this platform's "came from the internet" marker to an existing file.
 ///
-/// Prefer [`write_downloaded_file`], which cannot be called without marking.
-/// This is public only for the case where the bytes are already on disk.
+/// Prefer [`write_downloaded_file`]; public only for bytes already on disk.
 pub fn mark_downloaded(path: &Path) -> Marking {
     #[cfg(target_os = "macos")]
     {
@@ -104,8 +60,7 @@ pub fn mark_downloaded(path: &Path) -> Marking {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let value = quarantine_value(now);
-        // setxattr(path, name, value, size, position, options); position is 0
-        // for anything but a resource fork, options 0 = create or replace.
+        // position 0 (no resource fork), options 0 = create or replace.
         let rc = unsafe {
             libc::setxattr(
                 c_path.as_ptr(),
@@ -127,15 +82,10 @@ pub fn mark_downloaded(path: &Path) -> Marking {
 
     #[cfg(target_os = "windows")]
     {
-        // Through `private_fs` like every other write in this module — not for
-        // the mode (an alternate data stream inherits the host file's ACL, and
-        // the helper is a no-op on Windows anyway) but so the source scan below
-        // can ban the raw `std::fs` creation calls outright, with no exception
-        // for a `cfg` branch the Linux CI never compiles.
+        // Via `private_fs` so the source scan below can ban raw `std::fs` creation calls outright.
         return match crate::private_fs::write(&zone_identifier_path(path), ZONE_IDENTIFIER) {
             Ok(()) => Marking::Marked,
-            // A non-NTFS destination (a FAT32 stick, a network share) has no
-            // streams. The save itself succeeded; say so honestly.
+            // Non-NTFS destinations have no streams; the save itself succeeded.
             Err(e) => Marking::Failed(format!("write Zone.Identifier: {e}")),
         };
     }
@@ -150,22 +100,9 @@ pub fn mark_downloaded(path: &Path) -> Marking {
 /// Write `bytes` to `path` as a downloaded file, marked with this platform's
 /// provenance attribute.
 ///
-/// The two steps are one call on purpose — see the module docs.
+/// Through [`crate::private_fs`], so the decrypted attachment is 0600, not umask 0644.
 ///
-/// The write goes through [`crate::private_fs`], so the file is 0600 rather than
-/// whatever the process umask happens to be. It used to be a bare `fs` write,
-/// which on a stock Linux or macOS account produces 0644: the
-/// DECRYPTED plaintext of an attachment, readable by every other local user, on
-/// the one path in the app whose entire job is taking bytes out of the encrypted
-/// store and putting them on the disk. The export path
-/// (`commands::export`) was guarded against exactly this by a source scan; "save
-/// as…" was written later and got neither the helper nor the guard.
-///
-/// Owner-only, not umask, even though the user picked the location: the security
-/// whitepaper's §7.2 claim is that everything this app creates is owner-only on
-/// unix, and a saved attachment is the most sensitive thing it creates. A user
-/// who wants the file shared can widen it themselves — the reverse, noticing
-/// that an attachment was world-readable all along, is not something anyone does.
+/// Owner-only even at a user-picked location (whitepaper §7.2); a user can widen it.
 pub fn write_downloaded_file(path: &Path, bytes: &[u8]) -> std::io::Result<Marking> {
     crate::private_fs::write(path, bytes)?;
     Ok(mark_downloaded(path))
@@ -209,11 +146,7 @@ mod tests {
         );
     }
 
-    /// The point of the module: writing goes through one function, and that
-    /// function always attempts the marker. Asserted on whatever platform the
-    /// suite runs on — `Unsupported` on Linux (where the CI for this repo
-    /// runs), `Marked` on macOS and Windows, and never a silent success that
-    /// hides a failed attempt.
+    /// Writing always attempts the marker, and reports it on every platform.
     #[test]
     fn writing_a_download_always_reports_what_it_did_about_the_marker() {
         let dir = tempfile::tempdir().unwrap();
@@ -236,14 +169,7 @@ mod tests {
         }
     }
 
-    /// A saved attachment is decrypted plaintext someone else sent, written
-    /// wherever the picker pointed — often a shared-machine directory. At the
-    /// process umask that is 0644 on a stock Linux or macOS account, i.e.
-    /// world-readable, which is the one counterexample to the whitepaper's
-    /// §7.2 "everything this app creates is owner-only on unix".
-    ///
-    /// `#[cfg(unix)]` because the mode accessor is unix-only; the assertion is
-    /// gated on the platform predicate rather than assuming it.
+    /// A saved attachment must be 0600, not umask 0644 (whitepaper §7.2).
     #[cfg(unix)]
     #[test]
     fn a_saved_attachment_is_owner_only_not_umask() {
@@ -262,8 +188,7 @@ mod tests {
         );
     }
 
-    /// Even a file that was already there, world-readable, is tightened — the
-    /// picker routinely overwrites an earlier save.
+    /// A pre-existing world-readable file is tightened too.
     #[cfg(unix)]
     #[test]
     fn overwriting_an_existing_loose_file_tightens_it() {
@@ -285,12 +210,7 @@ mod tests {
     }
 
     /// The guard the export path already had and the download path did not.
-    /// Scanning the source rather than the output is what keeps the NEXT save
-    /// site honest: a new `std::fs::write` here would be invisible to any test
-    /// that only checks the file this one call produces.
-    ///
-    /// `r2.rs` is in scope because it owns the only caller
-    /// (`save_media_to_path`) and the media cache writes next door to it.
+    /// Scanning source keeps the next save site honest.
     #[test]
     fn nothing_on_the_download_path_creates_a_file_outside_private_fs() {
         for (name, src) in [
@@ -314,9 +234,7 @@ mod tests {
         }
     }
 
-    /// macOS only: read the attribute back off the file. Does not run on Linux
-    /// (there is nothing to read), which is stated rather than skipped
-    /// silently.
+    /// macOS only: read the attribute back off the file.
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_quarantine_is_readable_back_off_the_file() {

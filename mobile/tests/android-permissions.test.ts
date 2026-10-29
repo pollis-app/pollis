@@ -1,21 +1,4 @@
-/*
- * The Android build asks only for what the app uses, and ships shrunk.
- *
- * Play reported 36 permissions on 1.0.11. Most arrived through libraries the
- * app does not use: the LiveKit/WebRTC packages (installed for voice, which is
- * deliberately not wired on mobile — #343) bring SYSTEM_ALERT_WINDOW,
- * FOREGROUND_SERVICE, Bluetooth and audio-settings permissions;
- * expo-secure-store brings the biometric ones (the app never requests
- * biometric auth); and a launcher-badge library brings sixteen vendor badge
- * permissions (the app never sets a badge count). FOREGROUND_SERVICE without a
- * declared service type and SYSTEM_ALERT_WINDOW are the kind Play review flags.
- *
- * Pinned: every one of those is in `android.blockedPermissions`, none of the
- * permissions the app does need is, and R8 + resource shrinking stay on for
- * release builds (Play: "DEX code optimization: Low", 65.5 MB of DEX).
- *
- *   cd mobile && pnpm test
- */
+/* The Android build blocks the permissions libraries add but the app never uses, and ships R8-shrunk. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -43,8 +26,7 @@ const MUST_BLOCK = [
   "me.everything.badger.permission.BADGE_COUNT_WRITE",
 ];
 
-// What the app actually uses: network, QR pairing, push, and saving media to
-// the library on Android 7–9 (WRITE_EXTERNAL_STORAGE before scoped storage).
+// Network, QR pairing, push, and saving media on Android 7–9.
 const MUST_KEEP = [
   "android.permission.INTERNET",
   "android.permission.ACCESS_NETWORK_STATE",

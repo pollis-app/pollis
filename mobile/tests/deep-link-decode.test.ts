@@ -2,11 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-// expo-router parses every incoming pollis:// link's query through
-// query-string -> decode-uri-component@0.2.2, whose fallback decoder is
-// super-linear on malformed `%XX` runs (GHSA-vcc3-ghjq-m6fr): ~2.4KB froze the
-// JS thread for ~3s. patches/decode-uri-component@0.2.2.patch backports
-// 0.5.0's linear decoder. These tests fail if the patch stops applying.
+// patches/decode-uri-component@0.2.2.patch backports a linear decoder (GHSA-vcc3-ghjq-m6fr).
 const require = createRequire(import.meta.url);
 const queryString = require("query-string") as { parse: (q: string) => Record<string, unknown> };
 const decode = require(

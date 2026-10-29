@@ -1,7 +1,4 @@
-// Opens the full-screen media viewer (#1248) on an attachment. Always a push
-// on the ROOT stack — on iPad too, where the conversation sits in the
-// two-pane's detail pane: the viewer covers the whole window rather than
-// opening inside the pane (`useNav` would push it there).
+// Opens the media viewer (#1248), always on the ROOT stack, so on iPad it covers the window.
 
 import { useCallback } from "react";
 import { useRouter } from "expo-router";
@@ -35,12 +32,7 @@ export function useOpenMediaViewer(
   );
 }
 
-/**
- * Opens the same viewer on the composer's pending attachments (#1585), to
- * look at a picked image or video before sending it. The strip's files are
- * handed over in memory (`setDraftForViewer`); the page walks them in strip
- * order and draws each from its local file.
- */
+/** The viewer on the composer's pending attachments (#1585), handed over in memory. */
 export function useOpenDraftMediaViewer() {
   const router = useRouter();
   return useCallback(

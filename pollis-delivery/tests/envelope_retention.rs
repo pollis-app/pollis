@@ -1,48 +1,4 @@
-//! Envelope-GC retention. Drives the real `pollis_delivery` write handlers
-//! against local libsql DBs, exactly as the DS runs them in production.
-//!
-//! **Part E (I3 — no TTL)** is the headline invariant: envelope retention is
-//! bounded by the SLOWEST current member device and by nothing else. An envelope
-//! a member device has not collected is retained however old it is. The 30-day
-//! TTL that used to be OR'd into the deletion predicate deleted such envelopes on
-//! its own — failure mode F3, silent permanent loss for any member offline longer
-//! than a month.
-//!
-//! Parts A/B/D are the complementary #685 property: a revoked device can never
-//! rejoin the MLS tree (I5), so it must not count toward the roster the watermark
-//! gate is measured against — otherwise it holds the floor down forever.
-//!
-//!   * **Part A** — `apply_envelope_gc` prunes an envelope every LIVE device has
-//!     read past, even when a revoked device's watermark is stale (pins
-//!     `MIN(cw)` down) or entirely absent (breaks the `COUNT(ud) = COUNT(cw)`
-//!     "every device reported" check that otherwise disables pruning).
-//!   * **Part B** — the watermark-seeding writes (DM create, DM member add, group
-//!     member add) never seed a row for a revoked device, so a device revoked
-//!     before it ever synced cannot re-introduce the wedge on the next join.
-//!   * **Part D** — `apply_revoke_device` DELETEs the revoked device's watermark
-//!     rows outright, so the dead cursor stops existing rather than merely being
-//!     filtered out by every future reader — and does so scoped to that one
-//!     device of that one user.
-//!   * **Part E** — the no-TTL invariant and the conservative edges (empty
-//!     roster, never-reported device), plus the positive leg proving GC is
-//!     bounded rather than disabled.
-//!   * **Part F (#692)** — the tombstone `sent_at` floor must OUTLIVE this GC.
-//!     An admin delete only ever reaches a recipient whose watermark sorts BELOW
-//!     the tombstone (ingest selects `sent_at > last_fetched_at` and the cursor
-//!     never rewinds), so the DS stamps the tombstone above the conversation's
-//!     floor. That floor used to be `MAX(sent_at)` over envelopes STILL PRESENT
-//!     — which is exactly what the pruning tested above empties. Part F runs the
-//!     real GC first, then the real delete, and proves the tombstone still clears
-//!     every surviving cursor.
-//!   * **Part G (#689)** — the GC *trigger* is the DS-internal sweep
-//!     `sweep_envelope_gc`, not a member's ingest path. One sweep collects a
-//!     conversation every member device has caught up on — with no ingest and no
-//!     per-conversation endpoint call — and spares one with an uncollected
-//!     recipient.
-//!
-//! The mirror-image failures are covered as unit tests in
-//! `pollis_delivery::messages` (the raw `CLEANUP_*` SQL and the floor query) and
-//! end-to-end in `src-tauri/tests/flows/adversarial.rs`.
+//! Envelope-GC retention, driven through the real `pollis_delivery` handlers.
 
 use pollis_delivery::account::{apply_revoke_device, RevokeDeviceBody};
 use pollis_delivery::db::Db;
@@ -57,11 +13,7 @@ use pollis_delivery::writes::WriteOutcome;
 mod common;
 
 
-/// The device-liveness staleness window these tests drive GC with (#720). Wide
-/// enough that legacy fixtures (which seed `reported_at = NULL`, treated as live)
-/// are never excluded; the #720 tests set `reported_at` and probe the boundary.
-/// The DS's own default (12 months, #1486), so the suite runs the window an
-/// unconfigured deployment gets.
+/// The DS's default staleness window (#1486); wide enough that NULL `reported_at` fixtures stay live.
 const STALE: &str = pollis_delivery::messages::DEFAULT_WATERMARK_STALE_MODIFIER;
 
 async fn fresh() -> common::TempDb {
@@ -82,9 +34,7 @@ async fn add_device(db: &Db, user: &str, device: &str, revoked: bool) {
         .unwrap();
 }
 
-/// Seed a watermark whose cursor is the delivery sequence `seq` (#1087).
-/// `last_fetched_at` is written because the column is NOT NULL, but nothing
-/// asserts on it — that is the change.
+/// `last_fetched_at` is required by the schema but unasserted (#1087).
 async fn seed_watermark(db: &Db, conv: &str, user: &str, device: &str, seq: i64) {
     db.conn().await
         .unwrap()
@@ -98,10 +48,6 @@ async fn seed_watermark(db: &Db, conv: &str, user: &str, device: &str, seq: i64)
         .unwrap();
 }
 
-/// Seed a watermark with an explicit `reported_at` (the #720 liveness signal),
-/// independent of the delivery cursor. The two are of different KINDS on
-/// purpose: `seq` is how far the device has read, `reported` is when the DS last
-/// heard from it.
 async fn seed_watermark_reported(
     db: &Db,
     conv: &str,
@@ -128,7 +74,6 @@ async fn seed_watermark_reported(
         .unwrap();
 }
 
-/// Insert one envelope at delivery sequence `seq`.
 async fn add_envelope(db: &Db, id: &str, conv: &str, seq: i64) {
     let conn = db.conn().await.unwrap();
     conn.execute(
@@ -139,10 +84,7 @@ async fn add_envelope(db: &Db, id: &str, conv: &str, seq: i64) {
     )
     .await
     .unwrap();
-    // Keep the durable counter consistent with the row, exactly as
-    // `insert_envelope_with_seq` does — a fixture that inserts an envelope
-    // without advancing `conversation_seq` is not simulating the DS, and the
-    // next real write would reuse this sequence.
+    // Advance `conversation_seq` as `insert_envelope_with_seq` does, or the next write reuses `seq`.
     conn.execute(
         "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
          ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
@@ -164,7 +106,6 @@ async fn envelope_count(db: &Db, conv: &str) -> i64 {
     rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
 }
 
-/// The device ids that got a seeded watermark for `conv`, ascending.
 async fn watermark_devices(db: &Db, conv: &str) -> Vec<String> {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -181,10 +122,6 @@ async fn watermark_devices(db: &Db, conv: &str) -> Vec<String> {
     out
 }
 
-// ── Part A — apply_envelope_gc through the public handler ─────────────────────
-
-/// Channel GC, the "no watermark row" mode: a revoked device with no `cw` row
-/// must not disable pruning via the `COUNT(ud) != COUNT(cw)` gate.
 #[tokio::test]
 async fn channel_gc_ignores_revoked_device_with_no_watermark() {
     let db = fresh().await;
@@ -198,7 +135,6 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
         .unwrap();
     add_device(&db, "alice", "a-live", false).await;
     add_device(&db, "alice", "a-old", true).await;
-    // Only the live device reported; the revoked device has no watermark row.
     seed_watermark(&db, "c1", "alice", "a-live", 10).await;
     add_envelope(&db, "e1", "c1", 7).await;
 
@@ -218,8 +154,6 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
     );
 }
 
-/// DM GC, the "stale watermark row" mode: a revoked device's old cursor must not
-/// pin `MIN(cw)` down and keep an envelope the live device has read past.
 #[tokio::test]
 async fn dm_gc_ignores_stale_revoked_watermark() {
     let db = fresh().await;
@@ -250,9 +184,6 @@ async fn dm_gc_ignores_stale_revoked_watermark() {
     );
 }
 
-// ── Part B — watermark seeding never covers a revoked device ──────────────────
-
-/// DM create seeds a watermark for every member device EXCEPT revoked ones.
 #[tokio::test]
 async fn create_dm_skips_revoked_member_devices() {
     let db = fresh().await;
@@ -276,7 +207,6 @@ async fn create_dm_skips_revoked_member_devices() {
     );
 }
 
-/// DM member-add seeds a watermark for the new member's live devices only.
 #[tokio::test]
 async fn add_dm_member_skips_revoked_devices() {
     let db = fresh().await;
@@ -305,8 +235,6 @@ async fn add_dm_member_skips_revoked_devices() {
     );
 }
 
-/// Group member-add (via join-request approval) seeds per-channel watermarks for
-/// the new member's live devices only.
 #[tokio::test]
 async fn approve_join_request_skips_revoked_devices() {
     let db = fresh().await;
@@ -339,19 +267,7 @@ async fn approve_join_request_skips_revoked_devices() {
     );
 }
 
-// ── Part D — revocation removes the dead cursor at the chokepoint ─────────────
-
-/// `apply_revoke_device` must DELETE the revoked device's `conversation_watermark`
-/// rows, not merely leave them for the GC reads to filter out.
-///
-/// The read-time filters (Parts A/B) make the floor correct, but a cursor that can
-/// never advance is itself the invalid state — every future reader of
-/// `conversation_watermark` would have to remember to exclude it. Removing it in
-/// the revoke transaction means it cannot be represented at all.
-///
-/// The live sibling device's watermark is the control: revocation must be surgical
-/// (`WHERE user_id = actor AND device_id = ?`), so a pass cannot be earned by
-/// wiping the whole table.
+/// The sibling's surviving row proves revocation is scoped to the one device.
 #[tokio::test]
 async fn revoke_device_deletes_that_devices_watermarks_only() {
     let db = fresh().await;
@@ -359,8 +275,6 @@ async fn revoke_device_deletes_that_devices_watermarks_only() {
     add_device(&db, "alice", "a-doomed", false).await;
     add_device(&db, "bob", "b-live", false).await;
 
-    // The doomed device holds a cursor in two conversations; the live sibling and
-    // a different user hold cursors that must survive untouched.
     seed_watermark(&db, "c1", "alice", "a-doomed", 8).await;
     seed_watermark(&db, "d1", "alice", "a-doomed", 8).await;
     seed_watermark(&db, "c1", "alice", "a-live", 10).await;
@@ -389,16 +303,13 @@ async fn revoke_device_deletes_that_devices_watermarks_only() {
     );
 }
 
-/// Revocation is self-scoped: it must never delete another user's watermark rows,
-/// even when the body names that user's device.
 #[tokio::test]
 async fn revoke_device_cannot_delete_another_users_watermarks() {
     let db = fresh().await;
     add_device(&db, "bob", "b-live", false).await;
     seed_watermark(&db, "c1", "bob", "b-live", 10).await;
 
-    // Alice is the authenticated actor; the DELETE is bound `user_id = actor`, so
-    // naming bob's device id must be inert rather than destructive.
+    // The DELETE is bound to `user_id = actor`, so naming bob's device is inert.
     let body = RevokeDeviceBody {
         device_id: "b-live".into(),
         user_id: None,
@@ -415,9 +326,6 @@ async fn revoke_device_cannot_delete_another_users_watermarks() {
     );
 }
 
-// ── Part E — I3: retention is bounded by the slowest member device, not a TTL ──
-
-/// Seed a channel `c1` in group `g1` with the given members.
 async fn channel_with_members(db: &Db, members: &[&str]) {
     let conn = db.conn().await.unwrap();
     conn.execute_batch(
@@ -446,24 +354,13 @@ async fn gc_channel(db: &Db) {
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
-/// **The regression test for failure mode F3.**
-///
-/// Bob's device has been offline for 500 days; the envelope is 400 days old —
-/// more than 13× the deleted 30-day TTL. Under the old predicate the TTL arm
-/// deleted this row on its own, without consulting a single watermark, and bob
-/// permanently lost a message he was owed. Retention must be bounded by bob's
-/// cursor instead, so the envelope survives.
-///
-/// The age is an explicit `datetime('now','-400 days')` offset rather than a real
-/// elapsed wall-clock interval, so "well over 30 days" is a property of the
-/// fixture and not of when the suite happens to run.
+/// F3 regression: an envelope older than the removed 30-day TTL survives while bob's cursor is behind it.
 #[tokio::test]
 async fn ancient_envelope_survives_while_a_member_device_has_not_collected_it() {
     let db = fresh().await;
     channel_with_members(&db, &["alice", "bob"]).await;
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b1", false).await;
-    // Alice is caught up; bob's cursor sits BELOW the envelope.
     seed_watermark(&db, "c1", "alice", "a1", 10).await;
     seed_watermark(&db, "c1", "bob", "b1", 1).await;
     add_envelope(&db, "ancient", "c1", 2).await;
@@ -479,9 +376,7 @@ async fn ancient_envelope_survives_while_a_member_device_has_not_collected_it() 
     );
 }
 
-/// The other never-collected shape: the absent member device has never reported a
-/// watermark at all. No watermark is no evidence of delivery, so the envelope is
-/// retained however old it is.
+/// No watermark is no evidence of delivery.
 #[tokio::test]
 async fn ancient_envelope_survives_for_a_device_that_never_reported() {
     let db = fresh().await;
@@ -502,10 +397,7 @@ async fn ancient_envelope_survives_for_a_device_that_never_reported() {
     );
 }
 
-/// The positive leg: GC is bounded, not disabled. Once EVERY current member
-/// device has collected past an envelope it is deleted — and the envelope still
-/// above the floor is kept. Both envelopes are far younger than the old TTL, so
-/// this cannot be passing via the deleted arm.
+/// GC is bounded, not disabled; both envelopes are younger than the old TTL.
 #[tokio::test]
 async fn envelope_is_deleted_once_every_member_device_collected_past_it() {
     let db = fresh().await;
@@ -515,7 +407,6 @@ async fn envelope_is_deleted_once_every_member_device_collected_past_it() {
     add_device(&db, "bob", "b1", false).await;
     add_envelope(&db, "collected", "c1", 8).await;
     add_envelope(&db, "pending", "c1", 11).await;
-    // Every device sits strictly above `collected` and strictly below `pending`.
     seed_watermark(&db, "c1", "alice", "a1", 9).await;
     seed_watermark(&db, "c1", "alice", "a2", 9).await;
     seed_watermark(&db, "c1", "bob", "b1", 9).await;
@@ -539,10 +430,7 @@ async fn envelope_is_deleted_once_every_member_device_collected_past_it() {
     );
 }
 
-/// A revoked device must not pin retention forever. Bob's only device is revoked
-/// and its cursor is 500 days stale; alice — the sole remaining LIVE member
-/// device — has collected past the envelope, so it goes. Without the
-/// `revoked_at IS NULL` filter the dead cursor would hold this envelope for good.
+/// Without the `revoked_at IS NULL` filter the dead cursor would pin this forever.
 #[tokio::test]
 async fn a_revoked_device_does_not_pin_retention_forever() {
     let db = fresh().await;
@@ -563,16 +451,11 @@ async fn a_revoked_device_does_not_pin_retention_forever() {
     );
 }
 
-/// The empty-member-set edge, pinned conservative. With no current member devices
-/// the gate's aggregate degenerates to `COUNT 0 = COUNT 0` with `MIN(...) = NULL`
-/// over zero rows, so the CASE yields NULL and `sent_at < NULL` is NULL — nothing
-/// is deleted. The alternative reading of an empty roster ("everyone has
-/// collected, drop it all") is precisely the unbounded delete this ticket removes.
+/// An empty roster yields `sent_at < NULL`, so nothing is deleted.
 #[tokio::test]
 async fn an_empty_member_device_set_deletes_nothing() {
     let db = fresh().await;
     channel_with_members(&db, &["alice"]).await;
-    // A member row exists, but the member has no device at all.
     add_envelope(&db, "ancient", "c1", 2).await;
     add_envelope(&db, "fresh", "c1", 11).await;
 
@@ -585,9 +468,6 @@ async fn an_empty_member_device_set_deletes_nothing() {
     );
 }
 
-/// The same, taken one step further: excluding revoked devices must never
-/// *manufacture* an empty roster that then deletes. When every device is revoked
-/// the roster is empty, and an empty roster deletes nothing.
 #[tokio::test]
 async fn an_all_revoked_roster_deletes_nothing() {
     let db = fresh().await;
@@ -606,23 +486,11 @@ async fn an_all_revoked_roster_deletes_nothing() {
     );
 }
 
-// ── Part F (#692) — the tombstone floor outlives envelope GC ──────────────────
-//
-// Part F uses RFC3339 timestamps rather than the `datetime('now', ...)` shape the
-// parts above use. That is load-bearing, not cosmetic: `sent_at_after` parses the
-// floor with `DateTime::parse_from_rfc3339` and falls back to plain `now` when
-// that fails, so a SQLite-shaped floor would silently exercise the fallback path
-// instead of the guard. RFC3339 is also what production actually stores — clients
-// write `chrono::Utc::now().to_rfc3339()` into `sent_at`, and ingest copies a
-// consumed `sent_at` straight into `last_fetched_at`.
-
-/// An RFC3339 stamp `minutes` away from the DS's now, exactly as a client writes
-/// it. Negative is the past; positive models a client clock running AHEAD.
+/// RFC3339 as clients write it: `sent_at_after` falls back to `now` on any other shape.
 fn rfc3339_from_now(minutes: i64) -> String {
     (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
 }
 
-/// The delivery sequence of the single `type='delete'` tombstone in `conv`.
 async fn tombstone_seq(db: &Db, conv: &str) -> i64 {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -649,8 +517,6 @@ async fn tombstone_seq(db: &Db, conv: &str) -> i64 {
     out
 }
 
-/// Every surviving cursor in `conv` — the positions the tombstone has to clear
-/// to be fetched at all.
 async fn watermark_seqs(db: &Db, conv: &str) -> Vec<i64> {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -668,24 +534,7 @@ async fn watermark_seqs(db: &Db, conv: &str) -> Vec<i64> {
     out
 }
 
-/// **The #692 shape, now unrepresentable (#1087).**
-///
-/// This replaces two tests that pinned the `tombstone_floor` / `sent_at_after`
-/// arithmetic. The bug they guarded: the whole conversation has been GC'd, so the
-/// floor had no envelope left to read; it fell back to wall-clock `now`; and the
-/// surviving watermark rows had been written from client clocks running an HOUR
-/// AHEAD. Ingest's `sent_at > last_fetched_at` then never selected the tombstone,
-/// the cursor never rewound to pick it up, and the deleted message stayed
-/// readable on those devices forever.
-///
-/// Every step of that depended on comparing two clocks' strings. The cursor is
-/// now a DS-assigned sequence, so the tombstone takes `MAX(seq)+1` and is above
-/// every surviving cursor by construction — there is no floor to compute, no
-/// fallback to get wrong, and no clock to disagree with.
-///
-/// The fixture keeps the adversarial clocks precisely because they no longer
-/// matter: both devices report cursors stamped an hour into the DS's future, and
-/// the tombstone still outranks them.
+/// #692/#1087: the tombstone takes `MAX(seq)+1`, so client clocks running ahead are irrelevant.
 #[tokio::test]
 async fn a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversation() {
     let db = fresh().await;
@@ -698,9 +547,7 @@ async fn a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversatio
     add_device(&db, "alice", "a1", false).await;
     add_device(&db, "bob", "b1", false).await;
 
-    // Bob's message at sequence 1; both devices have read past it. Their
-    // `last_fetched_at` is an hour in the DS's FUTURE — the #692 clock shape,
-    // kept to prove it is now irrelevant.
+    // `last_fetched_at` an hour in the future: the #692 clock shape.
     add_envelope(&db, "m1", "c1", 1).await;
     for (user, device) in [("alice", "a1"), ("bob", "b1")] {
         db.conn().await
@@ -715,8 +562,6 @@ async fn a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversatio
             .unwrap();
     }
 
-    // The REAL cleanup predicate empties the conversation, which is what used to
-    // destroy the floor's only input.
     gc_channel(&db).await;
     assert_eq!(
         envelope_count(&db, "c1").await,
@@ -752,24 +597,13 @@ async fn a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversatio
     }
 }
 
-// ── Part G (#689) — the server-side sweep is the GC trigger ───────────────────
-//
-// GC used to fire only from whichever member device happened to ingest. This
-// pins the new trigger: the DS-internal sweep collects a conversation every
-// member device has caught up on WITHOUT any member calling the per-conversation
-// endpoint, and spares one with an uncollected recipient. It fails on the old
-// trigger (nothing drives GC when no member ingests) and passes on the sweep.
-
-/// The sweep collects quiet-but-collected conversations and spares uncollected
-/// ones — driving neither ingest nor the `/v1/envelopes/gc` endpoint. Covers a
-/// channel AND a DM so it also proves the sweep classifies both predicates.
+/// The sweep alone (no ingest, no endpoint) collects caught-up channels and DMs (#689).
 #[tokio::test]
 async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
     let db = fresh().await;
     db.conn().await
         .unwrap()
         .execute_batch(
-            // A channel every member device has caught up on.
             "INSERT INTO group_member (group_id, user_id) VALUES ('gA', 'alice');\
              INSERT INTO conversation (id, kind) VALUES ('cA', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('cA', 'gA', 'chan');\
              INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
@@ -780,21 +614,17 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
         .await
         .unwrap();
 
-    // cA — channel, its one device caught up past the envelope.
     add_device(&db, "alice", "aA", false).await;
     seed_watermark(&db, "cA", "alice", "aA", 10).await;
     add_envelope(&db, "eA", "cA", 7).await;
 
-    // dB — DM, its one device caught up past the envelope.
     add_device(&db, "bob", "bB", false).await;
     seed_watermark(&db, "dB", "bob", "bB", 10).await;
     add_envelope(&db, "eB", "dB", 7).await;
 
-    // cC — channel with an uncollected recipient: carol's device never reported.
     add_device(&db, "carol", "cC-dev", false).await;
     add_envelope(&db, "eC", "cC", 7).await;
 
-    // No member ingests, no endpoint call — the sweep is the sole trigger.
     let visited = sweep_envelope_gc(&db.conn().await.unwrap(), STALE).await.unwrap().visited;
 
     assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
@@ -815,22 +645,9 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
     );
 }
 
-// ─── Part H (#720 — device-liveness bound) ───────────────────────────────────
-//
-// The envelope floor is now bounded by member watermarks AND by device liveness:
-// a member device that has not REPORTED a watermark within the staleness window
-// stops pinning retention (`apply_advance_watermark` stamps `reported_at`; the
-// `CLEANUP_*` `?2` arm excludes the stale). These drive the REAL handlers, and
-// each asserts a COLLECTION the pre-#720 watermark-only predicate never performs,
-// so each fails against the pre-change code.
-
-/// **Reversibility.** A dormant device that comes back and reports a watermark —
-/// even one whose cursor is still behind the envelope — is live again IMMEDIATELY
-/// and re-pins. This drives the real `apply_advance_watermark`, proving it stamps
-/// `reported_at` and flips the device back into the roster.
+/// A dormant device that reports again is live immediately and re-pins.
 #[tokio::test]
 async fn a_returning_device_reports_and_pins_again() {
-    // Control: bob dormant, does NOT report → the envelope is collected.
     {
         let db = fresh().await;
         db.conn().await.unwrap().execute_batch(
@@ -848,8 +665,6 @@ async fn a_returning_device_reports_and_pins_again() {
         apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
         assert_eq!(envelope_count(&db, "c1").await, 0, "dormant → collected (control)");
     }
-    // Comeback: bob reports a watermark BEFORE GC. Its cursor stays behind the
-    // envelope, but `reported_at` is now fresh → bob is live → it re-pins.
     {
         let db = fresh().await;
         db.conn().await.unwrap().execute_batch(
@@ -863,11 +678,7 @@ async fn a_returning_device_reports_and_pins_again() {
         seed_watermark_reported(&db, "c1", "bob", "b1", 1, "-400 days").await;
         add_envelope(&db, "e1", "c1", 3).await;
 
-        // Bob comes back and reports — a cursor still BEHIND the envelope (-200d).
-        // The monotone guard keeps the max cursor, but `reported_at` jumps to now.
-        // RFC 3339, as a client writes it: the DS admits no other shape into
-        // `last_fetched_at` (`check_cursor_stamp`), so a SQLite-shaped stamp
-        // here would be refused and the assertion below would pass vacuously.
+        // RFC 3339: a SQLite-shaped stamp would be refused, making the assertion vacuous.
         let wm = WatermarkBody {
             conversation_id: "c1".into(),
             user_id: Some("bob".into()),
@@ -889,16 +700,7 @@ async fn a_returning_device_reports_and_pins_again() {
     }
 }
 
-/// The sweep and the per-conversation endpoint apply the SAME liveness predicate
-/// (both flow through `cleanup_conversation_envelopes`), so they agree on the
-/// same dormant-device fixture: BOTH collect the envelope. Its endpoint half is
-/// the "a device that reported long ago and then went silent stops pinning once
-/// every LIVE device has read past the envelope" proof through the real handler
-/// (formerly also `dormant_device_stops_pinning_via_endpoint`, the identical
-/// fixture and call). Two GC paths with two
-/// different predicates is exactly the invalid state this repo forbids (#720
-/// checkbox 3). Pre-#720 both KEEP the envelope, so the collection assertion also
-/// fails against the pre-change code.
+/// The sweep and the endpoint share one liveness predicate, so both collect (#720).
 #[tokio::test]
 async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
     async fn seeded(conv: &str) -> common::TempDb {
@@ -916,13 +718,11 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
         db
     }
 
-    // Endpoint path.
     let via_endpoint = seeded("c1").await;
     let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
     apply_envelope_gc(&via_endpoint.conn().await.unwrap(), None, &body, STALE).await.unwrap();
     let endpoint_count = envelope_count(&via_endpoint, "c1").await;
 
-    // Sweep path — same fixture, no endpoint call, no ingest.
     let via_sweep = seeded("c1").await;
     sweep_envelope_gc(&via_sweep.conn().await.unwrap(), STALE).await.unwrap();
     let sweep_count = envelope_count(&via_sweep, "c1").await;
@@ -931,8 +731,7 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
     assert_eq!(endpoint_count, 0, "both must collect the dormant-pinned envelope (fails pre-#720)");
 }
 
-/// The sweep gathers the identity-free growth snapshot on its walk (#720 checkbox
-/// 1): counts and the worst offender's shape, reflecting POST-cleanup survivors.
+/// The growth snapshot reflects post-cleanup survivors (#720).
 #[tokio::test]
 async fn sweep_reports_identity_free_growth_metrics() {
     let db = fresh().await;
@@ -941,8 +740,6 @@ async fn sweep_reports_identity_free_growth_metrics() {
          INSERT INTO conversation (id, kind) VALUES ('big', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('big', 'g1', 'chan');\
          INSERT INTO conversation (id, kind) VALUES ('small', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('small', 'g1', 'chan');",
     ).await.unwrap();
-    // Alice never reported anywhere → COUNT(ud) != COUNT(cw) → nothing collected,
-    // so every envelope survives and the snapshot sees them all.
     add_device(&db, "alice", "a1", false).await;
     add_envelope(&db, "b1", "big", 4).await;
     add_envelope(&db, "b2", "big", 5).await;

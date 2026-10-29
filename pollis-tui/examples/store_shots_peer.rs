@@ -52,7 +52,6 @@ async fn main() -> Result<()> {
     pollis_tui::auth::set_pin_and_init(&state, &me.id, "0000").await?;
     println!("PEER_HANDLE={}", me.username);
 
-    // The phone invites us to its group, then opens a DM; take each as it lands.
     let started = Instant::now();
     let mut dm_id = None;
     let mut joined = false;
@@ -78,15 +77,13 @@ async fn main() -> Result<()> {
     }
     let dm_id = dm_id.unwrap();
 
-    // Join the DM's MLS group before sending into it.
     pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await?;
     for line in DM_LINES {
         send(&state, &me.id, &me.username, &dm_id, line).await?;
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    // The group's first text channel. The welcome can trail the accept, so
-    // retry the first read until the channel decrypts.
+    // The welcome can trail the accept, so retry until the channel decrypts.
     let channel_id = loop {
         let gs = groups::list_user_groups_with_channels(me.id.clone(), &state).await?;
         if let Some(ch) = gs.iter().flat_map(|g| g.channels.iter()).find(|c| c.channel_type == "text") {
@@ -113,7 +110,6 @@ async fn main() -> Result<()> {
     }
     println!("PEER_SENT");
 
-    // Wait for the phone's channel answer, react to it, close the scene.
     let started = Instant::now();
     loop {
         let page = pollis_tui::data::channel_messages(&state, &me.id, &channel_id, None).await?;

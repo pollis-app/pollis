@@ -1,13 +1,7 @@
 //! The M2b three-pane client state — the interactive shell on top of the
 //! already-gated read/sync layer (`pollis_tui::{data, sync}`).
 //!
-//! This module owns the pure, in-memory model of the Home screen: the flattened
-//! sidebar (groups → channels + DMs + requests), which pane has focus, the open
-//! conversation's message buffer, and the scroll/pagination bookkeeping. The
-//! async work (loading the tree, loading a page of messages) lives in `app.rs`;
-//! everything here is a **pure function of state** so the render stays an
-//! immediate-mode projection and the tricky bits — tree flattening, selection
-//! movement, scroll windowing, page merging — are unit-tested in isolation.
+//! The pure, in-memory Home screen model; async loading lives in `app.rs`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,7 +10,7 @@ use pollis_core::commands::messages::{ChannelMessage, MessageCursor, Reaction};
 use crate::data::ConversationTree;
 
 /// How close to the top of the loaded buffer the user must scroll before we
-/// prefetch the next older page — keeps history loading a beat ahead of the eye.
+/// prefetch the next older page.
 pub const PREFETCH_MARGIN: usize = 5;
 
 /// Which pane currently receives navigation keys.
@@ -28,11 +22,7 @@ pub enum Focus {
 }
 
 /// What a bottom-bar text prompt (a create/invite flow) is collecting. The
-/// active buffer lives on [`crate::app::App::input`] so rendering reads one
-/// field; this only records *which* action the collected text feeds and any
-/// context (the target group) the submit needs. Kept a small pure enum so its
-/// label + validation are unit-testable in isolation, like the rest of this
-/// module.
+/// active buffer lives on [`crate::app::App::input`]; this records the action and its context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptKind {
     /// New group; the buffer is the group name.
@@ -66,9 +56,7 @@ impl PromptKind {
     }
 }
 
-/// How the Home screen is currently consuming keystrokes: navigating the tree,
-/// composing a message for the open conversation, or filling a create/invite
-/// prompt. The text buffer for the latter two lives on [`crate::app::App`].
+/// How the Home screen consumes keystrokes; buffers live on [`crate::app::App`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum HomeMode {
     /// Navigation + command keys (the default).
@@ -78,9 +66,7 @@ pub enum HomeMode {
     Compose,
     /// Filling a create/invite prompt (bottom input bar).
     Prompt(PromptKind),
-    /// Confirming the deletion of one of the user's own messages, in the input
-    /// bar (`y` deletes, `n`/Esc keeps it) — the desktop "replace the input
-    /// bar" pattern, never a modal.
+    /// Confirming deletion of the user's own message in the input bar (never a modal).
     ConfirmDelete { message_id: String, preview: String },
 }
 
@@ -108,15 +94,12 @@ pub struct ThreadView {
     pub replies: Vec<ChannelMessage>,
 }
 
-/// Whether a collected buffer is worth submitting: non-empty after trimming.
-/// Shared by compose (empty send is a no-op) and every prompt (empty submit is
-/// rejected), so an all-whitespace value can never reach the write layer.
+/// Non-empty after trimming, so all-whitespace never reaches the write layer.
 pub fn is_blank(s: &str) -> bool {
     s.trim().is_empty()
 }
 
-/// The three kinds of thing the message pane can be showing, which decides
-/// whether we read via `data::channel_messages` or `data::dm_messages`.
+/// Which read path the message pane uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConvKind {
     Channel,
@@ -168,8 +151,7 @@ pub struct OpenConversation {
     pub kind: Option<ConvKind>,
     /// Loaded messages, oldest-first.
     pub messages: Vec<ChannelMessage>,
-    /// Cursor for the next *older* page; `None` once history is exhausted or
-    /// before the first load completes.
+    /// Cursor for the next older page; `None` once exhausted or before the first load.
     pub older_cursor: Option<MessageCursor>,
     /// True once a page came back short — the beginning of history is loaded.
     pub at_beginning: bool,
@@ -181,8 +163,7 @@ pub struct OpenConversation {
     pub reactions: HashMap<String, Vec<Reaction>>,
     /// Thread root id → reply count this device holds.
     pub thread_counts: HashMap<String, i64>,
-    /// The highlighted message, by id (ids survive a page merge; indices do
-    /// not). `None` = nothing selected, view follows the newest message.
+    /// The highlighted message by id (ids survive a page merge). `None` follows the newest.
     pub selected: Option<String>,
     /// `Some` while a thread is open in the pane.
     pub thread: Option<ThreadView>,
@@ -190,9 +171,7 @@ pub struct OpenConversation {
 
 impl OpenConversation {
     /// The messages the pane shows, in display order. The channel view hides
-    /// thread replies — other clients file them under their thread, and the
-    /// root shows a reply count instead. A thread view is the root followed by
-    /// its replies.
+    /// thread replies (the root shows a count); a thread view is root plus replies.
     pub fn displayed(&self) -> Vec<&ChannelMessage> {
         match &self.thread {
             Some(t) => self
@@ -218,10 +197,7 @@ impl OpenConversation {
         self.selected.as_deref().and_then(|id| self.find(id))
     }
 
-    /// Move the message selection by `dir` (+1 newer, -1 older) over what is
-    /// displayed. Up from nothing selects the newest; down past the newest
-    /// clears the selection (back to following new messages). Lost-message
-    /// placeholders are skipped — there is nothing to act on.
+    /// Move the message selection (+1 newer, -1 older), skipping lost-message placeholders.
     pub fn step_selection(&mut self, dir: i32) {
         let ids: Vec<String> = self
             .displayed()
@@ -277,10 +253,7 @@ impl HomeState {
         }
     }
 
-    /// Replace the tree (from `data::load_conversations`) and rebuild the
-    /// sidebar, preserving the selection and expansion where still valid. On the
-    /// very first load, groups start expanded so the user immediately sees their
-    /// channels.
+    /// Replace the tree and rebuild the sidebar, keeping selection; groups start expanded.
     pub fn set_tree(&mut self, tree: ConversationTree, user_id: &str) {
         if self.tree.is_none() {
             for group in &tree.groups {
@@ -291,8 +264,7 @@ impl HomeState {
         self.rebuild_rows(user_id);
     }
 
-    /// Recompute `rows` from the current tree + expansion, then clamp the
-    /// selection onto a still-selectable row.
+    /// Recompute `rows` and clamp the selection onto a selectable row.
     pub fn rebuild_rows(&mut self, user_id: &str) {
         self.rows = match &self.tree {
             Some(tree) => build_sidebar_rows(tree, &self.expanded, user_id),
@@ -311,9 +283,7 @@ impl HomeState {
         self.selected = step_selection(&self.rows, self.selected, dir);
     }
 
-    /// Highlight the sidebar row that opens conversation `conv_id`, returning
-    /// it. Used to land on a just-created group / channel / DM, which used to
-    /// leave the highlight wherever it was (#1337).
+    /// Highlight the row that opens `conv_id`, to land on a just-created one (#1337).
     pub fn select_conversation(&mut self, conv_id: &str) -> Option<ConvRef> {
         let (i, conv) = self.rows.iter().enumerate().find_map(|(i, r)| match &r.target {
             RowTarget::Open(c) if c.id == conv_id => Some((i, c.clone())),
@@ -323,8 +293,7 @@ impl HomeState {
         Some(conv)
     }
 
-    /// The id of the selected sidebar row iff it's a **pending DM request** —
-    /// the target of the "accept" key. `None` for any other row.
+    /// The selected row's id iff it is a pending DM request.
     pub fn selected_dm_request(&self) -> Option<String> {
         match &self.current_row()?.target {
             RowTarget::Open(conv) if conv.kind == ConvKind::DmRequest => Some(conv.id.clone()),
@@ -332,20 +301,14 @@ impl HomeState {
         }
     }
 
-    /// The (id, name) of the group that scopes a "new channel" / "invite"
-    /// action for the current selection: the nearest group heading at or above
-    /// the highlighted row. Returns `None` if the selection sits in the DM /
-    /// Requests sections (past a section header), where no group applies.
+    /// The group that scopes "new channel" / "invite" for the selection, if any.
     pub fn context_group(&self) -> Option<(String, String)> {
         let tree = self.tree.as_ref()?;
         context_group(&self.rows, tree, self.selected)
     }
 }
 
-/// The group heading governing `selected`: walk up from the selection, resolving
-/// the first [`RowTarget::ToggleGroup`] against `tree.groups`, but stop (→ `None`)
-/// at a section header, so a DM/request selection has no group context. Pure so
-/// the walk-up + boundary rules are unit-tested.
+/// The group heading above `selected`, stopping (`None`) at a section header.
 pub fn context_group(
     rows: &[SidebarRow],
     tree: &ConversationTree,
@@ -361,19 +324,14 @@ pub fn context_group(
                 let g = tree.groups.get(*i)?;
                 return Some((g.id.clone(), g.name.clone()));
             }
-            // Crossed into the DM / Requests sections — no group applies.
             RowTarget::Header => return None,
-            // A channel row under a group — keep walking up to its heading.
             RowTarget::Open(_) => {}
         }
     }
     None
 }
 
-/// Flatten a [`ConversationTree`] into the ordered list of sidebar rows given
-/// which groups are expanded. Order: each group heading (its channels nested
-/// when expanded), then a Direct-Messages section, then a Requests section.
-/// `user_id` is used to title DMs by the *other* member.
+/// Flatten the tree into sidebar rows: groups, then Direct Messages, then Requests.
 pub fn build_sidebar_rows(
     tree: &ConversationTree,
     expanded: &HashSet<String>,
@@ -447,8 +405,7 @@ pub fn build_sidebar_rows(
     rows
 }
 
-/// Title a DM by the member who isn't the current user (falling back to a
-/// generic label if the metadata is missing or it's a self-note).
+/// Title a DM by the member who is not the current user.
 fn dm_label(dm: &pollis_core::commands::dm::DmChannel, user_id: &str) -> String {
     let names: Vec<String> = dm
         .members
@@ -464,13 +421,12 @@ fn dm_label(dm: &pollis_core::commands::dm::DmChannel, user_id: &str) -> String 
 }
 
 /// Clamp `selected` to the nearest selectable row at or after it, else the last
-/// selectable row, else 0. Keeps a rebuilt sidebar from landing on a header.
+/// selectable row, else 0.
 pub fn clamp_selection(rows: &[SidebarRow], selected: usize) -> usize {
     if rows.is_empty() {
         return 0;
     }
     let start = selected.min(rows.len() - 1);
-    // Search forward from the clamped position, then backward.
     for (i, row) in rows.iter().enumerate().skip(start) {
         if row.selectable() {
             return i;
@@ -484,8 +440,7 @@ pub fn clamp_selection(rows: &[SidebarRow], selected: usize) -> usize {
     start
 }
 
-/// Move `from` by `dir` (+1/-1) to the next selectable row, staying put at the
-/// ends. Headers are transparently skipped.
+/// Move `from` by `dir` to the next selectable row, staying put at the ends.
 pub fn step_selection(rows: &[SidebarRow], from: usize, dir: i32) -> usize {
     if rows.is_empty() {
         return 0;
@@ -495,7 +450,6 @@ pub fn step_selection(rows: &[SidebarRow], from: usize, dir: i32) -> usize {
     loop {
         let next = i + dir;
         if next < 0 || next > last {
-            // Past an end — keep the last valid selectable position.
             return i.clamp(0, last) as usize;
         }
         i = next;
@@ -505,16 +459,12 @@ pub fn step_selection(rows: &[SidebarRow], from: usize, dir: i32) -> usize {
     }
 }
 
-/// The slice of a message buffer to render and how many blank lines to pad above
-/// it, for a bottom-anchored list. Returns `(start, end, top_pad)`: render
-/// `messages[start..end]` preceded by `top_pad` blank lines. `scroll` counts
-/// lines up from the bottom and is clamped so it can never scroll past the top.
+/// The bottom-anchored render window: `(start, end, top_pad)`, with `scroll` clamped.
 pub fn visible_window(total: usize, viewport: usize, scroll: usize) -> (usize, usize, usize) {
     if viewport == 0 {
         return (total, total, 0);
     }
     if total <= viewport {
-        // Everything fits — pin it to the bottom by padding the top.
         return (0, total, viewport - total);
     }
     let max_scroll = total - viewport;
@@ -524,22 +474,17 @@ pub fn visible_window(total: usize, viewport: usize, scroll: usize) -> (usize, u
     (start, end, 0)
 }
 
-/// Whether the user has scrolled close enough to the top of the loaded buffer
-/// that we should prefetch the next older page.
+/// Whether to prefetch the next older page.
 pub fn should_load_older(scroll: usize, loaded: usize, has_more: bool, loading: bool) -> bool {
     has_more && !loading && scroll + PREFETCH_MARGIN >= loaded
 }
 
-/// Merge a freshly-fetched page (core order: newest-first) into an existing
-/// oldest-first buffer, deduping by id (the incoming copy wins, so edits/
-/// deletes overwrite) and re-sorting by `(sent_at, id)`. Uniform across a
-/// newest-page refresh and an older-page fetch: both just contribute rows.
+/// Merge a newest-first page into the oldest-first buffer; the incoming copy wins.
 pub fn merge_messages(
     existing: Vec<ChannelMessage>,
     incoming: Vec<ChannelMessage>,
 ) -> Vec<ChannelMessage> {
     let mut all = existing;
-    // Drop any existing rows the incoming page supersedes, then append.
     let incoming_ids: HashSet<&str> = incoming.iter().map(|m| m.id.as_str()).collect();
     all.retain(|m| !incoming_ids.contains(m.id.as_str()));
     all.extend(incoming);
@@ -633,7 +578,6 @@ mod tests {
         let mut expanded = HashSet::new();
         expanded.insert("g1".to_string());
         let rows = build_sidebar_rows(&t, &expanded, "me");
-        // group + 2 channels + DM header + 1 dm + Requests header + 1 request
         assert_eq!(rows.len(), 7);
         assert_eq!(rows[0].target, RowTarget::ToggleGroup(0));
         assert!(rows[1].label.contains("welcome"));
@@ -647,7 +591,6 @@ mod tests {
         let t = tree();
         let expanded = HashSet::new();
         let rows = build_sidebar_rows(&t, &expanded, "me");
-        // group + DM header + 1 dm + Requests header + 1 request (no channels)
         assert_eq!(rows.len(), 5);
         assert!(rows[0].label.starts_with("▸"));
     }
@@ -656,7 +599,6 @@ mod tests {
     fn dm_label_prefers_the_other_member() {
         let d = dm("d", "bob", Some("bob"));
         assert_eq!(dm_label(&d, "me"), "bob");
-        // Missing username falls back to the id; self-only DM gets a generic name.
         let anon = dm("d", "xyz", None);
         assert_eq!(dm_label(&anon, "me"), "xyz");
     }
@@ -667,13 +609,9 @@ mod tests {
         let mut expanded = HashSet::new();
         expanded.insert("g1".to_string());
         let rows = build_sidebar_rows(&t, &expanded, "me");
-        // From the group (0), down lands on channel row 1, not a header.
         assert_eq!(step_selection(&rows, 0, 1), 1);
-        // Stepping down off the DM header (index 3) must skip to the dm (4).
         assert_eq!(step_selection(&rows, 2, 1), 4);
-        // At the top, up stays put.
         assert_eq!(step_selection(&rows, 0, -1), 0);
-        // At the last selectable row, down stays put.
         let last = rows.len() - 1;
         assert_eq!(step_selection(&rows, last, 1), last);
     }
@@ -696,35 +634,24 @@ mod tests {
                 }),
             },
         ];
-        // Asked for the header (0) → moves forward to the selectable row.
         assert_eq!(clamp_selection(&rows, 0), 1);
-        // Out-of-range → clamps into range and onto a selectable row.
         assert_eq!(clamp_selection(&rows, 99), 1);
-        // Empty list is a safe 0.
         assert_eq!(clamp_selection(&[], 3), 0);
     }
 
     #[test]
     fn visible_window_bottom_anchors_and_clamps_scroll() {
-        // Fits entirely → top-padded so newest sits at the bottom.
         assert_eq!(visible_window(3, 10, 0), (0, 3, 7));
-        // Overflows, pinned to bottom → last 10.
         assert_eq!(visible_window(100, 10, 0), (90, 100, 0));
-        // Scrolled up 5 → window shifts back by 5.
         assert_eq!(visible_window(100, 10, 5), (85, 95, 0));
-        // Scroll past the top is clamped to the first line.
         assert_eq!(visible_window(100, 10, 999), (0, 10, 0));
-        // Zero-height viewport is a no-op.
         assert_eq!(visible_window(5, 0, 0), (5, 5, 0));
     }
 
     #[test]
     fn should_load_older_fires_only_near_the_top_with_more_history() {
-        // Near the top (scroll+margin reaches the loaded count) with a cursor.
         assert!(should_load_older(46, 50, true, false));
-        // Comfortably away from the top → no prefetch.
         assert!(!should_load_older(10, 50, true, false));
-        // No more history, or already loading → never.
         assert!(!should_load_older(46, 50, false, false));
         assert!(!should_load_older(46, 50, true, true));
     }
@@ -764,15 +691,11 @@ mod tests {
     fn selected_dm_request_only_fires_on_a_pending_request_row() {
         let mut home = HomeState::new();
         home.set_tree(tree(), "me");
-        // Row layout (all groups expanded on first load):
-        // 0 group, 1 #welcome, 2 #random, 3 "Direct Messages", 4 @bob,
-        // 5 "Requests", 6 @eve (pending).
+        // Rows: 0 group, 1 #welcome, 2 #random, 3 DMs, 4 @bob, 5 Requests, 6 @eve.
         home.selected = 6;
         assert_eq!(home.selected_dm_request().as_deref(), Some("r1"));
-        // A real DM (accepted) is not an acceptable target.
         home.selected = 4;
         assert_eq!(home.selected_dm_request(), None);
-        // A channel row is not either.
         home.selected = 1;
         assert_eq!(home.selected_dm_request(), None);
     }
@@ -781,22 +704,18 @@ mod tests {
     fn context_group_resolves_from_headings_and_channels_but_not_dms() {
         let mut home = HomeState::new();
         home.set_tree(tree(), "me");
-        // Group heading itself → that group.
         home.selected = 0;
         assert_eq!(
             home.context_group(),
             Some(("g1".to_string(), "General".to_string()))
         );
-        // A channel row resolves up to its parent group.
         home.selected = 2;
         assert_eq!(
             home.context_group(),
             Some(("g1".to_string(), "General".to_string()))
         );
-        // A DM row (past the "Direct Messages" header) has no group context.
         home.selected = 4;
         assert_eq!(home.context_group(), None);
-        // A pending request row likewise.
         home.selected = 6;
         assert_eq!(home.context_group(), None);
     }
@@ -832,7 +751,6 @@ mod tests {
         assert_eq!(step_message(&ids, Some("b"), 1).as_deref(), Some("c"));
         assert_eq!(step_message(&ids, Some("c"), 1), None);
         assert_eq!(step_message(&ids, None, 1), None);
-        // A selection that is no longer loaded restarts from the newest.
         assert_eq!(step_message(&ids, Some("gone"), -1).as_deref(), Some("c"));
         assert_eq!(step_message(&[], None, -1), None);
     }
@@ -852,7 +770,6 @@ mod tests {
     #[test]
     fn merge_messages_dedups_reorders_and_prefers_incoming() {
         let existing = vec![msg("b", "2", "second"), msg("d", "4", "fourth")];
-        // An older page (newest-first) plus a re-sent edit of "b".
         let incoming = vec![
             msg("c", "3", "third"),
             msg("a", "1", "first"),
@@ -860,9 +777,7 @@ mod tests {
         ];
         let merged = merge_messages(existing, incoming);
         let ids: Vec<&str> = merged.iter().map(|m| m.id.as_str()).collect();
-        // Sorted oldest-first by (sent_at, id), no dupes.
         assert_eq!(ids, vec!["a", "b", "c", "d"]);
-        // The incoming copy of "b" won.
         assert_eq!(merged[1].content.as_deref(), Some("second-edited"));
     }
 }

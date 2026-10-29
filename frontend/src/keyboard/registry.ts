@@ -1,15 +1,4 @@
-// Single global keydown dispatcher.
-//
-// One window listener (lazily attached on first registration, detached
-// when the last command unregisters) replaces the previous ~8 per-shortcut
-// useEffect lifecycles. It resolves each command's combo lazily per
-// keydown via resolveCombo, so a future user-override map takes effect
-// with zero extra wiring.
-//
-// Phase: bubble (non-capture), matching the app's prior global Esc
-// listener. Capture-phase modal-cancel handlers (ChatInput, MainContent,
-// MessageItem, VoiceChannel) still run first and may stopImmediatePropagation
-// to claim Escape before nav.back ever sees it — that behavior is preserved.
+// One lazily-attached bubble-phase keydown dispatcher; capture-phase Escape handlers still run first.
 
 import { resolveCombo } from "./bindings";
 import { comboMatchesEvent, comboReleasedByEvent, parseCombo } from "./keyCombo";
@@ -23,27 +12,15 @@ export interface ShortcutRegistration {
   priority: number;
   /** preventDefault on a match. Default true; nav.back opts out. */
   preventDefault: boolean;
-  /**
-   * Hold-style commands (push-to-talk) supply this. `invoke` then means
-   * "key went down" and `onRelease` means "key went up — or the window
-   * lost focus, so the keyup is never coming".
-   *
-   * `invoke` fires exactly once per physical press: keyboard auto-repeat
-   * re-delivers keydown at ~30 Hz and must not be mistaken for a re-press.
-   */
+  /** Hold-style release (key up, or focus lost); `invoke` fires once per press, not per auto-repeat. */
   onRelease?: () => void;
 }
 
-// Token identity guards against StrictMode / fast-refresh double-invokes:
-// unregister only clears the slot if it still holds *this* registration.
+// Token identity guards StrictMode double-invokes.
 const registry = new Map<ShortcutCommandId, ShortcutRegistration>();
 const tokens = new Map<ShortcutCommandId, object>();
 
-/**
- * Hold-style commands whose key is currently down. Membership is what
- * makes `invoke` fire once per press rather than once per auto-repeat, and
- * what `releaseAllHeld` walks on focus loss.
- */
+/** Held hold-style commands: once per press, and released on focus loss. */
 const held = new Set<ShortcutCommandId>();
 
 let listenerAttached = false;
@@ -56,15 +33,7 @@ function release(id: ShortcutCommandId): void {
   registry.get(id)?.onRelease?.();
 }
 
-/**
- * Drop every held key.
- *
- * The window losing focus is the important caller. The OS delivers the
- * keydown to us and then routes the *keyup* to whatever the user switched
- * to, so without this a held push-to-talk key stays logically down forever
- * and the microphone stays open in the background. Releasing here is also
- * why the Rust gate exposes `release_voice_ptt` — both ends fail closed.
- */
+/** Drop every held key; on blur the keyup goes to another app and the mic would stay open. */
 function releaseAllHeld(): void {
   for (const id of [...held]) {
     release(id);
@@ -96,7 +65,6 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
   }
   if (best.onRelease) {
-    // Auto-repeat: already down, nothing changed.
     if (held.has(bestId)) {
       return;
     }
@@ -117,10 +85,7 @@ function onKeyUp(e: KeyboardEvent): void {
   }
 }
 
-/**
- * A hidden document is a focus loss the `blur` event does not always
- * report (workspace switch, screen lock). Same failure mode, same fix.
- */
+/** A hidden document is a focus loss `blur` may miss. */
 function onVisibilityChange(): void {
   if (document.visibilityState === "hidden") {
     releaseAllHeld();
@@ -168,9 +133,7 @@ export function registerShortcut(
 
   return () => {
     if (tokens.get(id) === token) {
-      // Unregistering while the key is down (unmount mid-hold, or the
-      // command being disabled by leaving the call) must still run the
-      // release side — otherwise the mic never closes.
+      // Release on unregister mid-hold, or the mic never closes.
       release(id);
       registry.delete(id);
       tokens.delete(id);

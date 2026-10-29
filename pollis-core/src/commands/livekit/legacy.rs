@@ -4,18 +4,9 @@ use crate::commands::mls::ds_livekit_token;
 use crate::error::Result;
 use crate::state::AppState;
 
-// ── LiveKit token commands ─────────────────────────────────────────────────
-//
-// Minting moved server-side to the DS (#393): identity + display name are
-// derived from the verified signer there, so the client-supplied `identity` /
-// `display_name` args are ignored (kept for Tauri command-signature stability).
+// Minting is DS-side (#393); client `identity`/`display_name` args are ignored.
 
 /// A minted LiveKit credential: the JWT and the server it is valid at.
-///
-/// These are returned together on purpose. A LiveKit JWT is only accepted by the
-/// server that issued it, so handing back a bare token forces the caller to guess
-/// the address — which is how the SFU address ended up compiled into every shipped
-/// binary in the first place.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LivekitCredential {
     pub token: String,
@@ -46,10 +37,7 @@ pub async fn get_livekit_view_token(
 
 /// The compiled-in DEFAULT LiveKit address.
 ///
-/// Deliberately not authoritative: it is only the fallback used when a
-/// self-hosted DS leaves `LIVEKIT_URL` unset. Anything that dials a room should
-/// use the `url` returned beside that room's token (`LivekitCredential`), because
-/// only the issuing server will accept the JWT.
+/// Only a fallback; dial the `url` returned beside each token.
 pub async fn get_livekit_url(state: &Arc<AppState>) -> Result<String> {
     Ok(state.config.livekit_url.clone())
 }

@@ -1,18 +1,4 @@
-/*
- * Accepting a group invite is optimistic (#1560).
- *
- *   - The invite leaves the list and the group appears in the sidebar on the
- *     same frame as the click, while every refetch is still held — so the UI
- *     never shows neither the invite nor the group.
- *   - Once the real rows land the group opens, channels and all.
- *   - A failed accept puts the invite back, takes the group away again and
- *     says it failed.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true` (see
- * playwright.config.js). The mobile half is the accept step of
- * mobile/.maestro/two-client/membership/1-accept-and-post.yaml
- * (scripts/maestro-membership.sh).
- */
+// Accepting a group invite is optimistic (#1560); a failed accept rolls back.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 

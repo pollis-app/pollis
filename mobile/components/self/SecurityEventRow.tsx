@@ -1,6 +1,3 @@
-// One read-only row of the security-event log — the Security screen's
-// preview and the Security events screen (#1548).
-
 import { View, Text } from "react-native";
 import i18n from "../../i18n";
 import type { SecurityEvent } from "../../lib/securityEvents";
@@ -14,10 +11,7 @@ export function shortId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
-// The two addresses in an `email_changed` row's metadata, or null when the row
-// does not carry the expected JSON object. Never throws — the metadata column
-// is free-form, and a row from another build must render with vaguer copy
-// rather than crash the screen.
+// Null when the metadata is not the expected JSON. Never throws: rows from other builds must render.
 function parseEmailChangeMetadata(
   metadata: string | null | undefined,
 ): { from: string; to: string } | null {
@@ -33,14 +27,11 @@ function parseEmailChangeMetadata(
       }
     }
   } catch {
-    // Not JSON. Fall through to the unknown-shape copy.
   }
   return null;
 }
 
-// Human-readable summary per `security_event.kind` — mirrors desktop's
-// SecurityPage `describe()`. Unknown kinds fall through to the raw string so
-// new event types are never silently dropped.
+// Mirrors desktop's `describe()`; unknown kinds fall through to the raw string.
 export function describeEvent(event: SecurityEvent): {
   heading: string;
   detail: string;
@@ -71,9 +62,7 @@ export function describeEvent(event: SecurityEvent): {
           detail: i18n.t("settings:security.eventDeviceRevokedDetailUnknown"),
         };
       }
-      // `name=<device name>` when the revoked row carried one (#947). This
-      // event is the last place the revoked device's name is readable — the
-      // device row itself is deleted on revoke.
+      // The last place a revoked device's name is readable (#947).
       const name = event.metadata?.startsWith("name=")
         ? event.metadata.slice("name=".length)
         : null;
@@ -95,10 +84,7 @@ export function describeEvent(event: SecurityEvent): {
         detail: i18n.t("settings:security.eventIdentityResetDetail"),
       };
     case "identity_rotated":
-      // DS-authored, inside the rotation transaction. `credential=session` is
-      // the pre-enrollment soft reset (email code only — the DS also wiped
-      // memberships and other devices); `credential=signature` is a rotation
-      // from an enrolled device.
+      // DS-authored. `credential=session` is the pre-enrollment soft reset.
       return {
         heading: i18n.t("settings:security.eventIdentityRotatedHeading"),
         detail: event.metadata?.includes("credential=session")
@@ -111,8 +97,6 @@ export function describeEvent(event: SecurityEvent): {
         detail: i18n.t("settings:security.eventSecretKeyRotatedDetail"),
       };
     case "email_changed": {
-      // DS-authored as part of the change (#1161), so a client cannot suppress
-      // it by omitting a call. Metadata is `{"from":"…","to":"…"}`.
       const addresses = parseEmailChangeMetadata(event.metadata);
       return {
         heading: i18n.t("settings:security.eventEmailChangedHeading"),
@@ -122,9 +106,7 @@ export function describeEvent(event: SecurityEvent): {
       };
     }
     case "recovery_blob_fetched":
-      // DS-authored by `POST /v1/read/recovery-blob`: a device holding only an
-      // email code downloaded the account key wrapped under the Secret Key —
-      // the first step of Secret-Key recovery.
+      // The first step of Secret-Key recovery.
       return {
         heading: i18n.t("settings:security.eventRecoveryBlobFetchedHeading"),
         detail: i18n.t("settings:security.eventRecoveryBlobFetchedDetail"),
@@ -165,8 +147,7 @@ export function SecurityEventRow({ event }: { event: SecurityEvent }) {
         >
           {heading}
         </Text>
-        {/* Never shrinks and never wraps: "just now" used to lose its second
-            word to the heading's flex (#1548). The heading wraps instead. */}
+        {/* Never shrinks or wraps (#1548); the heading wraps instead. */}
         <Text style={[ty.meta, { flexShrink: 0 }]} numberOfLines={1}>
           {when}
         </Text>

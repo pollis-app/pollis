@@ -1,10 +1,7 @@
 //! MULTI-DEVICE ENROLLMENT gate (M4, spec §7 "Additional-device enrollment").
 //!
 //! Adding a second terminal to an account that already exists on another device,
-//! via sibling approval, and proving the new device got a WORKING MLS LEAF — not
-//! just an auth session. The canonical `device_enrollment` call order (derived
-//! from `src-tauri/tests/flows/harness.rs::enroll_second_device`), driven through
-//! `pollis_tui::{auth,enroll}`:
+//! via sibling approval, proving the new device got a working MLS leaf. Call order:
 //!
 //!   new device:  request_otp -> verify_otp  (enrollment_required=true, mints the
 //!                                             enrollment_session, registers device)
@@ -14,15 +11,9 @@
 //!   new device:  enrollment_status(request_id) -> Approved   (installs account key)
 //!   new device:  set_pin -> finalize(user_id) -> initialize_identity
 //!
-//! Devices A and B are the SAME user, so each gets its OWN data dir
-//! (separate local SQLCipher DB + keystore + accounts index) but shares the
-//! world's DS + libsql. Carol is a third user — the independent decryptor that
-//! proves B's leaf works.
+//! A and B are the same user on separate data dirs; Carol is the independent decryptor.
 //!
-//! Bounded-history holds (spec): B, a new device, does NOT inherit the message A
-//! sent before B enrolled. What MUST work — and what we assert — is that B, once
-//! enrolled, sees the conversation and can SEND a message the other members
-//! receive and decrypt.
+//! B does not inherit history, but once enrolled must see the conversation and send.
 
 mod common;
 
@@ -39,7 +30,6 @@ fn contents(page: &pollis_core::commands::messages::MessagePage) -> Vec<String> 
 async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
     let world = spawn_world().await;
 
-    // Device A (first device of alice) + Carol (a third user, the decryptor).
     let mut alice_a = TestClient::new_persistent_in(&world, "alice-dev-a");
     let mut carol = TestClient::new_persistent_in(&world, "carol");
 
@@ -47,7 +37,6 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
     let alice_profile = alice_a.sign_up(alice_email).await;
     let carol_profile = carol.sign_up("carol@test.local").await;
 
-    // ── A opens a DM to Carol; Carol accepts; A sends a first message ──
     let dm_id = alice_a.create_dm(&carol_profile.id).await;
     let requests = carol.dm_requests().await;
     assert_eq!(requests.len(), 1, "Carol should see A's pending DM request");
@@ -61,7 +50,6 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
         "baseline: Carol receives A's first message",
     );
 
-    // ── Device B: a fresh SECOND device for alice, on its own data dir ──
     let mut alice_b = TestClient::new_persistent_in(&world, "alice-dev-b");
     let b_profile = alice_b.begin_enrollment(alice_email).await;
     assert_eq!(
@@ -69,7 +57,6 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
         "the second device must resolve to alice's existing user_id",
     );
 
-    // ── B requests enrollment; A sees it, confirms the code, approves ──
     let handle = alice_b.request_enrollment().await;
     let pending = alice_a.pending_enrollment_requests().await;
     let matching = pending
@@ -81,15 +68,10 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
                 handle.request_id
             )
         });
-    // What A does NOT get is a verification code (#1096). It used to, and the UI
-    // displayed that copy and submitted it back, so the comparison the code
-    // exists for was performed by nobody — a Delivery Service that swapped B's
-    // ephemeral key and its stored code to match passed every check. A's list
-    // now carries only the device id; the code has to come off B's screen.
+    // A gets no verification code (#1096); the code has to come off B's screen.
     let _ = matching;
 
-    // A wrong code is refused, which is the whole point: what the approver types
-    // is checked against the code A derives from the ephemeral key A fetched.
+    // A wrong code is refused: the typed code is checked against the one A derives.
     let wrong = wrong_code(&handle.verification_code);
     let refused = alice_a
         .try_approve_enrollment(&handle.request_id, &wrong)
@@ -99,23 +81,19 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
         "approving with a code that is not the derived one must fail, got {refused:?}",
     );
 
-    // The right code — `handle.verification_code` is B's own locally-derived
-    // value, i.e. exactly what a human reads off B's screen and types on A.
+    // The right code, as a human reads it off B's screen.
     alice_a
         .approve_enrollment(&handle.request_id, &handle.verification_code)
         .await;
 
-    // ── B polls to Approved, then finishes (set_pin → finalize → init) ──
     alice_b.await_approval_and_finish(&handle.request_id).await;
 
-    // ── B syncs; it now sees the account's conversation ──
     alice_b.sync_rounds(4).await;
     assert!(
         alice_b.conversation_ids().await.contains(&dm_id),
         "the enrolled device must see alice's existing DM",
     );
 
-    // ── The gate: B SENDS; Carol (a different user) receives + decrypts it ──
     alice_b.send_text(&dm_id, "hello from device B").await;
 
     carol.sync_rounds(4).await;
@@ -125,7 +103,6 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
         "Carol must decrypt the message B sent from its new leaf; got {carol_seen:?}",
     );
 
-    // ── And A (alice's first device) also receives B's message ──
     alice_a.sync_rounds(4).await;
     let a_seen = contents(&alice_a.read_dm(&dm_id).await);
     assert!(
@@ -134,8 +111,7 @@ async fn second_device_enrolls_via_approval_and_gets_a_working_mls_leaf() {
     );
 }
 
-/// One character of `code` changed to a DIFFERENT character of the same
-/// alphabet — a near-miss, the shape a mis-read or substituted code takes.
+/// alphabet, the shape a mis-read or substituted code takes.
 fn wrong_code(code: &str) -> String {
     use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_ALPHABET;
     let mut chars: Vec<char> = code.chars().collect();

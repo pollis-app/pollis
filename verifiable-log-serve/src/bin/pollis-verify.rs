@@ -162,8 +162,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
-        // Version skew is reported as version skew, with its own exit code and an
-        // actionable message — never folded into a verification failure.
+        // Version skew gets its own exit code, never folded into a verification failure.
         Err(ServeError::VersionSkew { served, supported }) => {
             eprintln!(
                 "your pollis-verify is too old for this log — upgrade it.\n\

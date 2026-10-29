@@ -1,13 +1,4 @@
-/*
- * Ending a session drops the React Query cache (#1256).
- *
- * The cache holds decrypted message bodies and outlives AppShell. It was
- * cleared on lock only; sign-out, account deletion and the revoked-device
- * sign-out all land on "email-auth" and left it full. The mobile half of this
- * lives in mobile/tests/session-teardown.test.ts.
- *
- *   node --test frontend/tests/
- */
+/* Ending a session drops the query cache of decrypted bodies (#1256). Mobile: mobile/tests/session-teardown.test.ts. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +22,6 @@ test("a signed-in state does not", () => {
 test("App clears on the transition, and every sign-out lands on email-auth", () => {
   const src = readFileSync(APP, "utf8");
   assert.match(src, /if \(clearsQueryCache\(appState\)\) \{\s*queryClient\.clear\(\);/);
-  // A signed-in session whose user disappears (the revoked-device path only
-  // calls appStore.logout()) is routed to email-auth, which clears.
+  // A vanished user (revoked device) routes to email-auth, which clears.
   assert.match(src, /appState === "ready" && !currentUser\) \{\s*setAppState\("email-auth"\);/);
 });

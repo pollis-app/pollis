@@ -1,11 +1,4 @@
-/**
- * mobile-core-check.yml runs each job only on a PR that can change it (the
- * `changes` job's `native` / `app` / `tests` filters). A path missing from a
- * filter is a silent false negative: the PR goes green without the job that
- * would have caught it. These tests hold the filters to the two things that
- * define them — the Rust closure the native build compiles, and the files
- * outside mobile/ that these tests read.
- */
+/** mobile-core-check.yml's path filters must cover the Rust closure and every file outside mobile/ these tests read. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -21,14 +14,12 @@ const fingerprint = require("../fingerprint.config.js");
 const readWorkflow = (name: string) => readFileSync(join(repo, ".github", "workflows", name), "utf8");
 const workflow = readWorkflow("mobile-core-check.yml");
 
-// The quoted patterns of one `filters:` entry (`            native:` …).
 function filter(name: string, src = workflow): string[] {
   const block = new RegExp(`\\n {12}${name}:\\n((?: {14}.*\\n| *#.*\\n)+)`).exec(src)?.[1];
   assert.ok(block, `no \`${name}\` filter`);
   return [...block.matchAll(/^ {14}- '([^']+)'$/gm)].map((m) => m[1]);
 }
 
-// A trigger's `paths:` list (comment lines between entries allowed).
 function triggerPaths(event: "push" | "pull_request", src = workflow): string[] {
   const head = event === "push" ? "push:\\n {4}branches: \\[main\\]\\n(?: *#.*\\n)*" : "pull_request:\\n(?: *#.*\\n)*";
   const block = new RegExp(`\\n {2}${head} {4}paths:\\n((?: {6}- '.*'\\n| *#.*\\n)+)`).exec(src)?.[1];
@@ -37,7 +28,6 @@ function triggerPaths(event: "push" | "pull_request", src = workflow): string[] 
 }
 const pushPaths = () => triggerPaths("push");
 
-// picomatch's subset the filters use: `**`, `*`, literal text.
 function matches(pattern: string, file: string): boolean {
   const re = pattern
     .split("**")
@@ -74,9 +64,7 @@ test("every file outside mobile/ that these tests read is on a filter", () => {
       continue;
     }
     const src = readFileSync(join(here, name), "utf8");
-    // `../../x/y` from tests/ is the repo root. A single `../` is mobile/ from
-    // tests/ (mobile/scripts/…), but the repo root from a ROOT = mobile join,
-    // which only ever reaches frontend/.
+    // `../../x/y` from tests/ is the repo root.
     for (const m of src.matchAll(/["'`]\.\.\/\.\.\/((?:frontend|pollis-[a-z-]+|verifiable-log[a-z-]*|scripts|website)\/[^"'`$]+)/g)) {
       found.add(m[1]);
     }
@@ -93,8 +81,7 @@ test("every file outside mobile/ that these tests read is on a filter", () => {
   }
 });
 
-// windows-link.yml links pollis-core for Windows and kani.yml proves harnesses
-// inside it: both compile the same closure, so both lists are held to it too.
+// windows-link.yml and kani.yml compile the same closure.
 test("windows-link and kani run on every crate of pollis-core's closure", () => {
   const closure = (fingerprint.rustCrateClosure() as string[]).map((c) => `${c}/**`);
   const windows = readWorkflow("windows-link.yml");

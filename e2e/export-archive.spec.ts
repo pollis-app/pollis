@@ -1,20 +1,4 @@
-/*
- * On-device export (#856) — the renderer's half, in both skins.
- *
- * The archive itself is Rust's (`pollis-core/src/commands/export.rs`, unit-
- * tested there, including "never touches the network"). What this tier pins
- * is the contract between the two halves:
- *
- *   1. the "Your data" section renders on Security and one click reaches
- *      `export_archive` with the path the OS picker returned and no scope,
- *   2. cancelling the picker writes nothing and invokes nothing,
- *   3. the summary reports files honestly and the network step is OFFERED,
- *      not taken — `fetch_export_attachments` runs only after its own button,
- *   4. the two conversation entry points (DM settings, channel header) pass
- *      exactly their conversation id.
- *
- *   pnpm --filter @pollis/e2e e2e:ui -- export-archive.spec.ts
- */
+// On-device export (#856), renderer half: the picker path reaches export_archive; fetching only on its own button.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -147,7 +131,6 @@ async function lastArgs<T>(page: Page, cmd: string): Promise<T> {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`export archive — ${skin} skin`, () => {
     test("one click on Security writes the account archive to the picked path", async ({ page }) => {
@@ -230,7 +213,6 @@ for (const skin of SKINS) {
       expect(await lastArgs<{ conversationId: string | null }>(page, "export_archive")).toMatchObject({
         conversationId: DM_ID,
       });
-      // A text-only conversation offers no download.
       await expect(page.getByTestId("dm-settings-export-button-fetch")).toHaveCount(0);
     });
 

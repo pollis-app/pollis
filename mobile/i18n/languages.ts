@@ -1,27 +1,13 @@
-/**
- * The set of languages Pollis ships a catalogue for — the mobile mirror of
- * `frontend/src/i18n/languages.ts`.
- *
- * The catalogues themselves are SHARED with desktop (see `metro.config.js` and
- * `resources.ts`); this list is duplicated because mobile cannot import
- * frontend TypeScript. `tests/i18n.test.ts` fails if it drifts from the locale
- * directories that actually ship, so adding a locale is: add it to the desktop
- * registry, translate, then add the same row here.
- *
- * No React, no React Native imports: the resolution rules are pure and
- * unit-tested under `node --test`.
- */
+/** Mobile mirror of `frontend/src/i18n/languages.ts`; tests/i18n.test.ts fails if it drifts. Pure. */
 
 export interface LanguageOption {
-  /** BCP-47 base tag, lowercase. Region subtags are stripped — see `normalizeLanguage`. */
+  /** BCP-47 base tag, lowercase, no region. */
   code: string;
-  /** The language's own name for itself (endonym), never its English name. */
+  /** The endonym, never the English name. */
   label: string;
-  /** Writing direction. Drives `I18nManager` — see `index.ts`. */
   dir: "ltr" | "rtl";
 }
 
-/** The language every missing key falls back to. Always present. */
 export const DEFAULT_LANGUAGE = "en";
 
 export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
@@ -46,15 +32,11 @@ export function isSupportedLanguage(code: string | null | undefined): boolean {
   return !!code && SUPPORTED_LANGUAGES.some((l) => l.code === code);
 }
 
-/** Writing direction for a language code; unknown codes are treated as `ltr`. */
 export function languageDirection(code: string | null | undefined): "ltr" | "rtl" {
   return languageOption(code ?? "")?.dir ?? "ltr";
 }
 
-/**
- * Reduce an arbitrary BCP-47 tag to a supported language code, or null.
- * `pt-BR` → `pt` when we ship `pt`; `zh-Hans-CN` → `zh`.
- */
+/** `pt-BR` → `pt` when we ship `pt`; `zh-Hans-CN` → `zh`; else null. */
 export function normalizeLanguage(raw: string | null | undefined): string | null {
   if (!raw) {
     return null;
@@ -73,10 +55,6 @@ export function normalizeLanguage(raw: string | null | undefined): string | null
   return null;
 }
 
-/**
- * Pick a starting language from the device's locale list, most-preferred
- * first, falling back to English when we ship no catalogue for any of them.
- */
 export function resolveDeviceLanguage(candidates: readonly string[] | undefined): string {
   for (const candidate of candidates ?? []) {
     const match = normalizeLanguage(candidate);
@@ -87,14 +65,7 @@ export function resolveDeviceLanguage(candidates: readonly string[] | undefined)
   return DEFAULT_LANGUAGE;
 }
 
-/**
- * The device locale, as Hermes reports it.
- *
- * `Intl.DateTimeFormat().resolvedOptions().locale` is the OS locale on both
- * platforms (Hermes backs `Intl` with Foundation on iOS and ICU on Android),
- * which makes it the device's answer without a native module — the same
- * answer `expo-localization` would give, minus a prebuild.
- */
+/** The device locale via Hermes' `Intl` (the OS locale on both platforms), no native module. */
 export function deviceLanguageCandidates(): string[] {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -104,22 +75,12 @@ export function deviceLanguageCandidates(): string[] {
   }
 }
 
-/**
- * Uppercase already-translated copy the way the language itself does — the
- * locale-invariant `toUpperCase()` spells Turkish wrong and is a no-op
- * pretending to work in Arabic and Chinese. Mobile's label style (`SELF`,
- * `PREFERENCES`) makes this the common case, not the edge.
- */
+/** Locale-aware uppercase: `toUpperCase()` spells Turkish wrong. */
 export function localeUpperCase(value: string, language: string): string {
   return value.toLocaleUpperCase(language);
 }
 
-/**
- * The SecureStore key the language choice is stored under (`storage.ts`).
- * Here rather than there so it stays importable without the native module.
- * SecureStore keys may not contain `:`, so the desktop key shape is spelled
- * with dots, and the user id is reduced to the characters it allows.
- */
+/** SecureStore key for the choice; keys may not contain `:`, so dots. */
 export function languageKey(userId: string | null | undefined): string {
   if (!userId) {
     return "pollis-language.device";

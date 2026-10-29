@@ -1,23 +1,4 @@
-/*
- * DM delivery / read receipts (#857) — visual e2e.
- *
- * Runs against the browser-rendered frontend with the Tauri IPC mock
- * (`frontend/src/__mocks__/tauri-core.ts`), whose `get_conversation_receipts`
- * and `mark_messages_read` reimplement the semantics of
- * `pollis-core/src/commands/messages/receipts.rs` — per message, per reader,
- * and never acknowledging your own message.
- *
- * The specific failure this feature must avoid is conflating "delivered" with
- * "read", so the distinctness test below asserts on what actually renders
- * (icon geometry and computed colour), not on the state attribute — an
- * attribute-only assertion would pass even if both states drew the same tick.
- *
- * The tick is drawn only in the refined skin. The terminal skin shows no
- * receipts at all — same data, same query, nothing on screen — and the last
- * block below pins that down.
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js
- */
+// DM receipts (#857): delivered and read must render differently (geometry + colour); refined skin only.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -136,12 +117,7 @@ function preloadState(skin: Skin) {
   };
 }
 
-/*
- * NOTE ON NAVIGATION: the router runs on `createMemoryHistory`, so the browser
- * URL never changes and `page.goto("/dms/…")` would be meaningless. Every test
- * navigates through the UI — here via a permalink pasted into Cmd+K, the same
- * route `e2e/bookmarks.spec.ts` uses.
- */
+// Memory-history router: navigate via a permalink pasted into Cmd+K.
 async function boot(page: Page, skin: Skin) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
@@ -180,14 +156,7 @@ async function gotoViaPermalink(page: Page, conversationId: string, messageId: s
   await expect(page.getByTestId(`message-${messageId}`)).toBeVisible();
 }
 
-/**
- * What the indicator actually draws: its state, its rendered colour, how many
- * strokes the tick is made of, and the text beside it.
- *
- * Icon geometry is the honest discriminator between `Check` and `CheckCheck` —
- * lucide draws one path for a single tick and two for a double tick — so a
- * regression that swapped the colours but kept one glyph would still be caught.
- */
+/** What the indicator draws; path count tells Check (1) from CheckCheck (2). */
 async function indicatorShape(page: Page, messageId: string) {
   return page.evaluate((id) => {
     const el = document.querySelector(`[data-testid="receipt-${id}"]`);
@@ -250,16 +219,12 @@ test.describe("DM receipts — refined skin", () => {
     await boot(page, skin);
     await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
 
-    // Both messages are in the same DM, so both indicators are on screen at
-    // once — exactly how a user would compare them.
     const delivered = await indicatorShape(page, MSG_DELIVERED);
     const read = await indicatorShape(page, MSG_READ);
     expect(delivered).not.toBeNull();
     expect(read).not.toBeNull();
 
-    // Two independent channels of difference. Either alone would be a weak
-    // signal — colour alone fails for a colour-blind user, glyph alone is
-    // easy to miss at 14px — so the feature must carry both.
+    // Colour and glyph both differ: colour alone fails colour-blind users.
     expect(delivered!.strokes).not.toBe(read!.strokes);
     expect(delivered!.color).not.toBe(read!.color);
     // And the accessible name must not require the user to see either.
@@ -280,9 +245,7 @@ test.describe("DM receipts — refined skin", () => {
     const row = page.getByTestId(`message-${CHANNEL_MSG}`);
     await expect(row).toBeVisible();
 
-    // The message is the viewer's own AND has seeded receipts, so isOwn and
-    // "receipts exist" are both true — the DM-only rule is the only thing
-    // that can be suppressing this.
+    // Own message with seeded receipts: only the DM-only rule can suppress this.
     await expect(page.getByTestId(`receipt-${CHANNEL_MSG}`)).toHaveCount(0);
     await expect(row.locator('[data-receipt-state]')).toHaveCount(0);
 
@@ -298,16 +261,12 @@ test.describe("DM receipts — refined skin", () => {
     await boot(page, skin);
     await gotoViaPermalink(page, GROUP_DM_ID, MSG_PARTIAL);
 
-    // Two of three peers have read it. A single boolean tick could only say
-    // "read" or "not read"; both would misrepresent three people.
     const partial = await indicatorShape(page, MSG_PARTIAL);
     expect(partial?.state).toBe("read-some");
     expect(partial?.text).toBe("2/3");
     expect(partial?.label).toBe("Read by 2 of 3");
 
-    // The all-read case in the same conversation reads differently, which is
-    // what proves the fraction is derived from the reader set rather than
-    // being decorative.
+    // All-read in the same conversation differs, so the fraction comes from the reader set.
     const everyone = await indicatorShape(page, MSG_EVERYONE);
     expect(everyone?.state).toBe("read-all");
     expect(everyone?.text).toBe("3/3");

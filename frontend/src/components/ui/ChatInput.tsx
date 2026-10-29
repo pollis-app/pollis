@@ -42,32 +42,13 @@ import { EmojiSuggestList } from "./EmojiSuggestList";
 import { probeRender } from "../../utils/renderProbe";
 import { usePressActivation } from "../../hooks/usePressActivation";
 
-/**
- * Where the bytes of a queued attachment are, and the only two answers there
- * are.
- *
- * A discriminated union rather than an optional `path`, because the two cases
- * are not the same thing wearing different values:
- *
- * - `path` is a file the USER already has — a picker selection or an OS drag
- *   and drop. This app did not create it and must never delete it.
- * - `staged` is bytes the webview handed us with no path of its own — a paste,
- *   or a drop the webview surfaced as a `File`. They live in the backend's
- *   memory (`pollis_core::commands::staging`).
- *
- * This used to be one `path` field for both, because the second case wrote the
- * bytes to the OS temp directory under the file's original name to manufacture
- * one. Nothing deleted those files, so the plaintext of every file a user had
- * ever pasted was still sitting in `/tmp`. With no path there is nothing to
- * forget to delete.
- */
+/** Where a queued attachment's bytes are: a user's own file (never delete) or bytes staged in backend memory (no temp file). */
 export type AttachmentSource =
   | { kind: "path"; path: string }
   | { kind: "staged"; id: string };
 
 export interface Attachment {
   id: string;
-  // null only while the source is still being prepared (`loading`).
   source: AttachmentSource | null;
   name: string;
   size: number;      // bytes (0 if unknown)
@@ -77,12 +58,9 @@ export interface Attachment {
   loading?: boolean; // true while source/preview is still being prepared
   // Marked sensitive (#1568): sent with `sens`, so receivers see it blurred.
   sensitive?: boolean;
-  // The blurhash the sensitive cover is drawn with, worked out from the
-  // preview when the attachment is first marked.
   blurhash?: string;
 }
 
-/** The staged handle of an attachment, or null when its bytes are a real file. */
 export function stagedIdOf(attachment: Attachment): string | null {
   return attachment.source?.kind === "staged" ? attachment.source.id : null;
 }
@@ -90,11 +68,8 @@ export function stagedIdOf(attachment: Attachment): string | null {
 export interface ChatInputHandle {
   addFiles: (files: File[]) => void;
   focus: () => void;
-  /** Put a draft whose send failed back in the composer (#1497) — the text
-   *  only into an empty input, the attachments only into an empty tray, so a
-   *  draft the user has started since is never overwritten. */
+  /** Put a failed draft back (#1497), only into an empty input / tray. */
   restore: (text: string, attachments: Attachment[]) => void;
-  /** Send what the composer holds, exactly as Enter would. */
   send: () => void;
 }
 
@@ -105,27 +80,13 @@ interface ChatInputProps {
   autoFocus?: boolean;
   className?: string;
   maxAttachments?: number;
-  // Fires on every keystroke (and after send/clear). The parent uses this
-  // to drive the typing indicator publisher; it stays optional so simpler
-  // call sites that don't need it can ignore it entirely.
+  // Every keystroke; drives the typing indicator.
   onValueChange?: (value: string) => void;
-  // Stable key for the in-memory draft store (`utils/drafts.ts`). When
-  // present, the initial textarea value is seeded from the draft for this
-  // key, every keystroke writes back, and a successful send clears the
-  // entry. When undefined or null, the component behaves exactly as before
-  // (no draft persistence between mounts). Pass `null` rather than omitting
-  // the prop while the parent's room id is still loading — the component
-  // re-syncs whenever this value changes within the same mount.
+  // Draft store key (`utils/drafts.ts`); pass null while the room id loads, re-syncs on change.
   draftKey?: string | null;
-  // True when a standalone `@all` in the message will actually notify every
-  // member — i.e. this is a group channel (DMs and other surfaces don't fan
-  // out an `all_mention`). Gates the live "@all notifies everyone" composer
-  // hint so it only appears where the mention does something.
+  // A standalone `@all` notifies everyone here (group channels only).
   canNotifyAll?: boolean;
-  // Bash-history hand-off: called when ArrowUp is pressed while the message
-  // is empty or the caret sits on the first line. Return true to claim the
-  // key — the input blurs and the parent takes focus into the message log;
-  // return false (e.g. no messages to walk) to keep native caret movement.
+  // ArrowUp on an empty/first line; return true to claim it.
   onHistoryUp?: () => boolean;
 }
 
@@ -136,11 +97,9 @@ function typeFromMime(mime: string): Attachment["type"] {
   return "file";
 }
 
-// The tray's card: a square half again as tall as the old 80px thumb, so the
-// picture is easier to see and the toolbar has room (#1568).
+// Card size (#1568).
 const PREVIEW_SIZE = 120;
 
-// The card's corner toolbar buttons: filled, never bordered.
 const TOOLBAR_BUTTON =
   "flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
@@ -153,11 +112,8 @@ const AttachmentPreview: React.FC<{
   const { t } = useTranslation("common");
   const hasVisualPreview = attachment.type === "image" || attachment.type === "video";
   const sensitive = attachment.sensitive === true;
-  // A sensitive card stays covered in the composer too: opening it would put
-  // the media on screen, which is what marking it was for.
   const canExpand = hasVisualPreview && !!attachment.preview && !attachment.loading && !sensitive;
-  // Opening the preview is free to undo: a mouse press acts on pointer-down
-  // (#1529). Remove, beside it, stays on click.
+  // Free to undo, so it acts on pointer-down (#1529).
   const expandPress = usePressActivation<HTMLDivElement>(
     canExpand ? () => onExpand(attachment.preview!, attachment.type as "image" | "video") : undefined,
     "press",
@@ -202,9 +158,7 @@ const AttachmentPreview: React.FC<{
       >
         {attachment.name}
       </div>
-      {/* Corner toolbar. The eye says what is true now: open while the media
-          shows, crossed out once it is marked sensitive. Pictures and videos
-          only — a file has nothing on screen to hide. */}
+      {/* The eye shows the current state. Pictures and videos only. */}
       <div className="absolute flex items-center gap-1" style={{ top: 4, insetInlineEnd: 4 }}>
         {hasVisualPreview && (
           <button
@@ -246,16 +200,9 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 }, ref) => {
   probeRender("ChatInput");
   const { t } = useTranslation("common");
-  // Resolved at render, not as a default parameter, so the fallback follows
-  // a language change.
   const resolvedPlaceholder = placeholder ?? t("composer.placeholder");
   const [message, setMessage] = useState(() => getDraft(draftKey));
-  // Re-sync message when draftKey changes within the same mount (e.g. the
-  // user navigates from #general to #random without unmounting MainContent).
-  // Done during render via the "store previous prop in state" pattern so
-  // the textarea never shows a stale value for a frame — a useEffect would
-  // run after paint and produce a visible flash. Cheap: the compare is one
-  // string === and the setState bails out when values match.
+  // Re-sync on draftKey change during render, so no stale frame shows.
   const [prevDraftKey, setPrevDraftKey] = useState(draftKey);
   if (draftKey !== prevDraftKey) {
     setPrevDraftKey(draftKey);
@@ -263,22 +210,14 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   }
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isFocused, setIsFocused] = useState(false);
-  // Lightbox for previewing attachments before send.
   const [expandedPreview, setExpandedPreview] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const inputRef = useRef<RichTextInputHandle>(null);
 
-  // Insert emoji text at the caret, not at the end — appending would be wrong
-  // the moment someone picks an emoji mid-sentence, which is the common case.
-  //
-  // The splice itself lives in the input, which is the only thing that knows
-  // where the caret was: a `<textarea>` kept `selectionStart` across the blur
-  // the picker click causes, and a `contentEditable` does not. The resulting
-  // `onChange` runs the same draft / typing-indicator writes as a keystroke.
+  // Splice at the caret; only the input knows where it was (contentEditable loses it on blur).
   const insertAtCursor = useCallback((text: string) => {
     inputRef.current?.insertText(text);
   }, []);
 
-  // Close preview lightbox on Escape.
   useEffect(() => {
     if (!expandedPreview) { return; }
     const handler = (e: KeyboardEvent) => {
@@ -291,8 +230,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [expandedPreview]);
 
-  // Refocus the textarea after the pre-send preview lightbox closes so
-  // typing resumes immediately without an extra click.
   const prevExpandedPreviewRef = useRef(expandedPreview);
   useEffect(() => {
     if (prevExpandedPreviewRef.current && !expandedPreview) {
@@ -301,14 +238,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     prevExpandedPreviewRef.current = expandedPreview;
   }, [expandedPreview]);
 
-  // Refocus the textarea whenever the attachment count changes — covers
-  // drag-drop into the app while the native picker is still open (the
-  // picker's own pending `await open()` blocks `handlePickFiles`'
-  // finally-block from running until the user dismisses the dialog),
-  // remove-attachment, paste, and any other path that mutates the
-  // attachment list. Compares against a prev-value ref so the initial
-  // mount with `[]` doesn't steal focus from whatever the parent put it
-  // on.
+  // Refocus on any attachment count change (not on mount).
   const prevAttachmentLengthRef = useRef(attachments.length);
   useEffect(() => {
     if (prevAttachmentLengthRef.current !== attachments.length) {
@@ -317,9 +247,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     prevAttachmentLengthRef.current = attachments.length;
   }, [attachments.length]);
 
-  // ── Shared path-based attachment builder (picker + OS drag-drop) ─────────
   const handlePaths = useCallback(async (paths: string[]) => {
-    // De-dupe against already-queued paths.
     const existingPaths = new Set(
       attachments
         .map((a) => (a.source?.kind === "path" ? a.source.path : null))
@@ -330,14 +258,12 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     const candidates = newPaths.slice(0, remaining);
     if (candidates.length === 0) { return; }
 
-    // Filter out directories before adding stubs.
     const checks = await Promise.all(
       candidates.map(async (p) => {
         try {
           const info = await stat(p);
           return info.isDirectory ? null : p;
         } catch {
-          // stat failed — let it through and fail gracefully later
           return p;
         }
       })
@@ -345,9 +271,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     const toProcess = checks.filter((p): p is string => p !== null);
     if (toProcess.length === 0) { return; }
 
-    // Add stubs immediately so the user sees cards right away. Typed with the
-    // narrowed source so the preview loaders below can read `source.path`
-    // without re-checking a discriminant this function just set.
     type PathStub = Attachment & { source: { kind: "path"; path: string } };
     const stubs: PathStub[] = toProcess.map((p) => {
       const name = p.split(/[\\/]/).pop() ?? p;
@@ -360,15 +283,12 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         size: 0,
         mimeType: mime,
         type,
-        // Images and videos need async work for previews.
         loading: type === "image" || type === "video",
       };
     });
     setAttachments((prev) => [...prev, ...stubs]);
 
-    // Load previews for image and video stubs in parallel.
     await Promise.all([
-      // Images: readFile → blob URL
       ...stubs
         .filter((s) => s.type === "image")
         .map(async (stub) => {
@@ -377,16 +297,12 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             const bytes = await readFile(stub.source.path);
             preview = URL.createObjectURL(new Blob([bytes], { type: stub.mimeType }));
           } catch {
-            // no preview, fall back to file icon
           }
           setAttachments((prev) =>
             prev.map((a) => a.id === stub.id ? { ...a, preview, loading: false } : a)
           );
         }),
-      // Videos: read file bytes → blob URL → poster frame capture.
-      // We avoid convertFileSrc because it percent-encodes the path on Linux,
-      // producing a URL WebKit can't serve. readFile gives us the raw bytes
-      // and a reliable blob: URL instead.
+      // Not convertFileSrc: it percent-encodes Linux paths WebKit can't serve.
       ...stubs
         .filter((s) => s.type === "video")
         .map(async (stub) => {
@@ -395,10 +311,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             const bytes = await readFile(stub.source.path);
             const blobSrc = URL.createObjectURL(new Blob([bytes], { type: stub.mimeType }));
             preview = (await captureVideoPoster(blobSrc))?.url;
-            // Revoke the full-video blob URL — we only needed it for the poster.
             URL.revokeObjectURL(blobSrc);
           } catch {
-            // no preview — Film icon will show
           }
           setAttachments((prev) =>
             prev.map((a) => a.id === stub.id ? { ...a, preview, loading: false } : a)
@@ -407,7 +321,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     ]);
   }, [attachments, maxAttachments]);
 
-  // ── File picker via Tauri dialog ──────────────────────────────────────────
   const handlePickFiles = useCallback(async () => {
     if (attachments.length >= maxAttachments) { return; }
     try {
@@ -419,17 +332,14 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       if (!result) { return; }
       await handlePaths(Array.isArray(result) ? result : [result]);
     } finally {
-      // Native file dialog steals focus and the webview doesn't restore
-      // it — pull focus back to the chat input on every exit path
-      // (success, cancel, or error) so the user can keep typing.
+      // The native dialog steals focus and the webview doesn't restore it.
       inputRef.current?.focus();
     }
   }, [attachments.length, maxAttachments, handlePaths, t]);
 
-  // ── Paste (File objects, staged in the backend's memory) ──────────────────
   const handleBrowserFile = useCallback(async (file: File) => {
     if (attachments.length >= maxAttachments) { return; }
-    // De-dupe by name+size — pasted files have no stable path.
+    // De-dupe by name+size: pasted files have no path.
     if (attachments.some((a) => a.name === file.name && a.size === file.size)) { return; }
 
     const id = `${Date.now()}-${Math.random()}`;
@@ -438,7 +348,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     const isImg = type === "image";
     const isVid = type === "video";
 
-    // Image preview is available immediately from the File object.
     const preview = isImg ? URL.createObjectURL(file) : undefined;
 
     setAttachments((prev) => [
@@ -455,7 +364,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       },
     ]);
 
-    // For videos, capture a poster frame concurrently with the staging call.
     let videoPoster: string | undefined;
     if (isVid) {
       const blobSrc = URL.createObjectURL(file);
@@ -463,10 +371,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       URL.revokeObjectURL(blobSrc);
     }
 
-    // Hand the bytes to the backend. This is the call that used to write the
-    // file into the OS temp directory under its own name and leave it there
-    // forever; the bytes now sit in the backend's memory and the only handle
-    // to them is an opaque id.
     const staged = await stageAttachment(
       new Uint8Array(await file.arrayBuffer()),
     ).catch((err) => {
@@ -482,8 +386,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     }
 
     setAttachments((prev) => {
-      // The card was removed while its bytes were in flight — release them
-      // rather than leaving an entry nothing will ever upload or discard.
+      // Removed while in flight: release the bytes.
       if (!prev.some((a) => a.id === id)) {
         void discardStagedAttachment(staged.id);
         return prev;
@@ -499,8 +402,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     });
   }, [attachments, maxAttachments]);
 
-  // `handleSend` reads the latest render's state, so the handle is rebuilt
-  // with it rather than memoized past it.
+  // Rebuilt every render, since `handleSend` reads the latest state.
   const sendRef = useRef<() => void>(() => {});
   useImperativeHandle(ref, () => ({
     addFiles: (files: File[]) => { files.forEach(handleBrowserFile); },
@@ -518,17 +420,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     send: () => { sendRef.current(); },
   }), [handleBrowserFile, draftKey]);
 
-  // Register as the active file-drop target while mounted, so AppShell only
-  // shows the drag overlay on views that can actually receive a file (not,
-  // e.g., the voice/stream view where there's no input).
+  // AppShell shows the drag overlay only where a file can be received.
   useEffect(() => {
     const { register, unregister } = dropTargetStore;
     register();
     return unregister;
   }, []);
 
-  // Global drop zone — AppShell fires this when an OS file drop lands while a
-  // ChatInput is mounted.
   useEffect(() => {
     const handler = (e: Event) => {
       const paths: string[] = (e as CustomEvent<{ paths: string[] }>).detail.paths;
@@ -538,33 +436,17 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     return () => window.removeEventListener("pollis:pathdrop", handler);
   }, [handlePaths]);
 
-  // The auto-grow effect that used to measure `scrollHeight` on every keystroke
-  // is gone: a `contentEditable` sizes to its content on its own, so the clamp
-  // is `min-height` / `max-height` on the element (see the input row below) and
-  // the six-line ceiling is the same six lines it always was.
-
   const hasLoadingAttachments = attachments.some((a) => a.loading);
 
-  // Live signal that the message, as typed, will ping every channel member.
-  // Mirrors the backend's `mentions_all()` so the sender sees the hint exactly
-  // when the send will fan out an `all_mention`.
   const willNotifyEveryone = canNotifyAll && mentionsAll(message);
 
-  // ── @mention autocomplete (#843) ─────────────────────────────────────────
-  // Candidates come from the roster of the conversation the user is already
-  // in — never a directory lookup. See useMentionCandidates for why.
+  // @mention autocomplete (#843): candidates from this conversation's roster only.
   const skin = useSkin();
   const mentionCandidates = useMentionCandidates();
-  // Where the completion tracks think the caret is. Fed by the input's
-  // `selectionchange`, which is asynchronous — fine for deciding whether a
-  // suggestion list is open, and deliberately NOT what the ArrowUp hand-off
-  // reads (see `handleKeyDown`).
+  // Async `selectionchange` caret; the ArrowUp hand-off reads the selection directly.
   const [caret, setCaret] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
-  // Esc hides the suggestions for the current token; typing brings them back.
   const [mentionDismissed, setMentionDismissed] = useState(false);
-  // Where to put the caret after a completion is inserted. Applied in the
-  // effect below, once React has committed the new value to the input.
   const pendingCaretRef = useRef<number | null>(null);
 
   const mentionQuery = mentionDismissed ? null : mentionQueryAt(message, caret);
@@ -572,9 +454,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     ? rankMentionCandidates(mentionCandidates, mentionQuery.query)
     : [];
 
-  // Terminal skin: the ghost can only ever APPEND to what's typed, so it needs
-  // a prefix match, and — like fish / zsh-autosuggestions — it is only offered
-  // when the caret sits at the end of the line.
+  // Terminal ghost: prefix match, only with the caret at line end.
   const ghostTarget =
     skin === "terminal" && mentionQuery && caret === message.length
       ? suggestions.find((c) =>
@@ -585,37 +465,18 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     ? ghostTarget.username.slice(mentionQuery!.query.length)
     : "";
 
-  // Refined skin: the Slack-style list. Terminal never opens one.
   const showSuggestList = skin === "refined" && suggestions.length > 0;
 
-  // ── :shortcode: autocomplete and substitution ────────────────────────────
-  //
-  // PRECEDENCE: the composer now has two completion tracks, and exactly one
-  // may claim Enter / Tab / Esc at a time. Mentions win — they are tested
-  // first here and first in `handleKeyDown`, and an open mention query
-  // suppresses the emoji one outright.
-  //
-  // In practice the two cannot both be open: a query opens on '@' or ':' at
-  // the start of a word, and neither body alphabet contains the other's
-  // trigger character, so no caret position sits inside both. The ordering is
-  // stated anyway so that widening either alphabet has one obvious place to be
-  // reasoned about rather than two handlers quietly fighting over a key.
+  // :shortcode: autocomplete. Mentions take precedence for Enter/Tab/Esc.
   const [emojiDismissed, setEmojiDismissed] = useState(false);
   const emojiQuery =
     emojiDismissed || mentionQuery ? null : shortcodeQueryAt(message, caret);
-  // Loaded while the composer is focused rather than on the first colon: the
-  // standard half arrives over a dynamic import, and `:tada:` typed straight
-  // out has to resolve to the group's own emoji on the FIRST try, not on the
-  // second once a chunk landed. Focus is still after first paint, so the table
-  // stays out of the startup chunk exactly as #874 requires.
+  // Loaded on focus, so `:tada:` resolves on the first try without joining the startup chunk (#874).
   const shortcodeEntries = useShortcodeEntries(isFocused || emojiQuery !== null);
   const emojiSuggestions = emojiQuery
     ? rankShortcodeEntries(shortcodeEntries, emojiQuery.query)
     : [];
 
-  // Terminal skin: same rule as the mention ghost — a prefix match, offered
-  // only with the caret at the end of the line. The closing ':' is part of the
-  // ghost so what is shown is the `:joy:` that typing it out would produce.
   const emojiGhostTarget =
     skin === "terminal" && emojiQuery && caret === message.length
       ? emojiSuggestions.find((e) => e.shortcode.startsWith(emojiQuery.query))
@@ -626,10 +487,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   const showEmojiList = skin === "refined" && emojiSuggestions.length > 0;
 
-  // One highlight for both lists, because only one is ever open.
   const activeListLength = showSuggestList ? suggestions.length : emojiSuggestions.length;
 
-  // Keep the highlight in range as the candidate list narrows on each keystroke.
   useEffect(() => {
     setActiveIndex((prev) => (prev < activeListLength ? prev : 0));
   }, [activeListLength]);
@@ -640,9 +499,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       return;
     }
     pendingCaretRef.current = null;
-    // A passive effect, so it runs after RichTextInput's layout effect has
-    // rebuilt the projection — the offset it is given is meaningless against
-    // the previous DOM.
+    // Passive effect: runs after RichTextInput's layout effect rebuilt the projection.
     inputRef.current.setSelection(pending);
     setCaret(pending);
   }, [message]);
@@ -659,10 +516,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     setActiveIndex(0);
   }, [message, caret, draftKey, onValueChange]);
 
-  // Accepting from the list or the ghost writes the emoji plus a trailing
-  // space: the word is finished, and the user carries on typing. Typing the
-  // closing ':' yourself does NOT add one — see the substitution path in
-  // `onChange` — because that happens mid-word.
+  // List/ghost accept adds a trailing space; typing the closing ':' does not.
   const acceptEmoji = useCallback((entry: ShortcodeEntry) => {
     const query = shortcodeQueryAt(message, caret);
     if (!query) {
@@ -682,21 +536,15 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     onSend(message.trim(), attachments);
     setMessage("");
     setDraft(draftKey, "");
-    // Reset signals to "no longer typing" — covers the typing indicator
-    // publisher in the parent so the receiver doesn't keep us in the
-    // "still typing" state until TTL.
     onValueChange?.("");
-    // Do NOT revoke preview blob URLs here — they may still be referenced by
-    // optimistic message stubs in React Query cache. Let them be GC'd naturally.
+    // Don't revoke previews: optimistic stubs may still reference them.
     setAttachments([]);
     inputRef.current?.focus();
   };
   sendRef.current = handleSend;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Mention keys are handled BEFORE the Enter-sends branch: while a
-    // suggestion is on offer, Enter accepts it rather than sending a
-    // half-typed name, exactly as Slack and Discord behave.
+    // Before Enter-sends: Enter accepts a suggestion.
     if (showSuggestList) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -721,8 +569,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       }
     }
 
-    // Terminal skin: Tab accepts the ghosted completion. There is nothing to
-    // arrow through and nothing to dismiss beyond hiding the ghost.
     if (ghostTarget) {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -737,9 +583,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       }
     }
 
-    // `:shortcode:` list — the same key contract as the mention list, and
-    // reached only when no mention query is open (see the precedence note
-    // where `emojiQuery` is computed).
     if (showEmojiList) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -764,7 +607,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       }
     }
 
-    // Terminal skin: Tab accepts the ghosted shortcode.
     if (emojiGhostTarget) {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -779,16 +621,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       }
     }
 
-    // Bash-history hand-off into the message log. "First line" is the first
-    // LOGICAL line (no \n before the caret) — a soft-wrapped long first line
-    // counts wholesale, which errs toward the REPL behavior over caret
-    // movement, exactly like a shell with a wrapped prompt line.
-    //
-    // The selection is read from the input SYNCHRONOUSLY rather than off the
-    // `caret` state: a contentEditable reports caret moves through
-    // `selectionchange`, which is asynchronous, so two ArrowUps in quick
-    // succession would judge the second against the first one's stale offset
-    // and refuse to hand off. `<textarea>` had `selectionStart` for this.
+    // Hand off to the log on the first logical line. Read the selection synchronously: `selectionchange` is async.
     if (e.key === "ArrowUp" && onHistoryUp) {
       const selection = inputRef.current?.selection() ?? { start: 0, end: 0 };
       const collapsed = selection.start === selection.end;
@@ -808,12 +641,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     }
   };
 
-  // Returns true when the paste was a file and the text path must not run.
-  // RichTextInput has already prevented the browser's own (HTML) paste by the
-  // time this is called, so all this decides is whether plain text follows.
+  // True when the paste was a file and the text path must not run.
   const handlePaste = useCallback((e: React.ClipboardEvent): boolean => {
-    // Screenshots and images copied from web content come through as
-    // DataTransferItem files — handle these synchronously.
     const items = e.clipboardData.items;
     let hasFiles = false;
     for (let i = 0; i < items.length; i++) {
@@ -826,20 +655,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       return true;
     }
 
-    // For files copied from the OS file manager, WebKit doesn't expose the
-    // clipboard data — go through the bridge to read it via the Rust OS
-    // clipboard command. This probe is async and does not claim the paste, so
-    // the text half is inserted alongside exactly as it was before.
+    // WebKit hides OS file-manager copies; read them via the Rust clipboard command.
     readClipboardFiles().then((paths) => {
       if (paths.length > 0) {
         handlePaths(paths);
         return;
       }
-      // WebKitGTK doesn't expose clipboard images as DataTransferItem files
-      // the way macOS WebKit does, so screenshots / "copy image" from a
-      // browser fall through to here. Fetch the raster image from the OS
-      // clipboard as PNG bytes and import it on the same staging path a
-      // pasted `File` takes — no temp file on either route.
+      // WebKitGTK doesn't expose clipboard images as files; read PNG bytes from the OS.
       readClipboardImage().then((bytes) => {
         if (bytes) {
           handleBrowserFile(
@@ -851,14 +673,11 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     return false;
   }, [handleBrowserFile, handlePaths]);
 
-  // Mark or unmark an attachment sensitive (#1568).
   const toggleSensitive = useCallback((id: string) => {
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, sensitive: !a.sensitive } : a)));
   }, []);
 
-  // A marked attachment's cover is its blurhash, worked out from the preview
-  // once — when it is marked, or when its preview arrives if it was marked
-  // while still loading. Without one the cover is a plain surface.
+  // Blurhash for a marked attachment's cover, computed once.
   const blurhashAttemptedRef = useRef(new Set<string>());
   useEffect(() => {
     for (const att of attachments) {
@@ -879,22 +698,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     setAttachments((prev) => {
       const att = prev.find((a) => a.id === id);
       if (att?.preview) { URL.revokeObjectURL(att.preview); }
-      // Release the bytes, not just the card. The old code revoked the preview
-      // blob URL and dropped the array entry, and left the file it had written
-      // to the OS temp directory exactly where it was.
       const stagedId = att ? stagedIdOf(att) : null;
       if (stagedId) { void discardStagedAttachment(stagedId); }
       return prev.filter((a) => a.id !== id);
     });
   }, []);
 
-  // Unmount with attachments still queued — navigating away mid-compose,
-  // switching channels, closing a thread. Whatever is staged goes with the
-  // composer that staged it.
-  //
-  // Reads through a ref so the effect can depend on nothing and therefore run
-  // only on unmount; a dependency on `attachments` would fire this on every
-  // keystroke that changed the list and discard bytes still in use.
+  // Release whatever is still staged on unmount; via a ref so it runs only then.
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   useEffect(() => {
@@ -910,8 +720,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     <div
       className={`relative border-t border-line bg-bg ${className}`}
     >
-      {/* Refined skin's mention list. Anchored to this container with
-          `absolute`, never a portal or a fixed overlay. */}
+      {/* Anchored with `absolute`, never a portal. */}
       {showSuggestList && mentionQuery && (
         <MentionSuggestList
           candidates={suggestions}
@@ -922,9 +731,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         />
       )}
 
-      {/* Refined skin's `:shortcode:` list. Same anchoring, and it never
-          co-exists with the mention list — the two queries are mutually
-          exclusive. */}
       {showEmojiList && emojiQuery && (
         <EmojiSuggestList
           entries={emojiSuggestions}
@@ -935,7 +741,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         />
       )}
 
-      {/* Attachment previews */}
       {attachments.length > 0 && (
         <div
           className="px-2 py-2 flex items-start gap-2 flex-wrap border-b border-line"
@@ -966,10 +771,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </div>
       )}
 
-      {/* Input row — a single-line composer is exactly `--composer-h` (2rem
-          textarea box + py-1), and the sidebar / right-panel Close bars and
-          refined's voice strip floor on the same token, so all their borders
-          stay aligned with this one. */}
+      {/* Single-line height is `--composer-h`, shared with the Close bars so borders align. */}
       <div className="flex items-start gap-1 px-2 py-1 min-h-composer">
         <button
           onClick={handlePickFiles}
@@ -981,18 +783,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           <Plus className="w-4 h-4" />
         </button>
 
-        {/* Opens upward: the composer sits at the bottom of the window. The
-            panel is in-flow within the composer, never a portal.
-
-            `align="left"` — the panel's LEFT edge tracks this trigger, so it
-            grows rightwards across the message area. The default (`right`)
-            grows leftwards, and this trigger sits hard against the content
-            region's left edge, which AppShell clips with `overflow: hidden` —
-            so most of the panel was being cut off and left unclickable. */}
-        {/* h-8 = the textarea's single-row box (1.5rem line + py-1), so the
-            24px trigger centers on the first text line — vertically centered
-            at minimum composer height, and pinned to the first line (like the
-            +/send buttons) when the input grows. */}
+        {/* align="left": AppShell clips the content region's left edge. */}
         <EmojiPickerButton
           onSelect={insertAtCursor}
           placement="up"
@@ -1000,27 +791,15 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           className="h-8 flex items-center"
         />
 
-        {/* The composer's field. The ghost lives INSIDE it now (see
-            RichTextInput), so this box is no longer a positioning context for
-            an absolutely-positioned mirror — the mirror is gone.
-
-            At most one completion track ever offers a ghost (the two queries
-            are mutually exclusive, see the precedence note above), so the one
-            ghost slot carries both and keeps each track's own testid. */}
         <div className="relative flex-1 min-w-0">
           <RichTextInput
             ref={inputRef}
             testId="message-input"
             value={message}
             onChange={(next, nextCaret) => {
-              // Any edit re-opens suggestions that Esc had hidden.
               setMentionDismissed(false);
               setEmojiDismissed(false);
-              // Slack's direct substitution: the moment the user types the ':'
-              // that CLOSES a shortcode they know by heart, the emoji replaces
-              // the whole `:name:` and no list is involved. Gated on a
-              // single-character insertion so a paste that happens to end in a
-              // colon is left exactly as it was pasted.
+              // Slack-style direct substitution on typing the closing ':' (single-char inserts only).
               if (next.length === message.length + 1 && next[nextCaret - 1] === ":") {
                 const closed = completedShortcodeAt(next, nextCaret);
                 const entry = closed
@@ -1063,9 +842,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             style={{
               lineHeight: "1.5rem",
               minHeight: "1.5rem",
-              // Six lines, the same ceiling the measured auto-grow enforced —
-              // in rem now, so it tracks the user's font size instead of
-              // assuming a 16px root.
               maxHeight: "9rem",
               borderRadius: "4px",
               background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
@@ -1091,7 +867,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </button>
       </div>
 
-      {/* Pre-send preview lightbox */}
       {expandedPreview && (
         <div
           style={{

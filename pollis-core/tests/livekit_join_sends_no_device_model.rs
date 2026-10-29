@@ -1,26 +1,7 @@
 //! A LiveKit join must not tell the SFU what hardware the user is on (#1320).
 //!
-//! livekit 0.9's signal client reports a device model in every join — on desktop
-//! the SMBIOS product name, e.g. the motherboard model "MS-7E59" — and has no
-//! option to stop it. The SFU operator is untrusted for metadata, so the
-//! workspace patches the crate it reads that from (`patches/device-info`) to
-//! report nothing.
-//!
-//! ## The seam
-//!
-//! The SDK builds the join URL in private functions (`livekit-signaling`'s
-//! `get_livekit_url`), so this test goes through the real public entry point
-//! instead: `Room::connect`, with the same `RoomOptions::default()` the realtime
-//! path uses, against a fake SFU on loopback. The fake answers every request
-//! with 404, which walks the SDK through every request it makes on a failed
-//! join: the `/rtc/v1` WebSocket (join request as a protobuf in `join_request`),
-//! the `/rtc` v0 fallback (the model as a `device_model` query parameter), and
-//! the `/validate` probes. Every captured request is decoded and checked, and
-//! the test insists it saw both join forms, so it cannot pass by capturing
-//! nothing.
-//!
-//! Without the patch this fails on every desktop OS: the real crate never
-//! returns an empty model (it falls back to the string "Unknown").
+//! Guards the `patches/device-info` patch. A fake 404 SFU walks the SDK through
+//! both join forms (`/rtc/v1` protobuf and `/rtc` v0 `device_model` param).
 
 #![cfg(feature = "media")]
 

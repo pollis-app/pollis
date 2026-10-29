@@ -1,15 +1,9 @@
 //! THE M3 GATE (spec §11): a **full MLS round-trip, both directions**, driven
 //! purely through the TUI's own `pollis_tui::send` write layer + `pollis_tui::sync`.
 //!
-//! M2's `sync_smoke` proved one direction (A→B receive). M3 adds the return leg:
-//! B replies through the same `send` layer and A must decrypt it. Proving BOTH
-//! directions is what makes this a round-trip and closes the §11 M3 gate — the
-//! send path is symmetric, so a bug that only lets the DM *creator* send (or only
-//! the *acceptor*) would pass a one-directional test and fail here.
+//! Both directions, since a bug letting only the creator (or acceptor) send passes a one-way test.
 //!
-//! DM (not group) for the same reason as `sync_smoke`: identical MLS crypto path,
-//! a smaller DS surface (`dm/create` + `dm/accept` + `messages/send`, all already
-//! wired in the rig — no `groups/create` / `channels/create` / `invites/*`).
+//! A DM for the same reason as `sync_smoke`: same MLS path, smaller DS surface.
 //!
 //! ## Scenario
 //! 1. A and B sign up (first-device signup through the DS).
@@ -19,15 +13,13 @@
 //! 4. B sends "pong from B" via `pollis_tui::send`; A drives `sync::sync_rounds`
 //!    and decrypts exactly "pong from B", attributed to B. (the NEW direction)
 //! 5. Each side ends with BOTH messages, oldest-first in send order.
-//! 6. Both clients' main handles are read-only — every write went through the DS.
 
 mod common;
 
 use common::{spawn_world, TestClient};
 
 /// Read a DM and return its messages oldest-first as `(sender_id, content)`
-/// pairs. The core returns newest-first (a page is `limit` newest rows), so we
-/// reverse to assert against send order.
+/// pairs; the core returns newest-first, so reverse.
 async fn conversation(client: &TestClient, dm_id: &str) -> Vec<(String, String)> {
     let page = client.read_dm(dm_id).await;
     page.messages
@@ -47,14 +39,12 @@ async fn full_mls_round_trip_both_directions_via_send_layer() {
     let alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    // ── A opens a DM to B; B accepts the pending request ──
     let dm_id = alice.create_dm(&bob_profile.id).await;
     let requests = bob.dm_requests().await;
     assert_eq!(requests.len(), 1, "B should see one pending DM request from A");
     assert_eq!(requests[0].id, dm_id, "the pending request is A's DM");
     bob.accept_dm(&dm_id).await;
 
-    // ── Direction 1: A → B, through the TUI's send layer ──
     alice.send_text(&dm_id, "ping from A").await;
     bob.sync_rounds(4).await;
 
@@ -65,11 +55,9 @@ async fn full_mls_round_trip_both_directions_via_send_layer() {
         "B should have decrypted exactly A's one message, got: {bob_view:#?}",
     );
 
-    // ── Direction 2 (the NEW leg): B → A, through the TUI's send layer ──
     bob.send_text(&dm_id, "pong from B").await;
     alice.sync_rounds(4).await;
 
-    // ── Both sides now hold BOTH messages, oldest-first in send order ──
     let expected = vec![
         (alice_profile.id.clone(), "ping from A".to_string()),
         (bob_profile.id.clone(), "pong from B".to_string()),
@@ -81,22 +69,11 @@ async fn full_mls_round_trip_both_directions_via_send_layer() {
         "A should hold both messages in send order (A's own + B's reply), got: {alice_view:#?}",
     );
 
-    // B: needs one more sync to ingest its own view is unnecessary (B stored its
-    // own send locally), but drive a round so both ends converge identically.
+    // B stored its own send, but a round makes both ends converge identically.
     bob.sync_rounds(2).await;
     let bob_view = conversation(&bob, &dm_id).await;
     assert_eq!(
         bob_view, expected,
         "B should hold both messages in send order (A's + B's own), got: {bob_view:#?}",
     );
-
-    // ── Invariant: every read AND write went through the DS.
-    //
-    //    This used to be a runtime assertion: each client's main handle was a
-    //    `query_only` view, so a direct write had to fail. #987 replaced the
-    //    property with a stronger one that no runtime check can express —
-    //    `pollis-core` does not link `libsql` at all, so a client cannot open a
-    //    connection to open. The tripwire is
-    //    `pollis-core/tests/no_client_side_remote_reads.rs`, which fails if the
-    //    dependency ever comes back by any path.
 }

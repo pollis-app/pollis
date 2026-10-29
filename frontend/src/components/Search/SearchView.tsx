@@ -10,34 +10,10 @@ import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
 import { PressButton } from "../ui/PressButton";
 
-/**
- * The `/learn` entry explaining why search is on-device.
- *
- * A trust asset, not an apology: the server holds ciphertext, so it CANNOT
- * search for you, and the limits of the on-device corpus follow from that
- * rather than from an unfinished feature.
- */
+/** Why search is on-device: the server holds only ciphertext. */
 const LEARN_ON_DEVICE_SEARCH_URL = "https://pollis.com/learn#on-device-search";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Render a snippet with the ranges Rust computed.
- *
- * The old highlighter built a `g`-flagged regex from the raw query and reused
- * it across `.test()` calls, so its `lastIndex` carried between parts and every
- * other match failed to highlight. There is no regex here at all: the backend
- * returns `[start, end)` pairs in UTF-16 code units — i.e. plain string indices
- * — and this slices between them. It is also what keeps `<mark>` out of
- * `dangerouslySetInnerHTML`, so a message body can never become markup.
- *
- * Each slice is then rendered through `EmojiText`, the same component the
- * message log uses, so a `<:shortcode:hash>` token shows the image instead of
- * its raw source text. A highlight range that happens to cut a token in half
- * simply leaves that fragment literal — `splitEmojiSegments` only accepts
- * well-formed tokens — which degrades to today's behaviour rather than
- * breaking.
- */
+/** Slices the snippet by Rust's UTF-16 ranges: no regex, no innerHTML. */
 export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) => {
   const parts = useMemo(() => {
     const out: { text: string; mark: boolean }[] = [];
@@ -75,8 +51,7 @@ export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snipp
   );
 };
 
-/** `#general` in Acme, or `@bob`, or the bare id when this device has never
- *  listed the conversation. */
+/** `#general` in Acme, `@bob`, or the bare id. */
 function conversationLabel(result: SearchResult): string {
   if (result.conversation_kind === "channel" && result.conversation_name) {
     return result.group_name
@@ -89,18 +64,11 @@ function conversationLabel(result: SearchResult): string {
   return result.conversation_id;
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-
 interface SearchViewProps {
-  /** Open the conversation and jump to the message. */
   onOpenResult: (result: SearchResult) => void;
-  /** Take the user to the retention setting from the corpus footer. */
   onOpenRetentionSettings?: () => void;
-  /** Query handed over from the Cmd+K navigator, so the page opens searching. */
   initialQuery?: string;
 }
-
-// ─── SearchView ───────────────────────────────────────────────────────────────
 
 export const SearchView: React.FC<SearchViewProps> = ({
   onOpenResult,
@@ -109,15 +77,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
 }) => {
   const { t } = useTranslation("search");
   const [inputValue, setInputValue] = useState(initialQuery);
-  // Seeded, not debounced: a handed-off query is already what the user meant,
-  // so it should not spend 300 ms looking like it did nothing.
+  // Seeded, not debounced: a handed-off query searches at once.
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
-  // Null means "let the backend decide" — relevance globally, recency inside a
-  // conversation. It only becomes a value once the user overrides it.
+  // Null = backend default (relevance globally, recency in a conversation).
   const [sort, setSort] = useState<SearchSort | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounce the input: wait 300 ms after the user stops typing before searching
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
@@ -143,8 +108,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
   );
   const total = data?.pages[0]?.total ?? 0;
   const corpus: SearchCorpus | null = data?.pages[0]?.corpus ?? null;
-  // The ordering the backend actually applied, which is what the toggle shows
-  // when the user has not overridden it.
   const activeSort: SearchSort = sort ?? data?.pages[0]?.sort ?? "relevant";
 
   const renderEmptyState = () => {
@@ -167,9 +130,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
       );
     }
 
-    // Not "No results". A message can be missing for five reasons that have
-    // nothing to do with the query, and every one of them is a property of how
-    // end-to-end encryption works rather than a bug (#850 §6).
+    // Not "No results": E2EE has several reasons a message may be missing (#850 §6).
     return (
       <div
         data-testid="search-no-results"
@@ -192,7 +153,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   return (
     <div data-testid="search-view" className="flex flex-col h-full bg-bg">
-      {/* Search input */}
       <div className="px-4 py-3 flex-shrink-0 border-b border-line">
         <TextInput
           data-testid="search-input"
@@ -208,7 +168,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
         <p className="text-[10px] font-mono mt-1 text-muted">{t("view.filterHint")}</p>
       </div>
 
-      {/* Result count + sort toggle */}
       {hasResults && (
         <div className="px-4 py-2 flex-shrink-0 flex items-center justify-between gap-2 border-b border-line">
           <span data-testid="search-total" className="text-xs font-mono text-muted">
@@ -237,7 +196,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
         </div>
       )}
 
-      {/* Results */}
       <div className="flex-1 overflow-y-auto">
         {hasResults ? (
           <>
@@ -250,7 +208,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     onClick={() => onOpenResult(result)}
                     className="w-full text-start px-4 py-3 bg-transparent hover:bg-hover border-b border-line"
                   >
-                    {/* Sender and timestamp row */}
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <span
                         data-testid="search-result-sender"
@@ -263,7 +220,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Where the message lives */}
                     <div
                       data-testid="search-result-conversation"
                       className="text-xs font-mono mb-1 truncate text-muted"
@@ -273,7 +229,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
                       {result.has_attachment ? ` · ${t("view.hasAttachment")}` : ""}
                     </div>
 
-                    {/* Message snippet with highlight */}
                     <div className="text-xs font-mono text-dim" data-testid="search-result-snippet">
                       <HighlightedSnippet snippet={result.snippet} />
                     </div>
@@ -303,9 +258,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
         )}
       </div>
 
-      {/* What the corpus actually is. Persistent, because "no results" and
-          "4,000 results" both mean something different depending on how much
-          history this device holds. */}
+      {/* Persistent: result counts depend on how much history this device holds. */}
       {corpus && (
         <CorpusFooter corpus={corpus} onOpenRetentionSettings={onOpenRetentionSettings} />
       )}

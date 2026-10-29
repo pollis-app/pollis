@@ -10,33 +10,12 @@ interface MessageBodyProps {
   ctx: MessageRenderContext;
 }
 
-// Hoisted so every row shares one function identity — inline arrows here would
-// hand `EmojiText` a new `renderText` on every render of every row.
+// Hoisted: one function identity across rows.
 const renderLinkified = (text: string, key: string | number) => (
   <LinkifiedText key={key} text={text} />
 );
 
-/**
- * A message body: `@mentions` rendered as tokens, everything else handed to
- * `LinkifiedText` unchanged (#843).
- *
- * Only mentions that RESOLVE are tokenized — `@all`, and any name belonging to
- * someone in this conversation. An `@nobody` stays plain text, which keeps the
- * rendering honest: a highlighted token means a real person was actually
- * notified. The resolution set is the same conversation roster the composer
- * suggests from, so rendering never reveals a user the reader couldn't
- * already see.
- *
- * `LinkifiedText` is untouched by this — it still owns URL detection, and each
- * non-mention slice is delegated to it, so a message can contain both.
- *
- * #874: this used to call `useSkin()` and `useMentionCandidates()` itself, i.e.
- * two React Query observers and five MobX reactions PER MESSAGE, and rebuilt
- * the resolution Set per row. All of that is list-wide, so it now arrives via
- * `ctx` — one subscription for the whole log. The component reads no
- * observables at all as a result, so plain `React.memo` is the right wrapper;
- * `observer()` would only add a reaction that tracks nothing.
- */
+/** `@mentions` that resolve become tokens (#843); the rest goes to `LinkifiedText`. */
 export const MessageBody: React.FC<MessageBodyProps> = React.memo(({ text, ctx }) => {
   const { skin, mentionNames, selfName } = ctx;
 
@@ -57,7 +36,6 @@ export const MessageBody: React.FC<MessageBodyProps> = React.memo(({ text, ctx }
           />,
         );
       }
-      // `@all` speaks to everyone, so it is a mention of the reader too.
       const isSelf = m.name === "all" || m.name === selfName;
       nodes.push(
         <MentionToken key={`m${m.start}`} name={m.raw} isSelf={isSelf} skin={skin} />,

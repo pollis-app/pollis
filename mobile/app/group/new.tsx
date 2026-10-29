@@ -48,10 +48,7 @@ function NewGroup() {
           if (appStore.currentUser) {
             writeLastGroupId(appStore.currentUser.id, group.id);
           }
-          // Land on the Groups tab with the new group selected (pill strip,
-          // its channel panel, the tab bar) — not a standalone group page.
-          // Its #General (if opted in) renders once the groups list
-          // refetches. dismissTo pops this form back to the tabs.
+          // Land on the Groups tab with the new group selected, not a standalone page.
           router.dismissTo("/(tabs)/groups");
         },
       },
@@ -83,8 +80,7 @@ function NewGroup() {
             placeholder={t("mobile:group.new.descriptionPlaceholder")}
           />
         </LabeledField>
-        {/* Opt-in, off by default, like desktop. No voice option: voice is
-            not supported on mobile. */}
+        {/* Opt-in, like desktop. No voice option on mobile. */}
         <Card>
           <Pressable
             accessibilityRole="switch"

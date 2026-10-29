@@ -1,20 +1,6 @@
 import { makeAutoObservable } from "mobx";
 
-/**
- * The message a permalink asked us to jump to (#854).
- *
- * Ephemeral UI state, so it lives in MobX rather than the URL. Two reasons:
- *
- *  1. The root route's `validatePanelSearch` deliberately drops every search
- *     param it does not know, so a `?m=` would not survive navigation anyway.
- *  2. A message id is metadata. Keeping it out of the URL keeps it out of
- *     navigation history, which is the right default for a pointer at someone's
- *     private conversation.
- *
- * The flow is: resolve the permalink locally → set the target → navigate →
- * `MessageList` notices a target for the conversation it is rendering, scrolls
- * to it, flashes the highlight, and clears it.
- */
+/** The permalink jump target (#854); MobX, not the URL, so the id stays out of history. */
 class MessageJumpStore {
   /** Conversation the pending jump belongs to. */
   conversationId: string | null = null;
@@ -27,24 +13,12 @@ class MessageJumpStore {
     makeAutoObservable(this);
   }
 
-  /** Queue a jump. Called after a permalink resolves successfully. */
   request(conversationId: string, messageId: string) {
     this.conversationId = conversationId;
     this.messageId = messageId;
   }
 
-  /**
-   * Consume the pending jump, which the caller has confirmed it can satisfy.
-   *
-   * Claiming is keyed on the message the list actually RENDERS, not on a
-   * conversation id: `MessageList`'s `conversationId` prop is the MLS *group*
-   * id for channels (it drives roster banners), so comparing against it would
-   * never match a channel permalink. "Do I show this message?" is both the
-   * correct question and the one that cannot drift.
-   *
-   * Moves the id to `highlightedMessageId` so the jump fires exactly once per
-   * request and cannot re-trigger on every re-render.
-   */
+  /** Consume the jump if this message is rendered; moves it to `highlightedMessageId` so it fires once. */
   claimMessage(messageId: string): boolean {
     if (this.messageId !== messageId) {
       return false;

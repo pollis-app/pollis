@@ -1,10 +1,4 @@
-/*
- * Search lives at the top of Self, and the third tab is a shortcut to Scan
- * to sign in a device (#1550). Pinned at the source level: there is no
- * Search tab any more, Self swaps its menu for the results in place (no
- * navigation), and the shield pushes the link-device page instead of
- * switching tabs, so back returns to the tab it was tapped from.
- */
+/* Search lives at the top of Self; the third tab is a shortcut to Scan to sign in a device (#1550). */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -29,7 +23,6 @@ test("the tab bar's third cell is the shield shortcut to link-device", () => {
   assert.match(bar, /<Icon\.shield size=\{ICON\}/);
   assert.match(bar, /push: \{ pathname: "\/self\/link-device", params: \{ from: "tab" \} \}/);
   assert.match(bar, /router\.push\(tab\.push\)/);
-  // Tabs are matched by route name, never by index: the shortcut has no route.
   assert.doesNotMatch(bar, /state\.index === i/);
   assert.match(bar, /testID=\{`tab-\$\{tab\.name\}`\}/);
   assert.match(bar, /testID=\{`badge-\$\{tab\.name\}`\}/);
@@ -42,9 +35,7 @@ test("Self swaps its menu for the search results in place", () => {
   assert.match(self, /testID="input-search"/);
   assert.match(self, /testID="btn-search-cancel"/);
   assert.match(self, /testID="btn-search-clear"/);
-  // The account lookup stays exact-match on return only (#1216).
   assert.match(self, /onSubmitEditing=\{\(\) => \{\s*if \(trimmed\.length >= 2\) \{\s*setUserQuery\(trimmed\);/);
-  // A group's search field opens it.
   assert.match(
     read("components/groups/GroupPanel.tsx"),
     /rootRouter\.navigate\(\{ pathname: "\/\(tabs\)\/self", params: \{ search: "1" \} \}\)/,
@@ -66,7 +57,6 @@ test("a second tap on the focused tab reaches only that tab's listeners", () => 
   off();
   emitTabReselect("self");
   assert.equal(self, 1);
-  // The bar re-emits only for the focused tab; Self ends its search on it.
   assert.match(read("components/TabBar.tsx"), /if \(focused\) \{\s*emitTabReselect\(tab\.name\);\s*return;/);
   assert.match(read("app/(tabs)/self.tsx"), /onTabReselect\("self", endSearch\)/);
 });

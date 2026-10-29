@@ -1,17 +1,4 @@
-/*
- * Group membership without timeline lines (#1506).
- *
- *   - No "X joined / left / added a device" line ever renders in a channel,
- *     whatever a roster_changed event carries.
- *   - A member's messages carry a small "new" tag for 7 days after their
- *     server-side `joined_at`, in every channel of the group. The group's
- *     creator never carries it.
- *   - The member page lists pending invites under "Invited" (invitee, who
- *     invited, when); the inviter and admins can revoke.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true` (see
- * playwright.config.js).
- */
+// Group membership without timeline lines (#1506): "new" tag for 7 days; pending invites listed.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -178,7 +165,6 @@ test("an admin sees every pending invite and can revoke any of them", async ({ p
   await expect(ola).toContainText("ola");
   await expect(ola).toContainText("invited by mia");
   await expect(pip).toContainText("invited by dana");
-  // Pending invitees are not members.
   await expect(page.getByTestId("member-row-u_ola")).toHaveCount(0);
 
   await page.getByTestId("invited-revoke-u_pip").click();
@@ -186,7 +172,6 @@ test("an admin sees every pending invite and can revoke any of them", async ({ p
   await expect(ola).toBeVisible();
 
   await page.getByTestId("invited-revoke-u_ola").click();
-  // The section goes away with its last invite.
   await expect(section).toHaveCount(0);
 });
 

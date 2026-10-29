@@ -1,21 +1,7 @@
-// Playwright config for the UI-level specs (`e2e/*.spec.js`).
-//
-// These drive the BROWSER build of the frontend with `VITE_PLAYWRIGHT=true`,
-// which vite-aliases `@tauri-apps/api/*` to the mocks in
-// `frontend/src/__mocks__/`. That is the whole point: a composer-interaction
-// test needs the real React tree and the real CSS tokens, but nothing from
-// MLS, the delivery service, or Turso — so it runs anywhere, with no backend.
-//
-// The WebDriver scenarios (`e2e/*.js`, run via `pnpm e2e <name>`) are a
-// different tool for a different job: they drive the real native Tauri shell
-// end-to-end. Neither replaces the other.
+// Playwright config for the UI specs: browser build with Tauri mocked (VITE_PLAYWRIGHT=true), no backend.
 const { defineConfig, devices } = require("@playwright/test");
 
-// Derived from the checkout path, not fixed, and overridable with
-// `POLLIS_E2E_PORT`. A hardcoded port plus `reuseExistingServer` silently
-// serves ANOTHER checkout's dev server when two worktrees run the suite at
-// once — which is how a locale branch once "passed" 100 tests against a
-// different branch's code. A wrong-but-green run is worse than a failure.
+// Per-checkout port (POLLIS_E2E_PORT overrides): a fixed one plus reuseExistingServer serves another worktree.
 const crypto = require("node:crypto");
 const PORT =
   Number(process.env.POLLIS_E2E_PORT) ||
@@ -28,9 +14,6 @@ const PORT =
 
 module.exports = defineConfig({
   testDir: __dirname,
-  // Both dialects: mentions (#843) wrote .spec.js, bookmarks (#854) wrote
-  // .spec.ts. Playwright handles TS natively, so one config runs both rather
-  // than the repo carrying two configs and two script names.
   testMatch: /.*\.spec\.(js|ts)$/,
   outputDir: `${__dirname}/artifacts/playwright`,
   // Composer interaction is keystroke-by-keystroke; give it room on a cold

@@ -1,11 +1,6 @@
 //! The Vault (#107), end to end through the real command pipeline.
 //!
-//! The product promise under test: the vault behaves like cloud storage —
-//! every entry persists across devices (the stated inversion of "a new device
-//! starts empty", achieved by deriving the vault key from the ACCOUNT
-//! identity key), pin/unpin and edits sync, deletes are gone everywhere, and
-//! the server holds ciphertext it can neither read nor tell a pin flip from
-//! an edit.
+//! The vault key derives from the account identity, so entries persist across devices.
 
 use crate::harness::{wipe, writable_remote, TestClient};
 use serial_test::serial;
@@ -14,12 +9,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// Wipe the local decrypted cache, simulating what a brand-new device holds
-/// locally: nothing. The next `get_vault_messages` must rebuild everything
-/// from the remote ciphertext using only the account identity key — which is
-/// exactly the new-device story, exercised without a second enrollment
-/// (harness devices of one user share the local DB file, so a real second
-/// device would vacuously share the cache too).
+/// Simulates a new device (harness devices share the local DB, so a real one would not).
 async fn wipe_local_vault_cache(client: &TestClient) {
     let guard = client.state.local_db.lock().await;
     let db = guard.as_ref().expect("signed in");
@@ -50,8 +40,7 @@ async fn vault_entries_rebuild_from_remote_ciphertext_alone() {
         )
         .await;
 
-    // Pin the first entry — on the wire this is indistinguishable from an
-    // edit, and the flag must survive the round trip.
+    // A pin is indistinguishable from an edit on the wire.
     alice
         .invoke_json(
             "set_vault_message_pinned",
@@ -59,7 +48,6 @@ async fn vault_entries_rebuild_from_remote_ciphertext_alone() {
         )
         .await;
 
-    // The breach view: rows exist, and carry neither the words nor the flag.
     let remote = writable_remote().await;
     let conn = remote.conn().await.expect("conn");
     let mut rows = conn
@@ -85,8 +73,6 @@ async fn vault_entries_rebuild_from_remote_ciphertext_alone() {
         );
     }
 
-    // The new-device moment: local cache gone, remote ciphertext + account
-    // key are everything. The vault must come back whole, pin flag included.
     wipe_local_vault_cache(&alice).await;
     let listed = alice
         .invoke_json(
@@ -149,7 +135,6 @@ async fn edits_and_deletes_are_authoritative_on_the_server() {
         )
         .await;
 
-    // Rebuild from remote: the edit stuck, the delete stuck.
     wipe_local_vault_cache(&alice).await;
     let listed = alice
         .invoke_json(
@@ -161,7 +146,6 @@ async fn edits_and_deletes_are_authoritative_on_the_server() {
     assert_eq!(listed.len(), 1, "the deleted entry must be gone from the remote");
     assert_eq!(listed[0]["content"].as_str().unwrap(), "draft two");
 
-    // And search finds the edited text, not the original.
     let hits = alice
         .invoke_json(
             "search_vault_messages",
@@ -180,8 +164,6 @@ async fn edits_and_deletes_are_authoritative_on_the_server() {
     drop(alice);
 }
 
-/// The vault is PERSONAL: another account neither reads nor writes it, and
-/// its own vault stays empty.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn another_account_cannot_touch_the_vault() {
@@ -200,10 +182,7 @@ async fn another_account_cannot_touch_the_vault() {
         .await;
     let entry_id = entry["id"].as_str().unwrap().to_string();
 
-    // Bob asking for ALICE's vault: the DS refuses the sync (signed identity
-    // wins over the claimed user), and the command then serves BOB's local
-    // cache — which is empty. Either surface is fine; alice's content must
-    // not be.
+    // The DS refuses the sync and the command serves bob's own (empty) cache.
     let stolen = bob
         .invoke_try(
             "get_vault_messages",
@@ -217,7 +196,6 @@ async fn another_account_cannot_touch_the_vault() {
         );
     }
 
-    // Bob deleting alice's entry by replaying its id is a silent no-op.
     let _ = bob
         .invoke_try(
             "delete_vault_message",
@@ -245,16 +223,7 @@ async fn another_account_cannot_touch_the_vault() {
     drop(bob);
 }
 
-/// A Vault file is collected when the last entry holding it goes (#1491) —
-/// and not a moment before. Until #1491 deleting an entry released its DS
-/// references and nothing ever collected the file: its `attachment_object`
-/// row (and its stored object) stayed for the life of the account.
-///
-/// The flows world has no object storage, so the object row stands in for the
-/// upload: it is seeded server-side exactly as `/v1/attachments/register`
-/// leaves it, and the presigned DELETE the client then asks for fails
-/// harmlessly (no broker). The live-storage half is the vault soak's
-/// (`tests/vault_soak.rs`): object 404, rows gone, cache entry gone.
+/// A Vault file is collected when its last entry goes (#1491); the live-storage half is `tests/vault_soak.rs`.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn deleting_the_last_entry_that_holds_a_file_collects_it() {
@@ -308,7 +277,6 @@ async fn deleting_the_last_entry_that_holds_a_file_collects_it() {
         ids.push(e["id"].as_str().unwrap().to_string());
     }
 
-    // Two entries hold the file; deleting one must leave it.
     alice
         .invoke_json(
             "delete_vault_message",
@@ -317,7 +285,6 @@ async fn deleting_the_last_entry_that_holds_a_file_collects_it() {
         .await;
     assert_eq!(object_rows().await, 1, "a file another entry still holds was collected");
 
-    // An edit that drops it from the last entry releases it — collected.
     alice
         .invoke_json(
             "edit_vault_message",

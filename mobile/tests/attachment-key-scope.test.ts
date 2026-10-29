@@ -1,16 +1,4 @@
-/*
- * Attachment key scope (#1382).
- *
- * Attachments are sealed under a key only members can reach: the newest key
- * of the conversation's MLS-wrapped file key ring, or the account's Vault
- * key. The parser turns each `_att` reference into the scope Rust needs to
- * open it, and must never hand Rust a scope for a reference it cannot open —
- * a pre-#1382 reference (sealed under the retired content-hash scheme), an
- * entry still uploading, or a preview-only surface. The crypto itself is
- * covered by pollis-core's file_keys tests and src-tauri/tests/flows/file_keys.rs.
- *
- *   node --test mobile/tests/
- */
+/* Attachment key scope (#1382): the parser never hands Rust a scope for a reference it cannot open. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseContent } from "../lib/messageContent.ts";

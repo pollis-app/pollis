@@ -1,44 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client DM DELIVERY + READ RECEIPTS E2E (issue #857).
- *
- * Modelled on two-client-dm-reply.js — same isolation and backend assumptions
- * (two isolated app instances, one shared external backend from
- * start-backend.sh, one Vite server).
- *
- * What this proves that the Rust tests cannot: that the two receipt signals
- * actually travel between two real clients over a real Delivery Service, and
- * that they land on screen for the SENDER as distinct visual states.
- *
- * Choreography:
- *   1. A + B sign up; A DMs B by email; B accepts the request.
- *   2. A sends a message and B is left on a DIFFERENT screen (Home). B's
- *      background ingest fetches and decrypts the envelope, so B emits a
- *      DELIVERED receipt — but B has not looked at the message.
- *   3. A's row for that message reaches `data-receipt-state="delivered"`.
- *      Asserting the intermediate state is the point: it is what shows the two
- *      signals are genuinely separate, rather than "read" being emitted the
- *      moment anything is decrypted.
- *   4. B opens the DM, so the message is on screen in a focused window and B's
- *      dwell timer elapses. B emits a READ receipt.
- *   5. A's row advances to `data-receipt-state="read-all"`.
- *
- * A switches to the refined skin first: the terminal skin (the default) draws
- * no receipt ticks at all, so there would be nothing on screen to assert on.
- *
- * The step-3 assertion is deliberately ordered BEFORE step 4: if the two
- * signals were conflated, the row would jump straight to a read state and the
- * delivered wait would time out.
- *
- * ── PREREQUISITE (cross-cutting, see scratchpad/FEAT-COORDINATION.md) ────────
- * The `ReceiptIndicator` component (frontend/src/components/Message/
- * ReceiptIndicator.tsx) must be rendered inside the message row. MessageItem.tsx
- * is owned by the #843 agent, so that one-line wiring is applied by the lead at
- * integration. Until it is, this scenario fails at the step-3 wait — which is
- * the correct, honest failure: there is no indicator on screen to verify.
- *
- * On failure, dumps per-client A-FAIL.* / B-FAIL.* into e2e/artifacts/.
- */
+// Delivery + read receipts (#857), refined skin: A's row shows delivered before B opens the DM, then read-all.
 
 const fs = require("fs");
 const path = require("path");
@@ -90,10 +51,7 @@ async function signUp(browser, email, tag) {
   console.log(`[receipts] ${tag}: reached app-ready`);
 }
 
-/**
- * Switch skin through the real Preferences UI, as `invite-links.js` does.
- * Receipts render only in the refined skin.
- */
+/** Switch skin via Preferences; receipts render only in the refined skin. */
 async function setSkin(browser, skin, tag) {
   console.log(`[receipts] ${tag}: switching to ${skin} skin`);
   await browser.execute(() => { window.history.pushState({}, "", "/preferences"); window.dispatchEvent(new PopStateEvent("popstate")); });
@@ -147,7 +105,6 @@ async function messageVisible(browser, token) {
   }, token);
 }
 
-// Open the (only) DM conversation on this client — Home -> DMs -> first option.
 async function openDm(browser) {
   await h.clickTestId(browser, "sidebar-row-dms").catch(() => {});
   await h.sleep(1000);
@@ -157,9 +114,7 @@ async function openDm(browser) {
   }
 }
 
-// Park B somewhere that is NOT the conversation, so its background ingest still
-// runs (producing a DELIVERED receipt) while no message is ever on screen. This
-// is what separates the two signals in this test.
+// Park B off the conversation: background ingest sends DELIVERED while nothing is on screen.
 async function leaveDm(browser) {
   await h.clickTestId(browser, "sidebar-row-account").catch(() => {});
   await h.sleep(500);
@@ -198,9 +153,7 @@ async function receiptState(browser, token) {
   }, token);
 }
 
-// Wait until A's row for `token` shows one of `wanted`. `forbidden` states fail
-// fast: that is how "delivered must not silently mean read" is enforced rather
-// than merely hoped for.
+// Wait for one of `wanted` on A's row; `forbidden` states fail fast (delivered must not mean read).
 async function waitForReceiptState(browser, token, wanted, forbidden, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let last = null;

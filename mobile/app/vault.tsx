@@ -1,14 +1,4 @@
-// The Vault (#107; mobile #1316): a private, end-to-end-encrypted space that
-// works like a chat with yourself — Signal's Note to Self, with Drive
-// semantics. Entries sync across every enrolled device (the account key
-// decrypts them, so a new device starts FULL here, not empty), files ride
-// the normal attachment pipeline, and the Media toggle shows the same
-// content as a Photos-style grid. Port of desktop's
-// frontend/src/pages/Vault.tsx over the same core commands.
-//
-// Native patterns where desktop has pointer ones: a long press opens the
-// entry sheet (desktop's hover pin/edit/delete), and edit and delete replace
-// the composer exactly as desktop's bars do.
+// The Vault (#1316): a chat with yourself, synced to every enrolled device; port of desktop's Vault.tsx.
 
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Text, View } from "react-native";
@@ -55,15 +45,12 @@ import { useTheme } from "../components/theme";
 
 type VaultView = "chat" | "media";
 
-// What a failed save says, by what the user can do about it (#1497).
 const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
   offline: "mobile:vault.saveFailedOffline",
   tooLarge: "mobile:vault.saveFailedTooLarge",
   other: "mobile:vault.saveFailed",
 };
 
-// Rows of the inverted list — entries interleaved with day separators,
-// newest first.
 type VaultListItem =
   | { type: "sep"; key: string; label: string }
   | { type: "entry"; key: string; entry: VaultMessage };
@@ -95,8 +82,7 @@ function VaultScreen() {
   const visible = useMemo(() => filterVaultEntries(entries, query), [entries, query]);
   const allAttachments = useMemo(() => vaultAttachments(entries), [entries]);
 
-  // Chronological with a separator before each day's first entry, then
-  // reversed for the inverted list (index 0 = newest, at the bottom).
+  // Chronological with day separators, then reversed for the inverted list.
   const items = useMemo(() => {
     const out: VaultListItem[] = [];
     let lastKey = "";
@@ -133,8 +119,7 @@ function VaultScreen() {
     send.mutate(
       { text, attachments },
       {
-        // Nothing is lost on a failed save: the draft comes back unless the
-        // user has already started another one.
+        // A failed save puts the draft back unless another one was started.
         onError: () => {
           setDraft((current) => (current ? current : text));
           setPendingAttachments((current) => (current.length > 0 ? current : attachments));
@@ -143,10 +128,8 @@ function VaultScreen() {
     );
   };
 
-  // Images from the library — the same picker and upload flow as the chat.
   const onAttach = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      // Photos and videos, as desktop takes both (#1585).
       mediaTypes: ["images", "videos"],
       allowsMultipleSelection: true,
       quality: 1,
@@ -166,7 +149,6 @@ function VaultScreen() {
 
   const armDelete = useCallback((entry: VaultMessage) => {
     setEditTarget(null);
-    // The first tap of a two-tap confirm warns by touch (#1286).
     haptic("confirmArm");
     setPendingDeleteId(entry.id);
   }, []);
@@ -248,7 +230,7 @@ function VaultScreen() {
           paddingTop: space.xs,
         }}
       >
-        {/* A view switch is free to undo: touch-down (#1529). */}
+        {/* Touch-down (#1529). */}
         <Chip
           testID="chip-vault-view-chat"
           pressIn
@@ -322,12 +304,10 @@ function VaultScreen() {
             data={items}
             keyExtractor={(item) => item.key}
             renderItem={renderItem}
-            // `renderItem` is memoised: re-render the rows on a palette change.
             extraData={accentHex}
             style={{ flex: 1 }}
             keyboardShouldPersistTaps="handled"
-            // An inverted list pins short content to the visual bottom; these
-            // anchor a short vault to the top instead (the chat's rule).
+            // Anchor a short vault to the top (the chat's rule).
             contentContainerStyle={{
               paddingTop: 4,
               paddingBottom: 12,
@@ -352,7 +332,6 @@ function VaultScreen() {
               >
                 {t(SAVE_FAILED_COPY[vaultSaveFailure(send.error)])}
               </Text>
-              {/* The draft is already back in the composer; this sends it again. */}
               <Button variant="subtle" onPress={onSend} testID="btn-vault-retry">
                 {t("mobile:vault.retry")}
               </Button>
@@ -410,7 +389,7 @@ function VaultScreen() {
           onEdit={() => {
             const entry = actionTarget;
             setActionTarget(null);
-            // Focus the edit field only once the sheet's Modal is gone.
+            // Only once the sheet's Modal is gone.
             afterSheetClose(() => startEdit(entry));
           }}
           onDelete={() => {

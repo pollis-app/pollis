@@ -1,40 +1,15 @@
-//! Domain C (#419) — profile / preferences / blocks / DMs. Every CLIENT remote
-//! write in this domain routes through the DS, copying the domain-A shape in
-//! [`crate::messages`] verbatim:
-//!
-//!   - **Bodies** — one `#[derive(Deserialize)] *Body` per endpoint, plain JSON
-//!     (no binary fields in this domain).
-//!   - **Pure conn-level fns** — `apply_*` take a bare [`Connection`] (the MAIN
-//!     DB), the authenticated user (`Option<&str>`; `None` only on the no-auth
-//!     path), and a parsed `*Body`. They embed BOTH the authorization decision
-//!     AND the write, returning [`WriteOutcome`], so the in-process harness and
-//!     the production axum handler exercise the *exact* same authz.
-//!   - **axum handlers** — `(State, RawRequest) -> Response`, all identical:
-//!     `gate_and_parse` → `apply_*` → map outcome.
-//!
-//! ## Where the writes land
-//!
-//! Every domain-C table — `users`, `user_preferences`, `user_block`,
-//! `dm_channel`, `dm_channel_member`, `conversation_watermark` — lives in the
-//! **MAIN DB** (`state.db`), NOT the commit-log DB. So all `apply_*` fns run on
-//! the main connection.
+//! Domain C (#419) — profile / preferences / blocks / DMs, in the domain-A shape of [`crate::messages`].
 //!
 //! ## Authorization (the security core)
 //!
 //! `gate` proves *which user* signed the request; each `apply_*` then proves the
 //! user may make that specific write:
-//!   - profile update / preferences: the actor may only edit their OWN row
-//!     (`user_id` bound to the authenticated user).
-//!   - block / unblock: the blocker may only manage their OWN block list
-//!     (`blocker_id` bound to the authenticated user).
-//!   - DM create: the creator is the authenticated user, and no proposed pairing
-//!     may be blocked in either direction (re-checked server-side).
-//!   - DM accept: the authenticated user is the recipient flipping their OWN
-//!     membership row to accepted.
+//!   - profile update / preferences: the actor's OWN row only.
+//!   - block / unblock: the actor's OWN block list only.
+//!   - DM create: no proposed pairing may be blocked in either direction.
+//!   - DM accept: the actor's OWN membership row.
 //!
-//! On the no-auth path (`authed == None`, only reachable when the DS runs with
-//! `POLLIS_DS_REQUIRE_AUTH` off) the identity checks fall back to the body actor
-//! and membership/block checks are skipped — mirroring `messages` / `writes`.
+//! On the no-auth path identity falls back to the body actor; membership/block checks are skipped.
 
 use axum::{
     extract::State,
@@ -57,18 +32,10 @@ use crate::writes::{
 use crate::AppState;
 use crate::util::b64_decode;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::profile::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api`, shared with pollis-core; re-exported here.
 pub use pollis_api::profile::*;
 
-// ── Shared block helper ──────────────────────────────────────────────────────
-
-/// True when `user_a` has blocked `user_b` OR vice versa. Mirrors pollis-core's
-/// `blocks::is_blocked_either_way` (a symmetric `user_block` lookup) so the
-/// server re-derives the block relationship rather than trusting the client.
+/// True when `user_a` has blocked `user_b` or vice versa, re-derived server-side.
 pub(crate) async fn is_blocked_either_way(
     conn: &Connection,
     user_a: &str,
@@ -86,8 +53,6 @@ pub(crate) async fn is_blocked_either_way(
     Ok(rows.next().await?.is_some())
 }
 
-// ── POST /v1/profile/update ──────────────────────────────────────────────────
-
 pub async fn update_profile(
     State(state): State<AppState>,
     req: RawRequest,
@@ -102,8 +67,6 @@ pub async fn update_profile(
     )
 }
 
-// ── Username shape ───────────────────────────────────────────────────────────
-
 /// Shortest username the DS accepts.
 pub const USERNAME_MIN_LEN: usize = 3;
 /// Longest username the DS accepts.
@@ -111,21 +74,9 @@ pub const USERNAME_MAX_LEN: usize = 32;
 
 /// The one character class a username may be drawn from: `[a-z0-9_.-]`.
 ///
-/// Conservative on purpose, and — the load-bearing part — WITHOUT `@`. Every
-/// "find a person by identifier" lookup (`groups::apply_create_invite`,
-/// `directory::user_by_identifier`, and through it the client's
-/// `search_user_by_username`) decides between the `email` and `username`
-/// columns by whether the identifier contains `@`. That dispatch is only sound
-/// if no username can ever contain one; otherwise an account whose username is
-/// `alice@corp.com` is what an admin's invite to Alice resolves to, and the
-/// MLS Add faithfully admits the squatter. The character rule is enforced here
-/// (400), and the `@` half of it again by the `users_username_no_at_*` triggers
-/// of migration `000021`, so the state is unrepresentable rather than merely
-/// refused at one door.
+/// WITHOUT `@`: lookups dispatch on `@`, so such a username could squat an email (`000021` too).
 ///
-/// Mirrored client-side (`frontend/src/utils/username.ts`,
-/// `mobile/lib/username.ts`) so the form can explain the rule before the round
-/// trip; the DS check is the one that counts.
+/// Mirrored in `frontend/src/utils/username.ts` and `mobile/lib/username.ts`; the DS check counts.
 pub fn is_username_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-')
 }
@@ -135,33 +86,21 @@ pub fn is_valid_username(s: &str) -> bool {
     (USERNAME_MIN_LEN..=USERNAME_MAX_LEN).contains(&s.len()) && s.chars().all(is_username_char)
 }
 
-/// The message a rejected username is refused with; `pub` so the test that
-/// pins the refusal does not have to restate it.
+/// The message a rejected username is refused with.
 pub const USERNAME_INVALID: &str =
     "username must be 3-32 characters of a-z, 0-9, '_', '.' or '-'";
 
-/// Upper bound on a human display name — a `preferred_name` or a group name
-/// (#1095). Generous on purpose: this is a label people choose, and the point is
-/// that it is *bounded*, not short.
+/// Upper bound on a human display name (preferred or group name, #1095).
 pub const DISPLAY_NAME_MAX_LEN: usize = 100;
 
 /// Whether `s` is acceptable as a human display name.
 ///
-/// Deliberately NOT the username charset: a display name is rendered, never
-/// resolved, so spaces, punctuation and non-Latin scripts must all pass — a rule
-/// that rejected `Café déjà vu` or `研究チーム` would be a bug, not hardening.
-/// What is refused is what turns a label into a weapon:
+/// NOT the username charset (display names are rendered, never resolved). Refused:
 ///
-/// * anything longer than [`DISPLAY_NAME_MAX_LEN`] — an unbounded name is the
-///   payload space the #1095 notification markup needed, and breaks layout;
-/// * control characters, newlines included — one name should not be able to
-///   impersonate several lines of UI;
-/// * Unicode bidi overrides/isolates and the LRM/RLM marks — display-order
-///   spoofing, where the name a person reads is not the name that was stored;
-/// * `<` and `>`. The notification sink escapes these (that is the actual fix for
-///   #1095); refusing them here means a stored name never carries a tag to begin
-///   with. `&` is deliberately allowed — "Alice & Bob" is a real group name, and
-///   the sink escapes it correctly.
+/// * longer than [`DISPLAY_NAME_MAX_LEN`] (#1095);
+/// * control characters, newlines included;
+/// * bidi overrides/isolates and LRM/RLM (display-order spoofing);
+/// * `<` and `>` (the sink escapes them too); `&` is allowed.
 pub fn is_valid_display_name(s: &str) -> bool {
     !s.trim().is_empty()
         && s.chars().count() <= DISPLAY_NAME_MAX_LEN
@@ -178,11 +117,7 @@ pub fn is_valid_display_name(s: &str) -> bool {
 pub const DISPLAY_NAME_INVALID: &str =
     "name must be 1-100 characters, without control characters, bidi overrides, '<' or '>'";
 
-/// What the profile-domain `apply_*` fns decide. [`WriteOutcome`] plus one
-/// refusal it lacks: a body that is well-formed JSON but names an impossible
-/// value. That is the caller's mistake (400), not a permission problem, and
-/// answering 403 would send the user to an admin for a permission that does not
-/// exist. The `&'static str` means no caller input is ever echoed back.
+/// [`WriteOutcome`] plus `Invalid`: a malformed value is a 400, not a permission problem.
 #[derive(Debug)]
 pub enum ProfileOutcome {
     Ok,
@@ -204,16 +139,7 @@ where
 /// COALESCE-UPDATE the user's own profile row. Authz: the actor may only edit
 /// their own `users` row (`user_id` bound to the authenticated user).
 ///
-/// A `username` in the body must satisfy [`is_valid_username`] — with one
-/// carve-out. Both clients re-send the CURRENT username on every save, whatever
-/// field the user actually edited, and accounts created before the rule carry
-/// default names (`alice_7XK2`: the email's local part plus an upper-case ULID
-/// suffix) that do not satisfy it. So a username equal to the one already
-/// stored passes unvalidated: it introduces no new state. The carve-out never
-/// extends to `@`, because that is the half the resolvers depend on; a legacy
-/// row that somehow holds one is refused until it picks a real name (the
-/// `000021` trigger would refuse the write anyway — this check turns that 500
-/// into a 400 that says why).
+/// A `username` must pass [`is_valid_username`] unless it equals the stored one; `@` never passes.
 pub async fn apply_update_profile(
     conn: &Connection,
     authed: Option<&str>,
@@ -269,8 +195,6 @@ async fn current_username(conn: &Connection, user_id: &str) -> anyhow::Result<Op
     }
 }
 
-// ── POST /v1/profile/preferences ─────────────────────────────────────────────
-
 pub async fn save_preferences(
     State(state): State<AppState>,
     req: RawRequest,
@@ -305,26 +229,15 @@ pub async fn apply_save_preferences(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/read-cursors/save ───────────────────────────────────────────────
-
 /// Ceiling on one account's stored cursor blob.
 ///
-/// The blob is the padded JSON of one `(conversation_id, last_read_at,
-/// last_read_message_id)` triple per conversation the user has read — call it
-/// ~120 bytes each, so 256 KiB is room for well over a thousand conversations
-/// with the padding overhead on top. It exists precisely BECAUSE the DS cannot
-/// inspect what it is storing: an opaque blob with no cap is a free per-account
-/// object store, and "the server cannot read it" must not quietly become "the
-/// server will hold anything you like".
+/// ~120 bytes per conversation; an opaque blob with no cap would be a free object store.
 const READ_CURSOR_BLOB_MAX_BYTES: usize = 256 * 1024;
 
-/// AES-256-GCM nonce length. Fixed by the AEAD, so a body carrying any other
-/// length is malformed rather than merely unusual.
+/// AES-256-GCM nonce length.
 const READ_CURSOR_NONCE_LEN: usize = 12;
 
-/// The result of a read-cursor push — [`ProfileOutcome`] under the name the
-/// read-cursor tests and docs were written against. `Invalid` here means the
-/// blob envelope is malformed.
+/// The result of a read-cursor push; `Invalid` means a malformed envelope.
 pub type ReadCursorOutcome = ProfileOutcome;
 
 pub async fn save_read_cursors(
@@ -343,20 +256,11 @@ pub async fn save_read_cursors(
 
 /// UPSERT the account's encrypted read-cursor blob (#844).
 ///
-/// Authz: the actor may only write their OWN cursors (`user_id` bound to the
-/// authenticated user), exactly like preferences.
+/// Authz: the actor's OWN cursors only.
 ///
-/// What is validated is the blob's ENVELOPE — base64 that decodes, a nonce of
-/// the one length AES-GCM has, a bounded ciphertext — and nothing whatever about
-/// its contents, because the DS holds no key for this row and the whole point of
-/// #844 is that it never will. The neighbouring `apply_save_preferences` stores
-/// its payload as readable JSON; this one deliberately cannot.
+/// Only the ENVELOPE is validated; the DS holds no key for the contents (#844).
 ///
-/// Last-writer-wins is deliberate. The merge that makes concurrent pushes safe
-/// is a `max()` over per-conversation positions performed on the CLIENT after
-/// decryption, and cursors only ever move forward, so the loser of a race is
-/// re-pushed by its own device rather than lost. The server cannot merge
-/// ciphertext and must not need to.
+/// Last-writer-wins: clients merge by `max()` after decryption, and cursors only move forward.
 pub async fn apply_save_read_cursors(
     conn: &Connection,
     authed: Option<&str>,
@@ -390,8 +294,6 @@ pub async fn apply_save_read_cursors(
     Ok(ReadCursorOutcome::Ok)
 }
 
-// ── POST /v1/blocks/add ──────────────────────────────────────────────────────
-
 pub async fn block_user(
     State(state): State<AppState>,
     req: RawRequest,
@@ -402,9 +304,7 @@ pub async fn block_user(
     };
     let conn = state.db.conn().await?;
     let outcome = apply_block_user(&conn, authed.as_deref(), &parsed.0).await?;
-    // The block is what un-authorizes the blocked user for the shared DM's
-    // realtime room (`broker::dm_peer_blocked`); this is what ends the session
-    // they are already holding, which no membership change would.
+    // The block un-authorizes the shared DM's realtime room; this ends the session they hold.
     if matches!(outcome, WriteOutcome::Ok) {
         let blocker = authed
             .clone()
@@ -451,8 +351,6 @@ pub async fn apply_block_user(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/blocks/remove ───────────────────────────────────────────────────
-
 pub async fn unblock_user(
     State(state): State<AppState>,
     req: RawRequest,
@@ -484,8 +382,6 @@ pub async fn apply_unblock_user(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/channel-mutes/set (#1431) ───────────────────────────────────────
-
 pub async fn set_channel_mute(
     State(state): State<AppState>,
     req: RawRequest,
@@ -497,11 +393,7 @@ pub async fn set_channel_mute(
     let conn = state.db.conn().await?;
     let outcome = apply_set_channel_mute(&conn, authed.as_deref(), &parsed).await?;
     if matches!(outcome, WriteOutcome::Ok) {
-        // Tell the account's other devices to re-read their mutes, so a mute set
-        // on the phone dims the channel on the desktop without a refetch. The DS
-        // sends it (a client may not publish this type), and it names only the
-        // owner's own inbox. Best-effort: a device that misses it re-reads its
-        // mutes on its next launch or foreground.
+        // Nudge the account's other devices to re-read their mutes. Best-effort.
         let user = authed.clone().unwrap_or_else(|| parsed.user_id.clone());
         let inbox = format!("inbox-{user}");
         let event = serde_json::json!({ "type": "channel_mutes_changed" });
@@ -514,10 +406,7 @@ pub async fn set_channel_mute(
 
 /// Mute or unmute one group channel for the caller's account (#1431).
 ///
-/// Authz: the actor is the authenticated user, and the id must be a group
-/// CHANNEL the actor is currently a member of — so a mute row can never name a
-/// channel its owner is not in, a DM, or a group. The row's existence is the
-/// mute, so both directions are idempotent.
+/// Authz: a group CHANNEL the actor is in; the row is the mute, so both ways are idempotent.
 pub async fn apply_set_channel_mute(
     conn: &Connection,
     authed: Option<&str>,
@@ -537,9 +426,7 @@ pub async fn apply_set_channel_mute(
         )
         .await?;
     } else {
-        // Unmuting needs no membership check: the DELETE is scoped to the
-        // actor's own rows, and letting a former member clear a stale row is
-        // harmless.
+        // Unmuting needs no membership check: the DELETE is scoped to the actor's own rows.
         conn.execute(
             "DELETE FROM channel_mute WHERE user_id = ?1 AND channel_id = ?2",
             libsql::params![user, body.channel_id.clone()],
@@ -567,8 +454,6 @@ async fn is_channel_member(
     Ok(rows.next().await?.is_some())
 }
 
-// ── POST /v1/read/channel-mutes (#1431) ──────────────────────────────────────
-
 pub async fn read_channel_mutes(
     State(state): State<AppState>,
     req: RawRequest,
@@ -589,8 +474,7 @@ pub async fn read_channel_mutes(
 
 /// The channels `user_id` muted and is still a member of, sorted by id.
 ///
-/// The membership join keeps a row left behind by a path that did not clean up
-/// (a removal on a DS from before #1431) out of the answer.
+/// The membership join drops rows a pre-#1431 removal left behind.
 pub async fn list_channel_mutes(
     conn: &Connection,
     user_id: &str,
@@ -610,8 +494,6 @@ pub async fn list_channel_mutes(
     }
     Ok(ChannelMutesResponse { channel_ids })
 }
-
-// ── POST /v1/dm/create ───────────────────────────────────────────────────────
 
 pub async fn create_dm(
     State(state): State<AppState>,
@@ -639,12 +521,6 @@ pub async fn create_dm(
 }
 
 /// What `apply_create_dm` decided.
-///
-/// Distinct from [`WriteOutcome`] because this write has THREE outcomes, not
-/// two: a block is not an authorization failure (the caller is perfectly
-/// entitled to try), and reporting it as one would let the client tell "you may
-/// not do this" from "this particular pairing is blocked" — which is exactly the
-/// inference the generic refusal exists to prevent.
 #[derive(Debug)]
 pub enum DmOutcome {
     Created { id: String, existing: bool },
@@ -656,18 +532,7 @@ pub enum DmOutcome {
 /// membership, each other member as a pending request, and seed every member's
 /// per-device watermark — all in one transaction.
 ///
-/// Authz: the creator is the authenticated user, and no proposed pairing may be
-/// blocked in either direction (re-checked server-side).
-///
-/// # Dedupe moved here in #987
-///
-/// The 2-person dedupe used to run on the CLIENT: scan `dm_channel_member` for
-/// an existing pair, then re-read that channel. Two reads and a race — two
-/// devices creating the same DM at once each saw no existing pair and each
-/// created one, leaving the pair with two conversations and their messages split
-/// across both. Deciding it here makes "one DM per pair" a property of the write
-/// rather than of the client's timing. Multi-party DMs (3+ members) skip dedupe
-/// and always create fresh, unchanged.
+/// Authz: the creator is the caller; no pairing may be blocked. 2-person DMs dedupe here (#987).
 pub async fn apply_create_dm(
     conn: &Connection,
     authed: Option<&str>,
@@ -692,10 +557,7 @@ pub async fn apply_create_dm(
     // Re-check blocks server-side: refuse if ANY pairing is blocked either way.
     // Skipped on the no-auth path (mirrors the membership skips in `messages`).
     //
-    // Reported as `Blocked`, NOT as `Forbidden`: a block is not an authorization
-    // failure — the caller is perfectly entitled to try — and collapsing the two
-    // would let a client tell "you may not do this" from "this pairing is
-    // blocked", which is the inference the generic refusal exists to prevent.
+    // Reported as `Blocked`, NOT `Forbidden`, so the generic refusal reveals nothing.
     if authed.is_some() {
         for other in &others {
             if is_blocked_either_way(conn, &creator, other).await? {
@@ -704,9 +566,7 @@ pub async fn apply_create_dm(
         }
     }
 
-    // 2-person dedupe: an existing channel whose membership is exactly
-    // {creator, target} (order-independent, regardless of accepted state) is
-    // returned instead of a duplicate being created.
+    // 2-person dedupe: an existing exact {creator, target} channel is returned.
     if others.len() == 1 {
         let mut rows = conn
             .query(
@@ -728,9 +588,7 @@ pub async fn apply_create_dm(
         }
     }
 
-    // Refuse an id already in use as any other kind of conversation. See
-    // `conversation_id_taken` — `is_member` ORs across dm/group/channel on one
-    // id, so reusing another conversation's id grants membership of it.
+    // Refuse an id used by another conversation kind; `is_member` ORs across kinds on one id.
     if conversation_id_taken(conn, &body.id).await? {
         return Ok(DmOutcome::Forbidden);
     }
@@ -770,16 +628,10 @@ pub async fn apply_create_dm(
         )
         .await?;
     }
-    // Seed a watermark for every (member, device) pair so envelope cleanup isn't
-    // blocked by devices that didn't exist at channel creation. Revoked devices
-    // are excluded (#685) — they never rejoin and so are not part of the roster
-    // the envelope GC gate measures against.
+    // Seed a watermark per live (member, device) pair (#685) so envelope GC isn't blocked.
     let cursor = crate::messages::seeded_watermark_cursor();
     for member in std::iter::once(&creator).chain(others.iter()) {
-        // `reported_at = datetime('now')` marks each seeded device LIVE as of DM
-        // creation (#720): it pins for the staleness window, then stops if silent.
-        // The cursor is bound from `seeded_watermark_cursor` and the two columns
-        // are deliberately in different formats — see that function (#908).
+        // `reported_at` marks the device LIVE (#720); the cursor format differs on purpose (#908).
         tx.execute(
             "INSERT OR IGNORE INTO conversation_watermark \
                  (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
@@ -798,8 +650,6 @@ pub async fn apply_create_dm(
     })
 }
 
-// ── POST /v1/dm/accept ───────────────────────────────────────────────────────
-
 pub async fn accept_dm(
     State(state): State<AppState>,
     req: RawRequest,
@@ -812,10 +662,7 @@ pub async fn accept_dm(
     outcome_response::<AcceptDmBody>(apply_accept_dm(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Flip the actor's own `dm_channel_member.accepted_at` from NULL → now. Authz:
-/// the accepter is the authenticated user — the UPDATE is scoped `user_id =
-/// :user` so it can only ever accept the actor's OWN request, and the
-/// `accepted_at IS NULL` guard keeps it idempotent.
+/// Flip the actor's own `accepted_at` from NULL → now; scoped to `user_id`, idempotent.
 pub async fn apply_accept_dm(
     conn: &Connection,
     authed: Option<&str>,
@@ -837,12 +684,7 @@ pub async fn apply_accept_dm(
     Ok(WriteOutcome::Ok)
 }
 
-// ── Shared DM membership helper ──────────────────────────────────────────────
-
-/// True when `user_id` is a current member of DM channel `dm_channel_id`. A
-/// dedicated `dm_channel_member` lookup (NOT the broader `writes::is_member`,
-/// which also matches groups/channels) — DM churn only ever concerns the DM
-/// membership table.
+/// True when `user_id` is a member of DM `dm_channel_id` (DM table only, unlike `is_member`).
 async fn is_dm_member(
     conn: &Connection,
     dm_channel_id: &str,
@@ -858,8 +700,6 @@ async fn is_dm_member(
     Ok(rows.next().await?.is_some())
 }
 
-// ── POST /v1/dm/add ──────────────────────────────────────────────────────────
-
 pub async fn add_dm_member(
     State(state): State<AppState>,
     req: RawRequest,
@@ -872,12 +712,7 @@ pub async fn add_dm_member(
     outcome_response::<AddDmMemberBody>(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Insert a `dm_channel_member` row for `user_id` and seed that member's
-/// per-device watermarks, in one transaction. Authz: the actor (`added_by`) is
-/// the authenticated user AND a current member of the DM — a non-member cannot
-/// pull someone into a conversation it isn't part of. Membership is re-derived
-/// server-side; skipped only on the no-auth path (mirrors `apply_create_dm`'s
-/// block re-check).
+/// Add a DM member and seed their watermarks; the actor must be a current member.
 pub async fn apply_add_dm_member(
     conn: &Connection,
     authed: Option<&str>,
@@ -903,13 +738,7 @@ pub async fn apply_add_dm_member(
         ],
     )
     .await?;
-    // Seed a watermark for every device of the new member so pre-join messages
-    // don't block envelope cleanup indefinitely. Revoked devices are excluded
-    // (#685) — they never rejoin, so they are not part of the GC roster.
-    // `reported_at = datetime('now')` marks each seeded device LIVE as of the add
-    // (#720): it pins for the staleness window, then stops if it never reports.
-    // The cursor is bound from `seeded_watermark_cursor` and the two columns are
-    // deliberately in different formats — see that function (#908).
+    // Seed the new member's live devices (#685); `reported_at` LIVE (#720), cursor per #908.
     tx.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
              (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
@@ -927,8 +756,6 @@ pub async fn apply_add_dm_member(
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
-
-// ── POST /v1/dm/remove ───────────────────────────────────────────────────────
 
 pub async fn remove_dm_member(
     State(state): State<AppState>,
@@ -953,23 +780,9 @@ pub async fn remove_dm_member(
     outcome_response::<RemoveDmMemberBody>(outcome)
 }
 
-/// Delete a `dm_channel_member` row. Authz (replicates the client's current
-/// rule, server-side): the actor (`requester_id`, bound to the authenticated
-/// user) may remove only themselves, or — as the channel's creator — any member.
-/// The creator check is re-derived from `dm_channel.created_by`; skipped only on
-/// the no-auth path.
+/// Delete a `dm_channel_member` row: yourself, or anyone if you created the channel.
 ///
-/// ## Emptying a DM tears it down, by whichever door (L3)
-///
-/// `/v1/dm/leave` checks for survivors and purges the channel when the last one
-/// goes; this path did not, and it is reachable for exactly the same act — a
-/// member removing THEMSELVES. So leaving a two-person DM through
-/// `/v1/dm/members/remove` left an orphan `dm_channel` row behind, with its
-/// envelopes, watermarks and Welcomes, and — because the `conversation` registry
-/// is append-only on purpose (`writes::claim_conversation_id`) — the
-/// conversation id claimed forever by a conversation nobody is in. Two doors
-/// into one state must not disagree about what that state means, so the
-/// emptiness check and the purge are the same on both.
+/// Emptying a DM here tears it down exactly as `/v1/dm/leave` does (L3).
 ///
 /// Returns `(outcome, torn_down)` like [`apply_leave_dm`]; the caller does the
 /// log-DB half.
@@ -1008,9 +821,7 @@ pub async fn apply_remove_dm_member(
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )
     .await?;
-    // Existence, not a tally — see `groups::apply_leave_group`. Same check and
-    // same purge `/v1/dm/leave` runs, in the same transaction as the delete, so
-    // an emptied DM cannot survive either door.
+    // Existence, not a tally (see `groups::apply_leave_group`); same purge as `/v1/dm/leave`.
     let mut survivors = tx
         .query(
             "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
@@ -1025,8 +836,6 @@ pub async fn apply_remove_dm_member(
     tx.commit().await?;
     Ok((WriteOutcome::Ok, torn_down))
 }
-
-// ── POST /v1/dm/leave ────────────────────────────────────────────────────────
 
 pub async fn leave_dm(
     State(state): State<AppState>,
@@ -1049,17 +858,9 @@ pub async fn leave_dm(
     outcome_response::<LeaveDmBody>(outcome)
 }
 
-/// Remove the actor's own `dm_channel_member` row and, when the channel is left
-/// empty, tear it down — all in one transaction so a DM never lingers
-/// half-deleted. Authz: self only — the actor (`user_id`, bound to the
-/// authenticated user) may leave only their own membership; `resolve_actor`
-/// already refuses any other `user_id`.
+/// Leave a DM (self only) and tear it down when empty, in one transaction.
 ///
-/// The teardown used to drop the envelopes and the `dm_channel` row and trust
-/// `ON DELETE CASCADE` for the rest; with `foreign_keys=OFF` in production that
-/// left the per-device cursors, reactions, attachment references and the
-/// directory-index rows behind. [`crate::teardown::purge_dm_channel`] is the
-/// full set.
+/// [`crate::teardown::purge_dm_channel`] is the full set (no cascades in production).
 ///
 /// The `bool` is "the channel was destroyed", so the caller knows whether to
 /// purge its commit-log-DB state.

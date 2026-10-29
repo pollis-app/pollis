@@ -1,14 +1,4 @@
-/*
- * Pointer-down activation where an accidental press is free to undo (#1529).
- *
- * `utils/pressActivation.ts` decides, per event, whether a press acts on
- * pointerdown or waits for the click. These pin the contract the hook leans
- * on: only a plain primary mouse press acts early, the click that ends that
- * press never runs the action a second time, and the keyboard / assistive
- * tech path (a click with `detail === 0`) always acts.
- *
- *   node --test frontend/tests/
- */
+/* Pointer-down activation (#1529): only a plain primary mouse press acts early, once; `detail === 0` clicks always act. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

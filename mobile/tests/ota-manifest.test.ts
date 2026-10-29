@@ -1,16 +1,4 @@
-/*
- * scripts/ota/lib.ts — manifest building, code signing, the store-build safety
- * checks, and the transparency leaves of an OTA update (#1250).
- *
- * Pinned: the manifest is the protocol-v1 shape with content-addressed URLs and
- * base64url sha256 hashes; a signature verifies against the certificate (the
- * way the app checks it) and fails for a tampered body, another key, another
- * key id or an expired/non-code-signing certificate; Expo's own signer and ours
- * agree; the bundle/env checks refuse api-dev and non-public EXPO_PUBLIC_*;
- * the leaves keep the frozen BinaryRecord field order.
- *
- *   cd mobile && pnpm test
- */
+/* scripts/ota/lib.ts (#1250): manifests, code signing, the store-build checks, the transparency leaves. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -130,7 +118,6 @@ test("Expo's own signer and ours produce signatures the other accepts", () => {
   const body = sampleManifest();
   const expoSig = expoSign(signer, body);
   assert.doesNotThrow(() => verifyBody(body, signatureHeader(expoSig, KEY_ID), signer.certPem));
-  // RSASSA-PKCS1-v1_5 is deterministic: the same key and bytes give the same signature.
   assert.equal(parseSignatureHeader(signBody(body, signer.privateKeyPem)).sig, expoSig);
 });
 
@@ -169,13 +156,11 @@ test("only the four public EXPO_PUBLIC_* names may be set, and the DS must be pr
     EXPO_PUBLIC_R2_PUBLIC_URL: "https://cdn.example.com",
   };
   assert.doesNotThrow(() => assertPublicEnv(ok));
-  // The core refuses to start without both R2 origins, so an update must carry them.
   assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_R2_ENDPOINT: "" }), /EXPO_PUBLIC_R2_ENDPOINT must be set/);
   assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_R2_PUBLIC_URL: undefined }), /EXPO_PUBLIC_R2_PUBLIC_URL must be set/);
   assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_LIVEKIT_API_SECRET: "s" }), /not a public variable/);
   assert.throws(() => assertPublicEnv({ EXPO_PUBLIC_POLLIS_DELIVERY_URL: "https://api-dev.pollis.com" }), /api-dev/);
   assert.throws(() => assertPublicEnv({}), /must be exactly/);
-  // The dev DS gate key (#1242): the app may read it, an OTA may not carry it.
   assert.throws(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "k" }), /dev-only/);
   assert.doesNotThrow(() => assertPublicEnv({ ...ok, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "" }));
 });

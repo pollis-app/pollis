@@ -55,15 +55,11 @@ export default function Security() {
   const approveEnrollment = useApproveEnrollment();
   const rejectEnrollment = useRejectEnrollment();
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
-  // The code the approver TYPES off the new device's screen, per request
-  // (#1096). Never pre-filled — the server's copy is no longer even sent to the
-  // client, because submitting it back would put the server on both sides of the
-  // comparison the SAS exists to make.
+  // The code the approver TYPES (#1096); never pre-filled.
   const [typedCodes, setTypedCodes] = useState<Record<string, string>>({});
   const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
     useAutoLockMinutes();
-  // Auto-lock options sit in an even grid: three across at default text
-  // sizes, fewer as Dynamic Type grows, so labels never squeeze or strand.
+  // An even grid that loses columns as Dynamic Type grows.
   const { fontScale } = useWindowDimensions();
   const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
@@ -75,7 +71,6 @@ export default function Security() {
 
   const onRevoke = (deviceId: string) => {
     if (confirmRevoke !== deviceId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRevoke(deviceId);
       return;
@@ -91,7 +86,6 @@ export default function Security() {
       return;
     }
     confirmSignOut(() => {
-      // `useLogout` ends the session either way, which lands on sign-in.
       logout.mutate();
     });
   };
@@ -179,7 +173,6 @@ export default function Security() {
 
         <View style={sectionGap} onLayout={sectionLayout("devices")}>
           <Group title={t("security.devicesHeading")}>
-            {/* Sign in another device by scanning the code it shows (#1361). */}
             <ListRow
               testID="row-link-device"
               glyph={<Icon.plus size={22} color={semantic.text} />}
@@ -209,8 +202,7 @@ export default function Security() {
                   sub={sub}
                   action={
                     d.is_current ? (
-                      // Status, not a control: plain accent text, so it can't
-                      // be mistaken for a primary button.
+                      // Status, not a control.
                       <Text style={[ty.section, { color: semantic.accent }]}>
                         {t("mobile:self.security.current")}
                       </Text>
@@ -247,8 +239,7 @@ export default function Security() {
         {/* ── Part 2: what has happened to the account ── */}
         <View style={sectionGap} onLayout={sectionLayout("events")}>
           <Group title={t("security.eventsHeading")}>
-            {/* Only the newest few (#1548): the DS is asked for exactly that
-                many, and the whole log is its own screen. */}
+            {/* Only the newest few (#1548). */}
             {events.map((ev) => (
               <SecurityEventRow key={ev.id} event={ev} />
             ))}

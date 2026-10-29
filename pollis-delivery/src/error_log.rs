@@ -1,26 +1,10 @@
 //! The DS's failed-request log (#1305).
 //!
-//! **Why:** a tester's first-device signup failed after `verify-otp` succeeded,
-//! and nothing could say which request failed or why: Workers Logs and Logpush
-//! are off (they record client IPs — `tests/no_client_ip_exposure.rs`), and
-//! container stdout, where `tracing` writes, is not retained. A 5xx body says
-//! only "internal error"; the cause went to a log nobody can read.
+//! Every routed 4xx/5xx (except limiter 429s) lands in `ds_error_log`, with the client's request id.
 //!
-//! **What:** every routed request that ends in a 4xx/5xx (except the limiter's
-//! own 429s) is recorded in `ds_error_log`: when, the method, the router's
-//! matched route pattern, the status, the response's `error` text, and any
-//! `warn!`/`error!` the request emitted while it ran — the cause behind an
-//! "internal error". Plus the client's random `X-Pollis-Request-Id`, which is
-//! how a line in a user's diagnostics log finds its row here.
+//! **Not who:** no user, device, email or IP; the route is the pattern and text is scrubbed.
 //!
-//! **Not who:** no user, device, email or IP. The table has no column for one
-//! (migration `000035_ds_error_log`), the route is the pattern rather than the
-//! raw path, and every text field passes [`pollis_api::redact::scrub`] first.
-//!
-//! **Tight by construction:** the table's own trigger keeps 72 hours and 500
-//! rows at most, on every insert. On top of that the DS writes at most
-//! [`MAX_WRITES_PER_MINUTE`] rows a minute, so a burst of junk requests costs a
-//! bounded number of database writes and is counted rather than stored.
+//! Bounded by the table trigger (72h / 500 rows) and [`MAX_WRITES_PER_MINUTE`].
 //!
 //! **Read it:** `GET /v1/ops/errors` with the operator bearer token
 //! (`POLLIS_DS_METRICS_TOKEN`); 404 when no token is configured.
@@ -40,8 +24,7 @@ use axum::{
 use crate::db::Db;
 use crate::AppState;
 
-/// Rows written per minute, at most. Beyond it a failure is counted in
-/// [`ErrorLog::dropped`] and not stored.
+/// Rows written per minute, at most; the rest are counted in [`ErrorLog::dropped`].
 pub const MAX_WRITES_PER_MINUTE: u32 = 30;
 /// Longest `error` kept (matches the column's CHECK).
 pub const ERROR_MAX_CHARS: usize = 200;
@@ -56,11 +39,10 @@ const READ_LIMIT: i64 = 500;
 
 tokio::task_local! {
     /// The `warn!`/`error!` messages emitted while the current request ran.
-    /// Scoped per request by [`record`]; [`CaptureLayer`] appends to it.
     static CAPTURED: RefCell<Vec<String>>;
 }
 
-/// Shared write budget. Shallow-`Clone`, like the other `AppState` stores.
+/// Shared write budget.
 #[derive(Clone, Default)]
 pub struct ErrorLog {
     budget: Arc<Mutex<Budget>>,
@@ -74,7 +56,6 @@ struct Budget {
 }
 
 impl ErrorLog {
-    /// Take one write from this minute's budget.
     fn take(&self, now: u64) -> bool {
         let mut b = self.budget.lock().unwrap_or_else(|e| e.into_inner());
         if now.saturating_sub(b.window_start) >= 60 {
@@ -183,8 +164,7 @@ pub async fn record(
         &events,
     );
     let db = Arc::clone(&state.db);
-    // Off the response path, and best-effort: a DS running before migration
-    // 000035 is applied simply fails these inserts.
+    // Off the response path, and best-effort.
     tokio::spawn(async move {
         if let Err(e) = insert(&db, &row).await {
             tracing::debug!("ds_error_log insert skipped: {e:#}");
@@ -193,8 +173,7 @@ pub async fn record(
     response
 }
 
-/// Read the JSON `error` field out of a small error body, handing back an
-/// identical response. Bodies of unknown or large size are left untouched.
+/// Read the JSON `error` out of a small error body, returning an identical response.
 async fn take_error_text(response: Response) -> (Response, Option<String>) {
     use axum::body::HttpBody as _;
     let small = response
@@ -207,8 +186,7 @@ async fn take_error_text(response: Response) -> (Response, Option<String>) {
     }
     let (parts, body) = response.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, MAX_ERROR_BODY_BYTES as usize).await else {
-        // Unreachable for a body whose exact size is under the limit; answer
-        // with an empty body of the same status rather than panic.
+        // Unreachable under the size limit; don't panic.
         return (Response::from_parts(parts, Body::empty()), None);
     };
     let error = serde_json::from_slice::<serde_json::Value>(&bytes)
@@ -244,9 +222,7 @@ pub async fn insert(db: &Db, row: &FailedRequest) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `GET /v1/ops/errors` — the stored failures, newest first, behind the
-/// operator token. 404 when no token is configured (fail-closed, like
-/// `/v1/retention/metrics`); 401 without the right bearer token.
+/// `GET /v1/ops/errors`, newest first: 404 without a configured token, 401 without the bearer.
 pub async fn list(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(expected) = state.metrics_token.as_deref() else {
         return StatusCode::NOT_FOUND.into_response();
@@ -300,7 +276,6 @@ async fn read_all(db: &Db) -> anyhow::Result<Vec<serde_json::Value>> {
 
 /// A `tracing` layer that copies each `warn!`/`error!` raised inside a request
 /// into that request's [`CAPTURED`] buffer. Outside a request it does nothing.
-/// Installed next to the stdout formatter in `main`.
 pub struct CaptureLayer;
 
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {

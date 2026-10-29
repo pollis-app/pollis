@@ -1,14 +1,4 @@
-/*
- * Which `enrollment_requested` nudges raise the typed-code takeover
- * (`src/utils/enrollmentPrompt.ts`).
- *
- * A phone that scans a desktop's "Link a new device" QR files a link-tagged
- * request; the DS's nudge for it carries `link_id`. The core used to drop that
- * field on its way to the renderer, so the desktop raised "A new device wants
- * to enroll — code shown on the new device" for a phone that shows no code.
- *
- *   node --test frontend/tests/
- */
+/* Which nudges raise the typed-code takeover; a QR-linked phone request (`link_id`) shows no code. */
 import test from "node:test";
 import assert from "node:assert/strict";
 

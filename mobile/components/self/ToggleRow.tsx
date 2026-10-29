@@ -3,12 +3,7 @@ import { Toggle } from "../ui";
 import { semantic, type as ty, fonts, space, layout } from "../../theme/tokens";
 import { haptic } from "../../lib/haptics";
 
-/**
- * A settings row that IS a switch: the whole row toggles and is one control
- * for screen readers (role switch + checked state), so the visual Toggle
- * inside is not a second, nested target. `testID` (`toggle-<name>`) sits on
- * the row so e2e taps land on the control.
- */
+/** A settings row that IS a switch: one control for screen readers, `toggle-<name>` on the row. */
 export function ToggleRow({
   label,
   sub,
@@ -31,8 +26,7 @@ export function ToggleRow({
         disabled
           ? undefined
           : () => {
-              // The whole row flips the switch, so it ticks like the knob
-              // does (#1286; the knob's own press ticks inside Toggle).
+              // The whole row ticks like the knob (#1286).
               haptic("toggle");
               onToggle();
             }
@@ -49,8 +43,7 @@ export function ToggleRow({
         paddingVertical: space.sm,
         paddingStart: space.xxl,
         paddingEnd: space.xl,
-        // Disabled is solid colours (dim label, the Toggle's own disabled
-        // look), never an opacity fade — review #3/#4.
+        // Disabled is solid colours, never a fade (review #3/#4).
         backgroundColor: pressed && !disabled ? semantic.high : "transparent",
       })}
     >

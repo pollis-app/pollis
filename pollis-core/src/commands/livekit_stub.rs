@@ -1,20 +1,7 @@
 //! Mobile (iOS/Android) stub for the LiveKit realtime layer.
 //!
-//! The Rust LiveKit/libwebrtc *client* stack (`Room::connect`, track publish,
-//! libwebrtc) is desktop-only — mobile uses the native LiveKit SDK
-//! (`@livekit/react-native`) for its own room connections (see issue #185).
-//! This module is swapped in for `commands::livekit` on mobile targets via
-//! `#[cfg]` in `commands/mod.rs`, so the core messaging/auth/group/dm/
-//! enrollment call sites stay byte-identical across platforms.
-//!
-//! Pushes that ride an *already-connected* `Room` (new_message, typing, voice
-//! presence, …) stay no-ops here — mobile keeps no Rust-side `Room`. But
-//! pushes to a room this process is *not* joined to go through LiveKit's
-//! server-side `RoomService/SendData` Twirp API, which is plain HTTPS + a
-//! signed admin JWT and needs no native deps — so those are implemented for
-//! real. That's what lets "approve from another device" enrollment (and 1:1
-//! call invites) reach a sibling device's inbox room from mobile. Mirrors
-//! `commands::livekit::publish::publish_to_user_inbox` on desktop.
+//! Desktop-only Rust LiveKit client; mobile uses `@livekit/react-native` (#185).
+//! Connected-room pushes are no-ops; unjoined-room pushes go via DS SendData.
 
 use std::sync::Arc;
 
@@ -24,13 +11,7 @@ use crate::state::AppState;
 
 type LiveKit = Arc<tokio::sync::Mutex<LiveKitState>>;
 
-// ── Server-side data publish (DS SendData broker) ───────────────────────────
-//
-// Mobile has no Rust-side `Room`, so pushes to a room this process isn't joined
-// to go through the DS's server-side `RoomService/SendData` broker (#393). The
-// LiveKit admin secret used to be signed on-device (the leak); now the DS holds
-// it and the client just names a room + content-free payload. Mirrors desktop's
-// `commands::livekit::publish_*`.
+// Server-side data publish via the DS SendData broker (#393).
 
 /// Fire-and-forget SendData to `room_name` via the DS. Non-fatal — the DS treats
 /// a room with no participants (404) as success and errors are only logged.
@@ -68,13 +49,7 @@ pub async fn publish_to_room_server(
     send_data_to_room(state, room_name.to_string(), payload).await
 }
 
-/// Notify a conversation's room of a new message. Mobile has no Rust-side
-/// `Room` to publish through, but new_message is exactly the event a peer's
-/// open chat needs to refresh live — so we send it through the same
-/// server-side `SendData` path as inbox events (it delivers to whoever is in
-/// the room, e.g. a desktop client viewing the conversation). Without this a
-/// mobile-sent message only surfaces on the peer after a manual re-ingest.
-/// Mirrors the payload shape of desktop's `publish_new_message_to_room`.
+/// New-message wake-up via SendData, so a peer's open chat refreshes live.
 pub async fn publish_new_message_to_room(
     state: &Arc<AppState>,
     room_id: &str,
@@ -86,20 +61,7 @@ pub async fn publish_new_message_to_room(
     send_data_to_room(state, room_id.to_string(), payload).await
 }
 
-// ── Connected-room pushes — still no-op on mobile ───────────────────────────
-//
-// These ride a `Room` this process has already joined. Mobile holds no
-// Rust-side `Room`, and (unlike new_message above) edits/deletes still
-// propagate durably through the DS and refresh on the next ingest — so they
-// stay no-ops for now. They could move to the SendData path too if live
-// edit/delete propagation from mobile becomes a priority (#185).
-//
-// Group-structure wake-ups are NOT in that set, and must not be: nothing
-// "ingests" a channel list, a group name or a roster. A device learns those
-// changed only from the wake-up, so a no-op here meant a channel created,
-// renamed or deleted, a group renamed, a member removed or re-roled, or a join
-// request filed on a phone stayed invisible on the user's desktop (and every
-// other member's) until a hard refresh. They go through SendData below.
+// Connected-room pushes: no-ops on mobile (edits/deletes arrive on ingest, #185).
 
 pub async fn publish_edited_message_to_room(
     _livekit: &LiveKit,
@@ -121,7 +83,7 @@ pub async fn publish_deleted_message_to_room(
     Ok(())
 }
 
-// ── Group-structure wake-ups — real on mobile, via SendData ─────────────────
+// Group-structure wake-ups: real on mobile (nothing ingests them).
 
 /// A group's channels, name or roster changed. Same routing-only payload as
 /// desktop's `publish_membership_changed_to_room`, to the group's room.

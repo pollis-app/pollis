@@ -1,7 +1,6 @@
 //! MLS StorageProvider backed by the local SQLite `mls_kv` table.
 //!
-//! `MlsStore` wraps a `&rusqlite::Connection` and fully implements
-//! `openmls_traits::storage::StorageProvider<CURRENT_VERSION>`.
+//! Implements `openmls_traits::storage::StorageProvider<CURRENT_VERSION>`.
 //!
 //! Key layout (mirrors openmls_memory_storage):
 //!   scope = the entity-type label (e.g. b"KeyPackage", b"Tree", …)
@@ -11,8 +10,6 @@
 use openmls_traits::storage::{traits, Entity, StorageProvider, CURRENT_VERSION};
 use rusqlite::Connection;
 use serde::Serialize;
-
-// ── label constants (match openmls_memory_storage) ───────────────────────────
 
 const KEY_PACKAGE_LABEL: &[u8] = b"KeyPackage";
 const PSK_LABEL: &[u8] = b"Psk";
@@ -33,8 +30,6 @@ const EPOCH_SECRETS_LABEL: &[u8] = b"EpochSecrets";
 const RESUMPTION_PSK_STORE_LABEL: &[u8] = b"ResumptionPsk";
 const MESSAGE_SECRETS_LABEL: &[u8] = b"MessageSecrets";
 
-// ── Error type ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, thiserror::Error)]
 pub enum MlsStorageError {
     #[error("sqlite: {0}")]
@@ -48,8 +43,6 @@ impl From<MlsStorageError> for crate::error::Error {
         crate::error::Error::Other(anyhow::anyhow!("MLS storage: {e}"))
     }
 }
-
-// ── key helpers ──────────────────────────────────────────────────────────────
 
 /// Builds the composite storage key: label || serialised_key || VERSION (2 bytes BE).
 fn build_key<const V: u16>(label: &[u8], key_bytes: Vec<u8>) -> Vec<u8> {
@@ -70,27 +63,8 @@ fn epoch_key_pairs_id<const V: u16>(
     Ok(key)
 }
 
-// ── Storage-op instrumentation ───────────────────────────────────────────────
-
-/// A process-global count of the `mls_kv` statements this store has executed,
-/// so tests can assert on the SHAPE of a hot path rather than its wall clock.
-///
-/// Every MLS operation is a chain of small key-value hits, and the cost of the
-/// decrypt path is dominated by how many of them there are — a figure that is
-/// identical on every machine, unlike a timing, which is not. `#875` added this
-/// because "decrypt got faster" is unverifiable and "decrypt does 3 statements
-/// per message instead of 15" is a regression test.
-///
-/// Test-harness only: the increment is cheap but not free, and production has
-/// no reader for it.
-///
-/// **Per-thread, not process-global.** `cargo test` runs tests concurrently in
-/// one process, so a global counter would have every test's storage traffic
-/// bleeding into every other test's measurement. MLS storage ops are synchronous
-/// on the calling thread, so a thread-local counts exactly the work the
-/// measuring test caused — provided the measured section does not hop threads
-/// (i.e. contains no `.await` that can yield). Every call site here is a
-/// synchronous block, which is what makes the numbers reproducible.
+/// Per-thread count of `mls_kv` statements, so tests assert a hot path's shape, not its timing (#875).
+/// **Per-thread**: tests run concurrently, and MLS storage ops are synchronous, so measured sections must not `.await`.
 #[cfg(any(test, feature = "test-harness"))]
 pub mod counters {
     use std::cell::Cell;
@@ -132,13 +106,10 @@ fn count_write() {
 #[inline(always)]
 fn count_write() {}
 
-// ── MlsStore ─────────────────────────────────────────────────────────────────
-
 /// Thin wrapper around a `rusqlite::Connection` that maps all MLS storage
 /// operations to the `mls_kv(scope, key, value)` table.
 ///
-/// `MlsStore` borrows `&Connection` so it must not outlive the local DB guard
-/// that provides it.  This is enforced by the lifetime `'a`.
+/// Borrows `&Connection`, so it cannot outlive the local DB guard.
 pub struct MlsStore<'a> {
     conn: &'a Connection,
 }
@@ -148,20 +119,12 @@ impl<'a> MlsStore<'a> {
         Self { conn }
     }
 
-    /// Borrow the underlying connection. Used by sibling modules (e.g.
-    /// `commands::mls`) that need to read/write custom rows in `mls_kv`
-    /// that don't belong to openmls itself.
+    /// Borrow the connection, for sibling modules' custom `mls_kv` rows.
     pub fn raw_conn(&self) -> &Connection {
         self.conn
     }
 
-    // ── primitive KV ops ─────────────────────────────────────────────────────
-
-    // Every op goes through `prepare_cached` rather than `Connection::execute` /
-    // `query_row`, which compile a fresh statement and throw it away. There are
-    // exactly three statements here and they are executed a dozen-plus times per
-    // MLS message, so the SQL parse/plan was being redone thousands of times for
-    // three query plans that never change.
+    // `prepare_cached`: three fixed statements run a dozen-plus times per MLS message.
     fn raw_write(&self, storage_key: Vec<u8>, value: Vec<u8>) -> Result<(), MlsStorageError> {
         count_write();
         self.conn
@@ -191,8 +154,6 @@ impl<'a> MlsStore<'a> {
             .execute(rusqlite::params![b"" as &[u8], storage_key])?;
         Ok(())
     }
-
-    // ── typed write/read/delete for single values ─────────────────────────
 
     fn write<const V: u16>(
         &self,
@@ -225,9 +186,7 @@ impl<'a> MlsStore<'a> {
         self.raw_delete(&storage_key)
     }
 
-    // ── typed write/read for lists ────────────────────────────────────────
-    // Lists are persisted as JSON arrays of byte-arrays (Vec<Vec<u8>>),
-    // matching the openmls_memory_storage format exactly.
+    // Lists are JSON arrays of byte-arrays, matching openmls_memory_storage.
 
     fn read_list<const V: u16, Ent: Entity<V>>(
         &self,
@@ -287,12 +246,8 @@ impl<'a> MlsStore<'a> {
     }
 }
 
-// ── StorageProvider impl ──────────────────────────────────────────────────────
-
 impl StorageProvider<CURRENT_VERSION> for MlsStore<'_> {
     type Error = MlsStorageError;
-
-    // --- writes ---
 
     fn write_mls_join_config<
         GroupId: traits::GroupId<CURRENT_VERSION>,
@@ -334,13 +289,11 @@ impl StorageProvider<CURRENT_VERSION> for MlsStore<'_> {
         proposal_ref: &ProposalRef,
         proposal: &QueuedProposal,
     ) -> Result<(), Self::Error> {
-        // Write (group_id, proposal_ref) → proposal
         self.write::<CURRENT_VERSION>(
             QUEUED_PROPOSAL_LABEL,
             &serde_json::to_vec(&(group_id, proposal_ref))?,
             serde_json::to_vec(proposal)?,
         )?;
-        // Append proposal_ref to the per-group ref list
         self.append::<CURRENT_VERSION>(
             PROPOSAL_QUEUE_REFS_LABEL,
             &serde_json::to_vec(group_id)?,
@@ -558,8 +511,6 @@ impl StorageProvider<CURRENT_VERSION> for MlsStore<'_> {
         )
     }
 
-    // --- reads ---
-
     fn mls_group_join_config<
         GroupId: traits::GroupId<CURRENT_VERSION>,
         MlsGroupJoinConfig: traits::MlsGroupJoinConfig<CURRENT_VERSION>,
@@ -775,8 +726,6 @@ impl StorageProvider<CURRENT_VERSION> for MlsStore<'_> {
         self.read::<CURRENT_VERSION, _>(PSK_LABEL, &serde_json::to_vec(psk_id)?)
     }
 
-    // --- deletes ---
-
     fn remove_proposal<
         GroupId: traits::GroupId<CURRENT_VERSION>,
         ProposalRef: traits::ProposalRef<CURRENT_VERSION>,
@@ -785,13 +734,11 @@ impl StorageProvider<CURRENT_VERSION> for MlsStore<'_> {
         group_id: &GroupId,
         proposal_ref: &ProposalRef,
     ) -> Result<(), Self::Error> {
-        // Remove from refs list
         self.remove_item::<CURRENT_VERSION>(
             PROPOSAL_QUEUE_REFS_LABEL,
             &serde_json::to_vec(group_id)?,
             serde_json::to_vec(proposal_ref)?,
         )?;
-        // Delete the proposal itself
         self.delete::<CURRENT_VERSION>(
             QUEUED_PROPOSAL_LABEL,
             &serde_json::to_vec(&(group_id, proposal_ref))?,

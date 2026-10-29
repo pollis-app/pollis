@@ -1,60 +1,14 @@
 //! Authorized-secrets broker (#393).
 //!
-//! Two operations still done on-device hold a long-lived secret in the client
-//! bundle: minting a LiveKit access token (needs the LiveKit API secret) and
-//! reaching R2 (needs the R2 access key + secret). Shipping those secrets in
-//! the client is the whole problem — anyone who unpacks the app can extract
-//! them. This module moves both server-side: the DS holds the secrets in its
-//! env, the (already device-signed) client asks the DS to mint a token / presign
-//! a URL, and the secrets never leave the server.
+//! Mints LiveKit tokens and presigns R2 URLs server-side, so those secrets never ship in the client.
 //!
-//! Both endpoints reuse the existing device-signature auth ([`crate::auth`] via
-//! [`crate::writes::gate`]) — no new auth scheme. The point of server-side
-//! minting is precisely that the **identity is derived from the verified
-//! signer, not from anything the client sends**: a client cannot mint a LiveKit
-//! token as another user.
+//! Both reuse device-signature auth; identity comes from the verified signer, never the body.
 //!
 //! ## Why R2 presign needs no per-object READ authz (but delete is gated)
 //!
-//! Pollis media is sealed under a key the DS never holds (#1382, see
-//! `pollis-core`'s `r2.rs` and `file_keys.rs`): each file's AES-256-GCM key
-//! derives from its conversation's file key ring — which reaches this server
-//! only wrapped under an MLS exporter KEK (`file_keystate`) — salted by the
-//! file's random id, the object's name. Nothing in the bucket or in
-//! `attachment_object` / `attachment_ref` is key material. A presigned URL
-//! therefore only ever exposes **ciphertext** — confidentiality comes from MLS
-//! key distribution, NOT from the R2 ACL. So for `get` and `put` the presign
-//! gate exists solely to stop **anonymous internet access** to the bucket; it
-//! does not — and need not — enforce read authz on a per-object basis.
-//! Requiring an authenticated device is the right and sufficient gate there.
+//! Media is sealed under keys the DS never holds (#1382), so a presign only exposes ciphertext.
 //!
-//! (Until #1382 the key was derived from `SHA-256(plaintext)` and the object
-//! was named by that hash — so the bucket and these tables held everything
-//! needed to decrypt every attachment. The paragraph above was not true then.)
-//!
-//! `delete` is different, and NOT for confidentiality — for **integrity of a
-//! possibly SHARED object** (#690). One object backs every message whose
-//! reference names it (an edit keeps the original's reference; a re-save in the
-//! Vault keeps its files). Minting a `delete` for it while another message
-//! still references it would 404 that attachment for everyone else. So the `delete` presign consults
-//! the server-side reference count ([`crate::messages::object_is_referenced`],
-//! DERIVED by joining `attachment_ref` declarations to the still-live
-//! `message_envelope` rows — #690) and refuses to sign while any reference
-//! remains — the same evidence that gates the Turso row's collection in
-//! `apply_delete_attachment`. The DS is the chokepoint: a client that has already
-//! deleted its own message cannot blow away a blob a second conversation still
-//! needs. Because the count is derived, a reference cannot outlive its message:
-//! once every referencing envelope is deleted or GC'd the gate opens on its own,
-//! with no per-deleter bookkeeping to forget. This is a per-object *integrity*
-//! gate, not the per-object *read* authz
-//! the paragraph above (still correctly) says the bucket does not need.
-//!
-//! ## Contract
-//!
-//! This module's request/response shapes ARE the contract the frontend `bridge`
-//! (and mobile, via uniffi) will call once the on-device LiveKit/R2 paths are
-//! removed (that client cutover is the follow-up to #393). See
-//! `docs/secrets-broker.md`.
+//! `delete` is refused while a live message still references the object (#690, [`crate::messages::object_is_referenced`]).
 
 use axum::{
     extract::State,
@@ -70,20 +24,11 @@ use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, gate_and_parse, is_member, ok_response, Authed, RawRequest};
 use crate::AppState;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::broker::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api`, shared with pollis-core.
 pub use pollis_api::broker::*;
 
-// ── Config ───────────────────────────────────────────────────────────────────
-
 /// Secrets the broker needs, read from DS env in [`BrokerConfig::from_env`]. All
-/// `Option` — a missing secret makes the matching endpoint return 503 (the
-/// endpoint still exists and answers, mirroring OTP with no Resend key) rather
-/// than failing at startup. Default is all-`None` (no broker configured), so the
-/// integration harness and unconfigured deploys keep working.
+/// `Option`: a missing secret makes its endpoint answer 503 rather than fail startup.
 #[derive(Clone, Default)]
 pub struct BrokerConfig {
     /// LiveKit API key — the JWT `iss` claim (env `LIVEKIT_API_KEY`).
@@ -118,9 +63,7 @@ impl BrokerConfig {
             livekit_api_key: var("LIVEKIT_API_KEY"),
             livekit_api_secret: var("LIVEKIT_API_SECRET"),
             livekit_url: var("LIVEKIT_URL"),
-            // Accept the established client env names (`R2_S3_ENDPOINT` /
-            // `R2_SECRET_KEY`) so the DS reuses the same Doppler secrets instead
-            // of duplicating them under new keys.
+            // Also accept the established client env names, reusing the same Doppler secrets.
             r2_endpoint: var("R2_ENDPOINT").or_else(|| var("R2_S3_ENDPOINT")),
             r2_region: var("R2_REGION").unwrap_or_else(|| "auto".to_string()),
             r2_bucket: var("R2_BUCKET"),
@@ -177,12 +120,7 @@ fn not_configured(what: &str) -> Response {
         .into_response()
 }
 
-// ── 1. POST /v1/livekit/token ──────────────────────────────────────────────
-
-/// LiveKit JWT claims. This is the only minter left: the on-device
-/// `livekit_jwt::make_token` it was written to match was removed once #393
-/// landed, and clients now ask `ds_livekit_*` for a token. The shape is still
-/// frozen by the LiveKit SFU, which is what it has to satisfy.
+/// LiveKit JWT claims; the shape is frozen by the LiveKit SFU.
 #[derive(Serialize)]
 struct LiveKitClaims {
     iss: String,
@@ -210,13 +148,7 @@ struct VideoGrants {
 /// inbox room (`inbox-<user_id>`) is always allowed; any other room requires
 /// current membership.
 ///
-/// #836: the identity that reaches LiveKit is an opaque per-room pseudonym, and
-/// the JWT carries no display name. Both used to be raw account data — the
-/// identity was `{user_id}:{device_id}` and `name` was the username — which
-/// handed the SFU the membership of every room and a stable handle to cluster
-/// rooms by. Deriving the pseudonym here, from the signer, is what keeps
-/// "a client cannot mint a token as another user" true while the value itself
-/// becomes meaningless to the SFU.
+/// #836: the identity is an opaque per-room pseudonym and the JWT carries no display name.
 pub async fn livekit_token(
     State(state): State<AppState>,
     req: RawRequest,
@@ -230,8 +162,7 @@ pub async fn livekit_token(
         return Ok(bad_request("room required"));
     }
 
-    // Secrets gate: a clear 503 when the broker isn't configured, just like OTP
-    // with no Resend key.
+    // A clear 503 when the broker isn't configured.
     let (api_key, api_secret, url) = match state.broker.livekit_ready() {
         Some(t) => t,
         None => return Ok(not_configured("livekit")),
@@ -242,21 +173,11 @@ pub async fn livekit_token(
         Err(resp) => return Ok(resp),
     };
 
-    // Room authz — only on the signed path (mirrors the other handlers, which
-    // skip authz when auth is disabled). Allowed to mint a JOIN token for:
-    //   - the user's own inbox room (`inbox-<user_id>`),
-    //   - any `call-<ulid>` room — the ULID is an unguessable capability handed
-    //     out via the callee's inbox; there is no membership row for it, and
-    //     voice is MLS/E2EE'd so the room ACL isn't the confidentiality boundary,
-    //   - any conversation the user is a current member of (`is_member` covers
-    //     groups, DMs, and channels — the latter being the voice-room case).
     if !authorize_room(&state, &authed, &parsed.room, &user_id).await? {
         return Ok(AuthRejection::Forbidden.into_response());
     }
 
-    // Device half: on the signed path it's the header the signature was verified
-    // against (gate proved the key registered for THIS device signed the request),
-    // so it's trustworthy without re-checking; on the no-auth path take the body.
+    // Signed path: the header the signature was verified against; no-auth: the body.
     let device_id = if authed.is_some() {
         req.headers
             .get("x-pollis-device")
@@ -266,16 +187,11 @@ pub async fn livekit_token(
     } else {
         parsed.device_id.clone().unwrap_or_default()
     };
-    // `view` is the screenshare-receive variant: no data channel (mirrors
-    // pollis-core's old `make_view_token`). The kind also picks the identity's
-    // capability prefix — the only structure left in it.
+    // `view` = screenshare-receive (no data channel); the kind also picks the identity prefix.
     let kind = crate::participant_id::ParticipantKind::from_wire(parsed.kind.as_deref());
     let can_publish_data = kind != crate::participant_id::ParticipantKind::View;
 
-    // #836: the user and device are encrypted into the identity under a key
-    // scoped to the LOGICAL room, so nothing relates this participant to the
-    // same user in another room. `device_id` keeps a user's devices distinct
-    // (#140) without appearing in the output.
+    // #836: identity encrypted under a key scoped to the LOGICAL room; `device_id` keeps devices distinct (#140).
     let identity = crate::participant_id::participant_pseudonym(
         api_secret,
         &parsed.room,
@@ -284,11 +200,7 @@ pub async fn livekit_token(
         kind,
     );
 
-    // #828: membership was authorized on the LOGICAL room above; what reaches
-    // LiveKit is the pseudonym. The room travels inside the JWT grant and
-    // `Room::connect` takes no room argument, so the client needs no change and
-    // never holds the mapping — which is the point: a mapping shipped in a client
-    // binary could be extracted and used to re-link every room to its conversation.
+    // #828: authz used the LOGICAL room; LiveKit sees only the pseudonym, and the client never holds the mapping.
     let wire_room = crate::room_id::room_pseudonym(api_secret, &parsed.room);
 
     let token = sign_livekit_token(
@@ -304,11 +216,6 @@ pub async fn livekit_token(
 }
 
 /// Look up usernames for a batch of resolved user ids, in one query.
-///
-/// Display names used to ride along in the LiveKit JWT (`name`) and come back
-/// off the SFU with each participant; since #836 stopped sending them, this is
-/// where the roster and the identity resolver get them instead. Ids are BOUND,
-/// never interpolated.
 async fn lookup_usernames(
     conn: &Connection,
     user_ids: &[String],
@@ -355,19 +262,13 @@ async fn authorize_room(
     if !is_member(&conn, room, user_id).await? {
         return Ok(false);
     }
-    // A block does not delete the DM's membership rows — it resets the
-    // blocker's `accepted_at` — so membership alone would keep handing the
-    // blocked user a token for the room they were just evicted from, and the
-    // eviction would undo itself on their next reconnect. Refusing the token is
-    // what makes it stick. One-directional, like the block: the blocker keeps
-    // their own access.
+    // A block only resets `accepted_at`, so refuse the token or the eviction undoes itself on reconnect.
     Ok(!dm_peer_blocked(&conn, room, user_id).await?)
 }
 
 /// True when another member of the DM `room` has blocked `user_id`.
 ///
-/// Answers `false` for anything that is not a DM — a group room matches no
-/// `dm_channel_member` row — so the group and channel paths are unaffected.
+/// `false` for non-DM rooms.
 async fn dm_peer_blocked(
     conn: &Connection,
     room: &str,
@@ -390,12 +291,7 @@ async fn dm_peer_blocked(
 /// variant. `now` is injected so the claim times are testable. Pure (no I/O) so
 /// it's directly unit-testable.
 ///
-/// There is no display-name parameter, deliberately (#836). The `name` claim
-/// used to carry the user's Pollis username, which made pseudonymising the
-/// identity pointless — the SFU could read the account straight off the
-/// participant. Peers resolve display names through
-/// [`livekit_identities`] instead, and the claim is sent empty. Removing the
-/// argument rather than passing `""` is what stops it coming back.
+/// No display-name parameter, deliberately (#836): the SFU must not read the account.
 pub fn sign_livekit_token(
     api_key: &str,
     api_secret: &str,
@@ -425,14 +321,7 @@ pub fn sign_livekit_token(
     Ok(encode(&header, &claims, &key)?)
 }
 
-// ── 1b. LiveKit server (RoomService) API — admin token + Twirp ────────────────
-//
-// `RoomService/SendData` (fan out a control payload to a room the caller isn't
-// joined to) and `RoomService/ListParticipants` (voice roster) each need a
-// short-lived **admin** JWT (`roomAdmin`) — signed with the LiveKit API secret.
-// On-device that secret was the leak; here the DS signs and makes the Twirp call
-// so the client only names a room + payload. Mirrors pollis-core's old
-// `livekit/admin_api.rs` (`make_admin_token` / `twirp_base`).
+// LiveKit RoomService (Twirp) calls need a short-lived admin JWT, signed here so the secret stays server-side.
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -500,13 +389,7 @@ fn bad_gateway(what: impl std::fmt::Display) -> Response {
 
 /// Map a failed outbound call to a response (#913).
 ///
-/// A **timeout** is `504 Gateway Timeout`, distinct from the `502` every other
-/// upstream failure gets, because the two ask the client for different things: a
-/// 502 means the upstream answered and the answer was unusable (retrying is
-/// unlikely to help), while a 504 means it never answered in time and the
-/// request may well succeed on a retry. Both beat the pre-#913 behaviour, which
-/// was to answer nothing at all and hold the handler — and a pooled connection —
-/// for as long as the upstream kept the socket open.
+/// A timeout is 504 (a retry may help); any other upstream failure is 502.
 fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Error) -> Response {
     if e.is_timeout() {
         tracing::warn!(
@@ -518,8 +401,6 @@ fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Erro
             StatusCode::GATEWAY_TIMEOUT,
             Json(serde_json::json!({
                 "error": format!("{what}: {} timed out", upstream.name()),
-                // The client's retry is worth attempting; say so explicitly
-                // rather than making it guess from the status alone.
                 "retryable": true,
             })),
         )
@@ -528,10 +409,7 @@ fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Erro
     bad_gateway(format!("{what}: {e}"))
 }
 
-// ── POST /v1/livekit/send-data ────────────────────────────────────────────────
-//
-// Authz: an authenticated device is required (`gate`), and the TARGET room must
-// be one the signer may reach (this endpoint used to admit any room):
+// POST /v1/livekit/send-data. Authz: `gate`, and the TARGET room must be reachable:
 //
 //   - the signer's own inbox (`inbox-<signer>`) — always;
 //   - another user's inbox (`inbox-<peer>`) — only while the two share a
@@ -541,26 +419,13 @@ fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Erro
 //     a shared group) so a bare DM request cannot ring a stranger's devices;
 //   - a conversation room — only for a current member (`is_member`).
 //
-// The payload's `type` must be one a CLIENT legitimately originates
-// ([`ClientPayloadKind`]); `enrollment_requested` is emitted by the DS itself
-// from `bootstrap::enrollment_request` and is refused here, so no client can
-// raise the account-takeover approval prompt on another device.
+// Only CLIENT-originated `type`s ([`ClientPayloadKind`]); `enrollment_requested` is DS-only.
 //
-// Identity is never taken from the body. Every identity-bearing key a client
-// might send (`sender_id`, `caller_id`, `*_username`, …) is STRIPPED, and for
-// the private-inbox kinds that legitimately name their actor the DS stamps the
-// VERIFIED signer back in (`sender_id` + `sender_username`, resolved from
-// `users`), so a recipient's "Incoming call from X" can only ever name the
-// account that actually signed the request. Shared-room targets get nothing
-// stamped — §5 metadata minimization keeps those broadcasts routing-only.
+// Identity keys are STRIPPED; private-inbox kinds get the VERIFIED signer stamped back in.
 
 /// The control-payload types a client may fan out through `/v1/livekit/send-data`.
 ///
-/// An allowlist rather than a denylist: a `type` the client has no business
-/// publishing — `enrollment_requested` most of all — is unrepresentable here and
-/// is refused before anything is signed. Mirrors the emitters in pollis-core
-/// (`commands/livekit/publish.rs`, `livekit_stub.rs`, `livekit_signalling.rs`,
-/// and the inline `json!` pings in `dm.rs` / `groups/*` / `messages/send.rs`).
+/// An allowlist: a `type` a client has no business publishing is unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientPayloadKind {
     NewMessage,
@@ -676,12 +541,7 @@ pub struct StampedSender<'a> {
 
 /// Rewrite a client payload so nothing in it can misattribute the actor. Pure.
 ///
-/// Strips [`IDENTITY_KEYS`]; then, only for a private-inbox target and a kind
-/// that names its sender, stamps the verified signer as `sender_id` /
-/// `sender_username` — plus the per-kind legacy keys shipped clients already
-/// read (`caller_id` / `caller_username` on `call_invite`, `inviter_username` /
-/// `group_name` on `membership_changed`), all with the SAME verified values, so
-/// an older renderer sees the true caller rather than nothing at all.
+/// Strips [`IDENTITY_KEYS`], then stamps the verified signer (and per-kind legacy keys) for private-inbox kinds.
 pub fn sanitize_client_payload(
     payload: &serde_json::Value,
     kind: ClientPayloadKind,
@@ -773,10 +633,6 @@ async fn lookup_group_name(conn: &Connection, group_id: &str) -> anyhow::Result<
 /// 404, or its "no response from servers" 503 — see
 /// [`send_data_room_is_empty`]) is success, mirroring the client's
 /// fire-and-forget semantics.
-///
-/// Refuses (403) a target the signer may not reach and a payload `type` a client
-/// may not originate; strips and re-stamps identity before anything is signed.
-/// See the module comment above for the full rule.
 pub async fn livekit_send_data(
     State(state): State<AppState>,
     req: RawRequest,
@@ -806,9 +662,7 @@ pub async fn livekit_send_data(
     let target = SendTarget::classify(&parsed.room, &user_id);
 
     let conn = state.db.conn().await?;
-    // Room authz — only on the signed path (mirrors `authorize_room`, which the
-    // other LiveKit handlers skip when auth is disabled). Checked BEFORE the
-    // secrets gate so a refused target is a 403 whether or not LiveKit is wired.
+    // Signed path only; checked BEFORE the secrets gate so a refused target is always a 403.
     if authed.is_some() {
         let allowed = match &target {
             SendTarget::OwnInbox => true,
@@ -860,14 +714,7 @@ pub async fn livekit_send_data(
 /// [`send_data_room_is_empty`] recognises) is treated as success, matching the
 /// fire-and-forget nudge semantics.
 ///
-/// Shared by the client-facing `/v1/livekit/send-data` endpoint and by
-/// **server-side emitters** — notably the enrollment-request inbox
-/// notification (`bootstrap::enrollment_request`), which the requesting device
-/// CANNOT send itself: it is pre-enrollment, so its `local_db` is closed and it
-/// has no MLS signing credential, and a client-side device-signed send-data
-/// fails with "not signed in for DS request signing". The DS holds the LiveKit
-/// admin secret, so it emits that nudge here. Returns `Err(reason)` on any
-/// failure; fire-and-forget callers log and move on.
+/// Shared with server-side emitters (e.g. `bootstrap::enrollment_request`, whose pre-enrollment device cannot sign).
 pub async fn room_send_data(
     state: &AppState,
     room: &str,
@@ -883,10 +730,7 @@ pub async fn room_send_data(
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD.encode(&raw)
     };
-    // #828: map here, at the chokepoint, so EVERY caller — including server-side
-    // emitters like `bootstrap::enrollment_request` — keeps passing the logical
-    // room and none of them can forget. The pseudonym is the only form that ever
-    // reaches LiveKit.
+    // #828: map at the chokepoint so no caller can hand LiveKit the logical room.
     let wire_room = crate::room_id::room_pseudonym(api_secret, room);
     let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
         .map_err(|e| format!("sign admin token: {e}"))?;
@@ -916,10 +760,7 @@ pub async fn room_send_data(
             }
             Err(format!("SendData {status}: {text}"))
         }
-        // Callers of this one are fire-and-forget: they log the reason and move
-        // on, so a timeout needs no distinct status — what #913 changes here is
-        // that the nudge now GIVES UP instead of holding the caller's handler
-        // open indefinitely behind a LiveKit that stopped answering.
+        // Fire-and-forget callers just log; the point is to give up (#913).
         Err(e) if e.is_timeout() => Err(format!(
             "SendData: livekit timed out after {}s",
             crate::util::Upstream::LiveKit.timeout().as_secs()
@@ -931,18 +772,9 @@ pub async fn room_send_data(
 /// Whether a non-2xx `RoomService/SendData` answer means "this room has no
 /// participants (or does not exist)" rather than a real failure (#1337).
 ///
-/// LiveKit's router answers SendData for a room no node is hosting — which is
-/// every room nobody has joined, e.g. a DM whose members are all on the
-/// media-off CLI or offline — with the Twirp error
-/// `{"code":"unavailable","msg":"no response from servers"}` (HTTP 503), not
-/// with the 404 the arm above already accepts. For a fire-and-forget nudge that
-/// is the same outcome as an empty room: there is nobody to notify. It used to
-/// surface as a 502 on every such send.
+/// LiveKit answers an unhosted room with Twirp 503 `unavailable` / `no response from servers`, not 404.
 ///
-/// Deliberately narrow: only that exact Twirp code + message. Any other 503
-/// (an overloaded or draining node answers `unavailable` with a different
-/// message), any other code, and anything that is not a Twirp error body stays
-/// an error, so a LiveKit that is genuinely down still reads as down.
+/// Only that exact code + message, so a genuinely down LiveKit still reads as down.
 pub fn send_data_room_is_empty(status: StatusCode, body: &str) -> bool {
     if status != StatusCode::SERVICE_UNAVAILABLE {
         return false;
@@ -955,47 +787,17 @@ pub fn send_data_room_is_empty(status: StatusCode, body: &str) -> bool {
     code == Some("unavailable") && msg == Some("no response from servers")
 }
 
-// ── 1c. RoomService/RemoveParticipant — evicting who lost access ─────────────
-//
-// A LiveKit token is checked ONCE, when the participant joins. Nothing about
-// losing access afterwards reaches the SFU on its own: a member removed from a
-// group, one who left, a blocked user, or a revoked device all keep the realtime
-// connection they already hold until they happen to disconnect. Refusing them a
-// NEW token (which `authorize_room` already does) does not close a session that
-// is already open — only `RoomService/RemoveParticipant` does.
-//
-// Two halves make an eviction complete, and both live here so no call site can
-// implement half of it:
-//
-//   - the TTL ([`LIVEKIT_TOKEN_TTL_SECS`]) bounds how long a *stale* token stays
-//     usable, i.e. how long a client that reconnects can re-enter a room it has
-//     since lost. `realtime.rs` re-mints on every reconnect, so shortening it
-//     costs a client nothing;
-//   - the kick below ends the session that is open RIGHT NOW.
-//
-// The identity handed to LiveKit is the per-room pseudonym (#836), derived from
-// `(room, user, device, kind)` — so evicting a user means evicting every one of
-// their devices in every capability, which is what [`participant_identities`]
-// enumerates.
+// RoomService/RemoveParticipant: a token is checked only at JOIN, so losing access needs a kick plus a short TTL.
 
 /// Realtime/voice participant token lifetime, in seconds.
 ///
-/// Deliberately short (15 min, was 1 h). Membership is checked only when the
-/// token is MINTED, so the TTL is exactly the window in which a token issued
-/// before a removal can still be redeemed at the SFU. The client re-mints on
-/// every reconnect (`pollis-core` `commands/livekit/realtime.rs`), and LiveKit
-/// validates the token at join rather than continuously, so a live connection is
-/// never dropped by this expiring — shortening it costs an established session
-/// nothing and only narrows the re-entry window.
+/// Short because membership is checked only at mint; a live connection is never dropped by expiry.
 pub const LIVEKIT_TOKEN_TTL_SECS: u64 = 15 * 60;
 
 /// Evict one participant identity from one LiveKit room via server-side
 /// `RoomService/RemoveParticipant`.
 ///
-/// A 404 is success: LiveKit answers that way when the room does not exist or
-/// the identity is not in it, which for an eviction is the desired end state —
-/// and the common case, since most of a user's `(device, kind)` identities are
-/// not connected at any given moment.
+/// A 404 (room or identity absent) is success: the desired end state.
 pub async fn room_remove_participant(
     state: &AppState,
     room: &str,
@@ -1006,9 +808,7 @@ pub async fn room_remove_participant(
         .livekit_ready()
         .ok_or_else(|| "livekit not configured".to_string())?;
 
-    // #828: LiveKit is addressed by the room pseudonym here for the same reason
-    // `room_send_data` maps at the chokepoint — the logical name never leaves
-    // the DS.
+    // #828: addressed by the room pseudonym, as in `room_send_data`.
     let wire_room = crate::room_id::room_pseudonym(api_secret, room);
     let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
         .map_err(|e| format!("sign admin token: {e}"))?;
@@ -1040,16 +840,9 @@ pub async fn room_remove_participant(
 
 /// Every LiveKit identity `user_id` can be holding in `logical_room`.
 ///
-/// One per `(device, kind)` pair, because that is exactly what
-/// [`crate::participant_id::participant_pseudonym`] keys on: a user connected
-/// from two devices is two participants, and a device in a voice channel is a
-/// different participant from the same device's realtime connection. Missing one
-/// of them leaves that session live, so this enumeration is the whole
-/// correctness of an eviction.
+/// One per `(device, kind)`, as `participant_pseudonym` keys; missing one leaves a session live.
 ///
-/// Takes the devices explicitly rather than reading them, because the two
-/// callers want different sets: losing membership evicts EVERY device the user
-/// has, while revoking one device must leave that user's other sessions alone.
+/// Devices are explicit: membership loss evicts all, a revocation only one.
 pub fn participant_identities(
     api_secret: &str,
     logical_room: &str,
@@ -1079,9 +872,7 @@ pub fn participant_identities(
 
 /// The device ids registered to `user_id`, revoked ones included.
 ///
-/// Revoked devices are deliberately in: a revocation is one of the events that
-/// MUST evict, and the tombstone is written before the eviction runs, so
-/// filtering on `revoked_at IS NULL` would skip the very device being kicked.
+/// Revoked devices included: the tombstone is written before the eviction runs.
 pub async fn user_device_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
     let mut rows = conn
         .query(
@@ -1170,11 +961,7 @@ pub async fn user_rooms(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<
 
 /// Kick `user_id` out of every room in `rooms` — every device, every capability.
 ///
-/// This is the membership-loss eviction (removed, left, blocked): the user has
-/// no business in the room from any device, so every device they own is kicked,
-/// plus the legacy no-device identity (`participant_pseudonym` accepts `""`, and
-/// a client old enough to hold one is exactly the client that will not notice
-/// being un-authorized).
+/// Includes the legacy no-device identity (`""`), which old clients may hold.
 pub async fn evict_user_from_rooms(state: &AppState, rooms: &[String], user_id: &str) {
     let mut device_ids = match state.db.conn().await {
         Ok(conn) => user_device_ids(&conn, user_id).await.unwrap_or_default(),
@@ -1199,17 +986,9 @@ pub async fn evict_device_from_rooms(
     evict_identities(state, rooms, user_id, &[device_id.to_string()]).await;
 }
 
-/// Fire-and-forget in the same sense as [`room_send_data`]: a LiveKit that is
-/// down or unconfigured must not fail the write that already committed — the
-/// user IS removed either way, and the stale session then dies at its next
-/// reconnect, when [`authorize_room`] refuses it a token. Failures are logged,
-/// never returned.
+/// Fire-and-forget: failures are logged; the stale session dies when [`authorize_room`] refuses at reconnect.
 ///
-/// The calls run CONCURRENTLY and are awaited before the handler answers. There
-/// are `3 × devices` of them per room and each carries the 5s LiveKit deadline,
-/// so running them in sequence would put a stalled SFU on the critical path of a
-/// `POST /v1/members/remove` for a minute; concurrently the worst case is one
-/// deadline.
+/// Concurrent, so a stalled SFU costs one 5s deadline, not one per call.
 async fn evict_identities(
     state: &AppState,
     rooms: &[String],
@@ -1230,9 +1009,7 @@ async fn evict_identities(
             let room = room.clone();
             tasks.spawn(async move {
                 if let Err(e) = room_remove_participant(&state, &room, &identity).await {
-                    // The identity is a pseudonym and the room is logical, so
-                    // this names what failed without logging either in a form
-                    // that links a user to a conversation.
+                    // Pseudonym + logical room: names the failure without linking user to conversation.
                     tracing::warn!("RemoveParticipant failed: {e}");
                 }
             });
@@ -1240,8 +1017,6 @@ async fn evict_identities(
     }
     while tasks.join_next().await.is_some() {}
 }
-
-// ── POST /v1/livekit/participants ─────────────────────────────────────────────
 
 /// POST /v1/livekit/participants — return the voice roster for `room` via
 /// server-side `RoomService/ListParticipants`. Same room authz as the token
@@ -1270,8 +1045,7 @@ pub async fn livekit_participants(
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
-    // Roster is a read — gate it to members (own inbox is always ok), mirroring
-    // the token endpoint. Only enforced on the signed path.
+    // Members only (own inbox always ok), signed path only.
     if authed.is_some() {
         let inbox = format!("inbox-{user_id}");
         if parsed.room != inbox {
@@ -1315,11 +1089,7 @@ pub async fn livekit_participants(
                 Ok(p) => p,
                 Err(e) => return Ok(bad_gateway(format!("ListParticipants decode: {e}"))),
             };
-            // #836: identities off the SFU are opaque, so the filtering that used
-            // to read them as strings (`ends_with(":view")`, the internal names)
-            // now falls out of decryption: anything that doesn't resolve to a
-            // real user under THIS room's key is not a roster entry, and the
-            // `view` kind is a screenshare receiver rather than a person.
+            // #836: anything not resolving to a real user under THIS room's key, or a `view` receiver, is dropped.
             let resolved: Vec<(String, String)> = parsed_resp
                 .participants
                 .into_iter()
@@ -1334,8 +1104,7 @@ pub async fn livekit_participants(
                 })
                 .collect();
 
-            // Display names no longer ride in on the LiveKit `name` claim — the
-            // roster is where they get re-attached, from the DS's own DB.
+            // Display names are re-attached from the DS's DB (#836).
             let names = {
                 let ids: Vec<String> = resolved.iter().map(|(_, u)| u.clone()).collect();
                 let conn = state.db.conn().await?;
@@ -1345,9 +1114,7 @@ pub async fn livekit_participants(
                 .into_iter()
                 .map(|(identity, uid)| {
                     let name = names.get(&uid).cloned().unwrap_or_else(|| uid.clone());
-                    // No `kind` on the roster — it is already filtered to real
-                    // voice participants, and the field is skipped when absent
-                    // so these bytes are unchanged.
+                    // No `kind` on the roster; skipped when absent.
                     ResolvedIdentity { identity, user_id: uid, name, kind: None }
                 })
                 .collect();
@@ -1366,20 +1133,12 @@ pub async fn livekit_participants(
     }
 }
 
-// ── POST /v1/livekit/identities ───────────────────────────────────────────────
-
 /// POST /v1/livekit/identities — resolve opaque LiveKit participant identities
 /// back to Pollis users (#836).
 ///
-/// A client learns peer identities from the LiveKit event stream, where they are
-/// per-room pseudonyms it has no key for. This is the resolver. Same room authz
-/// as minting a token, so it discloses nothing the caller could not learn by
-/// joining the room and reading the roster.
+/// Same room authz as minting a token, so it discloses nothing new.
 ///
-/// Unresolvable entries are omitted rather than erroring: an internal
-/// participant (`pollis-ds`), an identity from another room, and a hostile SFU's
-/// forgery are all simply "not a Pollis user here", and a roster with one
-/// unattributed tile is a better outcome than a failed batch.
+/// Unresolvable entries are omitted rather than erroring.
 pub async fn livekit_identities(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1445,25 +1204,6 @@ pub async fn livekit_identities(
     Ok(ok_response::<LivekitIdentitiesBody>(LivekitIdentitiesResponse { identities }))
 }
 
-// #987 deleted `POST /v1/turso/token` here.
-//
-// It minted a short-TTL, READ-ONLY Turso token so the client would stop
-// shipping a long-lived one in its bundle (#393) — the right move at the time,
-// and the wrong shape in the end: short-TTL or not, the token was whole-DATABASE
-// and read-only was its only scope, so any authenticated device could read every
-// row in the deployment for its lifetime. That is the residual #917 named and
-// could not close.
-//
-// #987 closed it by removing the client's database access entirely rather than
-// by shortening the credential's life. With no client connection left, an
-// endpoint that hands out database credentials is pure attack surface — so it
-// goes, along with `TURSO_PLATFORM_TOKEN` / `TURSO_ORG` / `TURSO_DB`, which the
-// DS needed for nothing else. (`TURSO_URL` / `TURSO_TOKEN` /
-// `TURSO_ADMIN_TOKEN` / `LOG_DB_ADMIN_TOKEN` are UNRELATED and still required:
-// they are the DS's own data-plane connection and the migration runner's.)
-
-// ── 2. POST /v1/r2/presign ───────────────────────────────────────────────────
-
 /// Default presigned-URL lifetime, in seconds.
 const PRESIGN_EXPIRES_SECS: u64 = 900;
 
@@ -1492,14 +1232,10 @@ pub struct R2Key<'a> {
     /// The user or group the prefix names, for the two owned families.
     pub owner: Option<&'a str>,
     /// The content hash this key names, for the two SHARED families — the value
-    /// the reference gate is asked about. Present for legacy shapes too: an old
-    /// object is every bit as shared as a new one, so it gets the same
-    /// protection.
+    /// the reference gate is asked about; legacy shapes included.
     pub content_hash: Option<&'a str>,
     /// True when the key is CONTENT-ADDRESSED — its name is a 64-hex digest of
-    /// the bytes, which is what every key a current client writes looks like.
-    /// Only these are writable; a legacy mutable key stays readable forever and
-    /// writable never.
+    /// the bytes. Only these are writable; legacy mutable keys stay read-only.
     pub content_addressed: bool,
 }
 
@@ -1520,18 +1256,9 @@ fn stem_of(name: &str) -> &str {
 /// Parse an R2 key into the family it belongs to, or `None` if the DS will not
 /// sign anything for it.
 ///
-/// WHY AN ALLOW-LIST. The presign endpoint hands out a credential-free URL for
-/// whatever key it is given. With no restriction, an authenticated device could
-/// name any object in the bucket — including one belonging to a different
-/// product surface, a key with `..` in it, or a key it invented purely to park
-/// bytes under. The bucket holds exactly four families of object and every one
-/// of them is written by code in this repository, so the set of writable shapes
-/// is knowable and small; anything outside it is a request the product never
-/// makes.
+/// An allow-list: without one, any device could sign any object, a `..` key, or free storage.
 ///
-/// Segment hygiene is part of the same job: no empty segment, no `.`/`..`, and
-/// a conservative character set, so a key can neither traverse nor smuggle a
-/// query string or a signed-header separator into the canonical request.
+/// Segment hygiene: no empty/`.`/`..` segment and a narrow charset, so keys can't traverse or inject.
 pub fn parse_r2_key(key: &str) -> Option<R2Key<'_>> {
     if key.is_empty() || key.len() > R2_KEY_MAX_LEN {
         return None;
@@ -1608,31 +1335,15 @@ fn put_max_bytes(family: R2Family) -> u64 {
 /// against the configured R2 bucket. Requires an authenticated device (when auth
 /// is enforced, [`gate_and_parse`] rejects an unsigned request with 401).
 ///
-/// There is no per-object READ authz and there does not need to be — see the
-/// module docs: the bucket holds ciphertext under keys only MLS members can
-/// reach, plus public decoration, so a `get` presign discloses nothing a
-/// member did not already hold the key for. WRITES are a different question, and the gates are:
+/// No per-object READ authz is needed (see the module docs). WRITE gates:
 ///
-///   * **The key must be one the product writes** ([`parse_r2_key`]). An
-///     arbitrary key is an arbitrary object, and an arbitrary object is free
-///     storage on someone else's bucket.
-///   * **A PUT must be content-addressed.** A legacy mutable key stays readable
-///     but is never writable again: whoever can overwrite `avatars/<uid>`
-///     replaces that user's avatar for everyone, and nothing about the key says
-///     what the bytes should be.
-///   * **A PUT must declare its exact, bounded length.** Without a signed
-///     `content-length` the URL is permission to write an object of ANY size;
-///     the DS's own size checks at registration are then a promise the client
-///     makes about bytes only R2 ever sees. Signing the length moves the check
-///     to the one party that counts them.
+///   * **The key must be one the product writes** ([`parse_r2_key`]).
+///   * **A PUT must be content-addressed**, so nobody can overwrite e.g. `avatars/<uid>`.
+///   * **A PUT must sign its exact, bounded length**, so R2 itself enforces the size.
 ///   * **A PUT or DELETE of an owned object needs the owner.** Only a user may
 ///     write or delete under their own `avatars/` prefix, and only an admin of
 ///     the group under its `group-icons/` prefix.
-///   * **A PUT or DELETE of a shared object needs it unreferenced** (#690, #848)
-///     — the integrity rule the module docs set out, now reached for the
-///     `media/<hex64>.enc` key shape too, which the old hash extractor silently
-///     missed (it returned `"<hash>.enc"`, matching no stored content hash, so
-///     the gate never fired for any object written since #762).
+///   * **A PUT or DELETE of a shared object needs it unreferenced** (#690, #848).
 pub async fn r2_presign(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1658,8 +1369,6 @@ pub async fn r2_presign(
         None => return Ok(not_configured("r2")),
     };
 
-    // The acting user: the verified signer when auth is on, the body's declared
-    // id when it is off (`resolve_user` rejects an empty/absent one there).
     let actor = match resolve_user(&authed, parsed.user_id.as_deref()) {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
@@ -1667,7 +1376,7 @@ pub async fn r2_presign(
 
     let writing = http_method == "PUT" || http_method == "DELETE";
 
-    // ── Owned families: avatars belong to a user, icons to a group ───────────
+    // Owned families: avatars belong to a user, icons to a group.
     if writing {
         match (object.family, object.owner) {
             (R2Family::Avatar, Some(user_id)) => {
@@ -1685,23 +1394,9 @@ pub async fn r2_presign(
         }
     }
 
-    // ── Shared families: an object anybody still references is untouchable ───
+    // Shared families: overwriting substitutes bytes for everyone; deleting 404s them for everyone.
     //
-    // One `media/<hash>` blob backs every message carrying that file and one
-    // `emoji/<hash>` blob every group that registered it, across conversations
-    // and users. Overwriting one substitutes chosen bytes for everyone (and for
-    // media the AEAD key is derived from the hash every recipient already knows,
-    // so the substitution decrypts cleanly); deleting one 404s the attachment or
-    // emoji for everyone else.
-    //
-    // DELETE and PUT ask the same question of a `media/` object, and the answer
-    // has no identity in it: "does any still-live message reference these
-    // bytes". Migration 000031 briefly gave the recorded uploader a delete that
-    // ignored other accounts' references; that let one user's delete 404 another
-    // user's attachment, which is our storage optimisation (one blob per unique
-    // file) leaking onto users. It is removed — `object_is_referenced` is the
-    // single predicate, and it is the same one `apply_delete_attachment` reads
-    // for the Turso row, so the row and the blob cannot disagree.
+    // No identity in the answer: `object_is_referenced` is the one predicate, shared with `apply_delete_attachment`.
     if writing {
         if let Some(content_hash) = object.content_hash {
             let referenced = match object.family {
@@ -1721,7 +1416,7 @@ pub async fn r2_presign(
         }
     }
 
-    // ── PUT: content-addressed, and exactly this many bytes ──────────────────
+    // PUT: content-addressed, and exactly this many bytes.
     let signed_content_length = if http_method == "PUT" {
         if !object.content_addressed {
             return Ok(bad_request("a put must name a content-addressed key"));
@@ -1758,25 +1453,16 @@ pub async fn r2_presign(
     }))
 }
 
-// ── SigV4 query-string presign ───────────────────────────────────────────────
-//
-// The query-string ("presigned URL") variant of AWS SigV4, ported from the
-// auth-header form in pollis-core's `r2.rs`. Single-chunk, `UNSIGNED-PAYLOAD`,
-// `host` the only signed header. The five `X-Amz-*` params go in the canonical
-// query string; the signature is appended last (it is never itself signed).
+// SigV4 query-string presign: single-chunk, `UNSIGNED-PAYLOAD`; the signature is appended last, unsigned.
 
 /// Compute the current UTC time as the SigV4 `YYYYMMDDTHHMMSSZ` basic-format
-/// timestamp. Split out so the handler stays I/O-only and the pure
-/// [`presign_r2_url`] takes the timestamp as an argument (testable).
+/// timestamp, split out so [`presign_r2_url`] stays pure.
 fn amz_datetime() -> String {
     chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string()
 }
 
 /// Build a SigV4 presigned URL for `method` on `bucket/key`. Pure — `datetime`
 /// is injected — so tests can pin the clock and reproduce the signature.
-///
-/// Signs `host` only. See [`presign_r2_url_bounded`] for the variant that also
-/// binds an exact body length.
 #[allow(clippy::too_many_arguments)]
 pub fn presign_r2_url(
     endpoint: &str,
@@ -1796,15 +1482,7 @@ pub fn presign_r2_url(
 
 /// [`presign_r2_url`], optionally binding an EXACT `Content-Length`.
 ///
-/// With `content_length: Some(n)` the canonical request signs
-/// `content-length;host` instead of `host` alone, so the URL only authorizes a
-/// body of exactly `n` bytes — R2 rejects anything else with a signature
-/// mismatch. That is the difference between a size the server believes and a
-/// size the storage layer enforces, and it is what bounds `emoji/…` objects
-/// (#848).
-///
-/// `None` reproduces the original single-signed-header form byte for byte, which
-/// is why every existing media/avatar presign is unchanged.
+/// With `Some(n)` the URL authorizes exactly `n` bytes; R2 rejects any other length (#848).
 #[allow(clippy::too_many_arguments)]
 pub fn presign_r2_url_bounded(
     endpoint: &str,

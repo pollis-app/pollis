@@ -1,20 +1,4 @@
-/*
- * Self -> App -> Update (#1443): the install channel each build path bakes in
- * (app.config.js), and where the Update row sends each channel
- * (lib/installChannel.ts).
- *
- * Pinned:
- *   - the sideload APK (POLLIS_RELEASE_KEY=sideload) is "sideload", a store
- *     build (POLLIS_OTA=production, default upload key) is "store", anything
- *     else is "dev"; a bad POLLIS_RELEASE_KEY fails the config like Gradle does;
- *   - the channel lands in `extra.installChannel` next to the existing extra
- *     (the EAS project id push needs), and stays OUT of the fingerprint, so the
- *     OTA job computes the runtime version the binaries carry;
- *   - the APK workflow's native build step is the sideload one;
- *   - channel x platform -> Play / App Store / TestFlight / pollis.com.
- *
- *   cd mobile && pnpm test
- */
+/* Self -> App -> Update (#1443): the channel each build path bakes in (app.config.js), and where each channel sends the user. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -57,16 +41,12 @@ function evaluate(env: Record<string, string | undefined>) {
 }
 
 test("each build path bakes its own channel", () => {
-  // The sideload APK workflow: signing key + OTA on.
   assert.equal(installChannelFor({ POLLIS_OTA: "production", POLLIS_RELEASE_KEY: "sideload" }), "sideload");
-  // The Play AAB (default upload key) and the iOS archive: OTA on, no key.
   assert.equal(installChannelFor({ POLLIS_OTA: "production" }), "store");
   assert.equal(installChannelFor({ POLLIS_OTA: "production", POLLIS_RELEASE_KEY: "upload" }), "store");
-  // Dev clients, Maestro's api-dev Release builds, CI's debug APK.
   assert.equal(installChannelFor({}), "dev");
   assert.equal(installChannelFor({ POLLIS_OTA: "off" }), "dev");
   assert.equal(installChannelFor({ POLLIS_RELEASE_KEY: "" }), "dev");
-  // A local sideload build without OTA is still a sideload APK.
   assert.equal(installChannelFor({ POLLIS_RELEASE_KEY: "sideload" }), "sideload");
   assert.throws(() => installChannelFor({ POLLIS_RELEASE_KEY: "Sideload" }), /POLLIS_RELEASE_KEY must be/);
   for (const env of [{}, { POLLIS_OTA: "production" }, { POLLIS_RELEASE_KEY: "sideload" }]) {
@@ -94,12 +74,10 @@ test("the fingerprint ignores the channel", () => {
 
 test("the sideload APK's native build step sets POLLIS_RELEASE_KEY=sideload", () => {
   const apk = readFileSync(join(repo, ".github", "workflows", "mobile-apk-release.yml"), "utf8");
-  // expo-constants writes assets/app.config at Gradle preBuild, so the Gradle
-  // step's env is what decides the baked channel.
+  // The Gradle step's env decides the baked channel.
   const gradle = /- name: Assemble the signed release APKs\n([\s\S]*?)\n {6}- name:/.exec(apk)?.[1] ?? "";
   assert.match(gradle, /POLLIS_RELEASE_KEY: sideload/);
   assert.match(gradle, /POLLIS_OTA: production/);
-  // And the workflow checks the channel that landed in the APK.
   assert.match(apk, /installChannel/);
 });
 
@@ -115,7 +93,6 @@ test("store installs open their store, the APK opens its page", () => {
     url: "itms-apps://apps.apple.com/app/id123456789",
     fallbackUrl: "https://apps.apple.com/app/id123456789",
   });
-  // No App Store listing yet: the iOS store build came from TestFlight.
   assert.equal(updateDestination("store", "ios", { appStoreId: null }).kind, "testflight");
   assert.equal(updateDestination("store", "ios", { appStoreId: null }).url, "itms-beta://");
   assert.deepEqual(updateDestination("sideload", "android"), { kind: "web", url: SIDELOAD_PAGE_URL });
@@ -127,9 +104,7 @@ test("store installs open their store, the APK opens its page", () => {
 test("a binary from before the channel existed still gets a right answer", () => {
   assert.equal(parseInstallChannel(undefined), null);
   assert.equal(parseInstallChannel("play"), null);
-  // Android: Play or the APK; the APK page links to both.
   assert.deepEqual(updateDestination(null, "android"), { kind: "web", url: SIDELOAD_PAGE_URL });
-  // iOS only ever shipped through Apple.
   assert.equal(updateDestination(null, "ios", { appStoreId: null }).kind, "testflight");
   assert.equal(updateDestination(null, "ios", { appStoreId: "1" }).kind, "appstore");
 });

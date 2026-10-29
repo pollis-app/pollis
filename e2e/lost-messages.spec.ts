@@ -1,22 +1,4 @@
-/*
- * A message this device could not decrypt is shown, not dropped (#1312).
- *
- * Runs against the browser build with the Tauri IPC mock. The core writes a
- * placeholder row (`undecryptable: true`, no content, sealed-sender `sender_id`)
- * when its cursor moves past a message it was entitled to read and never did;
- * this checks what that row looks like in both skins:
- *
- *   - it renders in place, between the messages around it;
- *   - it names no author (nothing readable says who sent it) and leaks no
- *     sentinel id;
- *   - it offers no message actions — nothing to reply to, edit or react to —
- *     only a link to Diagnostics, where each loss has its own log line;
- *   - a run of consecutive losses is ONE row that says how many.
- *
- * Screenshots of both skins land in `e2e/artifacts/playwright/` for review.
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js lost-messages
- */
+// A message this device could not decrypt is shown in place, not dropped (#1312).
 
 import { test, expect, expectLosses, type Page } from "./lib/zero-loss";
 
@@ -31,7 +13,6 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const MSG_BEFORE = "01HQ7Z3K9M2P5R8T1V4W6Y0BEF";
 const MSG_LOST = "01HQ7Z3K9M2P5R8T1V4W6Y0LST";
 const MSG_AFTER = "01HQ7Z3K9M2P5R8T1V4W6Y0AFT";
-// A run of three lost messages, later in the log.
 const RUN = ["01HQ7Z3K9M2P5R8T1V4W6Y0RN1", "01HQ7Z3K9M2P5R8T1V4W6Y0RN2", "01HQ7Z3K9M2P5R8T1V4W6Y0RN3"];
 const MSG_LAST = "01HQ7Z3K9M2P5R8T1V4W6Y0LAS";
 
@@ -182,8 +163,7 @@ for (const skin of SKINS) {
 test("the placeholder's link opens Diagnostics", async ({ page }) => {
   await boot(page, "refined");
   await openChannel(page);
-  // Plain click, no force: the next row's hidden action bar overlaps this
-  // row's bottom edge and used to swallow it.
+  // Plain click, no force: the next row's hidden action bar overlaps this row.
   await page.getByTestId(`message-${MSG_LOST}`).getByTestId("undecryptable-diagnostics-link").click();
   await expect(page.getByTestId("diagnostics-page")).toBeVisible();
 });

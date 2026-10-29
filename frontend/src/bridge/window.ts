@@ -1,15 +1,4 @@
-/**
- * Window bridge — `getCurrentWindow()` returns an object whose methods
- * match Tauri's `Window` shape (size/position/badge/drag/etc.).
- *
- * Methods delegate to the real `@tauri-apps/api/window`.
- *
- * `availableMonitors`, `LogicalSize`, `LogicalPosition` mirror
- * `@tauri-apps/api/window` / `@tauri-apps/api/dpi`.
- *
- * NOTE: We only surface the methods the renderer actually uses. Adding a
- * new caller for a method not listed below requires adding it here first.
- */
+/** Window bridge over `@tauri-apps/api/window`; only the methods the renderer uses. */
 
 import { type DragDropPayload } from "./runtime";
 
@@ -18,7 +7,6 @@ type UnlistenFn = () => void;
 export class LogicalSize {
   readonly width: number;
   readonly height: number;
-  // Type tag so a Tauri-runtime `setSize` can introspect this if needed.
   readonly type = "Logical" as const;
   constructor(width: number, height: number) {
     this.width = width;
@@ -39,8 +27,7 @@ export class LogicalPosition {
 type SizeArg = { width: number; height: number } | LogicalSize;
 type PositionArg = { x: number; y: number } | LogicalPosition;
 
-/** Mirrors Tauri's `ResizeDirection`. The eight window edges/corners a
- *  frameless-window resize handle can drag. */
+/** Mirrors Tauri's `ResizeDirection`. */
 export type ResizeDirection =
   | "North"
   | "NorthEast"
@@ -52,43 +39,32 @@ export type ResizeDirection =
   | "NorthWest";
 
 export interface PollisImage {
-  // The real `Image` from `@tauri-apps/api/image`, whose `rgba()` etc.
-  // methods are handled by Tauri itself. `bytes` is unused on this path but
-  // kept optional so `Image.fromBytes`'s return type stays structural.
+  // The real Tauri `Image`; `bytes` keeps the type structural.
   readonly bytes?: Uint8Array;
 }
 
 export interface WindowProxy {
-  // Bounds
   setSize: (size: SizeArg) => Promise<void>;
   setPosition: (pos: PositionArg) => Promise<void>;
   center: () => Promise<void>;
   innerSize: () => Promise<{ width: number; height: number }>;
   outerPosition: () => Promise<{ x: number; y: number }>;
   scaleFactor: () => Promise<number>;
-  // Events
   onResized: (cb: () => void) => Promise<UnlistenFn>;
   onMoved: (cb: () => void) => Promise<UnlistenFn>;
   onDragDropEvent: (cb: (event: { payload: DragDropPayload }) => void) => Promise<UnlistenFn>;
-  // Badge / icon
   setBadgeCount: (n: number | undefined) => Promise<void>;
   setIcon: (img: PollisImage) => Promise<void>;
-  // Controls
   minimize: () => Promise<void>;
   toggleMaximize: () => Promise<void>;
   close: () => Promise<void>;
   hide: () => Promise<void>;
   show: () => Promise<void>;
-  // Drag — Tauri drives the native compositor move for the frameless window.
   startDragging: () => Promise<void>;
-  // Edge/corner resize for the frameless window; Tauri drives the native
-  // compositor resize.
   startResizeDragging: (direction: ResizeDirection) => Promise<void>;
 }
 
-// Module-load Tauri delegate. Loaded lazily so a browser-only build never
-// touches `@tauri-apps/api/window` at runtime (the module exists but its body
-// assumes the Tauri runtime). Cached after first hit.
+// Lazy, so a browser-only build never loads the Tauri window module.
 let tauriWindowProxy: WindowProxy | null = null;
 async function tauriWindow(): Promise<WindowProxy> {
   if (tauriWindowProxy) {
@@ -117,9 +93,6 @@ async function tauriWindow(): Promise<WindowProxy> {
         cb({ payload: event.payload as DragDropPayload }),
       ),
     setBadgeCount: (n) => real.setBadgeCount(n),
-    // Tauri's setIcon accepts its own Image. Callers should be passing a real
-    // `@tauri-apps/api/image` Image — forward whatever they gave us;
-    // PollisImage's surface is intentionally a subset.
     setIcon: (img) => real.setIcon(img as never),
     minimize: () => real.minimize(),
     toggleMaximize: () => real.toggleMaximize(),
@@ -133,12 +106,8 @@ async function tauriWindow(): Promise<WindowProxy> {
   return tauriWindowProxy;
 }
 
-// `getCurrentWindow()` is sync in Tauri. We can't reasonably block on a
-// dynamic import here, so we return a thin proxy whose methods do the lazy
-// load on first call.
+// Sync like Tauri's; methods load lazily on first call.
 export function getCurrentWindow(): WindowProxy {
-  // The dynamic import resolves on the first method call; that's cheap and
-  // matches what `getCurrentWindow()` from Tauri does internally.
   const lazy = (): Promise<WindowProxy> => tauriWindow();
   return {
     setSize: (s) => lazy().then((w) => w.setSize(s)),
@@ -178,11 +147,7 @@ export async function availableMonitors(): Promise<
   }));
 }
 
-/**
- * Wrapper for the `hide_window` `#[tauri::command]`. macOS hides, elsewhere
- * closes — the per-OS branch lives in `src-tauri/src/lib.rs` and stays the
- * source of truth.
- */
+/** `hide_window`: macOS hides, elsewhere closes (see `src-tauri/src/lib.rs`). */
 export async function hideWindow(): Promise<void> {
   const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
   await tauriInvoke("hide_window");

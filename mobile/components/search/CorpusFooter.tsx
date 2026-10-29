@@ -4,12 +4,7 @@ import { type as ty, space } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";
 import type { SearchCorpus } from "../../hooks/queries/useSearch";
 
-/**
- * What this device can search. Persistent rather than shown only on "no
- * results", because E2EE means the server cannot search for you — the limits
- * of the on-device corpus are the answer to most "why isn't it here" questions.
- * Same copy as desktop's CorpusFooter (shared `search:view.*` strings).
- */
+/** What this device can search, always shown: the server cannot search for you. */
 export function CorpusFooter({ corpus }: { corpus: SearchCorpus }) {
   const { t } = useTranslation("search");
   const earliest = corpus.earliest_sent_at

@@ -1,56 +1,34 @@
 //! The relay-serving state machine: consent + live conditions → what this
 //! device is actually doing right now.
 //!
-//! Pure and I/O-free on purpose. Every rule that decides whether a volunteer's
-//! device carries other people's traffic is a branch in [`evaluate`], so each one
-//! is a unit test rather than something you have to unplug a laptop to check.
+//! Pure and I/O-free, so every serving rule is a unit test.
 //!
 //! # Fail closed on unknown signals
 //!
-//! `on_wifi` / `on_power` are `Option<bool>` and `None` means *the platform
-//! cannot report it*, which is a first-class answer — the UI renders it as
-//! "unknown" rather than "no". It must **never** satisfy a condition: if the
-//! user asked to relay only on Wi-Fi and we cannot tell whether we are on Wi-Fi,
-//! we do not relay. The alternative — treating "don't know" as "sure, go ahead"
-//! — burns a stranger's cellular data on someone else's traffic, which is
-//! exactly the promise the consent screen makes.
+//! `None` (platform can't report) must **never** satisfy a condition; guessing would burn a stranger's data.
 //!
 //! # The one structural invariant
 //!
-//! `state == Waiting` **iff** `hold.is_some()`. The wire format has to carry the
-//! two separately (the TS type in `frontend/src/hooks/queries/useRelayServing.ts`
-//! is `state` + a nullable `hold`), so the pairing is held by making
-//! [`RelayServingStatus::evaluate`] the only way this crate builds one, plus a
-//! test that walks every combination.
+//! `state == Waiting` **iff** `hold.is_some()`, held by [`RelayServingStatus::evaluate`] being the only constructor.
 //!
-//! Keep these types in sync with `useRelayServing.ts` (CLAUDE.md) — serde
-//! **snake_case**, matching `ApmConfig`'s convention rather than
-//! `MediaPermissions`' camelCase.
+//! Keep in sync with `useRelayServing.ts`; serde **snake_case**.
 
 use serde::{Deserialize, Serialize};
 
-/// Consent plus the two conditions, exactly as persisted in the synced
-/// preferences blob (`relay_serving`, `relay_serving_wifi_only`,
-/// `relay_serving_power_only`) and as sent by the UI.
+/// Consent plus the two conditions, as persisted in preferences and sent by the UI.
 ///
-/// `#[serde(default)]`: a payload from an older/partial caller degrades field by
-/// field to the safe defaults below rather than failing or, worse, defaulting
-/// `enabled` to on.
+/// `#[serde(default)]`: a partial payload degrades to the safe defaults, never `enabled` on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", default)]
 pub struct RelayServingConfig {
     /// Master consent. Off by default; never implied by any other setting.
     pub enabled: bool,
-    /// Only relay while the device reports an unmetered link.
     pub wifi_only: bool,
-    /// Only relay while the device is on external power.
     pub power_only: bool,
 }
 
 impl Default for RelayServingConfig {
-    /// Off, and both conditions ON. Relaying on a metered or battery-powered
-    /// device is user-hostile if mis-defaulted (§11.6); consent to carry other
-    /// people's traffic is never implied.
+    /// Off, both conditions ON (§11.6); consent is never implied.
     fn default() -> Self {
         RelayServingConfig {
             enabled: false,
@@ -64,9 +42,7 @@ impl Default for RelayServingConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelayServingState {
-    /// No consent given; nothing is forwarded.
     Off,
-    /// Consented, conditions met, carrying traffic.
     Serving,
     /// Consented but a condition is unmet — see the paired hold.
     Waiting,
@@ -84,34 +60,24 @@ pub enum RelayServingHold {
     OnBattery,
     /// No network at all.
     Offline,
-    /// Nothing can reach this device to hand it circuits. In v1 that means no
-    /// first-party relay has accepted this device as a middle hop.
+    /// Nothing can reach this device to hand it circuits.
     NoInboundPath,
 }
 
-/// The live platform signals behind the two conditions. `None` is "this platform
-/// cannot report it", never "no".
+/// Live platform signals; `None` is "can't report", never "no".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct LinkSignals {
-    /// Unmetered link (Wi-Fi or wired). `None` when unknown.
     pub on_wifi: Option<bool>,
-    /// External power. `None` when unknown.
     pub on_power: Option<bool>,
-    /// Whether the device has any network at all. `None` when unknown, which is
-    /// deliberately **not** treated as offline: `Offline` is a fact we report
-    /// when we know it, and manufacturing it from ignorance would show the user
-    /// a hold they cannot act on. The two *conditions* are the fail-closed ones.
+    /// `None` is **not** offline: only the two conditions are fail-closed.
     pub online: Option<bool>,
 }
 
-/// Everything [`evaluate`] needs: the platform signals plus whether anything can
-/// currently hand this device circuits.
+/// The platform signals plus whether anything can hand this device circuits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ServingSignals {
     pub link: LinkSignals,
-    /// True once a [`crate::net::peer::PeerLink`] producer is attached and this
-    /// device is reachable as a middle hop. Defaults **false** — a device that
-    /// cannot be reached is not serving, whatever else is true.
+    /// True once this device is reachable as a middle hop. Defaults **false**.
     pub inbound_path: bool,
 }
 
@@ -119,22 +85,18 @@ pub struct ServingSignals {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct RelayServingStatus {
-    /// The config the backend is actually running with.
     pub config: RelayServingConfig,
     pub state: RelayServingState,
     /// `Some` iff `state == Waiting`.
     pub hold: Option<RelayServingHold>,
     pub on_wifi: Option<bool>,
     pub on_power: Option<bool>,
-    /// Circuits currently being carried.
     pub active_circuits: u32,
-    /// Bytes forwarded since the app started.
     pub bytes_forwarded: u64,
 }
 
 impl RelayServingStatus {
-    /// The only constructor. Pairs `state`/`hold` through [`evaluate`] so the
-    /// two cannot drift apart.
+    /// The only constructor; pairs `state`/`hold` via [`evaluate`].
     pub fn evaluate(
         config: RelayServingConfig,
         signals: ServingSignals,
@@ -162,9 +124,7 @@ impl RelayServingStatus {
 
 /// Consent + conditions → `(state, hold)`.
 ///
-/// `supported` is false where the platform cannot serve at all; it wins over
-/// everything, including consent, because the honest answer there is "relaying
-/// isn't available on this device", not "waiting for Wi-Fi".
+/// `supported == false` wins over everything, including consent.
 pub fn evaluate(
     config: RelayServingConfig,
     signals: ServingSignals,
@@ -182,9 +142,7 @@ pub fn evaluate(
     }
 }
 
-/// The first unmet condition, in the order the user can act on them: no network
-/// beats a metered network, which beats battery, which beats "nothing can reach
-/// us" (the only one the user cannot fix by walking to a plug).
+/// The first unmet condition, in the order the user can act on them.
 pub fn hold_for(
     config: RelayServingConfig,
     signals: ServingSignals,
@@ -192,7 +150,6 @@ pub fn hold_for(
     if signals.link.online == Some(false) {
         return Some(RelayServingHold::Offline);
     }
-    // Fail closed: `!= Some(true)` covers both "metered" and "can't tell".
     if config.wifi_only && signals.link.on_wifi != Some(true) {
         return Some(RelayServingHold::MeteredNetwork);
     }
@@ -209,7 +166,6 @@ pub fn hold_for(
 mod tests {
     use super::*;
 
-    /// Consented, everything green.
     fn ready() -> ServingSignals {
         ServingSignals {
             link: LinkSignals {
@@ -263,15 +219,13 @@ mod tests {
             evaluate(consented(), ready(), false),
             (RelayServingState::Unsupported, None)
         );
-        // Even with nothing else satisfied, the answer is still Unsupported —
-        // never a hold the user could act on.
+        // Still Unsupported, never an actionable hold.
         assert_eq!(
             evaluate(consented(), ServingSignals::default(), false),
             (RelayServingState::Unsupported, None)
         );
     }
 
-    /// The load-bearing rule: unknown is not satisfied.
     #[test]
     fn unknown_wifi_does_not_satisfy_wifi_only() {
         let mut signals = ready();
@@ -365,8 +319,7 @@ mod tests {
         );
     }
 
-    /// Consent given while on battery settles to Waiting{OnBattery}, never
-    /// Serving — the exact case D2 called out.
+    /// Consent on battery settles to Waiting{OnBattery}, never Serving.
     #[test]
     fn consent_on_battery_settles_to_waiting() {
         let mut signals = ready();
@@ -377,8 +330,7 @@ mod tests {
         assert!(!status.is_serving());
     }
 
-    /// `hold.is_some()` iff `state == Waiting`, over every combination of the
-    /// three booleans and the four tri-state signals.
+    /// `hold.is_some()` iff `state == Waiting`, over every combination.
     #[test]
     fn hold_is_set_exactly_when_waiting() {
         let tri = [None, Some(true), Some(false)];
@@ -440,7 +392,7 @@ mod tests {
         assert_eq!(json["config"]["power_only"], true);
         assert_eq!(json["config"]["enabled"], true);
 
-        // `hold` must be JSON null (not absent) — the TS type is `| null`.
+        // `hold` must be JSON null, not absent.
         assert!(json.get("hold").is_some());
         let off = RelayServingStatus::evaluate(
             RelayServingConfig::default(),
@@ -464,7 +416,6 @@ mod tests {
         assert!(!full.wifi_only);
         assert!(full.power_only);
 
-        // A partial payload takes the safe defaults for what it omits.
         let partial: RelayServingConfig = serde_json::from_str(r#"{"wifi_only":false}"#).unwrap();
         assert!(!partial.enabled);
         assert!(!partial.wifi_only);

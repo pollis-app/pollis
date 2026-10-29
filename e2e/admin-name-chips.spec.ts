@@ -1,14 +1,4 @@
-/*
- * Admin name chips (#1488). Admins' names render as a filled chip; your own
- * keeps the theme accent, and every other admin's is filled with that
- * user's stable per-user colour (the one their name would get as text on
- * the dark theme) under dark ink — so two admins no longer look identical.
- * Non-admin names are unchanged: coloured text, no fill.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true` (see
- * playwright.config.js), in both skins: both draw the chip from the same
- * `MessageItem`.
- */
+// Admin name chips (#1488): own chip uses the accent, other admins their per-user colour.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -33,8 +23,7 @@ const MESSAGES = [
   msg("m_zed", "u_zed", "zed", "just a member", "2026-08-01T09:03:00Z"),
 ];
 
-// Mirror of `getUsernameColor` in frontend/src/utils/usernameColor.ts —
-// FNV-1a over the username, 65% saturation, 68% lightness on a dark bg.
+// Mirror of getUsernameColor in frontend/src/utils/usernameColor.ts.
 function expectedColor(key: string, isLightBg: boolean): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) {
@@ -86,8 +75,6 @@ const paintOf = (page: Page, id: string) =>
     return { background: s.backgroundColor, color: s.color };
   });
 
-// Resolve any CSS colour to the computed `rgb(...)` string the browser
-// reports, so expectations compare like for like.
 const resolve = (page: Page, css: string) =>
   page.evaluate((value) => {
     const probe = document.createElement("div");

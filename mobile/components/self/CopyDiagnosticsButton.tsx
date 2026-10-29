@@ -7,10 +7,7 @@ import { copyDiagnostics } from "../../lib/diagnostics";
 
 type CopyState = "idle" | "copied" | "failed";
 
-/**
- * Puts the on-device diagnostics log (#1305) on the clipboard. Nothing is
- * sent anywhere by this button; the label says how the copy went.
- */
+/** Puts the diagnostics log (#1305) on the clipboard; sends nothing. */
 export function CopyDiagnosticsButton({
   variant = "secondary",
   full,

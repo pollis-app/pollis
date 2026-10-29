@@ -1,14 +1,6 @@
 //! Device-local message retention (lookback window) commands.
 //!
-//! Retention is a device-only setting: it bounds how much *local* message
-//! history this device keeps so the encrypted local SQLite file does not grow
-//! forever. It is stored in the local `ui_state` table (never synced to remote,
-//! unlike the `preferences` mirror) and never deletes anything on Turso. It is
-//! orthogonal to MLS epoch visibility — see the "bounded history" product
-//! principle in CLAUDE.md.
-//!
-//! The actual storage + eviction primitives live in `db::local`; these are the
-//! thin async command wrappers that take the shared `AppState` local DB.
+//! Device-only: bounds local history and never deletes anything remote.
 
 use std::sync::Arc;
 
@@ -35,9 +27,7 @@ pub async fn set_message_retention(days: i64, state: &Arc<AppState>) -> Result<(
     crate::db::local::set_message_retention_days(db.conn(), days)
 }
 
-/// Run an eviction sweep now — the lifecycle entry point used by the startup
-/// and app-focus hooks. Returns the number of rows deleted. A no-op (returns
-/// `Ok(0)`) when retention is Forever or no local DB is open yet.
+/// Run an eviction sweep now; returns rows deleted (0 when Forever or no local DB).
 pub async fn run_message_eviction(state: &Arc<AppState>) -> Result<usize> {
     let guard = state.local_db.lock().await;
     let Some(db) = guard.as_ref() else {

@@ -1,6 +1,4 @@
-//! The two worlds the soak runs in, the client it drives through the real
-//! command dispatch path, and the operator's-eye views of storage and the DS
-//! database the proofs read.
+//! The soak's two worlds, its client, and operator's-eye views of storage and the DS DB.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,8 +37,6 @@ pub async fn setup(cfg: &SoakConfig, scanner: Arc<Scanner>) -> World {
     let app_dir = cfg.workdir.join("app");
     let cache_root = app_dir.join("media-cache");
     std::fs::create_dir_all(&cache_root).expect("create app dir");
-    // The process-wide data dir (`pollis_<user>.db`, accounts.json) and media
-    // cache root, exactly as the desktop shell sets them at startup.
     pollis_core::db::local::set_data_dir(&app_dir);
     pollis_core::commands::r2::set_media_cache_dir(cache_root.clone());
 
@@ -60,8 +56,7 @@ pub async fn setup(cfg: &SoakConfig, scanner: Arc<Scanner>) -> World {
             bootstrap_log_schema(&log.conn().await.expect("conn")).await.expect("log schema");
             drop_log_tables_from_main(&main.conn().await.expect("conn")).await.expect("drop log tables");
 
-            // Object storage, behind its tap. The tap keeps the Host header the
-            // presigned URL was signed for.
+            // The tap keeps the Host header the presigned URL was signed for.
             let s3_tap = Tap::new("s3", &cfg.s3.endpoint, true, false, scanner.clone());
             let s3_url = s3_tap.serve().await;
 
@@ -156,8 +151,6 @@ pub async fn setup(cfg: &SoakConfig, scanner: Arc<Scanner>) -> World {
     }
 }
 
-// ── The client ───────────────────────────────────────────────────────────────
-
 pub struct Client {
     pub _app: App<MockRuntime>,
     pub webview: WebviewWindow<MockRuntime>,
@@ -167,9 +160,7 @@ pub struct Client {
 }
 
 impl Client {
-    /// A fresh device: its own keystore and state, signed up with a PIN, its
-    /// identity published, and the loopback media server running — what the
-    /// desktop app is after first launch and sign-up.
+    /// A fresh device after first launch and sign-up, with its media server running.
     pub async fn sign_up(world: &World, email: &str) -> Self {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(world.config.clone(), keystore));
@@ -191,8 +182,7 @@ impl Client {
         me
     }
 
-    /// The signed DS client derives its identity from `accounts.json`'s active
-    /// user; with two clients in one process, point it at this one first.
+    /// The signed DS client uses `accounts.json`'s active user; point it at this one.
     pub fn activate(&self) {
         let _ = pollis_lib::accounts::upsert_account(&self.user_id, &self.username, None);
     }
@@ -202,12 +192,10 @@ impl Client {
         invoke(&self.webview, cmd, args).await
     }
 
-    /// What a file picker does: put the path in this window's scope.
     pub fn pick_file(&self, path: &Path) {
         self._app.state::<pollis_lib::pathscope::PathScope>().remember_file(path);
     }
 
-    /// What the save panel does.
     pub fn pick_save_target(&self, path: &Path) {
         self._app.state::<pollis_lib::pathscope::PathScope>().remember_save_target(path);
     }
@@ -217,10 +205,7 @@ impl Client {
     }
 }
 
-// ── Operator views ───────────────────────────────────────────────────────────
-
-/// GET an object straight from storage with the bucket's own credentials —
-/// what an operator, a leaked bucket key, or a subpoena sees. Bypasses the tap.
+/// GET an object with the bucket's own credentials, bypassing the tap.
 pub async fn operator_get(http: &soak_reqwest::Client, s3: &S3, key: &str) -> (u16, Vec<u8>) {
     let url = pollis_delivery::broker::presign_r2_url(
         &s3.endpoint,
@@ -252,7 +237,6 @@ pub async fn plain_get(http: &soak_reqwest::Client, url: &str) -> (u16, Vec<u8>)
     }
 }
 
-/// One row as text/bytes cells, for scanning.
 pub type Row = Vec<Vec<u8>>;
 
 fn cell(v: libsql::Value) -> Vec<u8> {
@@ -307,7 +291,6 @@ pub async fn scan_all_tables(db: &Db, scanner: &Scanner) -> Result<(usize, usize
     Ok((nt, nr, nc, findings))
 }
 
-/// Every regular file under `dir` (recursively).
 pub fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];

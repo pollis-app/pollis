@@ -1,104 +1,21 @@
 //! Domains E + G — account lifecycle, identity rotation, recovery, and the
 //! security-audit log.
 //!
-//! This is the riskiest write surface in #419: it touches the **account-key
-//! transparency log** (`account_key_log`, fed to `verifiable-log-builder`'s
-//! account tenant → verify.pollis.com), the destructive **account-deletion**
-//! and **identity-reset** bulk wipes, the **device-enrollment** approval rows,
-//! and the **security-event** audit trail.
-//!
-//! Every endpoint follows the domain-A..D convention ([`crate::messages`],
-//! [`crate::devices`]): a thin axum handler `gate`s the request, parses the
-//! body, calls a pure `apply_*(conn, authed, body)` that embeds BOTH
-//! authorization and the write, and maps the result to a response. The handler
-//! and the integration harness share the `apply_*` fn, so the test suite
-//! exercises the exact authz + atomicity the production handler runs.
-//!
-//! ## Where the writes land
-//!
-//! Every table here — `users`, `account_key_log`, `account_recovery`,
-//! `security_event`, `device_enrollment_request`, `group_member`,
-//! `dm_channel_member`, `mls_key_package`, `message_envelope`, `groups`,
-//! `user_device` — lives in the **MAIN DB** (`state.db`). None of them is on the
-//! commit-log DB, so all `apply_*` fns run on the main connection. (The MLS
-//! Welcome purge that identity-reset also performs is a SEPARATE log-DB write
-//! routed through [`crate::writes::welcomes_purge`].)
+//! The riskiest write surface in #419: the account-key transparency log, wipes, enrollment, audit.
 //!
 //! ## Authorization — every op is SELF-scoped
 //!
-//! A user rotates / deletes / recovers / audits only THEIR OWN account.
-//! [`resolve_actor`] binds the target user to the authenticated signer (a body
-//! `user_id` that differs from the signer is `Forbidden`), and every statement
-//! is scoped `WHERE … user_id = actor` (or, for the enrollment rows, the request
-//! must belong to the actor). Nothing is re-derived from client-supplied ids.
+//! A user acts only on THEIR OWN account: [`resolve_actor`] binds the target; every statement is scoped.
 //!
-//! **Credential**: device signature, except `rotate-identity` and
-//! `reset-recover`, which take the signature OR a verified-OTP session
-//! (`gate_or_session`) — the soft reset runs from a PRE-ENROLLMENT device on
-//! the login gate, which has no signing key; its authorization has always been
-//! the email OTP (see `tests/reset_session.rs` for the properties).
+//! **Credential**: device signature, except `rotate-identity` and `reset-recover`, which take a session too.
 //!
-//! **A session-authenticated rotation IS the soft reset.** An email OTP alone
-//! may only ever buy the "catastrophic, observable nuke" the whitepaper concedes
-//! (§11.5): a fresh identity that owns NOTHING. So when `rotate-identity` is
-//! authenticated by a bare session, [`apply_rotate_identity`] runs the
-//! `reset-recover` wipe (membership removal, key-package drop, other-device
-//! revocation — keeping only the session's own device) in the SAME transaction
-//! as the key rotation. There is no server state in which a session-minted key
-//! sits on an account that still holds its memberships and devices; a client
-//! cannot "forget" to call `reset-recover`. A device-signed rotation (an enrolled
-//! device, holding the account key) stays a plain rotation. Either way the DS
-//! appends its own `security_event` (`identity_rotated`, recording the
-//! credential kind) inside that transaction — the audit row is not entrusted to
-//! the client.
+//! **A session-authenticated rotation IS the soft reset:** the `reset-recover` wipe rides in its transaction.
 //!
 //! ## The two hard requirements
 //!
-//! 1. **`account_key_log` CAS.** `account_key_log` is an append-only, seq-ordered
-//!    transparency log keyed `UNIQUE (user_id, identity_version)`. A fork or gap
-//!    corrupts the published account-key transparency tree. So
-//!    [`apply_rotate_identity`] models the commit-log CAS ([`crate::commit`]):
-//!    the `account_key_log` append is a single conditional `INSERT … SELECT …
-//!    WHERE <based_on == current head> … ON CONFLICT DO NOTHING`, and the
-//!    `users.identity_version` bump + the `account_recovery` rewrap ride in the
-//!    SAME transaction, gated by that one CAS. Two concurrent rotations at the
-//!    same head → SQLite serializes the writers; exactly one append lands and
-//!    advances the head, the other sees the new head and inserts nothing →
-//!    `Conflict`. No fork, no gap.
+//! 1. **`account_key_log` CAS.** One conditional append gates the bump and rewrap; a racer gets `Conflict`.
 //!
-//! 2. **`delete_account` / `reset_identity_and_recover` are each ONE
-//!    transaction.** Their bulk deletes (and the ownership-handoff promotions)
-//!    all commit together or not at all — a half-deleted account is a corrupt
-//!    state. [`apply_delete_account`] and [`apply_reset_recover`] run every
-//!    statement inside a single libsql transaction.
-//!
-//! ## What stays DIRECT (bootstrap — deliberately NOT here)
-//!
-//! A write that ESTABLISHES the signing credential cannot be authenticated by
-//! that credential. These remain on the client's direct Turso path:
-//!
-//!   - **Account creation** (`auth.rs` verify_otp INSERT `users`) — no device
-//!     key exists yet.
-//!   - **First account-identity establishment** (`account_identity.rs`
-//!     `/v1/auth/establish-identity`, version 1) — runs at signup BEFORE
-//!     `register_device` / `ensure_device_cert`, so no device signing key is
-//!     enrolled and the local DB isn't even open. Single-device, single-shot, no
-//!     concurrency: the `UNIQUE (user_id, identity_version)` index is its only
-//!     (sufficient) guard. Rotations (version ≥ 2) DO route here, CAS-guarded.
-//!   - **Device registration / first cert publish** (`register_device`,
-//!     `ensure_device_cert`) — domain-D bootstrap (see [`crate::devices`]).
-//!   - **Enrollment *request*** (`start_device_enrollment` INSERT
-//!     `device_enrollment_request`) — the requesting device is pre-enrollment:
-//!     its `user_device.mls_signature_pub` is still NULL and its local DB is
-//!     closed, so it cannot produce a signature the DS would accept. Enrollment
-//!     *approval* / *rejection* (run on an already-enrolled sibling) DO route.
-//!   - **Secret-Key recovery security-event** (`recover_with_secret_key`) — runs
-//!     pre-finalize, before this device has published a cert.
-//!
-//! Logout device removal USED to be on the direct path, but bucket-C C4 moved it
-//! to the DEVICE-SIGNED [`logout_device`] (`POST /v1/auth/logout`): the client now
-//! issues the signed DELETE BEFORE it unloads the local DB / clears the signing
-//! key, so a read-only Turso token no longer breaks logout.
+//! 2. **`delete_account` / `reset_identity_and_recover` are each ONE transaction.**
 
 use axum::{
     extract::State,
@@ -124,35 +41,20 @@ use crate::writes::{
 use crate::AppState;
 use crate::util::b64_decode;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::account::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api`, shared with pollis-core; re-exported here.
 pub use pollis_api::account::*;
 
-// ── POST /v1/account/rotate-identity ─────────────────────────────────────────
-
-/// The outcome of an identity rotation. Distinct from [`WriteOutcome`] because a
-/// rotation has a THIRD terminal state — a CAS loss — that maps to 409 (not 200
-/// / 403), exactly like a commit losing its epoch.
+/// The outcome of an identity rotation; a CAS loss is a 409.
 pub enum RotateOutcome {
     /// The rotation won its version. `new_version` is the version now recorded.
     Applied { new_version: i64 },
     /// The signer may not rotate this account (`user_id` ≠ signer).
     Forbidden,
-    /// A concurrent rotation already advanced the head past `based_on_version`
-    /// (or `based_on_version` was stale). `head_version` is the current head; the
-    /// client must re-read and retry. No fork was created.
+    /// The head moved past `based_on_version`; the client re-reads and retries. No fork.
     Conflict { head_version: i64 },
 }
 
-/// POST /v1/account/rotate-identity — rotate a user's account identity key,
-/// CAS-guarded so two concurrent rotations can never fork the account-key
-/// transparency log. The `account_key_log` append, the `users.identity_version`
-/// bump, the `account_recovery` rewrap, the DS-authored `security_event` and —
-/// when the credential is a bare OTP session — the `reset-recover` wipe are ONE
-/// atomic transaction (see the module docs).
+/// POST /v1/account/rotate-identity — CAS-guarded, ONE transaction (see the module docs).
 pub async fn rotate_identity(
     State(state): State<AppState>,
     req: RawRequest,
@@ -165,20 +67,12 @@ pub async fn rotate_identity(
     let conn = state.db.conn().await?;
     let (outcome, dead_conversations) =
         apply_rotate_identity(&conn, authed.as_deref(), &parsed, &credential).await?;
-    // Rotation does not itself rewrite `mls_signature_pub_pq`, but it changes the
-    // account key every device cert chains to and is immediately followed by
-    // `/v1/devices/resign` and (for a recovering device) a fresh cert publish.
-    // Evicting the user here means the auth path re-reads once and can never
-    // serve a key from before the rotation (#658). Under a session the wipe also
-    // dropped every other device, which the same eviction covers.
+    // Evict the user (#658): every device cert chains to the rotated key.
     let owner = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()).ok();
     if let Some(owner) = owner.as_deref() {
         state.device_keys.invalidate_user(owner);
     }
-    // The log-DB half of a session reset, after the main transaction committed:
-    // the MLS state of conversations the wipe emptied, and the actor's pending
-    // Welcomes (addressed to an identity that no longer exists). Mirrors
-    // `reset_recover` + `/v1/welcomes/purge`.
+    // The log-DB half of a session reset, after the main commit (mirrors `reset_recover`).
     if let (RotateOutcome::Applied { .. }, GateCredential::Session { .. }, Some(owner)) =
         (&outcome, &credential, owner.as_deref())
     {
@@ -223,24 +117,11 @@ where
 /// ```
 /// (`?3 = based_on_version + 1`, `?4 = based_on_version`.)
 ///
-/// Exactly one of two racing rotations at the same head appends (advancing the
-/// head); the other's `WHERE` now sees the new head and inserts nothing →
-/// `affected == 0` → `Conflict`, transaction rolled back. The `ON CONFLICT DO
-/// NOTHING` is the backstop the `UNIQUE (user_id, identity_version)` index
-/// enforces. No fork, no gap, append-only.
+/// One of two racing rotations appends; the other inserts nothing → `Conflict`.
 ///
-/// `credential` decides what the rotation MEANS. [`GateCredential::Session`] is
-/// the pre-enrollment soft reset: the [`reset_recover_in_tx`] wipe (memberships,
-/// key packages, every device but the session's own) runs inside this same
-/// transaction, so an OTP alone can never mint a key that inherits the account.
-/// [`GateCredential::Signature`] (an enrolled device holding the account key) and
-/// [`GateCredential::None`] (auth disabled) rotate only. In every case a
-/// DS-authored `security_event` of kind `identity_rotated` — `metadata =
-/// credential=<session|signature|none>,new_identity_version=<n>` — lands in the
-/// transaction; the client is not trusted to write the audit row.
+/// A [`GateCredential::Session`] rotation also runs [`reset_recover_in_tx`]; all write `identity_rotated`.
 ///
-/// Returns the conversation ids the session wipe destroyed (empty otherwise),
-/// for the caller's post-commit commit-log purge.
+/// Returns the conversation ids the session wipe destroyed.
 pub async fn apply_rotate_identity(
     conn: &Connection,
     authed: Option<&str>,
@@ -350,8 +231,6 @@ async fn current_key_log_head(conn: &Connection, user_id: &str) -> anyhow::Resul
     })
 }
 
-// ── POST /v1/security-events ─────────────────────────────────────────────────
-
 /// POST /v1/security-events — append a row to the actor's own security-audit
 /// log (`security_event`). Self-scoped: the row's `user_id` is the signer.
 pub async fn record_security_event(
@@ -372,29 +251,10 @@ const SECURITY_EVENT_WINDOW_SECS: i64 = 3600;
 /// Client-reported security events one account may append per
 /// [`SECURITY_EVENT_WINDOW_SECS`].
 ///
-/// `/v1/read/security-events` was `ORDER BY created_at DESC LIMIT n` with `n`
-/// clamped to 500 and no cursor, so the audit log was a FIXED-SIZE WINDOW onto the
-/// newest rows. It now pages by keyset cursor (#1548), but a human still reads
-/// newest-first and stops scrolling long before the bottom, and the Security
-/// page shows only the latest three. Appending is otherwise unbounded, which makes
-/// burial an available move: a device that has just done something the log
-/// records can bury it under hundreds of rows of its own and the user, reading
-/// their own log, sees only the flood. Evidence that a caller can push out of view
-/// is not evidence.
-///
-/// Sixty an hour is far above what a client produces — the shipped events are
-/// enrollment approvals, identity rotations and key changes, a handful a week —
-/// and far below the volume needed to shift a 500-row window, so the cap bites
-/// only abuse. It applies ONLY to this endpoint: the DS's own rows (the
-/// `identity_rotated` event `rotate_identity` writes, and everything else written
-/// server-side) never pass through here, so a flood cannot crowd out the entries
-/// the DS authored either.
+/// Unbounded appends could bury events in a newest-first log; DS-authored rows bypass this cap.
 const SECURITY_EVENT_MAX_PER_WINDOW: i64 = 60;
 
-/// INSERT a `security_event` with `user_id = actor`. The row is always
-/// attributed to the signer, so a caller can never forge an audit entry under
-/// another user, and is rate-bounded so it cannot evict its own history
-/// ([`SECURITY_EVENT_MAX_PER_WINDOW`]).
+/// INSERT a `security_event` attributed to the signer, rate-bounded.
 pub async fn apply_record_security_event(
     conn: &Connection,
     authed: Option<&str>,
@@ -404,9 +264,7 @@ pub async fn apply_record_security_event(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
-    // Counted from the table, not from memory, so a rolling deploy does not hand
-    // out a fresh allowance and every DS instance sees the same total (#847's
-    // durable-budget pattern).
+    // Counted from the table, not memory (#847's durable-budget pattern).
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM security_event \
@@ -425,9 +283,7 @@ pub async fn apply_record_security_event(
     if recent >= SECURITY_EVENT_MAX_PER_WINDOW {
         return Ok(WriteOutcome::Forbidden);
     }
-    // Client-supplied free text. Shipped clients copy the device name in here
-    // (`name=<device_name>`), and that name can embed an IP; no client IP may be
-    // stored, so redact rather than refuse.
+    // Client free text can embed an IP (device names); redact rather than refuse.
     let metadata = body.metadata.as_deref().map(crate::util::redact_ip_literals);
     conn.execute(
         "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
@@ -444,13 +300,7 @@ pub async fn apply_record_security_event(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/enrollment/approve ──────────────────────────────────────────────
-
-/// POST /v1/enrollment/approve — flip a pending enrollment request the actor
-/// OWNS to `approved`, attaching the wrapped account key. The approving device
-/// has already verified the code / status / expiry client-side; this is the
-/// server-bound state transition. Self-scoped: the request's `user_id` must
-/// equal the signer (a sibling device of the same account).
+/// POST /v1/enrollment/approve — flip the actor's OWN pending request to `approved`.
 pub async fn approve_enrollment(
     State(state): State<AppState>,
     req: RawRequest,
@@ -463,10 +313,7 @@ pub async fn approve_enrollment(
     outcome_response::<ApproveEnrollmentBody>(apply_approve_enrollment(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// UPDATE the request `WHERE id = ? AND user_id = actor`. The `user_id = actor`
-/// bind is the authz: a signer can only approve enrollments for THEIR OWN
-/// account. `affected == 0` → the request isn't theirs (or doesn't exist) →
-/// `Forbidden`.
+/// UPDATE `WHERE id = ? AND user_id = actor`; zero rows → `Forbidden`.
 pub async fn apply_approve_enrollment(
     conn: &Connection,
     authed: Option<&str>,
@@ -495,8 +342,6 @@ pub async fn apply_approve_enrollment(
     }
     Ok(WriteOutcome::Ok)
 }
-
-// ── POST /v1/enrollment/reject ───────────────────────────────────────────────
 
 /// POST /v1/enrollment/reject — flip a pending enrollment request the actor OWNS
 /// to `rejected`. Self-scoped like [`approve_enrollment`].
@@ -537,13 +382,7 @@ pub async fn apply_reject_enrollment(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/devices/revoke ──────────────────────────────────────────────────
-
-/// POST /v1/devices/revoke — drop the revoked device's unclaimed key packages
-/// and tombstone its `user_device` row (`revoked_at`). Self-scoped: both writes
-/// are bound `user_id = actor`, so a caller can only revoke their OWN devices.
-/// The MLS reconcile that removes the revoked leaf from each tree stays
-/// client-side (it commits through `/v1/commits`).
+/// POST /v1/devices/revoke — drop unclaimed key packages and tombstone the row (self-scoped).
 pub async fn revoke_device(
     State(state): State<AppState>,
     req: RawRequest,
@@ -553,17 +392,13 @@ pub async fn revoke_device(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    // The device's name BEFORE the write (#987). Tombstoning does not clear the
-    // column, but reading first keeps "does this device exist on your account?"
-    // and "what was it called?" a single question with a single answer.
+    // The device's name BEFORE the write (#987).
     let device_name = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         Ok(owner) => live_device_name(&conn, &owner, &parsed.device_id).await?,
         Err(_) => None,
     };
     let outcome = apply_revoke_device(&conn, authed.as_deref(), &parsed).await?;
-    // Revocation must bite on the NEXT request, not when the cache TTL lapses
-    // (#658). Evicted unconditionally: if the write was Forbidden nothing
-    // changed and the eviction only costs one re-read.
+    // Revocation must bite on the NEXT request (#658); evicting on Forbidden costs a re-read.
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         state
             .device_keys
@@ -573,11 +408,7 @@ pub async fn revoke_device(
         if matches!(outcome, WriteOutcome::Ok) {
             let log_conn = state.log_db.conn().await?;
             crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
-            // A revoked device fails the signature gate from here on, so it can
-            // never mint another LiveKit token — but the SFU checks a token only
-            // at JOIN, so the realtime and voice sessions it already holds would
-            // outlive the revocation. Kick exactly this device's identities; the
-            // account's other devices keep theirs.
+            // The SFU checks tokens only at JOIN, so kick this device's existing sessions.
             let rooms = crate::broker::user_rooms(&conn, &owner).await?;
             crate::broker::evict_device_from_rooms(&state, &rooms, &owner, &parsed.device_id).await;
         }
@@ -594,9 +425,7 @@ pub async fn revoke_device(
                 Some(name) => DeviceRevoked::Ok {
                     device_name: Some(name),
                 },
-                // The row was absent (or already tombstoned): the UPDATE's
-                // `revoked_at IS NULL` bind made it a no-op, so say so rather
-                // than report a revocation that did not happen.
+                // Absent or already tombstoned: report that, not a revocation.
                 None => DeviceRevoked::NotFound,
             },
         )),
@@ -605,8 +434,7 @@ pub async fn revoke_device(
 
 /// The name of a LIVE (non-tombstoned) device on `user_id`'s account.
 ///
-/// `None` covers both "no such device" and "already revoked", which the caller
-/// treats identically: neither is a revocation this call performed.
+/// `None` covers both "no such device" and "already revoked".
 async fn live_device_name(
     conn: &Connection,
     user_id: &str,
@@ -631,12 +459,7 @@ async fn live_device_name(
 /// watermarks, then tombstone its row — one transaction, all `WHERE user_id =
 /// actor`.
 ///
-/// The watermark DELETE is the "invalid states unrepresentable" half of #685: a
-/// revoked device can never fetch again, so a `conversation_watermark` row for it
-/// is a cursor that can never advance. The envelope-GC reads filter revoked
-/// devices out at read time, but leaving the rows behind means the invalid state
-/// still exists in the table and every future reader has to remember to exclude
-/// it. Deleting it here removes it at the chokepoint instead.
+/// Deleting the watermarks (#685) removes cursors that can never advance.
 pub async fn apply_revoke_device(
     conn: &Connection,
     authed: Option<&str>,
@@ -667,17 +490,11 @@ pub async fn apply_revoke_device(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/auth/logout ─────────────────────────────────────────────────────
-
 /// POST /v1/auth/logout — DELETE the logging-out device's `user_device` row.
 /// DEVICE-SIGNED and self-scoped: the signer can only remove a device on their
 /// OWN account (`WHERE user_id = actor`).
 ///
-/// Deliberately a DELETE, NOT the tombstone `/v1/devices/revoke` does: a
-/// `revoked_at` tombstone permanently fails the device-signature gate, but a
-/// logout-with-delete must re-register cleanly on the next sign-in. Removing the
-/// row outright lets `register_device` / re-enrollment recreate it. Mirrors
-/// pollis-core `auth::logout`'s direct `DELETE FROM user_device`.
+/// A DELETE, NOT a tombstone, so the next sign-in re-registers cleanly.
 pub async fn logout_device(
     State(state): State<AppState>,
     req: RawRequest,
@@ -703,18 +520,9 @@ pub async fn logout_device(
     outcome_response::<LogoutDeviceBody>(outcome)
 }
 
-/// DELETE the device row `WHERE device_id = ? AND user_id = actor`, together
-/// with that device's per-device state. The `user_id = actor` bind is the authz:
-/// a signer can only log out a device on THEIR OWN account. Idempotent —
-/// removing an already-gone device is a no-op `Ok` (a re-tried logout must never
-/// error).
+/// DELETE the device row and its per-device state, scoped to the actor; idempotent.
 ///
-/// The key-package and watermark deletes mirror [`apply_revoke_device`], which
-/// has always done them. Logout did not, so a logged-out device left unclaimed
-/// key packages behind — claimable by a peer, producing a Welcome for a device
-/// that no longer exists — plus a fetch cursor that can never advance. Neither
-/// is reachable by a cascade (`conversation_watermark` has no foreign key at
-/// all), so both are explicit.
+/// Key-package and watermark deletes, as in [`apply_revoke_device`]; no cascade reaches them.
 pub async fn apply_logout_device(
     conn: &Connection,
     authed: Option<&str>,
@@ -744,14 +552,7 @@ pub async fn apply_logout_device(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/account/reset-recover ───────────────────────────────────────────
-
-/// POST /v1/account/reset-recover — the membership/device wipe that follows an
-/// identity reset, as ONE transaction. Removes the actor from all groups/DMs
-/// (with ownership handoff), drops their stale key packages, and orphans their
-/// OTHER devices. The MLS Welcome purge is a separate log-DB call
-/// (`/v1/welcomes/purge`); the identity rotation itself is
-/// `/v1/account/rotate-identity`.
+/// POST /v1/account/reset-recover — the post-reset membership/device wipe, as ONE transaction.
 pub async fn reset_recover(
     State(state): State<AppState>,
     req: RawRequest,
@@ -763,9 +564,7 @@ pub async fn reset_recover(
     let conn = state.db.conn().await?;
     let (outcome, dead_conversations) =
         apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
-    // Account-wide device wipe → evict the whole user (#658). Cheaper to reason
-    // about than enumerating which sibling devices were dropped, and the kept
-    // `current_device_id` merely pays one re-read.
+    // Account-wide device wipe → evict the whole user (#658).
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         state.device_keys.invalidate_user(&owner);
     }
@@ -778,16 +577,9 @@ pub async fn reset_recover(
     outcome_response::<ResetRecoverBody>(outcome)
 }
 
-/// All of identity-reset's main-DB cleanup, in one transaction. Self-scoped: the
-/// actor is the signer, and every statement is bound to `user_id = actor` (the
-/// admin promotions touch related rows as a server-authorized consequence of the
-/// actor leaving — exactly mirroring [`apply_delete_account`]).
+/// All of identity-reset's main-DB cleanup, in one transaction, self-scoped.
 ///
-/// This is NOT account deletion: the `users` row and the account's own records
-/// (preferences, blocks, security events, recovery blob) deliberately survive,
-/// because the account does. Only membership and device state is shed. Returns
-/// the conversation ids this reset destroyed, for the caller's post-commit
-/// commit-log purge.
+/// NOT account deletion: the account's own records survive; only membership and devices go.
 pub async fn apply_reset_recover(
     conn: &Connection,
     authed: Option<&str>,
@@ -804,17 +596,9 @@ pub async fn apply_reset_recover(
     Ok((WriteOutcome::Ok, dead_conversations))
 }
 
-/// The statements of an identity-reset wipe, run on an OPEN transaction the
-/// caller commits. Shared by [`apply_reset_recover`] (the standalone endpoint,
-/// load-bearing for a device-signed reset) and [`apply_rotate_identity`] (which
-/// runs it inside the rotation's own transaction whenever the credential is a
-/// bare OTP session). Idempotent: on an already-wiped account every statement
-/// affects zero rows, which is what lets the client keep calling
-/// `reset-recover` after a session rotation that has already done the work.
+/// The identity-reset wipe on an OPEN transaction; shared with [`apply_rotate_identity`]. Idempotent.
 ///
-/// `current_device_id` is the `user_device` row to KEEP (it re-enrolls under
-/// the new identity); `None` drops them all. Returns the conversation ids the
-/// wipe destroyed, for the caller's post-commit commit-log purge.
+/// `current_device_id` is the row to KEEP; `None` drops them all.
 async fn reset_recover_in_tx(
     tx: &Connection,
     actor: &str,
@@ -861,8 +645,7 @@ async fn reset_recover_in_tx(
     )
     .await?;
 
-    // Orphan the actor's OTHER devices; keep the current one (it re-enrolls under
-    // the new identity). `None` → drop them all.
+    // Orphan the actor's OTHER devices.
     match current_device_id {
         Some(dev) => {
             tx.execute(
@@ -922,21 +705,14 @@ async fn reset_recover_in_tx(
     Ok(dead_conversations)
 }
 
-// ── POST /v1/account/delete ──────────────────────────────────────────────────
-
 /// POST /v1/account/delete — permanently delete the actor's account, as ONE
 /// transaction. Handles group ownership (delete empty groups / promote a sole
 /// admin's successor), tears down any DM left with nobody in it, and deletes
 /// every main-DB row naming the actor via [`crate::teardown::purge_user_rows`].
 ///
-/// Nothing here relies on `ON DELETE CASCADE`: production Turso runs with
-/// `foreign_keys=OFF`, so the schema's cascade clauses never fire and this used
-/// to leave the device roster, DM membership, invites, recovery blob and
-/// security-event log behind. See [`crate::teardown`].
+/// Nothing relies on `ON DELETE CASCADE` (FKs are off in production); see [`crate::teardown`].
 ///
-/// The commit-log DB cannot join the main transaction, so its rows (the actor's
-/// Welcomes, plus the MLS state of any conversation this deletion destroyed) are
-/// purged after the commit.
+/// Commit-log rows are purged after the commit.
 pub async fn delete_account(
     State(state): State<AppState>,
     req: RawRequest,
@@ -976,10 +752,7 @@ pub async fn delete_account(
 /// Every remote-data delete of account deletion, in one transaction. Self-scoped
 /// to the signer.
 ///
-/// Returns the ids of conversations this deletion destroyed (channels of groups
-/// the actor was the last member of, and DMs left with nobody in them), so the
-/// caller can purge their commit-log-DB rows once this transaction has
-/// committed.
+/// Returns the destroyed conversation ids, for the post-commit log purge.
 pub async fn apply_delete_account(
     conn: &Connection,
     authed: Option<&str>,
@@ -1042,15 +815,9 @@ pub async fn apply_delete_account(
     Ok((WriteOutcome::Ok, dead_conversations))
 }
 
-/// Group-ownership handoff shared by [`apply_delete_account`] and
-/// [`apply_reset_recover`]: for every group the actor belongs to, tear the
-/// group down if they are its sole member, else promote a successor if they are
-/// its sole admin. Runs inside the caller's transaction (`&Transaction` derefs
-/// to `&Connection`). Mirrors the direct logic this replaces in `auth.rs` /
-/// `device_enrollment.rs`.
+/// Group-ownership handoff: tear down sole-member groups, else promote a sole admin's successor.
 ///
-/// Returns the conversation ids destroyed along the way (the channels of every
-/// group torn down), for the caller's post-commit commit-log purge.
+/// Returns the conversation ids destroyed along the way.
 async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Result<Vec<String>> {
     let mut dead_conversations: Vec<String> = Vec::new();
     let mut memberships: Vec<(String, String)> = Vec::new();
@@ -1081,8 +848,7 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
         };
 
         if member_count <= 1 {
-            // Sole member — tear the whole group down. Explicitly, table by
-            // table: the cascade this used to trust does not fire on Turso.
+            // Sole member: tear the whole group down explicitly.
             let channels = crate::teardown::purge_group(conn, gid).await?;
             dead_conversations.extend(channels);
             dead_conversations.push(gid.clone());
@@ -1121,10 +887,7 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
                         libsql::params![gid.clone(), new_admin.clone()],
                     )
                     .await?;
-                    // Hand the `groups.owner_id` pointer over too. It has no
-                    // foreign key, so it was left naming a user who no longer
-                    // exists — a dangling reference AND a deleted user's id
-                    // retained in a table that outlives them.
+                    // Hand `groups.owner_id` over too; it has no foreign key.
                     conn.execute(
                         "UPDATE groups SET owner_id = ?1 \
                          WHERE id = ?2 AND owner_id = ?3",

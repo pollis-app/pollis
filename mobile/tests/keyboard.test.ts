@@ -1,13 +1,4 @@
-/*
- * The soft keyboard is handled by react-native-keyboard-controller (#1246).
- *
- * The app is edge-to-edge, so Android's `adjustResize` is inert, React
- * Native's own `KeyboardAvoidingView` misses a keyboard that was already up
- * when a screen mounted, and an inset hand-rolled from `keyboardDidShow` came
- * out short on gesture-nav phones with a keyboard toolbar, cutting off the
- * chat composer. None of that shows up in Maestro's view hierarchy, so the
- * wiring is pinned here instead.
- */
+/* The soft keyboard is handled by react-native-keyboard-controller (#1246); Maestro cannot see the wiring. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -17,7 +8,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
-// Every .ts/.tsx source under the app's own directories.
 function sources(): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
@@ -56,15 +46,7 @@ test("<Screen> and the sheet avoid the keyboard with keyboard-controller on both
   }
 });
 
-// #1432: `automaticOffset` takes the frame's height from the layout event but
-// its window position from an async native call, which on Android can answer
-// before the screen is mounted below the status bar (y=0). Nothing measures
-// again, so every keyboard on that screen stopped a status bar short and hid
-// the chat composer behind it. <Screen> is always a full screen whose top is
-// the window's top, so the layout event's own frame (relative to the
-// SafeAreaView) is exact and cannot go stale. The sheet keeps it: its view
-// fills the Modal's window from the first layout, so the position is 0 either
-// way.
+// #1432: `automaticOffset`'s async window position can be stale on Android; the sheet keeps it (its position is always 0).
 test("<Screen> avoids the keyboard from its layout frame, not automaticOffset", () => {
   const kav = read("components/ui.tsx").match(/<KeyboardAvoidingView[\s\S]*?>/);
   assert.ok(kav);

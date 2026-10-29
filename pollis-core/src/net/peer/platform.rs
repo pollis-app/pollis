@@ -1,43 +1,26 @@
 //! OS probes behind the two relay-serving conditions.
 //!
-//! Both answers are `Option<bool>` and **`None` is a real answer** — the caller
-//! ([`super::conditions::hold_for`]) treats it as "condition not satisfied", so a
-//! platform we cannot read simply does not relay under that condition rather
-//! than guessing. That is why this module never returns a default of
-//! convenience.
+//! **`None` is a real answer**: [`super::conditions::hold_for`] treats it as not satisfied.
 //!
 //! `on_wifi` means **unmetered link**, matching the shipped UI's wording
 //! ("unmetered (Wi-Fi) connection"): wired Ethernet counts, cellular does not.
 //!
 //! # Freshness, without a timer
 //!
-//! CLAUDE.md bans periodic polling, so nothing here runs on a schedule. The
-//! probe is re-run at every event that could act on the answer: a config apply,
-//! a status read (which the UI performs on mount and whenever the backend pushes
-//! an event), and every time the engine gains or loses a link. A charger
-//! unplugged while the app sits idle is therefore noticed at the next of those,
-//! not instantly. Subscribing to native change notifications (netlink/udev on
-//! Linux, `SCNetworkReachability` + IOKit on macOS) is the event-driven upgrade
-//! and needs no timer either — it is a follow-up, not a polling loop.
+//! No timer: the probe re-runs on config apply, status reads and link changes.
 //!
 //! # Platform coverage
 //!
 //! - **Linux** — pure sysfs/procfs reads, no subprocesses.
 //! - **macOS** — two short-lived subprocesses (`pmset`, `route`), each bounded
 //!   by a timeout.
-//! - **Everything else (incl. Windows)** — `None` for both signals, so a
-//!   consenting device with the default conditions sits in `Waiting` and says so
-//!   plainly. Honest and safe; a `GetSystemPowerStatus` / WinRT
-//!   `NetworkInformation` probe is the follow-up that lifts it.
+//! - **Everything else (incl. Windows)** — `None` for both, so the device waits.
 //!
-//! The string parsing is deliberately split out of the platform-gated wrappers
-//! and compiled everywhere, so the parsers are unit-tested on every host rather
-//! than only on the OS that produces those strings.
+//! Parsers are compiled everywhere so they are tested on every host.
 
 use super::conditions::LinkSignals;
 
-/// Probe both platform signals. Never blocks for long: the Linux path is a
-/// handful of small file reads, the macOS path two bounded subprocesses.
+/// Probe both signals; bounded.
 pub async fn probe() -> LinkSignals {
     #[cfg(target_os = "linux")]
     {
@@ -56,18 +39,13 @@ pub async fn probe() -> LinkSignals {
 /// How a network interface should count toward "unmetered".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinkKind {
-    /// Wi-Fi or wired — unmetered.
     Unmetered,
-    /// Cellular / mobile broadband — metered.
     Metered,
-    /// A tunnel (VPN) or anything we do not recognise. The underlying link
-    /// could be anything, so we decline to claim it is unmetered.
+    /// A tunnel or unrecognised link; never claimed unmetered.
     Unknown,
 }
 
-/// Classify an interface name. Tunnels are deliberately `Unknown` rather than
-/// `Unmetered`: a VPN over cellular looks exactly like a VPN over fibre from
-/// here, and claiming the latter would burn a stranger's data plan.
+/// Tunnels are `Unknown`: a VPN over cellular is indistinguishable, and claiming unmetered would burn someone's data.
 pub(crate) fn classify_iface(name: &str) -> LinkKind {
     let n = name.to_ascii_lowercase();
     let cellular = ["wwan", "wwp", "rmnet", "ppp", "qmi", "pdp_ip", "ccmni"];
@@ -78,7 +56,6 @@ pub(crate) fn classify_iface(name: &str) -> LinkKind {
     if tunnel.iter().any(|p| n.starts_with(p)) {
         return LinkKind::Unknown;
     }
-    // en*/eth*/wl*/br*/bond*/usb* — wired, Wi-Fi, or a bridge over them.
     LinkKind::Unmetered
 }
 
@@ -92,8 +69,6 @@ pub(crate) fn kind_to_signal(kind: LinkKind) -> Option<bool> {
 }
 
 /// Parse the interface out of `route -n get default` (macOS).
-///
-/// Compiled everywhere so its tests run everywhere; only macOS calls it.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn parse_route_get_default(output: &str) -> Option<String> {
     for line in output.lines() {
@@ -166,7 +141,6 @@ mod linux {
         let iface = default_route_iface();
         let online = match std::fs::metadata("/proc/net/route") {
             Ok(_) => Some(iface.is_some()),
-            // No procfs (a sandbox) — we genuinely do not know.
             Err(_) => None,
         };
         let on_wifi = iface.as_deref().and_then(|i| kind_to_signal(classify(i)));
@@ -187,10 +161,7 @@ mod linux {
         parse_proc_net_ipv6_route(&v6)
     }
 
-    /// Interface names alone do not distinguish `enp3s0` (wired) from a
-    /// predictable-named Wi-Fi device on every distro, but sysfs does: a
-    /// wireless device has a `wireless/` directory. Both are unmetered, so this
-    /// only matters for the `Unknown` fallback.
+    /// sysfs tells Wi-Fi apart by a `wireless/` dir; only matters for `Unknown`.
     fn classify(iface: &str) -> LinkKind {
         if Path::new(&format!("/sys/class/net/{iface}/wireless")).exists() {
             return LinkKind::Unmetered;
@@ -200,10 +171,7 @@ mod linux {
 
     /// External power from `/sys/class/power_supply`.
     ///
-    /// A machine with **no battery at all** cannot be running on battery — it is
-    /// plugged in, or it would not be running — so a desktop with no power-supply
-    /// entries answers `Some(true)` rather than blocking every desktop volunteer
-    /// behind a condition it can never satisfy.
+    /// **No battery at all** means plugged in: `Some(true)`, so desktops can volunteer.
     fn power() -> Option<bool> {
         let entries = std::fs::read_dir("/sys/class/power_supply").ok()?;
         let mut saw_battery = false;
@@ -216,7 +184,6 @@ mod linux {
                 saw_battery = true;
                 continue;
             }
-            // Mains / USB / USB_PD / Wireless are all external supplies.
             let online = std::fs::read_to_string(path.join("online")).unwrap_or_default();
             if online.trim() == "1" {
                 mains_online = true;
@@ -234,8 +201,7 @@ mod macos {
     use super::*;
     use std::time::Duration;
 
-    /// Bound each probe: these commands answer in milliseconds, and a wedged one
-    /// must not stall a status read.
+    /// Bound each probe so a wedged command can't stall a status read.
     const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
     pub(super) async fn probe() -> LinkSignals {
@@ -287,7 +253,6 @@ mod tests {
         }
     }
 
-    /// A tunnel is unknown, never "unmetered" — the fail-closed choice.
     #[test]
     fn tunnels_are_unknown_not_unmetered() {
         for name in ["tun0", "wg0", "utun3", "ipsec0"] {
@@ -303,7 +268,6 @@ mod tests {
              wlan0\t00000000\t01E0A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n";
         assert_eq!(parse_proc_net_route(contents).as_deref(), Some("wlan0"));
 
-        // No default route at all → offline.
         let no_default = "Iface\tDestination\tGateway\n\
              wlan0\t00E0A8C0\t00000000\n";
         assert_eq!(parse_proc_net_route(no_default), None);
@@ -336,13 +300,10 @@ mod tests {
         assert_eq!(parse_route_get_default("route: writing to routing socket: not in table"), None);
     }
 
-    /// The probe must never panic or hang on the host running the tests, and
-    /// whatever it says must be a value the state machine can consume.
+    /// The probe never panics or hangs, and returns consumable values.
     #[tokio::test]
     async fn probe_answers_without_panicking() {
         let signals = probe().await;
-        // Nothing to assert about the values (they depend on the host), but the
-        // tri-state contract is that any of them may be None.
         let _ = (signals.on_wifi, signals.on_power, signals.online);
     }
 }

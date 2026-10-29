@@ -9,8 +9,7 @@ import { describeSecurityEvent } from "./securityEvents";
 export const SecurityEventRow: React.FC<{ event: SecurityEvent }> = ({ event }) => {
   const { t } = useTranslation("settings");
   const { heading, detail } = describeSecurityEvent(t, event);
-  // `created_at` is SQLite `datetime('now')`: UTC with no zone. Read as UTC, or
-  // the shown time is off by the viewer's offset.
+  // SQLite `datetime('now')` is UTC with no zone.
   const ms = parseServerTimestamp(event.created_at);
   const createdAt = ms === null ? event.created_at : new Date(ms).toISOString();
   return (

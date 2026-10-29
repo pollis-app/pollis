@@ -1,36 +1,4 @@
-/*
- * The thread panel renders a message's timestamp correctly (#874).
- *
- * THE DEFECT
- * ----------
- * `Message.created_at` is a bare `number`, and the app's own contract — stated
- * in `utils/format.ts` and enforced by `MessageItem`, `MessageList` and
- * `timeAgo` — is that it may arrive in epoch SECONDS or epoch milliseconds, so
- * every surface normalises with `toMs` before formatting. `ThreadMessageRow`
- * did not. It called `new Date(created_at)` directly, so a seconds-precision
- * timestamp rendered as 1st January 1970 in the thread panel while the *same
- * message* read correctly in the channel two inches to its left. The row was
- * rewritten wholesale in #837 and the omission survived it, because nothing
- * rendered a thread row in any test.
- *
- * WHAT THESE TESTS PIN
- * --------------------
- * One invariant, twice: **a message shows the same wall-clock time wherever it
- * is drawn.** Once with an ordinary ISO timestamp (a guard — it passed before
- * the fix and must keep passing), and once with the seconds-precision shape
- * that only the normalisation makes correct (the regression proper — this one
- * failed before the fix, thread rows showing 1970's clock time).
- *
- * The expected strings are computed IN THE PAGE from the same `Intl` the app
- * uses, so the assertion holds in any timezone and any locale rather than
- * hardcoding one machine's rendering.
- *
- * Both skins, because the row has two entirely separate return branches —
- * terminal draws an IRC line, refined draws an avatar row — and each one
- * prints the time separately.
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js
- */
+// Thread panel timestamps (#874): a message shows the same wall-clock time wherever drawn, seconds or ms.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -44,15 +12,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const ISO_ROOT = "01HQ7Z3K9M2P5R8T1V4W6Y0ISO";
 const ISO_SENT_AT = "2026-08-01T15:07:00.000Z";
 
-/**
- * Thread root carrying the legacy epoch-SECONDS shape — the regression case.
- *
- * The renderer builds `created_at` as `new Date(sent_at).getTime()`, which
- * passes a seconds-magnitude number straight through untouched, so this is
- * exactly the value the `toMs` guard exists to catch. 1786000000s is
- * 2026-08-06; read as milliseconds it is 1970-01-21, and the two land on
- * different clock times in every timezone.
- */
+/** Thread root with the epoch-SECONDS shape the `toMs` guard exists to catch. */
 const SECONDS_ROOT = "01HQ7Z3K9M2P5R8T1V4W6Y0SEC";
 const SECONDS_SENT_AT = 1786000000;
 
@@ -157,12 +117,7 @@ async function boot(page: Page, skin: Skin) {
   await expect(page.getByTestId("message-list")).toBeVisible();
 }
 
-/**
- * The clock time the thread row is required to print for `epochMs`, and the
- * one it prints when the normalisation is missing — both produced by the same
- * `Intl` formatter and locale the app itself uses, so this is a real
- * expectation rather than a second implementation of the formatter.
- */
+/** The clock time the row must print for `epochMs`, and the 1970 one it prints without toMs. */
 async function expectedTimes(page: Page, seconds: number) {
   return page.evaluate((s) => {
     const locale = document.documentElement.lang || "en";
@@ -175,13 +130,7 @@ async function expectedTimes(page: Page, seconds: number) {
   }, seconds);
 }
 
-/**
- * Open the thread hanging off `rootId`, through the row's hover action menu.
- *
- * Not through the "N replies" button: `ThreadReplyCount` is rendered by the
- * REFINED branch of `MessageItem` only, so that entry point does not exist in
- * the terminal skin (noted, not fixed, in #874). The action menu is on both.
- */
+/** Open the thread via the row's action menu (the "N replies" button is refined-only). */
 async function openThread(page: Page, rootId: string) {
   const row = page.getByTestId(`message-${rootId}`);
   await row.hover();
@@ -192,7 +141,6 @@ async function openThread(page: Page, rootId: string) {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`thread panel timestamps — ${skin} skin`, () => {
     agnosticTest("a seconds-precision timestamp renders the real date, not 1970", async ({
@@ -243,10 +191,7 @@ for (const skin of SKINS) {
     test("the thread agrees with the channel about when a message was sent", async ({
       page,
     }) => {
-      // The invariant behind both tests above, asserted against what the
-      // channel actually drew rather than against a computed string. The
-      // channel pads the hour differently ("3:07 PM" vs "03:07 PM"), so
-      // compare the digits, which is the part that was wrong.
+      // Against what the channel drew; compare digits, since the hour padding differs.
       await boot(page, skin);
 
       const channelTime = await page

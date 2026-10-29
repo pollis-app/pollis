@@ -1,5 +1,4 @@
-// The Vault's pure rules (#1316) — each a port of the same rule in desktop's
-// frontend/src/pages/Vault.tsx, pinned so the two apps cannot drift.
+// The Vault's pure rules (#1316), ported from desktop's Vault.tsx.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -75,7 +74,6 @@ test("a text edit keeps an entry's files, rebuilding desktop's envelope", () => 
     _att: [{ key: "media/1", url: "", name: "a.png", ct: "image/png", size: 42, hash: "abc", kv: 0, sha: "d1g", bh: "LKO2", w: 4, h: 3 }],
     _txt: "new caption",
   });
-  // The rebuilt envelope reads back as the same files.
   assert.deepEqual(
     parseContent(edited, "vault").attachments.map((a) => [a.object_key, a.content_hash, a.filename, a.key_scope]),
     [["media/1", "abc", "a.png", { kind: "vault" }]],
@@ -110,7 +108,6 @@ test("the viewer walks the grid's images and videos in grid order, newest first 
     ]), { created_at: "2026-10-03T09:00:00.000Z" }),
   ];
   const { items, index } = vaultViewerItems(entries, "media/1");
-  // The order the grid lays out (vaultAttachments), minus files and audio.
   assert.deepEqual(items.map((a) => a.id), ["media/3", "media/4", "media/1", "media/2"]);
   assert.equal(index, 2);
   assert.equal(vaultViewerItems(entries, "media/3").index, 0);
@@ -158,7 +155,6 @@ test("delete asks first: the sheet arms the bar, with the confirm haptic", () =>
   assert.match(screen, /<VaultDeleteBar/);
 });
 
-// #1497: a failed save names what the user can do, read from the core's text.
 test("a failed save is sorted by what the user can do about it", () => {
   const offline = [
     "ds_post /v1/r2/presign: error sending request for url (https://api-dev.pollis.com/v1/r2/presign): client error (SendRequest): connection closed before message completed",
@@ -190,7 +186,6 @@ test("a retry of the same draft uploads only what failed", () => {
   assert.match(lib, /const done = uploaded\.get\(att\)/);
   assert.match(lib, /uploaded\.set\(att, result\)/);
   assert.match(lib, /Promise\.allSettled\(/);
-  // The failed draft goes back as the same objects, which is what the memo keys on.
   assert.match(
     src("app/vault.tsx"),
     /setPendingAttachments\(\(current\) => \(current\.length > 0 \? current : attachments\)\)/,

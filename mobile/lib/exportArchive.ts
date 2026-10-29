@@ -1,9 +1,4 @@
-// The pure half of the on-device export (#856): types and naming, kept out
-// of the hooks so `mobile/tests/` can pin them without a renderer. Wording
-// is `t()` in the component — the same catalogue keys desktop uses.
-//
-// Mirrors `frontend/src/components/Security/ExportArchiveButton.tsx`; the
-// Rust side (`pollis-core/src/commands/export.rs`) is shared verbatim.
+// The pure half of the on-device export (#856), mirroring desktop's ExportArchiveButton.
 
 /// Mirrors `pollis_core::commands::export::MissingAttachment`.
 export interface MissingAttachment {
@@ -32,8 +27,7 @@ export interface FetchSummary {
   failed: { content_hash: string; file: string; error: string }[];
 }
 
-/// `pollis-archive-<date>.json` for the account, `pollis-conversation-<id>.json`
-/// for one conversation — the same stems desktop suggests in its save dialog.
+/// The same stems desktop suggests.
 export function exportFileName(conversationId: string | null, now: Date = new Date()): string {
   if (conversationId) {
     return `pollis-conversation-${conversationId}.json`;

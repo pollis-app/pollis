@@ -32,14 +32,7 @@ interface UseVoiceTestResult {
   stopPlayback: () => Promise<void>;
 }
 
-/**
- * Drives the Voice Settings pre-flight test harness. Opens a single Tauri
- * Channel to receive level frames and lifecycle events from the Rust side,
- * then exposes a thin wrapper around the voice_test invoke commands.
- *
- * Only one VoiceSettingsPage can mount at a time, so it's fine to own a
- * single channel here rather than a global subscription.
- */
+/** Voice Settings pre-flight test: one Channel for level frames and events, plus the voice_test commands. */
 export function useVoiceTest(): UseVoiceTestResult {
   const [peak, setPeak] = useState(0);
   const [rms, setRms] = useState(0);
@@ -47,8 +40,6 @@ export function useVoiceTest(): UseVoiceTestResult {
   const [monitor, setMonitorState] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Track the current phase in a ref so event handlers see the latest value
-  // without rebinding the channel onmessage closure.
   const phaseRef = useRef<VoiceTestPhase>("idle");
   const setPhaseBoth = useCallback((next: VoiceTestPhase) => {
     phaseRef.current = next;
@@ -73,7 +64,6 @@ export function useVoiceTest(): UseVoiceTestResult {
           setPhase("recording");
           break;
         case "recording_finished":
-          // Transitional — wait for playback_started before flipping phase.
           break;
         case "playback_started":
           phaseRef.current = "playing";
@@ -94,8 +84,7 @@ export function useVoiceTest(): UseVoiceTestResult {
     });
 
     return () => {
-      // Leaving the page: kill anything still running on the Rust side so
-      // the mic doesn't stay hot and tones don't keep playing.
+      // Leaving the page stops the mic and tones.
       invoke("stop_mic_test").catch((e) => console.warn("stop_mic_test failed", e));
       invoke("stop_test_playback").catch((e) => console.warn("stop_test_playback failed", e));
     };
@@ -151,7 +140,6 @@ export function useVoiceTest(): UseVoiceTestResult {
     async (inputDeviceId: string, outputDeviceId: string, durationMs: number) => {
       setError(null);
       resetMeter();
-      // Optimistic phase — the Rust side will emit RecordingStarted shortly.
       setPhaseBoth("recording");
       try {
         await invoke("record_and_play_back", {

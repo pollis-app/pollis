@@ -1,17 +1,9 @@
-// Pure snippet splitting for search hits, free of react-native so `node
-// --test` can load it.
-
 export interface SnippetPart {
   text: string;
   hit: boolean;
 }
 
-/**
- * Split a snippet into plain and highlighted runs. `highlights` are
- * `[start, end)` pairs in UTF-16 code units (plain JS string indices). Ranges
- * are taken in order; an empty, inverted or overlapping range is skipped
- * rather than trusted, so the output always reassembles to `text` exactly.
- */
+/** `[start, end)` UTF-16 ranges; bad ranges are skipped, so the output always reassembles to `text`. */
 export function splitSnippet(text: string, highlights: [number, number][]): SnippetPart[] {
   const parts: SnippetPart[] = [];
   let at = 0;

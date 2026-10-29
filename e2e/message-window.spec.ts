@@ -1,22 +1,4 @@
-/*
- * The windowed message log (#874) — browser-level e2e.
- *
- * Phase 2 made RENDER cost independent of history length; this file covers the
- * phase that made LAYOUT and PAINT independent of it too, by keeping only a
- * bounded window of rows in the document.
- *
- * The interesting tests here are not "the window is small" — that one is easy
- * and would pass on a broken build that simply lost half the log. They are the
- * three subsystems that locate a row with `querySelector` and therefore break
- * the moment a row can be absent: permalink jumps, arrow-key focus projection,
- * and reply-quote scrolling. Each is deliberately pointed at a target far
- * outside the initial window, because a target inside it proves nothing.
- *
- * Runs in both skins: the two have different row shapes, different heights and
- * different grouping rules, and the window measures real rows.
- *
- *   pnpm --filter @pollis/e2e exec playwright test message-window
- */
+// The windowed message log (#874): jumps, arrow-key focus and reply scrolling must reach rows outside the window.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -26,11 +8,7 @@ const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2GRP";
 const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2XCB";
 
-/**
- * Long enough that the window has to be a real window. At ~2rem a row the
- * viewport holds roughly fifteen, so 400 is more than an order of magnitude
- * past anything an overscan could hide.
- */
+/** Far more rows than the viewport (~15) plus overscan could hide. */
 const TOTAL = 400;
 /** Messages on the first of the two seeded days. Kept a multiple of the
  *  sender run length so a day boundary never lands mid-group. */
@@ -167,16 +145,7 @@ async function openChannel(page: Page, name: string, newestId: string) {
   await expect(page.getByTestId(`message-${newestId}`)).toBeVisible();
 }
 
-/**
- * Scroll back through the log the way a reader does — a real wheel over the
- * message list, not an assignment to `scrollTop`, because the windowed log
- * re-anchors itself and a synthetic offset is not what the browser hands a
- * scrolling user.
- *
- * Stops as soon as `untilId` is in the document, so a passing run costs only
- * the scrolling it needed. Bounded: `MAX_WHEELS` is several times the ~21
- * steps a 400-message history takes at 50 messages a page.
- */
+/** Scroll back with a real wheel (the log re-anchors, so scrollTop is not what a user does) until `untilId` shows. */
 const MAX_WHEELS = 90;
 async function wheelBackTo(page: Page, untilId: string): Promise<boolean> {
   await page.getByTestId("message-list").hover();
@@ -190,12 +159,7 @@ async function wheelBackTo(page: Page, untilId: string): Promise<boolean> {
   return (await page.getByTestId(`message-${untilId}`).count()) > 0;
 }
 
-/**
- * Message rows currently in the document, counted by the row's own test id so
- * the count means the same thing with and without the window — which is what
- * makes "reverting the window fails this" a real check rather than a check
- * that a wrapper element is missing.
- */
+/** Message rows in the document, counted by the row's own test id. */
 function renderedRows(page: Page) {
   return page.locator('[data-testid^="message-01"]');
 }
@@ -224,10 +188,7 @@ async function scrollLogTo(page: Page, top: number) {
   }, top);
 }
 
-/**
- * Record every element that receives the jump-highlight class. Same reason as
- * `bookmarks.spec.ts`: asserting the class directly races its own removal.
- */
+/** Record elements that get the jump-highlight class (asserting the class races its removal). */
 async function watchForFlash(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as { __flashed: string[] };
@@ -257,7 +218,6 @@ async function flashedTestIds(page: Page): Promise<string[]> {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`windowed message log — ${skin} skin`, () => {
     test("a 400-message log keeps a bounded number of rows in the DOM", async ({
@@ -267,10 +227,7 @@ for (const skin of SKINS) {
       await gotoChannel(page);
 
       const rendered = await renderedRows(page).count();
-      // A viewport of ~15 rows plus 10 rows of overscan on each side. The
-      // ceiling is loose on purpose — this pins the ORDER, which is what
-      // regressing back to "render everything" would break, and 400 rows
-      // would sail past it.
+      // ~15 visible rows plus overscan; the loose ceiling pins the order, not the exact count.
       expect(rendered).toBeGreaterThan(0);
       expect(rendered).toBeLessThan(80);
 
@@ -390,10 +347,7 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      // Bottom of the log: deep inside the second day, so no boundary is on
-      // screen. This is the assertion that a window edge does not FABRICATE a
-      // divider — computing the boundary against the previous rendered row
-      // instead of the previous timeline entry would put one on every window.
+      // Deep in day two, no boundary is on screen: a window edge must not fabricate a divider.
       await expect(page.getByTestId("day-divider")).toHaveCount(0);
 
       // The first message of the log always opens a day.
@@ -483,12 +437,7 @@ for (const skin of SKINS) {
       await openChannel(page, "general", NEWEST);
       expect(await wheelBackTo(page, idAt(TOTAL - 60))).toBe(true);
 
-      // Back to "archive", now served from cache. Its cursor used to be
-      // seeded by an effect that read the pages belonging to the conversation
-      // just left — non-empty, so it declined to seed anything, and no
-      // dependency would ever change to make it try again. The channel was
-      // pinned to its newest 50 messages for as long as the cache held it,
-      // with the rest sitting on disk unreachable (#927).
+      // Back to "archive" from cache: its cursor must still seed so older pages load (#927).
       await openChannel(page, "archive", otherIdAt(TOTAL - 1));
       expect(await wheelBackTo(page, otherIdAt(0))).toBe(true);
       await expect(page.getByTestId(`message-${otherIdAt(0)}`)).toBeVisible();
@@ -517,10 +466,7 @@ test.describe("windowed message log — refined grouping", () => {
       ).toHaveCount(0);
     }
 
-    // The row at the very top of the window is the one a window-local
-    // computation would wrongly promote to a group start, since it has no
-    // rendered predecessor. Whether it carries a header must depend only on
-    // its index in the timeline.
+    // The window's top row has no rendered predecessor; its header must depend only on its timeline index.
     const topIndex = Number(
       await windowedRows(page).first().getAttribute("data-index"),
     );
@@ -569,30 +515,13 @@ test.describe("windowed message log — cost", () => {
   });
 });
 
-/*
- * The load-more seam (#934).
- *
- * `MainContent` used to clear `loadingMore` in the same `finally` that
- * prepended the page. React batches every setState from one async
- * continuation, so the rows and `loadingMore === false` landed in a single
- * commit and there was no committed — or painted — state in which the fetched
- * rows existed while the log still said it was fetching.
- *
- * That state is the seam anything reacting between "the page arrived" and "the
- * load is over" needs: a scroll anchor, a spinner that must not flash, a
- * timing measurement. Asserted through a MutationObserver rather than by
- * polling, because polling cannot see a state that lasts one commit — and
- * because the observer callback fires once per DOM mutation BATCH, which is
- * exactly the granularity the claim is about: if both changes were still in
- * one commit, no batch would ever contain new rows alongside the loading line.
- */
+// The load-more seam (#934): a commit must exist with the new rows present and the loading flag still set.
 test.describe("load-more leaves a frame with the new rows and the flag still set", () => {
   /** The newest row of the SECOND page — i.e. one that only a load-more can
    *  put in the document, and near enough the window edge to be rendered. */
   const FIRST_OLDER_ROW = idAt(TOTAL - 51);
 
   for (const skin of SKINS) {
-    // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
     const agnosticTest = skinAgnosticTest(skin);
     agnosticTest(`${skin}: a prepend batch still carries the loading line`, async ({
       page,

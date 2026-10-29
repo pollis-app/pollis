@@ -1,33 +1,10 @@
 //! The durable outbox for edits (#1555).
 //!
-//! Before #1555 an edit rewrote the sender's local `message` row and only then
-//! posted the edit envelope, outside the outbox that sends go through (#1335).
-//! A process killed between the two left the sender's copy showing the edited
-//! text while every other member kept the original, with no retry and nothing
-//! marking the edit unsent.
+//! An edit is stored in `outbox_edit` first; the `message` row changes only once the DS holds the envelope.
 //!
-//! Now an edit is stored in `outbox_edit` FIRST, before any network work, and
-//! the `message` row is left alone. Delivery seals and posts the stored edit;
-//! only once the DS holds the envelope does one transaction write the new text
-//! to the row and delete the outbox entry. Until then every read shows the
-//! pending text over the row with an `edit_state` (see
-//! [`overlay_pending_edits`]), so the editor sees what they typed and a failed
-//! edit is labelled — the same contract an unsent message has.
+//! The same drain as unsent messages redelivers it; one edit per target.
 //!
-//! An unconfirmed edit is delivered again by the same drain as unsent messages
-//! (`outbox::flush_outbox` — after unlock, on reconnect, on resume) and by
-//! `retry_message` naming the edited message. One edit per target: a newer
-//! edit replaces an unconfirmed older one, as the DS replaces a target's
-//! pending edit envelope.
-//!
-//! **Idempotency.** Every attempt at one edit posts under the same envelope id.
-//! The DS's edit write replaces the target's pending edit envelope (this one,
-//! if an earlier attempt landed unseen) with the new one, and both carry the
-//! same text, so a member who opened the first sees nothing change. Within
-//! this process one attempt per target runs at a time (the outbox lock, keyed
-//! by target), and confirming is conditional on the envelope id, so an attempt
-//! at an older edit that finishes after a newer edit was stored never
-//! overwrites it.
+//! **Idempotency.** Every attempt posts under the same envelope id; confirming is conditional on that id.
 
 use std::sync::Arc;
 
@@ -55,11 +32,7 @@ fn not_signed_in() -> Error {
 }
 
 /// Store an edit — the first thing `edit_message` does, before any network.
-///
-/// The target must be this sender's own delivered, undeleted message in that
-/// conversation. Storing the same text again (a renderer retrying its invoke)
-/// keeps the envelope id and re-arms a failed edit; new text is a new edit,
-/// with a new envelope id, replacing the old one.
+/// The same text keeps the envelope id and re-arms a failed edit; new text is a new edit.
 pub(super) fn enqueue_edit_on(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -80,9 +53,7 @@ pub(super) fn enqueue_edit_on(
     if author != sender_id || deleted_at.is_some() || conv != conversation_id {
         return Err(not_editable());
     }
-    // An unsent message (#1335) has no envelope for an edit to target; the
-    // recipients would get an edit of a message they never received. The
-    // renderer offers Retry or Discard on such a row instead.
+    // An unsent message (#1335) has no envelope for an edit to target.
     if send_state.is_some() {
         return Err(Error::Other(anyhow::anyhow!("message has not been sent yet")));
     }
@@ -142,10 +113,7 @@ pub(super) fn load_edit_on(
         .optional()?)
 }
 
-/// The DS holds `edit`'s envelope: drop the outbox entry and write its text to
-/// the row, in one transaction. Only the entry for this very envelope counts —
-/// a newer edit stored meanwhile stays queued, leaves the row as it was, and
-/// lands after.
+/// Drop the outbox entry and write the text in one transaction; a newer edit stays queued.
 pub(super) fn confirm_edit_on(
     conn: &rusqlite::Connection,
     edit: &QueuedEdit,
@@ -183,8 +151,7 @@ pub(super) fn mark_edit_state_on(
     Ok(())
 }
 
-/// Forget the pending edit of `target` — it was deleted, so there is nothing
-/// left to edit.
+/// Forget the pending edit of a deleted `target`.
 pub(crate) fn drop_edit_on(conn: &rusqlite::Connection, target: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM outbox_edit WHERE target_message_id = ?1",
@@ -206,10 +173,7 @@ pub(super) fn pending_edit_targets_on(conn: &rusqlite::Connection) -> Result<Vec
     Ok(ids)
 }
 
-/// Show each row's unconfirmed edit over it: the text the editor typed, an
-/// `edited_at` so it reads as edited, and `edit_state` so a failed edit is
-/// labelled. A deleted row keeps its tombstone. The table holds only edits
-/// still in flight, so this reads a handful of rows at most.
+/// Show each row's unconfirmed edit over it, with `edit_state`; a deleted row keeps its tombstone.
 pub(crate) fn overlay_pending_edits(
     conn: &rusqlite::Connection,
     messages: &mut [ChannelMessage],
@@ -246,12 +210,7 @@ pub(super) async fn has_pending_edit(state: &Arc<AppState>, target: &str) -> Res
 }
 
 /// Run one delivery attempt for the stored edit of `target`.
-///
-/// Takes the target's outbox lock and re-reads the entry: an edit another
-/// attempt confirmed while this one waited is gone, and so is one whose
-/// message was deleted meanwhile (the entry is dropped — there is nothing to
-/// edit). A failed attempt marks the entry `failed` (or `rejected`) and
-/// returns the error.
+/// Re-reads the entry under the target's outbox lock; a failed attempt marks it `failed` or `rejected`.
 pub(super) async fn deliver_edit(state: &Arc<AppState>, target: &str) -> Result<()> {
     let lock = OutboxLock::acquire(state, &format!("edit:{target}")).await;
     let result = deliver_edit_locked(state, target).await;
@@ -358,9 +317,7 @@ mod tests {
         }
     }
 
-    /// The whole fix in one assertion: storing an edit leaves the message row
-    /// exactly as every other member holds it. A process that dies now shows
-    /// the original text everywhere, and the edit is still queued.
+    /// Storing an edit leaves the message row untouched.
     #[test]
     fn storing_an_edit_does_not_touch_the_row() {
         let db = LocalDb::open_in_memory().unwrap();
@@ -378,9 +335,7 @@ mod tests {
         assert!(load_edit_on(conn, "m1").unwrap().is_none());
     }
 
-    /// The same text again keeps the envelope id (idempotent); new text is a
-    /// new edit with a new id, and a late confirmation of the older one
-    /// neither writes its text nor drops the newer edit.
+    /// Same text keeps the envelope id; a late confirmation of an older edit changes nothing.
     #[test]
     fn a_newer_edit_replaces_an_older_and_survives_its_confirmation() {
         let db = LocalDb::open_in_memory().unwrap();

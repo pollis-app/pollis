@@ -1,13 +1,6 @@
 //! Text-message size padding (issue #331 v2, `docs/metadata-minimization-design.md` §4.1).
 //!
-//! MLS application ciphertext length tracks plaintext length, so anyone reading
-//! `message_envelope` (Turso, a breach, a subpoena) learns the approximate
-//! message length — enough to tell "ok" from a paragraph, fingerprint forwarded
-//! content, or correlate a send with a receive by size. We defeat that by
-//! padding the plaintext to a small set of fixed size **buckets** BEFORE
-//! `try_mls_encrypt`, and stripping the padding right after `try_mls_decrypt`.
-//! The framing lives entirely INSIDE the MLS ciphertext, so only members ever
-//! see it and there is no schema or server change.
+//! Text plaintext is padded to size buckets inside the MLS ciphertext, so envelope length leaks little.
 //!
 //! ## Framing layout (version 1)
 //!
@@ -18,37 +11,13 @@
 //!  bytes N..   : zero padding     up to the bucket size
 //! ```
 //!
-//! ## Version-byte back-compat (the load-bearing invariant)
-//!
-//! A reader that understands the framing strips it; an OLD, unpadded message
-//! must still decode byte-for-byte. Both are handled by [`strip`] keying on the
-//! first byte:
-//!
-//! - The real plaintext of a text message / edit is ALWAYS a Rust `String`, i.e.
-//!   valid UTF-8. The bytes `0xF5..=0xFF` can never begin (or even appear in) a
-//!   valid UTF-8 string, so a legacy unpadded message can never be mistaken for
-//!   framed. `strip` returns such bytes verbatim.
-//! - Attachment envelopes are deliberately left UNPADDED (their R2 blob size is
-//!   inherent and dedup depends on it, §4.1). Their plaintext is JSON beginning
-//!   with `{` (0x7B), likewise never `0xF5`, so `strip` returns them verbatim
-//!   too.
-//!
-//! Reserving the whole `0xF5..=0xFF` range for framing versions means a future
-//! v2 framing (say `0xF6`) stays just as unambiguous against legacy UTF-8.
+//! Back-compat: `0xF5..=0xFF` never begins valid UTF-8, so legacy text and attachment JSON pass [`strip`] verbatim.
 
-/// First byte of the v1 padded framing. Chosen from the range of bytes that can
-/// never begin a valid UTF-8 string (`0xF5..=0xFF`), so a legacy unpadded
-/// message — always valid UTF-8 — is never mistaken for framed. See the module
-/// docs for the back-compat argument.
+/// First byte of the v1 padded framing (never a valid UTF-8 lead byte).
 const PAD_FRAMING_V1: u8 = 0xF5;
 
 /// First byte of the v1 **redaction control frame** ("delete for everyone").
-/// A redaction is an ordinary MLS application message whose plaintext is
-/// `[0xF6][u32 LE id-len][target message id]` zero-padded to a size bucket, so
-/// on the wire (and in a Turso breach) a redaction is indistinguishable by
-/// length from a short text message, and the server never learns which message
-/// was redacted. Drawn from the same non-UTF-8 `0xF5..=0xFF` range as
-/// [`PAD_FRAMING_V1`], so it can never collide with legacy unpadded text.
+/// Plaintext is `[0xF6][u32 LE id-len][target id]`, padded, so a redaction looks like a short message.
 const REDACT_FRAMING_V1: u8 = 0xF6;
 
 /// Marker for the optional **thread trailer** (#825), written immediately
@@ -65,25 +34,7 @@ const REDACT_FRAMING_V1: u8 = 0xF6;
 ///  bytes M..     : zero padding up to the bucket size
 /// ```
 ///
-/// ## Why a trailer instead of a new frame version
-///
-/// A brand-new marker byte (`0xF8…`) would have been the obvious move, but an
-/// OLD client hits the `strip` fallback on an unrecognised marker and returns
-/// the whole buffer verbatim — so every thread reply would render as binary
-/// mojibake on any client that predates this change. "Messages must work"
-/// (CLAUDE.md) rules that out.
-///
-/// Hanging the thread id off the END of the existing v1 frame keeps the header
-/// and the length prefix byte-for-byte what they always were, so an old
-/// client's `strip` reads the same length prefix, returns exactly the same
-/// plaintext, and never looks past it. A thread reply degrades to a perfectly
-/// ordinary channel message on an old client — it loses the threading, not the
-/// message.
-///
-/// The marker cannot be confused with padding (which is `0x00`) and cannot be
-/// confused with the plaintext (which ended at `N`), so its presence at `N` is
-/// unambiguous. It is drawn from the same reserved `0xF5..=0xFF` range as the
-/// frame markers so the two namespaces never collide.
+/// A trailer, not a new frame version, so an old client's `strip` still returns the plaintext.
 const THREAD_TRAILER_V1: u8 = 0xF7;
 
 /// First byte of the v1 **receipt control frame** (#857, DMs only).
@@ -101,23 +52,7 @@ const THREAD_TRAILER_V1: u8 = 0xF7;
 ///  remainder       : zero padding up to the size bucket
 /// ```
 ///
-/// zero-padded to a size bucket exactly like every other frame, so on the wire
-/// (and in a Turso breach) a receipt is indistinguishable **by length** from a
-/// short text message and the server never learns who read what, or when. It
-/// rides `/v1/messages/send` as an ordinary `type='message'` envelope for the
-/// same reason: a dedicated `/v1/receipts/*` endpoint would put "this is a
-/// receipt" in the request line, handing the untrusted DS precisely the metadata
-/// this frame exists to withhold.
-///
-/// Receipts are **batched** — one frame carries every message id a reader is
-/// acknowledging in that conversation — so a burst of catch-up ingest emits one
-/// envelope, not one per message.
-///
-/// Drawn from the same non-UTF-8 `0xF5..=0xFF` range as the other markers, which
-/// is what makes the back-compat degradation safe: a client that predates
-/// receipts hits the `strip` fallback, gets the buffer verbatim, fails the
-/// `String::from_utf8` check in the ingest path, and silently ignores the frame
-/// instead of rendering mojibake. See `old_client_ignores_receipt_frame`.
+/// Padded like every frame and sent as an ordinary envelope; batched; old clients drop it at the UTF-8 check.
 const RECEIPT_FRAMING_V1: u8 = 0xF8;
 
 /// Framing header: 1 version byte + 4-byte little-endian length prefix. Shared
@@ -155,10 +90,7 @@ fn padded_len(n: usize) -> usize {
 }
 
 /// Wrap `plaintext` in the v1 framing and zero-pad it to its size bucket.
-///
-/// The returned buffer is what gets handed to `try_mls_encrypt` for a TEXT
-/// message. [`strip`] recovers `plaintext` exactly. Callers must NOT pad
-/// attachment envelopes (see the module docs).
+/// For text only; never pad attachment envelopes.
 pub fn pad(plaintext: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(HEADER + plaintext.len());
     buf.push(PAD_FRAMING_V1);
@@ -171,16 +103,7 @@ pub fn pad(plaintext: &[u8]) -> Vec<u8> {
 }
 
 /// Recover the real plaintext from a decrypted buffer.
-///
-/// - **Framed (v1):** strips the header + zero padding and returns the exact
-///   original bytes.
-/// - **Legacy / unpadded** (old client, or an attachment envelope): the first
-///   byte is not the framing marker, so the buffer is returned verbatim. This is
-///   the version-byte back-compat that lets old and new clients interoperate.
-///
-/// The malformed-framing fallbacks (too short, or a length prefix past the end)
-/// also return the buffer verbatim; they cannot fire for a buffer produced by
-/// [`pad`] and exist only as defensive belt-and-braces.
+/// Framed v1 is stripped; anything else (legacy, attachment, malformed) is returned verbatim.
 pub fn strip(buf: &[u8]) -> Vec<u8> {
     if buf.first() != Some(&PAD_FRAMING_V1) {
         return buf.to_vec();
@@ -202,14 +125,7 @@ pub fn strip(buf: &[u8]) -> Vec<u8> {
 }
 
 /// Which of the two receipt signals a [`Frame::Receipt`] carries (#857).
-///
-/// The two are deliberately **distinct** and never conflated:
-/// - [`ReceiptKind::Delivered`] — the reader's device fetched the envelope and
-///   successfully MLS-decrypted it. Emitted by the ingest path; says nothing
-///   about a human.
-/// - [`ReceiptKind::Read`] — a human actually saw the message: it was on screen,
-///   in a focused window, in the conversation the user is looking at. Emitted
-///   only by an explicit foreground call from the renderer.
+/// `Delivered`: a device decrypted it. `Read`: a human saw it on screen. Never conflated.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ReceiptKind {
     Delivered,
@@ -230,9 +146,7 @@ impl ReceiptKind {
         match b {
             0 => Some(ReceiptKind::Delivered),
             1 => Some(ReceiptKind::Read),
-            // An unknown kind from a future client is dropped rather than
-            // guessed — recording it under the wrong kind would be worse than
-            // not recording it.
+            // An unknown kind from a future client is dropped, not guessed.
             _ => None,
         }
     }
@@ -246,17 +160,11 @@ impl ReceiptKind {
     }
 }
 
-/// A decrypted, de-framed message payload. Ordinary text (a text message, an
-/// edit, or an attachment envelope) is [`Frame::Text`] carrying the exact
-/// plaintext; a "delete for everyone" control message is
-/// [`Frame::Redaction`] carrying the target message id; a delivery/read
-/// acknowledgement is [`Frame::Receipt`] (#857).
+/// A decrypted, de-framed payload: text, a redaction, or a receipt (#857).
 pub enum Frame {
     Text {
         text: Vec<u8>,
-        /// Set when the sender wrote a thread trailer (#825) — the ULID of the
-        /// thread's root message. `None` for an ordinary channel message, and
-        /// for every message sent by a client that predates threads.
+        /// Thread root ULID from a thread trailer (#825); `None` otherwise.
         thread_id: Option<String>,
     },
     Redaction(String),
@@ -265,15 +173,12 @@ pub enum Frame {
         /// The reader's own RFC3339 timestamp for the acknowledgement. Inside
         /// authenticated ciphertext, so only the reader could have written it.
         at: String,
-        /// Every message id this frame acknowledges. Batched, so one envelope
-        /// covers a whole catch-up burst.
+        /// Every message id this frame acknowledges.
         message_ids: Vec<String>,
     },
 }
 
-/// Wrap `target_message_id` in the v1 redaction framing and zero-pad it to its
-/// size bucket. The returned buffer is handed to `try_mls_encrypt` exactly like
-/// a text send, so a redaction is length-indistinguishable from a short message.
+/// Wrap `target_message_id` in the v1 redaction framing, padded to its bucket.
 pub fn pad_redaction(target_message_id: &str) -> Vec<u8> {
     let id = target_message_id.as_bytes();
     let mut buf = Vec::with_capacity(HEADER + id.len());
@@ -287,9 +192,6 @@ pub fn pad_redaction(target_message_id: &str) -> Vec<u8> {
 
 /// Wrap a batch of receipt acknowledgements in the v1 receipt framing and
 /// zero-pad to the size bucket (#857). See [`RECEIPT_FRAMING_V1`] for the layout.
-///
-/// The buffer is handed to `try_mls_encrypt` exactly like a text send, so a
-/// receipt is length-indistinguishable from a short message.
 pub fn pad_receipt(kind: ReceiptKind, at: &str, message_ids: &[String]) -> Vec<u8> {
     let at_bytes = at.as_bytes();
     let mut buf = Vec::with_capacity(2 + 4 + at_bytes.len() + 4 + message_ids.len() * 30);
@@ -309,8 +211,7 @@ pub fn pad_receipt(kind: ReceiptKind, at: &str, message_ids: &[String]) -> Vec<u
 }
 
 /// Read a u32 LE at `at`, returning the value and the offset just past it.
-/// `None` when the four bytes are not fully inside `buf` — every caller is
-/// parsing a buffer it did not build, so no read may be assumed in-bounds.
+/// `None` unless all four bytes are inside `buf` (an untrusted buffer).
 fn read_u32(buf: &[u8], at: usize) -> Option<(usize, usize)> {
     let end = at.checked_add(4)?;
     if end > buf.len() {
@@ -359,12 +260,7 @@ fn parse_receipt(buf: &[u8]) -> Option<Frame> {
 /// - anything else — v1 padded text (`0xF5`), legacy unpadded UTF-8, or an
 ///   attachment envelope (`{`) → [`Frame::Text`] via [`strip`].
 ///
-/// A malformed redaction or receipt frame (too short, bad length prefix,
-/// non-UTF-8 payload) degrades to `Text` — it cannot arise from
-/// [`pad_redaction`] / [`pad_receipt`] and exists only as belt-and-braces so a
-/// hostile buffer can never panic the ingest path. Such a buffer then fails the
-/// ingest path's `String::from_utf8` check (its lead byte is not valid UTF-8)
-/// and is dropped rather than stored as a visible message.
+/// A malformed redaction or receipt frame degrades to `Text` (never panics); ingest then drops it.
 pub fn classify(buf: &[u8]) -> Frame {
     if let Some(receipt) = parse_receipt(buf) {
         return receipt;
@@ -405,19 +301,13 @@ pub fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
 }
 
 /// Recover the thread id from a decrypted buffer, if the sender wrote one.
-///
-/// Returns `None` for every buffer [`pad`] produces, for legacy unpadded
-/// messages, for attachment envelopes, and for any malformed trailer — a
-/// message that merely loses its threading is far better than one that fails
-/// to decode, so every ambiguous case degrades to "not in a thread".
+/// `None` for anything without a well-formed trailer; losing threading beats failing to decode.
 pub fn thread_of(buf: &[u8]) -> Option<String> {
     if buf.first() != Some(&PAD_FRAMING_V1) || buf.len() < HEADER {
         return None;
     }
     let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-    // `checked_add` because `len` is attacker-controlled in the sense that it
-    // arrives from a decrypted buffer we did not build; an overflow here would
-    // wrap and index somewhere arbitrary.
+    // `checked_add`: `len` comes from an untrusted buffer.
     let end = HEADER.checked_add(len)?;
     // `>=`, not `>`: the trailer marker itself must be within the buffer.
     if end >= buf.len() || buf[end] != THREAD_TRAILER_V1 {
@@ -447,10 +337,7 @@ pub fn thread_of(buf: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// pad -> strip is the identity for a spread of sizes: empty, 1 byte, at and
-    /// just over each bucket boundary, and large. (The MLS encrypt/decrypt layer
-    /// is transparent to the payload, so this is the whole round-trip minus the
-    /// crypto; the through-MLS version lives in `mls/tests.rs`.)
+    /// pad -> strip is the identity across sizes and bucket boundaries.
     #[test]
     fn pad_strip_roundtrip_exact() {
         let mut sizes = vec![0usize, 1, 2, 10, 100, 200, 250, 251, 252, 255, 256, 257];
@@ -502,9 +389,7 @@ mod tests {
         assert_eq!(distinct_outputs.len(), 1, "0..=240 bytes all share one bucket");
     }
 
-    /// Version-byte back-compat: an OLD, unpadded message (raw UTF-8 text, no
-    /// framing) must survive `strip` byte-for-byte. This is what lets a
-    /// pre-#331 send be read by a new client.
+    /// An old, unpadded message survives `strip` byte-for-byte.
     #[test]
     fn legacy_unpadded_message_passes_through() {
         for legacy in [
@@ -527,9 +412,7 @@ mod tests {
         assert_eq!(pad(b"hi")[0], PAD_FRAMING_V1);
     }
 
-    /// The zero padding is genuine trailing filler, not part of the plaintext:
-    /// a plaintext that itself ends in zero bytes must still round-trip exactly
-    /// (the length prefix, not a sentinel, delimits the real bytes).
+    /// Plaintext ending in zero bytes still round-trips; the length prefix delimits it.
     #[test]
     fn plaintext_with_trailing_zeros_roundtrips() {
         let original = vec![0u8; 300];
@@ -555,9 +438,7 @@ mod tests {
         }
     }
 
-    /// A redaction frame is padded to the SAME size bucket as an ordinary short
-    /// text message, so its length leaks nothing: the server cannot tell a
-    /// redaction apart from a normal message by envelope size.
+    /// A redaction pads to the same bucket as a short text message.
     #[test]
     fn redaction_is_length_indistinguishable_from_text() {
         let redaction = pad_redaction("01ARZ3NDEKTSV4RRFFQ69G5FAV");
@@ -595,15 +476,9 @@ mod tests {
         assert!(matches!(classify(&bad), Frame::Text { .. }));
     }
 
-    // ── Thread trailer (#825) ───────────────────────────────────────────────
-
     const THREAD: &str = "01J8XQ2M5H7NR3T0V9WZ4KDCEB";
 
-    /// THE load-bearing back-compat test. A client that predates threads only
-    /// ever calls `strip`; if the trailer disturbed the header or the length
-    /// prefix, every thread reply would render as mojibake on an old client.
-    /// `strip` must return the plaintext byte-for-byte, exactly as it does for
-    /// an unthreaded `pad`.
+    /// Back-compat: an old client's `strip` returns a threaded plaintext byte-for-byte.
     #[test]
     fn old_client_strip_recovers_thread_reply_verbatim() {
         for text in [
@@ -652,10 +527,7 @@ mod tests {
         assert_eq!(thread_of(&pad_redaction("01JABC")), None);
     }
 
-    /// A truncated or hostile trailer degrades to "no thread" instead of
-    /// panicking. These cannot arise from `pad_threaded`; the ingest path must
-    /// survive them anyway, since the buffer is only as trustworthy as the
-    /// sender.
+    /// A truncated or hostile trailer degrades to "no thread" instead of panicking.
     #[test]
     fn malformed_thread_trailer_degrades_to_none() {
         let good = pad_threaded(b"hi", THREAD);
@@ -690,8 +562,6 @@ mod tests {
         assert_eq!(thread_of(&bad_utf8), None);
     }
 
-    // ── Receipt frame (#857) ────────────────────────────────────────────────
-
     const MSG_A: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
     const MSG_B: &str = "01J8XQ2M5H7NR3T0V9WZ4KDCEB";
 
@@ -725,9 +595,7 @@ mod tests {
         }
     }
 
-    /// Delivered and Read are DISTINCT signals on the wire — the whole point of
-    /// not conflating "your device got it" with "a human saw it". A frame built
-    /// as one must never decode as the other.
+    /// Delivered and Read are distinct on the wire.
     #[test]
     fn delivered_and_read_are_distinct_on_the_wire() {
         let d = pad_receipt(ReceiptKind::Delivered, "2026-08-15T00:00:00Z", &ids(&[MSG_A]));
@@ -742,9 +610,7 @@ mod tests {
         }
     }
 
-    /// A receipt is padded to the SAME size bucket as a short text message, so
-    /// the DS/Turso cannot pick receipts out of the envelope stream by length.
-    /// This is the property that keeps "who read what, when" off the server.
+    /// A receipt pads to the same bucket as a short text message.
     #[test]
     fn receipt_is_length_indistinguishable_from_text() {
         let receipt = pad_receipt(ReceiptKind::Read, "2026-08-15T12:34:56Z", &ids(&[MSG_A]));
@@ -760,10 +626,7 @@ mod tests {
         assert_eq!(big_framed.len(), padded_len(big_framed.len()));
     }
 
-    /// THE back-compat test. A client that predates receipts only ever calls
-    /// `strip`, which returns a `0xF8` buffer verbatim; the ingest path then
-    /// tries `String::from_utf8` on it. `0xF8` can never begin valid UTF-8, so
-    /// the frame is silently ignored — never rendered as a garbage message.
+    /// Back-compat: an old client ignores a `0xF8` frame at the UTF-8 check.
     #[test]
     fn old_client_ignores_receipt_frame() {
         for kind in [ReceiptKind::Delivered, ReceiptKind::Read] {
@@ -799,10 +662,7 @@ mod tests {
         assert!(matches!(classify(&receipt), Frame::Receipt { .. }));
     }
 
-    /// A truncated or hostile receipt frame degrades to `Text` (and is then
-    /// dropped by ingest's UTF-8 check) rather than panicking. These cannot
-    /// arise from `pad_receipt`; the ingest path must survive them anyway,
-    /// because the buffer is only as trustworthy as the sender.
+    /// A truncated or hostile receipt frame degrades to `Text` rather than panicking.
     #[test]
     fn malformed_receipt_frame_degrades_to_text() {
         let cases: Vec<Vec<u8>> = vec![
@@ -855,9 +715,7 @@ mod tests {
         }
     }
 
-    /// The trailer must not defeat the padding it sits inside — a thread reply
-    /// is still bucketed, so its ciphertext length leaks no more than an
-    /// ordinary short message's does.
+    /// The trailer still sits inside the padding bucket.
     #[test]
     fn threaded_payloads_are_still_bucketed() {
         for text in ["a", "a much longer thread reply", ""] {

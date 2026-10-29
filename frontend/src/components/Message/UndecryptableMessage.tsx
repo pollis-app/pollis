@@ -11,16 +11,7 @@ interface UndecryptableMessageProps {
   skin: Skin;
 }
 
-/**
- * A message this device was entitled to read and could not decrypt (#1312) —
- * or a run of them, which `MessageList` collapses into one row
- * (`undecryptable_count`).
- *
- * It stands where the message would have been, so a loss is visible instead
- * of silent. Nothing readable says who sent it, so there is no author, and
- * nothing can be done with it, so there are no message actions. Its one link
- * opens Diagnostics, where each loss has its own log line.
- */
+/** A message (or collapsed run) this device could not decrypt (#1312); links to Diagnostics. */
 export const UndecryptableMessage: React.FC<UndecryptableMessageProps> = ({ message, skin }) => {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();

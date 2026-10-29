@@ -1,12 +1,4 @@
-// The single source of truth for global keyboard commands.
-//
-// A command is identified by a stable, binding-independent id. The key
-// combo is *data* attached to the id, not something hardcoded at the call
-// site. Today the combo comes from `defaultCombo`; when user-configurable
-// shortcuts land, an override layer (see resolveCombo in ./bindings) is
-// consulted first and the rest of the system — registry, hook, a future
-// settings/help page — keeps working unchanged. Remapping a shortcut will
-// mean writing an override for an id, never editing a component.
+// Global keyboard commands by stable id; the combo is data, overridable via ./bindings.
 
 export type ShortcutCommandId =
   | "app.toggleSidebar"
@@ -32,35 +24,12 @@ export type ShortcutCategory =
 
 export interface ShortcutCommandMeta {
   id: ShortcutCommandId;
-  /**
-   * Translation key for the human-facing name, in the `settings` namespace.
-   *
-   * A key rather than the copy itself: this table is module-level data,
-   * evaluated once at import time, so a `t()` call here would snapshot
-   * whatever language was active on the very first import and never update.
-   * Every consumer translates at its own render site instead.
-   */
+  /** `settings` translation key; translated at render, not import time. */
   titleKey: string;
-  /** Grouping for that future page. */
   category: ShortcutCategory;
-  /**
-   * Default key combo. Canonical form: lowercase tokens joined by "+", in
-   * the order mod, meta, ctrl, alt, shift, then the key. `mod` is the
-   * platform primary (Cmd on macOS, Ctrl elsewhere) and matches either
-   * metaKey or ctrlKey, mirroring the app's prior `e.metaKey || e.ctrlKey`
-   * convention. This string is JSON-serializable so a future override map
-   * can be persisted in preferences verbatim.
-   */
+  /** Canonical combo: lowercase "+"-joined, mod/meta/ctrl/alt/shift then key; `mod` = meta or ctrl. */
   defaultCombo: string;
-  /**
-   * Hold-style command: fires on key *down* and again on key *up*, and is
-   * force-released whenever the window loses focus. Push-to-talk is the
-   * only one today. Default false — an ordinary command only ever fires on
-   * keydown.
-   *
-   * The rebinding UI shows these identically to any other shortcut; the
-   * difference is purely in how the registry dispatches them.
-   */
+  /** Fires on keydown and keyup, force-released on blur (push-to-talk). */
   hold?: boolean;
 }
 
@@ -78,8 +47,6 @@ export const SHORTCUT_COMMANDS: Record<
     id: "app.toggleRightPanel",
     titleKey: "shortcuts.appToggleRightPanel",
     category: "Application",
-    // Mirrors mod+b for the left sidebar, shifted — the two panels are the
-    // same gesture on opposite edges.
     defaultCombo: "mod+shift+b",
   },
   "app.toggleTerminal": {
@@ -118,12 +85,7 @@ export const SHORTCUT_COMMANDS: Record<
     category: "Navigation",
     defaultCombo: "escape",
   },
-  // Only dispatched while the search menu is open, and registered above
-  // app.toggleSearch so the `mod+k` that opened the menu moves the
-  // selection instead of closing it again — Esc already closes, and a
-  // toggle that fires from inside the menu is a wasted key. The j/k
-  // direction follows vim, which is where every app that offers this
-  // (Linear, GitHub, Slack's quick switcher) took it from.
+  // Registered above app.toggleSearch, so `mod+k` inside the open menu moves the selection.
   "search.next": {
     id: "search.next",
     titleKey: "shortcuts.searchNext",
@@ -146,19 +108,13 @@ export const SHORTCUT_COMMANDS: Record<
     id: "voice.toggleDeafen",
     titleKey: "shortcuts.voiceToggleDeafen",
     category: "Voice",
-    // Sits next to Toggle mute on the same modifier pair, the way Discord
-    // pairs the two controls.
     defaultCombo: "mod+shift+d",
   },
   "voice.pushToTalk": {
     id: "voice.pushToTalk",
     titleKey: "shortcuts.voicePushToTalk",
     category: "Voice",
-    // Deliberately a modifier combo rather than a bare key. The dispatcher
-    // has no "is the user typing" guard, so a bare-key default would
-    // transmit every time you wrote a message mid-call. Real PTT users
-    // rebind this to whatever is under their thumb — that is what the
-    // rebinding UI is for — but the shipped default must be safe.
+    // A modifier combo: there is no "typing" guard, so a bare key would transmit while writing.
     defaultCombo: "mod+shift+space",
     hold: true,
   },

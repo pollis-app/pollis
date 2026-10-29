@@ -2,14 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Eye } from "lucide-react";
 
-/**
- * The top-right eye on a revealed sensitive attachment (#1568): one click
- * blurs it again, as often as the user likes. The open eye says what is true
- * now — the media is showing — exactly as the composer's toggle does.
- *
- * A sibling of the thumb, never inside it: the thumb is itself a button, and
- * a press here must not also open the viewer.
- */
+/** Re-hides a revealed sensitive attachment (#1568). A sibling of the thumb, which is itself a button. */
 export const SensitiveHideButton: React.FC<{
   filename: string;
   onHide: () => void;

@@ -1,17 +1,4 @@
-/*
- * Bottom sheets must be opaque (#1193).
- *
- * `SheetOverlay` used to paint its card with `semantic.cardBg`, the accent at
- * 6% alpha. Over a 55% black backdrop that dimmed the channel header and the
- * composer without hiding them, so they showed through the sheet's buttons.
- * Maestro cannot catch this — it reads the view hierarchy, where an element
- * behind a translucent sheet and one behind an opaque sheet look identical —
- * so the invariant is pinned here instead: the sheet surface is an opaque
- * colour for any accent, and every sheet is painted with it.
- *
- * Since the redesign the sheet surface is the derived `raised` tier
- * (theme/derive.ts), which is an opaque mix rather than an alpha composite.
- */
+/* Bottom sheets must be opaque (#1193); Maestro cannot see translucency. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -21,13 +8,12 @@ import { fileURLToPath } from "node:url";
 import { compositeOver } from "../theme/composite.ts";
 import { deriveTheme } from "../theme/derive.ts";
 
-const BG = "10, 9, 7"; // palette.bg, #0a0907
+const BG = "10, 9, 7";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
 test("the composite is opaque and matches the translucent tier over the background", () => {
-  // Default amber at 6% over #0a0907: 10*.94+250*.06=24.4, 9*.94+191*.06=19.92,
-  // 7*.94+90*.06=11.98.
+  // Default amber at 6% over #0a0907.
   assert.equal(compositeOver("250, 191, 90", 0.06, BG), "rgb(24, 20, 12)");
 });
 
@@ -65,8 +51,7 @@ test("SheetOverlay paints with sheetBg, and no sheet repaints itself translucent
   const overlay = read("components/chat/SheetOverlay.tsx");
   assert.match(overlay, /backgroundColor:\s*semantic\.sheetBg/);
   assert.doesNotMatch(overlay, /semantic\.cardBg/);
-  // Every sheet built on SheetOverlay. Inner fields may be tinted (they sit
-  // ON the opaque card); the sheet surface itself must not be cardBg.
+  // Every sheet built on SheetOverlay must not be cardBg.
   for (const sheet of [
     "components/chat/ChannelMenuSheet.tsx",
     "components/chat/MessageActionsSheet.tsx",

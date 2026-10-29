@@ -1,7 +1,4 @@
-// The client's verification path for the signed directory (§3 frozen contract),
-// in one place. The reconciler signs; this verifies. scripts/verify-directory.mjs
-// runs it against the live URL; test/directory-contract.test.mjs runs it offline
-// with generated keys + tampering, proving the contract end to end.
+// Client verification of the signed directory (§3 frozen contract); tested offline by test/directory-contract.test.mjs.
 //
 // Byte-for-byte discipline: verify the Ed25519 signature over the EXACT bytes we
 // base64-decode from payload_b64, THEN parse those bytes. No canonicalization.
@@ -30,16 +27,7 @@ export class DirectoryRejected extends Error {}
 // WHICH artifact was signed: an on-path attacker can serve the revocation list
 // where the directory is expected and both signatures verify.
 //
-// The guard is deliberately ONE-SIDED: a present-and-wrong `type` is rejected, an
-// ABSENT one is accepted. The reconciler does not (yet) emit `type` on the
-// directory, and it must not have to — making the field REQUIRED would mean a
-// verifier release and a reconciler release that can never be out of order, i.e.
-// a fleet-wide outage waiting on a deploy race, for no security gain. Absence is
-// already unambiguous: every other artifact this key signs DOES carry a `type`,
-// so "no type" cannot be one of them. What the guard buys is that the rejection
-// is a DECISION rather than a side effect of which required fields the other
-// artifacts happen to lack — a distinction one `#[serde(default)]` away from
-// disappearing on the Rust side.
+// The guard is ONE-SIDED: a wrong `type` is rejected, an absent one accepted (requiring it would make deploy order an outage).
 export const DIRECTORY_TYPE = "pollis-relay-directory";
 
 // Mirrors the client: REJECT (fail closed) on bad signature, version != 1, a
@@ -91,25 +79,12 @@ export function verifyDirectory(envelopeText, pinnedPublicKeyB64, nowSeconds = M
   return directory;
 }
 
-// ─── Revocation anchoring (#813 Phase C) ────────────────────────────────────
+// Revocation anchoring (#813 Phase C); `version` stays 1.
 //
 // The §3 payload gained ONE additive, optional top-level field:
 //
 //   "revocation": { "seq": <int>, "path": "revocations.json", "count": <int> }
-//
-// `version` stays 1 and every existing field keeps its exact meaning, so an
-// already-shipped client — which parses the payload with a struct that ignores
-// unknown fields (pollis-core) or reads only version/expires_at/relays (this
-// module) — is completely unaffected. That backward compatibility is not a hope;
-// test/directory-contract.test.mjs pins it.
-//
-// The anchor is what makes revocation resistant to an on-path attacker. Both
-// artifacts are signed by the same key and neither can be forged, but they can be
-// PAIRED dishonestly: serve a fresh directory next to a stale-but-unexpired
-// revocation list, and the newest revocation disappears. Carrying the sequence
-// INSIDE the signed directory makes that pairing detectable — a client that
-// accepted the directory has, by construction, also accepted a floor on how old
-// the revocation list may be.
+// Carrying the seq INSIDE the signed directory stops a fresh directory being paired with a stale list.
 
 // The revocation anchor a directory carries, or null for a directory published
 // before revocation existed (or by a pool that has not enabled it).
@@ -133,12 +108,7 @@ export function revocationAnchor(directory) {
 //   - the list has expired          → held evidence is no longer evidence;
 //   - list.seq < the anchored seq   → a stale list paired with a fresh directory.
 //
-// Getting this backwards is the whole risk of the feature. Returning "all
-// relays" when revocation cannot be evaluated turns the mechanism into
-// decoration; the only safe answer to "I don't know" is the same as the answer
-// to "revoked". The caller then has no usable relays, which in Prefer means a
-// direct dial and in Strict a surfaced degrade — never a silent send over a
-// relay that might be seized.
+// The only safe answer to "I don't know" is the same as the answer to "revoked".
 export function admitRelays(directory, list, nowSeconds = Math.floor(Date.now() / 1000)) {
   const anchor = revocationAnchor(directory);
   if (list === null || list === undefined) {
@@ -159,28 +129,17 @@ export function admitRelays(directory, list, nowSeconds = Math.floor(Date.now() 
   return usable;
 }
 
-// ─── Peer-hosted relays (#813 wave 3) ───────────────────────────────────────
+// Peer-hosted relays (#813 wave 3); `version` stays 1.
 //
 // The §3 payload gained a SECOND additive, optional top-level field:
 //
 //   "peers": [ { "cert_b64": "<peer relay leaf DER>", "parked_at": ["ip:port"] } ]
-//
-// Same terms as the revocation anchor: `version` stays 1, relay entries are
-// untouched, and an already-shipped client — which either ignores unknown payload
-// fields (pollis-core) or reads only version/expires_at/relays (this module) — is
-// unaffected. test/directory-contract.test.mjs pins that, and its Rust twin is
-// `net::directory::tests::an_old_client_still_parses_a_peers_carrying_directory`.
-//
 // ABSENT MEANS NONE. There is no "unknown" state to represent: a directory with
 // no `peers` key is a directory with no peer relays, which is the shape the pool
 // published before this existed. Hence an array with an empty default rather than
 // a nullable field — the fail-closed answer and the default are the same value.
 
-// The peer entries a verified directory carries, normalized. Entries that are not
-// usable (no cert, or parked at nowhere) are DROPPED rather than throwing: a peer
-// can only ever be a middle hop, so an unusable one costs a shorter path, which is
-// where the pool was before peers existed. Compare revocation, where the same
-// leniency would be a safety hole — hence the different direction there.
+// Usable peer entries, normalized; unusable ones are DROPPED (a middle hop only costs a shorter path).
 export function directoryPeers(directory) {
   if (!Array.isArray(directory?.peers)) {
     return [];
@@ -212,15 +171,7 @@ export function directoryPeers(directory) {
 // revoked peer at publication — this is what protects a client still holding an
 // older directory.
 //
-// Mirrors the SHIPPING client (`pollis-core`'s `net::revocation::RelayAdmission`)
-// exactly, including its deploy-order carve-out: while the directory carries no
-// anchor, or an anchor saying `count == 0`, unusable evidence means "no
-// revocations known" and the peers stand; once the anchor advertises revocations,
-// "cannot evaluate" resolves identically to "revoked" and the peer set is EMPTY.
-// That is a looser rule than `admitRelays` above, which throws on a missing list
-// unconditionally because it backs the operator's end-to-end verifier, where a
-// missing artifact must be loud. The client's rule is the one peers are selected
-// by, so it is the one reproduced here.
+// Mirrors pollis-core's RelayAdmission, incl. its carve-out: with no anchor (or count 0), unusable evidence means no revocations.
 export function admitPeers(directory, list, nowSeconds = Math.floor(Date.now() / 1000)) {
   const peers = directoryPeers(directory);
   if (peers.length === 0) {

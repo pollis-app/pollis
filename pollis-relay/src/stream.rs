@@ -1,11 +1,6 @@
 //! Byte-pipe stream types shared across the relay.
 //!
-//! Everything the overlay carries is an opaque bidirectional byte stream: the
-//! caller runs *its own* TLS to the real destination over the top, and neither
-//! the relay nor these types ever look inside. Two concrete carriers exist —
-//! [`RelayStream`] (a quinn bi-stream to a relay) and a plain `TcpStream` (a
-//! direct dial) — and [`BoxedStream`] erases which one a given target got so the
-//! shim can pipe them uniformly.
+//! Opaque duplex byte streams; [`BoxedStream`] erases relay vs direct TCP so the shim pipes both alike.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -13,8 +8,6 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// A duplex byte stream: anything that is both `AsyncRead` and `AsyncWrite`.
-/// The blanket impl means `RelayStream`, `TcpStream`, TLS streams, etc. all
-/// qualify without extra glue.
 pub trait DuplexStream: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> DuplexStream for T {}
@@ -59,9 +52,7 @@ impl AsyncWrite for BoxedStream {
 
 /// A relay hop's bidirectional byte pipe: one quinn stream in each direction.
 ///
-/// The owned `Connection`/`Endpoint` are held only to keep the QUIC session
-/// alive for the lifetime of the stream — dropping the endpoint would tear the
-/// connection down. They are never read.
+/// `Connection`/`Endpoint` are held only to keep the QUIC session alive.
 pub struct RelayStream {
     send: quinn::SendStream,
     recv: quinn::RecvStream,

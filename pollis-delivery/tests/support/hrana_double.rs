@@ -1,11 +1,4 @@
-//! A hrana-over-HTTP test double for the DS connection-pool tests
-//! (`conn_pool.rs`, `conn_pool_faults.rs`). Shared by `#[path]` rather than
-//! through `common`, so only the binaries that dial it compile it.
-//!
-//! The double counts distinct *client* socket addresses. Each `libsql`
-//! `Connection` for a remote DB owns its own `hyper::Client` (and therefore its
-//! own TCP pool), so "distinct peer addresses" is exactly "how many connections
-//! were built".
+//! A hrana-over-HTTP double for the conn-pool tests; one client socket per libsql `Connection`.
 
 #![allow(dead_code)]
 
@@ -26,15 +19,11 @@ use libsql_hrana::proto::{
 };
 use pollis_delivery::db::Db;
 
-/// What the double saw, keyed the way the assertions need it.
 #[derive(Default)]
 pub struct Double {
-    /// Distinct client socket addresses == distinct TCP connections == distinct
-    /// `hyper::Client`s built by libsql.
+    /// Distinct client sockets == distinct libsql connections.
     peers: Mutex<HashSet<SocketAddr>>,
-    /// SQL executed on each hrana stream, in order.
     pub streams: Mutex<HashMap<u64, Vec<String>>>,
-    /// Whether each stream is in autocommit (i.e. NOT inside a transaction).
     autocommit: Mutex<HashMap<u64, bool>>,
     /// Live baton -> stream id. A stream keeps its id across baton rotations.
     batons: Mutex<HashMap<String, u64>>,
@@ -78,13 +67,11 @@ impl Double {
         self.peers.lock().unwrap().len()
     }
 
-    /// Expire every open stream, as Turso does to an idle one: a request that
-    /// still carries one of their batons is answered `404 stream not found`.
+    /// Expire every open stream, as Turso does to an idle one.
     pub fn expire_streams(&self) {
         self.batons.lock().unwrap().clear();
     }
 
-    /// Streams whose SQL log contains `needle`, as (stream id, sql log).
     pub fn streams_containing(&self, needle: &str) -> Vec<(u64, Vec<String>)> {
         self.streams
             .lock()
@@ -100,8 +87,6 @@ fn ok(response: StreamResponse) -> StreamResult {
     StreamResult::Ok { response }
 }
 
-/// A result shaped like a one-row write. The tests assert on protocol traffic,
-/// not on data, so nothing here needs a real SQLite behind it.
 fn stmt_result() -> StmtResult {
     StmtResult {
         cols: vec![],
@@ -118,16 +103,12 @@ fn stmt_result() -> StmtResult {
 async fn pipeline(
     State(state): State<Arc<Double>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    // Raw bytes, not `Json<_>`: libsql posts the pipeline without a
-    // `Content-Type` header, which axum's JSON extractor rejects.
+    // Raw bytes: libsql sends no `Content-Type`, which axum's JSON extractor rejects.
     body: axum::body::Bytes,
 ) -> Response {
     let req: PipelineReqBody = serde_json::from_slice(&body).expect("pipeline request");
     state.peers.lock().unwrap().insert(peer);
 
-    // A request carrying a baton continues an existing stream; one without
-    // opens a new one — the hrana rule the pool's staleness bound protects. A
-    // baton for a stream that has expired gets Turso's answer.
     let stream = match req.baton.as_deref() {
         Some(baton) => {
             let Some(stream) = state.batons.lock().unwrap().get(baton).copied() else {
@@ -202,7 +183,6 @@ async fn pipeline(
     .into_response()
 }
 
-/// Start the double and return it with the `http://` URL to point `Db` at.
 pub async fn start_double() -> (Arc<Double>, String) {
     let state = Arc::new(Double::default());
     let app = Router::new()

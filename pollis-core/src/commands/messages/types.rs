@@ -7,9 +7,7 @@ pub struct Message {
     pub sender_id: String,
     pub content: Option<String>,
     pub reply_to_id: Option<String>,
-    /// ULID of the thread root this message replies into (#825), or `None` for
-    /// an ordinary channel message. Recovered from inside the MLS ciphertext —
-    /// never a server-visible field.
+    /// Thread root ULID (#825), recovered from inside the ciphertext; `None` otherwise.
     pub thread_id: Option<String>,
     pub sent_at: String,
 }
@@ -61,17 +59,10 @@ pub struct ChannelMessage {
     /// not decrypt (#1312). `content` is always `None` when set.
     #[serde(default)]
     pub undecryptable: bool,
-    /// The durable outbox (#1335): `Some("pending")` for this device's own
-    /// message that is stored but not yet confirmed by the DS, `Some("failed")`
-    /// when its last delivery attempt failed (the renderer offers Retry), `None`
-    /// for everything delivered or received. Omitted from the JSON when `None`.
+    /// Outbox state (#1335): `pending`, `failed` (renderer offers Retry), or `None` once delivered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_state: Option<String>,
-    /// The edit outbox (#1555): set on this device's own message while an edit
-    /// of it is stored but not yet confirmed by the DS — `content` is then the
-    /// edited text. Same values as `send_state`: `pending` (drawn as an
-    /// ordinary edit), `failed` / `rejected` (labelled as not sent). Omitted
-    /// from the JSON when `None`.
+    /// Edit outbox state (#1555), `content` then being the edited text: `pending`, `failed` or `rejected`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_state: Option<String>,
 }
@@ -84,10 +75,7 @@ pub struct MessageCursor {
     pub id: String,
 }
 
-/// Result of a channel message fetch: the messages (newest-first) and an
-/// optional cursor for fetching the next older page. `next_cursor` is `None`
-/// when fewer than `limit` rows were returned, meaning the beginning of
-/// history has been reached.
+/// Messages newest-first, plus a cursor for the next older page (`None` at the start).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessagePage {
     pub messages: Vec<ChannelMessage>,
@@ -95,10 +83,6 @@ pub struct MessagePage {
 }
 
 /// How a result page is ordered (#850).
-///
-/// Both orderings are cheap, and neither is right everywhere: Slack defaults to
-/// relevance, Discord to recency. The default is picked from the query — see
-/// `search::search_messages` — and the user can always override it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchSort {
@@ -109,11 +93,7 @@ pub enum SearchSort {
 }
 
 /// Where to draw `<mark>` in a snippet, plus the text to draw it on.
-///
-/// Ranges rather than HTML: the renderer builds `<mark>` elements from these
-/// without `dangerouslySetInnerHTML`, and a structured answer cannot carry
-/// markup that a message body forged. Offsets are UTF-16 code units, i.e. what
-/// JavaScript's string indices actually are.
+/// Ranges rather than HTML so a message body cannot forge markup. Offsets are UTF-16 units.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchSnippet {
     pub text: String,
@@ -125,9 +105,7 @@ pub struct SearchSnippet {
 pub struct SearchResult {
     pub message_id: String,
     pub conversation_id: String,
-    /// `channel` or `dm`, from `conversation_cache`. `None` when this device has
-    /// never listed the conversation — the caller then renders the id, which is
-    /// what search did for every result before #850.
+    /// `channel` or `dm`, from `conversation_cache`; `None` if never listed.
     pub conversation_kind: Option<String>,
     /// `#general`, or the peer's username for a DM.
     pub conversation_name: Option<String>,
@@ -140,22 +118,17 @@ pub struct SearchResult {
     pub has_link: bool,
     pub content: String,
     pub sent_at: String,
-    /// A window around the first hit, with highlight ranges. Built in Rust from
-    /// `content`, never by FTS5's `snippet()` — a contentless index has no
-    /// column text to return.
+    /// A window around the first hit, with highlight ranges, built from `content`.
     pub snippet: SearchSnippet,
 }
 
-/// Opaque pagination cursor for search. An offset, because relevance ordering
-/// is decided after the rows leave SQLite and a keyset cursor cannot describe a
-/// position in an order the database never produced.
+/// An offset cursor: relevance ordering happens after rows leave SQLite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchCursor {
     pub offset: i64,
 }
 
-/// What this device actually holds, so the UI can say so instead of implying
-/// that "no results" means "no such message" (§6 of #850).
+/// What this device holds, so "no results" isn't read as "no such message" (#850).
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SearchCorpus {
     /// Searchable messages on this device.
@@ -173,8 +146,7 @@ pub struct SearchCorpus {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchPage {
     pub results: Vec<SearchResult>,
-    /// Total hits, not just this page. `count(*) … MATCH` is ~1.4 ms even for a
-    /// term present in half the corpus, so "About N results" is free.
+    /// Total hits, not just this page.
     pub total: i64,
     pub next_cursor: Option<SearchCursor>,
     /// The ordering actually applied, which the caller may not have specified.
@@ -185,9 +157,7 @@ pub struct SearchPage {
 
 /// Reply count and last-reply time for one thread (#825), used to render the
 /// "N replies" affordance under a root message without loading the thread.
-///
-/// Derived entirely from decrypted local rows — the server has no notion of a
-/// thread, so these numbers describe what THIS device holds.
+/// Derived from local rows only; the server has no notion of a thread.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ThreadSummary {
     /// ULID of the thread root message.

@@ -1,10 +1,6 @@
 //! `pollis_tui` — the reusable, shell-free core of the Pollis terminal client.
 //!
-//! Everything here is UI-agnostic: it calls `pollis_core::commands::*` directly
-//! (no Tauri, no IPC — see `docs/pollis-tui-spec.md` §2) and returns plain typed
-//! data. The ratatui binary (`src/main.rs` and its `app`/`ui`/`terminal`
-//! modules) is a thin presentation layer on top; the in-box smoke tests
-//! (`tests/`) link this library and drive the same functions the UI will.
+//! UI-agnostic: calls `pollis_core::commands::*` directly and returns plain typed data.
 //!
 //! Data/sync/auth modules:
 //! - [`auth`] — the order-enforcing signup/unlock wrappers (M1).
@@ -16,12 +12,7 @@
 //! - [`send`] — the conversation + group WRITE layer (M3, §8 command→screen map).
 //! - [`sync`] — the §6 polling sync loop that keeps a client caught up (M2).
 //!
-//! UI state-machine modules — promoted from binary-only into the library so the
-//! headless in-process e2e tests (`tests/ui_e2e.rs`) can drive the real ratatui
-//! state machine (keystrokes → [`app::App::on_key`] → [`app::App::run`] →
-//! [`ui::render`]) against a `TestBackend`. The `pollis` binary reaches them via
-//! the `pollis_tui::` path; only `terminal` (the crossterm raw-mode guard) stays
-//! binary-only in `main.rs`.
+//! UI state-machine modules, in the library so `tests/ui_e2e.rs` can drive them headless:
 //! - [`app`] — the UI state machine (screens, actions, key handling).
 //! - [`ui`] — the immediate-mode renderer (`render` + layout helpers).
 //! - [`home`] — the pure three-pane Home model.

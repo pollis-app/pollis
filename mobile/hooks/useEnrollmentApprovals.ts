@@ -1,16 +1,4 @@
-// #1360: bring a new device's approval request to the user instead of waiting
-// for them to find it under Self → Security. Mounted once, beside the inbox
-// realtime (`app/_layout.tsx`). Desktop's twin is the enrollment poll fallback
-// plus the `enrollment_requested` takeover in `frontend/src/hooks/useLiveKitRealtime.ts`.
-//
-// Triggers, all event-driven (no timer):
-//   - the DS's live `enrollment_requested` nudge (`useInboxRealtime` hands it
-//     to `noticeEnrollmentRequested`);
-//   - landing in the signed-in, unlocked app — sign-in, unlock, cold start —
-//     which catches a request filed while the phone was closed;
-//   - every return to the foreground, since a nudge sent while backgrounded is
-//     gone.
-// Rules (which request, when it may show): `lib/enrollmentPrompt.ts`.
+// #1360: bring a new device's approval request to the user; event-driven (nudge, landing, foreground). Rules: lib/enrollmentPrompt.ts.
 
 import { useCallback, useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
@@ -35,11 +23,9 @@ export function useEnrollmentApprovals() {
   const isLocked = useObserver(() => appStore.isLocked);
   const presentable = !!userId && canPresentApproval(segments, isLocked);
 
-  // Requests already opened in this process, so backing out of one does not
-  // re-open it on the next resume. Reset with the user.
+  // Requests already opened in this process. Reset with the user.
   const presented = useRef<Set<string>>(new Set());
-  // A nudge that arrived while the screen could not be shown (locked, still
-  // in the auth flow); opened as soon as it can be.
+  // A nudge that arrived while the screen could not be shown.
   const queued = useRef<ApprovalCandidate | null>(null);
   const presentableRef = useRef(presentable);
   presentableRef.current = presentable;
@@ -68,8 +54,7 @@ export function useEnrollmentApprovals() {
     [router],
   );
 
-  // Ask the DS what is pending, refresh the Security card from the answer, and
-  // open the newest request not yet shown.
+  // Ask the DS what is pending and open the newest not yet shown.
   const check = useCallback(async () => {
     if (!userId) {
       return;
@@ -89,7 +74,6 @@ export function useEnrollmentApprovals() {
     }
   }, [userId, queryClient, present]);
 
-  // Live nudge.
   useEffect(() => {
     if (!userId) {
       return;
@@ -100,8 +84,7 @@ export function useEnrollmentApprovals() {
     });
   }, [userId, queryClient, present]);
 
-  // Landing in the signed-in app (sign-in, unlock, cold start): catch up on
-  // anything filed meanwhile, and open a nudge that was held back.
+  // Landing in the signed-in app: catch up, and open a held nudge.
   useEffect(() => {
     if (!presentable) {
       return;
@@ -115,7 +98,6 @@ export function useEnrollmentApprovals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presentable, userId]);
 
-  // Return to the foreground.
   useEffect(() => {
     if (!userId) {
       return;

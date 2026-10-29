@@ -3,22 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { fonts, semantic, type as ty } from "../../theme/tokens";
 
-// Same columns as MessageRow, so the placeholder lines up with the messages
-// around it.
 const AVATAR = 40;
 const AVATAR_GAP = 12;
 
-/**
- * A message this device was entitled to read and could not decrypt (#1312) —
- * or a run of them (`count`), which the timeline collapses into one row.
- *
- * It stands where the message would have been, so a loss shows instead of
- * vanishing. Nothing readable says who sent it, so there is no avatar or
- * name; nothing can be done with the message, so there is no swipe or long
- * press. Its one control opens Diagnostics, where each loss has its own log
- * line. One accessible element, like every message row: screen readers reach
- * the link through the row's activate action.
- */
+/** A message this device could not decrypt (#1312), or a collapsed run; a loss shows instead of vanishing. */
 export function UndecryptableRow({
   messageId,
   time,

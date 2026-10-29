@@ -1,17 +1,4 @@
-/*
- * The client-side username rule (`src/utils/username.ts`) — a mirror of what
- * the Delivery Service enforces on `POST /v1/profile/update`
- * (`pollis-delivery/src/profile.rs`, `is_valid_username`), so the settings
- * form can explain a refusal before the round trip.
- *
- * The one property that matters for security is the `@`: the DS resolves an
- * identifier that contains one against emails ONLY, which is sound exactly
- * because no username may contain it. `pollis-delivery/tests/username_shape.rs`
- * proves the server and the schema refuse it; this pins that the mirror agrees,
- * so the form never tells the user a name is fine that the DS will reject.
- *
- *   node --test frontend/tests/
- */
+/* The client username mirror of the DS rule (`pollis-delivery/src/profile.rs`); above all, no `@`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

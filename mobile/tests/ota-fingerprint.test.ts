@@ -1,22 +1,6 @@
-/*
- * One commit, one runtime version, wherever it is computed (#1427).
- *
- * A store build (macOS, after Gradle/Xcode ran) and the OTA job (Linux, fresh
- * `pnpm install`, no Gradle) must compute the same fingerprint, or updates
- * never reach store binaries. They did not: Gradle rewrites
+/* One commit, one runtime version, wherever it is computed (#1427). Gradle rewrites
  * @react-native-masked-view/masked-view's AndroidManifest.xml in node_modules,
- * and the npm ubrn bin leaves cargo output in its package dir. Pinned:
- *
- *   - the masked-view manifest hashes identically pristine and rewritten,
- *     and as the REWRITTEN bytes (what Play 1.0.14 was built from);
- *   - the hook buffers the file, so a chunk boundary cannot split the edit;
- *   - masked-view's build.gradle still makes exactly the edit mirrored here;
- *   - no other installed package's build.gradle rewrites its own sources;
- *   - the npm ubrn build output and Kotlin's `.kotlin/` build state are ignored;
- *   - the store-build ledger parses, and an update's reach is computed from it.
- *
- *   cd mobile && pnpm test
- */
+ * and the npm ubrn bin leaves cargo output in its package dir. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -37,7 +21,6 @@ const MANIFEST = "node_modules/@react-native-masked-view/masked-view/android/src
 const PRISTINE = '<manifest package="org.reactnative.maskedview" xmlns:android="http://schemas.android.com/apk/res/android">\n</manifest>\n';
 const REWRITTEN = '<manifest  xmlns:android="http://schemas.android.com/apk/res/android">\n</manifest>\n';
 
-// Feed a file through the hook the way @expo/fingerprint streams it.
 function streamThroughHook(filePath: string, bytes: Buffer, chunkSize: number): Buffer {
   const hook = fingerprint.fileHookTransform;
   const source = { type: "file", filePath };
@@ -58,7 +41,6 @@ function streamThroughHook(filePath: string, bytes: Buffer, chunkSize: number): 
 test("masked-view's manifest hashes as Gradle leaves it, pristine or already rewritten", () => {
   assert.equal(fingerprint.normaliseGradleRewrite(MANIFEST, PRISTINE), REWRITTEN);
   assert.equal(fingerprint.normaliseGradleRewrite(MANIFEST, REWRITTEN), REWRITTEN);
-  // Any other file is untouched.
   assert.equal(fingerprint.normaliseGradleRewrite("node_modules/x/AndroidManifest.xml", PRISTINE), PRISTINE);
 });
 
@@ -67,7 +49,6 @@ test("the hook buffers a rewritten file, so no chunk boundary splits the edit", 
     assert.equal(streamThroughHook(MANIFEST, Buffer.from(PRISTINE), size).toString("utf8"), REWRITTEN, `chunk size ${size}`);
     assert.equal(streamThroughHook(MANIFEST, Buffer.from(REWRITTEN), size).toString("utf8"), REWRITTEN, `chunk size ${size}`);
   }
-  // Ordinary files stream through byte for byte.
   const other = Buffer.from(PRISTINE);
   assert.deepEqual(streamThroughHook("node_modules/x/AndroidManifest.xml", other, 7), other);
 });
@@ -80,14 +61,11 @@ test("masked-view's build.gradle still makes exactly the edit fingerprint.config
   assert.ok(gradle.includes('def PACKAGE_PROP = "package=\\"org.reactnative.maskedview\\""'), "PACKAGE_PROP changed: update GRADLE_REWRITTEN_FILES");
   assert.match(gradle, /manifestContent\.replaceAll\(\s*PACKAGE_PROP,\s*''\s*\)/);
   assert.match(gradle, /manifestOutFile\.write\(manifestContent\)/);
-  // The installed file is one of the two forms this test knows.
   const onDisk = readFileSync(join(mobile, MANIFEST), "utf8");
   assert.ok(onDisk === PRISTINE || onDisk === REWRITTEN, `unexpected ${MANIFEST}:\n${onDisk}`);
 });
 
-// A package whose Gradle script writes into its own sources gives a store build
-// (Gradle ran) and the OTA job (it did not) different bytes for one commit.
-// Each one needs an entry in GRADLE_REWRITTEN_FILES or an ignore path.
+// A package whose Gradle script writes into its own sources needs an entry or an ignore path.
 test("no other installed package's build.gradle rewrites its own source files", { skip: !installed && "node_modules not installed" }, () => {
   const writers: string[] = [];
   const consider = (dir: string, name: string) => {
@@ -126,11 +104,7 @@ test("build output a tool leaves inside an installed package is not fingerprinte
   assert.ok(ignored.includes("node_modules/**/.kotlin/**/*"));
 });
 
-// #1429: the Kotlin Gradle plugin keeps `.kotlin/sessions/*.salive` in each
-// included build's root for exactly as long as the build runs, and
-// expo-updates bakes the runtime version mid-build. The sideload APKs hashed it
-// (expo-updates-gradle-plugin is a fingerprinted dir); the OTA job never did.
-// End to end through @expo/fingerprint, the way Gradle's bake step calls it.
+// #1429: Kotlin's `.kotlin/sessions/*.salive` exists only mid-build, when expo-updates bakes the value.
 const updatesPlugin = join(nodeModules, "expo-updates", "expo-updates-gradle-plugin");
 test(
   "a Kotlin build-session file mid-build does not move the runtime version",
@@ -184,8 +158,7 @@ test("an update's reach is the recorded binaries with its runtime version", () =
   assert.equal(reachOf({ android: "35e62c3e7d8d032e4ac83ac761ca268e6e4f2d1b" }, builds)[0].binaries.length, 0);
 });
 
-// #1429: a baked runtime version the OTA job does not compute strands the
-// binary, so both Gradle builds in CI refuse one rather than warn about it.
+// #1429: both Gradle builds in CI refuse a stray baked value.
 test("CI fails any APK whose baked runtime version the OTA job would not compute", () => {
   const workflows = join(mobile, "..", ".github", "workflows");
   const checks: Array<[string, RegExp]> = [

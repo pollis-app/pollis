@@ -1,18 +1,4 @@
-/*
- * The reaction map a tap produces, before the write has answered (#1028).
- *
- * `useToggleReaction` awaited the invoke and then invalidated, so a pill did
- * not move until a round trip and the refetch behind it had both landed.
- * `applyReactionToggle` computes the post-write map up front — and it has to
- * agree with what `useConversationReactions` will report, or every tap ends in
- * a visible correction when the refetch arrives.
- *
- * That agreement is the thing worth testing: pill ordering, a message dropping
- * out of the map, `count` tracking `user_ids`, and a toggle that asks for what
- * is already true.
- *
- *   node --test mobile/tests/
- */
+/* The reaction map a tap produces before the write answers (#1028); it must agree with what the refetch reports. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -53,8 +39,7 @@ test("joining an existing pill appends rather than replacing", () => {
   assert.deepEqual(next.get(MSG), [pill("👍", THEM, ME)]);
 });
 
-// The queryFn sorts what the Rust HashMap hands back, so an optimistic insert
-// that appended would reorder on the refetch — a visible twitch after the tap.
+// An appended insert would reorder on the refetch.
 test("a new pill lands in the sorted position the refetch will put it in", () => {
   const next = applyReactionToggle(map([[MSG, [pill("🅰", THEM), pill("🅾", THEM)]]]), {
     messageId: MSG,
@@ -88,9 +73,7 @@ test("leaving the last pill drops it", () => {
   assert.deepEqual(next.get(MSG), [pill("🎉", THEM)]);
 });
 
-// `useConversationReactions` omits messages with no reactions rather than
-// storing an empty array, so an empty array here would render an empty pill
-// row until the refetch removed it.
+// An empty array would render an empty pill row until the refetch.
 test("removing the only reaction takes the message out of the map", () => {
   const next = applyReactionToggle(map([[MSG, [pill("👍", ME)]]]), {
     messageId: MSG,
@@ -127,7 +110,6 @@ test("a double tap cannot double-count", () => {
     mode: "add",
   });
   assert.deepEqual(twice.get(MSG), [pill("👍", ME)]);
-  // Same map by identity, so React Query re-renders nothing.
   assert.equal(twice, once);
 });
 
@@ -154,6 +136,5 @@ test("other messages are untouched", () => {
     mode: "remove",
   });
   assert.deepEqual(after.get("m2"), [pill("🎉", THEM)]);
-  // A new Map, so the cache sees a changed reference.
   assert.notEqual(after, before);
 });

@@ -1,29 +1,5 @@
 #!/usr/bin/env node
-/*
- * Single-client LISTEN-ONLY voice join E2E.
- *
- * Regression cover for the no-mic join bug: on Wayland/Linux with no capture
- * device, `join_voice_channel` used to hard-fail on `build mic stream` (ALSA
- * "No such file or directory"), so you couldn't even listen in. The mic is now
- * best-effort — a failed capture device joins the room *listen-only* (connected,
- * receiving, not publishing) instead of aborting the whole join.
- *
- * We force that path deterministically with POLLIS_DISABLE_MIC=1 (the same seam
- * the backend uses to skip cpal capture) rather than trying to unplug a virtual
- * device mid-run.
- *
- * Choreography (one client is enough — a solo group is its own MLS group, so the
- * voice E2EE key derives fine and the join is self-contained):
- *   1. A signs up.
- *   2. A creates a group + a VOICE channel.
- *   3. A opens the voice channel and clicks Join — with the mic force-disabled.
- *   4. ASSERT: the join SUCCEEDS anyway (voice-channel-view mounts), and the
- *      tray shows the "listening only" indicator (voice-tray-listen-only)
- *      instead of a live mute toggle (voice-tray-mute).
- *   5. A leaves; the join CTA reappears.
- *
- * On failure, dumps A-FAIL.* into e2e/artifacts/.
- */
+// Listen-only voice join: with the mic disabled (POLLIS_DISABLE_MIC=1) the join still succeeds.
 
 const fs = require("fs");
 const path = require("path");
@@ -118,8 +94,7 @@ async function createGroup(browser, groupName) {
   await h.waitTestId(browser, "menu-item-create-channel", 30000);
 }
 
-// Create a VOICE channel: toggle the type switch (#create-channel-type, default
-// "text") to voice before submitting. A voice channel returns to the group page.
+// Create a VOICE channel; it returns to the group page.
 async function createVoiceChannel(browser, channelName) {
   await h.clickTestId(browser, "menu-item-create-channel");
   await h.waitTestId(browser, "create-channel-page", 20000);
@@ -210,7 +185,6 @@ async function main() {
     console.log("[no-mic] A: listen-only indicator present, no mute toggle");
     await shot(A.browser, "no-mic-listen-only.png");
 
-    // A leaves; the join CTA reappears.
     console.log("[no-mic] A: leaving the voice channel");
     await h.clickTestId(A.browser, "voice-tray-leave");
     await h.waitTestId(A.browser, "voice-join-cta", 30000);

@@ -1,7 +1,4 @@
-// Shim layer. Each #[tauri::command] forwards to pollis_core::commands::terminal::*.
-// `terminal_write` is hand-rolled to consume the IPC raw-byte body symmetric
-// with the output Channel; the rest are straight pass-throughs — edit
-// pollis-core, not here.
+// Shim over pollis_core::commands::terminal. Edit pollis-core, not here.
 
 #![allow(unused_imports)]
 use std::sync::Arc;
@@ -16,15 +13,12 @@ pub async fn terminal_open(rows: u16, cols: u16, on_output: tauri::ipc::Channel<
     pollis_core::commands::terminal::terminal_open(rows, cols, std::sync::Arc::new(crate::sink::RawChannelSink(on_output)), &state).await
 }
 
-/// Whether the in-app terminal is switched on for this device. Read by the
-/// Security settings page and by the terminal pane before it tries to attach.
 #[tauri::command]
 pub async fn get_terminal_enabled() -> Result<bool> {
     pollis_core::commands::terminal_gate::get_terminal_enabled().await
 }
 
-/// Flip the device-local terminal switch. The renderer may set it; it cannot
-/// bypass it — `terminal_open` reads the persisted value, not an IPC argument.
+/// `terminal_open` reads the persisted value, so the renderer cannot bypass it.
 #[tauri::command]
 pub async fn set_terminal_enabled(enabled: bool) -> Result<()> {
     pollis_core::commands::terminal_gate::set_terminal_enabled(enabled).await
@@ -35,14 +29,7 @@ pub async fn terminal_ack(terminal_id: String, bytes: usize, state: State<'_, Ar
     pollis_core::commands::terminal::terminal_ack(terminal_id, bytes, &state).await
 }
 
-/// Forward a keystroke chunk to the PTY using a binary IPC body — symmetric
-/// with the output Channel that already pushes raw bytes via
-/// `InvokeResponseBody::Raw` (issue #282). The frontend hands us the
-/// `Uint8Array` from `TextEncoder.encode(data)` as the request body, and
-/// the terminal id rides in the `x-terminal-id` header. This avoids the
-/// `Array.from(uint8) -> JSON number-array -> serde Vec<u8>` roundtrip
-/// previously paid on *every* keypress — the latency that made the
-/// terminal feel laggy on WebKitGTK/X11.
+/// Keystrokes as a raw IPC body, id in `x-terminal-id`; JSON number arrays lagged on WebKitGTK (#282).
 #[tauri::command]
 pub async fn terminal_write(
     request: tauri::ipc::Request<'_>,

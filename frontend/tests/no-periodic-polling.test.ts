@@ -1,19 +1,4 @@
-/*
- * The no-periodic-polling rule, as a test (#874).
- *
- * CLAUDE.md bans `setInterval` keepalives outright: freshness comes from
- * realtime events, explicit invalidation, or `with_retry` on the Rust side.
- * Two of them had survived anyway — a 2-second enrollment-status poll and a
- * 15-minute update poll — and neither was visible from any behavioural test,
- * because "a timer nobody watches fires again" leaves no trace in the UI.
- *
- * So the guard is a source scan, which is the honest shape for this rule: it
- * is a rule ABOUT the code, not about what the code renders. Every remaining
- * `setInterval` in the renderer has to be on the allowlist below with a reason,
- * which is what makes adding a new one a decision rather than an accident.
- *
- *   node --test frontend/tests/
- */
+/* The no-periodic-polling rule as a source scan (#874); every `setInterval` needs an allowlisted reason. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,13 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
-/**
- * Files permitted to call `setInterval`, each with the reason it is not a poll.
- *
- * The bar for this list: the timer must drive something already on screen and
- * touch NO network. A timer that asks anything — the DS, Turso, R2, a Tauri
- * command that does any of those — belongs on an event instead.
- */
+/** Allowed `setInterval` callers: on-screen only, touching no network. */
 const ALLOWED = new Map<string, string>([
   [
     "components/Auth/EnrollmentGateScreen.tsx",
@@ -59,8 +38,7 @@ test("no renderer module polls on a timer", () => {
   for (const file of walk(SRC)) {
     const rel = relative(SRC, file).split("\\").join("/");
     const source = readFileSync(file, "utf8");
-    // `setInterval(` in any spelling the codebase uses (`window.setInterval`,
-    // bare, `globalThis.`). Comments mentioning the rule are not calls.
+    // Any spelling (`window.`, bare, `globalThis.`); comments don't match.
     const calls = source.match(/(?:^|[^.\w])(?:window\.|globalThis\.)?setInterval\s*\(/gm);
     if (!calls) {
       continue;
@@ -83,8 +61,7 @@ test("the enrollment gate waits on one awaited call, not a status poll", () => {
     join(SRC, "components/Auth/EnrollmentGateScreen.tsx"),
     "utf8",
   );
-  // The wait is a single `await_enrollment_approval` round trip that Rust
-  // holds open with backoff, bounded by the request's own TTL.
+  // One `await_enrollment_approval` call that Rust holds open.
   assert.match(source, /awaitEnrollmentApproval/);
   assert.doesNotMatch(
     source,

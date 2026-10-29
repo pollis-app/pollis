@@ -1,7 +1,4 @@
-//! `POST /v1/welcomes/resubmit` (issue #430 P2), driven through the real axum
-//! router with `tower::oneshot` against a local libsql DB. The resubmit path
-//! re-drives a missing Welcome so recovery does not depend solely on the client's
-//! external-join fallback, and is idempotent on the UNIQUE recipient tuple.
+//! `POST /v1/welcomes/resubmit` (#430 P2), driven through the real router.
 
 use std::sync::Arc;
 
@@ -25,14 +22,7 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// Make `recipient` a current member of `conv` and open `generation` in the
-/// commit log.
-///
-/// `/v1/welcomes/resubmit` now refuses a Welcome addressed to a NON-member, and
-/// refuses a lineage the commit log never opened: a Welcome that admits nobody
-/// into a group that does not exist is a row an attacker parks, not a recovery.
-/// Both checks apply on the no-auth path too, because they are properties of the
-/// row being written rather than of the caller's credential.
+/// Make `recipient` a member of `conv` and open `generation`, both required on any path.
 async fn seed_conversation(db: &Db, conv: &str, recipient: &str, generation: i64) {
     let conn = db.conn().await.unwrap();
     conn.execute(
@@ -53,7 +43,6 @@ async fn seed_conversation(db: &Db, conv: &str, recipient: &str, generation: i64
     }
 }
 
-/// A resubmit body carrying an explicit suite generation.
 fn resubmit_req_at(
     conv: &str,
     generation: i64,
@@ -70,8 +59,7 @@ fn resubmit_req_at(
     }))
 }
 
-/// A resubmit body with NO generation field — byte-for-byte what a pre-P4
-/// desktop app sends.
+/// A resubmit body with no generation field, as a pre-P4 desktop app sends.
 fn resubmit_req(conv: &str, recipient: &str, device: &str, welcome: &[u8]) -> Request<Body> {
     req_from(serde_json::json!({
         "conversation_id": conv,
@@ -90,8 +78,6 @@ fn req_from(body: serde_json::Value) -> Request<Body> {
         .unwrap()
 }
 
-/// The COUNT + newest welcome_data + generation for a (conversation, recipient,
-/// device) tuple.
 async fn welcome_row(db: &Db, conv: &str, recipient: &str, device: &str) -> (i64, Vec<u8>, i64) {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -109,18 +95,11 @@ async fn welcome_row(db: &Db, conv: &str, recipient: &str, device: &str) -> (i64
     (count, data, generation)
 }
 
-/// A resubmit re-drives a Welcome for a recipient/device that had none — the row
-/// is (re)inserted with the supplied blob, armed for delivery.
-///
-/// The request carries no `generation` field, so it is also the pre-hybrid
-/// compatibility contract (#454 P4, formerly `an_omitted_generation_is_the_classic_lineage`,
-/// the identical request): a shipped desktop app sends no `generation`, and
-/// generation 0 is exactly the lineage that app is in.
+/// A resubmit with no `generation` re-drives the Welcome at generation 0 (#454 P4).
 #[tokio::test(flavor = "multi_thread")]
 async fn resubmit_re_drives_a_missing_welcome() {
     let db = fresh_db().await;
-    // Auth off: the no-auth path skips the CALLER's membership gate (as submit
-    // does) — the recipient's is checked either way.
+    // Auth off skips the caller's membership gate; the recipient's is checked either way.
     seed_conversation(&db, "conv1", "alice", 0).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
@@ -136,9 +115,6 @@ async fn resubmit_re_drives_a_missing_welcome() {
     assert_eq!(generation, 0, "a pre-P4 client's Welcome is generation 0");
 }
 
-/// Two resubmits for the same (conversation, recipient, device) are idempotent:
-/// the second refreshes the blob in place on the UNIQUE tuple — no error, no
-/// duplicate row.
 #[tokio::test(flavor = "multi_thread")]
 async fn resubmit_is_idempotent_and_refreshes_blob() {
     let db = fresh_db().await;
@@ -163,10 +139,7 @@ async fn resubmit_is_idempotent_and_refreshes_blob() {
     assert_eq!(data, b"welcome-v2", "resubmit must refresh to the latest blob");
 }
 
-/// Re-driving a Welcome for a conversation that has since migrated must land the
-/// SUCCESSOR's Welcome, not leave the recipient pointed at the retired lineage.
-/// The recipient decides when to adopt by reading this generation, so a stale
-/// value is how a device gets stranded on a closed suite.
+/// A migrated conversation must land the successor's Welcome, or the device is stranded.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_resubmit_refreshes_the_generation_too() {
     let db = fresh_db().await;
@@ -192,21 +165,7 @@ async fn a_resubmit_refreshes_the_generation_too() {
     assert_eq!(generation, 1, "the upsert must carry the successor's lineage");
 }
 
-/// Acking more Welcome ids than SQLite will bind must still work (#916).
-///
-/// `ack_welcomes` builds `id IN (…)` from `AckBody::welcome_ids`, a list that
-/// arrives in the REQUEST BODY — so its length is chosen by the caller, not
-/// sized by anything on the server. Past `SQLITE_MAX_VARIABLE_NUMBER` the
-/// statement does not run slowly, it fails to prepare, and an ack that 500s
-/// leaves the Welcomes marked undelivered and redelivered forever.
-///
-/// The ids do not need to exist for this to bite: the limit applies to the
-/// statement, not the matching rows. So this drives one real Welcome plus a pile
-/// of ids that match nothing, which is both the cheap way to exceed the ceiling
-/// and a fair model of a client acking a long backlog.
-///
-/// Without the chunking this is an `Err` from `prepare`; with it, the real
-/// Welcome is acked and the rest are simply no-ops.
+/// Acking more ids than SQLite will bind must still work (#916): an ack that 500s redelivers forever.
 #[tokio::test]
 async fn acking_more_ids_than_sqlite_can_bind_still_marks_them_delivered() {
     let db = fresh_db().await;
@@ -221,8 +180,7 @@ async fn acking_more_ids_than_sqlite_can_bind_still_marks_them_delivered() {
     .await
     .expect("seed welcome");
 
-    // Comfortably past the bundled build's 32766 ceiling, so the test does not
-    // quietly stop testing anything if that limit is raised again.
+    // Past the bundled 32766 ceiling, with margin.
     let mut ids: Vec<String> = (0..40_000).map(|i| format!("w-absent-{i}")).collect();
     ids.push("w-real".to_string());
 
@@ -242,11 +200,7 @@ async fn acking_more_ids_than_sqlite_can_bind_still_marks_them_delivered() {
     assert_eq!(delivered, 1, "the acked Welcome must not be redelivered");
 }
 
-/// Chunking must not let an ack cross the recipient scope (#916 + W5).
-///
-/// The recipient is bound as `?1` in every chunk. Rebuilding the statement per
-/// chunk is exactly where that binding could be dropped, and losing it would
-/// turn an ack into "mark any Welcome with this id delivered, whoever owns it".
+/// Chunking must keep the recipient bound in every chunk (#916 + W5).
 #[tokio::test]
 async fn a_chunked_ack_still_cannot_touch_another_users_welcomes() {
     let db = fresh_db().await;
@@ -265,7 +219,6 @@ async fn a_chunked_ack_still_cannot_touch_another_users_welcomes() {
         .unwrap();
     }
 
-    // Long enough to span several chunks, and it names BOTH users' Welcomes.
     let mut ids: Vec<String> = (0..1_200).map(|i| format!("w-absent-{i}")).collect();
     ids.push("w-alice".to_string());
     ids.push("w-bob".to_string());

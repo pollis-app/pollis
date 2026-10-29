@@ -10,8 +10,7 @@
 //!   with `poll-offer`. The QR carries the new device's ephemeral public key,
 //!   never a secret.
 //!
-//! Wire types only — no handler logic, no DB access. See
-//! `pollis-delivery/src/links.rs` for what the server does with each one.
+//! Wire types only; see `pollis-delivery/src/links.rs`.
 
 use serde::{Deserialize, Serialize};
 
@@ -53,10 +52,7 @@ pub struct ClaimLinkBody {
     pub device_name: Option<String>,
 }
 
-/// The claim's answer: a DEVICE-LINK-scoped session (enrollment-only — it
-/// cannot authorize the soft reset or anything outside enrolling this device)
-/// and the account it belongs to. The verify-otp shape, minus the fields that
-/// only mean something for a fresh signup.
+/// The claim's answer: an enrollment-only session and the account it belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimLinkResponse {
     pub user_id: String,
@@ -106,18 +102,12 @@ pub struct LinkStatusResponse {
     pub link_tag: Option<String>,
 }
 
-/// `POST /v1/link/offer` — pre-credential, from the NEW device showing a v2 QR
-/// (#1361). The QR itself carries `link_id` and the device's ephemeral public
-/// key; nothing sent here lets the DS, or anyone who photographs the QR, act
-/// as that device.
+/// `POST /v1/link/offer` — pre-credential, from the NEW device showing a v2 QR (#1361).
 #[derive(Serialize, Deserialize)]
 pub struct OfferLinkBody {
     /// Client-chosen id (a ULID); the QR carries it.
     pub link_id: String,
-    /// `SHA-256(poll_secret)`, base64 (STANDARD). `poll_secret` is 32 random
-    /// bytes held only by the new device — NOT in the QR — and is what
-    /// `poll-offer` must present, so a photo of the QR cannot collect the
-    /// session.
+    /// `SHA-256(poll_secret)`, base64 (STANDARD); the secret is NOT in the QR, so a photo cannot collect the session.
     pub poll_verifier: String,
     /// The new device's id; the session it collects binds to it.
     pub device_id: String,
@@ -132,9 +122,7 @@ pub struct OfferLinkResponse {
     pub expires_at: i64,
 }
 
-/// `POST /v1/link/accept-offer` — device-signed, from the signed-in device that
-/// scanned a v2 QR. Binds the offer to the SIGNER's account, once. The signer
-/// then follows the link through `/v1/link/status`, as a v1 creator does.
+/// `POST /v1/link/accept-offer` — device-signed; binds the offer to the signer's account, once.
 #[derive(Serialize, Deserialize)]
 pub struct AcceptOfferBody {
     pub link_id: String,

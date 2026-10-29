@@ -7,23 +7,18 @@ function randomChar(): string {
 }
 
 interface ScrambleTextProps {
-  // The real text to reveal. When undefined/null, shows a scrambling placeholder.
+  // null/undefined shows a scrambling placeholder.
   text: string | null | undefined;
-  // Width of the scramble placeholder in characters (default: 20)
+  // Placeholder width in characters (default 20).
   placeholderLength?: number;
-  // Delay between each typed character in ms (default: 18)
+  // Per-character delay in ms (default 18).
   typeSpeed?: number;
-  // How often the scramble noise refreshes in ms (default: 60)
+  // Scramble refresh in ms (default 60).
   scrambleInterval?: number;
   className?: string;
 }
 
-/**
- * ScrambleText — shows random cycling characters while loading, then
- * types the real text in one character at a time when it becomes available.
- *
- * This is a "scramble-reveal" / "decode" animation common in terminal UIs.
- */
+/** Scrambles while loading, then types the text in. */
 export const ScrambleText: React.FC<ScrambleTextProps> = ({
   text,
   placeholderLength = 20,
@@ -31,7 +26,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
   scrambleInterval = 100,
   className,
 }) => {
-  // If text is already available on mount, show it immediately — no animation needed.
   const [displayed, setDisplayed] = useState(() => text ?? "");
   const [phase, setPhase] = useState<"scramble" | "typing" | "done">(() =>
     text != null ? "done" : "scramble"
@@ -40,7 +34,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
   const typeIndex = useRef(0);
   const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear any pending timers on unmount
   useEffect(() => {
     return () => {
       if (frameRef.current !== null) {
@@ -50,7 +43,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
   }, []);
 
   useEffect(() => {
-    // Text just became available — start typing phase from scratch
     if (text != null && prevText.current == null) {
       prevText.current = text;
       typeIndex.current = 0;
@@ -58,7 +50,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
       return;
     }
 
-    // Text changed while already available — restart typing
     if (text != null && text !== prevText.current) {
       prevText.current = text;
       typeIndex.current = 0;
@@ -66,7 +57,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
       return;
     }
 
-    // Text removed — go back to scramble
     if (text == null && prevText.current != null) {
       prevText.current = null;
       setPhase("scramble");
@@ -74,7 +64,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
     }
   }, [text]);
 
-  // Scramble loop — runs while phase === "scramble"
   useEffect(() => {
     if (phase !== "scramble") {
       return;
@@ -93,7 +82,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
     };
   }, [phase, placeholderLength, scrambleInterval]);
 
-  // Typing loop — runs while phase === "typing"
   useEffect(() => {
     if (phase !== "typing" || text == null) {
       return;
@@ -104,7 +92,7 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
         setPhase("done");
         return;
       }
-      // Ensure at least 1 character is always shown to prevent height jitter
+      // At least 1 character, to prevent height jitter.
       setDisplayed(text.slice(0, Math.max(1, i)));
       typeIndex.current = i + 1;
       frameRef.current = setTimeout(tick, typeSpeed);
@@ -117,7 +105,6 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
     };
   }, [phase, text, typeSpeed]);
 
-  // Done — just show the full text
   useEffect(() => {
     if (phase === "done" && text != null) {
       setDisplayed(text);

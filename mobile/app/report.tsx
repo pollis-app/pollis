@@ -21,12 +21,7 @@ import { useThemeRerender } from "../components/theme";
 
 const REASONS: ReportReason[] = ["spam", "harassment", "illegal", "other"];
 
-/**
- * Report a user (#1213), from a message's action sheet or their profile.
- * Signal-style: Pollis receives the account, the reason and, for a message,
- * the conversation and message ids. Never the message text. One screen:
- * pick a reason, then Report or Report and block; then a short confirmation.
- */
+/** Report a user (#1213): ids and a reason, never the message text. */
 export default function ReportScreen() {
   useThemeRerender();
   const { t } = useTranslation("chat");
@@ -162,7 +157,6 @@ export default function ReportScreen() {
         >
           {t("report.submit")}
         </Button>
-        {/* Report and block: secondary, below — the label says what it does. */}
         <Button
           testID="btn-report-and-block"
           variant="secondary"

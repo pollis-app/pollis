@@ -1,12 +1,9 @@
 import { makeAutoObservable } from "mobx";
 
-// Receiver-side TTL: a typing entry that hasn't been refreshed within this
-// many ms ages out, even without an explicit `is_typing: false`. Covers the
-// case where a sender drops offline mid-keystroke.
+// Receiver-side TTL, for senders that drop offline mid-keystroke.
 export const TYPING_TTL_MS = 6000;
 
-// Re-emit cadence on the sender side. Pick something < TYPING_TTL_MS so an
-// actively-typing user keeps refreshing their own entry.
+// Sender re-emit cadence; below TYPING_TTL_MS.
 export const TYPING_REFRESH_MS = 3000;
 
 export type TypingRoomKey = `channel:${string}` | `dm:${string}`;
@@ -15,18 +12,14 @@ interface TypingEntry {
   username: string;
 }
 
-// Per-entry expiry timer handles, keyed by `${roomKey}:${userId}`. These live
-// OUTSIDE the observable store on purpose — a timer handle is not UI state, so
-// it must never be tracked by MobX or trigger a re-render.
+// Timer handles live outside the observable store.
 const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function timerKey(roomKey: TypingRoomKey, userId: string): string {
   return `${roomKey}:${userId}`;
 }
 
-// Immutably drop a single user from a room map, removing the room key itself
-// when it empties. Pure: takes the current byRoom and returns the next one
-// (the same reference when there was nothing to remove).
+// Drop one user, and the room when empty; same reference if nothing changed.
 function removeEntry(
   byRoom: Record<string, Record<string, TypingEntry>>,
   roomKey: string,
@@ -48,8 +41,6 @@ function removeEntry(
 }
 
 class TypingStore {
-  // roomKey → userId → entry. Two-level map so typing in one channel doesn't
-  // leak into another and lookups stay O(1).
   byRoom: Record<string, Record<string, TypingEntry>> = {};
 
   constructor() {
@@ -61,10 +52,7 @@ class TypingStore {
     room[userId] = { username };
     this.byRoom = { ...this.byRoom, [roomKey]: room };
 
-    // (Re)arm a per-entry expiry timer. A refresh resets the countdown, so an
-    // entry only ages out once TTL elapses with no further keystroke — and a
-    // sender that drops offline mid-keystroke is cleaned up exactly once,
-    // without any global polling.
+    // A refresh resets the per-entry countdown.
     const key = timerKey(roomKey, userId);
     const existing = expiryTimers.get(key);
     if (existing) {

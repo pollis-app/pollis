@@ -1,32 +1,6 @@
 //! MLS leaf self-update — the commit a member issues for ITSELF (issue #666).
 //!
-//! Every other commit Pollis produces is *about someone else*: reconcile adds
-//! and removes leaves, external join re-attaches a wiped device. None of them
-//! rotate the committer-less members' own key material, and until #666 Pollis
-//! had no self-update at all. That cost two things:
-//!
-//! 1. **No post-compromise security for non-committing members.** MLS forward
-//!    secrecy comes from the ratchet and holds regardless. PCS does not: healing
-//!    after a device compromise requires *that device* to publish a fresh leaf
-//!    secret along its direct path, which only its own commit can do. A member
-//!    who never commits never heals, no matter how many epochs pass.
-//!
-//! 2. **Commit payloads that grow linearly with group size.** A member added by
-//!    someone else stays an *unmerged leaf* in every ancestor of the adder's
-//!    direct path until that member itself commits. Each unmerged leaf adds one
-//!    HPKE ciphertext to a copath resolution, so with a single commit-producing
-//!    member the per-commit cost never collapses to the logarithm TreeKEM
-//!    promises. Measured on #454's hybrid suite by
-//!    `self_update_turns_linear_commit_growth_into_logarithmic`: a commit is
-//!    13.4 KB at 8 members and 24.0 KB at 16 with every leaf unmerged — about
-//!    1.3 KB per member, so ~135 KB at N=100. With every leaf merged the same
-//!    commits are 8.7 KB and 11.1 KB: ~2.4 KB per *doubling*, so ~17 KB at
-//!    N=100. Post-quantum encapsulations are ~35× larger than X25519's, which
-//!    is what turned a latent inefficiency into a real ceiling on group size.
-//!
-//! One self-update per member per join collapses (2); a periodic one gives (1).
-//! Both are the same commit — the difference is only when it fires, which is
-//! what [`self_update_if_due`] decides.
+//! Without it non-committers never heal (PCS) and stay unmerged leaves, so commits grow linearly with group size; [`self_update_if_due`] decides when it fires.
 
 use std::sync::Arc;
 
@@ -41,34 +15,19 @@ use super::group_state::load_group_with_signer;
 use super::provider::{stored_group_ciphersuite, MlsProvider, PollisProvider};
 use super::reconcile::{publish_staged_commit, PublishOutcome};
 
-/// How long a device's leaf may go without rotating before [`self_update_if_due`]
-/// rotates it. Bounds the window in which a compromised device keeps decrypting:
-/// after this long, every group it is in has healed past the stolen key material.
-///
-/// Seven days is a deliberate trade: MLS's own guidance is "as often as you can
-/// afford", and the cost here is one commit per member per week per group — a
-/// rounding error next to message traffic, but not free on the hybrid suite
-/// where a commit is several KB.
+/// How long a leaf may go unrotated; bounds how long a compromised device keeps decrypting.
 const SELF_UPDATE_INTERVAL: chrono::Duration = chrono::Duration::days(7);
 
-/// Extra delay, spread deterministically per (device, conversation), so a fleet
-/// that all installed the same release does not rotate every leaf of a shared
-/// group in the same hour. Losers of the resulting CAS races are correct but
-/// wasteful, and the waste is what this avoids.
+/// Per-(device, conversation) spread so a fleet does not rotate a shared group in the same hour.
 pub(super) const SELF_UPDATE_JITTER: chrono::Duration = chrono::Duration::days(2);
 
-/// Most self-updates to attempt in one sweep. A device returning after a long
-/// absence can be overdue in every group at once; without a cap, one cold launch
-/// becomes a commit storm against the log. The rest are picked up on later
-/// sweeps — rotation is a deadline, not a heartbeat, so spreading it is free.
+/// Cap per sweep, so a long-absent device does not storm the log.
 pub(super) const MAX_SELF_UPDATES_PER_SWEEP: usize = 3;
 
 /// Rotate this device's leaf in `conversation_id` if it is overdue, and report
 /// whether a commit actually landed.
 ///
-/// "Overdue" is: never rotated in this group (the post-join case — the leaf is
-/// still unmerged, so this is also what collapses commit size), or last rotated
-/// more than [`SELF_UPDATE_INTERVAL`] plus a per-conversation jitter ago.
+/// Overdue: never rotated here (post-join), or older than [`SELF_UPDATE_INTERVAL`] plus jitter.
 pub async fn self_update_if_due(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -93,17 +52,13 @@ async fn is_due(state: &Arc<AppState>, conversation_id: &str) -> bool {
     }
     let last = match last_self_update(db.conn(), conversation_id) {
         Some(ts) => ts,
-        // Never rotated: this is the post-join case (#666 M2). Due immediately —
-        // the leaf is unmerged right now and every commit in the group is paying
-        // for it.
+        // Never rotated (post-join, #666): the leaf is unmerged, so due now.
         None => return true,
     };
     chrono::Utc::now() - last >= SELF_UPDATE_INTERVAL + jitter_for(conversation_id)
 }
 
-/// Deterministic per-conversation offset in `[0, SELF_UPDATE_JITTER)`. Derived
-/// from the conversation id so it is stable across launches (a re-rolled jitter
-/// would let a device drift indefinitely) and differs per group.
+/// Stable per-conversation offset in `[0, SELF_UPDATE_JITTER)`.
 pub(super) fn jitter_for(conversation_id: &str) -> chrono::Duration {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in conversation_id.as_bytes() {
@@ -133,10 +88,6 @@ fn last_self_update(
 
 /// Record a landed self-update so the next one is a week out, not immediate.
 /// Written only on a confirmed win: a lost race did not rotate anything.
-///
-/// `pub(super)` for migration (#454 P4): the device that creates a successor
-/// group is its founder, so its leaf is merged by construction and it starts the
-/// new lineage already rotated.
 pub(super) fn record_self_update(conn: &rusqlite::Connection, conversation_id: &str, epoch: u64) {
     let now = chrono::Utc::now().to_rfc3339();
     if let Err(e) = conn.execute(
@@ -151,12 +102,7 @@ pub(super) fn record_self_update(conn: &rusqlite::Connection, conversation_id: &
 /// Forget that this device ever rotated in `conversation_id`, making a
 /// self-update due immediately.
 ///
-/// Called when adopting a new suite generation (#454 P4). A device that joins
-/// the successor group by Welcome is an unmerged leaf *there* regardless of how
-/// recently it rotated in the predecessor, and every commit in the new lineage
-/// pays for that leaf until it commits once. Keeping the old timestamp would
-/// suppress the post-join rotation for up to a week — exactly the linear
-/// commit-growth #666 exists to kill.
+/// Called on adopting a new generation (#454): the device is an unmerged leaf in the successor.
 pub(super) fn clear_self_update(conn: &rusqlite::Connection, conversation_id: &str) {
     if let Err(e) = conn.execute(
         "DELETE FROM mls_self_update WHERE conversation_id = ?1",
@@ -168,21 +114,13 @@ pub(super) fn clear_self_update(conn: &rusqlite::Connection, conversation_id: &s
 
 /// Issue exactly one self-update commit for `conversation_id`, unconditionally.
 ///
-/// Returns `true` if the commit landed, `false` if another member claimed the
-/// epoch first (in which case we converge on the winner and leave the rotation
-/// due, so the next sweep retries).
-///
-/// Shares reconcile's publish path verbatim — same compare-and-swap on the head
-/// epoch, same Kani-proved adopt/rollback for an ambiguous submit — because a
-/// self-update is an ordinary commit as far as the log is concerned. It carries
-/// no Welcome and adds nobody.
+/// Returns `false` if another member claimed the epoch first; the rotation stays due.
 pub async fn self_update_group(
     state: &Arc<AppState>,
     conversation_id: &str,
     actor_user_id: &str,
 ) -> Result<bool> {
-    // Same per-conversation serialisation reconcile takes: two commits staged
-    // from one epoch on the same device would guarantee one of them is wasted.
+    // Reconcile's per-conversation lock: two commits from one epoch waste one.
     let mls_guard = state.mls_group_lock(conversation_id).await;
 
     let staged = {
@@ -201,9 +139,7 @@ pub async fn self_update_group(
         None => return Ok(false),
     };
 
-    // Test-harness only: a test can park a committer here to land another
-    // member's message at `epoch_before` while this commit is in flight
-    // (#1041).
+    // Test-harness park point (#1041).
     #[cfg(feature = "test-harness")]
     super::group_state::rendezvous::park(super::group_state::rendezvous::Point::SelfUpdateBeforeSubmit)
         .await;
@@ -236,9 +172,7 @@ pub async fn self_update_group(
                 "[mls] self-update: rotated own leaf in {conversation_id} at epoch {epoch_before} → {}",
                 epoch_before + 1
             );
-            // The local epoch advanced, so this device's voice frames must move
-            // to the new exporter key — same hook the committer path in
-            // reconcile fires for exactly the same reason.
+            // Move voice frames to the new exporter key.
             crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
             // And the pin key's wrap moves to the new exporter too (#99).
             crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
@@ -246,12 +180,7 @@ pub async fn self_update_group(
             Ok(true)
         }
         PublishOutcome::LostRace => {
-            // Our commit was rolled back. Converge through the INTERLEAVED
-            // ingesting catch-up, never a bare commit replay: advancing past an
-            // epoch whose messages we have not ingested discards their keys
-            // (`max_past_epochs = 0`). It re-acquires the per-conversation MLS
-            // lock, so drop ours first. The rotation stays due and the next
-            // sweep retries it at the new epoch.
+            // Converge via the interleaved ingesting catch-up, not a bare replay (`max_past_epochs = 0`); it takes the MLS lock, so drop ours.
             drop(mls_guard);
             if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
                 state,
@@ -274,13 +203,7 @@ type StagedSelfUpdate = (u64, Vec<u8>, Option<Vec<u8>>);
 /// Stage a path-bearing commit that carries no proposals: the MLS "update" that
 /// replaces this member's leaf key and refreshes every node on its direct path.
 ///
-/// Returns `(epoch_before, commit_bytes, group_info_bytes)`, or `None` when
-/// there is no local group to update.
-///
-/// `force_self_update(true)` is explicit rather than relying on "a commit with
-/// no proposals needs a path anyway" — the whole point of this commit is the
-/// path, so a future openmls that optimised the empty commit into a pathless one
-/// must break here loudly, not silently stop rotating keys.
+/// `force_self_update(true)` is explicit: this commit exists for its path.
 pub(super) fn stage_self_update<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,

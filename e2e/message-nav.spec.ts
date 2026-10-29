@@ -1,15 +1,4 @@
-/*
- * Arrow-key chat-log navigation — browser-level e2e.
- *
- * The pure state machine is pinned by `frontend/tests/message-nav.test.ts`;
- * THIS spec proves the DOM half: the composer hands ArrowUp off at the right
- * caret positions, logical focus projects onto real element focus (rows, then
- * action-bar buttons), and the exits (down past newest, Escape, Tab) land back
- * in the composer. Runs against the browser build with the Tauri IPC mock,
- * in both skins, like the other UI specs.
- *
- *   pnpm --filter @pollis/e2e e2e:ui message-nav
- */
+// Arrow-key chat-log navigation, DOM half (state machine: frontend/tests/message-nav.test.ts).
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -108,7 +97,6 @@ async function gotoChannel(page: Page) {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`arrow-key log navigation — ${skin} skin`, () => {
     test("ArrowUp from an empty composer focuses the newest message; ArrowDown returns", async ({
@@ -208,9 +196,7 @@ for (const skin of SKINS) {
       // draft preserved.
       await page.keyboard.press("ArrowUp");
       await expect(page.getByTestId(`message-${OWN_ID}`)).toBeFocused();
-      // The composer is a contentEditable (custom emoji render as inline
-      // images while you type), so its serialized wire text is mirrored onto
-      // `data-value` rather than readable as `.value`.
+      // The composer is contentEditable; its wire text is mirrored onto data-value.
       await expect(input).toHaveAttribute("data-value", "first line\nsecond line");
     });
   });

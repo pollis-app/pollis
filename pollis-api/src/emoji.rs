@@ -1,8 +1,7 @@
 //! Custom per-group emoji (#848): creation, removal, and the unreferenced-object
 //! sweep.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,19 +35,13 @@ pub struct RemoveEmojiBody {
 
 /// `POST /v1/emoji/gc` — sweep custom-emoji objects no group still references.
 ///
-/// Carries no parameters: the sweep's scope is the whole store and its decision
-/// is derived from the reference rows, never from anything the caller says. The
-/// empty struct exists so the endpoint is a first-class row in the
-/// [`crate::ENDPOINTS`] table (and so route-coverage tests reach it) rather than
-/// a loose `json!({})` at the call site.
+/// No parameters; the empty struct gives the endpoint a row in [`crate::ENDPOINTS`].
 #[derive(Serialize, Deserialize)]
 pub struct EmojiGcBody {}
 
 /// `POST /v1/emoji/gc` — what the sweep collected.
 ///
-/// The caller deletes the R2 blobs behind `r2_keys`: the Turso row is the only
-/// record of where a blob lives, so the sweep has to hand them over as it drops
-/// the rows or the object is stranded forever.
+/// The caller deletes the R2 blobs behind `r2_keys`, or they are stranded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmojiGcResponse {
     /// How many objects were collected — `r2_keys.len()`, sent explicitly

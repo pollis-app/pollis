@@ -12,10 +12,7 @@ export default function Discover() {
   useThemeRerender();
   const { t } = useTranslation("search");
   const [slug, setSlug] = useState("");
-  // Looked up on Search / return, never per keystroke: slug lookups share a
-  // tight per-IP budget on the DS (60 per 10 min), and a slug typed one
-  // character at a time spent ~one lookup per character (#1216). Desktop's
-  // Find Group works the same way.
+  // Looked up on submit, never per keystroke: slug lookups share a tight per-IP budget (#1216).
   const [submitted, setSubmitted] = useState("");
   const search = useGroupBySlug(submitted || null);
   const submit = () => {
@@ -34,10 +31,7 @@ export default function Discover() {
     requestAccess.mutate(search.data.id);
   };
 
-  // The DS never tells a non-member about their own pending request (that
-  // would answer "has X asked to join Y" for anyone), so a sent request is
-  // shown from the request's own outcome, as desktop does; the lookup only
-  // ever answers for admins (#1216).
+  // The DS never tells a non-member about their own request (#1216): show the request's outcome.
   const sentForThisGroup = requestAccess.isSuccess && requestAccess.data === search.data?.id;
   const status = sentForThisGroup ? "pending" : myRequest.data?.status;
 

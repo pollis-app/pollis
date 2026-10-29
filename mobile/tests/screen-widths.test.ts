@@ -1,12 +1,4 @@
-/*
- * One centred column width per class of page on iPad (review7 N1).
- *
- * Every full-screen page and every page drawn in the two-pane's right pane
- * uses <Screen>'s default `layout.screenMaxWidth` column; only the auth steps
- * pass `centered` for the narrower `layout.authMaxWidth`. A page that hard
- * codes its own max width (or opts into the auth column) drifts out of line
- * with its neighbours, which only a screenshot would otherwise catch.
- */
+/* One centred column width per class of page on iPad (review7 N1); only auth steps pass `centered`. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";

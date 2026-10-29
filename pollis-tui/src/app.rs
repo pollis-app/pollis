@@ -1,8 +1,4 @@
 //! The UI state machine.
-//!
-//! M0 gives us the skeleton (boot → event loop → quit). M1 adds the auth
-//! screens: first-device signup (email → OTP → PIN) and returning-user unlock.
-//! M2 grafts the group/channel/DM panes onto the [`Screen::Home`] state.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,13 +20,10 @@ use crate::home::{
 };
 use crate::timeline;
 
-/// Background-sync cadence (spec §6: ~3–5 s while foregrounded). The loop polls
-/// the Delivery Service and advances local MLS state; the UI re-reads on its own
-/// (faster) refresh tick, so a newly-synced message surfaces within a second.
+/// Background-sync cadence; the UI re-reads on its own faster refresh tick.
 pub const SYNC_CADENCE: Duration = Duration::from_secs(4);
 
-/// Which screen the user is looking at. Text-input buffers live on [`App`], not
-/// in the variants, so transitions are cheap and the render code reads one field.
+/// in the variants, so transitions are cheap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
     /// Boot-time session probe in flight.
@@ -39,35 +32,23 @@ pub enum Screen {
     Email,
     /// First-device signup: enter the OTP code.
     Otp,
-    /// First-device signup: show the account's Secret Key (the Emergency Kit)
-    /// and have the user type it back before going on (#1337). Desktop and
-    /// mobile have always shown it; the CLI skipped it, so a CLI-only account
-    /// had no recovery path at all. Phase in [`App::secret_confirming`].
+    /// First-device signup: show the Secret Key and have it typed back (#1337).
     SaveSecretKey,
     /// Set a PIN for THIS device — shared by first-device signup and a second
-    /// device's enroll/recover tail (the flow is tracked by [`App::pin_flow`]).
+    /// device's enroll/recover tail ([`App::pin_flow`]).
     SetPin,
     /// Returning user: enter the PIN to unlock the local DB.
     Unlock,
-    /// Second device (M4b): this account already exists elsewhere — choose to
-    /// enroll via a sibling's approval or recover with the Secret Key.
+    /// Second device: choose sibling approval or Secret-Key recovery.
     EnrollChoice,
-    /// Second device (M4b): the enrollment request is out; show its verification
-    /// code and poll `enrollment_status` until approved/rejected.
+    /// Second device: show the request's code and poll until approved or rejected.
     EnrollWaiting,
     /// Second device (M4b): enter the Secret Key (Emergency Kit) to recover.
     RecoverKey,
-    /// Existing device (M4b): the "Pending device enrollments" list — approve or
-    /// reject other devices requesting to join this account.
+    /// Existing device: approve or reject other devices requesting to join.
     PendingEnrollments,
-    /// Existing device: type the verification code shown on the NEW device to
-    /// approve the highlighted request (#1096).
-    ///
-    /// A separate screen rather than an inline field because the list's keymap
-    /// needs `a`/`r`/`j`/`k`, and every one of those is also a character a
-    /// verification code can contain — so the two cannot share a keystroke.
-    /// Reached with `a` from [`Screen::PendingEnrollments`]; `Enter` approves
-    /// once the code is complete, `Esc` goes back.
+    /// Existing device: type the code shown on the NEW device to approve (#1096); its own
+    /// screen because the list keys are also code characters.
     ApproveEnrollment,
     /// Signed in and unlocked — the three-pane client (M2b).
     Home,
@@ -75,9 +56,7 @@ pub enum Screen {
     Fatal,
 }
 
-/// An async operation the render loop should run after drawing a "working"
-/// frame. Keeping these out of the synchronous key handler lets the UI paint a
-/// status line *before* a network round-trip blocks.
+/// frame, so a status line paints before a network round-trip blocks.
 pub enum Action {
     Boot,
     RequestOtp,
@@ -86,8 +65,7 @@ pub enum Action {
     Unlock,
     /// Reached Home: start the background sync loop and load the tree.
     EnterHome,
-    /// Re-read the tree (and the open conversation's newest page) — fired by the
-    /// UI refresh tick so background-synced data surfaces.
+    /// Re-read the tree and the open conversation's newest page (refresh tick).
     Refresh,
     /// Open the currently-selected sidebar conversation in the main pane.
     OpenSelected,
@@ -97,8 +75,7 @@ pub enum Action {
     SendMessage,
     /// Accept the given pending DM request (§8 "Accept DM request").
     AcceptDm(String),
-    /// Submit the active create/invite prompt (new group/channel, start DM,
-    /// invite), dispatching on the current [`HomeMode::Prompt`] kind.
+    /// Submit the active create/invite prompt.
     SubmitPrompt,
     /// Delete one of the user's own messages (after the `y` confirmation).
     DeleteMessage(String),
@@ -107,7 +84,6 @@ pub enum Action {
     /// Deliver one unsent message again (#1335), under the same id.
     RetryMessage(String),
 
-    // ── M4b: multi-device enrollment / recovery ──────────────────────────────
     /// New device: kick off a sibling-approval enrollment request.
     RequestEnrollment,
     /// New device: poll `enrollment_status` once for the open request.
@@ -123,10 +99,7 @@ pub enum Action {
 }
 
 impl Action {
-    /// Actions the UI refresh tick fires on its own. They run without the
-    /// "working…" busy hint — flashing it on a 750ms timer strobes the status
-    /// line (and for [`Action::Refresh`], the work is a cheap in-memory
-    /// snapshot read anyway).
+    /// Fired by the refresh tick; run without the busy hint, which would strobe.
     pub fn is_background(&self) -> bool {
         matches!(
             self,
@@ -149,52 +122,36 @@ pub struct App {
 
     /// Email captured on the [`Screen::Email`] step, reused by `verify_otp`.
     email: String,
-    /// Profile from `verify_otp` / `get_session` — carries the `user_id` needed
-    /// by `set_pin`/`initialize_identity`/`unlock`. Its `new_secret_key` is
-    /// always taken out (into [`Self::pending_secret`]) the moment it arrives.
+    /// by `set_pin`/`initialize_identity`/`unlock`; `new_secret_key` is moved out on arrival.
     profile: Option<UserProfile>,
-    /// The first-device Secret Key, held only while [`Screen::SaveSecretKey`]
-    /// is up and wiped on drop. Never written anywhere unless the user asks for
-    /// the Emergency Kit file.
+    /// is up; wiped on drop.
     pending_secret: Option<Zeroizing<String>>,
-    /// On [`Screen::SaveSecretKey`]: false = showing the key, true = the user
-    /// is typing it back to confirm they saved it.
+    /// On [`Screen::SaveSecretKey`]: false shows the key, true is typing it back.
     pub secret_confirming: bool,
 
     /// The three-pane client model (populated once [`Screen::Home`] is reached).
     pub home: HomeState,
 
-    // ── M4b enrollment / recovery state ──────────────────────────────────────
     /// Which flow the [`Screen::SetPin`] success handler completes into.
     pub pin_flow: PinFlow,
     /// Highlighted option on the [`Screen::EnrollChoice`] screen.
     pub enroll_choice: EnrollChoice,
-    /// The open enrollment request (new device): its `request_id` (polled) and
-    /// `verification_code` (shown for the sibling to confirm).
+    /// The open enrollment request (new device).
     pub enroll_handle: Option<EnrollmentHandle>,
-    /// Set once a poll reaches a terminal non-approved state (rejected/expired),
-    /// so the waiting screen offers retry instead of continuing to poll.
+    /// Set once a poll is rejected or expired, so the screen offers retry.
     pub enroll_stopped: bool,
     /// Existing device: the pending-approvals list + highlight.
     pub approvals: ApprovalState,
 
     /// The running background poll loop; cancelled on quit for a clean shutdown.
     sync_loop: Option<sync::SyncLoop>,
-    /// The last sync round whose snapshot the UI consumed. A refresh tick only
-    /// does work when the loop has completed a newer round — the tick itself
-    /// must never issue remote queries (that's the sync loop's job).
+    /// The last consumed sync round; a refresh tick never issues remote queries itself.
     last_sync_round: u64,
-    /// Last-rendered height (in rows) of the message pane, so the key handler can
-    /// scroll by whole pages. Updated each frame via [`Self::set_msg_viewport`].
+    /// Message pane height in rows, for page scrolling ([`Self::set_msg_viewport`]).
     msg_height: usize,
-    /// Last-rendered width (in columns) of the message pane — the layout the
-    /// key handler measures to keep the selected message on screen.
+    /// Message pane width, for keeping the selection on screen.
     msg_width: u16,
-    /// Cadence the background sync loop is spawned at on [`Action::EnterHome`].
-    /// Defaults to [`SYNC_CADENCE`] (the 4s production value); the e2e driver
-    /// overrides it via [`Self::with_sync_cadence`] so a headless test doesn't
-    /// wait seconds per round while still exercising the real spawn_loop →
-    /// SyncSnapshot → [`Action::Refresh`] path.
+    /// Sync loop cadence; the e2e driver overrides it via [`Self::with_sync_cadence`].
     sync_cadence: Duration,
 }
 
@@ -204,8 +161,7 @@ impl App {
         Self::with_sync_cadence(state, SYNC_CADENCE)
     }
 
-    /// Like [`Self::new`] but with an injectable background-sync cadence. Used
-    /// only by the e2e driver — the binary always uses [`Self::new`] (4s).
+    /// only by the e2e driver.
     pub fn with_sync_cadence(state: Arc<AppState>, sync_cadence: Duration) -> Self {
         Self {
             state,
@@ -237,17 +193,12 @@ impl App {
         self.profile.as_ref().map(|p| p.username.as_str())
     }
 
-    /// The signed-in user's id, once a profile has been established (after
-    /// verify-otp). Read-only accessor exposed for the e2e driver, which needs
-    /// it to establish DM membership through the core command layer before
-    /// exercising send/receive through the real UI.
+    /// The signed-in user's id, once verify-otp has run (used by the e2e driver).
     pub fn signed_in_user_id(&self) -> Option<&str> {
         self.profile.as_ref().map(|p| p.id.as_str())
     }
 
-    /// Record the message pane's inner size (see [`crate::ui::message_viewport`])
-    /// so page keys jump a screen and selection keeps the highlighted message on
-    /// screen. Called before each frame is drawn.
+    /// Record the message pane's inner size; called before each frame.
     pub fn set_msg_viewport(&mut self, width: u16, height: usize) {
         self.msg_width = width;
         self.msg_height = height;
@@ -258,9 +209,7 @@ impl App {
         self.pending_secret.as_ref().map(|s| s.as_str())
     }
 
-    /// The open conversation laid out at the pane's current width — the same
-    /// layout the renderer draws, so selection scrolling measures what is on
-    /// screen.
+    /// The open conversation laid out at the pane's current width, as rendered.
     pub fn open_layout(&self) -> Vec<timeline::Block> {
         match &self.home.open {
             Some(open) => timeline::layout_open(
@@ -278,10 +227,8 @@ impl App {
         Action::Boot
     }
 
-    /// Handle a key press. Returns an [`Action`] when the key commits a step
-    /// that needs an async round-trip; the caller runs it after redrawing.
+    /// that needs an async round-trip.
     pub fn on_key(&mut self, key: KeyEvent) -> Option<Action> {
-        // Ctrl-C quits from anywhere.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_quit = true;
             return None;
@@ -290,7 +237,6 @@ impl App {
         match self.screen {
             Screen::Booting => None,
             Screen::Fatal => {
-                // Any key quits the error screen.
                 self.should_quit = true;
                 None
             }
@@ -308,11 +254,8 @@ impl App {
         }
     }
 
-    /// The Secret Key screen (#1337). Two phases, like desktop's
-    /// SaveSecretKeyScreen: first the key is shown (`s` writes the Emergency
-    /// Kit file, Enter continues), then the user types or pastes it back, and
-    /// only a match moves on to the PIN. Esc from the second phase shows the
-    /// key again.
+    /// The Secret Key screen (#1337): show it (`s` writes the kit file), then require it typed
+    /// back.
     fn on_save_secret_key(&mut self, key: KeyEvent) -> Option<Action> {
         if !self.secret_confirming {
             match key.code {
@@ -349,7 +292,6 @@ impl App {
                     .as_ref()
                     .is_some_and(|secret| secret_keys_match(secret, &self.input));
                 if matches {
-                    // Done with it: drop (and so wipe) the only copy we held.
                     self.pending_secret = None;
                     self.secret_confirming = false;
                     self.goto(Screen::SetPin, "Saved. Now choose a 4-digit PIN for this device.");
@@ -370,8 +312,7 @@ impl App {
         None
     }
 
-    /// Enroll-choice screen (second device): pick between sibling-approval and
-    /// Secret-Key recovery. ↑/↓ (or `1`/`2`) move the highlight, Enter commits.
+    /// Enroll-choice screen (second device): ↑/↓ or `1`/`2` move, Enter commits.
     fn on_enroll_choice_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Up | KeyCode::Down | KeyCode::Char('k') | KeyCode::Char('j') => {
@@ -395,8 +336,6 @@ impl App {
         }
     }
 
-    /// Act on the highlighted enroll choice: approval kicks off a request; recovery
-    /// opens the Secret-Key entry screen.
     fn commit_enroll_choice(&mut self) -> Option<Action> {
         match self.enroll_choice {
             EnrollChoice::Approval => {
@@ -413,9 +352,7 @@ impl App {
         }
     }
 
-    /// Waiting-for-approval screen (second device). While polling, only Ctrl-C
-    /// quits. Once a poll comes back rejected/expired, Enter returns to the choice
-    /// screen to try again.
+    /// Waiting-for-approval screen; after a rejection Enter returns to the choice screen.
     fn on_enroll_waiting_key(&mut self, key: KeyEvent) -> Option<Action> {
         if self.enroll_stopped {
             match key.code {
@@ -431,8 +368,7 @@ impl App {
         None
     }
 
-    /// Secret-Key entry (second device): a free-text field. Enter recovers; Esc
-    /// returns to the choice screen.
+    /// Secret-Key entry (second device): Enter recovers, Esc goes back.
     fn on_recover_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Esc => {
@@ -453,8 +389,7 @@ impl App {
                 None
             }
             KeyCode::Char(c) => {
-                // The Secret Key can carry any non-whitespace glyph (hyphens,
-                // mixed case); the core validates it on unwrap.
+                // Any non-whitespace glyph; the core validates on unwrap.
                 if !c.is_whitespace() {
                     self.input.push(c);
                 }
@@ -464,9 +399,7 @@ impl App {
         }
     }
 
-    /// Pending-enrollments list (existing device): ↑/↓ move, `a` approves the
-    /// highlighted request (with its shown code), `r` rejects it, Esc/`q` returns
-    /// to Home. No modal — a full-screen list with an action line.
+    /// Pending-enrollments list: ↑/↓ move, `a` enters the code, `r` rejects, Esc/`q` returns.
     fn on_pending_enrollments_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -482,10 +415,7 @@ impl App {
                 self.approvals.move_selection(1);
                 None
             }
-            // #1096: `a` no longer approves. It opens the code-entry screen,
-            // because the approver has to type the code shown on the NEW device
-            // — the list cannot display one (nothing fetches it) and a one-key
-            // approval is exactly what let a substituted ephemeral key through.
+            // #1096: `a` opens code entry; a one-key approval let a substituted key through.
             KeyCode::Char('a') => {
                 match self.approvals.current() {
                     Some(req) => {
@@ -518,12 +448,7 @@ impl App {
 
     /// Type the verification code shown on the NEW device, then `Enter` (#1096).
     ///
-    /// `self.input` is the per-screen buffer every other typed screen uses.
-    /// Characters go through `pollis_core`'s own normalizer — the same function
-    /// the alphabet and length come from — so a lookalike is DROPPED rather than
-    /// mapped: turning a typed `O` into `0` would let a mis-read code compare
-    /// equal to the one Rust derives, which is the substitution this whole
-    /// screen exists to catch.
+    /// Characters go through `pollis_core`'s normalizer, so a lookalike is dropped, never mapped.
     fn on_approve_enrollment_key(&mut self, key: KeyEvent) -> Option<Action> {
         use pollis_core::commands::device_enrollment::{
             normalize_enrollment_sas, ENROLLMENT_SAS_LEN,
@@ -562,8 +487,7 @@ impl App {
             CodeEntry::Type(c) => {
                 let next = normalize_enrollment_sas(&format!("{}{c}", self.input));
                 if next == self.input {
-                    // Either the buffer is full or the character is not one a
-                    // code can contain. Say which, rather than swallowing it.
+                    // Full buffer or not a code character; say which.
                     self.status = Some(if self.input.chars().count() == ENROLLMENT_SAS_LEN {
                         "The code is complete — press Enter to approve.".to_string()
                     } else {
@@ -579,8 +503,7 @@ impl App {
         }
     }
 
-    /// The poll action for the waiting screen's refresh tick, if a request is open
-    /// and hasn't already reached a terminal state. `None` pauses polling.
+    /// and has not reached a terminal state.
     pub fn enrollment_poll_action(&self) -> Option<Action> {
         if self.enroll_stopped {
             return None;
@@ -615,11 +538,7 @@ impl App {
         }
     }
 
-    /// Handle a key on the three-pane Home screen. The screen has four input
-    /// modes — navigate, compose (typing a message), prompt (a create/invite/
-    /// react bottom bar) and confirm-delete — each with its own handler.
-    /// Compose/prompt keystrokes edit [`Self::input`]; the write-triggering
-    /// keys return an [`Action`].
+    /// Home screen keys: navigate, compose, prompt or confirm-delete mode.
     fn on_home_key(&mut self, key: KeyEvent) -> Option<Action> {
         match self.home.mode {
             HomeMode::Navigate => self.on_home_nav_key(key),
@@ -629,18 +548,13 @@ impl App {
         }
     }
 
-    /// Navigate mode: tree movement + the command keys that open compose or a
-    /// create/invite prompt. The two async reads (open a conversation, page
-    /// history) return an [`Action`]; the write-triggering keys hand off to the
-    /// `begin_*` helpers. The message keys (`r` reply, `e` edit, `x` delete,
-    /// `+` react, `t` thread) act on the message selected in the message pane.
+    /// Navigate mode: tree movement and the command keys; message keys act on the selection.
     fn on_home_nav_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
                 None
             }
-            // Tab cycles focus between the sidebar and the message pane.
             KeyCode::Tab | KeyCode::BackTab => {
                 self.home.focus = match self.home.focus {
                     Focus::Sidebar => Focus::Messages,
@@ -657,25 +571,18 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.on_home_down(1),
             KeyCode::PageUp => self.on_page(true),
             KeyCode::PageDown => self.on_page(false),
-            // `i` (or Enter on the message pane) enters compose for the open conv.
             KeyCode::Char('i') => self.begin_compose(),
-            // `a` accepts the selected pending DM request.
             KeyCode::Char('a') => self.begin_accept_dm(),
-            // Create/invite flows open an inline bottom-bar prompt.
             KeyCode::Char('g') => self.begin_prompt(PromptKind::NewGroup),
             KeyCode::Char('c') => self.begin_new_channel_prompt(),
             KeyCode::Char('d') => self.begin_prompt(PromptKind::StartDm),
             KeyCode::Char('v') => self.begin_invite_prompt(),
-            // Message actions on the selected message (#1337).
             KeyCode::Char('r') => self.begin_reply(),
             KeyCode::Char('e') => self.begin_edit(),
             KeyCode::Char('x') | KeyCode::Delete => self.begin_delete(),
             KeyCode::Char('+') => self.begin_react(),
             KeyCode::Char('t') => self.begin_open_thread(),
-            // `R`: retry a message the outbox could not deliver (#1335).
             KeyCode::Char('R') => self.begin_retry(),
-            // `E` opens the pending device-enrollments list (approve/reject a
-            // second device requesting to join this account).
             KeyCode::Char('E') => {
                 self.status = Some("Loading pending device enrollments…".to_string());
                 self.screen = Screen::PendingEnrollments;
@@ -685,7 +592,6 @@ impl App {
                 if self.home.focus == Focus::Sidebar {
                     return self.activate_selection();
                 }
-                // Message pane focused → start composing.
                 self.begin_compose()
             }
             _ => None,
@@ -716,9 +622,7 @@ impl App {
         self.home.focus = Focus::Sidebar;
     }
 
-    /// Compose mode: type into the buffer; Enter sends (empty is a no-op);
-    /// Alt-Enter or Ctrl-J adds a line break; Esc leaves so navigation keys
-    /// work again.
+    /// Compose mode: Enter sends, Alt-Enter or Ctrl-J adds a line break, Esc leaves.
     fn on_compose_key(&mut self, key: KeyEvent) -> Option<Action> {
         let newline = (key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT))
             || (key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL));
@@ -734,7 +638,6 @@ impl App {
             KeyCode::Enter => {
                 let attachment_edit = self.editing_attachment_message();
                 if is_blank(&self.input) && !attachment_edit {
-                    // Empty/whitespace-only input does not send.
                     None
                 } else {
                     self.status = Some(match self.home.compose {
@@ -756,8 +659,7 @@ impl App {
         }
     }
 
-    /// Whether the compose bar is editing a message that carries attachments —
-    /// the one case an empty buffer is a real edit (it clears the caption).
+    /// the one case where an empty buffer is a real edit.
     fn editing_attachment_message(&self) -> bool {
         let ComposeTarget::Edit { message_id } = &self.home.compose else {
             return false;
@@ -770,8 +672,7 @@ impl App {
             .is_some_and(|raw| !content::parse_content(raw).attachments.is_empty())
     }
 
-    /// Prompt mode: type into the buffer; Enter submits (empty is rejected with a
-    /// hint); Esc cancels.
+    /// Prompt mode: Enter submits, Esc cancels.
     fn on_prompt_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Esc => {
@@ -819,9 +720,7 @@ impl App {
         }
     }
 
-    /// Enter compose mode for the open conversation. Guards: nothing open →
-    /// guidance; an un-accepted DM request → tell the user to accept it first
-    /// (its MLS tree has no send path until accepted).
+    /// Enter compose for the open conversation, unless nothing is open or it is an un-accepted DM.
     fn begin_compose(&mut self) -> Option<Action> {
         if self.compose_guard() {
             self.home.compose = ComposeTarget::New;
@@ -931,8 +830,7 @@ impl App {
         None
     }
 
-    /// `R`: send the selected message again, if the outbox could not deliver
-    /// it (#1335). A message that went out has nothing to retry.
+    /// `R`: retry the selected message if the outbox could not deliver it (#1335).
     fn begin_retry(&mut self) -> Option<Action> {
         let picked = self
             .home
@@ -1003,8 +901,7 @@ impl App {
         None
     }
 
-    /// Open the "new channel" prompt scoped to the selected group (or the group
-    /// owning the selected channel). Needs a group in context.
+    /// Open the "new channel" prompt for the group in context.
     fn begin_new_channel_prompt(&mut self) -> Option<Action> {
         match self.home.context_group() {
             Some((group_id, group_name)) => self.begin_prompt(PromptKind::NewChannel {
@@ -1041,9 +938,7 @@ impl App {
         self.status = None;
     }
 
-    /// Up/`k`: in the sidebar move the highlight; in the message pane select
-    /// the next older message, keeping it on screen and prefetching history as
-    /// the selection nears the top of what is loaded.
+    /// Up/`k`: move the sidebar highlight, or select an older message (prefetching history).
     fn on_home_up(&mut self, amount: usize) -> Option<Action> {
         match self.home.focus {
             Focus::Sidebar => {
@@ -1074,8 +969,7 @@ impl App {
         }
     }
 
-    /// Down/`j`: in the sidebar move the highlight; in the message pane select
-    /// the next newer message (past the newest, back to following new ones).
+    /// Down/`j`: move the sidebar highlight, or select a newer message.
     fn on_home_down(&mut self, amount: usize) -> Option<Action> {
         match self.home.focus {
             Focus::Sidebar => self.home.move_selection(amount as i32),
@@ -1092,9 +986,7 @@ impl App {
         None
     }
 
-    /// PageUp / PageDown: scroll the message pane a screen at a time (the
-    /// sidebar is short enough to need no paging), prefetching older history
-    /// near the top.
+    /// PageUp / PageDown: scroll the message pane a screen, prefetching near the top.
     fn on_page(&mut self, up: bool) -> Option<Action> {
         let page = self.msg_height.max(1);
         let total = timeline::line_count(&self.open_layout());
@@ -1131,8 +1023,7 @@ impl App {
         }
     }
 
-    /// Enter on the sidebar: toggle a group's expansion (inline) or queue opening
-    /// the highlighted conversation.
+    /// Enter on the sidebar: toggle a group or open the conversation.
     fn activate_selection(&mut self) -> Option<Action> {
         let target = self.home.current_row().map(|r| r.target.clone())?;
         match target {
@@ -1154,9 +1045,7 @@ impl App {
         }
     }
 
-    /// Install a fresh (loading) [`OpenConversation`] for `conv` and return the
-    /// action that fetches its first page. Re-selecting the already-open
-    /// conversation is a no-op so a stray Enter doesn't wipe scrollback.
+    /// Install a loading [`OpenConversation`] for `conv`; re-opening the open one is a no-op.
     fn begin_open(&mut self, conv: ConvRef) -> Action {
         let already = self
             .home
@@ -1176,12 +1065,8 @@ impl App {
         Action::OpenSelected
     }
 
-    /// Run a queued async [`Action`] against the core command surface. All error
-    /// handling funnels through [`Self::fail`] so the UI never dies silently.
-    /// The caller sets/clears [`Self::busy`] around this so the "working…" frame
-    /// paints before the (possibly network-blocking) call. Returns an optional
-    /// **follow-up** action for the caller to run next (e.g. entering Home queues
-    /// the first tree load).
+    /// Run a queued [`Action`]; errors go through [`Self::fail`]. Returns an optional follow-up
+    /// action.
     pub async fn run(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::Boot => match auth::boot(&self.state).await {
@@ -1208,17 +1093,14 @@ impl App {
                 let code = self.input.trim().to_string();
                 match auth::verify_otp(&self.state, &self.email, &code).await {
                     Ok(mut profile) => {
-                        // The branch point (spec §7): a fresh device for an account
-                        // that already exists elsewhere must enroll/recover, not
-                        // run first-device signup.
+                        // A fresh device for an existing account must enroll or recover, not
+                        // sign up.
                         let enrollment_required = profile.enrollment_required;
                         let secret = profile.new_secret_key.take().map(Zeroizing::new);
                         self.profile = Some(profile);
                         if let (false, Some(secret)) = (enrollment_required, secret) {
-                            // First device: the account's Secret Key exists only
-                            // in this response. Show it before anything else, as
-                            // desktop's SaveSecretKeyScreen and mobile's
-                            // emergency-kit screen do.
+                            // First device: the Secret Key exists only in this response, so
+                            // show it first.
                             self.pin_flow = PinFlow::FirstDevice;
                             self.pending_secret = Some(secret);
                             self.secret_confirming = false;
@@ -1244,9 +1126,7 @@ impl App {
             Action::SetPinAndInit => {
                 let pin = self.input.clone();
                 let user_id = self.user_id();
-                // First device: set_pin → initialize_identity. A second device
-                // (already holding the account key in `state.unlock`, via approval
-                // or recovery): set_pin → finalize → initialize_identity.
+                // First device: set_pin then initialize_identity; a second device also finalizes.
                 let result = match self.pin_flow {
                     PinFlow::FirstDevice => auth::set_pin_and_init(&self.state, &user_id, &pin).await,
                     PinFlow::NewDevice => {
@@ -1254,7 +1134,6 @@ impl App {
                     }
                 };
                 match result {
-                    // Reaching Home starts the sync loop + first tree load.
                     Ok(()) => {
                         self.goto(Screen::Home, "You're signed in.");
                         return Some(Action::EnterHome);
@@ -1274,25 +1153,17 @@ impl App {
                 }
             }
             Action::EnterHome => {
-                // Start the background poll loop (spec §6). It does the remote
-                // work and publishes a per-round snapshot; the UI's refresh tick
-                // consumes that snapshot without issuing queries of its own.
+                // Start the sync loop; the refresh tick only consumes its snapshots.
                 if self.sync_loop.is_none() {
                     let user_id = self.user_id();
                     self.sync_loop =
                         Some(sync::spawn_loop(self.state.clone(), user_id, self.sync_cadence));
                 }
-                // Load the tree once immediately (user-initiated, so a visible
-                // "working…" is fine) so the sidebar isn't empty while the first
-                // background round runs.
+                // Load the tree now so the sidebar is not empty during the first round.
                 self.refresh_tree().await;
             }
             Action::Refresh => {
-                // Timer-driven and must stay cheap: consume the sync loop's
-                // latest snapshot; if no new round completed since the last
-                // tick there is nothing to do. The only remote call is the
-                // open conversation's newest-page read, and only once per
-                // completed sync round.
+                // Timer-driven and cheap: only the open conversation's newest page, once per round.
                 let snapshot = self
                     .sync_loop
                     .as_ref()
@@ -1327,8 +1198,7 @@ impl App {
         None
     }
 
-    /// New device: request sibling-approval enrollment. On success show the
-    /// verification code and start polling; on failure stay on the choice screen.
+    /// New device: request enrollment, show the code and start polling.
     async fn do_request_enrollment(&mut self) {
         let user_id = self.user_id();
         match enroll::request_enrollment(&self.state, user_id).await {
@@ -1347,18 +1217,13 @@ impl App {
         }
     }
 
-    /// New device: poll the open request once. `Approved` advances to set this
-    /// device's PIN (which finalizes enrollment); `Rejected`/`Expired` stop the
-    /// poll and let the user retry; `Pending` keeps waiting. Returns a follow-up
-    /// action so an approval flows straight into the PIN step.
+    /// New device: poll the request once; an approval flows straight into the PIN step.
     async fn do_poll_enrollment(&mut self, request_id: &str) -> Option<Action> {
         match enroll::enrollment_status(&self.state, request_id.to_string()).await {
             Ok(status) => match poll_outcome(&status) {
                 PollOutcome::KeepWaiting => {}
                 PollOutcome::Approved => {
                     self.enroll_handle = None;
-                    // The account key is now in `state.unlock`; set this device's
-                    // own PIN, then finalize (via the NewDevice pin_flow tail).
                     self.goto(
                         Screen::SetPin,
                         "Approved! Choose a 4-digit PIN to secure this device.",
@@ -1375,16 +1240,13 @@ impl App {
                         Some("The request expired. Press Enter to try again.".to_string());
                 }
             },
-            // A transient read error just leaves the waiting screen up; the next
-            // tick retries.
+            // A transient read error leaves the screen up; the next tick retries.
             Err(e) => self.status = Some(format!("Still waiting… ({e})")),
         }
         None
     }
 
-    /// New device: Secret-Key recovery. On success the account key is installed —
-    /// advance to set this device's PIN (finalize runs in the NewDevice pin tail).
-    /// A bad key surfaces the error and keeps the entry screen up.
+    /// New device: Secret-Key recovery, then set this device's PIN.
     async fn do_recover(&mut self) {
         let user_id = self.user_id();
         let secret_key = self.input.trim().to_string();
@@ -1395,13 +1257,11 @@ impl App {
                     "Recovered! Choose a 4-digit PIN to secure this device.",
                 );
             }
-            // Stay on RecoverKey (buffer intact) so the user can correct + retry.
             Err(e) => self.status = Some(format!("Recovery failed: {e}")),
         }
     }
 
-    /// Existing device: load the account's pending enrollment requests, preserving
-    /// the highlight across a refresh.
+    /// Existing device: load pending enrollment requests, keeping the highlight.
     async fn do_load_pending_enrollments(&mut self) {
         let user_id = self.user_id();
         match enroll::pending_requests(&self.state, user_id).await {
@@ -1438,13 +1298,8 @@ impl App {
         }
     }
 
-    /// Send the compose buffer to the open conversation — as a new message, a
-    /// quote reply, a thread reply, or an edit of the user's own message,
-    /// per [`HomeState::compose`] — then re-read its newest page so the result
-    /// appears immediately (the core stores it locally on send). A new message
-    /// stays in compose so the user can keep typing; a reply or edit returns to
-    /// navigation. A failure surfaces on the status line and the text is kept
-    /// for a retry.
+    /// Send the compose buffer (new message, reply, thread reply or edit), then re-read the
+    /// newest page; failures keep the text.
     async fn do_send(&mut self) {
         let Some((conv_id, thread_root)) = self
             .home
@@ -1455,7 +1310,6 @@ impl App {
             self.leave_input_mode();
             return;
         };
-        // Trailing whitespace and blank lines go; the user's line breaks stay.
         let text = self.input.trim_end().trim_start_matches('\n').to_string();
         let user_id = self.user_id();
         let username = self.identity().map(|s| s.to_string());
@@ -1482,7 +1336,6 @@ impl App {
                 .map(|_| "")
             }
             ComposeTarget::Edit { message_id } => {
-                // Keep the attachments of a captioned message; replace the text.
                 let raw = self
                     .home
                     .open
@@ -1508,7 +1361,6 @@ impl App {
                     self.home.mode = HomeMode::Navigate;
                     self.home.compose = ComposeTarget::New;
                 }
-                // Pin to newest and surface the result.
                 if let Some(open) = self.home.open.as_mut() {
                     if matches!(target, ComposeTarget::New | ComposeTarget::Reply { .. }) {
                         open.selected = None;
@@ -1526,8 +1378,7 @@ impl App {
         }
     }
 
-    /// Retry one unsent message and report how it went; the refresh shows the
-    /// row settled, or still marked not sent.
+    /// Retry one unsent message and report how it went.
     async fn do_retry(&mut self, message_id: &str) {
         self.status = Some(match send::retry(&self.state, message_id).await {
             Ok(()) => "Sent.".to_string(),
@@ -1536,11 +1387,9 @@ impl App {
         self.refresh_open().await;
     }
 
-    /// Delete one of the user's own messages (or discard an unsent one), then
-    /// re-read so it disappears.
+    /// Delete one of the user's own messages (or discard an unsent one).
     async fn do_delete(&mut self, message_id: &str) {
-        // A message the outbox still holds is discarded, not deleted (#1335):
-        // the core withdraws it from everyone first if it may have landed.
+        // An outbox message is discarded, not deleted (#1335); the core withdraws it first.
         let unsent = self
             .home
             .open
@@ -1603,8 +1452,7 @@ impl App {
         }
     }
 
-    /// Accept a pending DM request, then refresh the tree so it moves from
-    /// Requests to Direct Messages.
+    /// Accept a pending DM request, then refresh the tree.
     async fn do_accept_dm(&mut self, dm_id: &str) {
         let user_id = self.user_id();
         match send::accept_dm(&self.state, &user_id, dm_id).await {
@@ -1616,12 +1464,8 @@ impl App {
         }
     }
 
-    /// Dispatch the active prompt on its [`HomeMode::Prompt`] kind, then
-    /// refresh the tree so a new group/channel/DM appears — and land on it:
-    /// the new conversation is highlighted and opened with the message pane
-    /// focused, rather than leaving the user wherever they were (#1337). Any
-    /// failure (user not found, not an admin, …) lands on the status line —
-    /// never a panic — and the prompt stays open, buffer intact, for a retry.
+    /// Dispatch the active prompt, then land on the new conversation (#1337); failures keep the
+    /// prompt.
     async fn do_submit_prompt(&mut self) -> Option<Action> {
         let HomeMode::Prompt(kind) = self.home.mode.clone() else {
             return None;
@@ -1634,7 +1478,6 @@ impl App {
             return self.do_react(message_id, &value).await;
         }
         let user_id = self.user_id();
-        // (status, conversation to land on)
         let result: anyhow::Result<(&'static str, Option<String>)> = match kind {
             PromptKind::NewGroup => send::new_group(&self.state, &user_id, &value)
                 .await
@@ -1672,8 +1515,7 @@ impl App {
         }
     }
 
-    /// Highlight and open the conversation `id` names — a channel or DM id, or
-    /// a group id, which lands on that group's first channel.
+    /// Highlight and open `id` (a channel, DM, or a group's first channel).
     fn land_on(&mut self, id: &str) -> Option<Action> {
         let conv_id = self
             .home
@@ -1721,9 +1563,7 @@ impl App {
         None
     }
 
-    /// Look a user up by username/email, then open a DM to them, returning its
-    /// id. A miss is a clean error, not a panic — the prompt stays open for a
-    /// corrected try.
+    /// Look a user up, then open a DM to them, returning its id.
     async fn resolve_and_start_dm(&self, user_id: &str, identifier: &str) -> anyhow::Result<String> {
         let found =
             pollis_core::commands::user::search_user_by_username(identifier.to_string(), &self.state)
@@ -1738,8 +1578,7 @@ impl App {
         Ok(dm.id)
     }
 
-    /// Re-read the conversation tree from the local DB (populated by the sync
-    /// loop). Non-fatal: a failed read just leaves the last-good tree up.
+    /// Re-read the tree from the local DB; a failed read keeps the last-good tree.
     async fn refresh_tree(&mut self) {
         let user_id = self.user_id();
         match data::load_conversations(&self.state, &user_id).await {
@@ -1748,8 +1587,7 @@ impl App {
         }
     }
 
-    /// Re-read the newest page of the open conversation and merge it in, so a
-    /// peer's just-synced message appears without disturbing loaded scrollback.
+    /// Merge the open conversation's newest page in without disturbing scrollback.
     async fn refresh_open(&mut self) {
         let Some((conv_id, kind)) = self.open_target() else {
             return;
@@ -1761,7 +1599,6 @@ impl App {
                     open.messages =
                         crate::home::merge_messages(std::mem::take(&mut open.messages), page.messages);
                     open.loading = false;
-                    // Only learn the older-cursor if we haven't paged back yet.
                     if open.older_cursor.is_none() && !open.at_beginning {
                         open.older_cursor = page.next_cursor;
                         open.at_beginning = open.older_cursor.is_none();
@@ -1773,10 +1610,7 @@ impl App {
         }
     }
 
-    /// What the pane shows beside the messages themselves: the reactions on
-    /// the newest displayed messages (one batched DS read), the thread reply
-    /// counts and, with a thread open, its replies (both local). Best effort —
-    /// a failure leaves the last-known values up rather than blanking them.
+    /// Reactions, thread counts and open thread replies; failures keep the last values.
     async fn refresh_extras(&mut self) {
         /// The newest this many displayed messages get their reactions read.
         const REACTION_WINDOW: usize = 60;
@@ -1856,8 +1690,7 @@ impl App {
         let Some((conv_id, kind)) = self.open_target() else {
             return;
         };
-        // Take the cursor by value — `MessageCursor` isn't `Clone`, and we
-        // replace it with the page's `next_cursor` afterwards.
+        // Take the cursor by value; `MessageCursor` is not `Clone`.
         let cursor = self.home.open.as_mut().and_then(|o| o.older_cursor.take());
         let user_id = self.user_id();
         match self.fetch_page(&user_id, &conv_id, kind, cursor).await {
@@ -1906,8 +1739,7 @@ impl App {
             .and_then(|o| o.kind.map(|k| (o.conv_id.clone(), k)))
     }
 
-    /// Cancel the background sync loop on shutdown, giving the current round a
-    /// brief window to finish so the terminal restore isn't racing a DB write.
+    /// Cancel the sync loop, giving the current round a moment to finish.
     pub async fn shutdown(&mut self) {
         if let Some(sync_loop) = self.sync_loop.take() {
             let handle = sync_loop.cancel();
@@ -1915,8 +1747,7 @@ impl App {
         }
     }
 
-    /// The active user's id. Only called on screens reached *after* a profile is
-    /// established, so a missing profile is a programming error, not a runtime one.
+    /// established, so a missing profile is a programming error.
     fn user_id(&self) -> String {
         self.profile
             .as_ref()
@@ -1931,8 +1762,7 @@ impl App {
         self.status = Some(status.to_string());
     }
 
-    /// A recoverable failure: stay on the current screen, clear the buffer, show
-    /// the error so the user can retry.
+    /// A recoverable failure: stay on screen, clear the buffer, show the error.
     fn fail(&mut self, msg: String) {
         self.input.clear();
         self.status = Some(msg);
@@ -1945,10 +1775,8 @@ impl App {
     }
 }
 
-/// Compare a typed Secret Key with the real one the way desktop's
-/// SaveSecretKeyScreen does: whitespace, dashes and the `A3-` version prefix
-/// ignored, case-insensitive — so a key pasted with or without its grouping
-/// still counts.
+/// Compare a typed Secret Key the way desktop does: ignore whitespace, dashes, the `A3-` prefix
+/// and case.
 pub(crate) fn secret_keys_match(secret: &str, typed: &str) -> bool {
     fn normalize(s: &str) -> Zeroizing<String> {
         let compact = Zeroizing::new(s.chars().filter(|c| !c.is_whitespace()).collect::<String>());
@@ -1963,10 +1791,7 @@ pub(crate) fn secret_keys_match(secret: &str, typed: &str) -> bool {
     !want.is_empty() && *want == *normalize(typed)
 }
 
-/// The Emergency Kit document, word for word the one desktop downloads and
-/// mobile shares (`auth:emergencyKit.document` in
-/// `frontend/src/i18n/locales/en/auth.json`) — a kit that reads differently
-/// per platform is a support problem the day someone compares them.
+/// The Emergency Kit, word for word the desktop and mobile document.
 fn emergency_kit_document(secret: &str, generated: &str) -> String {
     let lines = [
         "POLLIS — EMERGENCY KIT",
@@ -1998,11 +1823,8 @@ fn emergency_kit_document(secret: &str, generated: &str) -> String {
     doc
 }
 
-/// Write the Emergency Kit to the current directory — the terminal's
-/// equivalent of desktop's download — as
-/// `pollis-emergency-kit-<email>-<time>.txt`, owner-only and never overwriting
-/// an existing file. Deliberately NOT the data dir: a recovery key kept beside
-/// the keystore it recovers is no backup.
+/// Write the Emergency Kit to the current directory, owner-only, never overwriting. Not the
+/// data dir.
 fn write_emergency_kit(secret: &str, email: &str) -> std::io::Result<std::path::PathBuf> {
     use std::io::Write as _;
     let now = chrono::Local::now();
@@ -2053,7 +1875,6 @@ enum InputKind {
 impl InputKind {
     fn accepts(&self, c: char) -> bool {
         match self {
-            // Reject whitespace; the DS validates the address itself.
             InputKind::Email => !c.is_whitespace(),
             InputKind::Digits(_) => c.is_ascii_digit(),
         }
@@ -2077,12 +1898,7 @@ impl InputKind {
 
 /// What a keystroke means on the verification-code entry screen (#1096).
 ///
-/// Pure, and separate from the handler, for one reason: the rule that `Enter`
-/// approves ONLY a complete code is the gate that replaced a one-keystroke
-/// approval, and it has to be testable. Building an `App` needs a full `Config`,
-/// so the handler itself is not — this is, and the handler is a thin match over
-/// it. Same shape as [`InputKind`], which the auth screens' validation uses for
-/// the same reason.
+/// Pure so the complete-code-only `Enter` rule is testable without an `App`.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum CodeEntry {
     /// Offer this character to the normalizer.
@@ -2119,13 +1935,7 @@ pub(crate) fn classify_code_entry(code: KeyCode, typed: usize) -> CodeEntry {
 mod tests {
     use super::*;
 
-    // The auth screens differ only in their `InputKind`; these lock the
-    // per-screen validation so a wrong OTP/PIN length or a non-numeric key can't
-    // reach the (DB-opening, network-hitting) command layer.
-
-    /// #1096: the gate that replaced a one-keystroke approval. `Enter` must
-    /// produce an approval ONLY when the buffer holds a full code — otherwise
-    /// the screen is back to approving whatever happens to be there.
+    /// #1096: `Enter` approves ONLY a full code.
     #[test]
     fn enter_approves_only_a_complete_code() {
         use pollis_core::commands::device_enrollment::ENROLLMENT_SAS_LEN;
@@ -2143,9 +1953,7 @@ mod tests {
         );
     }
 
-    /// The list keys the previous design used — `a` to approve, `j`/`k` to move
-    /// — are all characters a code can contain, which is why code entry is its
-    /// own screen. On THAT screen every one of them is just input.
+    /// On the code screen the old list keys (`a`, `j`, `k`) are just input.
     #[test]
     fn on_the_entry_screen_the_list_keys_are_only_input() {
         for c in ['a', 'r', 'j', 'k', 'q'] {
@@ -2155,17 +1963,13 @@ mod tests {
                 "'{c}' must be typed, never treated as a command here"
             );
         }
-        // Esc is the way out; it is not a code character.
         assert_eq!(classify_code_entry(KeyCode::Esc, 3), CodeEntry::Cancel);
         assert_eq!(classify_code_entry(KeyCode::Backspace, 3), CodeEntry::Backspace);
-        // Anything else is inert rather than accidentally submitting.
         assert_eq!(classify_code_entry(KeyCode::Tab, 8), CodeEntry::Ignore);
         assert_eq!(classify_code_entry(KeyCode::Delete, 8), CodeEntry::Ignore);
     }
 
-    /// The Secret Key confirmation accepts the key however it was pasted —
-    /// grouped or not, any case, with or without the version prefix — and
-    /// nothing else, the same rule as desktop's SaveSecretKeyScreen.
+    /// The Secret Key confirmation accepts any grouping, case or prefix, and nothing else.
     #[test]
     fn a_typed_secret_key_matches_however_it_was_pasted() {
         let key = "A3-ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567";
@@ -2178,9 +1982,7 @@ mod tests {
         assert!(!secret_keys_match("", ""));
     }
 
-    /// The kit the CLI writes is byte-for-byte the document desktop downloads
-    /// and mobile shares — read from desktop's own catalogue, so a wording
-    /// change there fails here instead of drifting.
+    /// The kit matches desktop's own catalogue byte for byte.
     #[test]
     fn the_emergency_kit_is_the_desktop_document() {
         let catalogue: serde_json::Value = serde_json::from_str(include_str!(

@@ -1,18 +1,4 @@
-/*
- * Screen-share picker — the "share sound" switch versus its stored default
- * (#1040).
- *
- * The picker seeds its switch from the `screen_share_audio` preference, which
- * arrives asynchronously over IPC. A user who flips the switch before that
- * reply lands used to have their choice overwritten by the reply a few
- * milliseconds later — a race that real IPC latency makes reachable and the
- * mock's microtask-fast replies make invisible. `window.__tauriHold` parks
- * the `get_preferences` reply so the spec can widen that window on purpose,
- * flip the switch inside it, and then let the reply through.
- *
- * The mock never publishes, so `start_screen_share` is asserted by the
- * arguments the app sent, read back from `window.__tauriLastArgs`.
- */
+// Screen-share picker (#1040): a switch flipped before the preference reply must not be overwritten.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -81,8 +67,7 @@ async function joinVoice(page: Page, preferences: Record<string, unknown>) {
   await expect(page.getByTestId("voice-tray-mute")).toBeVisible();
 }
 
-/** Open the in-app picker the way the macOS/Windows enumerate path does,
- *  with the preference reply optionally parked. */
+/** Open the in-app picker, with the preference reply optionally parked. */
 async function openPicker(page: Page, holdPreferences: boolean) {
   await page.evaluate(
     ({ hold, display }) => {

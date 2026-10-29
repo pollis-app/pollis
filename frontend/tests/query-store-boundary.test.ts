@@ -1,23 +1,4 @@
-/*
- * The React Query / MobX boundary, as tests (#928, #929).
- *
- * CLAUDE.md splits renderer state cleanly: React Query hooks own remote data,
- * MobX singletons hold UI state only. `useUserProfile` had blurred it in the
- * hardest direction to debug — its `queryFn` called `appStore.setUserAvatarUrl`
- * — and the residue of several dead code paths was still exported alongside.
- *
- * Both are GUARDS, and deliberately source scans rather than behavioural
- * specs, for the same reason `no-periodic-polling.test.ts` is: they are rules
- * ABOUT the code. "A query function must not write observable state" describes
- * a shape, and its symptom — a background refetch nobody asked for mutating a
- * store, out of order with render — is a race that no deterministic test can
- * reliably provoke. "This export has no callers" is not observable at runtime
- * at all. The behaviour that the store still gets hydrated (the reason the
- * write existed) is covered by the app: `VoiceSessionManager` reads
- * `userAvatarUrl` when it builds the local voice tile.
- *
- *   node --test frontend/tests/
- */
+/* The React Query / MobX boundary (#928, #929) as source-scan guards: no queryFn writes a store, and deleted exports stay deleted. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -41,13 +22,7 @@ function walk(dir: string): string[] {
   return out;
 }
 
-/**
- * The body of every `queryFn:` in a file, as source text.
- *
- * Brace-matched from the `{` that opens the function rather than regexed to a
- * closing line, so a nested object or an inline arrow inside the body cannot
- * end the slice early and hide a write past it.
- */
+/** Every `queryFn:` body, brace-matched so nested braces can't end it early. */
 function queryFnBodies(source: string): string[] {
   const bodies: string[] = [];
   const marker = /queryFn\s*:/g;
@@ -75,12 +50,7 @@ function queryFnBodies(source: string): string[] {
   return bodies;
 }
 
-/**
- * A write to a MobX singleton: `<something>Store.setX(` / `.clearX(` etc.
- *
- * Reads (`appStore.currentUser`) are fine and common — a query function is
- * allowed to depend on who is signed in. Only mutation is banned.
- */
+/** A MobX store mutation; reads are fine. */
 const STORE_WRITE = /\b\w*[sS]tore\.(set|clear|reset|add|remove|toggle|update|push)\w*\s*\(/;
 
 test("GUARD: no queryFn writes to a MobX store (#928)", () => {
@@ -120,9 +90,7 @@ test("useUserProfile hydrates the store from an effect, not its queryFn (#928)",
     );
   }
 
-  // …and it still happens, keyed on the resolved value. Dropping the write
-  // altogether would blank the local participant's avatar in a voice call,
-  // which is the bug the original line existed to fix.
+  // The write still happens, keyed on the resolved value (the local voice tile needs it).
   assert.match(
     source,
     /useEffect\([\s\S]*?setUserAvatarUrl/,
@@ -130,11 +98,7 @@ test("useUserProfile hydrates the store from an effect, not its queryFn (#928)",
   );
 });
 
-/**
- * Exports deleted by #929, each with what replaced it. A name coming back
- * means either a real caller appeared (delete the entry) or the residue was
- * reintroduced (don't).
- */
+/** Exports deleted by #929 and their replacements. */
 const DELETED_API_EXPORTS = new Map<string, string>([
   ["uploadFile", "services/r2-upload.ts owns uploads"],
   ["downloadFile", "services/r2-upload.ts is the only caller of download_file"],
@@ -164,8 +128,7 @@ test("GUARD: the dead per-group channels hook stays deleted (#929)", () => {
     "`useGroupChannels` had zero callers — the sidebar reads " +
       "`list_user_groups_with_channels` (#929)",
   );
-  // The cache KEY is not dead: channel create / rename / delete and
-  // `membership_changed` all invalidate it.
+  // The key is still an invalidation target.
   assert.match(source, /channels:\s*\(/, "groupQueryKeys.channels is still an invalidation target");
 });
 

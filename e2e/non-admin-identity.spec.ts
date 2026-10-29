@@ -1,19 +1,4 @@
-/*
- * Group / channel identity for someone who cannot edit it (#1281). BOTH skins.
- *
- * A non-admin must never be shown an empty, editable-looking Description box
- * ("Optional description…") they cannot type into. On desktop every way into
- * the rename page is admin-only, so the two things to prove are:
- *
- *   1. a member is offered no rename entry point, for the group or a channel;
- *   2. the rename page itself, if it is open when the viewer stops being an
- *      admin (a demotion arriving while it is on screen), turns into a
- *      read-only view: the name as text, the description as text only when
- *      there is one, and no Save.
- *
- * An admin's form is unchanged — including an empty, editable Description.
- * The mobile half is `.maestro/two-client/join-request/5-peer-settings.yaml`.
- */
+// Non-admins (#1281) get no rename entry point; an open rename page turns read-only on demotion.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -62,12 +47,7 @@ async function boot(page: Page, skin: Skin, role: "admin" | "member", descriptio
   await page.getByTestId(`group-option-${GROUP_ID}`).click();
 }
 
-/**
- * Demote the viewer in the mock, then make the app refetch its group list the
- * way the real one does on a `membership_changed` push: the list is 60 s
- * fresh, so jump the clock past that and fire a reconnect, which refetches
- * every stale query.
- */
+/** Demote the viewer, then jump past the 60 s list freshness and reconnect to refetch. */
 async function demoteWhileOpen(page: Page) {
   await page.evaluate((groupId) => {
     const store = (window as unknown as {

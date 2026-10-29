@@ -1,15 +1,4 @@
-// React lifecycle hook over the media transport (issue #346).
-//
-// Resolves a `MessageAttachment` to a local `file://` URI for rendering
-// and — crucially — releases its reference when the component unmounts or
-// the attachment changes, so the decrypted plaintext file gets unlinked
-// once nothing is showing it. This is the "unlink-on-unmount" half of the
-// file-path approach; the cache bookkeeping lives in `lib/media/cache`.
-//
-//   const { uri, loading, error } = useMediaUri(attachment);
-//
-// Pass `null` (e.g. for a non-media message, or while an optimistic send
-// has no object key yet) to no-op cleanly.
+// Resolves an attachment to a local `file://` URI and releases it on unmount (#346), so the decrypted file is unlinked. `null` no-ops.
 
 import { useEffect, useState } from "react";
 import {
@@ -37,9 +26,7 @@ export function useMediaUri(
     error: null,
   });
 
-  // Re-resolve only when the underlying bytes change. content_hash is
-  // content-addressed, so it's the precise identity key — a new object_key
-  // for the same hash is the same file.
+  // Re-resolve only when the bytes change: content_hash is the identity.
   const contentHash = attachment?.content_hash ?? null;
   const objectKey = attachment?.object_key ?? null;
 
@@ -50,9 +37,7 @@ export function useMediaUri(
     }
 
     let active = true;
-    // Ties this reference to the current cache generation, so a release
-    // that runs after a sign-out cleared the cache can't touch the counts
-    // of the session that follows.
+  // A release after a sign-out clear must not touch the next session's counts.
     const resolvedIn = mediaCacheGeneration();
     setState({ uri: null, loading: true, error: null });
 
@@ -74,8 +59,7 @@ export function useMediaUri(
 
     return () => {
       active = false;
-      // Pairs with the reference taken inside resolveMediaUri. The last
-      // outstanding release unlinks the decrypted file.
+      // The last outstanding release unlinks the decrypted file.
       void releaseMediaUri(contentHash, resolvedIn);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

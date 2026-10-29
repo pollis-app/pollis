@@ -18,10 +18,7 @@ interface RawProfile {
   preferred_name?: string;
 }
 
-// "You & <name>" (#1563): the safety number of a PAIR — your key combined
-// with theirs (pollis-core `get_safety_number`) — so it lives in the DM, not
-// on their profile. Reached from DM info: one row for a 1:1, one row per
-// other member in a group DM. Never one number for "the conversation".
+// "You & <name>" (#1563): the safety number of a PAIR, so it lives in the DM.
 function DMSafetyNumber() {
   useThemeRerender();
   const { t } = useTranslation("dms");
@@ -33,7 +30,6 @@ function DMSafetyNumber() {
   const peerId = peerParam ?? null;
   const isSelf = appStore.currentUser?.id === peerId;
 
-  // Same key the profile screen uses, so an already-opened profile is cached.
   const profile = useQuery({
     queryKey: ["user", "profile", peerId],
     queryFn: async (): Promise<RawProfile | null> => {
@@ -85,8 +81,7 @@ function DMSafetyNumber() {
           </Txt>
         ) : safety.data ? (
           <Card style={{ gap: space.lg, alignItems: "center" }}>
-            {/* The QR carries the digits themselves: `qr_payload` (both
-                ML-DSA-44 keys in hex, ~5 KB) is past what a QR can hold. */}
+            {/* The QR carries the digits: `qr_payload` (~5 KB) is too big. */}
             <View accessible accessibilityLabel={t("safety.qrLabel", { name })}>
               <QrCode
                 testID="img-safety-qr"

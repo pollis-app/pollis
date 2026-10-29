@@ -146,7 +146,6 @@ fn run_verify(
 
 /// Build a small multi-tenant log and serialize a known-good fixture.
 fn gen_example(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    // Deterministic key so the fixture is reproducible.
     let signing_key = SigningKey::from_seed(&[7u8; 32].into());
     let public_key = hex::encode(signing_key.verifying_key().encode());
 
@@ -164,10 +163,8 @@ fn gen_example(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         log.append(entry.clone())?;
     }
 
-    // An STH after the third append and one over the full log.
     let first_size = 3usize;
     let sth_mid = {
-        // Re-derive the size-3 root via root_at, sign at a fixed timestamp.
         let root = log.root_at(first_size)?;
         Sth::create(&signing_key, first_size as u64, root, 1_700_000_000_000)
     };

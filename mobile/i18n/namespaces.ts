@@ -1,7 +1,4 @@
-/**
- * The namespace list — the mobile mirror of `frontend/src/i18n/namespaces.ts`.
- * `tests/i18n.test.ts` fails if it drifts from the catalogue files that ship.
- */
+/** Mirror of desktop's namespaces.ts; tests/i18n.test.ts fails if it drifts. */
 
 export const NAMESPACES = [
   "common",

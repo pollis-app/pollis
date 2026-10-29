@@ -2,14 +2,7 @@ import React from "react";
 import { EyeOff } from "lucide-react";
 import { BlurhashCanvas } from "./BlurhashCanvas";
 
-/**
- * What a sensitive attachment (#1568) shows while it is hidden: its blurhash,
- * with one eye icon centred on it — the same in the composer, the message,
- * the media grid and the gallery. With no blurhash (a video whose poster could
- * not be read) it is a plain surface with the same eye, never the media.
- *
- * Purely visual: it fills its parent, and the parent owns the reveal.
- */
+/** A hidden sensitive attachment (#1568): its blurhash (or plain surface) with an eye; the parent owns the reveal. */
 export const SensitiveCover: React.FC<{ blurhash?: string }> = ({ blurhash }) => (
   <div
     data-testid="sensitive-cover"

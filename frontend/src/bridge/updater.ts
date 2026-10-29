@@ -1,28 +1,8 @@
-/**
- * Updater bridge — wraps `@tauri-apps/plugin-updater` behind a single
- * `check()` returning a `PollisUpdate` with the shape the existing
- * UpdateScreen + Settings auto-update flows already speak.
- *
- * ## The overlay
- *
- * The updater is the one first-party HTTP caller that does not go through
- * `pollis_relay::http::http_client`: the plugin builds its own `reqwest`
- * client inside Rust. So with the relay overlay on, every other request rode
- * the relay and this one still went straight to `cdn.pollis.com`, handing it
- * the device's real address on every window focus — including in `strict`,
- * the mode whose entire promise is that nothing silently goes direct.
- *
- * Rust decides what is allowed (`get_update_check_plan`, see
- * `pollis-core/src/commands/update.rs`) and this passes the answer to the
- * plugin. `check` stores the proxy on the `Update` it returns, so the artifact
- * download inherits it and not just the manifest fetch.
- */
+/** `check()` over `@tauri-apps/plugin-updater`, using Rust's `get_update_check_plan` so the overlay proxy covers manifest and download. */
 
 import { invoke } from "./invoke";
 
-// Mirrors `@tauri-apps/plugin-updater`'s DownloadEvent: `Started` carries the
-// upfront content length, `Progress` carries per-chunk byte counts only (no
-// precomputed percentage), `Finished` carries nothing.
+// Mirrors the plugin's DownloadEvent.
 export type DownloadEvent =
   | { event: "Started"; data: { contentLength?: number } }
   | {
@@ -45,10 +25,7 @@ export type UpdateCheckPlan =
   | { kind: "blocked"; reason: string };
 
 export async function check(): Promise<PollisUpdate | null> {
-  // Ask Rust first. A build without the command (or an error reading the
-  // overlay) falls back to a direct check, which is what every pre-overlay
-  // build did — the overlay is off by default and off means byte-for-byte the
-  // old behaviour.
+  // No command or an error: direct, as before the overlay.
   let plan: UpdateCheckPlan = { kind: "direct" };
   try {
     const answer = await invoke<UpdateCheckPlan>("get_update_check_plan");

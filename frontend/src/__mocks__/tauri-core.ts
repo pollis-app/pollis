@@ -1,9 +1,4 @@
-/**
- * Browser-side mock for @tauri-apps/api/core used when VITE_PLAYWRIGHT=true.
- *
- * State is initialized from window.__POLLIS_PRELOAD__ which tests set via
- * page.addInitScript() before React hydrates.
- */
+/** Browser mock for @tauri-apps/api/core (VITE_PLAYWRIGHT); state seeds from window.__POLLIS_PRELOAD__. */
 
 interface MockUser {
   id: string;
@@ -33,16 +28,7 @@ interface MockMessage {
   sender_id: string;
   content?: string;
   reply_to_id?: string;
-  /**
-   * Normally an ISO-8601 string, exactly as `pollis-core` serializes it.
-   *
-   * A NUMBER is allowed as the legacy epoch-**seconds** shape: the renderer
-   * turns `sent_at` into `created_at` with `new Date(sent_at).getTime()`,
-   * which passes a seconds-magnitude number straight through, and every
-   * component that formats a message timestamp is required to run it through
-   * `toMs` before rendering. Only a spec that is testing that normalisation
-   * should use it — see `e2e/thread-panel.spec.ts` (#874).
-   */
+  /** ISO-8601; a number is the legacy epoch-seconds shape, only for specs of `toMs` (#874). */
   sent_at: string | number;
   edited_at?: string;
   thread_id?: string;
@@ -69,12 +55,10 @@ interface MockProfile {
 }
 
 /// The only code the mocked email-change flow accepts, for BOTH of its codes.
-/// Mirrors the real `DEV_OTP` the Delivery Service honours in dev.
 const MOCK_OTP_CODE = '000000';
 /// `verify_otp` rejects this code as the DS's 401 does (#1305).
 const MOCK_WRONG_OTP_CODE = '111111';
-/// `verify_otp` accepts this code and then fails a later bootstrap step — the
-/// shape of #1305's report, where the code was right and the UI said otherwise.
+/// `verify_otp` accepts this code, then a later bootstrap step fails (#1305).
 const MOCK_POST_VERIFY_FAILURE_CODE = '500500';
 
 interface MockGroupMember {
@@ -121,11 +105,7 @@ interface MockCustomEmoji {
   created_by: string;
 }
 
-/**
- * One invite link as the management list sees it (#847). Mirrors
- * `InviteLinkSummary` — no token field, because the server has no token to
- * give: only `sha256(secret)` was ever stored.
- */
+/** Mirrors `InviteLinkSummary` (#847): no token, the server stores only its hash. */
 interface MockInviteLink {
   id: string;
   group_id: string;
@@ -137,10 +117,7 @@ interface MockInviteLink {
   revoked_at: string | null;
 }
 
-/**
- * One pending invite as the member page lists it (#1506). Mirrors
- * `GroupInvite` in `hooks/queries/useGroups`, plus the group it belongs to.
- */
+/** Mirrors `GroupInvite` in `hooks/queries/useGroups`, plus its group (#1506). */
 interface MockGroupInvite {
   id: string;
   group_id: string;
@@ -151,10 +128,7 @@ interface MockGroupInvite {
   created_at: string;
 }
 
-/**
- * An invite waiting on the signed-in user (#1560). Mirrors `PendingInvite` in
- * `hooks/queries/useGroups`; `channels` is what the group holds once joined.
- */
+/** Mirrors `PendingInvite` in `hooks/queries/useGroups` (#1560). */
 interface MockPendingInvite {
   id: string;
   group_id: string;
@@ -168,16 +142,7 @@ interface MockPendingInvite {
 /** Mirrors `VoiceInputMode` in `pollis-core/src/commands/voice/gate.rs`. */
 type MockVoiceInputMode = 'voice_activity' | 'push_to_talk';
 
-/**
- * The push-to-talk / mute / deafen state machine (#849).
- *
- * A field-for-field port of `TransmitGate` in
- * `pollis-core/src/commands/voice/gate.rs`, including the private restore slot
- * that makes undeafen non-destructive and the `deafened ⇒ self_muted`
- * invariant. Ported rather than stubbed because the interesting UI states —
- * push-to-talk idle, and deafened-vs-muted — only exist as *derived* answers,
- * and a stub that just flipped booleans could not produce them honestly.
- */
+/** Port of `TransmitGate` (pollis-core/src/commands/voice/gate.rs, #849); the UI reads derived states. */
 interface MockVoiceGate {
   mode: MockVoiceInputMode;
   self_muted: boolean;
@@ -186,27 +151,14 @@ interface MockVoiceGate {
   muted_before_deafen: boolean;
 }
 
-/** Mirrors `MessageReceipts` in `pollis-core/src/commands/messages/receipts.rs`.
- *  Both sides are lists of user ids, never booleans — that is the whole point
- *  of the per-reader store, and a mock that collapsed them to a flag could not
- *  reproduce the multi-participant DM case. */
+/** Mirrors `MessageReceipts` in `pollis-core/src/commands/messages/receipts.rs`; user-id lists, not flags. */
 interface MockReceipt {
   message_id: string;
   delivered_by: string[];
   read_by: string[];
 }
 
-/**
- * An open enrollment request as the APPROVING device sees it — with **no**
- * verification code, mirroring `PendingEnrollmentRequest` in
- * `pollis-core/src/commands/device_enrollment.rs` (#1096). If this shape ever
- * grows a code again, `enrollment-approval.spec.ts` is the spec that notices.
- *
- * `correctCode` is the value the mock's `approve_device_enrollment` accepts. It
- * stands in for what Rust derives from the ephemeral key it fetched — the spec's
- * whole point is that the UI cannot see it, so it is deliberately NOT part of
- * what `list_pending_enrollment_requests` returns.
- */
+/** Mirrors `PendingEnrollmentRequest` (#1096): no code. `correctCode` is mock-only and never listed. */
 interface MockPendingEnrollment {
   request_id: string;
   new_device_id: string;
@@ -225,110 +177,57 @@ interface MockStore {
   groups: MockGroup[];
   channels: Record<string, MockChannel[]>;
   messages: Record<string, MockMessage[]>;
-  // Thread replies (#825), keyed by the ROOT message's id — local-only in
-  // production too, because `thread_id` lives inside the MLS ciphertext.
+  // Thread replies (#825), keyed by the ROOT message's id.
   threadMessages: Record<string, MockMessage[]>;
-  // Per-conversation reply counts, keyed by conversation id. Separate from
-  // `threadMessages` on purpose: the channel row renders the count without
-  // loading the thread, so a preload can seed one without the other.
   threadSummaries: Record<string, MockThreadSummary[]>;
   dmChannels: MockDmChannel[];
-  // Keyed by group id. Drives the @mention candidate list (#843), which is
-  // deliberately derived from roster membership only.
   groupMembers: Record<string, MockGroupMember[]>;
-  // Saved messages (#854). Device-local in production; a plain array here.
   bookmarks: MockBookmark[];
   vaultMessages: MockVaultMessage[];
-  // Custom emoji (#848) the signed-in user may SEND — every emoji from every
-  // group they belong to, which is exactly what `list_usable_emoji` returns.
   customEmoji: MockCustomEmoji[];
-  // Shareable invite links (#847), keyed by nothing — the group id is on the
-  // row, as it is server-side.
   inviteLinks: MockInviteLink[];
   groupInvites: MockGroupInvite[];
-  /** Invites waiting on the signed-in user (#1560). */
   pendingInvites: MockPendingInvite[];
   /** Open device-enrollment requests the approval takeover renders (#1096). */
   pendingEnrollments: MockPendingEnrollment[];
   /** What the UI actually submitted to `approve_device_enrollment`. */
   enrollmentApprovals: { requestId: string; verificationCode: string }[];
-  /**
-   * QR device link (#1207). `deviceLinkPin` is the PIN `create_device_link`
-   * accepts (Rust verifies it in production); `deviceLinkScript` is the
-   * sequence of statuses successive `await_device_link` calls resolve to;
-   * `deviceLinkApprovals` records each `approve_device_link`.
-   */
+  /** QR device link (#1207): accepted PIN, scripted `await_device_link` statuses, approvals. */
   deviceLinkPin: string;
   deviceLinkScript: unknown[];
   deviceLinkApprovals: string[];
-  /**
-   * The reverse QR sign-in (#1361): how many codes this device offered, what
-   * successive `await_device_offer` calls resolve to, and how many offers the
-   * UI cancelled.
-   */
+  /** Reverse QR sign-in (#1361): offers made, scripted `await_device_offer` statuses, cancels. */
   deviceOffers: number;
   deviceOfferScript: unknown[];
   deviceOfferCancels: number;
   /** Abuse reports filed through `report_user` (#1213), args verbatim. */
   reports: Record<string, unknown>[];
   enrollmentWait: 'none' | 'pending';
-  // Local voice gate (#849). Rust owns this in production.
   voiceGate: MockVoiceGate;
-  // Delivery / read receipts (#857), keyed by conversation id. DM-only in
-  // production — a preload that puts receipts under a channel id is modelling
-  // something the Rust side cannot produce, so the UI must still show nothing.
+  // Receipts (#857), keyed by conversation id; DM-only, so a channel id must render nothing.
   receipts: Record<string, MockReceipt[]>;
-  // Reactions, keyed by message id. `add_reaction` / `remove_reaction` are
-  // real writes here so a spec can watch a pill appear and disappear.
   reactions: Record<string, { emoji: string; user_ids: string[]; count: number }[]>;
-  // Held decoded. `get_preferences` is the only thing that serializes it, and
-  // preloads may write either shape (see `readPreferences`).
+  // Held decoded; see `readPreferences`.
   preferences: Record<string, unknown>;
   clipboard: string;
-  // Idle auto-lock (#851): the last window the renderer pushed (null = Off)
-  // and how many activity reports it has sent. Nothing here times anything —
-  // Rust owns the deadline — these exist so a spec can prove the renderer's
-  // half of the contract.
+  // Auto-lock (#851): last pushed window (null = Off) and activity count; Rust owns the timer.
   autoLockMinutes: number | null;
   activityReports: number;
-  // Opt-in message pagination (#874). Off by default so every existing spec
-  // keeps getting its whole seeded conversation in one page; a preload sets
-  // `paginate: true` to make `read_*_messages` honour `limit`/`cursor` and
-  // hand back a real `next_cursor`, which is what the load-more path — and
-  // the windowed log's scroll anchoring across a prepend — needs to exercise.
+  // Opt-in pagination (#874); off returns each conversation in one page.
   paginate: boolean;
-  // On-device export (#856). What the OS save dialog "returns"; `null` is the
-  // user cancelling. A preload sets it; the default is a plausible path.
+  // Export (#856): what the save dialog returns; null = cancelled.
   exportSavePath: string | null;
-  /**
-   * Durable outbox (#1335): while true every delivery attempt fails the way an
-   * offline send does — the message is kept, marked failed. Preload
-   * `failSends`, or flip it with `window.__tauriFailSends(bool)`.
-   */
+  /** Outbox (#1335): while true every send fails as offline; see `window.__tauriFailSends`. */
   failSends: boolean;
-  /**
-   * Per-channel mute (#1431). Account-wide and DS-held in production; a
-   * preload seeds `mutedChannels`, and `set_channel_muted` writes it here.
-   */
+  /** Per-channel mute (#1431). */
   mutedChannels: string[];
-  /**
-   * The account's security-event log (#1548), any order — `list_security_events`
-   * sorts it `(created_at DESC, id DESC)` and serves keyset pages from it.
-   */
+  /** Security-event log (#1548), any order. */
   securityEvents: MockSecurityEvent[];
-  /**
-   * What `plugin:notification|is_permission_granted` answers. Off by default,
-   * as a fresh install is; a spec that counts OS notifications preloads
-   * `notificationPermission: true`.
-   */
+  /** `is_permission_granted`'s answer; off by default, as on a fresh install. */
   notificationPermission: boolean;
 }
 
-// Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
-// Other Tauri modules (notably `/window`, via `useWindowState`) are the REAL
-// ones and read `window.__TAURI_INTERNALS__` directly, throwing without it.
-// Defining a minimal internals object here — this module is imported early —
-// keeps those modules inert instead of crashing app startup.
+// Only `core` and `/event` are aliased; real modules like `/window` throw without __TAURI_INTERNALS__.
 (window as any).__TAURI_INTERNALS__ = (window as any).__TAURI_INTERNALS__ ?? {
   metadata: {
     currentWindow: { label: 'main' },
@@ -343,18 +242,7 @@ interface MockStore {
   runCallback: () => {},
 };
 
-/**
- * This module can be evaluated twice in one page. Vite pre-bundles the lazily
- * imported Tauri plugins (updater, shell, process, fs) and the alias inlines a
- * second copy of this file into their shared chunk, which runs the first time
- * one of them loads — e.g. on the Software Update page. The app keeps talking
- * to the first copy, so the second must not take over: it forwards every
- * `invoke` to the first, and puts back the first's test hooks, which its own
- * top-level code has just overwritten with a fresh, unused store.
- *
- * Vite does not re-optimize when this file changes, so a local pre-bundle can
- * carry a stale copy; `rm -rf frontend/node_modules/.vite` refreshes it.
- */
+/** Vite can inline a second copy of this module into the lazy plugin chunk; it forwards to the first. */
 const PRIMARY_HOOKS = [
   '__tauriMock',
   '__tauriFailSends',
@@ -376,12 +264,7 @@ const primaryHooks: Record<string, unknown> | null = primaryInvoke
 
 const preload = (window as any).__POLLIS_PRELOAD__ ?? {};
 
-/**
- * Preferences arrive from a preload as either the decoded object
- * (`{ skin: 'terminal' }`) or the JSON string the real command hands back
- * (`'{"skin":"terminal"}'`). Both spellings are in use across the specs, so
- * normalize once here and keep exactly one representation in the store.
- */
+/** Preloads give preferences as an object or its JSON string; keep the object. */
 function readPreferences(raw: unknown): Record<string, unknown> {
   if (typeof raw === 'string') {
     try {
@@ -433,7 +316,6 @@ const store: MockStore = {
   },
   receipts: preload.receipts ?? {},
   reactions: preload.reactions ?? {},
-  // Lets a test drive the skin: `{ skin: 'refined' }` or its JSON string.
   preferences: readPreferences(preload.preferences),
   clipboard: '',
   autoLockMinutes: null,
@@ -449,7 +331,6 @@ const store: MockStore = {
   notificationPermission: preload.notificationPermission === true,
 };
 
-// Expose for test inspection via page.evaluate(() => window.__tauriMock)
 (window as any).__tauriMock = store;
 (window as any).__tauriFailSends = (fail: boolean) => {
   store.failSends = fail;
@@ -462,7 +343,6 @@ function unsentMessages(): MockMessage[] {
     .filter((m) => m.send_state !== undefined);
 }
 
-/** One delivery attempt for a stored outgoing message (#1335). */
 function deliverMock(message: MockMessage): MockMessage {
   if (store.failSends) {
     message.send_state = 'failed';
@@ -472,12 +352,7 @@ function deliverMock(message: MockMessage): MockMessage {
   return message;
 }
 
-/**
- * #1338: revoke this device from another one. From here every command rejects
- * the way the real core does once the DS has said `device_revoked`, except the
- * ones that still work on a removed device: signing out and the local account
- * index the sign-in screen reads.
- */
+/** #1338: once revoked, every command rejects except these. */
 const WORKS_WHEN_REVOKED = new Set([
   'logout',
   'list_known_accounts',
@@ -488,11 +363,7 @@ const WORKS_WHEN_REVOKED = new Set([
   store.deviceRevoked = true;
 };
 
-/**
- * Reject every call of `cmd` with `message` until cleared, without revoking
- * anything — the shape of a late rejection that arrives after the session it
- * belonged to (#1338 review).
- */
+/** Reject every `cmd` call with `message` until cleared, without revoking (#1338). */
 const rejectWith = new Map<string, string>();
 (window as any).__tauriRejectWith = (cmd: string, message: string | null) => {
   if (message === null) {
@@ -502,18 +373,7 @@ const rejectWith = new Map<string, string>();
   }
 };
 
-/**
- * Per-command invoke tally (#874).
- *
- * The IPC-efficiency work is only ever as good as its measurement: "the
- * sidebar feels snappier" is not a result, "one `read_last_messages` instead
- * of nine `read_channel_messages`" is. Specs read
- * `window.__tauriInvokeCounts` and call `window.__resetTauriInvokeCounts()`
- * to scope a count to one interaction (e.g. a window-focus round).
- *
- * Counting lives here rather than in each spec because every spec shares this
- * module — a per-spec wrapper would only see its own calls.
- */
+/** Per-command invoke tally (#874), read via `window.__tauriInvokeCounts`. */
 const invokeCounts: Record<string, number> = {};
 (window as any).__tauriInvokeCounts = invokeCounts;
 (window as any).__resetTauriInvokeCounts = () => {
@@ -522,19 +382,7 @@ const invokeCounts: Record<string, number> = {};
   }
 };
 
-/**
- * Reply gating (#1040).
- *
- * Real IPC has latency; this mock answers on the microtask queue. A race the
- * app can only lose while a reply is in flight — the picker's stored
- * "share sound" default landing after the user has already flipped the
- * switch — is therefore unreachable here unless a spec can hold a command's
- * reply open. `window.__tauriHold(cmd)` parks every reply for `cmd` (the
- * command still runs, only its answer waits); `window.__tauriRelease(cmd)`
- * lets the parked replies through in order. The last args each command was
- * called with are kept in `window.__tauriLastArgs` so a spec can check what
- * the app eventually asked for.
- */
+/** Reply gating (#1040): `__tauriHold(cmd)` parks replies until `__tauriRelease(cmd)`. */
 const heldReplies = new Map<string, Array<() => void>>();
 const lastInvokeArgs: Record<string, unknown> = {};
 (window as any).__tauriLastArgs = lastInvokeArgs;
@@ -577,12 +425,7 @@ interface SecurityEventCursor {
   id: string;
 }
 
-/**
- * One keyset page of the security-event log, the way the DS answers
- * `/v1/read/security-events` (#1548): newest first with `id` as the tiebreak,
- * optionally narrowed to `kinds`, strictly older than `before`, and a
- * `next_cursor` only when a row exists past the page.
- */
+/** One keyset page of security events, as the DS serves it (#1548). */
 function securityEventsPage(
   limit: number | null | undefined,
   before: SecurityEventCursor | null | undefined,
@@ -606,16 +449,7 @@ function securityEventsPage(
   };
 }
 
-/**
- * One page of a conversation, newest-last, the way `read_channel_messages`
- * and `read_dm_messages` answer.
- *
- * With `paginate` off (the default) the whole seeded conversation comes back
- * in one page and `next_cursor` is null — the historical behaviour every other
- * spec relies on. With it on, the page is the newest `limit` messages older
- * than `cursor`, and `next_cursor` points at the oldest message returned so
- * the next call continues from there.
- */
+/** One page, newest-last; with `paginate` off, the whole conversation. */
 function readMessagePage(
   conversationId: string,
   limit?: number,
@@ -625,9 +459,7 @@ function readMessagePage(
   if (!store.paginate) {
     return { messages: all, next_cursor: null };
   }
-  // `sent_at` is an ISO string in every paginating spec, but the type also
-  // admits the legacy numeric shape, so order on the string spelling rather
-  // than calling `localeCompare` on something that might be a number.
+  // `sent_at` may be the legacy number, so compare as strings.
   const at = (m: MockMessage) => String(m.sent_at);
   const chronological = [...all].sort((a, b) =>
     at(a) === at(b) ? a.id.localeCompare(b.id) : at(a).localeCompare(at(b)),
@@ -659,11 +491,7 @@ function chronologicalMessages(conversationId: string): MockMessage[] {
   );
 }
 
-/**
- * `read_messages_around` (#850, #1039): `limit` before the anchor, the anchor,
- * and `limit` after it, newest-first; `next_cursor` is the oldest row returned
- * when older rows remain. Without `paginate` the whole conversation is the page.
- */
+/** `read_messages_around` (#850, #1039): `limit` either side of the anchor, newest-first. */
 function readMessagesAround(
   conversationId: string,
   messageId: string,
@@ -687,11 +515,7 @@ function readMessagesAround(
   };
 }
 
-/**
- * `read_messages_after` (#1039): the oldest `limit` rows strictly newer than
- * `cursor`, newest-first; `next_cursor` is the newest row returned iff the
- * page came back full. Without `paginate` everything newer comes back at once.
- */
+/** `read_messages_after` (#1039): oldest `limit` rows newer than `cursor`, newest-first. */
 function readMessagesAfter(
   conversationId: string,
   cursor: MessageCursor,
@@ -714,8 +538,6 @@ function readMessagesAfter(
   };
 }
 
-/** Look a message up across every conversation, as the local DB's primary key
- *  lookup does. */
 /** The `_att` refs in a message body, or none for plain text / bad JSON. */
 function parseAttachmentRefs(
   content: string,
@@ -745,22 +567,7 @@ function findMessage(messageId: string): MockMessage | undefined {
   return undefined;
 }
 
-/**
- * This user's role in `groupId`, or null when they are not a member.
- *
- * The two sources are consulted in order and neither shadows the other (#942).
- * That ordering is the fix for a sharp edge: preloading `groupMembers` used to
- * make the roster the ONLY answer, so a spec that preloaded a roster and left
- * the session user out of it — an easy omission, since the specs care about the
- * other members — silently became a non-member and got
- * `authz::NOT_A_MEMBER` thrown at it from an unrelated call. The error described
- * a production authorization failure; the cause was an incomplete fixture.
- *
- * In production the roster and the group list cannot disagree about whether you
- * are in a group, so the mock should not manufacture a disagreement out of a
- * partial fixture. A roster that names you wins; a roster that does not falls
- * through to the group row, exactly as an unset roster already did.
- */
+/** This user's role: the roster if it names them, else the group row (#942). */
 function roleInGroup(groupId: string): string | null {
   const me = store.session?.id;
   const fromRoster = me
@@ -769,8 +576,6 @@ function roleInGroup(groupId: string): string | null {
   if (fromRoster) {
     return fromRoster;
   }
-  // The group row is what `list_user_groups_with_channels` already reports to
-  // the UI: if this group is in the user's own group list, they are in it.
   const group = store.groups.find((g) => g.id === groupId);
   if (!group) {
     return null;
@@ -778,37 +583,14 @@ function roleInGroup(groupId: string): string | null {
   return group.current_user_role ?? 'admin';
 }
 
-/**
- * The mock's copy of `authz::require_member` (#917).
- *
- * The roster, channel-list and emoji-list reads are members-only in Rust. The
- * mock enforces the same rule so a hook that forgets to send `requesterId`
- * fails here — in a fast browser test — instead of only against a real Turso.
- * The wording matches `authz::NOT_A_MEMBER` so assertions can be shared.
- *
- * To test the genuine non-member path, leave the group out of `store.groups`.
- * That is now the only way to reach this throw, which is what makes the message
- * below trustworthy rather than ambiguous (#942).
- */
+/** Mock `authz::require_member` (#917), worded as `NOT_A_MEMBER`. */
 function requireMemberMock(groupId: string): void {
   if (roleInGroup(groupId) === null) {
     throw new Error('you are not a member of this group');
   }
 }
 
-/**
- * A stand-in image for one custom emoji.
- *
- * Production hands back `http://127.0.0.1:<port>/<token>/<hash>` from the
- * loopback media server, because the real bytes are a WebP/GIF that must not
- * cross the JSON IPC. There is no loopback server in the browser build, so the
- * mock returns a `data:` URL instead: same contract as far as every caller is
- * concerned — an `<img src>` that resolves — and it keeps the assertion honest,
- * since the image either decodes or it does not.
- *
- * The glyph is derived from the shortcode so two different emoji are visibly
- * two different images in the screenshots.
- */
+/** A `data:` stand-in for the loopback emoji URL; glyph derived from the shortcode. */
 function emojiDataUrl(shortcode: string, contentHash: string): string {
   const hue = Number.parseInt(contentHash.slice(0, 2), 16) * 1.4;
   const letter = (shortcode[0] ?? '?').toUpperCase();
@@ -820,21 +602,12 @@ function emojiDataUrl(shortcode: string, contentHash: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-/**
- * Snapshot the gate exactly as `TransmitGate::snapshot` does.
- *
- * A preload may set `nullGateCommands` to a list of command names that should
- * resolve to nothing instead of a snapshot. That is not a shape Rust produces
- * today; it exists so a test can reproduce #888 — a gate command returning
- * nothing, which used to throw a TypeError into `applyGate`'s catch and read
- * as a silent no-op.
- */
+/** Snapshot as `TransmitGate::snapshot`; `nullGateCommands` makes a command resolve null (#888). */
 function gateSnapshot(command?: string): Record<string, unknown> | null {
   if (command && (preload.nullGateCommands ?? []).includes(command)) {
     return null;
   }
   const gate = store.voiceGate;
-  // Derived in Rust, never recomputed by the UI — so it is derived here too.
   const transmitting = gate.self_muted
     ? false
     : gate.mode === 'voice_activity' || gate.ptt_held;
@@ -847,10 +620,7 @@ function gateSnapshot(command?: string): Record<string, unknown> | null {
   };
 }
 
-/**
- * What a conversation id means, the way `conversation_cache` answers it in
- * production: derived from the same channel and DM lists the sidebar renders.
- */
+/** What a conversation id means, as `conversation_cache` answers it. */
 function describeConversation(conversationId: string): {
   kind: 'channel' | 'dm' | null;
   name: string | null;
@@ -877,8 +647,7 @@ function describeConversation(conversationId: string): {
   return { kind: null, name: null, group_id: null, group_name: null };
 }
 
-/** The caption plus attachment filenames, with transport metadata dropped —
- *  the mock's `pollis_search_text` equivalent. */
+/** The mock's `pollis_search_text`: caption plus attachment filenames. */
 function searchableText(content: string): { text: string; hasAttachment: boolean } {
   if (!content.trimStart().startsWith('{')) {
     return { text: content, hasAttachment: false };
@@ -908,8 +677,6 @@ function searchMessagesMock(
   limit: number,
   offset: number,
 ): unknown {
-  // Filters are lifted out the same way Rust does, so a spec can drive
-  // `from:` / `in:` / `has:attachment` against the mock.
   const tokens = rawQuery.trim().split(/\s+/).filter(Boolean);
   const terms: string[] = [];
   let fromUser: string | null = null;
@@ -979,9 +746,7 @@ function searchMessagesMock(
     if (effectiveSort === 'recent') {
       return at(b).localeCompare(at(a));
     }
-    // "Relevance" here is term-occurrence count, tie-broken by recency. Not
-    // bm25 — the point is that the two orderings differ and the toggle changes
-    // which one the list is in.
+    // Relevance = term count, then recency; not bm25.
     const score = (m: MockMessage) => {
       const haystack = searchableText(m.content ?? '').text.toLowerCase();
       return terms.reduce((sum, term) => sum + haystack.split(term).length - 1, 0);
@@ -1061,9 +826,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return store.session;
 
     case 'get_unlock_state':
-      // E2E mock reports "PIN already set and unlocked" so existing
-      // session-based tests fall through App.tsx's PIN gate straight
-      // to the main app without pin-entry / pin-create screens.
+      // PIN set and unlocked, so session specs skip the PIN gate.
       return {
         last_active_user: store.session?.id ?? null,
         is_unlocked: true,
@@ -1075,12 +838,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'lock':
       return null;
 
-    // Idle auto-lock (#851). The real deadline and timer live in Rust
-    // (`pollis-core/src/commands/autolock.rs`); in the browser tier there is
-    // nothing to time, so these just record the last window the renderer
-    // pushed. A spec asserts on `__tauriMock.autoLockMinutes` to prove the
-    // setting reached the backend, and fires the lock itself with
-    // `window.__tauriEmit('auto-lock')`.
+    // Auto-lock (#851): Rust times it; specs read `autoLockMinutes` and emit 'auto-lock'.
     case 'set_auto_lock_timeout':
       store.autoLockMinutes = (args.minutes as number | null) ?? null;
       return null;
@@ -1093,29 +851,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'finalize_device_enrollment':
       return null;
 
-    // Startup asks whether this device is still registered and SIGNS OUT when
-    // the answer is falsy — an unhandled command returning null therefore
-    // dead-ends the app on the loading screen rather than reaching the UI.
+    // A falsy answer signs the app out at startup.
     case 'is_current_device_registered':
       return true;
 
-    // A preload may set `managedInstall` to render the package-manager branch
-    // of the Software Update page; absent, the install is self-updating.
     case 'detect_managed_install':
       return preload.managedInstall ?? null;
 
     case 'detect_read_only_location':
       return null;
 
-    // Shaped, not empty: App.tsx reads `.accounts` off the result.
     case 'list_known_accounts':
       return { accounts: [], active_user_id: store.session?.id ?? null };
 
     case 'get_message_retention':
       return 0;
 
-    // Callers index or iterate these, so `null` throws where `[]` is inert.
-    // `= []` destructuring defaults only cover `undefined`, not `null`.
+    // `= []` defaults don't cover `null`, so return lists.
     case 'list_peer_verifications':
     case 'list_pending_invites':
     case 'list_dm_requests':
@@ -1128,9 +880,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_pinned_messages':
       return [];
 
-    // The approving device's view of open enrollment requests. Note what is
-    // NOT here: a verification code (#1096). The approver types the code shown
-    // on the new device, so there is nothing for this list to pre-fill with.
     case 'list_security_events':
       return securityEventsPage(
         args.limit as number | null | undefined,
@@ -1146,9 +895,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         expires_at: e.expires_at,
       }));
 
-    // QR device link (#1207). The PIN check and the link-tag verification are
-    // Rust's in production; here the PIN is a preload value and the statuses a
-    // scripted sequence, so a spec can drive every screen of the flow.
     case 'create_device_link': {
       if ((args.pin as string) !== store.deviceLinkPin) {
         throw new Error("That PIN isn't right.");
@@ -1159,8 +905,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         expires_at: Math.floor(Date.now() / 1000) + 60,
       };
     }
-    // A wait with nothing scripted models "nothing has happened yet": it never
-    // resolves, exactly like the Rust wait while the link sits unchanged.
+    // Nothing scripted: never resolves, like the Rust wait.
     case 'await_device_link':
       return store.deviceLinkScript.length > 0 ? store.deviceLinkScript.shift() : new Promise(() => {});
     case 'approve_device_link':
@@ -1171,10 +916,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'report_user':
       store.reports.push({ ...args });
       return null;
-    // The reverse direction (#1361): this (new) device shows a code. Each
-    // offer is a fresh code; `deviceOfferScript` holds what successive
-    // `await_device_offer` calls resolve to, and an empty script waits forever
-    // ("nobody has scanned it yet"), like the Rust wait.
+    // Reverse direction (#1361); an empty script waits forever.
     case 'create_device_offer': {
       store.deviceOffers += 1;
       return {
@@ -1195,18 +937,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       return { id: 'u_linked', email: 'me@pollis.test', username: 'mia', enrollment_required: true };
     }
-    // `null` (the historical default) reads as "the wait ended without an
-    // answer"; a preload of `enrollmentWait: 'pending'` holds it open, which
-    // is what the linked-wait screen (#1207) needs to be looked at.
+    // `enrollmentWait: 'pending'` holds the wait open (#1207).
     case 'await_enrollment_approval':
       return store.enrollmentWait === 'pending' ? new Promise(() => {}) : null;
     case 'start_device_enrollment':
       return { request_id: 'req_linked_1', verification_code: 'H7K2PQ3M', expires_at: '2099-01-01T00:00:00Z' };
 
-    // Records what the UI submitted, and accepts it only if it equals the
-    // request's real code — standing in for `approve_device_enrollment`, which
-    // compares against the value it derives from the ephemeral key it fetched
-    // rather than against anything the server said.
+    // Accepts only the request's real code, as Rust's own derivation would.
     case 'approve_device_enrollment': {
       const { requestId, verificationCode } = args as {
         requestId: string;
@@ -1230,11 +967,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // `MessageReactions` destructures with `= []`, which only covers
-    // `undefined` — the `null` an unhandled command returns reaches
-    // `reactions.length` and takes the whole message log down with it. It went
-    // unnoticed because the crash needs the query to have RESOLVED, so a spec
-    // that finished asserting first never saw it (#850).
+    // `= []` doesn't cover `null`; a null here crashes the message log (#850).
     case 'get_reactions': {
       const { messageId } = args as { messageId: string };
       return store.reactions[messageId] ?? [];
@@ -1265,16 +998,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // Threads (#825). Keyed by the root message id and by conversation id
-    // respectively, matching the two Rust commands. Empty unless a preload
-    // seeds them, so every spec that predates threads is unaffected.
     case 'read_thread_messages':
       return store.threadMessages[args.threadId as string] ?? [];
 
     case 'list_thread_summaries':
       return store.threadSummaries[args.conversationId as string] ?? [];
 
-    // Realtime / MLS background work the browser build has no backend for.
     case 'connect_rooms':
     case 'subscribe_realtime':
     case 'subscribe_camera_events':
@@ -1287,7 +1016,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'tray_set_unread':
       return null;
 
-    // Ingest reports how many envelopes it decrypted; nothing arrives here.
     case 'ingest_channel_envelopes':
     case 'ingest_dm_envelopes':
       return 0;
@@ -1295,8 +1023,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'plugin:notification|is_permission_granted':
       return store.notificationPermission;
 
-    // An OS banner. Counted by `__tauriInvokeCounts` like every command; the
-    // args land in `__tauriLastArgs`.
     case 'plugin:notification|notify':
       return null;
 
@@ -1312,41 +1038,25 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // The in-app terminal's device-local switch. Off, as a fresh install is —
-    // see pollis-core/src/commands/terminal_gate.rs.
     case 'get_terminal_enabled':
       return false;
     case 'set_terminal_enabled':
       return null;
 
-    // "Save attachment as…" (#17): Rust writes the file and applies this
-    // platform's download marker, so the renderer never sees the bytes. The
-    // browser suite has no filesystem — report the Linux answer.
     case 'save_media_to_path':
       return 'unsupported';
 
-    // The overlay's verdict on the auto-updater (`bridge/updater.ts`). The
-    // browser suite runs with no overlay, so a direct check is the honest
-    // answer — see pollis-core/src/commands/update.rs.
     case 'get_update_check_plan':
       return { kind: 'direct' };
 
-    // The OS save picker, which the export's button opens before anything is
-    // written. Driven from Rust now (`pick_save_path`) so the chosen path is
-    // recorded in the path scope before the renderer ever sees it — see
-    // `src-tauri/src/pathscope.rs`.
     case 'pick_save_path':
       return store.exportSavePath;
 
-    // The OS open picker. Nothing in the browser suite drives it yet; answering
-    // with an empty list is "the user cancelled", which every call site handles.
+    // An empty list is "cancelled".
     case 'pick_open_paths':
       return [];
 
-    // On-device export (#856): the same summary shape
-    // `pollis-core/src/commands/export.rs` returns. The browser holds no media
-    // cache, so every attachment is "missing" — which is what lets a spec see
-    // the opt-in fetch offer.
+    // Export (#856): no media cache, so every attachment is "missing".
     case 'export_archive': {
       const { path, conversationId } = args as { path: string; conversationId: string | null };
       const ids = conversationId ? [conversationId] : Object.keys(store.messages);
@@ -1386,17 +1096,14 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return { fetched: attachments.length, failed: [] };
     }
 
-    // Loopback media server URL — nothing serves it in the browser.
     case 'screenshare_ws_url':
       return null;
 
-    // No media server in the browser build, so the sentinel that means "fall
-    // back to the byte path" is the honest answer (#874).
+    // The "use the byte path" sentinel (#874).
     case 'get_public_file_url':
       return '';
 
-    // Desktop-shell side effects with no browser equivalent. Explicit no-ops
-    // so they don't show up as "unhandled" noise in test output.
+    // Explicit no-ops so they don't log as unhandled.
     case 'tray_set_enabled':
     case 'tray_set_close_to_tray':
     case 'tray_set_voice_state':
@@ -1404,11 +1111,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'mark_update_required':
       return null;
 
-    // Email change is a two-code flow (#1161): one code to the new address,
-    // one to the address being left. The mock enforces the same fail-closed
-    // rule the Delivery Service does — a request that does not answer the
-    // current-address challenge is refused — so the spec exercises the real
-    // shape of the UI rather than a version of it that always succeeds.
+    // Two-code email change (#1161), fail-closed like the DS.
     case 'request_email_change_otp':
       return null;
 
@@ -1473,7 +1176,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_user_groups':
       return store.groups;
 
-    // The group list + every breadcrumb reads this one, not `list_user_groups`.
     case 'list_user_groups_with_channels':
       return store.groups.map((g) => ({
         ...g,
@@ -1535,8 +1237,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return store.messages[conversationId] ?? [];
     }
 
-    // `read_*` are the live command names; the `get_*` spellings are kept as
-    // aliases so older callers (and this mock's own history) still resolve.
+    // `get_*` are legacy aliases of `read_*`.
     case 'get_channel_messages':
     case 'read_channel_messages': {
       const { channelId, limit, cursor } = args as {
@@ -1559,10 +1260,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return readMessagePage(key, limit, cursor);
     }
 
-    // #874: one batched call for every sidebar preview row. Mirrors
-    // `pollis_core::commands::messages::read_last_messages` — newest message
-    // per conversation, and conversations with no messages are simply absent
-    // from the result rather than carrying a null.
+    // #874: newest message per conversation; empty conversations are absent.
     case 'read_last_messages': {
       const { conversationIds } = args as { conversationIds: string[] };
       const out: MockMessage[] = [];
@@ -1579,8 +1277,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_dm_channels':
       return store.dmChannels;
 
-    // Safety number of a pair (#1563): deterministic digits per peer, so a
-    // spec can tell two peers' numbers apart, and a local verified mark.
     case 'get_safety_number': {
       const { peerUserId } = args as { peerUserId: string };
       let seed = 0;
@@ -1616,14 +1312,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       try {
         store.preferences = { ...store.preferences, ...JSON.parse(preferencesJson ?? '{}') };
       } catch {
-        // malformed payload — leave the stored prefs alone
       }
       return null;
     }
 
-    // Mirrors the durable outbox (#1335): the message is stored first (as
-    // pending) under the id the renderer named it with, and only then
-    // delivered — so a failing attempt leaves a failed row, never nothing.
+    // Stored as pending first, then delivered (#1335).
     case 'send_message': {
       const { conversationId, senderId, content, replyToId, threadId, messageId } = args as {
         conversationId: string;
@@ -1634,8 +1327,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         messageId?: string | null;
       };
       const id = messageId ?? generateId();
-      // Attachments the outbox would upload: the mock "uploads" them at once
-      // and stores the finished envelope, keyed by a fake content hash.
       const attachments = (args.attachments ?? []) as Array<{
         filename: string;
         contentType: string;
@@ -1655,13 +1346,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
                 ct: a.contentType,
                 size: 0,
                 hash: `mock-${id}-${i}`,
-                // #1382: the ring key version and plaintext digest every real
-                // reference carries; without them the renderer refuses to fetch.
+                // #1382: without these the renderer refuses to fetch.
                 kv: 1,
                 sha: `sha-${id}-${i}`,
                 ...(a.blurhash ? { bh: a.blurhash } : {}),
                 ...(a.width ? { w: a.width, h: a.height } : {}),
-                // #1568: written only when set, as the core's outbox does.
                 ...(a.sensitive ? { sens: true } : {}),
               })),
               ...(content ? { _txt: content } : {}),
@@ -1728,7 +1417,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           report.failed.push(message.id);
         }
       }
-      // Then the edit outbox (#1555).
       const edited = Object.values(store.messages)
         .flat()
         .filter((m) => m.edit_state !== undefined);
@@ -1744,10 +1432,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return report;
     }
 
-    // `useEditMessage` applies an optimistic cache update and then invalidates,
-    // so without this case the refetch served the ORIGINAL text back and the
-    // edit appeared to silently revert. Mutating the store keeps the mock
-    // honest about what a real `edit_message` does (#874).
+    // Without this the refetch reverts the optimistic edit (#874).
     case 'edit_message': {
       const { messageId, newContent } = args as {
         messageId: string;
@@ -1757,8 +1442,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
-        // The core stores the edit before posting it (#1555): a failed post
-        // keeps it, read back with `edit_state`, for the drain to deliver.
+        // A failed post keeps the edit for the drain (#1555).
         if (store.failSends) {
           message.edit_state = 'failed';
           throw new Error('network unreachable');
@@ -1768,10 +1452,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // ── Vault (#107) ─────────────────────────────────────────────────────
-    // Mirrors `pollis-core/src/commands/vault.rs`. Entries are the caller's
-    // own by construction — there is no sharing surface — so the mock keeps
-    // one flat list and never filters by anything but time.
+    // Vault (#107): one flat list of the caller's own entries.
 
     case 'get_vault_messages':
       return [...store.vaultMessages].sort((a, b) =>
@@ -1780,8 +1461,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'send_vault_message': {
       const { content } = args as { userId: string; content: string };
-      // `failSends` covers the Vault too (#1497): the save dies on the
-      // connection, exactly the text the core rejects with.
       if (store.failSends) {
         throw 'ds_post /v1/vault/save: error sending request for url (https://api.pollis.test/v1/vault/save): connection closed before message completed';
       }
@@ -1826,11 +1505,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // ── Saved messages + permalinks (#854) ───────────────────────────────
-    // Mirrors `pollis-core/src/commands/bookmarks.rs`, including the parts
-    // that matter for the security property: the conversation is derived from
-    // the message rather than trusted from the caller, and resolution only ever
-    // consults this device's own message store.
+    // Saved messages (#854): conversation derived from the message, resolved locally only.
 
     case 'list_saved_messages': {
       return [...store.bookmarks]
@@ -1888,9 +1563,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         conversationId: string;
         messageId: string;
       };
-      // Must match BOTH halves. A message this device does not hold — which is
-      // what a device outside the MLS group always sees — yields the single
-      // unresolvable answer, with no id echoed back.
+      // Must match both; a message this device lacks resolves to one opaque answer.
       const inConversation = (store.messages[conversationId] ?? []).some(
         (m) => m.id === messageId,
       );
@@ -1904,15 +1577,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       };
     }
 
-    // ── On-device message search (#850) ──────────────────────────────────
-    //
-    // Mirrors the SHAPE of `pollis-core`'s FTS-backed search, not its ranking:
-    // there is no FTS5 in a browser, so matching here is a substring scan over
-    // the seeded messages. What the mock does reproduce is everything the UI
-    // depends on — the enriched result (kind, names, thread, attachment flag),
-    // the structured snippet with UTF-16 highlight ranges, the total count, the
-    // corpus footer numbers, offset pagination, and both orderings. Without
-    // this case `SearchView` was untestable under the mock runtime.
+    // Search (#850): mirrors the result shape, not FTS ranking.
 
     case 'search_messages': {
       const { query, conversationId, sort, limit, cursor } = args as {
@@ -1928,12 +1593,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'rebuild_search_index':
       return null;
 
-    // The jump-to-message read path. With `paginate` off the mock hands back
-    // the whole conversation as "the page around this message" — the right
-    // answer for most specs, since the point of the command is that the
-    // target ends up loaded. With it on, the page is `limit` before and
-    // `limit` after the anchor, as Rust reads it, so the gap between that
-    // page and the live tail (#1039) is real.
     case 'read_messages_around': {
       const { conversationId, messageId, limit } = args as {
         conversationId: string;
@@ -1943,9 +1602,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return readMessagesAround(conversationId, messageId, limit);
     }
 
-    // The forward page read that fills that gap (#1039): the oldest `limit`
-    // messages strictly newer than `cursor`, newest-first like Rust, with a
-    // continuation only when the page came back full.
     case 'read_messages_after': {
       const { conversationId, cursor, limit } = args as {
         conversationId: string;
@@ -1955,11 +1611,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return readMessagesAfter(conversationId, cursor, limit);
     }
 
-    // ── Custom emoji (#848) ──────────────────────────────────────────────
-    // `list_usable_emoji` is the permission predicate as well as the picker's
-    // source: every emoji from every group you are in, usable in any
-    // conversation. The mock keeps them as one flat list for the same reason
-    // Rust does — narrowing by the conversation being typed in is the bug.
+    // Custom emoji (#848): every emoji from every group, one flat list.
 
     case 'list_usable_emoji':
       return store.customEmoji;
@@ -1970,9 +1622,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return store.customEmoji.filter((e) => e.group_id === groupId);
     }
 
-    // The DS rule (#1280): any member may add, only an ADMIN may remove —
-    // the creator gets no exemption. Mirrored here so the browser tests see
-    // the same refusal a non-admin gets from `/v1/emoji/remove`.
+    // #1280: only an admin may remove, as the DS rules.
     case 'remove_group_emoji': {
       const { groupId, shortcode } = args as { groupId: string; shortcode: string };
       if (roleInGroup(groupId) !== 'admin') {
@@ -1986,8 +1636,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'get_emoji_url': {
       const { contentHash } = args as { contentHash: string };
-      // #1562: hashes listed here fail their FIRST resolve (a transient
-      // outage), so a spec can prove the image recovers without a remount.
+      // #1562: hashes here fail their first resolve.
       const failFirst = (window as unknown as Record<string, unknown>)
         .__POLLIS_EMOJI_FAIL_FIRST__ as string[] | undefined;
       if (failFirst?.includes(contentHash)) {
@@ -1996,15 +1645,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       const emoji = store.customEmoji.find((e) => e.content_hash === contentHash);
       if (!emoji) {
-        // An emoji this device cannot resolve — deleted, or never stored.
-        // Rejecting is what drives the `:shortcode:` text fallback, so the
-        // mock must reject rather than hand back a broken URL.
+        // Rejecting drives the `:shortcode:` fallback.
         throw new Error('no stored object for that hash');
       }
       return emojiDataUrl(emoji.shortcode, emoji.content_hash);
     }
-
-    // ── Shareable invite links (#847) ────────────────────────────────────
 
     case 'create_group_invite_link': {
       const { groupId, expiresInHours, maxUses } = args as {
@@ -2017,9 +1662,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         throw new Error('only admins can create invite links');
       }
       const id = generateId();
-      // `selector.secret`, the shape `invite_token::mint` produces. Only the
-      // hash of the secret half would reach a server; nothing here stores it,
-      // which is precisely why the card can only be shown once.
       const token = `${generateId()}${generateId()}.${generateId()}${generateId()}`;
       const expiresAt =
         expiresInHours == null
@@ -2046,7 +1688,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'list_group_invite_links': {
       const { groupId } = args as { groupId: string };
-      // Admins only; everyone else gets an empty list, as in Rust.
       if (roleInGroup(groupId) !== 'admin') {
         return [];
       }
@@ -2061,8 +1702,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           max_uses: l.max_uses,
           uses: l.uses,
           revoked_at: l.revoked_at,
-          // Computed here for the same reason SQLite computes it there: the
-          // badge must not be able to disagree with what redemption would do.
           is_live:
             l.revoked_at == null &&
             (l.expires_at == null || Date.parse(l.expires_at) > Date.now()) &&
@@ -2070,12 +1709,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         }));
     }
 
-    // Invites waiting on the signed-in user (#1560).
     case 'get_pending_invites':
       return store.pendingInvites.map(({ channels: _c, ...rest }) => rest);
 
-    // Accepting makes the user a member: the group and its channels appear in
-    // `list_user_groups_with_channels`, as the DS reports after the accept.
     case 'accept_group_invite': {
       const { inviteId } = args as { inviteId: string };
       const invite = store.pendingInvites.find((i) => i.id === inviteId);
@@ -2100,7 +1736,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // The member page's pending invites (#1506). Members only, as in Rust.
     case 'list_group_invites': {
       const { groupId } = args as { groupId: string };
       if (roleInGroup(groupId) === null) {
@@ -2111,7 +1746,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         .map(({ group_id: _g, ...rest }) => rest);
     }
 
-    // The inviter or an admin may withdraw an invite; the DS re-derives both.
     case 'revoke_group_invite': {
       const { inviteId, userId } = args as { inviteId: string; userId: string };
       const invite = store.groupInvites.find((i) => i.id === inviteId);
@@ -2131,22 +1765,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (!link) {
         throw new Error('no such invite link');
       }
-      // Revocation stamps the row; it does not delete it. The link stays
-      // listed as Revoked, which is what the DS-backed list returns.
       link.revoked_at = nowIso();
       return null;
     }
 
-    // ── Voice gate: push-to-talk, mute, deafen (#849) ────────────────────
-    // Every one of these returns the full snapshot, because the renderer is
-    // forbidden from re-deriving the outcome of a transition.
+    // Voice gate (#849): each returns the full snapshot; the renderer never re-derives it.
 
     case 'toggle_voice_mute': {
       const gate = store.voiceGate;
       const muted = !gate.self_muted;
       if (!muted && gate.deafened) {
-        // Unmuting while deafened also undeafens — the invariant forbids
-        // `deafened && !self_muted`.
         gate.deafened = false;
         gate.muted_before_deafen = false;
       }
@@ -2175,7 +1803,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'set_voice_input_mode': {
       const { mode } = args as { mode: MockVoiceInputMode };
       store.voiceGate.mode = mode;
-      // Switching mode always drops a held latch, in either direction.
       store.voiceGate.ptt_held = false;
       return gateSnapshot(command);
     }
@@ -2194,8 +1821,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_voice_gate_state':
       return gateSnapshot(command);
 
-    // Voice room observation, device enumeration and the mic-test rig. There
-    // is no audio hardware behind the browser build, so these are inert.
     case 'list_voice_participants':
     case 'list_voice_room_counts':
     case 'list_audio_devices':
@@ -2222,10 +1847,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'mark_messages_read': {
-      // Mirrors `receipts::mark_messages_read`: the local reader is added to
-      // `read_by`, and to `delivered_by` too if it was somehow missing — the
-      // real schema has a trigger making "read without delivered" impossible,
-      // so the mock must not be able to represent it either.
+      // `read_by` implies `delivered_by`, as the real schema enforces.
       const { conversationId, userId, messageIds } = args as {
         conversationId?: string;
         userId?: string;
@@ -2236,10 +1858,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       const list = (store.receipts[conversationId] ??= []);
       for (const messageId of messageIds ?? []) {
-        // You never acknowledge your own message — `mark_messages_read` in
-        // receipts.rs drops any id whose sender is the acking user. Without
-        // this the viewer's own id lands in `read_by` and a 1:1 DM would
-        // render "read" purely from the sender having looked at the screen.
+        // Own messages are never acknowledged (receipts.rs).
         const target = findMessage(messageId);
         if (!target || target.sender_id === userId) {
           continue;
@@ -2259,16 +1878,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
-    // The on-device diagnostics log (#1305). A fixed report in the shape
-    // `pollis_core::commands::diagnostics` produces.
     case 'get_diagnostics':
       return 'Pollis diagnostics\napp: mock\ncore: mock\nos: browser\ngenerated: 2026-01-01T00:00:00Z\n----\n2026-01-01T00:00:00.000Z [auth] verify_otp: email=***@example.com\n';
 
     case 'write_clipboard_text': {
-      // A preload may set `failClipboard` to model an OS clipboard write that
-      // fails — the Rust command returns false rather than throwing, and that
-      // false used to be discarded by the caller (#889). Nothing is written in
-      // that case, so a test can also prove the clipboard was left alone.
+      // `failClipboard`: the command returns false and writes nothing (#889).
       if (preload.failClipboard) {
         return false;
       }
@@ -2291,10 +1905,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'verify_otp': {
       const { email, code } = args as { email: string; code: string };
-      // Real Tauri rejects with the Rust error's TEXT — a string, never an
-      // `Error` — and that difference is what hid #1305: the UI only read
-      // `Error`s, so every failure rendered as "Invalid code". These two codes
-      // reject exactly as the shell does, with pollis-core's own messages.
+      // Real Tauri rejects with a string, not an Error (#1305).
       if (code === MOCK_WRONG_OTP_CODE) {
         throw 'Invalid code. Please check and try again.';
       }
@@ -2310,13 +1921,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return user;
     }
 
-    // In-memory attachment staging (src-tauri/src/commands/staging.rs). There
-    // is no backend here to hold bytes, so a stage answers with a handle and a
-    // discard answers true — enough for the composer's bookkeeping to run.
-    // The loopback media URL for an attachment. There is no media server
-    // here; a preload's `mediaUrls` (object key -> URL a test serves) stands
-    // in for one. Anything else answers null, as the real command does for a
-    // file it cannot serve, and the renderer falls back to its blurhash.
+    // A preload's `mediaUrls` stands in for the media server; else null.
     case 'get_media_url': {
       const urls = (preload.mediaUrls ?? {}) as Record<string, string>;
       return urls[args.r2Key as string] ?? null;
@@ -2329,12 +1934,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
-    // No OS clipboard under Playwright; an empty body is "no image", which is
-    // exactly what the real command answers in that case.
     case 'read_clipboard_image':
       return new Uint8Array();
 
-    // These are no-ops or stubs for commands not needed in frontend tests
     case 'search_user_by_username':
     case 'invite_to_group':
     case 'get_prekey_bundle':
@@ -2354,19 +1956,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
 let stagedAttachmentCount = 0;
 
-/** Peers marked verified via `set_contact_verified`, for `get_safety_number`. */
 const verifiedPeers = new Set<string>();
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (primaryInvoke) {
     return primaryInvoke(command, args) as Promise<T>;
   }
-  // Settled on the microtask queue, not through `setTimeout`. Real IPC hands
-  // its reply back as a resolved promise, so a caller that fires a command
-  // without awaiting it (e.g. `void copyPermalink(...)` behind a click) has
-  // observably completed by the time the click handler's task ends. A macrotask
-  // hop instead parks the effect behind every timer the app has queued, which
-  // is long enough for a test to look at the result and find nothing there.
+  // Settled on the microtask queue like real IPC; a macrotask hop lets specs see nothing yet.
   invokeCounts[command] = (invokeCounts[command] ?? 0) + 1;
   lastInvokeArgs[command] = args ?? {};
   if (store.deviceRevoked && !WORKS_WHEN_REVOKED.has(command)) {
@@ -2393,27 +1989,13 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   });
 }
 
-/**
- * `@tauri-apps/api/core` also exports `Channel` and `convertFileSrc`, and
- * `frontend/src/bridge` imports both. A vite alias replaces the WHOLE module,
- * so the mock has to carry every named export the bridge reaches for or the
- * dep scan fails outright — which is what had quietly broken
- * `VITE_PLAYWRIGHT=true` mode.
- *
- * Neither needs real behaviour here: `hasTauri()` is false in the browser, so
- * `bridge/invoke.ts` picks its own inert StubChannel over this one, and no
- * mocked command serves real files.
- */
+/** The alias replaces the whole module, so the bridge's named imports must exist; inert here. */
 export class Channel<T = unknown> {
   id = 0;
   onmessage: ((message: T) => void) | null = null;
 
   constructor() {
-    // Register every channel the app opens so a spec can push a realtime event
-    // into it (#874). Realtime is the ONLY thing that keeps a query fresh once
-    // `refetchOnWindowFocus` is off, so "this event invalidates exactly these
-    // caches" has to be assertable — otherwise the tests can only prove the
-    // refetches are gone, not that anything replaced them.
+    // Registered so a spec can push realtime events into it (#874).
     openChannels.push(this as unknown as Channel<unknown>);
   }
 
@@ -2425,10 +2007,7 @@ export class Channel<T = unknown> {
 const openChannels: Channel<unknown>[] = [];
 
 (window as any).__emitRealtimeEvent = (event: unknown) => {
-  // Deliver to the MOST RECENTLY created channel only. StrictMode
-  // double-invokes effects in dev, so several Channel objects exist but only
-  // the last one is the live subscription — fanning an event out to all of
-  // them would multiply every invalidation and make the counts meaningless.
+  // Only the newest channel is live (StrictMode double-invokes effects).
   const live = openChannels[openChannels.length - 1];
   if (!live) {
     return 0;
@@ -2441,13 +2020,7 @@ export function convertFileSrc(filePath: string, _protocol = "asset"): string {
   return filePath;
 }
 
-/**
- * The alias replaces `@tauri-apps/api/core` for EVERY importer, not just our
- * own bridge — the `@tauri-apps/plugin-*` packages pull `Resource` and
- * `addPluginListener` from it as well, and a missing export fails the dep
- * pre-bundle for the whole app. None of them are exercised in mock mode; they
- * exist so the module's shape matches.
- */
+/** Exports the plugin packages import from core; unused in mock mode. */
 export class Resource {
   #rid: number;
 
@@ -2506,8 +2079,6 @@ export async function requestPermissions<T>(_plugin: string): Promise<T> {
 
 export const SERIALIZE_TO_IPC_FN = "__TAURI_TO_IPC_KEY__";
 
-// The first evaluation owns the window hooks; a later one restores them (see
-// `PRIMARY_HOOKS`).
 if (primaryHooks) {
   Object.assign(window, primaryHooks);
 } else {

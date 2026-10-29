@@ -5,18 +5,11 @@ use crate::error::Result;
 use super::types::AudioDevice;
 
 pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
-    // Frontend sends "default" (or "") to mean "use the OS default" rather
-    // than a real device id. Treat those as None so we don't go looking
-    // for a device literally named "default".
+    // "default"/"" mean the OS default, not a device named "default".
     let name = name.filter(|n| !n.is_empty() && *n != "default");
     let device = match name {
         None => {
-            // On Linux, ALSA's system default may be a virtual device like
-            // "vdownmix" (surround downmix) that crashes when opened for capture.
-            // Strategy:
-            //   1. Try well-known audio-server PCMs: pipewire, pulse, default.
-            //   2. Fall back to first device that passes is_useful_device.
-            //   3. Return error rather than opening a blocked device.
+            // Linux: ALSA's default may be a virtual device (vdownmix) that crashes.
             #[cfg(target_os = "linux")]
             {
                 // Virtual ALSA devices known to crash or produce no audio.
@@ -28,7 +21,6 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                 } else {
                     host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
                 };
-                // Collect, filter blocked names, log what we see.
                 let devices: Vec<cpal::Device> = iter
                     .filter(|d| {
                         d.name()
@@ -41,14 +33,13 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                 crate::diag!("[voice] available {} devices (blocked filtered): {}",
                     if is_input { "input" } else { "output" }, devices.len());
 
-                // 1. Preferred by name
                 let found = preferred.iter().find_map(|&pref| {
                     devices.iter().position(|d| d.name().ok().as_deref() == Some(pref))
                 });
                 if let Some(idx) = found {
                     devices.into_iter().nth(idx)
                 } else {
-                    // 2. First device that passes the useful filter (e.g. hw:CARD=...,DEV=0)
+                    // Else the first useful device (e.g. hw:CARD=...,DEV=0)
                     devices
                         .into_iter()
                         .find(|d| d.name().ok().map(|n| is_useful_device(&n)).unwrap_or(false))
@@ -56,10 +47,7 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
             }
             #[cfg(target_os = "macos")]
             {
-                // CoreAudio occasionally reports no default device (e.g. mid
-                // Bluetooth handover, or a stale default after a device went
-                // away). Fall back to the first enumerated device so a missing
-                // default doesn't break voice.
+                // CoreAudio sometimes has no default (Bluetooth handover): use the first.
                 let default_dev = if is_input {
                     host.default_input_device()
                 } else {
@@ -79,8 +67,7 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
             }
         }
         Some(n) => {
-            // On Linux, reject blocked devices even when explicitly named.
-            // Fall back to auto-detect so a stale preference doesn't crash the app.
+            // Linux: blocked even when named; auto-detect instead of crashing.
             #[cfg(target_os = "linux")]
             {
                 let blocked: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
@@ -95,10 +82,7 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                 host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             };
             let found = iter.find(|d| d.name().ok().as_deref() == Some(n));
-            // macOS-only fallback: AirPods (and other Bluetooth duplex devices)
-            // in HFP/SCO mode sometimes drop out of host.output_devices() while
-            // their mic is captured, even though the device DOES support output.
-            // Try host.devices() (all scopes) and validate via supported_output_configs.
+            // macOS: HFP AirPods can vanish from output_devices(); try all scopes.
             #[cfg(target_os = "macos")]
             let found = found.or_else(|| macos_lookup_any_scope(host, n, is_input));
             found
@@ -116,9 +100,7 @@ fn macos_first_device(host: &cpal::Host, is_input: bool) -> Option<cpal::Device>
     let iter = if is_input { host.input_devices().ok() } else { host.output_devices().ok() };
     iter.and_then(|mut it| it.next())
         .or_else(|| {
-            // Last-resort: scan all devices and pick the first that supports
-            // the requested scope. Required when a duplex device (AirPods in
-            // HFP mode) is missing from the scoped list but present in devices().
+            // Last resort: first device in devices() supporting this scope.
             host.devices().ok().and_then(|all| {
                 all.filter(|d| {
                     if is_input {
@@ -134,12 +116,7 @@ fn macos_first_device(host: &cpal::Host, is_input: bool) -> Option<cpal::Device>
 
 #[cfg(target_os = "macos")]
 fn macos_lookup_any_scope(host: &cpal::Host, name: &str, is_input: bool) -> Option<cpal::Device> {
-    // Multiple AudioObjects can share a name (system-level objects, aggregate
-    // devices, BlackHole virtual devices). Returning the first name-match
-    // unconditionally can hand back a stub Device that hangs inside
-    // default_input_config() / default_output_config(). Direction-validate
-    // each candidate via supported_*_configs() and skip anything that
-    // doesn't report a usable stream for the requested scope.
+    // Names collide (aggregate/BlackHole stubs that hang); direction-validate each.
     let supports = |d: &cpal::Device| -> bool {
         if is_input {
             d.supported_input_configs().map(|mut c| c.next().is_some()).unwrap_or(false)
@@ -158,9 +135,7 @@ fn macos_lookup_any_scope(host: &cpal::Host, name: &str, is_input: bool) -> Opti
             }
         }
     }
-    // Opposite-scope last resort: AirPods in HFP can appear only in the input
-    // list while still capable of output (or vice versa). Still direction-
-    // validate so we don't hand back a stub.
+    // Opposite-scope last resort (HFP AirPods), still direction-validated.
     let opposite = if is_input { host.output_devices().ok() } else { host.input_devices().ok() };
     if let Some(it) = opposite {
         for d in it {
@@ -192,11 +167,7 @@ fn macos_log_enumeration(host: &cpal::Host, wanted: Option<&str>, is_input: bool
     );
 }
 
-// ── Device name helpers ───────────────────────────────────────────────────
-
-/// Allowlist for Linux: only keep well-known virtual devices and direct
-/// hardware interfaces (hw:CARD=X,DEV=0). Everything else — sysdefault,
-/// speex, upmix, vdownmix, front:, iec958:, etc. — is filtered out.
+/// Linux allowlist: known audio servers and hw:CARD=X,DEV=0 only.
 /// On macOS/Windows all devices pass through.
 fn is_useful_device(_name: &str) -> bool {
     #[cfg(not(target_os = "linux"))]
@@ -231,8 +202,7 @@ fn display_name(raw: &str) -> String {
 }
 
 /// Return all available audio input and output devices.
-/// Device enumeration makes blocking ALSA syscalls (and produces ALSA warning
-/// spam); run it on a blocking thread to avoid stalling the tokio runtime.
+/// Enumeration blocks (ALSA), so it runs on a blocking thread.
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     tokio::task::spawn_blocking(|| {
         let host = cpal::default_host();
@@ -262,9 +232,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
             }
             Err(e) => crate::diag!("[voice] list_audio_devices: output enumeration failed: {e}"),
         }
-        // On macOS, a duplex device (AirPods, USB headset) in HFP mode can
-        // get dropped from output_devices() while still listed by devices().
-        // Surface those as output options so the user can still pick them.
+        // macOS: surface HFP duplex devices missing from output_devices().
         #[cfg(target_os = "macos")]
         if let Ok(all) = host.devices() {
             let seen_output: std::collections::HashSet<String> = devices

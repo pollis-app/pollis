@@ -1,19 +1,4 @@
-/*
- * Which side the emoji picker opens on, and how tall it is allowed to be.
- *
- * The panel is a fixed `h-[24rem]` anchored to its trigger, and the side was a
- * prop fixed at the call site — `placement="up"` for the composer, because the
- * composer normally sits at the bottom of the window. "Normally" is the bug:
- * when the trigger rides high (a short window, a large font setting, a
- * scrolled layout) the panel renders off the top of the content region, which
- * `AppShell` clips with `overflow: hidden` — so the missing part is not merely
- * off-screen, it is unreachable.
- *
- * The geometry needs a browser; the decision made from it does not, and the
- * decision is where the rule lives.
- *
- *   node --test frontend/tests/
- */
+/* Which side the emoji picker opens on, and its max height; a fixed side clipped it unreachably under AppShell. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -110,18 +95,14 @@ test("a panel that fits is given no height — its own class keeps governing", (
   );
 });
 
-// A larger font setting scales the panel (it is sized in rem) while the
-// viewport does not — which is exactly when it stops fitting.
+// rem-sized panel, px viewport: a larger font stops it fitting.
 test("the same space flips for a bigger panel", () => {
   const space = { preferred: "up" as const, spaceAbove: 400, spaceBelow: 900 };
   assert.equal(resolvePlacement({ ...space, desired: 384 }).placement, "up");
   assert.equal(resolvePlacement({ ...space, desired: 480 }).placement, "down");
 });
 
-// `PANEL_REM_HEIGHT` is a hand-copy of a Tailwind class in another file. If the
-// panel is resized and the copy is not, placement is resolved against a height
-// the panel no longer has — and the failure is a clipped picker, which is the
-// bug this whole module exists to stop.
+// `PANEL_REM_HEIGHT` hand-copies a Tailwind class; they must agree.
 test("the height the button resolves against is the height the picker renders", () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../src/components/Emoji");
   const rendered = readFileSync(resolve(root, "EmojiPicker.tsx"), "utf8").match(

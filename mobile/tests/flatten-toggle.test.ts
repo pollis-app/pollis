@@ -1,8 +1,4 @@
-// A View whose pointerEvents (or opacity) is conditional flips between
-// flattened and unflattened in Fabric unless it also forms a view for
-// another reason. On Android that churn crashed the PIN keypad
-// ("Unable to find viewState for tag N" in updatePadding). Such views must
-// opt out of flattening with collapsable={false}.
+// A conditional pointerEvents/opacity View must set collapsable={false}: Fabric churn crashed the PIN pad.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

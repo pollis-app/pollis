@@ -1,17 +1,4 @@
-/*
- * Pinned messages on mobile (#1315, desktop #99).
- *
- * Three things worth pinning here: a pin row reads the SNAPSHOT's content
- * string through the same parser as a timeline row (attachment envelopes
- * included); the jump a pin row queues walks back through history until the
- * row is rendered, without looping forever or landing on a thread reply; and
- * the jump store fires once per request. The rest of the semantics (who may
- * pin, what an unpin does) live in pollis-core and the DS and are covered by
- * src-tauri/tests/flows/pinning.rs and the DS tests; the device tier is
- * .maestro/flows/pins.yaml.
- *
- *   node --test mobile/tests/
- */
+/* Pinned messages on mobile (#1315): the snapshot parse, the bounded jump, a one-shot jump store. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -104,11 +91,9 @@ test("the message sheet pins, the header opens the list, and every jump door que
   for (const door of ["app/conversation/pins.tsx", "app/self/saved.tsx", "app/m/[...permalink].tsx"]) {
     assert.match(src(door), /messageJumpStore\.request\(/, door);
   }
-  // Another member's pin has no realtime event: opening the list reads fresh,
-  // never the chat screen's 30 s-cached copy.
+  // Pins have no realtime event: the list reads fresh.
   assert.match(src("app/conversation/pins.tsx"), /usePinnedMessages\(conversationId, \{\s*fresh: true,/);
   assert.match(src("hooks/queries/usePins.ts"), /refetchOnMount: fresh \? "always" : true/);
-  // On iPad the list opens inside the detail pane.
   assert.match(src("components/pane/paneContext.ts"), /"\/conversation\/pins"/);
   assert.match(src("components/MasterDetail.tsx"), /"\/conversation\/pins": PinnedMessages/);
 });

@@ -70,7 +70,6 @@ async fn main() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
-    // Join the DM's MLS group before sending into it.
     pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await?;
     println!("PEER_READY dm={dm_id}");
 
@@ -85,13 +84,11 @@ async fn main() -> Result<()> {
         }
     };
 
-    // The phone's app is in the background.
     wait_for_signal(&signals, "go-1").await?;
     send("sent while you were away").await?;
     send("and another one").await?;
     println!("PEER_SENT_1");
 
-    // The phone's app is closed.
     wait_for_signal(&signals, "go-2").await?;
     send("sent while the app was closed").await?;
     println!("PEER_SENT_2");

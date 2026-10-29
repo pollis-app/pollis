@@ -7,16 +7,7 @@ import { useObserver } from "mobx-react-lite";
 import { messageQueryKeys } from "./useMessages";
 import { groupQueryKeys } from "./useGroups";
 
-/**
- * The signed-in user's own profile, as the settings form needs it.
- *
- * No `phone` (#929): the desktop settings page's phone field had been
- * commented out for a long time while its state, this field and the mutation
- * argument stayed live — a control the user could not see, still writing to
- * the profile on every save. The `update_user_profile` command still accepts a
- * phone (mobile surfaces one), so `api.updateUserProfile` keeps the argument;
- * nothing in this renderer sends it.
- */
+/** The signed-in user's own profile; no `phone` here (#929). */
 export interface ServiceUserData {
   username: string;
   preferred_name?: string;
@@ -25,20 +16,9 @@ export interface ServiceUserData {
 }
 
 export const userQueryKeys = {
-  /**
-   * The SIGNED-IN user's own profile (`ServiceUserData`: username, email,
-   * phone, avatar).
-   *
-   * Deliberately a different key from [`otherProfile`] even for the same user
-   * id. The two hooks return different SHAPES from the same command — this one
-   * merges in `email` from the session and defaults `username` off the store;
-   * the other returns the raw public row with an `id`. They shared one key
-   * until #874, which meant opening your own profile page could park the
-   * public shape where `useUserProfile` consumers expected the private one and
-   * blank out the settings form. Two shapes, two keys.
-   */
+  /** Own profile; a separate key from `otherProfile` since the shapes differ (#874). */
   profile: (userId: string | null) => ["user", "profile", userId] as const,
-  /** Another user's PUBLIC profile row. See [`profile`] for why it is separate. */
+  /** Another user's PUBLIC profile row. */
   otherProfile: (userId: string | null) => ["user", "public-profile", userId] as const,
 };
 
@@ -73,8 +53,7 @@ export interface SafetyNumberInfo {
   safety_number: string;
   status: "unverified" | "verified" | "changed";
   peer_identity_version: number;
-  /// Both pubkeys joined as `pollis-key:v<n>:<a>:<b>`, sorted so both
-  /// sides scan the same string. Encoded directly into the QR code.
+  /// Both pubkeys, sorted, as `pollis-key:v<n>:<a>:<b>`; the QR content.
   qr_payload: string;
 }
 
@@ -88,10 +67,7 @@ export const peerVerificationKeys = {
   all: ["safety", "peer-verifications"] as const,
 };
 
-/// Snapshot of every TOFU-pinned peer plus their verified/key_changed
-/// flags. Single round-trip — used for shield-badge rendering across the
-/// sidebar / DM list and for the inline key-changed banner. Invalidated
-/// on the `KeyChanged` realtime event and after `set_contact_verified`.
+/// Every TOFU-pinned peer's flags in one round-trip; invalidated on `KeyChanged` and `set_contact_verified`.
 export function usePeerVerifications() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
@@ -110,20 +86,7 @@ export type PeerVerificationState = Pick<
   "verified" | "key_changed"
 >;
 
-/**
- * The same snapshot as `usePeerVerifications`, indexed by peer user id.
- *
- * Every surface that draws a shield next to a person wants the lookup, not the
- * list, and three of them (the sidebar's DM rows, the DMs page, the group
- * member list) each built the identical `useMemo` over it. One shared
- * derivation also means all three cannot drift apart on what "verified" means
- * — which is a security-facing badge, so a divergence there is worse than
- * duplicated code (#874).
- *
- * The `useMemo` still belongs here rather than at the query: the query's data
- * identity is already stable between renders, so memoising on it gives every
- * caller a stable `Map` for free.
- */
+/** `usePeerVerifications` indexed by peer id, shared so the security badge can't drift (#874). */
 export function usePeerVerificationMap(): Map<string, PeerVerificationState> {
   const { data: peerVerifications = [] } = usePeerVerifications();
   return useMemo(() => {
@@ -202,20 +165,7 @@ export function useUserProfile() {
     refetchOnReconnect: true,
   });
 
-  // Hydrate the denormalized store avatar so the optimistic local voice
-  // participant (VoiceSessionManager builds its tile from
-  // `store.userAvatarUrl`, and it is not a React consumer) shows the user's
-  // avatar. Without it the field stays null until an avatar *update*, so your
-  // own voice tile renders the placeholder. Remote tiles are unaffected — they
-  // get avatar_url from the backend voice presence (lookup_avatar_url).
-  //
-  // An EFFECT, not the `queryFn` (#928). A query function runs on refetch, on
-  // retry and on cache-restore, with no ordering guarantee against render — so
-  // writing observable state from inside it let a background refetch nobody
-  // asked for mutate the store, and let a cache HIT (queryFn never runs) leave
-  // it unhydrated. Keying on the resolved value instead means the store
-  // follows the query's data whatever produced it, and settles at most once
-  // per actual change.
+  // Hydrate the store avatar for the local voice tile; an effect, not the queryFn (#928).
   const avatarUrl = query.data?.avatar_url ?? null;
   const hasProfile = query.data !== undefined;
   useEffect(() => {
@@ -225,11 +175,7 @@ export function useUserProfile() {
     appStore.setUserAvatarUrl(avatarUrl);
   }, [avatarUrl, hasProfile]);
 
-  // Same for the username. `currentUser.username` is seeded by `get_session`
-  // from the on-disk accounts index, which is a cache: an install renamed
-  // before the index was kept in step still carries the enrollment-time name,
-  // and that name is what an optimistic row shows as its sender until the send
-  // resolves. The profile query is the remote truth, so the store follows it.
+  // The accounts index is a cache; the profile query is the truth.
   const username = query.data?.username || null;
   useEffect(() => {
     if (!hasProfile || !username || appStore.currentUser?.username === username) {
@@ -257,14 +203,10 @@ export function useUpdateProfile() {
     },
     onSuccess: (data) => {
       setUsername(data.username);
-      // Username appears in messages, DM previews, and group membership — invalidate
-      // all of these so the updated name is reflected everywhere.
       queryClient.invalidateQueries({
         queryKey: userQueryKeys.profile(currentUser?.id ?? null),
       });
-      // The public view of the same person is now a separate cache entry
-      // (#874), so it needs its own invalidation — viewing your own profile
-      // page reads that one.
+      // The public view is a separate entry (#874).
       queryClient.invalidateQueries({
         queryKey: userQueryKeys.otherProfile(currentUser?.id ?? null),
       });
@@ -281,15 +223,7 @@ export function useUpdateProfile() {
   });
 }
 
-/**
- * The signed-in user's own avatar URL.
- *
- * A thin wrapper over [`useAvatarBlobUrl`] since #874 — it used to be a second
- * query, under its own key, fetching the SAME object the `Avatar` component
- * was already fetching. Any screen showing both (the settings page shows the
- * form preview beside the sidebar avatar) downloaded the image twice and
- * cached it twice.
- */
+/** The signed-in user's avatar URL, via `useAvatarBlobUrl` (#874). */
 export function useUserAvatar() {
   const { data: userProfile } = useUserProfile();
   return useAvatarBlobUrl(userProfile?.avatar_url ?? null);
@@ -334,10 +268,7 @@ export function useUpdateAvatar() {
       queryClient.invalidateQueries({
         queryKey: userQueryKeys.otherProfile(currentUser?.id ?? null),
       });
-      // Avatar keys are content-addressed since #874, so a re-upload produces
-      // a NEW key and therefore a new `["avatar-blob", key]` entry — nothing
-      // to bust. What still has to happen is the profile refetch above, which
-      // is what tells every `Avatar` which key to ask for now.
+      // Avatar keys are content-addressed (#874); the profile refetch is enough.
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
       });

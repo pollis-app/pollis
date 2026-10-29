@@ -8,20 +8,10 @@ import { splitEmojiSegments } from "../Emoji/emojiTokens";
 
 interface MessageReactionsProps {
   messageId: string;
-  /** Placement, owned by the row: the terminal row indents the pills to the
-   * author column, the refined row renders them inside its body column and
-   * needs no indent. */
   className?: string;
 }
 
-/**
- * Render a reaction's emoji — either a Unicode character or a custom
- * `<:name:hash>` token.
- *
- * Reactions are stored as opaque strings, so a custom reaction is simply its
- * wire token; splitting it here is what makes the same string render as an
- * image for someone who has never heard of the group that owns it (#848).
- */
+/** Unicode or a custom `<:name:hash>` token (#848). */
 const ReactionEmoji: React.FC<{ emoji: string }> = ({ emoji }) => {
   const segments = splitEmojiSegments(emoji);
   return (
@@ -42,12 +32,7 @@ const ReactionEmoji: React.FC<{ emoji: string }> = ({ emoji }) => {
   );
 };
 
-/**
- * The reaction pills under a message. Renders NOTHING — no wrapper, no
- * reserved height — until the message has a reaction: a permanent row with a
- * hover-revealed "+" put a blank line under every message and read as a
- * layout bug. Adding a reaction lives in the hover bar (`ReactionAddButton`).
- */
+/** Reaction pills; renders nothing until the message has one. */
 export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId, className = "" }) => {
   const { t } = useTranslation("chat");
   const { currentUser } = appStore;

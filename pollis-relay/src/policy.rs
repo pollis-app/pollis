@@ -1,20 +1,9 @@
 //! Per-target routing policy: overlay vs direct vs degraded-error, plus **live
 //! relay revocation**.
 //!
-//! This encodes the plane split (design §6.4) and the first-party allowlist as
-//! *data*, and it is pure and unit-testable — no sockets. The shim asks
-//! [`RoutingPolicy::plan`] what to do with a target, then executes; if an overlay
-//! attempt fails, [`PlannedRoute::fallback_to_direct`] decides whether to fall
-//! back to a direct dial (Prefer) or surface a degraded error (Strict).
+//! Pure routing: [`RoutingPolicy::plan`] picks a route; [`PlannedRoute::fallback_to_direct`] handles failure.
 //!
-//! The second half of this module ([`RevocationStore`] and friends) is the
-//! *identity* side of the same question: a relay may be in the signed directory
-//! and still be untrustworthy, because the directory is only re-signed with a
-//! ~1 hour TTL and a seized node stays "valid" until that lapses. Revocation is a
-//! second signed artifact with a much shorter life; see [`verify_revocations`].
-//! It is pure too — bytes in, decision out — so both the client (path selection)
-//! and the relay (refusing to extend a circuit to a revoked next hop) can share
-//! one enforcement point with no I/O of its own.
+//! [`RevocationStore`] covers identity: a short-lived signed artifact, since the directory's ~1 h TTL is too slow.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -41,8 +30,7 @@ pub enum OverlayMode {
 }
 
 impl OverlayMode {
-    /// Stable `u8` encoding so the mode can live in an [`AtomicU8`] the shim's
-    /// routing policy reads live (runtime Prefer↔Strict, design §14 / apply slice).
+    /// Stable `u8` encoding for the shared [`AtomicU8`].
     pub(crate) fn as_u8(self) -> u8 {
         match self {
             OverlayMode::Off => 0,
@@ -83,11 +71,7 @@ pub enum FinalAction {
 /// Decides how each target is routed, given the mode, the set of overlay
 /// (control-plane) hosts, and the set of always-direct (media) hosts.
 ///
-/// `mode` is held in a shared [`AtomicU8`] rather than a plain field so a running
-/// shim can be flipped between `Prefer` and `Strict` **live** — no shim restart,
-/// no DB reconnect — via [`OverlayHandle::set_mode`](crate::shim::OverlayHandle::set_mode).
-/// The host sets are immutable for the shim's lifetime (a mode change never
-/// re-derives the plane split).
+/// `mode` is a shared [`AtomicU8`] so [`OverlayHandle::set_mode`](crate::shim::OverlayHandle::set_mode) flips it live.
 #[derive(Clone)]
 pub struct RoutingPolicy {
     mode: Arc<AtomicU8>,
@@ -110,8 +94,7 @@ impl RoutingPolicy {
         OverlayMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
 
-    /// Flip the live routing mode. The shim's next `plan()` observes it — used to
-    /// switch Prefer↔Strict without restarting the shim (design §14 apply slice).
+    /// Flip the live routing mode; the next `plan()` observes it.
     pub fn set_mode(&self, mode: OverlayMode) {
         self.mode.store(mode.as_u8(), Ordering::Relaxed);
     }
@@ -122,9 +105,7 @@ impl RoutingPolicy {
         Arc::clone(&self.mode)
     }
 
-    // Routing is a per-HOST decision: which plane a destination belongs to does
-    // not depend on its port. The port is judged where it matters — by the
-    // relay's egress allowlist at the far end of the circuit.
+    // Per-HOST: the port is judged by the relay's egress allowlist.
     fn is_direct_host(&self, host: &str) -> bool {
         self.direct_hosts.iter().any(|p| p.matches_host(host))
     }
@@ -179,25 +160,15 @@ impl RoutingPolicy {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Live relay revocation (#813 Phase C)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// The `type` discriminator every revocation payload must carry.
 ///
-/// The revocation list and the signed directory are produced by the **same**
-/// Ed25519 key, so without a discriminator an attacker could feed a directory
-/// envelope to the revocation parser (or the reverse) and have the signature
-/// check pass. Both artifacts name themselves; a mismatch is a hard reject.
+/// The same key signs the directory, so the tag stops cross-artifact confusion.
 pub const REVOCATION_TYPE: &str = "pollis-relay-revocations";
 
 /// The only revocation payload version this build understands.
 pub const REVOCATION_VERSION: u32 = 1;
 
-/// Why a revocation list was rejected. **Every variant is fail-closed**: a
-/// rejected list never becomes evidence that a relay is fine, it removes the
-/// evidence entirely, and [`RevocationStore::admit`] then answers
-/// [`Admission::Unevaluable`] — which is not an admission.
+/// Why a revocation list was rejected; every variant is fail-closed.
 #[derive(Debug, thiserror::Error)]
 pub enum RevocationError {
     #[error("malformed revocation envelope JSON")]
@@ -227,9 +198,7 @@ pub enum RevocationError {
     NotConfigured,
 }
 
-/// The signed envelope, byte-identical in shape to the directory's:
-/// base64 (STANDARD) of the payload bytes plus base64 of the 64-byte Ed25519
-/// signature over **exactly** those bytes. No canonicalization on either side.
+/// The signed envelope: base64 payload plus an Ed25519 signature over exactly those bytes.
 #[derive(Deserialize)]
 struct RevocationEnvelope {
     payload_b64: String,
@@ -260,10 +229,7 @@ struct RevokedEntry {
 
 /// A verified, unexpired, non-rolled-back revocation list.
 ///
-/// Construct one only via [`verify_revocations`] — there is deliberately no way
-/// to build this type from unverified data, so "I have a `RevocationList`" is
-/// itself the proof that the signature, version, type, expiry and sequence
-/// checks all passed.
+/// Only built via [`verify_revocations`], so holding one proves the checks passed.
 #[derive(Debug, Clone)]
 pub struct RevocationList {
     seq: u64,
@@ -290,10 +256,7 @@ impl RevocationList {
         self.expires_at
     }
 
-    /// How many relays this list revokes. An **empty list is legal and normal** —
-    /// unlike the directory's `relays`, where empty is a reject. "Nothing is
-    /// revoked right now" is the steady state and must be expressible, otherwise
-    /// there would be no fresh artifact to fail closed against.
+    /// How many relays this list revokes; an empty list is legal and normal.
     pub fn len(&self) -> usize {
         self.addrs.len() + self.cert_digests.len()
     }
@@ -307,11 +270,7 @@ impl RevocationList {
         now_secs < self.expires_at
     }
 
-    /// Does this list revoke `id`? Either selector matching is enough: the
-    /// address covers the shared-pool-identity case (every hydra node currently
-    /// presents the SAME pinned leaf, so a cert-keyed revocation would take the
-    /// whole pool down), the cert digest covers per-node and peer-hosted
-    /// identities where the leaf really is the relay's name (§7).
+    /// Either selector suffices: address for the shared-pool leaf, cert digest for per-node identities (§7).
     pub fn revokes(&self, id: &RelayIdentity<'_>) -> bool {
         if self.addrs.contains(&normalize_addr(id.addr)) {
             return true;
@@ -323,8 +282,7 @@ impl RevocationList {
 /// The relay being checked: the endpoint the directory advertised plus the DER
 /// leaf it actually presented on the wire.
 ///
-/// Both are carried on purpose. The address is what an operator can revoke the
-/// instant a node is seized; the cert is what remains true if that node moves.
+/// The address is revocable at seizure; the cert stays true if the node moves.
 pub struct RelayIdentity<'a> {
     pub addr: &'a str,
     pub cert_der: &'a [u8],
@@ -343,9 +301,7 @@ pub enum Admission {
 }
 
 impl Admission {
-    /// The single place the fail-closed rule is encoded: only [`Admission::Admit`]
-    /// is an admission. A caller that cannot evaluate revocation must not use the
-    /// relay, so "I don't know" and "revoked" are the same answer here.
+    /// Only [`Admission::Admit`] is an admission: "don't know" equals "revoked".
     pub fn admitted(self) -> bool {
         matches!(self, Admission::Admit)
     }
@@ -353,14 +309,9 @@ impl Admission {
 
 /// Verify a revocation envelope against the pinned directory-signing key.
 ///
-/// Mirrors `pollis-core`'s directory verifier and the JS reference
-/// (`infra/relay-hydra/lib/revocation-verify.mjs`) exactly: verify the Ed25519
-/// signature over the decoded payload bytes FIRST, then parse and range-check.
+/// Signature over the decoded payload FIRST, matching `pollis-core` and the JS reference.
 ///
-/// `seq_floor` is the lowest sequence number the caller will accept. Pass the
-/// highest sequence it has already seen (rollback protection) or the sequence the
-/// signed directory anchored (freshness binding) — whichever is greater. A list
-/// below the floor is a **replay** and is rejected.
+/// A list below `seq_floor` (max of high-water and directory anchor) is a replay.
 pub fn verify_revocations(
     envelope_bytes: &[u8],
     pinned_pubkey_b64: &str,
@@ -410,10 +361,7 @@ pub fn verify_revocations(
     let mut addrs = HashSet::new();
     let mut cert_digests = HashSet::new();
     for entry in payload.revoked {
-        // An entry this build cannot act on fails the WHOLE list closed rather
-        // than being skipped. Skipping would silently downgrade a revocation
-        // published by a newer producer (a selector we don't know yet) into an
-        // admission — exactly the bypass revocation exists to prevent.
+        // An unknown entry fails the WHOLE list closed; skipping would admit a revoked relay.
         let addr = entry.addr.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let digest = entry
             .cert_sha256_b64
@@ -472,17 +420,14 @@ fn cert_digest_b64(cert_der: &[u8]) -> String {
 
 /// The live revocation state a relay (or a client's path selector) consults.
 ///
-/// Cheap to clone — every clone shares one cell, so a refresh task installing a
-/// newer list is observed immediately by every in-flight `Extend`.
+/// Cheap to clone; every clone shares one cell.
 ///
 /// **Fail-closed by construction:**
 /// - a store with no pinned key ([`RevocationStore::unconfigured`]) admits
 ///   nothing;
 /// - a store that has never installed a list admits nothing;
 /// - a store whose list has expired admits nothing;
-/// - [`RevocationStore::install`] never accepts a list below the highest
-///   sequence already seen, so a captured older-but-unexpired list cannot be
-///   replayed to un-revoke a relay.
+/// - [`RevocationStore::install`] refuses lists below the high-water sequence (no replay).
 #[derive(Clone)]
 pub struct RevocationStore {
     inner: Arc<RwLock<StoreInner>>,
@@ -518,11 +463,7 @@ impl RevocationStore {
 
     /// A store for a node that was never given a directory key.
     ///
-    /// This is **not** a bypass: it admits nothing. A relay deployed without the
-    /// key simply cannot extend circuits to other relays (single-hop
-    /// `CONNECT` is unaffected — there is no next hop to vouch for). Making the
-    /// unconfigured case permissive is the classic way revocation turns into
-    /// decoration, so it is deliberately the strictest state, not the loosest.
+    /// Admits nothing: the node serves single-hop `CONNECT` but cannot extend.
     pub fn unconfigured() -> RevocationStore {
         RevocationStore::with_key(None)
     }
@@ -535,11 +476,7 @@ impl RevocationStore {
     /// Verify `envelope_bytes` and adopt it if it is newer-or-equal to what we
     /// hold. Returns the accepted sequence number.
     ///
-    /// `directory_seq_floor` is the sequence the signed directory anchored, if
-    /// the caller has one; the effective floor is the max of that and the
-    /// store's own high-water mark. Binding to the directory is what stops an
-    /// on-path attacker pairing a *fresh* directory with a *stale but unexpired*
-    /// revocation list to hide the newest revocation.
+    /// The floor also binds to `directory_seq_floor`, so a fresh directory cannot pair with a stale list.
     pub fn install(
         &self,
         envelope_bytes: &[u8],
@@ -589,10 +526,7 @@ impl RevocationStore {
         let Some(list) = guard.list.as_ref() else {
             return Admission::Unevaluable;
         };
-        // Staleness is checked at USE time, not just at install time: a list
-        // installed 10 minutes ago is worthless evidence now, and treating it as
-        // "not revoked" would restore exactly the TTL-window bug revocation
-        // exists to close.
+        // Staleness at use time: an old list is worthless evidence now.
         if !list.is_fresh(now_secs) {
             return Admission::Unevaluable;
         }
@@ -651,8 +585,6 @@ mod tests {
         assert_eq!(policy.mode(), OverlayMode::Off);
         assert_eq!(policy.plan("control.test"), PlannedRoute::Direct);
     }
-
-    // ── Live relay revocation (#813 Phase C) ────────────────────────────────
 
     mod revocation {
         use super::*;
@@ -829,8 +761,6 @@ mod tests {
             assert_eq!(store.admit(&id("203.0.113.7:9444", CERT), NOW), Admission::Admit);
 
             // One second past expiry the SAME held list is no longer evidence.
-            // This is the property that bounds the exposure window to the
-            // revocation TTL rather than the directory TTL.
             assert_eq!(
                 store.admit(&id("203.0.113.7:9444", CERT), NOW + 300),
                 Admission::Unevaluable
@@ -919,9 +849,7 @@ mod tests {
         #[test]
         fn entry_with_no_usable_selector_fails_the_whole_list_closed() {
             let sk = signer();
-            // A revocation published by a NEWER producer, keyed on something this
-            // build does not understand. Silently skipping it would admit a relay
-            // the operator revoked.
+            // A newer producer's unknown selector: skipping it would admit a revoked relay.
             let env = envelope(
                 &sk,
                 &payload(4, NOW + 300, r#"{"region":"us-west-2","reason":"seized"}"#),

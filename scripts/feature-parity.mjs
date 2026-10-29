@@ -1,14 +1,6 @@
 #!/usr/bin/env node
 /**
- * Feature parity across the three clients (#1347).
- *
- * Desktop, mobile and the CLI all drive the same pollis-core, so a feature is,
- * almost always, a core command that a client calls. This lists which core
- * commands each client actually calls and reports the ones one client uses
- * and another does not, minus the documented exemptions in
- * scripts/feature-parity.json (real-time media is desktop-only by product
- * decision, the CLI is deliberately a smaller client, and so on).
- *
+ * Feature parity (#1347): core commands one client calls and another does not, minus scripts/feature-parity.json.
  *   node scripts/feature-parity.mjs                 # every unexplained gap today
  *   node scripts/feature-parity.mjs --since v1.17.2 # only gaps NEW since a ref:
  *                                                   #   "this landed on one client only"
@@ -16,24 +8,6 @@
  *   node scripts/feature-parity.mjs --json          # machine-readable
  *
  * It reports; it never fails the build. Exit status is always 0.
- *
- * ## Where each list comes from
- *
- * - Desktop: names registered in `tauri::generate_handler![...]`
- *   (src-tauri/src/lib.rs) that appear as a string literal anywhere in
- *   frontend/src. Matching literals rather than `invoke("x")` call shapes
- *   catches the dynamic call sites (`invoke(pinned ? "unpin_message" : ...)`).
- * - Mobile: the `"name" =>` arms of the uniffi bridge (pollis-core/src/bridge.rs)
- *   that appear as a string literal in mobile/{app,components,hooks,lib,stores}.
- * - CLI: pollis-tui calls pollis_core directly, so `module::fn(` calls and
- *   `use pollis_core::commands::module::{a, b}` imports in pollis-tui/src.
- *
- * Tests and mocks are excluded everywhere: a command a test calls is not a
- * feature a user has.
- *
- * This is a heuristic over names, not a type-checked call graph. A gap it
- * reports is a question to answer ("is this deliberate?"), and the answer goes
- * in scripts/feature-parity.json with its reason, so the next run is quiet.
  */
 
 import { execFileSync } from "node:child_process";

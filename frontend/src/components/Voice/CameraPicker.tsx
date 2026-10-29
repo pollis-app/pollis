@@ -9,11 +9,7 @@ import type { CameraSource } from "../../camera/types";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 
-/** Inline in-app picker for webcam devices. Replaces the voice participant
- *  grid when `camera.kind === 'picking'` — no modal, no overlay, just a
- *  full-pane takeover (CLAUDE.md rule), mirroring `ScreenSharePicker`. Only
- *  shown when there's more than one camera; the single-camera case starts
- *  directly without a picker (see `cameraActions`). */
+/** Inline webcam picker replacing the participant grid (no modal); only with more than one camera. */
 export const CameraPicker: React.FC = observer(() => {
   const { t } = useTranslation("voice");
   const cameras =
@@ -26,8 +22,6 @@ export const CameraPicker: React.FC = observer(() => {
   const cameraFailed = appStore.cameraFailed;
   const [busy, setBusy] = useState(false);
 
-  // Esc cancels — matches the screen-share picker + the app's other
-  // modal-replacement flows.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) {
@@ -40,9 +34,7 @@ export const CameraPicker: React.FC = observer(() => {
   }, [busy]);
 
   function handleCancel() {
-    // The enumerate call parks a helper waiting for our pick; cancelling the
-    // picker without starting leaves it to be reaped by the next
-    // list/start/stop. Reset UI state immediately.
+    // The parked helper is reaped by the next list/start/stop.
     cameraCancelPicker();
   }
 

@@ -1,24 +1,13 @@
 import { makeAutoObservable } from "mobx";
 
-/// Per-peer "their identity key just changed" signal. Pushed by the
-/// `key_changed` realtime event the backend emits whenever
-/// `check_and_pin_account_key` observes a mismatch against the TOFU pin.
-///
-/// Policy is ADVISORY-with-acknowledge (matches the existing
-/// `check_and_pin_account_key` comment: "advisory — the caller does not
-/// block delivery"). Sends still work; the banner just nudges the user
-/// to re-verify out-of-band. Acknowledging the banner only dismisses it
-/// from the UI — the verified flag in the local DB stays cleared until
-/// the user explicitly re-verifies on the profile page.
+/// Per-peer identity-key-change flags from `key_changed`. Advisory: sends work; dismissing doesn't restore "verified".
 interface KeyChangeFlag {
   peerIdentityVersion: number;
   observedAt: number;
 }
 
 class KeyChangeStore {
-  // peerUserId → version observed at the time of the change. We key by
-  // peerUserId (not conversation_id) because the same peer may be in
-  // several DMs and the warning is per-identity, not per-conversation.
+  // Keyed by peer, since the warning is per identity.
   flagged: Record<string, KeyChangeFlag> = {};
 
   constructor() {

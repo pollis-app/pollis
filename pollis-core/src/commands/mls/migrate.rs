@@ -1,70 +1,18 @@
 //! Migrating an existing conversation onto the current suite (#454 P4, #669).
 //!
-//! MLS binds the ciphersuite into the group at creation and RFC 9420 provides no
-//! way to change it afterwards — there is no "rekey to another suite" commit. So
-//! a migration is not an operation on the group at all: it stands up a
-//! **successor group** for the same conversation in the current suite
-//! ([`current_suite`](super::provider::current_suite), which every shipped build
-//! answers with [`CS_PQ`](super::provider::CS_PQ)) and moves the roster in by
-//! Welcome. The predecessor is retired, not converted.
+//! MLS fixes the suite at creation, so a migration stands up a successor group in [`current_suite`](super::provider::current_suite) and moves the roster in by Welcome.
 //!
-//! ## What this migrates, now that there is only one suite
-//!
-//! #454 wrote this to move classic groups onto the hybrid suite, and #669
-//! retired the classic suite once that was done. What is left is deliberately
-//! *not* deleted, and is no longer phrased in terms of classic-vs-hybrid: it
-//! migrates any group whose stored suite is not the current one, whatever those
-//! two suites happen to be. In the steady state every group is already current
-//! and this is a single local read that returns `Ok(false)`.
-//!
-//! It earns its keep because `CS_PQ`'s code point is provisional —
-//! `draft-ietf-mls-pq-ciphersuites` has renumbered once already, and a renumber
-//! is a wire break for every group on the suite. When that happens the fix is to
-//! change the `CS_PQ` constant; this module is what then carries every existing
-//! conversation across, and the receiving half of it (`generation`,
-//! `maybe_advance_generation`, the DS's `(conversation, generation, epoch)` key)
-//! is load-bearing regardless. Deleting the producer would leave that half live
-//! but unexercised.
-//!
-//! That is what suite *generations* are (see [`super::generation`]): the
-//! conversation's commit log is keyed by `(generation, epoch)` rather than
-//! `epoch` alone, the successor restarts at epoch 0 of generation `N + 1`, and
-//! ordering is lexicographic so restarting the epoch counter never reads as going
-//! backwards.
+//! Kept for when `CS_PQ`'s provisional code point is renumbered (a wire break).
 //!
 //! ## What makes it safe
 //!
-//! The whole migration is one compare-and-swap, enforced server-side by the DS's
-//! second accept branch (`pollis-delivery/src/commit.rs`): opening generation
-//! `N + 1` at epoch 0 is accepted only when the submitter also names the head of
-//! generation `N` in `closes_epoch`. If any commit lands in the old lineage
-//! between our read and our write, `closes_epoch` is stale and the entire
-//! migration is rejected — the alternative being a commit silently orphaned on a
-//! lineage nobody will ever read again.
+//! One compare-and-swap: opening generation N+1 is accepted only when `closes_epoch` names the head of N, so no commit is orphaned.
 //!
-//! Locally the same property comes from the ordering below: the successor is
-//! built under its own `GroupId`, so up until the CAS resolves this device holds
-//! *both* lineages and a failure is a plain delete of the successor. The
-//! predecessor's key material — the only thing that can still open envelopes
-//! sealed before the boundary, since `max_past_epochs = 0` — is dropped last, and
-//! only after the predecessor has been drained to its head.
+//! Locally the successor has its own `GroupId`, so failure just deletes it; the predecessor is dropped last, after it is drained.
 //!
 //! ## No stranding
 //!
-//! The acceptance criterion is that *a migrated group can never contain a member
-//! who could not follow it across*. Migration honours it in step 5 by claiming a
-//! KeyPackage in the target suite for every roster device before it creates
-//! anything, and aborting on the first miss: move everyone or nobody. A partial
-//! move would leave that device on the roster but never in the tree, unable to
-//! read its own conversation — reconcile can only skip it, and rebuilding the
-//! group on the old suite to admit it is the downgrade this exists to prevent.
-//!
-//! #454 additionally gated on `pq_capable`, a server-derived flag counting
-//! devices that had published a hybrid pool, both for the roster and fleet-wide.
-//! #669 removed both reads. They were a *predictor* of the step-5 claim, needed
-//! because a classic-only device could be invited after the migration and
-//! stranded then rather than now; with one suite there is no such device, and
-//! the claim itself is the direct test the flag was standing in for.
+//! Step 5 claims a target-suite KeyPackage for every roster device first and aborts on any miss: move everyone or nobody.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -81,29 +29,20 @@ use super::reconcile::{
     PublishOutcome,
 };
 
-/// Most suite migrations to attempt in one sweep. A migration claims a
-/// KeyPackage per roster device and publishes a full add-everyone commit,
-/// so it is by some distance the most expensive thing the sweep can do — and a
-/// device that has just updated may be newly eligible in every conversation at
-/// once. Spreading them costs nothing: eligibility does not expire.
+/// Most migrations per sweep: each claims a KeyPackage per device and adds everyone.
 pub(super) const MAX_MIGRATIONS_PER_SWEEP: usize = 2;
 
 /// Migrate `conversation_id` onto the current suite if it is on some other one
 /// and the move is possible, reporting whether a successor lineage actually
 /// opened.
 ///
-/// `Ok(false)` is the overwhelmingly common answer and is never an error: already
-/// on the current suite, no local group, a lineage we haven't finished draining,
-/// a KeyPackage we couldn't claim, or a lost race. All of them mean "not now" and
-/// are retried by the next sweep.
+/// `Ok(false)` means "not now" and is retried by the next sweep.
 pub(super) async fn migrate_to_current_suite_if_due(
     state: &Arc<AppState>,
     conversation_id: &str,
     actor_user_id: &str,
 ) -> Result<bool> {
-    // 1. Cheapest gate, and entirely local: is this group on a suite that is no
-    //    longer the current one? In the steady state every group is already
-    //    current, so this returns without a single remote read.
+    // 1. Cheap local gate: is this group on a non-current suite?
     let generation = {
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else {
@@ -116,11 +55,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
         }
     };
 
-    // 2. Drain the predecessor to its head BEFORE taking the lock, through the
-    //    interleaved catch-up so every message sealed on the old lineage is
-    //    ingested on the way (`max_past_epochs = 0` — once we retire the group,
-    //    nothing can decrypt what we skipped). It re-acquires the per-conversation
-    //    MLS lock itself, hence "before".
+    // 2. Drain the predecessor first (`max_past_epochs = 0`); the catch-up takes the MLS lock itself.
     crate::commands::messages::catch_up_mls_group_interleaved(
         state,
         conversation_id,
@@ -128,14 +63,10 @@ pub(super) async fn migrate_to_current_suite_if_due(
     )
     .await?;
 
-    // 3. From here on the lineage must not move under us. The same lock reconcile
-    //    and self-update take, so no other commit can be staged from the epoch we
-    //    are about to close.
+    // 3. Hold the lineage still: the lock reconcile and self-update take.
     let mls_guard = state.mls_group_lock(conversation_id).await;
 
-    // Re-read under the lock: the catch-up above may have adopted a successor
-    // somebody else published while we were draining, in which case there is
-    // nothing left to do.
+    // Re-read under the lock: the catch-up may have adopted someone else's successor.
     let local_epoch = {
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else {
@@ -150,11 +81,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
         }
     };
 
-    // 4. The head of the lineage we are closing. Our drained local epoch must
-    //    equal it — a commit is stored at the epoch it was built FROM, so a group
-    //    that has applied 0..H-1 sits at H, which is exactly the next epoch the
-    //    DS would hand out. Any mismatch means the drain didn't reach head, and
-    //    closing a lineage we haven't finished reading would orphan the tail.
+    // 4. Our drained epoch must equal the head, or closing would orphan the tail.
     let head = head_epoch_in(state, conversation_id, generation).await?;
     if head != local_epoch {
         crate::diag!(
@@ -166,15 +93,8 @@ pub(super) async fn migrate_to_current_suite_if_due(
 
     let actor_device_id = state.device_id.lock().await.clone().unwrap_or_default();
 
-    // 5. Who has to come across, and can they? Every registered roster device
-    //    except our own needs a KeyPackage in the target suite; a single miss
-    //    aborts the whole
-    //    migration BEFORE anything is created. This is the no-downgrade criterion
-    //    in its strongest form — not "add whoever we can", but "move everyone or
-    //    nobody".
-    // The roster and its registered devices, from the SAME definitions
-    // `reconcile` uses — one copy, server-side (#987), so the diff and the
-    // migration cannot disagree about who belongs.
+    // 5. Every roster device but ours needs a target-suite KeyPackage; one miss aborts before anything is created.
+    // Roster from the same server-side definitions reconcile uses (#987).
     let roster_user_ids: Vec<String> =
         crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
             .await?
@@ -187,10 +107,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
     let roster_user_ids: std::collections::HashSet<String> =
         roster_user_ids.into_iter().collect();
 
-    // #1082: `targets` below is built from `valid_devices` with our own device
-    // filtered OUT, so a snapshot that omits us is invisible here — it just
-    // yields a short target list and migrates a subset of the roster. Refuse it
-    // for the same reason reconcile does, and defer to the next pass.
+    // #1082: a snapshot omitting us would silently migrate a subset; refuse it as reconcile does.
     if !super::reconcile::snapshot_includes_actor(
         &roster_user_ids,
         &valid_devices,
@@ -225,10 +142,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
         }
     }
 
-    // 6. Build the successor locally. It lives under its own `GroupId`
-    //    (`{conversation_id}#g{successor}`), so the predecessor is untouched and
-    //    still serving reads; nothing this device does before the CAS resolves is
-    //    observable to the conversation.
+    // 6. Build the successor under its own `GroupId`; the predecessor is untouched.
     let successor = generation + 1;
     let staged = {
         let guard = state.local_db.lock().await;
@@ -248,11 +162,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
             &identities,
         )
     };
-    // Every failure past the create must tear the successor down. A stored group
-    // on a lineage that never opened is not merely wasted space: the
-    // generation backstop in `process_pending_commits` treats a stored successor
-    // as evidence of a migration, so leaving one behind could walk this device
-    // off a perfectly healthy lineage onto one that does not exist.
+    // Every failure past here must tear the successor down, or the generation backstop may adopt a lineage that never opened.
     let (welcomes, commit_bytes, group_info_bytes) = match staged {
         Ok(Some(v)) => v,
         Ok(None) => {
@@ -265,10 +175,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
         }
     };
 
-    // 7. The compare-and-swap. `closes_epoch` names the predecessor head we
-    //    observed, which is what makes opening the lineage conditional on the old
-    //    one not having moved. `epoch_before` is 0 because the successor is a
-    //    brand-new group — the DS accepts epoch 0 only on this branch.
+    // 7. The CAS: `closes_epoch` names the predecessor head we saw; `epoch_before` is 0.
     let (added_uid, added_dids) = added_metadata(&welcomes);
     let published = publish_staged_commit(
         state,
@@ -289,9 +196,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
     match published {
         Ok(PublishOutcome::Won) => {}
         Ok(PublishOutcome::LostRace) => {
-            // Someone committed on the old lineage (or migrated it first) between
-            // our read and our write. Our staged commit was rolled back; the
-            // successor group itself is ours alone and now meaningless.
+            // Someone committed on the old lineage first; our successor is now meaningless.
             crate::diag!(
                 "[mls] migrate: {conversation_id} lost the generation-{successor} race — \
                  discarding the successor and staying on {generation}"
@@ -305,18 +210,12 @@ pub(super) async fn migrate_to_current_suite_if_due(
         }
     }
 
-    // 8. We own generation `successor` at epoch 1 (the opening commit merged
-    //    inside `publish_staged_commit`). Record the lineage FIRST, then drop the
-    //    predecessor: a crash in between leaves a harmless orphan group, whereas
-    //    the reverse order would leave this device pointing at a lineage it no
-    //    longer has. Same ordering as `adopt_generation_locked`.
+    // 8. Record the lineage FIRST, then drop the predecessor: a crash between leaves only a harmless orphan.
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
             super::generation::set_local_generation(db.conn(), conversation_id, successor);
-            // Unlike a device that arrives by Welcome, the migrator FOUNDED this
-            // group — its leaf is merged by construction, so the new lineage
-            // starts already rotated rather than immediately due (#666).
+            // The founder's leaf is merged by construction (#666).
             super::self_update::record_self_update(db.conn(), conversation_id, 1);
         }
     }
@@ -327,13 +226,9 @@ pub(super) async fn migrate_to_current_suite_if_due(
          {generation} (head {head}) closed, generation {successor} open at epoch 1"
     );
 
-    // The exporter secret is per-group and we are now on a different group, so a
-    // live voice room must re-derive immediately.
+    // A new group means a new exporter secret for voice.
     crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
-    // The successor lineage's exporter is brand new, so the migrator — who by
-    // construction holds the conversation's Kpin if anyone does — re-wraps it
-    // under (successor generation, epoch) so pins cross the suite boundary
-    // (#99). Content is untouched, exactly like message history.
+    // Re-wrap the pin key under the successor's exporter (#99).
     crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
     crate::commands::file_keys::maybe_rewrap_file_keys(state, conversation_id).await;
     drop(mls_guard);
@@ -353,11 +248,6 @@ type StagedSuccessor = (Vec<WelcomeOut>, Vec<u8>, Option<Vec<u8>>);
 /// Create the successor group and stage its opening commit, returning
 /// `(welcomes, commit_bytes, group_info_bytes)` — or `None` when there is
 /// nothing to commit at all.
-///
-/// Synchronous, and the successor's suite is
-/// [`current_suite`](super::provider::current_suite) rather than a parameter: a
-/// migration exists only to move a conversation onto the *current* suite, and
-/// there is no such thing as migrating sideways.
 #[allow(clippy::too_many_arguments)]
 fn stage_successor_commit<C>(
     provider: &super::provider::MlsProvider<'_, C>,
@@ -382,11 +272,7 @@ where
         current_suite(),
     )?;
 
-    // Reuse reconcile's staging verbatim: the successor is a fresh group
-    // containing only us, so the diff against the desired roster IS the
-    // add-everyone commit — with the same revoked-device filtering and the same
-    // server-untrusted re-check that every claimed KeyPackage really is in this
-    // group's suite.
+    // Reuse reconcile's staging: against a group of only us, the diff IS the add-everyone commit.
     let staged = stage_reconcile_commit(
         provider,
         conversation_id,
@@ -404,21 +290,13 @@ where
             let welcomes = welcomes_for(&outcome.added, data.welcome_bytes.as_deref());
             Ok(Some((welcomes, data.commit_bytes, data.group_info_bytes)))
         }
-        // A conversation whose roster resolves to this device alone has nobody to
-        // add, so reconcile stages no commit — but the lineage still needs one at
-        // epoch 0 for the compare-and-swap to have anything to write. A
-        // self-update is the smallest commit that qualifies.
+        // A sole-device roster stages nothing, but epoch 0 still needs a commit; a self-update is the smallest.
         _ => Ok(super::self_update::stage_self_update(provider, conversation_id, successor)?
             .map(|(_, commit, group_info)| (Vec::new(), commit, group_info))),
     }
 }
 
 /// Tear down a successor group that never opened its lineage.
-///
-/// Safe precisely because nothing else can reference it yet: the CAS did not
-/// land, so no Welcome was delivered and no commit exists at generation
-/// `successor`. Best-effort — a leftover group is inert (nothing routes to it
-/// until the lineage row moves) and the next attempt deletes it on create.
 async fn abandon_successor(state: &Arc<AppState>, conversation_id: &str, successor: i64) {
     if let Err(e) = forget_local_mls_group_at(state, conversation_id, successor).await {
         crate::diag!("[mls] migrate: discarding successor {successor} for {conversation_id}: {e}");
@@ -433,11 +311,7 @@ async fn head_epoch_in(
     conversation_id: &str,
     generation: i64,
 ) -> Result<i64> {
-    // Advisory only, and deliberately so: the DS re-validates `closes_epoch`
-    // inside the migration's compare-and-swap, so a head that goes stale between
-    // this read and the submit rejects the migration rather than orphaning a
-    // commit. That is what lets this be an ordinary read rather than something
-    // that needs a lock.
+    // Advisory: the DS re-validates `closes_epoch` in the CAS, so no lock is needed.
     let snap = super::ds_reads::conversation_snapshot(
         state,
         super::ds_reads::state_query(conversation_id, Some(generation)),
@@ -465,22 +339,9 @@ fn welcomes_for(added: &[(String, String)], welcome_bytes: Option<&[u8]>) -> Vec
 /// The `(added_user_id, added_device_ids)` pair the commit row carries so
 /// receivers can verify cross-signing certs before processing it.
 ///
-/// **Every distinct user**, in add order, plus every added device id — both CSV,
-/// mirroring `reconcile`. It used to name only `welcomes[0]`'s user (#1080),
-/// which is always wrong here: a suite migration re-adds the WHOLE roster in one
-/// commit, so the opening commit of every successor lineage named one user and
-/// left every other member's leaf unverifiable to a replaying device.
+/// **Every distinct user**, in add order, plus every added device id, both CSV (#1080).
 ///
-/// This is a PREFETCH HINT, not what receivers verify — they read the added
-/// leaves off the commit's own Add proposals (`AddedLeaf`), so an incomplete
-/// hint could only ever make an honest add look *unverifiable*, never make a
-/// rogue one look verified. What it cost was a spurious eviction reconcile on
-/// every receiver, and a log line saying a teammate's device could not be
-/// verified.
-///
-/// Only reachable through an external join into a fresh lineage: a Welcome
-/// joiner starts at the successor's epoch 1 and never replays its opening
-/// commit. That narrowness is why it survived the reconcile-side fix.
+/// A PREFETCH HINT: receivers verify the commit's own Add proposals, so a bad hint only looks unverifiable.
 fn added_metadata(welcomes: &[WelcomeOut]) -> (Option<String>, Option<String>) {
     if welcomes.is_empty() {
         return (None, None);
@@ -532,9 +393,7 @@ mod tests {
         assert_eq!(out[2].recipient_id, "u2");
     }
 
-    /// #1080: a migration re-adds the whole roster in ONE commit, so naming a
-    /// single user left every other member's leaf unverifiable to a device that
-    /// replays that commit (an external join into the fresh lineage).
+    /// #1080: a migration re-adds the whole roster in ONE commit.
     #[test]
     fn added_metadata_lists_every_user_and_every_device() {
         let (uid, dids) = added_metadata(&[welcome("u1", "d1"), welcome("u2", "d2")]);
@@ -542,9 +401,7 @@ mod tests {
         assert_eq!(dids.as_deref(), Some("d1,d2"));
     }
 
-    /// A user with several devices appears ONCE in the user list — the DS folds
-    /// per user, so a repeat is wasted work, and the device list is what carries
-    /// the per-device detail.
+    /// A user with several devices appears ONCE in the user list.
     #[test]
     fn added_metadata_does_not_repeat_a_multi_device_user() {
         let (uid, dids) = added_metadata(&[
@@ -556,9 +413,7 @@ mod tests {
         assert_eq!(dids.as_deref(), Some("d1,d2,d3"));
     }
 
-    /// The shape the DS parses: both columns are CSV and it splits each on `,`
-    /// (`reads::added_identities`). A single-user migration must still produce a
-    /// bare id with no stray separator.
+    /// Both columns are CSV; a single user is a bare id.
     #[test]
     fn added_metadata_of_one_user_carries_no_separator() {
         let (uid, dids) = added_metadata(&[welcome("u1", "d1")]);
@@ -568,9 +423,7 @@ mod tests {
 
     #[test]
     fn added_metadata_is_absent_when_nobody_was_added() {
-        // The sole-device case again: a self-update opening commit adds nobody, so
-        // the row's verification columns must stay NULL rather than naming a
-        // device the commit never touched.
+        // A self-update opening commit adds nobody: verification columns stay NULL.
         let (uid, dids) = added_metadata(&[]);
         assert!(uid.is_none());
         assert!(dids.is_none());

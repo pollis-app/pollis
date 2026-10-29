@@ -1,14 +1,4 @@
-/**
- * QR device link, desktop half (#1207): Security → "Link a new device" shows a
- * QR after the PIN, follows the link through claimed → ready, and approves only
- * on an explicit tap; a tampered request is never approvable. And the other
- * direction: "Sign in with another device" on the login screen takes a pasted
- * code and lands on the linked wait, which shows no code to read out.
- *
- * The PIN check and the link-tag verification are Rust's (covered end to end in
- * src-tauri/tests/flows/device_link.rs); the mock scripts the statuses so every
- * screen here is reachable.
- */
+/** QR device link, desktop half (#1207); PIN and link-tag checks are Rust's (flows/device_link.rs). */
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -51,17 +41,11 @@ async function approvals(page: Page): Promise<string[]> {
 }
 
 async function enterPin(page: Page, pin: string) {
-  // One fill per cell: each is its own change event on its own input, so no
-  // digit depends on InputOtp having moved focus in time. Per-key typing into
-  // the first cell raced that focus move and dropped a digit on a slow runner.
+  // One fill per cell: per-key typing raced InputOtp's focus move and dropped digits.
   const cells = page.getByTestId("link-device-pin-input").locator("input");
   for (let i = 0; i < pin.length; i++) {
     await cells.nth(i).fill(pin[i]);
-    // InputOtp rebuilds the PIN from its last-rendered value on each change,
-    // so the next digit waits for this one to render. (The digits CI used to
-    // drop were PageShell's initial focus stealing the caret mid-fill, #1258;
-    // see the test below.) The last digit submits, after which the cells may
-    // unmount.
+    // InputOtp rebuilds the PIN from its last render, so wait per digit; the last one submits.
     if (i < pin.length - 1) {
       await expect(cells.nth(i)).not.toHaveValue("");
     }
@@ -165,10 +149,7 @@ test("a tampered request offers no Approve", async ({ page }) => {
 });
 
 test("the page's initial focus never moves a caret the user already placed", async ({ page }) => {
-  // PageShell focuses the page's first control on a short timer after mount.
-  // When that timer landed between a fill's focus and its keystroke (a slow
-  // CI runner), the second digit went into the FIRST box, over the first
-  // digit (#1258). Freeze the clock so the timer fires exactly in that gap.
+  // Freeze the clock so PageShell's delayed first-control focus lands mid-fill (#1258).
   await page.clock.install();
   await boot(page, signedIn());
   await gotoSecurity(page);
@@ -186,7 +167,7 @@ test("the page's initial focus never moves a caret the user already placed", asy
   await expect(cells.nth(1)).toHaveValue("2");
 });
 
-// ── #1361: the sign-in screen SHOWS a code for a signed-in phone to scan ────
+// #1361: the sign-in screen shows a code for a signed-in phone to scan.
 
 async function mockCounters(page: Page): Promise<{ deviceOffers: number; deviceOfferCancels: number }> {
   return page.evaluate(() => {

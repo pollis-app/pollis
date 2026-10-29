@@ -1,13 +1,10 @@
-//! Builder error type. The build/verify path returns `Result` and never
-//! panics; the only `panic!`-shaped exit is the CLI mapping an error to a
-//! non-zero process code.
+//! Builder error type. The build/verify path returns `Result` and never panics.
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum BuilderError {
-    /// Only reachable with `db-source` on — the feature that compiles the
-    /// database reader at all.
+    /// Only reachable with `db-source` on.
     #[cfg(feature = "db-source")]
     #[error("database error: {0}")]
     Db(#[from] libsql::Error),
@@ -30,8 +27,7 @@ pub enum BuilderError {
     PersistedLeaves(String),
 
     /// The commit-log reset statement (#1579) could not be minted: the committed
-    /// retirement facts disagree with what is served, or the successor has no
-    /// genesis yet.
+    /// retirement facts disagree with what is served, or the successor has no genesis.
     #[error("commit-log reset refused: {0}")]
     Reset(String),
 

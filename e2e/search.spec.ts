@@ -1,23 +1,4 @@
-/*
- * On-device message search (#850) — behavioural e2e.
- *
- * Runs against the browser-rendered frontend with the Tauri IPC mock
- * (`frontend/src/__mocks__/tauri-core.ts`), whose `search_messages` case
- * reproduces the SHAPE of the Rust command — enriched results, structured
- * snippets with UTF-16 highlight ranges, a total count, offset pagination and
- * both orderings. The ranking itself is Rust's job and is pinned by
- * `pollis-core`'s own tests; what this spec pins is the user-visible flow the
- * ticket was actually about:
- *
- *   type a query → ranked results with REAL NAMES (not UUIDs) → click a channel
- *   hit → land on the channel route (not the broken DM route every hit used to
- *   go to) → see the message flash-highlighted.
- *
- * Every test runs in BOTH skins, per the repo convention that visual features
- * stay consistent across `terminal` and `refined`.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// On-device message search (#850): real names, ranked hits; a channel hit lands on the channel and flashes.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -109,11 +90,7 @@ function preloadState(skin: Skin) {
   };
 }
 
-/*
- * NOTE ON NAVIGATION: the router runs on `createMemoryHistory` (see
- * `frontend/src/router.tsx`), so the browser URL stays at "/" no matter where
- * the app navigates. Every assertion below checks what is RENDERED.
- */
+// Memory-history router: assert on what renders, not the URL.
 async function boot(page: Page, skin: Skin) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
@@ -137,13 +114,7 @@ async function boot(page: Page, skin: Skin) {
   await expect(page.getByTestId("sidebar")).toBeVisible();
 }
 
-/**
- * Record every element that receives the jump-highlight class.
- *
- * Asserting `toHaveClass` directly races the animation — the class is removed
- * after HIGHLIGHT_MS, so a slow first poll sees a clean element and fails even
- * though the flash happened. Observing mutations captures the event itself.
- */
+/** Record elements that get the jump-highlight class (toHaveClass races the animation). */
 async function watchForFlash(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as { __flashed: string[] };
@@ -179,22 +150,14 @@ async function openCommandPalette(page: Page) {
   await expect(page.getByTestId("search-panel")).toBeVisible();
 }
 
-/**
- * Type into the palette and wait for the value to stick.
- *
- * The panel clears its own input in an effect keyed on `isOpen`, so a `fill`
- * that lands in the same tick as the open can be wiped a moment later. Waiting
- * on the value rather than on the panel's visibility is what makes that
- * deterministic.
- */
+/** Type into the palette and wait for the value to stick (the panel clears it on open). */
 async function typeInPalette(page: Page, query: string) {
   const input = page.getByTestId("search-panel-input");
   await input.fill(query);
   await expect(input).toHaveValue(query);
 }
 
-/** Open `/search` and run a query. Goes through Cmd+K's page result, which is
- *  also what proves `/search` is registered in `PAGE_RESULTS`. */
+/** Open /search via Cmd+K's page result (proves it is in PAGE_RESULTS) and run a query. */
 async function search(page: Page, query: string) {
   await openCommandPalette(page);
   await typeInPalette(page, "Search Messages");
@@ -204,7 +167,6 @@ async function search(page: Page, query: string) {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`message search — ${skin} skin`, () => {
     agnosticTest("a query returns ranked results carrying real names, not ids", async ({ page }) => {
@@ -214,8 +176,7 @@ for (const skin of SKINS) {
       const items = page.getByTestId("search-result-item");
       await expect(items).toHaveCount(3);
 
-      // Names, not UUIDs — the first of the three original defects. `u-bob`
-      // and the raw conversation id must not appear anywhere in the list.
+      // Names, not UUIDs: `u-bob` and the raw conversation id must not appear.
       await expect(page.getByTestId("search-result-sender").first()).toHaveText("bob");
       const conversations = await page
         .getByTestId("search-result-conversation")
@@ -268,8 +229,7 @@ for (const skin of SKINS) {
       await expect(channelHit).toBeVisible();
       await channelHit.click();
 
-      // The channel route, NOT `/dms/$conversationId` — every channel hit used
-      // to land on a broken DM route.
+      // The channel route, NOT `/dms/$conversationId`.
       await expect(page.getByTestId("main-content")).toBeVisible();
       await expect(page.getByTestId(`message-${CHANNEL_HIT_ID}`)).toBeVisible();
       // The breadcrumb is what says which route actually matched.

@@ -1,34 +1,14 @@
 //! The per-conversation attachment key ring (#1382).
 //!
-//! One mutable row per MLS conversation in `file_keystate`: the conversation's
-//! ring of random 32-byte file keys, WRAPPED under a KEK the members export
-//! from the current MLS epoch, plus the ring's length (`key_version`). The DS
-//! holds the wrap and can open neither it nor any attachment sealed under the
-//! ring. Same shape and CAS as `pin_keystate` (`crate::pins`), with one
-//! addition: the ring rotates on member removal, and `key_version` is what
-//! lets the DS refuse every write that would fork it.
+//! One wrapped key ring per conversation in `file_keystate`; the DS can open neither it nor any attachment.
 //!
 //! ## The three writes
 //!
-//! - **mint** — insert-only, `key_version = 1`. A losing minter gets
-//!   `updated: false`, refetches, and adopts the winner's ring.
-//! - **re-wrap** — same ring, newer epoch's KEK: `key_version` must EQUAL the
-//!   stored one and `(generation, epoch)` must be lexicographically strictly
-//!   greater. A re-wrap racing a rotation carries the old length and is
-//!   refused, so a rotation can never be rolled back.
-//! - **rotate** — exactly one new key appended: `key_version` must be the
-//!   stored one plus one, at a `(generation, epoch)` no older than the stored
-//!   pair. Two concurrent rotations cannot both land.
+//! - **mint** — insert-only, `key_version = 1`; a losing minter adopts the winner's ring.
+//! - **re-wrap** — same `key_version`, strictly newer `(generation, epoch)`; can't undo a rotation.
+//! - **rotate** — `key_version` + 1, epoch no older; concurrent rotations can't both land.
 //!
-//! Every write and the read are membership-gated, and the `(generation,
-//! epoch)` a write names is ceilinged at the commit log's head, like
-//! `pin_keystate`, so nobody can freeze the row with an epoch that does not
-//! exist yet.
-//!
-//! Each ring entry is a key plus the `(generation, epoch)` it was added at
-//! (48 bytes before the wrap's tag). The DS checks only that the wrap's length
-//! matches `key_version`; the epochs inside let a client tell whether a
-//! rotation owed for a removal has already happened.
+//! Every write and the read are membership-gated; epochs are ceilinged at the commit log's head.
 
 use axum::{
     extract::State,
@@ -48,16 +28,13 @@ pub use pollis_api::file_keys::*;
 /// AES-256-GCM nonce length.
 const NONCE_LEN: usize = 12;
 
-/// One ring entry: a 32-byte key plus the `(generation, epoch)` it was added
-/// at, two big-endian i64s. Mirrors `pollis_core::commands::file_keys`.
+/// One ring entry: key + `(generation, epoch)` as big-endian i64s. Mirrors pollis-core.
 const RING_ENTRY_LEN: usize = 48;
 
 /// AES-256-GCM tag.
 const TAG_LEN: usize = 16;
 
-/// Ceiling on the ring length. A ring grows by one key per removal batch; a
-/// conversation that has removed members a thousand times is not a real one,
-/// and the bound keeps a hostile member from parking a large blob here.
+/// Ceiling on the ring length (one key per removal batch); bounds a hostile member's blob.
 const MAX_KEY_VERSION: i64 = 1024;
 
 #[derive(Debug)]
@@ -116,8 +93,7 @@ pub async fn apply_upsert_keystate(
     let Ok(wrapped) = b64_decode(&body.wrapped_keyring) else {
         return Ok(FileKeystateOutcome::Invalid("wrapped_keyring is not valid base64"));
     };
-    // The wrap is exactly the ring plus a tag: a length that disagrees with
-    // `key_version` is a client bug or a lie, and either way not a ring.
+    // The wrap is exactly the ring plus a tag.
     if wrapped.len() != body.key_version as usize * RING_ENTRY_LEN + TAG_LEN {
         return Ok(FileKeystateOutcome::Invalid(
             "wrapped_keyring length does not match key_version",
@@ -219,7 +195,7 @@ pub async fn read_keystate(
     }))
 }
 
-/// The stored row, byte-exact. Shared by the read handler and the tests.
+/// The stored row, byte-exact.
 pub async fn read_stored(
     conn: &Connection,
     conversation_id: &str,

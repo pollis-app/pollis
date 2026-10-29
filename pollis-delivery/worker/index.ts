@@ -1,17 +1,8 @@
 // Cloudflare Worker front-door for the Pollis Delivery Service.
 //
-// The DS is a stateless axum binary (pollis-delivery/Dockerfile) — all state
-// lives in Turso/R2. Here it runs as a single-instance Cloudflare Container
-// fronted by a Durable Object: the Worker forwards every HTTP request to the
-// container on :8788, and the DO gives us exactly one serialized instance
-// (Pollis's single-writer-to-Turso invariant, #419/#420).
+// One serialized Cloudflare Container behind a Durable Object (single writer to Turso, #419/#420).
 //
-// Secrets: the container reads its config as OS env vars (TURSO_URL, LIVEKIT_*,
-// R2_*, …). Those come from Wrangler Secrets Store bindings, which are async
-// (`.get()`), so they cannot live in the static `envVars`. Instead we override
-// `startAndWaitForPorts` to resolve them at boot and inject them as per-instance
-// env vars before the container serves any traffic. Doppler -> Secrets Store is
-// the single source of truth (see the deploy workflows).
+// Secrets Store bindings are async, so `startAndWaitForPorts` resolves them into env vars at boot.
 import {
   Container,
   type ContainerStartConfigOptions,
@@ -28,66 +19,16 @@ import {
 } from "./dev-gate";
 
 // WHERE the DS container physically runs (#658).
-//
-// A Durable Object addressed by name is placed in the region nearest whoever
-// FIRST instantiated it, and that placement is PERMANENT for the life of that
-// object ID. `getContainer(binding, name)` — which this used to call — is exactly
-// `binding.idFromName(name)` + `binding.get(id)` with no placement argument
-// (@cloudflare/containers 0.3.7, dist/lib/utils.js), so placement was never
-// configured: it was decided by whichever request happened to arrive first.
-//
-// `enam` (eastern North America) matches the `aws-us-east-1` Turso primary that
-// BOTH environments use. It is declared so placement is at least a reviewable
-// property rather than silently inherited from whoever sent the first request.
-//
-// DO NOT TREAT THIS AS A PERFORMANCE LEVER — it was tested and it is not one.
-//
-// Dev is much slower than prod on identical code and images, measured from the
-// SAME edge (IAD, confirmed via cf-ray): `/version` ~280ms vs ~47ms with no
-// database involved at all, and ~1.4s vs ~65ms on a signed request. The dev Turso
-// database answers in ~20ms queried directly, so the database is not the cause.
-// The hypothesis was that dev's container sits far from it, and #658 tested that
-// directly by creating a FRESH object under this hint (via the staged
-// max_instances migration in docs/deployments.md).
-//
-// RESULT: no change whatsoever — ~280ms and ~1.4s after re-placement. A
-// `locationHint` evidently does not govern where a CONTAINER-backed durable
-// object's container is scheduled, whatever it does for the object itself. The
-// dev/prod gap is still unexplained; that is deferred to the hosting-strategy
-// spike on #658. Keep the hint (it is free and correct as a declaration), but do
-// not reach for it expecting latency to move.
+// A DO is placed near whoever first created it, permanently; `enam` matches the Turso primary.
+// NOT A PERFORMANCE LEVER: re-placing dev under this hint changed nothing (#658).
 const DS_LOCATION_HINT: DurableObjectLocationHint = "enam";
 
-// `locationHint` is honoured ONLY when the object is first created — an existing
-// object never migrates. So the hint below does NOT move either environment's
-// current container; it decides where the object lands the next time one is
-// created from scratch (new account, new namespace, a `migrations` class change,
-// or a deliberate rename per the procedure below). That is the point: it stops
-// prod's placement from being re-rolled by chance.
-//
-// The object name comes from the per-environment `DS_SINGLETON_NAME` var so an
-// environment can be re-placed on its own. This is the fallback for a config that
-// sets no var — prod's long-standing object.
-//
-// CHANGING AN ENVIRONMENT'S NAME RE-PLACES ITS CONTAINER, and must follow the
-// staged procedure in docs/deployments.md. A bare rename was tried on 2026-08-06
-// and took dev down:
-//
-//   Failed to start container: Maximum number of running container instances
-//   exceeded. Try again later, or try configuring a higher value for max_instances
-//
-// A rename creates a SECOND durable object while `max_instances: 1` permits only
-// one container instance. The outgoing object still held it, so the incoming one
-// could never start and every request 500'd until traffic was routed back. The DO
-// holds no DS state (all of it is in Turso; the only `ctx.storage` use is dev's
-// disposable gate counts, dev-gate.ts) — the blocker is the instance cap, not data. Hence: raise the cap, switch the name,
-// let the orphan idle past `sleepAfter` and release, then lower the cap again.
+// `locationHint` applies only when an object is first created; existing objects never migrate.
+// Fallback object name when `DS_SINGLETON_NAME` is unset (prod's object).
+// RENAMING RE-PLACES THE CONTAINER: follow docs/deployments.md, or `max_instances: 1` blocks it.
 const DS_SINGLETON_NAME_FALLBACK = "pollis-delivery-singleton";
 
-// Keys synced from Doppler into this env's Secrets Store, each bound under the
-// same name in wrangler config. Read at container start and passed through as
-// OS env vars. Missing/optional keys are skipped so an absent dev-only secret
-// (e.g. DEV_OTP in prod) never bricks startup.
+// Secrets Store keys passed to the container as env vars; missing ones are skipped.
 const SECRET_KEYS = [
   "TURSO_URL",
   "TURSO_TOKEN",
@@ -102,27 +43,16 @@ const SECRET_KEYS = [
   "R2_SECRET_KEY",
   "R2_BUCKET",
   "DEV_OTP",
-  // #720: gates GET /v1/retention/metrics. Absent here means the DS never sees
-  // it, the route stays default-closed, and the endpoint 404s however correctly
-  // the secret is set in Doppler and bound in wrangler.
+  // #720: gates GET /v1/retention/metrics; absent, the endpoint 404s.
   "POLLIS_DS_METRICS_TOKEN",
-  // #707: authenticates the content-free push fan-out to Expo. Absent
-  // here means the DS sends unauthenticated, which Expo rejects outright
-  // once Enhanced Security for Push Notifications is enabled.
+  // #707: authenticates push fan-out to Expo.
   "EXPO_TOKEN",
   // `<email>:<6 digits>` — the one account App Store / Play review signs in
   // with; that address gets this fixed code and no email (otp.rs ReviewLogin).
   "APP_REVIEW_LOGIN",
 ] as const;
 
-// Non-secret per-environment tunables, set (or not) as wrangler `vars` and
-// forwarded to the container only when set — an unset key leaves the DS on its
-// compiled-in default (ratelimit.rs `RateLimitConfig::from_env`). Every per-IP
-// rate-limit tier is listed so any of them can be tuned per environment with a
-// config change alone; today only dev sets the two OTP tiers (the mobile e2e
-// suites sign up many accounts from one IP) and the ops log. Checked against
-// ds-config-manifest.json `optional_container_vars` by
-// scripts/check-ds-config-chain.py.
+// Non-secret tunables, forwarded only when set; checked by scripts/check-ds-config-chain.py.
 const TUNABLE_VAR_KEYS = [
   "RL_REQUEST_OTP_MAX",
   "RL_REQUEST_OTP_WINDOW_SECS",
@@ -138,17 +68,11 @@ const TUNABLE_VAR_KEYS = [
   "RL_GET_WINDOW_SECS",
   "RL_INVITE_REDEEM_MAX",
   "RL_INVITE_REDEEM_WINDOW_SECS",
-  // Dev-only request-otp / rate-limit ops log (ops_log.rs). Only
-  // wrangler.dev.jsonc sets it; unset (prod) means no recorder exists.
+  // Dev-only ops log (ops_log.rs).
   "POLLIS_DS_OPS_LOG",
 ] as const;
 
-// Every request header through which a client IP can reach the container. The
-// Durable Object deletes ALL of them before forwarding (see `fetch` below), so
-// the DS process never receives a plain client address — it receives only
-// CLIENT_BUCKET_HEADER. Listed exhaustively, including headers Cloudflare adds
-// only under optional zone settings (Pseudo IPv4, the "Add True-Client-IP"
-// managed transform), so toggling one in the dashboard cannot leak an address.
+// Every header that can carry a client IP, all deleted before forwarding.
 // tests/no_client_ip_exposure.rs asserts this list is complete.
 const CLIENT_IP_HEADERS = [
   "cf-connecting-ip",
@@ -160,18 +84,13 @@ const CLIENT_IP_HEADERS = [
   "forwarded",
 ] as const;
 
-// The ONLY client identity the container sees: a per-instance keyed hash of the
-// client IP, which the DS rate limiter keys on (ratelimit.rs). Always deleted
-// from the inbound request first, so a client cannot choose its own bucket.
+// The ONLY client identity the container sees: a keyed hash of the IP; inbound copies are deleted.
 const CLIENT_BUCKET_HEADER = "x-pollis-client-bucket";
 
-// Bytes of HMAC-SHA256 output kept in the bucket — matches the DS's own
-// truncation; 128 bits makes two clients sharing a budget negligible.
+// Bytes of HMAC-SHA256 output kept (128 bits), matching the DS.
 const CLIENT_BUCKET_BYTES = 16;
 
-// How long a resolved dev-gate secret is reused before the Secrets Store is
-// asked again: a rotated key is honoured within this window, and an ordinary
-// request does not pay a store round trip.
+// How long a resolved dev-gate secret is reused before re-reading the store.
 const GATE_SECRET_TTL_MS = 5 * 60 * 1000;
 
 // A Secrets Store value, or undefined when unbound, unset or unreadable.
@@ -196,28 +115,18 @@ type Env = {
   PORT: string;
   POLLIS_DS_REQUIRE_AUTH: string;
   POLLIS_DS_WATERMARK_STALE_MONTHS?: string;
-  // Which durable object hosts this environment's container — PER ENVIRONMENT,
-  // and deliberately so. The name determines object identity, and identity
-  // determines placement, so a name shared across environments means dev cannot
-  // be re-placed without also re-placing prod on its next deploy. That coupling
-  // is exactly how a routine dev migration would become a production outage.
-  // Absent → DS_SINGLETON_NAME_FALLBACK, which is prod's existing object.
+  // The object hosting this environment's container; per environment so dev can be re-placed alone.
   DS_SINGLETON_NAME?: string;
-  // Mobile OTA updates (#1250, updates.ts): the public release bucket, read
-  // under its `ota/` prefix, and the one channel served. Prod only — dev binds
-  // neither, so its /updates/ routes answer 404.
+  // Mobile OTA updates (#1250): prod only; dev answers /updates/ with 404.
   UPDATES?: R2Bucket;
   OTA_CHANNEL?: string;
-  // The dev gate (#1242, dev-gate.ts). Dev only: wrangler.dev.jsonc sets the
-  // mode and binds the key, read by the Worker and never forwarded to the
-  // container. Prod sets neither, so the gate does not exist there.
+  // The dev gate (#1242): dev only; the key is never forwarded to the container.
   DEV_GATE_MODE?: string;
   POLLIS_DEV_ACCESS_KEY?: SecretStoreBinding;
 } & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined> &
   Partial<Record<(typeof TUNABLE_VAR_KEYS)[number], string>>;
 
-// The tunables this environment actually sets, ready to spread into envVars.
-// Unset/empty keys are omitted so the DS default applies.
+// The tunables this environment sets; unset keys are omitted.
 function tunableVarEnv(env: Env): Record<string, string> {
   const out: Record<string, string> = {};
   for (const key of TUNABLE_VAR_KEYS) {
@@ -238,40 +147,13 @@ export class PollisDelivery extends Container<Env> {
   defaultPort = 8788;
   // Startup readiness gate — the DS serves /health.
   pingEndpoint = "/health";
-  // Scale-to-zero pre-launch: the DO wakes the container on the next request,
-  // so single-instance serialization is unaffected — only a cold boot cost.
-  //
-  // "10m" is EXACTLY the @cloudflare/containers default (DEFAULT_SLEEP_AFTER
-  // in dist/lib/container.js as of the pinned 0.3.7). Consequences:
-  //   - Deleting this line is a NO-OP — the base class re-applies the same 10m.
-  //   - There is no "never sleep" value: parseTimeExpression accepts only
-  //     `<n>[smh]` or a bare seconds count, so always-on is not expressible via
-  //     sleepAfter at any value. The only lever is a large FINITE duration
-  //     (e.g. "24h"), which just widens the warm window at a running cost.
-  // So going always-on is a COST decision, not a code fix (#515). We keep the
-  // value EXPLICIT — matching the default — to document intent and to survive a
-  // library default change. Re-measure the cold start before paying: procedure
-  // in docs/deployments.md, DS section. (#695)
-  //
-  // DO NOT LOWER THIS BELOW THE OTP LIFETIME (#1142). The DS holds the OTP
-  // failed-guess counter and mailbox lockout in memory, so sleeping clears them.
-  // That is safe only because the silence needed to trigger a sleep (10m) also
-  // expires the code being attacked (OTP_TTL_SECS, 600s) — the reset cannot
-  // outlive the secret it protects. Lower it and an attacker earns a fresh
-  // 5-guess budget against one LIVE code every sleep window just by pausing.
-  // `tests/otp_state_durability.rs` reads this line and fails if the inequality
-  // inverts; raising it (a cost decision) is always safe.
+  // Scale-to-zero after 10m (the library default, kept explicit); always-on is a cost call (#515).
+  // NEVER BELOW THE OTP LIFETIME (#1142): sleep clears the in-memory lockout (otp_state_durability.rs).
   sleepAfter = "10m";
   // The DS reaches out to Turso, Resend, LiveKit and R2 — needs egress.
   enableInternet = true;
 
-  // HMAC key for CLIENT_BUCKET_HEADER: random, non-extractable, generated once
-  // per Durable Object instance and held only in its memory. A per-instance key
-  // is enough — and needs no secret to provision — because every request goes
-  // through this ONE object (the DS is a single serialized instance), so one
-  // client always lands in one bucket for as long as the object lives. When the
-  // object is recreated the key changes, which resets per-IP counters exactly as
-  // a container restart already does.
+  // Per-instance in-memory HMAC key for CLIENT_BUCKET_HEADER; one object, so one bucket per client.
   private bucketKey?: Promise<CryptoKey>;
 
   // Dev gate state (dev-gate.ts): the resolved secrets, re-read every
@@ -314,12 +196,7 @@ export class PollisDelivery extends Container<Env> {
       .join("");
   }
 
-  // The dev gate first (dev only; see dev-gate.ts), so a refused request never
-  // wakes the container. Then replace every client-IP header with the keyed
-  // bucket before the request reaches the container. `CF-Connecting-IP` is set
-  // by Cloudflare's edge and cannot be forged through it; the first
-  // `X-Forwarded-For` hop is a fallback that never applies in practice behind
-  // Cloudflare.
+  // The dev gate first, so a refused request never wakes the container; then bucket the client IP.
   override async fetch(request: Request): Promise<Response> {
     const gateMode = gateModeFrom(this.env.DEV_GATE_MODE);
     if (gateMode !== undefined) {
@@ -345,15 +222,11 @@ export class PollisDelivery extends Container<Env> {
     return super.fetch(new Request(request, { headers }));
   }
 
-  // Non-secret config baked at deploy time (from wrangler `vars`). Secret env
-  // vars are injected in startAndWaitForPorts below (they need async .get()).
+  // Non-secret config from wrangler `vars`; secrets come in startAndWaitForPorts.
   envVars = {
     PORT: this.env.PORT ?? "8788",
     POLLIS_DS_REQUIRE_AUTH: this.env.POLLIS_DS_REQUIRE_AUTH ?? "true",
-    // #720: the device-staleness window. Forwarded explicitly — a wrangler `var`
-    // is bound to the WORKER, not to the container, so without this line the DS
-    // silently falls back to its 6-month code default no matter what the config
-    // says. Omitted from the map when unset so that fallback stays intact.
+    // #720: a wrangler `var` binds to the Worker, not the container, so forward it explicitly.
     ...(this.env.POLLIS_DS_WATERMARK_STALE_MONTHS
       ? { POLLIS_DS_WATERMARK_STALE_MONTHS: this.env.POLLIS_DS_WATERMARK_STALE_MONTHS }
       : {}),
@@ -361,9 +234,7 @@ export class PollisDelivery extends Container<Env> {
     ...tunableVarEnv(this.env),
   };
 
-  // Resolve every Secrets Store binding into a plain env map. Optional/unset
-  // secrets (a dev-only key in prod, or an absent optional) are skipped so a
-  // missing binding never bricks boot.
+  // Resolve every Secrets Store binding into an env map, skipping unset ones.
   private async resolveSecretEnv(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
     for (const key of SECRET_KEYS) {
@@ -383,11 +254,7 @@ export class PollisDelivery extends Container<Env> {
     return out;
   }
 
-  // Inject the resolved secrets as per-instance env vars before the container
-  // accepts traffic. The default fetch path reaches here via containerFetch,
-  // which calls the POSITIONAL form `startAndWaitForPorts(port, {abort})`, so we
-  // must parse all overload shapes (mirroring the base) and preserve ports +
-  // cancellation. Runs on every (re)start, including the scale-to-zero wake.
+  // Inject secrets before traffic; handles every overload (containerFetch uses the positional one).
   //
   // NB: per-call startOptions.envVars REPLACES the class `envVars` in the base
   // (it does not merge), so we re-merge `this.envVars` (PORT etc.) ourselves.
@@ -414,8 +281,7 @@ export class PollisDelivery extends Container<Env> {
     }
 
     const secretEnv = await this.resolveSecretEnv();
-    // Positional (overload 2) form — avoids the object-form typing friction and
-    // preserves ports + cancellation from whichever shape the caller used.
+    // Positional form, preserving ports + cancellation.
     await super.startAndWaitForPorts(ports, resolvedCancellation, {
       ...resolvedStart,
       envVars: {
@@ -428,12 +294,7 @@ export class PollisDelivery extends Container<Env> {
 }
 
 export default {
-  // Forward everything to the single serialized container instance. No
-  // per-route allowlist (the nginx-vhost rot this migration kills, #515) —
-  // the app owns its routing. The ONE exception is `/updates/`, the mobile
-  // OTA update server (updates.ts): answered here from R2 and never forwarded,
-  // so it neither wakes the container nor queues behind it, and it never
-  // passes through the client-IP bucketing above (it reads no client IP).
+  // Forward everything to the container, except `/updates/` (updates.ts), answered here from R2.
   async fetch(request: Request, env: Env): Promise<Response> {
     if (isUpdatesPath(new URL(request.url).pathname)) {
       return handleUpdates(request, env);

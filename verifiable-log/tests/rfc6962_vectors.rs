@@ -1,44 +1,17 @@
 //! RFC 6962 / RFC 9162 known-answer tests against the canonical Certificate
 //! Transparency test vectors (the 8-leaf set published in RFC 6962 and the
 //! `google/certificate-transparency` Go repository, `merkle/merkle_test.go`).
-//!
-//! Every expected value below is a HARDCODED hex constant copied from the
-//! spec/CT vectors. None is derived by calling this crate's own code — these
-//! are true known-answer tests, not self-referential round-trips. We feed the
-//! canonical leaf inputs through our hashing + Merkle math and assert that the
-//! roots, inclusion paths, and consistency paths come out byte-exact against
-//! the published numbers.
-//!
-//! ## Why these run at the hash/merkle layer, not through `Entry`
-//!
-//! Our application leaf encoding wraps payloads in a tenant frame —
-//! `len(tenant) as u32 BE || tenant || data` (see [`verifiable_log::Entry`]).
-//! That framing prepends bytes, so a framed entry's hashed bytes can NEVER be
-//! byte-equal to a bare RFC leaf input (e.g. the empty input `""` is impossible
-//! to reproduce — the frame is at minimum 4 bytes). The RFC vectors therefore
-//! cannot be applied at the `Entry` layer.
-//!
-//! They CAN be applied — bit-exactly — one layer down, where the raw leaf input
-//! is exactly what gets hashed under the `0x00` prefix: `hash::leaf_hash(input)`
-//! computes `SHA-256(0x00 || input)`, and `merkle::{root_hash, inclusion_path,
-//! consistency_path, verify_inclusion, verify_consistency}` operate directly on
-//! those leaf hashes. So the Merkle tree math this crate signs prod STHs over is
-//! demonstrably RFC 6962-conformant; only the per-tenant leaf framing (an
-//! intentional multi-tenancy choice) sits above it. The
-//! `tenant_frame_cannot_reproduce_raw_rfc_leaf` test pins that distinction.
+//! Expected values are hardcoded spec constants, applied below the `Entry` tenant frame.
 
 use verifiable_log::hash::{self, Hash};
 use verifiable_log::merkle;
 use verifiable_log::Entry;
 
-/// Decode a hardcoded vector hex string into a 32-byte hash. Uses the crate's
-/// own `from_hex` only as a hex *decoder* — the bytes themselves are the
-/// external known answer, not anything this crate computed.
+/// Decode a hardcoded vector hex string into a 32-byte hash.
 fn h(s: &str) -> Hash {
     hash::from_hex(s).expect("vector hex must be 32 bytes")
 }
 
-// ── Canonical leaf inputs (RFC 6962 / CT `merkle_test.go`) ──────────────────
 // The 8 leaf inputs, as raw bytes. Leaf 0 is the empty input.
 fn leaf_inputs() -> Vec<Vec<u8>> {
     [
@@ -56,8 +29,6 @@ fn leaf_inputs() -> Vec<Vec<u8>> {
     .collect()
 }
 
-/// Leaf hashes for the first `n` canonical inputs, computed through our
-/// `hash::leaf_hash` (the layer that hashes the raw RFC input under `0x00`).
 fn leaves(n: usize) -> Vec<Hash> {
     leaf_inputs()
         .iter()
@@ -66,13 +37,10 @@ fn leaves(n: usize) -> Vec<Hash> {
         .collect()
 }
 
-// ── Known-answer constants ──────────────────────────────────────────────────
-
 /// Merkle Tree Hash of the empty list = SHA-256() (RFC 6962 §2.1).
 const EMPTY_ROOT: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-/// Published roots (Merkle Tree Hash) for tree sizes 1..=8 over the canonical
-/// inputs. Index 0 here is tree size 1.
+/// Published roots for tree sizes 1..=8; index 0 is tree size 1.
 const ROOTS: [&str; 8] = [
     "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
     "fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125",
@@ -84,12 +52,9 @@ const ROOTS: [&str; 8] = [
     "5dc9da79a70659a9ad559cb701ded9a2ab9d823aad2f4960cfe370eff4604328",
 ];
 
-// ── Empty tree + per-size roots ─────────────────────────────────────────────
-
 #[test]
 fn empty_tree_hash_matches_rfc() {
     assert_eq!(hash::empty_root(), h(EMPTY_ROOT));
-    // The tree-of-zero-leaves root takes the same path through merkle::root_hash.
     assert_eq!(merkle::root_hash(&[]), h(EMPTY_ROOT));
 }
 
@@ -119,8 +84,6 @@ fn roots_match_rfc_for_every_size_1_through_8() {
     }
 }
 
-// ── Inclusion proofs ────────────────────────────────────────────────────────
-//
 // Published CT inclusion vectors (`merkle_test.go`, 1-based leaf indices in the
 // source, written here 0-based): (leaf_index, tree_size, audit_path).
 
@@ -193,7 +156,6 @@ fn inclusion_proofs_verify_against_published_vectors() {
             "published inclusion proof for leaf {} in tree {} must verify",
             v.leaf_index, v.tree_size,
         );
-        // Negative control: the same proof against a different root must fail.
         let wrong_root = h(EMPTY_ROOT);
         assert!(
             !merkle::verify_inclusion(&leaf, v.leaf_index, v.tree_size, &path, &wrong_root),
@@ -202,10 +164,7 @@ fn inclusion_proofs_verify_against_published_vectors() {
     }
 }
 
-// ── Consistency proofs ──────────────────────────────────────────────────────
-//
 // Published CT consistency vectors (`merkle_test.go`): (first, second, path).
-// These are the exact pairs the CT vectors publish.
 
 struct ConsistencyVector {
     first: usize,
@@ -214,7 +173,6 @@ struct ConsistencyVector {
 }
 
 const CONSISTENCY_VECTORS: &[ConsistencyVector] = &[
-    // 1 -> 8
     ConsistencyVector {
         first: 1,
         second: 8,
@@ -224,7 +182,6 @@ const CONSISTENCY_VECTORS: &[ConsistencyVector] = &[
             "6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
         ],
     },
-    // 6 -> 8
     ConsistencyVector {
         first: 6,
         second: 8,
@@ -234,7 +191,6 @@ const CONSISTENCY_VECTORS: &[ConsistencyVector] = &[
             "d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
         ],
     },
-    // 2 -> 5
     ConsistencyVector {
         first: 2,
         second: 5,
@@ -269,7 +225,6 @@ fn consistency_proofs_verify_against_published_vectors() {
             "published consistency proof {} -> {} must verify",
             v.first, v.second,
         );
-        // Negative control: swapping in the wrong older root must fail.
         let wrong_first = h(EMPTY_ROOT);
         assert!(
             !merkle::verify_consistency(v.first, v.second, &path, &wrong_first, &second_root),
@@ -278,14 +233,9 @@ fn consistency_proofs_verify_against_published_vectors() {
     }
 }
 
-// ── The framing-layer finding ───────────────────────────────────────────────
-
 #[test]
 fn tenant_frame_cannot_reproduce_raw_rfc_leaf() {
-    // An `Entry` prepends `len(tenant) as u32 BE || tenant` before the payload,
-    // so even with an empty tenant the hashed bytes differ from the bare RFC
-    // input — which is exactly why the vectors above are applied at the
-    // hash/merkle layer, not through `Entry`.
+    // An `Entry` frames even an empty tenant, so it can never match a bare RFC input.
     let raw = &leaf_inputs()[1]; // input "00"
     let framed = Entry::new("", raw.clone());
     assert_ne!(
@@ -293,7 +243,6 @@ fn tenant_frame_cannot_reproduce_raw_rfc_leaf() {
         hash::leaf_hash(raw),
         "tenant framing must change the hashed bytes vs the bare RFC leaf input",
     );
-    // The framed bytes carry the 4-byte length prefix (empty tenant => 0u32).
     assert_eq!(&framed.encode()[..4], &[0, 0, 0, 0]);
     assert_eq!(&framed.encode()[4..], &raw[..]);
 }

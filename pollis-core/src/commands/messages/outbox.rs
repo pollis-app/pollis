@@ -1,35 +1,10 @@
 //! The durable outbox for outgoing messages (#1335).
 //!
-//! Before #1335 a send wrote its local `message` row only after the slow part —
-//! resolve, MLS catch-up, seal — and the DS post came after that. The first send
-//! in a fresh group can take up to a minute, and the renderer shows the message
-//! as sent from the first frame. A process killed in that window (the user
-//! swiping the app away, the OS reclaiming it) lost the message without a trace:
-//! no row, nothing marked unsent, nothing to retry.
+//! The outbox is the `message` row itself, written first as `pending`, so every read path shows it.
 //!
-//! The outbox is the `message` row itself, written FIRST with
-//! `send_state = 'pending'` and an empty ciphertext. Delivery fills the
-//! ciphertext, posts, and clears the state; a failed attempt sets `'failed'`.
-//! Using the row rather than a side table means every read path — the
-//! conversation page, previews, threads, search — already shows the message, on
-//! every restart, with no second copy to keep in step.
+//! [`flush_outbox`] (event-driven, never polled) and [`retry_message`] redeliver unsent rows and queued edits.
 //!
-//! An unsent row is delivered again by [`flush_outbox`] — spawned after every
-//! unlock (which is also every cold start) and called by both renderers on a
-//! realtime reconnect and (mobile) on returning to the foreground — and by
-//! [`retry_message`] when the user taps Retry. All event-driven; nothing polls.
-//! The same drain also delivers edits still in the edit outbox (#1555,
-//! `edit_outbox`).
-//!
-//! **Idempotency.** A retry reuses the message id, which is the envelope id.
-//! If an earlier attempt's envelope did land (the process died before it could
-//! record that), the DS answers the re-post as a replay — 200, nothing stored
-//! twice, no second push (`pollis_delivery::messages::send_envelope`) — and a
-//! recipient that somehow holds the id already keeps its one row. Within this
-//! process, one attempt per message runs at a time: [`deliver`] holds the
-//! message's lock in `AppState::outbox_locks` for the whole attempt and re-reads
-//! the row once it has it, so a drain arriving behind an in-flight send finds
-//! the message already delivered and leaves it alone.
+//! **Idempotency.** A retry reuses the envelope id (the DS answers a replay); [`deliver`] holds the per-message lock.
 
 use std::sync::Arc;
 
@@ -42,22 +17,15 @@ use crate::state::AppState;
 
 use super::types::Message;
 
-/// `message.send_state` for a stored message not yet confirmed by the DS —
-/// including an attachment send whose only obstacle is that its
-/// conversation's file key has not reached this device yet
-/// (`file_keys::FileKeyUnavailable`): that is a wait, not a failure.
+/// Not yet confirmed by the DS, including an attachment send waiting on its file key (a wait, not a failure).
 pub(crate) const PENDING: &str = "pending";
 /// `message.send_state` once a delivery attempt has failed in a way a later
 /// one may not (offline, a 5xx, an outdated client).
 pub(crate) const FAILED: &str = "failed";
-/// `message.send_state` once the DS refused it in a way no retry fixes — not a
-/// member any more, the conversation is gone, a malformed body. The drain
-/// leaves these alone; the user's Retry or Discard decides.
+/// The DS refused it in a way no retry fixes; the drain leaves it to the user.
 pub(crate) const REJECTED: &str = "rejected";
 
-/// Whether `e` is a refusal no retry can fix (see [`REJECTED`]): a DS answer of
-/// 400, 403, 404, 410 or 422. Everything else — transport errors, 5xx, 429, an
-/// outdated client, a local MLS problem — may pass next time.
+/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422.
 pub(super) fn is_permanent(e: &Error) -> bool {
     let Error::Other(any) = e else {
         return false;
@@ -68,9 +36,7 @@ pub(super) fn is_permanent(e: &Error) -> bool {
             .is_some_and(|r| matches!(r.status.as_u16(), 400 | 403 | 404 | 410 | 422))
 }
 
-/// The DS's conversation resolve answered that the sender is not (or no longer)
-/// a member — the commonest refusal no retry fixes. Typed so
-/// [`is_permanent`] need not read a message.
+/// The DS resolve says the sender is not a member; typed so [`is_permanent`] needn't parse.
 #[derive(Debug)]
 pub(super) struct NotAMember;
 
@@ -86,12 +52,7 @@ pub(super) fn not_a_member() -> Error {
     Error::Other(anyhow::Error::new(NotAMember))
 }
 
-/// The one way a row is soft-deleted (a redaction, an admin tombstone, the
-/// admin's own copy). It also settles `send_state`: a delete can only target
-/// an envelope that exists, so a message of ours that is deleted for everyone
-/// was delivered — and an unsent row must keep its content (the CHECK), so a
-/// redaction that left the state set would fail, and the ingest would hold its
-/// cursor on it forever (#1335). Binds `?1` = deleted_at, `?2` = id.
+/// The one soft-delete; also clears `send_state`, or the CHECK would wedge ingest (#1335). `?1` = deleted_at, `?2` = id.
 pub(crate) const SOFT_DELETE_SQL: &str = "UPDATE message SET content = NULL, deleted_at = ?1, send_state = NULL
      WHERE id = ?2 AND deleted_at IS NULL";
 
@@ -104,24 +65,12 @@ pub(super) struct Queued {
     pub content: String,
     pub reply_to_id: Option<String>,
     pub thread_id: Option<String>,
-    /// The send's display stamp. While the row has never been sealed every
-    /// attempt refreshes it, so a message queued offline lands at the time it
-    /// actually went out rather than hours earlier; the first attempt that
-    /// SEALS persists its stamp, and every later attempt posts that one
-    /// unchanged — so a retry after a crash-after-post (which the DS answers as
-    /// a replay of the first post) leaves the sender's copy where every
-    /// recipient's is.
+    /// Refreshed each attempt until the first seal, then fixed so a replayed post matches recipients' copies.
     pub sent_at: String,
 }
 
 /// One attachment a send hands to the outbox before it is uploaded (#1335).
-///
-/// Exactly one source: `path`, a file the user chose (a picker selection or a
-/// drop — the shell has already checked it against its path scope), or
-/// `staged_id`, bytes the renderer staged in memory (a paste). Either way the
-/// bytes are stored in the local SQLCipher database before the message row is,
-/// and before any network work, so a process killed during the upload loses
-/// nothing; the staging entry is released once they are.
+/// Exactly one source: a `path` or a `staged_id`; bytes are stored locally before any network work.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutgoingAttachment {
@@ -133,16 +82,12 @@ pub struct OutgoingAttachment {
     pub blurhash: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    /// Marked sensitive in the composer (#1568): receivers draw it blurred
-    /// until revealed. Travels only inside the encrypted envelope (`sens`);
-    /// absent from older renderers, which is `false`.
+    /// Marked sensitive (#1568); travels only inside the encrypted envelope (`sens`).
     #[serde(default)]
     pub sensitive: bool,
 }
 
-/// What the outbox knows about one stored attachment without its bytes: all a
-/// provisional envelope, the finished one and an upload's bookkeeping need. The
-/// bytes themselves are read one attachment at a time, when uploaded.
+/// What the outbox knows about one stored attachment, without its bytes.
 #[derive(Debug, Clone)]
 pub(super) struct AttMeta {
     pub filename: String,
@@ -154,9 +99,7 @@ pub(super) struct AttMeta {
     pub sensitive: bool,
 }
 
-/// The most one message may carry through the outbox, all attachments
-/// together. Each is already capped at the R2 limit; this bounds what a single
-/// queued message can put into the local database.
+/// The most one queued message may carry through the outbox, all attachments together.
 pub(crate) const MAX_OUTBOX_BYTES_PER_MESSAGE: u64 = 4 * pollis_api::broker::R2_MEDIA_MAX_BYTES;
 
 fn over_cap(size: u64) -> Option<Error> {
@@ -168,10 +111,7 @@ fn over_cap(size: u64) -> Option<Error> {
     })
 }
 
-/// Size every attachment from what is already known about it — the file's
-/// metadata, the staged buffer's length — and refuse anything the upload would
-/// refuse (over the R2 cap, or over the per-message total) BEFORE a byte of it
-/// is read or allocated.
+/// Size every attachment and refuse anything over the caps before a byte is read.
 async fn plan_attachments(attachments: &[OutgoingAttachment]) -> Result<Vec<AttMeta>> {
     let mut metas = Vec::with_capacity(attachments.len());
     let mut total: u64 = 0;
@@ -246,9 +186,7 @@ pub(super) fn store_attachment_on(
     Ok(())
 }
 
-/// Store one attachment's bytes: read (a file) or borrowed (a staged paste —
-/// no copy), inserted under the database lock for that one row only, so a
-/// large message never holds the lock across all of its files.
+/// Store one attachment's bytes, locking the DB for that one row only.
 async fn store_attachment(
     state: &Arc<AppState>,
     id: &str,
@@ -281,11 +219,7 @@ async fn store_attachment(
         ))),
     }
 }
-/// One `_att` entry exactly as the renderers encode it
-/// (`frontend/src/utils/attachmentEnvelope.ts`, `mobile/lib/attachments.ts`):
-/// same keys, same order, absent values omitted — so a message whose upload
-/// the outbox finished is indistinguishable on the wire from one the renderer
-/// uploaded itself.
+/// One `_att` entry exactly as the renderers encode it (same keys, same order).
 #[derive(Serialize)]
 struct AttWire<'a> {
     key: &'a str,
@@ -306,9 +240,7 @@ struct AttWire<'a> {
     w: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     h: Option<u32>,
-    /// Sensitive media (#1568). Omitted unless set, so an unmarked attachment
-    /// is byte-identical to one from before the flag existed, and an older
-    /// client — which ignores unknown keys — draws a marked one unblurred.
+    /// Sensitive media (#1568); omitted unless set, so unmarked entries are unchanged.
     #[serde(skip_serializing_if = "is_false")]
     sens: bool,
 }
@@ -326,9 +258,7 @@ struct PendingAttWire<'a> {
     w: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     h: Option<u32>,
-    /// Sensitive media (#1568). Omitted unless set, so an unmarked attachment
-    /// is byte-identical to one from before the flag existed, and an older
-    /// client — which ignores unknown keys — draws a marked one unblurred.
+    /// Sensitive media (#1568); omitted unless set, so unmarked entries are unchanged.
     #[serde(skip_serializing_if = "is_false")]
     sens: bool,
 }
@@ -457,9 +387,7 @@ pub(super) fn remove_unsent_on(conn: &rusqlite::Connection, id: &str) -> Result<
     Ok(n > 0)
 }
 
-/// Bytes whose message row was never written: a process killed after storing
-/// an attachment but before the row (the commit point) — a send the user never
-/// saw accepted. Swept when the database opens, when no send can be mid-way.
+/// Bytes whose message row was never written (killed mid-enqueue); swept at DB open.
 pub(crate) fn sweep_orphan_attachments_on(conn: &rusqlite::Connection) -> Result<usize> {
     Ok(conn.execute(
         "DELETE FROM outbox_attachment WHERE message_id NOT IN (SELECT id FROM message)",
@@ -476,10 +404,7 @@ pub(super) enum Enqueued {
     AlreadySent(Message),
 }
 
-/// A fresh message id for the renderer to name its next send with, so its
-/// optimistic row and the stored outbox row are the same message (#1335).
-/// Minted here rather than in JavaScript so it carries this crate's
-/// randomness: the id is the envelope id the DS dedupes on.
+/// A fresh message id for the renderer, so its optimistic row is the stored row (#1335).
 pub fn new_message_id() -> String {
     Ulid::new().to_string()
 }
@@ -523,11 +448,7 @@ pub(super) fn load(conn: &rusqlite::Connection, id: &str) -> Result<Option<(Mess
 }
 
 /// Write the outbox row — the first thing a send does, before any network.
-///
-/// A row that already carries this id is adopted rather than duplicated, so a
-/// repeated call (a renderer retrying its own invoke) is harmless. It must be
-/// the same message, though: an id already used by another conversation or
-/// author is refused rather than silently merged.
+/// An existing row with this id is adopted, but only if it is the same message.
 pub(super) fn enqueue_on(
     conn: &rusqlite::Connection,
     queued: &Queued,
@@ -573,8 +494,7 @@ pub(super) async fn enqueue(
     queued: &Queued,
     attachments: Vec<OutgoingAttachment>,
 ) -> Result<Enqueued> {
-    // An id already stored is adopted as it stands — any attachments it has
-    // were stored with it.
+    // An id already stored is adopted as it stands.
     {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
@@ -582,9 +502,7 @@ pub(super) async fn enqueue(
             return enqueue_on(db.conn(), queued, &[]);
         }
     }
-    // Sized before anything is read; then stored one at a time, each under the
-    // database lock for its own insert only; then the row, which commits the
-    // message. A kill before the row leaves only bytes, swept at the next open.
+    // Sized, then stored one at a time, then the row (the commit point); a kill leaves only bytes.
     let metas = plan_attachments(&attachments).await?;
     for (position, (att, meta)) in attachments.iter().zip(&metas).enumerate() {
         if let Err(e) = store_attachment(state, &queued.id, position, att, meta).await {
@@ -630,9 +548,7 @@ pub(super) fn settle_on(conn: &rusqlite::Connection, id: &str) -> Result<String>
     )?)
 }
 
-/// Record a failed attempt — `rejected` when no retry can fix it, `failed`
-/// otherwise. Only an unsent row can fail: a delivered message is never
-/// demoted.
+/// Record a failed attempt: `rejected` if permanent, else `failed`.
 #[cfg(test)]
 fn mark_failed_on(conn: &rusqlite::Connection, id: &str, permanent: bool) -> Result<()> {
     mark_state_on(conn, id, if permanent { REJECTED } else { FAILED })
@@ -648,9 +564,7 @@ pub(super) fn mark_state_on(conn: &rusqlite::Connection, id: &str, send_state: &
     Ok(())
 }
 
-/// The ids of every unsent message the drain should try, oldest first — the
-/// order they were written, so a drain delivers a conversation's backlog in
-/// the order it was typed. A `rejected` one is not among them.
+/// Unsent message ids the drain should try, oldest first; `rejected` ones excluded.
 pub(super) fn unsent_ids_on(conn: &rusqlite::Connection) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT id FROM message WHERE send_state IN ('pending', 'failed') ORDER BY sent_at, id",
@@ -668,9 +582,7 @@ pub(super) async fn is_unsent(state: &Arc<AppState>, id: &str) -> Result<bool> {
     Ok(matches!(load(db.conn(), id)?, Some((_, Some(_)))))
 }
 
-/// Hold `id`'s outbox lock for the life of the guard, and drop the map entry
-/// afterwards when nobody else is waiting on it, so the map does not grow by
-/// one entry per message sent this session.
+/// Holds `id`'s outbox lock; drops the map entry when nobody else waits.
 pub(super) struct OutboxLock {
     state: Arc<AppState>,
     id: String,
@@ -707,11 +619,7 @@ impl OutboxLock {
 }
 
 /// Run one delivery attempt for the queued message `id`.
-///
-/// Takes the message's lock, then re-reads the row: a message that another
-/// attempt delivered while this one waited is returned as it stands, and one
-/// the user discarded meanwhile is gone. A failed attempt marks the row
-/// `'failed'` and returns the error.
+/// Re-reads the row under the lock; a failed attempt marks it `failed`.
 pub(super) async fn deliver(
     state: &Arc<AppState>,
     id: &str,
@@ -740,8 +648,7 @@ async fn deliver_locked(
         let Some(content) = row.content.clone() else {
             return Err(Error::Other(anyhow::anyhow!("Message not found")));
         };
-        // A drained message has no renderer to name its author; the cache this
-        // device keeps of its own profile does, for the mention ping's label.
+        // A drained message's author label comes from this device's cached profile.
         let sender_username = match sender_username {
             Some(name) => Some(name),
             None => db
@@ -774,9 +681,7 @@ async fn deliver_locked(
     let queued = match finish_uploads(state, queued).await {
         Ok(queued) => queued,
         Err(e) if crate::commands::file_keys::is_file_key_unavailable(&e) => {
-            // Only the conversation's file key is missing: a key holder's
-            // re-wrap brings it, nothing about the message is wrong. It stays
-            // queued — not failed, no Retry — and the next drain sends it.
+            // Only the file key is missing: stays queued, not failed; the next drain sends it.
             mark_state(state, id, PENDING).await;
             return Err(e);
         }
@@ -810,13 +715,7 @@ async fn mark_state(state: &Arc<AppState>, id: &str, send_state: &str) {
     }
 }
 
-/// Upload whatever attachment bytes the outbox holds for this message — one
-/// at a time, each blob read from the database just before its upload and
-/// moved into it — then swap the row's provisional content for the finished
-/// `_att` envelope and drop the bytes in one transaction, so a kill at any
-/// point leaves either the bytes (upload again; the orphaned first object is
-/// collected by the DS sweep once nothing references it)
-/// or the finished content.
+/// Upload stored attachments one at a time, then swap in the finished `_att` envelope in one transaction.
 async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Queued> {
     let metas = {
         let guard = state.local_db.lock().await;
@@ -881,18 +780,7 @@ pub async fn retry_message(message_id: String, state: &Arc<AppState>) -> Result<
 
 /// Throw away one of this device's unsent messages — the renderer's Discard.
 ///
-/// Waits out any attempt in flight, so it never races a post. A message that
-/// was never sealed never left this device, and only the local row goes. One
-/// that WAS sealed may have reached the DS — a process that died after its post
-/// landed but before it recorded that, followed by an attempt that failed for
-/// another reason, leaves exactly that — so it is first withdrawn from everyone
-/// the way a self-delete is (redaction + envelope removal, a no-op when nothing
-/// landed), and only then removed here. If that withdrawal fails for a reason
-/// that may pass (offline), nothing is removed and the error is returned:
-/// discarding must never leave a delivered message the sender could still have
-/// deleted. If it fails for good — the sender is no longer a member, the
-/// conversation is gone — there is nothing left they could ever withdraw, so
-/// the row goes anyway rather than staying undiscardable forever.
+/// Waits out any attempt in flight; a sealed message is first withdrawn from the DS unless that is impossible for good.
 ///
 /// Returns `false` when there was nothing to discard: the id is unknown, or the
 /// message was delivered (a delivered message is deleted with `delete_message`).
@@ -903,9 +791,7 @@ pub async fn discard_unsent_message(message_id: String, state: &Arc<AppState>) -
     result
 }
 
-/// The facts a discard decides on: whose message, where, and whether it was
-/// ever sealed (a non-empty ciphertext is written only by a seal, right before
-/// the post).
+/// Whose message, where, and whether it was ever sealed.
 fn unsent_row_on(
     conn: &rusqlite::Connection,
     id: &str,
@@ -944,9 +830,7 @@ async fn discard_locked(state: &Arc<AppState>, id: &str) -> Result<bool> {
     remove_unsent_on(db.conn(), id)
 }
 
-/// Withdraw a possibly-landed message from everyone, first asking whether the
-/// sender can still act in that conversation at all — a non-member's redaction
-/// would fail somewhere inside the MLS path instead of saying so.
+/// Withdraw a possibly-landed message, checking membership first.
 async fn withdraw(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -975,20 +859,7 @@ pub struct OutboxReport {
 
 /// Deliver every unsent message, oldest first (#1335).
 ///
-/// Run after unlock and on reconnect / resume — triggers that often fire
-/// together (an unlock, the launch catch-up, a reconnect and an `online`
-/// event within seconds). So it is SINGLE-FLIGHT: a call that arrives while a
-/// drain runs does not start a second, overlapping one (which would re-attempt
-/// — a catch-up and a fresh seal each — every message the first is failing).
-/// But it is not dropped either: it sets `outbox_rerun`, the running drain goes
-/// round once more before it lets go, and if it had already finished its last
-/// pass, the waiting caller drains itself. A reconnect that arrives while the
-/// unlock drain is failing offline attempts therefore still gets its pass.
-/// Each message still goes
-/// through [`deliver`], so a drain that overlaps a send in flight waits for it
-/// and then finds that message settled. Nothing here retries in a loop: a
-/// message that fails stays `failed` until the next drain or a Retry, and a
-/// `rejected` one is left to the user.
+/// Single-flight: a call during a drain sets `outbox_rerun` instead of overlapping. Nothing retries in a loop.
 pub async fn flush_outbox(state: &Arc<AppState>) -> Result<OutboxReport> {
     use std::sync::atomic::Ordering;
     let mut last = match state.outbox_drain.try_lock() {
@@ -1090,8 +961,7 @@ mod tests {
         .unwrap()
     }
 
-    /// The whole fix in one assertion: the message is stored, as unsent, before
-    /// anything else happens — so a process that dies next still has it.
+    /// The message is stored as unsent before anything else happens.
     #[test]
     fn enqueue_stores_the_message_as_pending_before_any_network() {
         let db = LocalDb::open_in_memory().unwrap();
@@ -1198,9 +1068,7 @@ mod tests {
         enqueue_on(conn, q, &metas).unwrap();
     }
 
-    /// The bytes are stored before the row, before any network — so a kill
-    /// during the upload still has everything the upload needs — and are read
-    /// back one attachment at a time.
+    /// Bytes are stored before the row and read back one attachment at a time.
     #[test]
     fn an_attachment_send_stores_its_bytes_before_its_row() {
         let db = LocalDb::open_in_memory().unwrap();
@@ -1275,9 +1143,7 @@ mod tests {
         );
     }
 
-    /// #1568: a sensitive attachment is stored, read back and written into
-    /// both envelopes as `sens: true`; an unmarked one carries no `sens` at
-    /// all (the byte-for-byte tests above), so it is what it was before.
+    /// #1568: a sensitive attachment round-trips as `sens: true`; an unmarked one has no `sens`.
     #[test]
     fn a_sensitive_attachment_carries_sens_through_the_outbox() {
         let db = LocalDb::open_in_memory().unwrap();
@@ -1319,11 +1185,7 @@ mod tests {
         assert!(v["_att"][1].get("sens").is_none());
     }
 
-    /// #1568, old clients: an envelope carrying `sens` reads exactly as before
-    /// through every parser that predates the flag — the attachment refs a
-    /// delete releases, the search index, the export — because each one
-    /// ignores keys it does not know. And a renderer that predates the flag
-    /// (no `sensitive` in what it sends) sends an unmarked attachment.
+    /// #1568, old clients: every pre-flag parser ignores `sens`.
     #[test]
     fn sens_is_invisible_to_clients_that_predate_it() {
         let marked = r#"{"_att":[{"key":"media/a.enc","url":"","name":"a.png","ct":"image/png","size":1,"hash":"aa","kv":1,"sha":"s","bh":"LKO2","sens":true}],"_txt":"look"}"#;
@@ -1356,9 +1218,7 @@ mod tests {
         assert!(new.sensitive);
     }
 
-    /// A redaction or tombstone that reaches a row the outbox still holds
-    /// applies (no CHECK failure that would hold the ingest's cursor) and
-    /// settles it, so the drain never re-posts a deleted message.
+    /// A redaction reaching an unsent row applies and settles it.
     #[test]
     fn a_remote_delete_of_an_unsent_row_applies_and_settles_it() {
         let db = LocalDb::open_in_memory().unwrap();

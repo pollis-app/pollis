@@ -1,7 +1,4 @@
-// One page of the full-screen media viewer (#1248), chosen by MIME type.
-// A sensitive item the user has not revealed (#1568) — one swiped to from a
-// neighbour — shows its cover instead, and a tap reveals it; the media page
-// (a video's player included) is not mounted until then.
+// One viewer page by MIME type (#1248); an unrevealed sensitive item (#1568) mounts only its cover.
 
 import { Pressable, View } from "react-native";
 import { observer } from "mobx-react-lite";
@@ -26,8 +23,7 @@ export const MediaViewerPage = observer(function MediaViewerPage({
   attachment: MessageAttachment;
   width: number;
   height: number;
-  // The page on screen. Off-screen pages reset their zoom, pause playback
-  // and release their named copy.
+  // Off-screen pages reset zoom, pause and release their named copy.
   active: boolean;
   onZoomChange: (zoomed: boolean) => void;
 }) {

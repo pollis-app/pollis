@@ -6,11 +6,7 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// Generic error string returned whenever a send is suppressed because
-/// of a block — same phrasing whether the recipient has actively
-/// blocked the sender or simply hasn't accepted yet. Keeping this
-/// deliberately uninformative prevents the sender from inferring their
-/// block status.
+/// Generic error for a block-suppressed send; deliberately uninformative so a block can't be inferred.
 pub const BLOCK_ERR: &str = "message request pending";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,8 +27,6 @@ pub struct DmChannelMember {
     pub accepted_at: Option<String>,
 }
 
-/// Wire → domain for one DM channel. One conversion, so the create, list and
-/// fetch paths cannot map the same row differently.
 fn dm_from_wire(d: pollis_api::directory::DmChannelWire) -> DmChannel {
     DmChannel {
         id: d.id,
@@ -65,22 +59,11 @@ pub async fn create_dm_channel(
         return Err(Error::Other(anyhow::anyhow!("cannot create a DM with only yourself")));
     }
 
-    // The block check and the 2-person dedupe both moved into the write (#987).
-    //
-    // Dedupe especially: run on the client it was two reads AND a race — two
-    // devices creating the same DM at once each saw no existing pair and each
-    // created one, splitting the pair's messages across two conversations.
-    // Deciding it inside the write makes "one DM per pair" a property of the
-    // transaction rather than of the client's timing. Multi-party DMs (3+
-    // members) still skip dedupe and always create fresh.
+    // Block check and 2-person dedupe run inside the DS write (#987), so concurrent creates can't split a pair.
 
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    // DS seam: route the channel-creation writes (dm_channel + every membership
-    // row + per-member watermark seeds) through the Delivery Service. The DS
-    // performs all writes in one transaction, re-checks the block relationships,
-    // dedupes a 2-person pair, and answers with the DM either way.
     let body = pollis_api::profile::CreateDmBody {
         id: id.clone(),
         creator_id: creator_id.clone(),
@@ -123,9 +106,7 @@ pub async fn create_dm_channel(
     // An existing DM already has its MLS group; re-initialising would delete and
     // rebuild one every member is already in.
     if !existing {
-        // Initialise the MLS group for this DM (creator becomes the sole member).
-        // Reconcile then adds all members' devices (including creator's other
-        // devices).
+        // Creator becomes the sole member; reconcile adds everyone's devices.
         match crate::commands::mls::init_mls_group(state, &id, &creator_id).await {
             Ok(()) => {
                 if let Err(e) =
@@ -138,9 +119,7 @@ pub async fn create_dm_channel(
         }
     }
 
-    // TOFU-pin every peer's account_id_pub locally so a later Turso-side key
-    // swap is detectable. Advisory — never blocks DM creation. Batched (#875):
-    // one Turso query for the whole roster, not one per member.
+    // TOFU-pin every peer's account_id_pub so a later key swap is detectable. Advisory.
     let peer_ids: Vec<String> = members
         .iter()
         .filter(|m| m.user_id != creator_id)
@@ -151,10 +130,7 @@ pub async fn create_dm_channel(
         crate::diag!("[safety] create_dm_channel: batch pin failed: {e}");
     }
 
-    // Notify non-creator members via their personal inbox rooms so they see
-    // the new DM channel immediately without needing to refresh. Carry the
-    // creator's username so the recipient's status-bar alert can name the
-    // requester instead of a placeholder (issue #396).
+    // Notify other members via their inbox; the username lets their alert name the requester (#396).
     let creator_username = members
         .iter()
         .find(|m| m.user_id == creator_id)
@@ -171,22 +147,13 @@ pub async fn create_dm_channel(
         }
     }
 
-    // Wake the creator's OTHER devices too (#1410). They are not in this DM's
-    // room — they do not know it exists — so the inbox is the only room that
-    // reaches them, and without this a device left open never listed the DM,
-    // never joined its room, and so saw none of its messages until a restart.
-    // `dm_created` is what every shipped client already answers by refetching
-    // its DM lists and pulling its Welcomes; the DS stamps the sender, which is
-    // how a receiver tells its own DM from a request and stays quiet. Sent
-    // after the reconcile above so the Welcomes it queued are there to pull.
+    // Wake the creator's other devices (#1410): the inbox is the only room that reaches them.
     notify_own_devices_of_dm(state, &creator_id, &id, "create_dm_channel").await;
 
     Ok(dm)
 }
 
-/// Wake every device of `user_id` (the actor's own inbox) about a change to the
-/// DM `dm_channel_id` they made on one of them. Best-effort, like every
-/// wake-up: a device that misses it catches up on its next launch.
+/// Best-effort wake of every device of `user_id` about a change to DM `dm_channel_id`.
 async fn notify_own_devices_of_dm(
     state: &Arc<AppState>,
     user_id: &str,
@@ -206,12 +173,7 @@ async fn notify_own_devices_of_dm(
 
 /// The caller's ACCEPTED DMs.
 ///
-/// The block filter is deliberately ASYMMETRIC, and lives server-side now: it
-/// hides channels whose other members the caller has blocked, but NOT channels
-/// where the caller is the blocked party. A blocked user keeps seeing the
-/// conversation, so the block produces no observable signal on their side —
-/// their messages simply stay pending, indistinguishable from a recipient who
-/// has not accepted.
+/// The DS block filter is deliberately asymmetric: a blocked user still sees the DM, so a block is unobservable.
 pub async fn list_dm_channels(
     user_id: String,
     state: &Arc<AppState>,
@@ -223,9 +185,7 @@ pub async fn list_dm_channels(
         .map(dm_from_wire)
         .collect();
 
-    // Same reason the group tree caches its channels (#850): a local `message`
-    // row cannot say whether its conversation is a channel or a DM, and a DM's
-    // display name is the peer's username, which is only knowable here.
+    // Cache DM names for search (#850); the peer's username is only knowable here.
     cache_dms(state, &user_id, &dms).await;
 
     Ok(dms)
@@ -271,9 +231,6 @@ pub async fn accept_dm_request(
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
 
-    // DS seam: route the accept (flip the user's own accepted_at NULL → now)
-    // through the Delivery Service. Server-side authz binds the accept to the
-    // authenticated recipient's own membership row.
     let body = pollis_api::profile::AcceptDmBody {
         dm_channel_id: dm_channel_id.clone(),
         user_id: user_id.clone(),
@@ -281,18 +238,10 @@ pub async fn accept_dm_request(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // #1410: the accepter's other devices still list this DM as a request — the
-    // creator's `dm_created` told them about it, and nothing told them it was
-    // accepted. Until they refetch, the DM is not in their conversation list,
-    // they are not in its room, and every message in it stays invisible there.
+    // #1410: the accepter's other devices still list this as a request until woken.
     notify_own_devices_of_dm(state, &user_id, &dm_channel_id, "accept_dm_request").await;
 
-    // #1571: accepting is the moment this user's device first acts in the DM.
-    // Catch it up (joining it if it holds no group yet) and run the re-add
-    // backstop, so the accepter's OTHER devices — which a creator's add may have
-    // missed — are put in the tree now, from whichever device accepted, rather
-    // than when each one next opens the DM and joins at the head. Best-effort:
-    // the accept itself has already landed.
+    // #1571: catch up and run the re-add backstop so the accepter's other devices join now. Best-effort.
     // Both boxed: large futures, kept off the caller's stack.
     if let Err(e) = Box::pin(crate::commands::messages::catch_up_mls_group_interleaved(
         state,
@@ -314,10 +263,6 @@ pub async fn accept_dm_request(
 }
 
 /// One DM and its members.
-///
-/// Membership-gated since #987: the DS answers `authorized: false` for a DM the
-/// caller is not in, which surfaces here as the same "not found" the caller
-/// already handled. Before, any user could read any DM's roster.
 pub async fn get_dm_channel(
     dm_channel_id: String,
     state: &Arc<AppState>,
@@ -337,10 +282,6 @@ pub async fn add_user_to_dm_channel(
     added_by: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // DS seam: route the membership INSERT + watermark seeds through the
-    // Delivery Service. The DS performs both writes in one transaction and
-    // re-derives the actor's DM membership server-side (a non-member cannot add
-    // anyone).
     let now = chrono::Utc::now().to_rfc3339();
     let body = pollis_api::profile::AddDmMemberBody {
         dm_channel_id: dm_channel_id.clone(),
@@ -366,9 +307,7 @@ pub async fn remove_user_from_dm_channel(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // DS seam: route the membership DELETE through the Delivery Service. The
-    // authz rule (only the channel creator or the user themselves may remove a
-    // member) is enforced server-side.
+    // Only the creator or the user themselves may remove a member (enforced by the DS).
     let body = pollis_api::profile::RemoveDmMemberBody {
         dm_channel_id: dm_channel_id.clone(),
         user_id,
@@ -376,7 +315,7 @@ pub async fn remove_user_from_dm_channel(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // Reconcile removes the member's leaves from the MLS tree (was a security gap).
+    // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &dm_channel_id, &requester_id,
     ).await {
@@ -391,11 +330,7 @@ pub async fn leave_dm_channel(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // DS seam: route the membership DELETE and the empty-channel teardown
-    // (envelopes + dm_channel) through the Delivery Service. The DS does the
-    // member-delete + count + conditional teardown in ONE transaction so a DM
-    // never lingers half-deleted; authz binds the leave to the actor's own
-    // membership.
+    // The DS deletes the member and tears down an empty DM in one transaction.
     let body = pollis_api::profile::LeaveDmBody {
         dm_channel_id: dm_channel_id.clone(),
         user_id,
@@ -408,9 +343,7 @@ pub async fn leave_dm_channel(
         Err(e) => crate::diag!("[mls] leave_dm_channel: forget local group {dm_channel_id}: {e}"),
     }
 
-    // Signal remaining members to reconcile (removes the leaver's stale leaf).
-    // `kind: "leave"` is what makes them actually do it — see
-    // `member_left_conversation_payload` and #1081.
+    // `kind: "leave"` makes remaining members remove the leaver's leaf (#1081).
     if let Err(e) = crate::commands::livekit::publish_to_room_server(
         state,
         &dm_channel_id,
@@ -422,18 +355,11 @@ pub async fn leave_dm_channel(
     Ok(())
 }
 
-// The remaining tests pin schema constraints (PRIMARY KEY dedupe, ON DELETE
-// CASCADE) against the shipped remote schema, plus the 2-person DM dedupe
-// lookup whose SQL now lives in pollis-delivery/src/profile.rs and has no DS
-// test yet. Query-simulation tests for the client SQL #987 removed were deleted.
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
 
-    /// The SHIPPED remote schema — baseline plus every numbered migration, in
-    /// the order `scripts/db-apply.sh` applies them. #875: this used to be
-    /// `BASELINE` plus a hand-written `EXTRA_TABLES` block standing in for the
-    /// later migrations, which is how a fixture ends up laxer than production.
+    /// The shipped remote schema: baseline plus every numbered migration.
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
@@ -462,13 +388,11 @@ mod tests {
             rusqlite::params![id, creator, now],
         ).unwrap();
 
-        // Add creator
         conn.execute(
             "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![id, creator, creator, now],
         ).unwrap();
 
-        // Add other members
         for member in members {
             if *member == creator {
                 continue;
@@ -480,15 +404,12 @@ mod tests {
         }
     }
 
-    // ── DM channel creation ────────────────────────────────────────────────
-
     #[test]
     fn create_dm_channel_duplicate_member_ignored() {
         let conn = db();
         setup(&conn);
         create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
 
-        // Try adding bob again
         conn.execute(
             "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) VALUES ('dm1', 'bob', 'alice', '2024-01-02T00:00:00Z')",
             [],
@@ -501,8 +422,6 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1, "should still be one membership row");
     }
-
-    // ── DM cascade deletes ─────────────────────────────────────────────────
 
     #[test]
     fn dm_channel_delete_cascades_members() {
@@ -536,8 +455,6 @@ mod tests {
         assert_eq!(count, 0, "bob's membership should be cascade-deleted");
     }
 
-    // ── watermark dedupe ───────────────────────────────────────────────────
-
     #[test]
     fn watermark_idempotent() {
         let conn = db();
@@ -566,8 +483,6 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
     }
-
-    // ── 2-person DM dedupe lookup ─────────────────────────────────────────
 
     fn find_two_person_dm(conn: &Connection, a: &str, b: &str) -> Option<String> {
         conn.query_row(
@@ -606,9 +521,7 @@ mod tests {
 
     #[test]
     fn dedupe_finds_channel_created_by_other_user() {
-        // Duplicate-prevention case: bob created the pending request first;
-        // when alice triggers create_dm_channel(alice, [bob]) the dedupe
-        // lookup must find bob's existing channel regardless of who created it.
+        // Bob created the pending request first; the lookup must still find it.
         let conn = db();
         setup(&conn);
         create_dm(&conn, "dm1", "bob", &["bob", "alice"]);

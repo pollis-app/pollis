@@ -1,9 +1,4 @@
-//! #1423 — push outcomes are visible to the operator, and the tickets kept for
-//! receipts go with the account.
-//!
-//! `GET /v1/ops/push` serves counts only, behind the operator token, with the
-//! same fail-closed shape as `/v1/ops/errors`. `push_ticket` names only a token,
-//! so account deletion has to reach it through the user's tokens.
+//! #1423 — push outcomes are visible to the operator; push tickets go with the account.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -62,7 +57,6 @@ async fn the_route_needs_the_operator_token() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["pending_receipts"], 1);
     assert!(body["counts"].is_object(), "{body}");
-    // Counts only: the pending ticket's token never appears.
     assert!(!body.to_string().contains("ExponentPushToken"), "{body}");
 }
 

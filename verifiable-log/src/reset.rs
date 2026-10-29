@@ -1,49 +1,7 @@
 //! Signed **reset statements**: the log's own record that one of its trees was
 //! retired and replaced by a new one (#1579).
-//!
-//! **Why this exists.** A transparency log promises that every signed head extends
-//! every earlier one. When a tree breaks that promise (the first commit-log tree
-//! did, after it was rebuilt from a pruned database table), there are two honest
-//! options: continue it at hash level, or retire it and start a new tree. A silent
-//! restart is not one of them, because a new tree with no statement behind it is
-//! indistinguishable from a log quietly discarding history it did not like.
-//!
-//! A reset statement is that statement, signed by the log's signing key under its
-//! own domain ([`RESET_DOMAIN`]), so it can never be mistaken for, or replayed as, a
-//! tree head or a key set. It records:
-//!
-//! * the retired tree's identity (name, STH context, URL path);
-//! * its **last consistent head** (a full signed STH) and the leaf hashes that
-//!   head commits to, so anyone can recompute the root of every earlier head on
-//!   the same chain without the leaf data, some of which is gone;
-//! * every other head of the retired tree that is still served, each with its
-//!   root: the sizes on the consistent chain, the **forked** heads signed during
-//!   the incident, and heads **superseded** by an earlier re-genesis;
-//! * why the tree was retired;
-//! * the successor tree's identity and its **genesis**: the head at size 1, i.e.
-//!   the hash of its first leaf, which every later head of the successor must
-//!   commit to.
-//!
-//! A verifier then reports the retired tree as RETIRED rather than failing on it:
-//! the consistent chain is still checked head by head, and each listed fork is
-//! reported as known. Anything the statement does not list (a head at an unlisted
-//! size, or a listed size with a different root) is still a failure. Listing is
-//! not absolution for what the log might sign tomorrow: the statement is signed
-//! once and its retired tree is frozen, so a head it does not name is evidence the
-//! freeze was broken.
-//!
-//! **Why the online key, not the root.** The root key (#754) is offline and signs
-//! only key sets, and CI must never hold it. The signing key is the party that
-//! signed the inconsistent heads, so it is the party whose account of them is
-//! being recorded: the statement binds that key to one description of its own
-//! history, publicly and permanently. It cannot be used to hide anything, because
-//! every head it lists is checked against what is actually served.
-//!
-//! **Encoding.** The signed bytes are `RESET_DOMAIN || len(u64 BE) || body`, where
-//! `body` is the compact JSON of [`ResetBody`]. Every type in the body is a struct,
-//! a sequence, a string or an integer, and unknown fields are refused, so parsing
-//! and re-serialising a body is canonical: field order follows the declaration,
-//! never the input.
+//! A verifier reports the retired tree as RETIRED: its chain and listed forks are checked,
+//! anything unlisted fails.
 
 use ml_dsa::{EncodedSignature, Keypair, MlDsa44, Signer, Verifier};
 use serde::{Deserialize, Serialize};
@@ -86,8 +44,7 @@ pub struct RetiredTree {
     pub path: String,
     /// The newest head that is consistent with every earlier head on its chain.
     pub last_consistent: Sth,
-    /// Leaf hashes (lowercase hex) of the `last_consistent.tree_size` leaves that
-    /// head commits to, in leaf order.
+    /// Leaf hashes (lowercase hex) of the `last_consistent` head, in leaf order.
     pub leaf_hashes: Vec<String>,
     /// Every served head size on the consistent chain, ascending. Each head's root
     /// is the Merkle root of that prefix of [`Self::leaf_hashes`].
@@ -137,8 +94,7 @@ pub struct ResetStatement {
 /// How a served head of the retired tree relates to the statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeadClass<'a> {
-    /// On the consistent chain: its root is the root of that prefix of the
-    /// listed leaf hashes.
+    /// On the consistent chain.
     Chain,
     /// A fork the statement lists, at this size and root.
     ListedFork(&'a ListedHead),
@@ -171,9 +127,7 @@ impl ResetBody {
             .collect()
     }
 
-    /// Check the statement against itself: the leaf hashes reproduce the last
-    /// consistent head, the chain sizes are on that chain, and every listed fork
-    /// really is off it. Says nothing about what is served; see [`Self::classify`].
+    /// Check the statement against itself; says nothing about what is served.
     pub fn validate(&self) -> Result<()> {
         if self.format_version != RESET_FORMAT_VERSION {
             return Err(refuse(format!(
@@ -419,8 +373,7 @@ mod tests {
         assert!(serde_json::from_value::<ResetStatement>(v).is_err());
     }
 
-    /// A signature from the same key over the same bytes under another domain
-    /// (a tree head, a key set) is never a reset signature, and the reverse.
+    /// Same key, other domain (tree head, key set): never a reset signature, and the reverse.
     #[test]
     fn a_signature_under_another_context_does_not_verify() {
         let b = body();
@@ -437,7 +390,6 @@ mod tests {
         };
         assert!(st.verify_any(&cands(1)).is_err());
 
-        // A reset signature is not an STH signature either.
         let good = ResetStatement::create(&key(1), body()).unwrap();
         let fake_head = Sth {
             tree_size: 9,
@@ -480,8 +432,7 @@ mod tests {
         let b = body();
         let chain4 = to_hex(&b.chain_root(4).unwrap());
         assert_eq!(b.classify(4, &chain4), HeadClass::Chain);
-        // An unlisted size on the chain still classifies as chain: the leaf
-        // hashes, not the size list, are what decide.
+        // Unlisted chain sizes still classify as chain: the leaf hashes decide.
         let chain2 = to_hex(&b.chain_root(2).unwrap());
         assert_eq!(b.classify(2, &chain2), HeadClass::Chain);
         let fork = b.retired.forks[0].clone();

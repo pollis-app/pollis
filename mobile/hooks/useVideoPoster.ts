@@ -1,17 +1,8 @@
-// A poster frame for a local video file (#1585): the composer's card for a
-// picked video shows its first frame, as desktop's does. expo-image cannot
-// decode video, so a short-lived expo-video player grabs one thumbnail
-// (a native image ref expo-image draws directly) and is released at once.
-// Only ever a picked, local `file://` — never a decrypted attachment.
-//
-// The frame is asked for once the player has loaded the file: on iOS the
-// player item is attached asynchronously, and a request before that returns
-// nothing.
+// A picked local video's first frame (#1585) via a short-lived expo-video player, asked for only once loaded (iOS).
 
 import { useEffect, useState } from "react";
 import { createVideoPlayer, type VideoThumbnail } from "expo-video";
 
-// Give up on a file the player never loads; the card keeps its plain surface.
 const LOAD_TIMEOUT_MS = 8000;
 
 export function useVideoPoster(uri: string | null): VideoThumbnail | null {
@@ -59,7 +50,7 @@ export function useVideoPoster(uri: string | null): VideoThumbnail | null {
           }
         })
         .catch(() => {
-          // No poster: the card keeps its plain surface under the play glyph.
+          // No poster: the card keeps its plain surface.
         })
         .finally(release);
     };
@@ -78,7 +69,6 @@ export function useVideoPoster(uri: string | null): VideoThumbnail | null {
     }
     return () => {
       active = false;
-      // An unmount before the frame came back: drop the player now.
       if (subscription) {
         release();
       }

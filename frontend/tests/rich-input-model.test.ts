@@ -1,25 +1,4 @@
-/*
- * The composer's contentEditable is only safe if serialization is exact.
- *
- * `pollis-core::commands::emoji::parse_emoji_tokens` reads whatever this
- * produces, so "what the editor sends" has to be byte-identical to what the
- * `<textarea>` used to send for the same logical content. The rules under test:
- *
- *   - token -> node -> token is lossless, for every position a token can be in;
- *   - a malformed near-token (`<:oops:>`) is TEXT and survives as those exact
- *     characters — the same rule `emojiTokens.ts` states for rendering;
- *   - an element's rendered contents never reach the wire; only its validated
- *     `data-emoji-token` does, so a forged attribute cannot smuggle markup;
- *   - the terminal skin's ghost is a rendering and contributes nothing;
- *   - a paste is `text/plain` and nothing else, so no amount of pasted HTML can
- *     put a `<`, `>` or `&` into the message that was not typed as one.
- *
- * DOM-free on purpose: `frontend/tests/` runs on Node's built-in runner with no
- * browser, so the serializer is written against the handful of `Node` members
- * it touches and the fixtures below are plain objects.
- *
- *   node --test frontend/tests/
- */
+/* Composer serialization must be exact: lossless tokens, malformed tokens stay text, only validated `data-emoji-token` reaches the wire, paste is text/plain. DOM-free fixtures. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -38,8 +17,6 @@ import { splitEmojiSegments } from "../src/components/Emoji/emojiTokens.ts";
 
 const PARROT = "<:partyparrot:d7da905542ed745664126a7722b588eef0634737afe8f7a2b9fb7699f13fd3bd>";
 const SHIPIT = "<:shipit:a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90>";
-
-// ── minimal DOM fixtures ───────────────────────────────────────────────────
 
 function text(value: string): SerializableNode {
   return { nodeType: 3, nodeName: "#text", textContent: value, childNodes: [] };
@@ -72,12 +49,7 @@ function emojiNode(token: string, shortcode: string): SerializableNode {
   );
 }
 
-/**
- * The projection `RichTextInput` builds, expressed against the fixtures.
- *
- * Kept in step with `project()` by construction: both are driven by `richRuns`,
- * so a change to how the value is split shows up on both sides at once.
- */
+/** `RichTextInput`'s projection over the fixtures; both are driven by `richRuns`. */
 function project(value: string): SerializableNode {
   const children: SerializableNode[] = [];
   for (const run of richRuns(value)) {
@@ -92,8 +64,6 @@ function project(value: string): SerializableNode {
   }
   return root(children);
 }
-
-// ── round-trip ─────────────────────────────────────────────────────────────
 
 const ROUND_TRIP_CASES = [
   "",
@@ -128,9 +98,7 @@ test("token -> node -> token is lossless", () => {
 });
 
 test("the projection carries exactly the tokens the renderer would draw", () => {
-  // `richRuns` and `splitEmojiSegments` must agree about what a token is, or
-  // the composer would show an image for something a message body renders as
-  // text (or the reverse).
+  // `richRuns` and `splitEmojiSegments` must agree on what a token is.
   for (const value of ROUND_TRIP_CASES) {
     const projected = richRuns(value)
       .filter((run) => run.kind === "emoji")
@@ -148,11 +116,8 @@ test("a malformed near-token stays literal characters, not an emoji node", () =>
   assert.equal(serializeRichInput(project(value)), value);
 });
 
-// ── nothing but text and validated tokens reaches the wire ─────────────────
-
 test("an emoji node contributes its token, never its rendered contents", () => {
-  // The image is a rendering. If serialization ever read the subtree instead of
-  // the attribute, a fallback-to-`:shortcode:` node would send the wrong thing.
+  // Serialization reads the attribute, never the rendered subtree.
   const node = root([
     emojiNode(PARROT, "partyparrot"),
     // The failure rendering: same attribute, text contents instead of an image.
@@ -162,8 +127,7 @@ test("an emoji node contributes its token, never its rendered contents", () => {
 });
 
 test("a forged data-emoji-token is read as ordinary markup, not as a token", () => {
-  // The attribute is validated against the grammar rather than trusted, so an
-  // element that claims a token it cannot have contributes only its text.
+  // The attribute is validated, so a forged token contributes only its text.
   const forged = root([
     element("SPAN", { [EMOJI_TOKEN_ATTR]: "<:x:></span><script>alert(1)</script>" }, [
       text("harmless"),
@@ -180,8 +144,7 @@ test("a forged data-emoji-token is read as ordinary markup, not as a token", () 
 });
 
 test("pasted rich markup serializes to its text and nothing else", () => {
-  // What a browser would have inserted if the paste were not intercepted: a
-  // tree of styled elements, links and an image. None of the markup may appear.
+  // What an uncaught paste would insert; none of its markup may appear.
   const pasted = root([
     element("DIV", {}, [
       element("B", {}, [text("bold")]),
@@ -195,8 +158,6 @@ test("pasted rich markup serializes to its text and nothing else", () => {
   ]);
   const out = serializeRichInput(pasted);
   assert.equal(out, "bold and a link\nstyled");
-  // Every character and attribute value that only markup could have supplied.
-  // ("style" itself is not in the list — the word appears in the pasted TEXT.)
   for (const forbidden of ["<", ">", "&", "https://example.com", "alert(1)", "color:red"]) {
     assert.ok(!out.includes(forbidden), `serialized output leaked ${forbidden}`);
   }
@@ -220,8 +181,6 @@ test("a trailing <br> is the editing host's filler, an inner one is a newline", 
   assert.equal(serializeRichInput(root([element("BR", {})])), "");
 });
 
-// ── atomic deletion ────────────────────────────────────────────────────────
-
 test("backspace and forward-delete find the whole token, never one character", () => {
   const value = `hi${PARROT}there`;
   const start = 2;
@@ -230,8 +189,6 @@ test("backspace and forward-delete find the whole token, never one character", (
   assert.deepEqual(emojiTokenBefore(value, end), { start, end });
   assert.deepEqual(emojiTokenAfter(value, start), { start, end });
 
-  // Anywhere else there is no token adjacent, so the browser's own deletion
-  // stands — one character, as it should be.
   assert.equal(emojiTokenBefore(value, 1), null);
   assert.equal(emojiTokenBefore(value, end + 3), null);
   assert.equal(emojiTokenAfter(value, 0), null);
@@ -256,8 +213,6 @@ test("a near-token is not atomically deletable — it is just characters", () =>
     assert.equal(emojiTokenAfter(value, caret), null);
   }
 });
-
-// ── paste sanitization ─────────────────────────────────────────────────────
 
 /** A clipboard that records which flavours were asked for. */
 function clipboard(flavours: Record<string, string>) {
@@ -289,7 +244,6 @@ test("a pasted raw token survives verbatim and becomes an emoji node", () => {
   const board = clipboard({ "text/plain": `look ${PARROT} here` });
   const pasted = pastedPlainText(board.data);
   assert.equal(pasted, `look ${PARROT} here`);
-  // Spliced into the model, it projects as an image — the whole point.
   assert.deepEqual(
     richRuns(pasted).map((run) => run.kind),
     ["text", "emoji", "text"],
@@ -297,16 +251,13 @@ test("a pasted raw token survives verbatim and becomes an emoji node", () => {
 });
 
 test("a paste of literal markup stays literal characters", () => {
-  // Typed `<` and `>` are ordinary text and must survive as themselves — the
-  // grammar is what makes that safe, since no token can contain them.
+  // Typed `<` and `>` survive; no token can contain them.
   const board = clipboard({ "text/plain": "<script>alert(1)</script> & <:oops:>" });
   assert.equal(pastedPlainText(board.data), "<script>alert(1)</script> & <:oops:>");
 });
 
 test("a paste normalizes CRLF and drops control characters", () => {
-  // Tab and newline are things a person can type, so they stay. A bare CR from
-  // a Windows app would otherwise travel over the wire, and a stray NUL or ESC
-  // would be invisible in the composer and present in the message.
+  // Tab and newline stay; CR, NUL and ESC go.
   const board = clipboard({ "text/plain": "a\r\nb\rc\td\u0000e\u001Bf" });
   assert.equal(pastedPlainText(board.data), "a\nb\nc\tdef");
 });

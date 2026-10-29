@@ -1,6 +1,4 @@
-// Block / unblock hooks. The Rust side hides blocked-by-me DM channels
-// in `list_dm_channels`, so toggling block state from the peer profile
-// screen automatically prunes the inbox on the next refetch.
+// Block / unblock hooks; the core hides blocked-by-me DM channels.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
@@ -8,10 +6,7 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import { dmQueryKeys, dropDMRequests } from "./useDMChannels";
 
-// Mirrors `pollis_core::commands::blocks::BlockedUser` field for field. It
-// used to name these `blocked_id` / `blocked_username` / `created_at`, which
-// the core never sends, so a blocked profile never offered Unblock and the
-// Blocked Users list read `undefined`.
+// Mirrors `pollis_core::commands::blocks::BlockedUser` field for field.
 export interface BlockedUser {
   user_id: string;
   username?: string | null;
@@ -54,8 +49,7 @@ export function useBlockUser() {
         blockedId,
       });
     },
-    // Blocking declines the sender's request: it leaves the list, and the
-    // Direct tab badge, on the tap (#1561).
+    // Blocking declines the sender's request, on the tap (#1561).
     onMutate: async (blockedId: string) => {
       await dropDMRequests(queryClient, currentUser?.id ?? null, (r) => r.user2_id === blockedId);
     },
@@ -71,8 +65,6 @@ export function useBlockUser() {
       queryClient.invalidateQueries({
         queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
       });
-      // Blocking is also the decline path for a DM request (desktop's
-      // RequestsPage does the same) — drop the sender's pending request row.
       queryClient.invalidateQueries({
         queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
       });
@@ -82,11 +74,7 @@ export function useBlockUser() {
 
 export type ReportReason = "spam" | "harassment" | "illegal" | "other";
 
-/**
- * Report a user (#1213), optionally pointing at one of their messages,
- * optionally blocking them in the same step. Sends ids and a reason only; no
- * message text ever leaves the device.
- */
+/** Report a user (#1213): ids and a reason only, never message text. */
 export function useReportUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);

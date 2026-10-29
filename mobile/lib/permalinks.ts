@@ -1,12 +1,9 @@
-// Message permalinks (#887). Port of the parsing/formatting half of
-// frontend/src/utils/urlRouting.ts — the wire format is
-// `pollis://m/<conversation_id>/<message_id>` on every platform.
+// Message permalinks (#887): `pollis://m/<conversation_id>/<message_id>`.
 
 import i18n from "../i18n";
 
 const PERMALINK_PREFIX = "pollis://m/";
 
-// ULIDs today, but validated loosely on purpose: opaque, short, URL-safe.
 const OPAQUE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function formatMessagePermalink(
@@ -35,10 +32,7 @@ export function parseMessagePermalink(
   return { conversationId, messageId };
 }
 
-/**
- * Desktop's exact non-oracle miss copy — a failed resolve renders this and
- * navigates nowhere, indistinguishable from a lookup error on purpose.
- */
+/** Desktop's exact non-oracle miss copy. */
 export function permalinkMissCopy(): string {
   return i18n.t("saved:page.unresolved");
 }

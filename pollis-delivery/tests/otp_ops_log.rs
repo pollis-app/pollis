@@ -1,15 +1,4 @@
-//! The dev-only request-otp / rate-limit ops log (`src/ops_log.rs`), driven
-//! through the real axum router with `tower::oneshot`.
-//!
-//! Three things must hold, and each has a test:
-//! 1. **Prod is untouched.** Off by default, the limiter answers exactly as it
-//!    always did and the operator route does not exist; and `wrangler.prod.jsonc`
-//!    can never switch it on.
-//! 2. **On, it observes without changing a verdict.** The same sequence of
-//!    requests gets the same statuses and the same 429 body with the log on.
-//! 3. **On, it records who spent the budget — never an IP or an address.** Each
-//!    event carries a client pseudonym, the user agent, the email's domain and a
-//!    keyed tag, and the operator view contains no raw IP and no full email.
+//! The dev-only request-otp / rate-limit ops log (`src/ops_log.rs`): observes, never decides, never names.
 
 use std::sync::Arc;
 
@@ -27,13 +16,11 @@ const TOKEN: &str = "ops-token";
 const IP_A: &str = "203.0.113.41";
 const IP_B: &str = "198.51.100.42";
 
-/// request-otp never touches a table, so a bare DB is enough.
 async fn fresh_db() -> common::TempDb {
     common::TempDb::open("ops.db").await
 }
 
-/// `request_otp_max` 2 per 10 min, `write` 1 per minute, `DEV_OTP` so nothing
-/// is mailed, and no per-email throttle so only the per-client limit is in play.
+/// Only the per-client limit is in play: `DEV_OTP`, no per-email throttle.
 fn state(db: Arc<pollis_delivery::db::Db>, ops_log: bool) -> AppState {
     AppState::new(db, false)
         .with_otp_config(OtpConfig {
@@ -84,8 +71,7 @@ fn ops_view(token: Option<&str>) -> Request<Body> {
     b.body(Body::empty()).unwrap()
 }
 
-/// The sequence both on/off tests drive: three request-otps from A (the third
-/// over budget), one from B, and two writes from A (the second over budget).
+/// Three request-otps from A (third over budget), one from B, two writes from A (second over).
 async fn drive(state: &AppState) -> Vec<(StatusCode, Vec<u8>)> {
     let mut out = Vec::new();
     for (i, email) in ["e2e-1@example.com", "e2e-2@example.com", "e2e-3@example.com"].iter().enumerate() {
@@ -99,8 +85,7 @@ async fn drive(state: &AppState) -> Vec<(StatusCode, Vec<u8>)> {
     out
 }
 
-/// Off (the production state): the limiter's answers are the ones it always
-/// gave, and the operator route is not served even with the right token.
+/// Off: the limiter answers as always, and the operator route is not served.
 #[tokio::test]
 async fn off_by_default_the_route_does_not_exist() {
     let db = fresh_db().await;
@@ -116,8 +101,7 @@ async fn off_by_default_the_route_does_not_exist() {
     assert!(body.is_empty(), "an off route must not describe itself");
 }
 
-/// On, every response — status AND body — is identical to off. The log
-/// observes the limiter; it never decides anything.
+/// On, every response is identical to off.
 #[tokio::test]
 async fn on_it_changes_no_status_and_no_body() {
     let db_off = fresh_db().await;
@@ -127,8 +111,7 @@ async fn on_it_changes_no_status_and_no_body() {
     assert_eq!(off, on, "the ops log altered a response");
 }
 
-/// On, the operator view attributes the budget: per-client counts, outcomes,
-/// user agents and email domains — and no raw IP or full address anywhere.
+/// On, the operator view attributes the budget with no raw IP or full address.
 #[tokio::test]
 async fn on_it_records_who_spent_the_budget_without_ips_or_emails() {
     let db = fresh_db().await;
@@ -143,13 +126,11 @@ async fn on_it_records_who_spent_the_budget_without_ips_or_emails() {
     }
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    // 4 request-otps + the 1 rate-limited write; the allowed write is not an
-    // OTP request and was not limited, so it is not recorded.
+    // 4 request-otps + the limited write; the allowed write is not recorded.
     assert_eq!(v["total_recorded"], 5);
     let events = v["events"].as_array().unwrap();
     assert_eq!(events.len(), 5);
 
-    // Newest first: the limited write, then B's request-otp, then A's three.
     let write = &events[0];
     assert_eq!(write["endpoint"], "/v1/profile/update");
     assert_eq!(write["tier"], "write");
@@ -169,19 +150,16 @@ async fn on_it_records_who_spent_the_budget_without_ips_or_emails() {
     assert!(a3["user_agent"].is_null(), "no agent sent → none recorded");
     assert_eq!(events[4]["user_agent"], "curl/8.7.1");
 
-    // A is one client across tiers; B is another. Pseudonyms are 32 hex chars.
     let client_a = a3["client"].as_str().unwrap();
     assert_eq!(client_a.len(), 32);
     assert!(client_a.bytes().all(|c| c.is_ascii_hexdigit()));
     assert_eq!(write["client"], client_a, "one client, one pseudonym, every tier");
     assert_ne!(b["client"], client_a);
 
-    // Three fresh addresses → three distinct tags.
     let tags: std::collections::BTreeSet<&str> =
         events[2..].iter().map(|e| e["email_tag"].as_str().unwrap()).collect();
     assert_eq!(tags.len(), 3);
 
-    // The summary puts the busiest client first with its outcome split.
     let top = &v["clients"][0];
     assert_eq!(top["client"], client_a);
     assert_eq!(top["requests"], 4);
@@ -192,7 +170,6 @@ async fn on_it_records_who_spent_the_budget_without_ips_or_emails() {
     assert_eq!(top["user_agents"], serde_json::json!(["(none)", "curl/8.7.1"]));
 }
 
-/// A retry loop is visible as such: many requests, ONE email tag.
 #[tokio::test]
 async fn a_retry_loop_shows_as_one_address_many_requests() {
     let db = fresh_db().await;
@@ -208,20 +185,16 @@ async fn a_retry_loop_shows_as_one_address_many_requests() {
     assert_eq!(top["rate_limited"], 2);
 }
 
-/// The route has the same operator gate as `/v1/config`: 401 without the token.
 #[tokio::test]
 async fn the_ops_view_requires_the_operator_token() {
     let db = fresh_db().await;
     let st = state(db.arc(), true);
     assert_eq!(call(&st, ops_view(None)).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(call(&st, ops_view(Some("wrong"))).await.0, StatusCode::UNAUTHORIZED);
-    // On but no operator token configured → not served at all.
     let st = st.with_metrics_token(None);
     assert_eq!(call(&st, ops_view(Some(TOKEN))).await.0, StatusCode::NOT_FOUND);
 }
 
-/// `/v1/config` reports the OTP tiers in force and whether the log is on, so
-/// "is dev's raised budget actually live?" is checkable from outside.
 #[tokio::test]
 async fn config_reports_the_otp_tiers_and_the_ops_log() {
     let db = fresh_db().await;
@@ -254,8 +227,7 @@ fn wrangler_vars(env: &str) -> serde_json::Map<String, serde_json::Value> {
     cfg["vars"].as_object().cloned().unwrap_or_default()
 }
 
-/// The hard gate: production never sets the ops log (nor anything that would
-/// change its limits — prod keeps the compiled-in defaults), and dev does.
+/// Production never sets the ops log (or its limits); dev does.
 #[test]
 fn only_dev_turns_the_ops_log_on() {
     let prod = wrangler_vars("prod");
@@ -268,9 +240,7 @@ fn only_dev_turns_the_ops_log_on() {
 
     let dev = wrangler_vars("dev");
     assert_eq!(dev.get("POLLIS_DS_OPS_LOG").and_then(|v| v.as_str()), Some("true"));
-    // Dev runs request-otp unlimited for the parallel e2e suites, but never
-    // verify-otp: `DEV_OTP` is one code for every mailbox, so that tier is the
-    // only bound on guessing it across rotated addresses.
+    // Never unlimit verify-otp in dev: `DEV_OTP` is one code for every mailbox.
     assert_eq!(dev.get("RL_REQUEST_OTP_MAX").and_then(|v| v.as_str()), Some("off"));
     let verify = dev.get("RL_VERIFY_OTP_MAX").and_then(|v| v.as_str());
     assert!(

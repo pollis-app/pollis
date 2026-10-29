@@ -1,15 +1,4 @@
-/*
- * The layout direction is only written once the stored language is known.
- *
- * Android's Fabric re-reads the persisted `I18nUtil` direction on every root
- * measure (ReactSurfaceImpl.updateLayoutSpecs), not once at launch. A
- * module-load `forceRTL(false)` from the device-locale guess, before
- * `hydrateLanguage` has read the user's stored Arabic pick, therefore landed
- * in that window and un-mirrored Yoga for the whole launch, while JS (which
- * had already read `isRTL`) still flipped direction-aware icons. iOS reads the
- * direction once, so it never showed. `i18n/index.ts` imports react-native and
- * cannot load under plain node, so the invariant is pinned on its source.
- */
+/* The layout direction is written only once the stored language is known: Android's Fabric re-reads it on every root measure. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

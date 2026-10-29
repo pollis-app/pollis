@@ -1,12 +1,4 @@
-/*
- * Unread badges from the persisted read cursors (#1422), `mobile/lib/unread.ts`.
- *
- * Mobile's badges used to be in-memory only and bumped only by a live wake-up,
- * so a message that arrived while the app was backgrounded or killed (the push
- * case) never badged, and a cold start wiped them all. They now come from
- * `get_unread_counts`; these pin how that answer becomes the badge set, plus
- * the wiring that makes the refetch happen at the moments that matter.
- */
+/* Unread badges from the persisted read cursors (#1422): lib/unread.ts and the refetch wiring. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -33,8 +25,7 @@ test("the core's answer becomes the badge set", () => {
 });
 
 test("a conversation absent from the answer has no badge (replace, not merge)", () => {
-  // Another device read it: the core no longer lists it, so a merge would
-  // strand the old badge here. The store replaces its whole set with this.
+  // Another device read it; a merge would strand the old badge.
   assert.deepEqual(unreadBadges([{ conversation_id: "dm-1", count: 3 }], null), {
     "dm-1": 3,
   });
@@ -44,8 +35,7 @@ test("a conversation absent from the answer has no badge (replace, not merge)", 
 });
 
 test("the conversation on screen never badges", () => {
-  // The answer can be read before the open chat's cursor advanced; showing it
-  // would flash a badge for the very conversation the user is reading.
+  // The answer can predate the open chat's cursor advancing.
   assert.deepEqual(
     unreadBadges(
       [
@@ -84,7 +74,6 @@ test("the store hydrates through unreadBadges, filtering the open conversation",
   const store = read("stores/appStore.ts");
   assert.match(store, /hydrateUnread\(counts: UnreadCount\[\]\)/);
   assert.match(store, /unreadBadges\(counts, this\.openConversationId\)/);
-  // Sign-out forgets which conversation was open.
   assert.match(store, /this\.openConversationId = null;/);
 });
 
@@ -93,12 +82,9 @@ test("the persisted counts are read with the desktop command shapes", () => {
   assert.match(hook, /invoke<UnreadCount\[\]>\("get_unread_counts", \{ userId \}\)/);
   assert.match(hook, /invoke<boolean>\("mark_conversation_read", \{ conversationId, userId \}\)/);
   assert.match(hook, /invoke<number>\("sync_read_cursors", \{ userId \}\)/);
-  // No polling: refetches are event-driven (unlock, foreground, ingest).
   assert.doesNotMatch(hook, /refetchInterval|setInterval/);
-  // An answer equal to the last must still re-hydrate: the store may have
-  // moved in between (a live bump, an optimistic clear).
+  // An equal answer must still re-hydrate: the store may have moved.
   assert.match(hook, /structuralSharing: false/);
-  // Gated on being past the PIN: the counts live in the encrypted local DB.
   assert.match(hook, /isInSignedInApp\(segments, isLocked\)/);
   assert.match(hook, /AppState\.addEventListener\("change"/);
 });
@@ -106,7 +92,6 @@ test("the persisted counts are read with the desktop command shapes", () => {
 test("every ingest re-reads the counts unless the caller bumps them itself", () => {
   const messages = read("hooks/queries/useMessages.ts");
   assert.match(messages, /if \(opts\.refreshUnread !== false\) \{\s*refreshUnread\(queryClient\);/);
-  // The live wake-up keeps its instant bump and re-reads after it.
   const realtime = read("hooks/useInboxRealtime.ts");
   assert.match(realtime, /ingestRef\.current\(id, kind, \{ refreshUnread: false \}\)/);
   assert.match(realtime, /appStore\.incrementUnread\(id\);\s*\}\s*refreshUnread\(qc\);/);
@@ -124,16 +109,14 @@ test("every place that cleared a badge also advances the persisted cursor", () =
     assert.doesNotMatch(src, /appStore\.markRead\(/, `${p} clears only the in-memory badge`);
     assert.match(src, /markConversationRead\(/, `${p} should mark the conversation read`);
   }
-  // The chat screen marks itself read however it was reached (a notification
-  // tap included) and records itself as the open conversation.
+  // The chat screen marks itself read however it was reached.
   const chat = read("app/chat/[id].tsx");
   assert.match(chat, /appStore\.setOpenConversationId\(conversationId\);\s*markConversationRead\(conversationId\);/);
   assert.match(chat, /appStore\.clearOpenConversationId\(conversationId\);/);
 });
 
 test("landing in the app catches up every listed conversation once", () => {
-  // A message that arrived while the app was closed woke nothing: without a
-  // catch-up on landing it was never ingested, so it could not be counted.
+  // A message that arrived while the app was closed woke nothing.
   const realtime = read("hooks/useInboxRealtime.ts");
   assert.match(
     realtime,

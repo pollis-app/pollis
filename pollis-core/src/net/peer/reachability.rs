@@ -2,44 +2,21 @@
 //! directory, keep the peer's own revocation evidence current, and park a
 //! connection at every first-party relay it lists.
 //!
-//! This is the join between [`super::park`] (the transport) and
-//! [`super::serving`] (the consent state machine). It exists as its own module
-//! because it is the only part of peer relaying that does **network I/O on a
-//! schedule**, and that deserves to be one reviewable place.
+//! Joins [`super::park`] and [`super::serving`]; the only peer code doing scheduled network I/O.
 //!
 //! # Two things are refreshed here, for two different reasons
 //!
-//! - **The directory** decides *where* to park, and — installed into the
-//!   engine's [`NextHopDirectory`] — *where the engine may extend to*.
-//!   Membership churns (the hosted pool runs on Spot instances), so a stale set
-//!   means parking at a node that no longer exists; an expired one means a
-//!   device that has stopped forwarding, which is the fail-closed direction.
-//! - **The revocation list** decides whether this peer may forward *at all*.
-//!   `PeerEngine` is handed the store built here, and `serve_extend` refuses
-//!   when it cannot evaluate revocation (#813 phase C/E2). The artifact carries
-//!   a 5-minute TTL and is re-signed every 2 minutes, and `admit` re-checks
-//!   expiry at **use** time — so a missed refresh degrades this device to "no
-//!   longer forwarding", never to "still trusting a stale list". That is why the
-//!   refresh can be lazy and best-effort rather than a correctness dependency.
+//! - **The directory** decides where to park and, via [`NextHopDirectory`], where the engine may extend.
+//! - **The revocation list** decides whether this peer may forward at all; expiry is checked at use, so a missed refresh fails closed.
 //!
 //! # On the refresh cadence
 //!
-//! The loop sleeps on the **directory's own `expires_at`**, clamped by the
-//! revocation artifact's much shorter TTL — the same shape `net::overlay`'s
-//! already-shipped `directory_refresh_loop` uses, for the same reason. It is not
-//! a keepalive poll: it does no work to *discover* state, it renews a
-//! short-lived signed artifact whose expiry is the schedule, and it exists only
-//! while the user's consent and conditions hold. When consent is withdrawn the
-//! whole task is dropped and nothing is left ticking.
+//! Sleeps on the directory's `expires_at`, clamped by the revocation TTL; exists only while consent holds.
 //!
 //! # Fail-closed, in both directions
 //!
-//! - No directory configured ⇒ nowhere to park **and** no key to evaluate
-//!   revocation with ⇒ the device runs its node, carries nothing, and reports
-//!   `Waiting{NoInboundPath}`. Exactly the pre-wave-3 state, honestly reported.
-//! - Directory but no usable revocation list ⇒ parked, reachable, and still
-//!   forwarding nothing, because the engine's store cannot admit a next hop.
-//!   Being reachable is not the same as being willing.
+//! - No directory ⇒ the node carries nothing and reports `Waiting{NoInboundPath}`.
+//! - Directory but no usable list ⇒ parked, yet forwarding nothing.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -54,30 +31,21 @@ use super::context::ServingContext;
 use super::park::{LinkAcceptor, ParkedRelay, ParkingSupervisor};
 use crate::net::directory;
 
-/// Refresh the directory this long before it expires, so parking never runs off
-/// a directory that has already lapsed.
+/// Refresh this long before expiry.
 const DIRECTORY_REFRESH_SKEW: Duration = Duration::from_secs(5 * 60);
 
-/// Ceiling on the sleep between refreshes, set by the *revocation* artifact
-/// rather than the directory: the list is re-signed every ~2 minutes with a
-/// 5-minute TTL, so renewing every minute leaves ~5× margin. A device that
-/// oversleeps stops forwarding (fail-closed) rather than forwarding stale.
+/// Ceiling set by the revocation list's 5-minute TTL; oversleeping stops forwarding.
 const REVOCATION_REFRESH: Duration = Duration::from_secs(60);
 
-/// Floor on the sleep, so a pathological `expires_at` cannot tight-loop the
-/// directory host.
+/// Floor, so a pathological `expires_at` can't tight-loop.
 const MIN_REFRESH: Duration = Duration::from_secs(15);
 
-/// After a failed refresh, retry on this fixed backoff — recover lazily, never
-/// hammer.
+/// Fixed backoff after a failed refresh.
 const RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Owns the refresh loop and, through it, every parked connection.
 ///
-/// Dropping it aborts the loop, which drops the [`ParkingSupervisor`], which
-/// closes every parked connection. That is the whole "withdrawing consent stops
-/// the device being reachable, now" path — no flag to check, no shutdown
-/// handshake to get wrong.
+/// Dropping it closes every parked connection: withdrawing consent needs no flag.
 pub struct Reachability {
     task: JoinHandle<()>,
 }
@@ -88,28 +56,20 @@ impl Drop for Reachability {
     }
 }
 
-/// Everything the loop needs, gathered so the signature does not sprawl.
 pub struct ReachabilityConfig {
     pub context: Arc<dyn ServingContext>,
-    /// The store the running [`super::engine::PeerEngine`] was handed. Cloned
-    /// from the same cell, so a list installed here is observed immediately by
-    /// every in-flight `Extend`.
+    /// The engine's store, same cell, so installs are seen by in-flight `Extend`s.
     pub revocations: RevocationStore,
-    /// The engine's next-hop directory, on the same terms: this loop is already
-    /// fetching and verifying the signed directory to decide where to park, and
-    /// that same artifact is the only statement of which addresses the engine
-    /// may extend a circuit to.
+    /// The engine's next-hop directory, from the same verified artifact.
     pub next_hops: NextHopDirectory,
     /// This device's relay leaf — the `Park` frame's payload.
     pub leaf_der: CertificateDer<'static>,
     pub acceptor: Arc<dyn LinkAcceptor>,
-    /// Called with the live parked-connection count whenever it changes.
     pub on_change: Arc<dyn Fn(usize) + Send + Sync>,
 }
 
 impl Reachability {
-    /// Start making this device reachable. Returns immediately; the first park
-    /// lands once the directory has been fetched and verified.
+    /// Start making this device reachable; returns immediately.
     pub fn start(config: ReachabilityConfig) -> Reachability {
         Reachability {
             task: tokio::spawn(async move {
@@ -121,9 +81,7 @@ impl Reachability {
 
 async fn maintain(config: ReachabilityConfig) {
     let Some((url, key)) = config.context.directory() else {
-        // No signed directory ⇒ no relays to park at, and no key to evaluate
-        // revocation with. Report once and stop rather than retry a thing that
-        // cannot change without a rebuild.
+        // No directory: report once and stop; it can't change without a rebuild.
         crate::diag!(
             "[peer-relay] no signed relay directory configured — this device runs its node but \
              nothing can reach it"
@@ -131,8 +89,7 @@ async fn maintain(config: ReachabilityConfig) {
         return;
     };
 
-    // Held across iterations: replacing it is what a membership change costs,
-    // and keeping it is what stops a no-op refresh dropping live connections.
+    // Kept across iterations so a no-op refresh doesn't drop live connections.
     let mut supervisor: Option<ParkingSupervisor> = None;
 
     loop {
@@ -147,8 +104,7 @@ async fn maintain(config: ReachabilityConfig) {
     }
 }
 
-/// One refresh: re-verify the directory, renew revocation evidence, and make the
-/// parked set match what the directory now says. Returns how long to sleep.
+/// One refresh: directory, revocation, parked set. Returns how long to sleep.
 async fn refresh(
     url: &str,
     key: &str,
@@ -159,11 +115,7 @@ async fn refresh(
     let now = pollis_relay::proto::now_unix();
     let dir = directory::verify_directory(&bytes, key, now)?;
 
-    // The engine checks every `Extend` against this, so it is installed from the
-    // SAME verified bytes that decide where to park — there is no second source
-    // of truth for "which addresses are relays", and no window where the device
-    // would park somewhere it would not forward to. A failure here is not fatal
-    // to parking: the engine simply keeps refusing to extend.
+    // Same verified bytes as the park set: one source of truth. A failure only stops extending.
     if let Err(e) = config.next_hops.install(&bytes, now) {
         crate::diag!(
             "[peer-relay] next-hop directory unusable ({e}) — this device stays parked but \
@@ -171,9 +123,7 @@ async fn refresh(
         );
     }
 
-    // Renew the peer's own revocation evidence. Best-effort by design: a failure
-    // here leaves the engine unable to admit a next hop, which is the safe
-    // outcome, so it must not abort the parking it is refreshing alongside.
+    // Best-effort: a failure leaves the engine refusing, which is safe.
     if let Err(e) = renew_revocations(url, &dir, &config.revocations, now).await {
         crate::diag!(
             "[peer-relay] revocation evidence unusable ({e}) — this device stays parked but \
@@ -192,13 +142,11 @@ async fn refresh(
         addrs
     };
     if supervisor.as_ref().is_some_and(|s| s.relay_set() == wanted) {
-        // Membership is unchanged: leave the live connections exactly alone.
+        // Membership unchanged: leave live connections alone.
         return Ok(until_refresh(dir.expires_at));
     }
 
-    // A parked connection authenticates as this device, so the identity is
-    // required before anything can be parked. Before login there is none, and
-    // that is a fail-closed "not reachable yet", not an error to swallow.
+    // Parking needs an identity; before login that is a fail-closed "not yet".
     let identity = config.context.identity().await?;
     *supervisor = Some(ParkingSupervisor::start(
         relays,
@@ -218,23 +166,17 @@ async fn renew_revocations(
     now: i64,
 ) -> anyhow::Result<()> {
     let Some(anchor) = dir.revocation.as_ref() else {
-        // A directory published before revocation existed anchors nothing. The
-        // store then holds no list and the engine forwards nothing — strictly
-        // safer than the pool-side carve-out, and correct here because a peer
-        // that cannot evaluate revocation has no business extending.
+        // No anchor: the store holds no list and the engine forwards nothing.
         return Ok(());
     };
     let url = crate::net::revocation::revocation_url(directory_url, anchor.resolved_path());
     let bytes = directory::fetch_signed(&url).await?;
-    // Floored at the sequence THIS directory commits to, which is what makes a
-    // stale-list/fresh-directory pairing detectable.
+    // Floored at this directory's `seq`.
     store.install(&bytes, now, anchor.seq)?;
     Ok(())
 }
 
-/// Map a verified directory to the relays this device parks at. An entry whose
-/// address will not parse or whose cert is not decodable base64 DER is skipped —
-/// never park at a relay we cannot pin.
+/// Relays to park at; unparseable or unpinnable entries are skipped.
 fn parked_relays(dir: &directory::Directory) -> Vec<ParkedRelay> {
     use base64::Engine as _;
     dir.relays
@@ -255,25 +197,16 @@ fn parked_relays(dir: &directory::Directory) -> Vec<ParkedRelay> {
         .collect()
 }
 
-/// Sleep until the next refresh: the directory's own expiry less a skew, capped
-/// by the revocation artifact's far shorter TTL and floored so nothing tight
-/// loops.
+/// Directory expiry less skew, capped by the revocation TTL, floored.
 fn until_refresh(expires_at: i64) -> Duration {
     let now = pollis_relay::proto::now_unix();
     let secs = (expires_at - now).saturating_sub(DIRECTORY_REFRESH_SKEW.as_secs() as i64);
     let clamped = Duration::from_secs(secs.max(0) as u64)
         .min(REVOCATION_REFRESH)
         .max(MIN_REFRESH);
-    // Jittered (#875) for the same reason `park.rs` jitters its re-dial: this
-    // sleep is derived from a signed artifact's expiry, which every device in
-    // the fleet reads the same value of, so slept verbatim it wakes them all
-    // together, forever.
+    // Jittered (#875): the whole fleet reads the same expiry.
     //
-    // DOWNWARD only, and re-floored. Both bounds here are load-bearing, not
-    // sanity clamps: `REVOCATION_REFRESH` is the margin that keeps a forwarding
-    // device from running on stale revocation evidence, and `MIN_REFRESH` stops
-    // a pathological `expires_at` tight-looping the host. Shortening spreads the
-    // fleet without spending either.
+    // DOWNWARD only, re-floored: both bounds are load-bearing.
     pollis_relay::backoff::jittered_down(clamped).max(MIN_REFRESH)
 }
 
@@ -288,8 +221,7 @@ mod tests {
         .expect("directory parses")
     }
 
-    /// Only relays we can both reach and pin are parked at. A malformed address
-    /// or an undecodable cert is skipped, never parked at unverified.
+    /// Only reachable and pinnable relays are parked at.
     #[test]
     fn only_pinnable_relays_are_parked_at() {
         let dir = directory_json(
@@ -313,34 +245,22 @@ mod tests {
         assert_eq!(parked_relays(&dir).len(), 2);
     }
 
-    /// The sleep is derived from the artifact's own expiry, bounded on both
-    /// sides — never zero (which would tight-loop) and never longer than the
-    /// revocation list stays fresh (which would forward on stale evidence).
-    ///
-    /// #875 added downward jitter, so these are no longer single values; the
-    /// bounds are what matter and they are now checked over many draws rather
-    /// than once. The CEILING in particular is a safety margin, not a sanity
-    /// clamp, which is why the jitter only ever shortens.
+    /// Bounded on both sides: never zero, never past revocation freshness.
     #[test]
     fn the_refresh_interval_is_bounded_on_both_sides() {
         let now = pollis_relay::proto::now_unix();
         for _ in 0..200 {
-            // Expired artifact: floored, never a tight loop.
             assert_eq!(until_refresh(now - 10_000), MIN_REFRESH);
-            // Long-lived artifact: capped by the revocation TTL, never above it.
             let far = until_refresh(now + 10_000);
             assert!(far <= REVOCATION_REFRESH, "{far:?} exceeded the revocation ceiling");
             assert!(far >= MIN_REFRESH, "{far:?} fell through the floor");
-            // Just past the skew: still floored.
             assert!(
                 until_refresh(now + DIRECTORY_REFRESH_SKEW.as_secs() as i64 + 1) >= MIN_REFRESH
             );
         }
     }
 
-    /// The jitter has to actually spread the fleet, or it is only overhead:
-    /// every device reads the SAME `expires_at` off the same signed artifact, so
-    /// an un-jittered sleep wakes them all on one instant, permanently.
+    /// The jitter must actually spread the fleet.
     #[test]
     fn the_refresh_interval_is_not_the_same_value_every_time() {
         let now = pollis_relay::proto::now_unix();

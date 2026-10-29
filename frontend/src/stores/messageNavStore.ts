@@ -6,12 +6,7 @@ import {
   type MessageNavState,
 } from "../utils/messageNav";
 
-/**
- * What the active chat surface lends the navigator. Registered by the ONE
- * `MessageList` that opts into keyboard navigation (the main chat) while it is
- * mounted; every callback reads live component state so the store never holds
- * a stale copy of the message list.
- */
+/** Callbacks lent by the one navigable `MessageList`; they read live state. */
 export interface MessageNavContext {
   /** Rendered, navigable message ids, oldest → newest. */
   orderedIds: () => string[];
@@ -21,12 +16,7 @@ export interface MessageNavContext {
   focusComposer: () => void;
 }
 
-/**
- * Live keyboard-navigation state for the chat log (UI selection state only —
- * see `utils/messageNav.ts` for the machine and the invariants). All mutation
- * funnels through `dispatch`, which runs the pure transition against the
- * registered surface context.
- */
+/** Chat-log keyboard nav state; all mutation goes through `dispatch` (see `utils/messageNav.ts`). */
 class MessageNavStore {
   state: MessageNavState = { mode: "composer" };
   private ctx: MessageNavContext | null = null;
@@ -62,9 +52,7 @@ class MessageNavStore {
     const prev = this.state;
     const next = transitionMessageNav(prev, event, ctx.orderedIds(), ctx.actionsFor);
     this.state = next;
-    // Exiting the log deliberately (down past the newest, Tab, Escape) hands
-    // focus back to the composer. A cancel means focus already went somewhere
-    // else on purpose — never steal it back.
+    // Deliberate exits refocus the composer; a cancel never steals focus.
     if (next.mode === "composer" && prev.mode !== "composer" && event.type !== "cancel") {
       ctx.focusComposer();
     }

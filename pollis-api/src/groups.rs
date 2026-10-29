@@ -1,7 +1,6 @@
 //! Groups, channels, membership, invites, invite links and join requests.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -111,21 +110,10 @@ pub struct CreateInviteBody {
     #[serde(default)]
     pub inviter_id: Option<String>,
     /// Who to invite, as the USER TYPED IT — a username or an email (#987).
-    ///
-    /// Was a resolved `invitee_id`, which made the client run five reads before
-    /// it could even build this body: resolve the identifier, check the block
-    /// pair, check existing membership, check for a pending invite, and its own
-    /// admin preflight. Every one of those is re-derived by this write anyway.
-    /// Taking the identifier moves the resolution to where the decision already
-    /// lives, and turns six round trips into one.
     pub invitee_identifier: String,
 }
 
 /// `POST /v1/invites/create` — the outcome of inviting someone (#987).
-///
-/// Named outcomes rather than one 403, because the five reads this replaces
-/// existed to tell them apart for the user. Every message the client used to
-/// produce locally has a variant here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum InviteCreated {
@@ -247,20 +235,13 @@ pub struct RedeemInviteLinkBody {
     pub attempt_id: String,
     /// **IGNORED by the server, and kept only for wire compatibility.**
     ///
-    /// This used to be the clock the Delivery Service compared `expires_at`
-    /// against — a plain wire field, so `{"now":"2020-01-01T00:00:00Z"}`
-    /// redeemed any expired link, and a `now` far in the future emptied the
-    /// failed-attempt rate-limit window. Expiry, the rate-limit window and the
-    /// audit stamp are all `datetime('now')` on the server now. A shipped
-    /// client still sends the field; nothing reads it.
+    /// Expiry and rate limits use the server clock; shipped clients still send it.
     pub now: String,
 }
 
 /// `POST /v1/invite-links/redeem` — the group the token admitted the caller to.
 ///
-/// Every way a token can fail to be live answers with ONE indistinguishable
-/// rejection status, deliberately (#847), so this type describes the success
-/// case only.
+/// Every failure is one indistinguishable status (#847), so this is the success case only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum RedeemInviteLinkResponse {
@@ -268,9 +249,6 @@ pub enum RedeemInviteLinkResponse {
         group_id: String,
         /// The group's display name, for the caller's confirmation UI (#987).
         ///
-        /// Returned with the join rather than fetched after it: the DS has just
-        /// read the row to authorize the redemption, and the client asking again
-        /// was a second round trip for a string the server already had in hand.
         /// `None` only if the row vanished between the join and this read.
         #[serde(default)]
         group_name: Option<String>,
@@ -278,12 +256,6 @@ pub enum RedeemInviteLinkResponse {
 }
 
 /// `POST /v1/groups/update` — the row as it now stands (#987).
-///
-/// Returned rather than re-read, for the reason the whole read migration
-/// exists: the client used to `SELECT` the group straight back after the write,
-/// which was a second round trip for a row the server had just written and,
-/// worse, a read that could observe a LATER concurrent update and report it as
-/// the result of THIS one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum UpdatedGroup {
@@ -314,12 +286,6 @@ pub enum UpdatedChannel {
 
 /// `POST /v1/invites/accept` — which group the invite admitted the caller to
 /// (#987).
-///
-/// The client used to read `group_invite` to learn this BEFORE posting the
-/// accept, which is both a round trip and a TOCTOU: the invite it read could be
-/// revoked before the write landed, leaving the client announcing membership of
-/// a group it never joined. Naming the group in the RESPONSE makes the answer a
-/// property of the write that succeeded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum AcceptedInvite {
@@ -328,12 +294,6 @@ pub enum AcceptedInvite {
 
 /// `POST /v1/join-requests/{approve,reject}` — who the reviewed request was
 /// for (#987).
-///
-/// The client used to read the request row before posting, both to learn the
-/// group (for the reconcile and the realtime nudge that follow) and to run its
-/// admin preflight against it. The write already resolves the same row under the
-/// same admin gate, so returning what it resolved deletes the read AND the race
-/// where the row changed in between.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum ReviewedJoinRequest {
@@ -347,13 +307,6 @@ pub enum ReviewedJoinRequest {
 }
 
 /// `POST /v1/join-requests/create` — the outcome of asking to join (#987).
-///
-/// The client used to run three reads before posting: does the group exist, am
-/// I already a member, and do I already have a PENDING request. All three are
-/// re-derived by the write anyway, so what the reads bought was a specific
-/// error message. Naming the outcomes here keeps every message and adds none of
-/// the reads back — and closes the TOCTOU the third one had, where a request
-/// created between the check and the write was silently reset to pending.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum JoinRequestCreated {

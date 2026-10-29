@@ -1,20 +1,13 @@
-// DM delivery/read receipt read hook (#892). Mirrors desktop's
-// `useConversationReceipts` (frontend/src/hooks/queries/useReceipts.ts):
-// one `get_conversation_receipts` fetch per open conversation, keyed into a
-// map by message id. Messages with no receipts are absent. The core returns
-// an empty list when the user's `send_read_receipts` preference is off —
-// the reciprocal rule (your own flag gates both emitting AND recording) is
-// enforced in Rust, not here.
+// DM receipts (#892): one fetch per open conversation, keyed by message id; the reciprocal rule is enforced in Rust.
 
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 
-/** Mirror of `pollis_core::commands::messages::receipts::MessageReceipts`. */
 export interface MessageReceipts {
   message_id: string;
-  /** Readers whose device fetched and decrypted the message. */
+  /** Readers whose device decrypted it. */
   delivered_by: string[];
-  /** Readers who actually saw it on screen. Subset of `delivered_by`. */
+  /** Readers who saw it on screen; a subset of `delivered_by`. */
   read_by: string[];
 }
 

@@ -1,17 +1,4 @@
-/*
- * Saved messages + message permalinks (#854) — visual/behavioural e2e.
- *
- * Runs against the browser-rendered frontend with the Tauri IPC mock
- * (`frontend/src/__mocks__/tauri-core.ts`), which reimplements the bookmark and
- * permalink commands with the same semantics as
- * `pollis-core/src/commands/bookmarks.rs` — in particular, permalink resolution
- * consults only this device's own message store.
- *
- * Every test runs in BOTH skins, because the owner asked specifically that
- * visual features stay consistent across `terminal` and `refined`.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// Saved messages + permalinks (#854), both skins; permalinks resolve only from this device's store.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -95,13 +82,7 @@ function preloadState(skin: Skin, bookmarks: unknown[] = []) {
   };
 }
 
-/*
- * NOTE ON NAVIGATION: the router runs on `createMemoryHistory` (see
- * `frontend/src/router.tsx`), so the browser URL stays at "/" no matter where
- * the app navigates. `page.goto("/saved")` and `waitForURL` would therefore be
- * meaningless here — every assertion below navigates through the UI and checks
- * what is RENDERED instead.
- */
+// Memory-history router: navigate through the UI and assert on what renders.
 async function boot(
   page: Page,
   skin: Skin,
@@ -133,13 +114,7 @@ async function boot(
   await expect(page.getByTestId("sidebar")).toBeVisible();
 }
 
-/**
- * Record every element that receives the jump-highlight class.
- *
- * Asserting `toHaveClass` directly races the animation — the class is removed
- * after HIGHLIGHT_MS, so a slow first poll sees a clean element and fails even
- * though the flash happened. Observing mutations captures the event itself.
- */
+/** Record elements that get the jump-highlight class (toHaveClass races the animation). */
 async function watchForFlash(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as { __flashed: string[] };
@@ -175,11 +150,7 @@ async function openCommandPalette(page: Page) {
   await expect(page.getByTestId("search-panel")).toBeVisible();
 }
 
-/**
- * Navigate to the saved-items page through Cmd+K, which also proves the page is
- * registered in `PAGE_RESULTS` (one of the three places a new static page must
- * be registered).
- */
+/** Go to saved items via Cmd+K (proves the page is in PAGE_RESULTS). */
 async function gotoSaved(page: Page) {
   await openCommandPalette(page);
   await page.getByTestId("search-panel-input").fill("Saved");
@@ -195,13 +166,7 @@ async function gotoChannel(page: Page) {
   await expect(page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`)).toBeVisible();
 }
 
-/**
- * Resolve a `--c-*` design token to the same serialisation `getComputedStyle`
- * gives a painted element, so a token can be compared against an element's
- * computed `color` / `backgroundColor` verbatim. Goes through a probe element
- * because the tokens are `hsl(... / 14%)` and `color-mix(...)` expressions,
- * which only become `rgb()` / `rgba()` / `color()` once painted.
- */
+/** Resolve a `--c-*` token to the serialisation getComputedStyle gives a painted element. */
 async function resolveToken(
   page: Page,
   token: string,
@@ -228,7 +193,6 @@ async function resolveToken(
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`bookmarks + permalinks — ${skin} skin`, () => {
     test("saved list shows a saved message and can unsave it", async ({ page }) => {
@@ -300,9 +264,7 @@ for (const skin of SKINS) {
       await openCommandPalette(page);
       await page.getByTestId("search-panel-input").fill(CHANNEL_PERMALINK);
 
-      // Landed in the CHANNEL, not the DM — the bug this must not inherit.
-      // Proven by what rendered: the channel's messages are on screen and the
-      // DM's are not, and the breadcrumb names the channel.
+      // Landed in the CHANNEL, not the DM: proven by what rendered and the breadcrumb.
       const target = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
       await expect(target).toBeVisible();
       await expect
@@ -406,30 +368,12 @@ for (const skin of SKINS) {
     test("the copied state is actually painted, not just labelled", async ({
       page,
     }) => {
-      // Twice now the colour half of this affordance has silently painted
-      // nothing while the glyph and the accessible name still changed, which
-      // is exactly why the attribute/name tests passed throughout. First
-      // `--c-text-accent` was referenced everywhere and defined nowhere
-      // (#935); then #990's focus inversion (`focus:bg-accent focus:text-bg`)
-      // painted over the copied tone, because the row keeps focus after the
-      // click — the menu stays open so the feedback lands where the pointer
-      // is (#897). This asserts the RESOLVED paint of the row in the state it
-      // is actually in after a click: still focused, and copied.
-      //
-      // The design (#1059): the copied row steps its focus fill down from the
-      // solid accent to the selected-row tint (`--c-active`) so the accent
-      // text can show — like a pressed button releasing. Focus never moves.
-      //
-      // Terminal defines `--c-text` as the same HSL as `--c-accent`, so a row
-      // falling back to inherited text colour lands on the accent by
-      // coincidence there; the idle row is `text-dim`, so the colour still
-      // has to move. Keep both skins: in terminal this is a guard, in refined
-      // it proves the fix.
+      // Asserts the RESOLVED paint after a click (still focused, copied): the colour half failed silently twice (#935, #990).
+      // Design (#1059): the copied row's focus fill steps down to `--c-active` so the accent text shows.
       await boot(page, skin);
       await gotoChannel(page);
 
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
-      // A hidden action bar takes no clicks until its row is hovered (#1312).
       await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
@@ -440,9 +384,7 @@ for (const skin of SKINS) {
 
       await copyButton.click();
       await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
-      // The contract the bug hid behind: the row is still the active element
-      // after the click. If a future change moves focus off the row, this
-      // test stops proving anything about the focused paint — fail loudly.
+      // The row must still be focused after the click, or this proves nothing about focused paint.
       await expect(copyButton).toBeFocused();
       const copied = await colourOf();
       const copiedFill = await copyButton.evaluate(
@@ -453,9 +395,7 @@ for (const skin of SKINS) {
       // And it is the accent, not some arbitrary third colour.
       const accent = await resolveToken(page, "--c-accent", "color");
       expect(copied).toBe(accent);
-      // The focused copied row is tinted, not inverted: the solid accent fill
-      // would swallow the accent text (this is the #1059 regression), so the
-      // fill must be the selected-row tint instead.
+      // Tinted, not inverted: a solid accent fill would swallow the accent text (#1059).
       const activeTint = await resolveToken(page, "--c-active", "backgroundColor");
       expect(copiedFill).toBe(activeTint);
       const accentFill = await resolveToken(page, "--c-accent", "backgroundColor");
@@ -466,11 +406,8 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      // Copy-link lives in the per-message "more" menu — open it first. The
-      // menu deliberately stays open after the click so the copied/failed
-      // feedback is visible where the click happened.
+      // The menu stays open after the click so the copied/failed feedback shows where the click was.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
-      // A hidden action bar takes no clicks until its row is hovered (#1312).
       await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
@@ -495,9 +432,7 @@ for (const skin of SKINS) {
       await boot(page, skin, [], { failClipboard: true });
       await gotoChannel(page);
 
-      // Copy-link lives in the per-message "more" menu — open it first.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
-      // A hidden action bar takes no clicks until its row is hovered (#1312).
       await message.hover();
       await message.getByTestId("message-actions-more").click();
       const copyButton = message.getByTestId("copy-link-button");
@@ -532,9 +467,7 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      // Save lives in the per-message "more" menu — open it first.
       const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
-      // A hidden action bar takes no clicks until its row is hovered (#1312).
       await message.hover();
       await message.getByTestId("message-actions-more").click();
       const saveButton = message.getByTestId("save-button");

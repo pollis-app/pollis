@@ -1,16 +1,4 @@
 //! Gate for live lazy-cache serving mode (`serve live`).
-//!
-//! Everything here runs against a LOCAL libSQL fixture file (a temp SQLite DB
-//! seeded with `mls_commit_log` rows) — no network, no prod DB. Covers:
-//! (a) live `/v1/sth/latest.json` and `/verify/group/<id>` return correct data;
-//! (b) within a large TTL a second request does NOT rebuild (mutate the fixture,
-//!     prove the response is unchanged until the TTL elapses / `ttl=0`);
-//! (c) single-flight: many concurrent requests in the cold/stale window cause
-//!     exactly one DB pull (asserted via the rebuild counter);
-//! (d) a forked / epoch-regressed group yields `chain_valid = false`;
-//! (e) the `/verify/group` endpoint carries the CORS header (+ OPTIONS preflight);
-//! (f) the in-memory `verify_group_in_bundle` and the URL-based `verify_group`
-//!     agree for the same data.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -32,10 +20,6 @@ fn signing_key() -> SigningKey {
     SigningKey::from_seed(&[5u8; 32].into())
 }
 
-// ---------------------------------------------------------------------------
-// Fixture DB helpers (local libSQL file, no network).
-// ---------------------------------------------------------------------------
-
 struct Row {
     seq: i64,
     conv: &'static str,
@@ -47,9 +31,7 @@ fn row(seq: i64, conv: &'static str, epoch: i64, data: &'static str) -> Row {
     Row { seq, conv, epoch, data }
 }
 
-/// Drive an async block on a throwaway current-thread runtime. Keeps the test
-/// functions plain `#[test]` so they never nest inside the `LiveServer`'s own
-/// runtime (which lives on its worker threads).
+/// Drive an async block on a throwaway runtime, outside the `LiveServer`'s own.
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -59,7 +41,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 }
 
 /// Create a fresh local libSQL file with the real `mls_commit_log` shape (no
-/// UNIQUE index, so forks/regressions can be seeded as a buggy server would).
+/// UNIQUE index, so forks/regressions can be seeded).
 fn seed_db(path: &Path, rows: &[Row]) {
     block_on(async {
         let db = libsql::Builder::new_local(path).build().await.unwrap();
@@ -121,10 +103,6 @@ fn healthy_rows() -> Vec<Row> {
     ]
 }
 
-// ---------------------------------------------------------------------------
-// HTTP helpers.
-// ---------------------------------------------------------------------------
-
 fn get_json<T: serde::de::DeserializeOwned>(base: &str, path: &str) -> T {
     let body = ureq::get(&format!("{base}{path}"))
         .call()
@@ -142,19 +120,11 @@ fn http_group(base: &str, id: &str) -> (u16, Option<String>, GroupReport) {
     (status, cors, report)
 }
 
-// ---------------------------------------------------------------------------
-// Planted-bundle helpers (for the read-time verifier — forks/regressions that
-// the builder would reject, so they are built WITHOUT the invariant, exactly as
-// a buggy/malicious server might have published them).
-// ---------------------------------------------------------------------------
-
 fn leaf(conv: &str, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
     leaf_at(conv, 0, epoch, seq, commit)
 }
 
 fn leaf_at(conv: &str, generation: u64, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
-    // Published leaf shape since #701: windowed pseudonyms derived from the real
-    // `conv` and the leaf's own `seq`.
     let window = window_for_seq(seq);
     CommitLeaf {
         conversation_pseudonym: derive_conversation_pseudonym(conv, window),
@@ -175,8 +145,7 @@ fn distinct_hash(s: &str) -> [u8; 32] {
 }
 
 /// Build a [`Bundle`] directly from leaves, in order, with NO `CommitLogInvariant`
-/// — so forks/regressions get published and it is the read-time verifier that
-/// must catch them. Optionally also writes the static `/v1` tree under `root`.
+/// so forks get published for the read-time verifier to catch.
 fn plant_bundle(leaves: &[CommitLeaf], root: Option<&Path>) -> Bundle {
     let key = SigningKey::from_seed(&[7u8; 32].into());
     let mut log = VerifiableLog::new();
@@ -245,10 +214,6 @@ fn mixed_leaves() -> Vec<CommitLeaf> {
     ]
 }
 
-// ---------------------------------------------------------------------------
-// (a) Live correctness over HTTP.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn live_serves_latest_and_group_over_http() {
     let dir = tempfile::tempdir().unwrap();
@@ -266,17 +231,14 @@ fn live_serves_latest_and_group_over_http() {
     .unwrap();
     let base = server.base_url();
 
-    // /v1/sth/latest.json reflects all 5 commits and verifies under the key.
     let sth: Sth = get_json(&base, "/v1/sth/latest.json");
     assert_eq!(sth.tree_size, 5);
     assert!(sth.verify(&key.verifying_key()), "latest STH must verify");
 
-    // /v1/index.json discovery manifest.
     let manifest: Manifest = get_json(&base, "/v1/index.json");
     assert_eq!(manifest.entry_count, 5);
     assert_eq!(manifest.latest_tree_size, Some(5));
 
-    // /verify/group/<id> for a healthy group.
     let (status, cors, report) = http_group(&base, "conv-a");
     assert_eq!(status, 200);
     assert_eq!(cors.as_deref(), Some("*"));
@@ -289,11 +251,6 @@ fn live_serves_latest_and_group_over_http() {
     server.shutdown();
 }
 
-// ---------------------------------------------------------------------------
-// (b) Within TTL: no rebuild; the cache is served untouched even after the DB
-//     changes. With ttl=0 the change shows up.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn within_ttl_does_not_rebuild_then_refreshes() {
     let dir = tempfile::tempdir().unwrap();
@@ -301,7 +258,6 @@ fn within_ttl_does_not_rebuild_then_refreshes() {
     seed_db(&db, &healthy_rows());
     let db_url = db.to_str().unwrap().to_string();
 
-    // Large TTL: the first request builds, the rest serve the cache.
     let server = LiveServer::spawn(
         db_url.clone(),
         String::new(),
@@ -316,19 +272,17 @@ fn within_ttl_does_not_rebuild_then_refreshes() {
     assert_eq!(first.commits.len(), 3, "conv-a starts with 3 commits");
     assert_eq!(server.rebuild_count(), 1, "first request triggers one build");
 
-    // Mutate the fixture: add conv-a epoch 3. Within the TTL this must NOT show.
+    // Add conv-a epoch 3; within the TTL this must not show.
     insert_rows(&db, &[row(6, "conv-a", 3, "a3")]);
 
     let (_, _, again) = http_group(&base, "conv-a");
     assert_eq!(again.commits.len(), 3, "within TTL the cache is served untouched");
     assert_eq!(server.rebuild_count(), 1, "no second DB pull within TTL");
-    // Also via the moving STH pointer: tree_size unchanged within the TTL.
     let sth: Sth = get_json(&base, "/v1/sth/latest.json");
     assert_eq!(sth.tree_size, 5);
     assert_eq!(server.rebuild_count(), 1);
     server.shutdown();
 
-    // A fresh server with ttl=0 rebuilds every request and sees the mutation.
     let live0 =
         LiveServer::spawn(db_url, String::new(), 0, Duration::ZERO, signing_key()).unwrap();
     let (_, _, fresh) = http_group(&live0.base_url(), "conv-a");
@@ -338,19 +292,13 @@ fn within_ttl_does_not_rebuild_then_refreshes() {
     live0.shutdown();
 }
 
-// ---------------------------------------------------------------------------
-// (c) Single-flight: many concurrent requests in the cold window cause exactly
-//     one DB pull.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn concurrent_requests_trigger_exactly_one_rebuild() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("commits.db");
     seed_db(&db, &healthy_rows());
 
-    // Cold cache + a large TTL: the first request to win the rebuild lock builds,
-    // every other concurrent request must serve its result, not pull again.
+    // Only the rebuild-lock winner builds; every other request serves its result.
     let server = LiveServer::spawn(
         db.to_str().unwrap().to_string(),
         String::new(),
@@ -384,15 +332,10 @@ fn concurrent_requests_trigger_exactly_one_rebuild() {
     server.shutdown();
 }
 
-// ---------------------------------------------------------------------------
-// (d) A forked / epoch-regressed group yields chain_valid = false.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn forked_and_regressed_groups_are_invalid() {
     let bundle = plant_bundle(&mixed_leaves(), None);
 
-    // Fork (conv-c): two commits at the same epoch.
     let forked = verify_group_in_bundle(&bundle, "conv-c");
     assert!(forked.found);
     assert!(!forked.chain_valid, "a forked group must fail");
@@ -402,7 +345,6 @@ fn forked_and_regressed_groups_are_invalid() {
         forked.violations
     );
 
-    // Epoch regression (conv-d): 0 -> 5 -> 3.
     let regressed = verify_group_in_bundle(&bundle, "conv-d");
     assert!(!regressed.chain_valid, "an epoch-regressed group must fail");
     assert!(
@@ -411,14 +353,9 @@ fn forked_and_regressed_groups_are_invalid() {
         regressed.violations
     );
 
-    // The healthy group in the same bundle still verifies.
     let healthy = verify_group_in_bundle(&bundle, "conv-a");
     assert!(healthy.chain_valid, "violations: {:?}", healthy.violations);
 }
-
-// ---------------------------------------------------------------------------
-// (e) CORS header present on the live verify endpoint (+ OPTIONS preflight).
-// ---------------------------------------------------------------------------
 
 #[test]
 fn live_verify_group_has_cors() {
@@ -448,10 +385,6 @@ fn live_verify_group_has_cors() {
 
     server.shutdown();
 }
-
-// ---------------------------------------------------------------------------
-// (f) The in-memory verifier and the URL-based verifier agree.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn in_memory_and_url_verify_agree() {

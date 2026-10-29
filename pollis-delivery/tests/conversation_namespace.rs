@@ -1,31 +1,6 @@
 //! #880 — one id names exactly one kind of conversation, and the DATABASE is
 //! what says so.
-//!
-//! `dm_channel`, `groups` and `channels` are three tables with three separate
-//! primary keys, so SQLite accepts the same id in all three. `is_member` ORs
-//! across all three on one id, so a DM whose id is a victim group's id grants
-//! membership of that group (#879, and the audit finding behind it). #879 closed
-//! that with `conversation_id_taken`, a check every `create_*` path must
-//! remember to call — code discipline, ranked LAST by CLAUDE.md.
-//!
-//! This suite pins the durable half: the `conversation` registry, claimed in the
-//! SAME transaction as the row it names, so a second claim of one id cannot
-//! commit. Two kinds of test live here and they are deliberately separated:
-//!
-//!   * **guard tests** — the `conversation_id_taken` chokepoint, which turns a
-//!     rejected claim into a clean `Forbidden` instead of a 500. Removing the
-//!     guard fails exactly these.
-//!   * **registry tests** — what holds when the guard is *not* consulted at all.
-//!     They assert only that no row was written, which is true whether the guard
-//!     refused it or the registry's primary key did. These are what make the
-//!     invariant a property of the schema rather than of anyone's memory.
-//!
-//! The backfill tests at the bottom drive the real migration SQL against a
-//! database stamped at the PREVIOUS version, which is the only way to prove what
-//! happens to rows that already exist in production.
-//!
-//! `foreign_keys=OFF` throughout: that is what production Turso does, so a test
-//! must not borrow enforcement no deploy has.
+//! `foreign_keys=OFF` throughout, as on production Turso.
 
 use libsql::Connection;
 use pollis_delivery::groups::{
@@ -39,10 +14,6 @@ mod common;
 const OWNER: &str = "owner-1";
 const MALLORY: &str = "mallory-1";
 
-// ── harness ──────────────────────────────────────────────────────────────────
-
-/// A database at the CURRENT schema (baseline + every migration), the shape a
-/// deployed DS talks to.
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
@@ -69,7 +40,6 @@ async fn count(conn: &Connection, sql: &str) -> i64 {
         .expect("count")
 }
 
-/// The registry's verdict for one id: `Some(kind)` or `None` when unclaimed.
 async fn claimed_kind(conn: &Connection, id: &str) -> Option<String> {
     let mut rows = conn
         .query(
@@ -107,12 +77,7 @@ fn channel_body(id: &str, group_id: &str) -> CreateChannelBody {
     }
 }
 
-/// A DM with one OTHER participant.
-///
-/// Since #987 `apply_create_dm` refuses a members-only-me DM outright — the
-/// client always did, and "a conversation with nobody in it" is an invalid state
-/// the write should not be able to produce. So the fixture names a peer: the
-/// counterparty is whichever of the two seeded users is not the creator.
+/// A DM with one other participant: since #987 a members-only-me DM is refused.
 fn dm_body(id: &str, creator: &str) -> CreateDmBody {
     let peer = if creator == OWNER { MALLORY } else { OWNER };
     CreateDmBody {
@@ -123,10 +88,7 @@ fn dm_body(id: &str, creator: &str) -> CreateDmBody {
     }
 }
 
-// ── the namespace itself ─────────────────────────────────────────────────────
-
-/// The positive case first, so nothing below can pass by refusing everything:
-/// three fresh ids, one of each kind, all created and all registered.
+/// The positive case, so nothing below can pass by refusing everything.
 #[tokio::test]
 async fn every_kind_of_conversation_is_still_creatable_and_lands_in_the_registry() {
     let db = fresh().await;
@@ -144,8 +106,6 @@ async fn every_kind_of_conversation_is_still_creatable_and_lands_in_the_registry
 
     assert!(matches!(g, WriteOutcome::Ok), "group create: {g:?}");
     assert!(matches!(c, WriteOutcome::Ok), "channel create: {c:?}");
-    // A three-outcome enum since #987: a block is not an authorization failure,
-    // so `apply_create_dm` reports it separately rather than as `Forbidden`.
     assert!(
         matches!(d, pollis_delivery::profile::DmOutcome::Created { existing: false, .. }),
         "dm create: {d:?}"
@@ -160,8 +120,7 @@ async fn every_kind_of_conversation_is_still_creatable_and_lands_in_the_registry
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM conversation").await, 3);
 }
 
-/// GUARD. The attack in its original form: a DM named after a victim's group.
-/// Fails if `conversation_id_taken` is removed from `apply_create_dm`.
+/// GUARD: a DM named after a victim's group (`conversation_id_taken`).
 #[tokio::test]
 async fn a_dm_cannot_be_created_with_an_existing_groups_id() {
     let db = fresh().await;
@@ -180,9 +139,7 @@ async fn a_dm_cannot_be_created_with_an_existing_groups_id() {
     );
 }
 
-/// REGISTRY. The same attack, asserted the way that survives the guard being
-/// gone: whatever refuses it, no `dm_channel` row may exist afterwards and the
-/// id must still name the group. This is the invariant — one id, one kind.
+/// REGISTRY: whatever refuses it, no `dm_channel` row exists and the id still names the group.
 #[tokio::test]
 async fn a_dm_naming_a_group_leaves_no_row_behind() {
     let db = fresh().await;
@@ -191,8 +148,7 @@ async fn a_dm_naming_a_group_leaves_no_row_behind() {
         .await
         .expect("group");
 
-    // `Err` (the registry's primary key) and `Ok(Forbidden)` (the guard) are both
-    // acceptable refusals; a committed row is not.
+    // Both `Err` and `Ok(Forbidden)` are acceptable refusals; a committed row is not.
     let _ = apply_create_dm(&conn, None, &dm_body("victim-group", MALLORY)).await;
 
     assert_eq!(
@@ -216,8 +172,7 @@ async fn a_dm_naming_a_group_leaves_no_row_behind() {
     );
 }
 
-/// REGISTRY. A channel may not name an existing DM either — the attack is
-/// symmetric across all three tables, not a property of DMs.
+/// REGISTRY: the attack is symmetric across all three tables.
 #[tokio::test]
 async fn a_channel_cannot_take_an_existing_dms_id() {
     let db = fresh().await;
@@ -239,11 +194,7 @@ async fn a_channel_cannot_take_an_existing_dms_id() {
     assert_eq!(claimed_kind(&conn, "a-dm").await.as_deref(), Some("dm"));
 }
 
-/// REGISTRY, and the case the guard structurally cannot see. The registry is
-/// append-only: an id survives its conversation. Here only the registry row
-/// exists — no `groups`/`channels`/`dm_channel` row for that id at all — which
-/// is exactly what `conversation_id_taken`'s three-table query looked for. The
-/// claim must still be refused, and the group must not be half-created.
+/// REGISTRY: the registry is append-only, so an id outlives its conversation.
 #[tokio::test]
 async fn an_id_whose_conversation_is_gone_can_never_be_claimed_again() {
     let db = fresh().await;
@@ -266,14 +217,7 @@ async fn an_id_whose_conversation_is_gone_can_never_be_claimed_again() {
     assert_eq!(claimed_kind(&conn, "retired-dm").await.as_deref(), Some("dm"));
 }
 
-// ── the default channels created alongside a group ───────────────────────────
-
-/// REGISTRY. The gap #879 left open: `create_group` checked its OWN id but
-/// inserted `default_text_channel_id` / `default_voice_channel_id` — both taken
-/// straight from the request body — with no check at all. Naming a victim's
-/// group as your new group's default channel reaches `is_member` through the
-/// channel leg (`channels JOIN group_member ON gm.group_id = c.group_id`) and
-/// grants membership just as surely as the DM route did.
+/// REGISTRY: a group's default channel ids come from the body and must be claimed too.
 #[tokio::test]
 async fn a_default_channel_cannot_name_an_existing_group() {
     let db = fresh().await;
@@ -310,8 +254,7 @@ async fn a_default_channel_cannot_name_an_existing_group() {
     );
 }
 
-/// REGISTRY. Same gap via the voice channel, and against an existing CHANNEL
-/// rather than a group — both legs of the pair are attacker-controlled.
+/// REGISTRY: same gap via the voice channel, against an existing channel.
 #[tokio::test]
 async fn a_default_voice_channel_cannot_name_an_existing_channel() {
     let db = fresh().await;
@@ -335,9 +278,7 @@ async fn a_default_voice_channel_cannot_name_an_existing_channel() {
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM groups").await, 1);
 }
 
-/// REGISTRY. One request naming the same id twice — a group and its own default
-/// channel, or both default channels. Nothing exists yet, so no lookup of
-/// existing rows can catch it; the registry's primary key is what does.
+/// REGISTRY: one request naming the same id twice is caught by the primary key.
 #[tokio::test]
 async fn one_request_cannot_name_the_same_id_twice() {
     let db = fresh().await;
@@ -364,9 +305,7 @@ async fn one_request_cannot_name_the_same_id_twice() {
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM conversation").await, 0);
 }
 
-/// GUARD. The same two cases, asserted as the clean 403 the endpoint should
-/// return rather than a 500 from a constraint violation. Fails if the
-/// default-channel checks are removed from `apply_create_group`.
+/// GUARD: the same cases answer a clean 403, not a 500.
 #[tokio::test]
 async fn a_refused_group_creation_is_forbidden_not_an_error() {
     let db = fresh().await;
@@ -390,13 +329,7 @@ async fn a_refused_group_creation_is_forbidden_not_an_error() {
     assert!(matches!(dup, WriteOutcome::Forbidden), "got {dup:?}");
 }
 
-// ── the guard triggers (#948) — the DATABASE refuses, no DS code in the path ─
-
-/// #948's definition of done, verbatim: a raw `INSERT INTO dm_channel` naming
-/// an existing group's id is refused BY THE DATABASE, with no pollis-delivery
-/// code in the path at all. #880's registry tests assert "no row was written
-/// whatever refused it"; this one asserts the refusal happens with the DS
-/// bypassed entirely — a writer that skips both the guard and the claim.
+/// #948: a raw `INSERT INTO dm_channel` on a group's id is refused by the database itself.
 #[tokio::test]
 async fn a_raw_insert_naming_a_groups_id_is_refused_by_the_database() {
     let db = fresh().await;
@@ -420,9 +353,7 @@ async fn a_raw_insert_naming_a_groups_id_is_refused_by_the_database() {
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM dm_channel").await, 0);
 }
 
-/// A writer that simply skips the registry — a fresh id, never claimed — is
-/// refused too. Before #948 this insert committed and left a conversation the
-/// registry had never heard of.
+/// A writer that skips the registry entirely is refused too.
 #[tokio::test]
 async fn a_raw_insert_with_an_unclaimed_id_is_refused_by_the_database() {
     let db = fresh().await;
@@ -440,9 +371,7 @@ async fn a_raw_insert_with_an_unclaimed_id_is_refused_by_the_database() {
     }
 }
 
-/// The positive control, so the two tests above cannot pass by refusing
-/// everything: claim first (what `claim_conversation_id` does, in the same
-/// transaction), then insert — exactly the production sequence — succeeds.
+/// Positive control: claim, then insert, in one transaction.
 #[tokio::test]
 async fn a_claimed_insert_still_succeeds() {
     let db = fresh().await;
@@ -458,8 +387,7 @@ async fn a_claimed_insert_still_succeeds() {
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM dm_channel").await, 1);
 }
 
-/// The side door: renaming an existing row onto another conversation's id (or
-/// onto unclaimed territory) via UPDATE is refused the same way.
+/// Renaming onto another id via UPDATE is refused the same way.
 #[tokio::test]
 async fn a_raw_update_cannot_rename_a_row_onto_another_conversations_id() {
     let db = fresh().await;
@@ -487,10 +415,7 @@ async fn a_raw_update_cannot_rename_a_row_onto_another_conversations_id() {
     );
 }
 
-// ── the backfill ─────────────────────────────────────────────────────────────
-
-/// Every main-DB script up to but excluding #880's, i.e. the schema production
-/// had the moment before this migration ran.
+/// Every main-DB script before #880's.
 fn schema_before_880() -> Vec<&'static str> {
     let mut out = vec![pollis_schema::BASELINE_SQL];
     out.extend(
@@ -504,7 +429,6 @@ fn schema_before_880() -> Vec<&'static str> {
 
 const CONVERSATION_NAMESPACE_VERSION: u32 = 16;
 
-/// The real migration SQL, not a paraphrase of it.
 fn conversation_namespace_sql() -> &'static str {
     pollis_schema::POST_BASELINE_MIGRATIONS
         .iter()
@@ -513,10 +437,7 @@ fn conversation_namespace_sql() -> &'static str {
         .expect("migration 000016 is listed")
 }
 
-/// A database stamped at the previous version and seeded with `sql`, then
-/// migrated. Returns the connection so the caller can inspect the result, plus
-/// the `Database` handle it borrows from — the caller must hold that for as long
-/// as it uses the connection. This used to be `std::mem::forget(db)` (#942).
+/// Stamp at the previous version, seed, migrate; the caller holds the `Database` (#942).
 async fn backfilled(seed: &str) -> (libsql::Database, Connection) {
     let db = libsql::Builder::new_local(":memory:")
         .build()
@@ -538,8 +459,6 @@ async fn backfilled(seed: &str) -> (libsql::Database, Connection) {
     (db, conn)
 }
 
-/// The rows production actually has: a group with two channels, a group with
-/// none, and a DM. Exactly one registry row each, with the right kind.
 #[tokio::test]
 async fn the_backfill_registers_every_existing_conversation_exactly_once() {
     let (_db, conn) = backfilled(
@@ -572,18 +491,13 @@ async fn the_backfill_registers_every_existing_conversation_exactly_once() {
     assert_eq!(claimed_kind(&conn, "d-1").await.as_deref(), Some("dm"));
 }
 
-/// An empty database backfills to nothing — the migration must not invent rows.
 #[tokio::test]
 async fn the_backfill_of_an_empty_database_is_empty() {
     let (_db, conn) = backfilled("").await;
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM conversation").await, 0);
 }
 
-/// The edge case that decides whether the migration can be trusted against real
-/// data: an id ALREADY shared by two tables (a pre-#879 attack). The migration
-/// must not fail — a migration that aborts blocks the release for everyone — and
-/// the id must go to whichever conversation had it FIRST, so a squatter never
-/// inherits the victim's id.
+/// An id shared by two tables (pre-#879) must not abort the migration and goes to the first owner.
 #[tokio::test]
 async fn a_pre_existing_collision_backfills_to_the_older_conversation() {
     let (_db, conn) = backfilled(
@@ -605,8 +519,7 @@ async fn a_pre_existing_collision_backfills_to_the_older_conversation() {
     );
 }
 
-/// The mirror of the above — order decides, not table precedence. If the DM came
-/// first, the DM keeps the id.
+/// Order decides, not table precedence.
 #[tokio::test]
 async fn a_pre_existing_collision_is_resolved_by_age_not_by_table_order() {
     let (_db, conn) = backfilled(
@@ -620,8 +533,6 @@ async fn a_pre_existing_collision_is_resolved_by_age_not_by_table_order() {
     assert_eq!(claimed_kind(&conn, "shared").await.as_deref(), Some("dm"));
 }
 
-/// The registry's own constraint, stated directly: one id, one kind, and the
-/// database is what refuses the second one.
 #[tokio::test]
 async fn the_registry_refuses_a_second_kind_for_one_id() {
     let (_db, conn) = backfilled("").await;
@@ -637,8 +548,6 @@ async fn the_registry_refuses_a_second_kind_for_one_id() {
     assert_eq!(claimed_kind(&conn, "x").await.as_deref(), Some("group"));
 }
 
-/// `kind` is closed: the three legs `is_member` ORs over are the only kinds
-/// there are, so a fourth cannot be smuggled in.
 #[tokio::test]
 async fn the_registry_refuses_an_unknown_kind() {
     let (_db, conn) = backfilled("").await;

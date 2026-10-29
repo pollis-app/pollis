@@ -1,18 +1,6 @@
 //! The **account-key** tenant: the canonical leaf encoding for one account
-//! identity-key version and the [`AccountKeyInvariant`] that makes the account
-//! key directory's per-user rules globally auditable.
-//!
-//! This is the second tenant of the transparency log (the first is
-//! [`crate::commit_log`]). Per the locked design it gets its **own** Merkle tree
-//! and its **own** STH — account-key entries are never interleaved into the
-//! commit-log tree — and that tree's STHs are signed under a domain-separated
-//! context ([`STH_CONTEXT`]) so an account-key head can never be presented as a
-//! commit-log head.
-//!
-//! Like [`crate::commit_log`] this module is pure — no IO, no DB, no clock. The
-//! DB reading lives in [`crate::source`]; everything here operates on
-//! already-read values so the encoding and invariant can be unit-tested and
-//! reused (e.g. by a monitor) without a database.
+//! identity-key version and the [`AccountKeyInvariant`].
+//! Its own tree, signed under [`STH_CONTEXT`]. Pure: no IO, DB or clock.
 
 use serde::{Deserialize, Serialize};
 use verifiable_log::{Entry, InvariantViolation, TenantInvariant};
@@ -21,33 +9,12 @@ use verifiable_log::{Entry, InvariantViolation, TenantInvariant};
 pub const TENANT: &str = "account-key";
 
 /// Domain-separation context for the account-key tree's Signed Tree Heads.
-///
-/// It extends the commit-log's frozen `pollis-verifiable-log:sth:v2` with an
-/// `:account-keys` suffix. The commit-log context must NOT change (continuity of
-/// already-published STHs); this distinct context guarantees an STH signed for
-/// one tree fails verification against the other even though both use the same
-/// key. Verified via [`verifiable_log::Sth::verify_with_context`].
-///
-/// Re-exported from the core rather than restated: the bytes are the tree's
-/// identity, and a context spelled out in several crates is one that can drift
-/// into two trees that silently do not verify each other's heads.
 pub use verifiable_log::STH_CONTEXT_ACCOUNT_KEYS as STH_CONTEXT;
 
 /// The canonical, frozen leaf payload committing to a single account
-/// identity-key version: which public key was authoritative for `user_id` at
-/// `identity_version`.
-///
-/// Unlike a commit leaf (which stores `sha256(commit_data)` to avoid disclosing
-/// the commit bytes), the account public key is **public by design** — the whole
-/// point of an account-key directory is to publish it — so `account_id_pub`
-/// carries the key itself, lowercase hex.
-///
-/// The on-the-wire leaf encoding is **compact JSON of this struct with fields in
-/// exactly this declared order** (`user_id`, `identity_version`,
-/// `account_id_pub`, `seq`). serde emits struct fields in declaration order with
-/// no insignificant whitespace, so the encoding is deterministic and stable.
-/// This is a frozen contract extension of `verifiable-log`'s leaf encoding —
-/// see the builder README.
+/// identity-key version: which public key was authoritative for `user_id`.
+/// The key is public by design, so it is stored as hex. Compact JSON in declared field order
+/// (frozen).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountKeyLeaf {
     /// The user whose account identity key this row records.
@@ -80,23 +47,17 @@ impl AccountKeyLeaf {
 }
 
 /// The globally-auditable form of the account-key directory's per-user rule.
-/// Registered for [`TENANT`] on the builder's log, it is consulted on every
-/// append and enforces, per user:
+/// Enforced on every append, per user:
 ///
 /// * **(a) no duplicate version** — no two entries share the same
 ///   `(user_id, identity_version)` (the public mirror of the DB's
 ///   `UNIQUE(user_id, identity_version)` index);
 /// * **(b) no version regression/replay** — within a user, `identity_version` is
 ///   strictly increasing in `seq` order.
-///
-/// Because the builder appends rows in `seq` order, the candidate always has the
-/// largest `seq` seen so far for its user, so "strictly greater than every prior
-/// version for this user" is exactly rule (b).
 pub struct AccountKeyInvariant;
 
 impl AccountKeyInvariant {
-    /// A leaf whose bytes don't parse as an `AccountKeyLeaf` can't be reasoned
-    /// about, so it's treated as a violation rather than silently accepted.
+    /// An unparseable leaf is a violation, not silently accepted.
     fn parse(entry: &Entry) -> Result<AccountKeyLeaf, InvariantViolation> {
         AccountKeyLeaf::decode(&entry.data).map_err(|e| {
             InvariantViolation::new(TENANT, format!("malformed account-key leaf: {e}"))
@@ -112,7 +73,6 @@ impl TenantInvariant for AccountKeyInvariant {
             if prev.user_id != cand.user_id {
                 continue;
             }
-            // (a) duplicate version: same user + same identity_version, two rows.
             if prev.identity_version == cand.identity_version {
                 return Err(InvariantViolation::new(
                     TENANT,
@@ -122,8 +82,7 @@ impl TenantInvariant for AccountKeyInvariant {
                     ),
                 ));
             }
-            // (b) version regression/replay: a prior row for this user already
-            // reached a higher version, so this one goes backwards.
+            // (b) version regression/replay: a prior row already reached a higher version.
             if prev.identity_version > cand.identity_version {
                 return Err(InvariantViolation::new(
                     TENANT,
@@ -155,7 +114,6 @@ mod tests {
     fn encode_is_stable_and_roundtrips() {
         let l = leaf("u-alice", 2, 7);
         let bytes = l.encode().unwrap();
-        // Field order is frozen: user_id, identity_version, account_id_pub, seq.
         let s = String::from_utf8(bytes.clone()).unwrap();
         assert!(s.starts_with("{\"user_id\":"));
         assert!(s.find("\"identity_version\":").unwrap() < s.find("\"account_id_pub\":").unwrap());
@@ -170,7 +128,6 @@ mod tests {
         let a2 = leaf("u-alice", 2, 3).to_entry().unwrap();
         let b1 = leaf("u-bob", 1, 2).to_entry().unwrap();
         assert!(inv.check(&[], &a1).is_ok());
-        // A different user at version 1 is fine.
         assert!(inv.check(&[&a1], &b1).is_ok());
         assert!(inv.check(&[&a1, &b1], &a2).is_ok());
     }
@@ -179,7 +136,6 @@ mod tests {
     fn rejects_duplicate_version() {
         let inv = AccountKeyInvariant;
         let a1 = leaf("u-alice", 1, 1).to_entry().unwrap();
-        // Same user + same version, different key bytes (different seq).
         let dup = leaf("u-alice", 1, 2).to_entry().unwrap();
         let err = inv.check(&[&a1], &dup).unwrap_err();
         assert!(err.message.contains("duplicate"), "got: {}", err.message);

@@ -1,7 +1,4 @@
-// Thin wrapper over lucide-react-native so screens use a stable `Icon.*` API.
-// Every icon is drawn at a 1.75pt stroke (Tokens.dc.html), pinned here.
-// Icons are decorative to screen readers: the control that holds one carries
-// the accessibilityLabel.
+// Stable `Icon.*` wrapper over lucide-react-native at a 1.75pt stroke. Decorative to screen readers.
 import {
   Hash,
   Search,
@@ -80,7 +77,6 @@ import {
 import { I18nManager, View } from "react-native";
 import { semantic } from "../theme/tokens";
 
-// The stroke every icon uses.
 export const ICON_STROKE = 1.75;
 
 type P = { size?: number; color?: string };
@@ -95,11 +91,7 @@ const wrap =
     />
   );
 
-// Yoga mirrors layout under RTL but never the glyph inside an icon, so an
-// icon that ENCODES direction ("back", "forward") is flipped here — and only
-// those. A magnifier or a bell means the same thing in both directions, and a
-// mirrored one would just be wrong (#1074, the same rule as desktop's
-// `.rtl-mirror`).
+// Only icons that ENCODE direction are mirrored under RTL (#1074).
 const mirrored =
   (C: LucideIcon, defaultSize = 20) =>
   ({ size, color }: P) => (
@@ -112,8 +104,7 @@ const mirrored =
     </View>
   );
 
-// Keys that existed before the redesign keep their old default sizes so
-// unmigrated call sites keep their layout; new keys default to 20.
+// Pre-redesign keys keep their old default sizes; new keys default to 20.
 export const Icon = {
   /* ── Navigation ── */
   back: mirrored(ChevronLeft, 14),
@@ -145,7 +136,6 @@ export const Icon = {
   link: wrap(Link2, 14),
   share: wrap(Share2, 14),
   download: wrap(Download, 14),
-  // A row that leaves the app (a store listing, a web page).
   external: wrap(ExternalLink, 16),
   trash: wrap(Trash2),
   logOut: wrap(LogOut),
@@ -154,8 +144,7 @@ export const Icon = {
   attach: wrap(Paperclip),
   more: wrap(Ellipsis),
   kebab: wrap(MoreVertical, 14),
-  // The PIN pad's delete key. Its arrow points at the text it erases, so it
-  // mirrors under RTL.
+  // Points at the text it erases, so it mirrors under RTL.
   backspace: mirrored(Delete, 26),
   userX: wrap(UserX),
   ban: wrap(Ban),
@@ -197,13 +186,11 @@ export const Icon = {
   play: wrap(Play),
   pause: wrap(Pause),
   video: wrap(Film),
-  // Sensitive media (#1568): open while it shows, crossed out while covered.
   eye: wrap(Eye, 16),
   eyeOff: wrap(EyeOff, 16),
   file: wrap(File),
   saveImage: wrap(ImageDown),
-  // Seek back / forward: the arrows encode time, not reading direction, so
-  // they are not mirrored (a media player's controls never flip in RTL).
+  // The arrows encode time, not reading direction: not mirrored.
   seekBack: wrap(RotateCcw),
   seekForward: wrap(RotateCw),
 
@@ -214,11 +201,9 @@ export const Icon = {
 
 export type IconName = keyof typeof Icon;
 
-// Every Icon.* component, so a control can tell an icon element it may
-// recolour (IconButton / Button tint the glyph) from a composed node.
+// So a control can tell an icon element it may recolour from a composed node.
 const ICON_COMPONENTS: ReadonlySet<unknown> = new Set<unknown>(Object.values(Icon));
 
-/** True when `node` is an `<Icon.* />` element. */
 export function isIconElement(node: unknown): boolean {
   return (
     typeof node === "object" &&

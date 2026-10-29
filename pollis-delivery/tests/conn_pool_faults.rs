@@ -1,11 +1,5 @@
 //! #1500 — a pooled connection that hit a transport failure is never reused.
 //!
-//! libsql keeps a hrana stream's baton when a request on it fails at the HTTP
-//! layer, so once Turso has expired the stream (or the request carrying a new
-//! baton was lost), every later statement on that `Connection` sends the dead
-//! baton and fails with `stream not found`. The pool used to park such a
-//! connection again, so the next request to draw it failed the same way.
-//!
 //! Its own binary because recording a fault discards every connection checked
 //! out at that moment, process-wide: run beside `conn_pool.rs`'s tests, it
 //! would make their connection counts nondeterministic.
@@ -26,7 +20,6 @@ async fn a_connection_whose_stream_died_is_not_parked_again() {
     let conn = db.conn().await.expect("checkout");
     conn.prepare("SELECT 1").await.expect("prepare");
 
-    // Turso expires the stream; the connection still holds its baton.
     double.expire_streams();
     let Err(err) = conn.prepare("SELECT 2").await else {
         panic!("a statement on the expired stream must fail");
@@ -43,7 +36,6 @@ async fn a_connection_whose_stream_died_is_not_parked_again() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     drop(conn);
 
-    // The next request gets a new connection, and it works.
     let conn = db.conn().await.expect("checkout");
     conn.execute("INSERT INTO t VALUES (1)", ())
         .await
@@ -55,8 +47,7 @@ async fn a_connection_whose_stream_died_is_not_parked_again() {
     );
 }
 
-/// The fault discards only what was checked out when it happened: a connection
-/// released before it is reused as normal.
+/// The fault discards only connections checked out when it happened.
 #[tokio::test]
 async fn a_connection_released_before_a_fault_is_still_reused() {
     let (double, url) = start_double().await;

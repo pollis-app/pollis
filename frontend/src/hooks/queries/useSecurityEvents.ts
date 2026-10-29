@@ -20,10 +20,7 @@ export const SECURITY_EVENTS_PREVIEW = 3;
 /** Rows per page on the Security events page (#1548). */
 const PAGE_SIZE = 25;
 
-/**
- * The newest few events, for the Security page's preview. Asks the DS for
- * exactly that many rather than slicing a bigger list.
- */
+/** The newest few events, asked for exactly. */
 export function useSecurityEventsPreview() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
@@ -42,12 +39,7 @@ export function useSecurityEventsPreview() {
   });
 }
 
-/**
- * The whole log, one keyset page at a time, narrowed by a quick filter
- * (#1548). `placeholderData: keepPreviousData` keeps the previous filter's rows
- * on screen until the new filter's first page lands, so a chip tap never
- * blanks the list; `isPlaceholderData` is the "still switching" signal.
- */
+/** The whole log in keyset pages, filtered (#1548); keeps the previous rows while switching. */
 export function useSecurityEventPages(filter: SecurityEventFilter) {
   const currentUser = useObserver(() => appStore.currentUser);
   return useInfiniteQuery({

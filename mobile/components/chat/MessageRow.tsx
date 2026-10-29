@@ -29,32 +29,13 @@ import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 import type { MessageAttachment } from "../../types";
 
-// Avatar column (40) + gap (12): a continued message's body lines up with
-// the header message's body.
+// Avatar column (40) + gap (12), so continued bodies line up.
 const AVATAR = 40;
 const AVATAR_GAP = 12;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-/**
- * One timeline message (Chat.dc.html), Discord-style: 40pt avatar, the
- * sender's name in accent 16/700, a muted 12pt time, then a 16pt body.
- * `continued` rows (same sender, shortly after) drop the avatar and name and
- * hang under the previous header. A message that mentions the reader gets a
- * full-width accent tint — never an edge stripe.
- *
- * The whole row is ONE accessible element: its label always carries the
- * sender and text, even when the header is visually collapsed.
- *
- * A reply (#1270) carries a quote line above it, desktop's reference: the
- * reply arrow, the original's author and one line of its text, or
- * "[redacted]" when the original is not loaded. Swiping the row toward the
- * start edge, or double-tapping it, starts a reply (`SwipeToReply`).
- *
- * A finger resting on the row fades it one surface step up (#1282), held
- * through the long press and cleared on release, scroll or swipe. One shared
- * value drives it on the UI thread; JS only sets it at touch down and up.
- */
+/** One timeline message, Discord-style; the whole row is ONE accessible element. */
 export function MessageRow({
   av,
   amber,
@@ -98,11 +79,10 @@ export function MessageRow({
   text?: string;
   pending?: boolean;
   failed?: boolean;
-  // A failed send's way out (#1335): deliver it again, or throw it away.
+  // A failed send's way out (#1335).
   onRetry?: () => void;
   onDiscard?: () => void;
   edited?: boolean;
-  /** Our edit of this message is stored but its delivery failed (#1555). */
   editUnsent?: boolean;
   reactions?: Reaction[];
   currentUserId?: string;
@@ -111,37 +91,27 @@ export function MessageRow({
   peerCount?: number;
   showReceipt?: boolean;
   threadCount?: number;
-  // Formatted time of the newest reply, for the thread chip.
   threadLastReply?: string;
   onOpenThread?: () => void;
   mentionNames?: ReadonlySet<string>;
   selfName?: string | null;
   attachments?: MessageAttachment[];
-  // Opens the full-screen media viewer (#1248) on a tapped attachment.
   onOpenAttachment?: (attachment: MessageAttachment) => void;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
-  // Starts a reply to this message: swipe, double tap, or the a11y action.
   onReply?: () => void;
-  // The message this one answers. Undefined: not a reply. Null: a reply
-  // whose original is not loaded.
+  // Undefined: not a reply. Null: a reply whose original is not loaded.
   replyTo?: { name: string; snippet: string } | null;
-  // Scrolls to the original (only when it is loaded).
   onPressReplyQuote?: () => void;
-  // A brief tint after a quote was tapped to jump here.
   highlighted?: boolean;
-  // Same sender as the row above, within the grouping window.
   continued?: boolean;
-  // The sender joined the group within a week of this message (#1506): a
-  // small "new" tag after their name. Group channels only.
+  // Joined within a week of this message (#1506); group channels only.
   isNew?: boolean;
   testID?: string;
   messageId?: string;
 }) {
   const { t } = useTranslation("chat");
 
-  // A mention of the reader (`@me` or `@all`) that resolves against the
-  // roster tints the whole row.
   const mentionsSelf = useMemo(() => {
     if (!text || !mentionNames) {
       return false;
@@ -153,9 +123,7 @@ export function MessageRow({
     );
   }, [text, mentionNames, selfName]);
 
-  // Touch feedback: 0 at rest, 1 pressed. Set from JS once at touch down
-  // and once at touch up; the fade itself runs on the UI thread. The swipe
-  // clears it from its own worklet the moment a drag takes the touch.
+  // Touch feedback (#1282): the fade runs on the UI thread; the swipe clears it from its worklet.
   const press = useSharedValue(0);
   const tinted = mentionsSelf || highlighted;
   const restBg = semantic[restingSurface(tinted)];
@@ -163,8 +131,7 @@ export function MessageRow({
   const pressStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(press.value, [0, 1], [restBg, pressBg]),
   }));
-  // Only a row that opens the message sheet answers a press: a pending row
-  // or a thread reply has nothing to offer, so it stays still.
+  // Only a row that opens the message sheet answers a press.
   const onPressIn = () => {
     if (!onLongPress) {
       return;
@@ -178,8 +145,7 @@ export function MessageRow({
     press.value = withTiming(0, { duration: PRESS_FEEDBACK.fadeOutMs });
   };
 
-  // A long press by touch confirms itself with a haptic as the sheet opens
-  // (#1286); the accessibility action does not, the screen reader speaks it.
+  // Touch long press plays a haptic (#1286); the a11y action does not.
   const onLongPressTouch = onLongPress
     ? () => {
         haptic("longPress");
@@ -190,11 +156,7 @@ export function MessageRow({
   const showHeader = !continued;
   const statusLabel = failed ? t("status.failed") : null;
 
-  // The row is one accessible element, so the nested avatar button is out of
-  // a screen reader's reach; "View profile" is offered as a custom action
-  // instead. Activate and long press both open the message actions.
-  // The attachments are nested buttons too, so each one that can open is
-  // offered as an action of its own ("Open <filename>").
+  // The row is one accessible element: nested buttons are offered as custom actions.
   const openableAttachments = onOpenAttachment
     ? (attachments ?? []).filter((a) => !!a.object_key || !!a.localPreviewUri)
     : [];
@@ -217,7 +179,6 @@ export function MessageRow({
     ? `${t("mobile:chat.replyQuoteLabel", { name: replyTo?.name ?? "", text: quoteText })}. `
     : "";
 
-  // The tag is part of the one spoken label, not a separate element.
   const spokenName = isNew ? `${name} (${t("message.newMember")})` : name;
 
   return (
@@ -275,8 +236,6 @@ export function MessageRow({
               alignItems: "center",
               gap: 6,
               minWidth: 0,
-              // Hangs from the avatar column toward the body, Discord's reply
-              // reference; the arrow sits over the avatar's end half.
               paddingStart: AVATAR / 2,
             }}
           >
@@ -344,9 +303,7 @@ export function MessageRow({
                     </Text>
                   </View>
                 ) : null}
-                {/* A pending row renders exactly like a sent one: a "sending"
-                    label or dimmed row made a fast send feel slow. Only a failure
-                    is labelled, matching desktop. */}
+                {/* A pending row looks sent: only a failure is labelled, as on desktop. */}
                 <Text
                   style={[
                     ty.meta,
@@ -376,8 +333,7 @@ export function MessageRow({
                 ) : null}
               </Text>
             ) : null}
-            {/* Collapsed rows have no header, so their status line sits under the
-                body: the failure label and receipts stay visible. */}
+            {/* Collapsed rows show their status line under the body. */}
             {!showHeader && (failed || (showReceipt && receipt)) ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 {failed ? (
@@ -437,7 +393,6 @@ export function MessageRow({
                 testID={`btn-thread-${messageId ?? ""}`}
                 accessibilityRole="button"
                 accessibilityLabel={t("mobile:chat.openThread", { count: threadCount })}
-                // 32pt chip; the slop brings the target to 44pt.
                 hitSlop={6}
                 style={({ pressed }) => ({
                   flexDirection: "row",

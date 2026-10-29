@@ -1,8 +1,4 @@
-// Auth mutation hooks. Wraps the request_otp / verify_otp / set_pin /
-// unlock / initialize_identity flow that all four `(auth)/*` screens
-// share. Mirrors the auth shape in `frontend/src/hooks/queries/useAuth.ts`
-// where the desktop equivalents live — there's no public hook there, so
-// this file is a fresh start scoped to mobile's screen sequence.
+// Auth mutation hooks for the `(auth)/*` screen sequence.
 
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
@@ -20,9 +16,7 @@ export interface RawUserProfile {
 
 export interface UnlockOutcome {
   user_id: string;
-  // Whatever else `crate::commands::pin::UnlockOutcome` carries — opaque
-  // to the UI; we read user_id and trust the Rust side to have set
-  // AppState.unlock for downstream commands.
+  // Whatever else `UnlockOutcome` carries is opaque to the UI.
 }
 
 export interface UnlockStateSnapshot {
@@ -71,8 +65,7 @@ export function useVerifyOtp() {
       const user = profileToUser(profile);
       setCurrentUser(user);
       setUsername(profile.username);
-      // Stash the recovery key (returned only on first-device signup) so
-      // the PIN screen can hand it off to the Emergency Kit display.
+      // The recovery key (first-device signup only), for the Emergency Kit.
       if (profile.new_secret_key) {
         setPendingSecretKey(profile.new_secret_key);
       }
@@ -130,19 +123,12 @@ export function useLogout() {
     mutationFn: async (vars: { deleteData?: boolean } | void) => {
       await invoke("logout", { deleteData: vars?.deleteData ?? false });
     },
-    // Settled, not just success: a failed `logout` still lands on sign-in,
-    // so it must not leave the old session's state behind (desktop's
-    // sign-out does the same).
+    // Settled, not just success: a failed `logout` still ends the session.
     onSettled: () => endSession(),
   });
 }
 
-/**
- * One-shot session-restore call. Used by `app/index.tsx` to decide where
- * to send the user at app start: existing session → tabs, no session →
- * auth flow. Returns the profile (and side-effects the store) when there
- * is one; returns null when not signed in.
- */
+/** Session restore for `app/index.tsx`: the profile, or null when not signed in. */
 export async function restoreSession(): Promise<RawUserProfile | null> {
   const profile = await invoke<RawUserProfile | null>("get_session");
   if (!profile) {

@@ -1,12 +1,4 @@
-// How a group's or channel's name and description render on the rename page
-// (#1281). Mirrored by mobile/lib/identityFields.ts for the mobile group
-// settings screen; mobile imports no frontend TypeScript, so the two are kept
-// in step by hand.
-//
-// Someone who can edit gets an input, always. Someone who cannot gets the
-// value as plain text, and when there is no value at all, nothing: an empty
-// box with a placeholder in it reads as an invitation to type that the person
-// cannot accept.
+// Rename-page field mode (#1281): editors get an input, others text or nothing. Mirrored by mobile/lib/identityFields.ts.
 
 export type IdentityFieldMode = "edit" | "read" | "hidden";
 

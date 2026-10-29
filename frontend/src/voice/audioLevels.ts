@@ -1,12 +1,4 @@
-// Per-source multi-band audio levels, pushed from Rust at ~20 Hz via the
-// `audio_bands` voice event. Kept OUT of the MobX/React-Query state on
-// purpose: this is high-frequency cosmetic data (N participants × ~20 Hz)
-// and routing it through observable state would thrash every tile 20×/sec.
-//
-// Instead it's a tiny per-identity pub/sub. The participant tile's live
-// waveform subscribes and writes CSS variables straight onto its bar
-// element via a ref — so the meter animates with zero React re-renders.
-// Mirrors the `useScreenShareStats` per-frame-stats subscription pattern.
+// Per-identity pub/sub for ~20 Hz `audio_bands` levels, kept out of observable state; tiles write CSS vars via refs.
 
 import { userIdFromVoiceIdentity } from "./identity";
 
@@ -19,13 +11,7 @@ class AudioLevels {
   private listeners = new Map<string, Set<Listener>>();
   private latest = new Map<string, number[]>();
 
-  // Levels are keyed by *user id*, not the full device identity, to match the
-  // user-scoped tile model (VoiceStage merges a user's devices into one tile;
-  // the speaking indicator is likewise user-scoped). This is also what fixes
-  // the local meter: the local tile's identity is synthesized on the frontend
-  // and may not byte-match the device-suffixed identity the backend emits
-  // `audio_bands` under, but the user id always matches. Remote bands collapse
-  // per user (latest device wins), consistent with the merged tile.
+  // Keyed by user id to match user-scoped tiles (and the synthesized local identity).
   private key(identity: string): string {
     return userIdFromVoiceIdentity(identity);
   }
@@ -50,13 +36,11 @@ class AudioLevels {
     };
   }
 
-  /** Latest snapshot for an identity, if one has arrived (for seeding a
-   *  freshly-mounted subscriber before the next push). */
+  /** Latest snapshot, to seed a new subscriber. */
   get(identity: string): number[] | undefined {
     return this.latest.get(this.key(identity));
   }
 
-  /** Called from the voice event handler when an `audio_bands` event lands. */
   push(identity: string, bands: number[]): void {
     const k = this.key(identity);
     this.latest.set(k, bands);

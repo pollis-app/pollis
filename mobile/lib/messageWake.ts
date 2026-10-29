@@ -1,27 +1,11 @@
-// What a `new_message` wake-up — or a missed one — should do.
-//
-// Mirrors desktop's `frontend/src/utils/messageWake.ts`. The wake-up names no
-// sender (§5 signalling minimization), so whether a message is our OWN — sent
-// from this account's other device — is only known after ingest, from the
-// MLS-attributed `sender_id` of the newest local row. Our own message is shown
-// exactly like anyone else's, but never counts as unread.
-//
-// The second half is the catch-up a missed wake-up needs. A LiveKit wake-up
-// that fires while the app is backgrounded (or while the room is reconnecting)
-// is simply gone, and a message from this user's other device is the one case
-// that has no push to fall back on — the Delivery Service never pushes a
-// sender's own message to their own account. So on resume / reconnect the app
-// re-ingests the conversations it shows. Pure, so `tests/message-wake.test.ts`
-// pins both rules.
+// What a `new_message` wake-up, or a missed one, should do (mirrors desktop's messageWake.ts). Own messages show but never count unread. Pure.
 
 import type { ConversationKind } from "../hooks/queries/useMessages";
 
-/** The fields of the newest local message that the decision reads. */
 export interface WakeLatest {
   sender_id: string;
 }
 
-/** True when the newest message in the conversation is the user's own. */
 export function isOwnLatest(
   latest: WakeLatest | null | undefined,
   selfId: string | null | undefined,
@@ -32,11 +16,7 @@ export function isOwnLatest(
   return latest.sender_id === selfId;
 }
 
-/**
- * Whether a wake-up should bump the unread badge. Never for the conversation
- * on screen, never for our own message. When nothing could be read back it
- * counts, as every wake-up did before the sender could be told apart.
- */
+/** Never for the conversation on screen or our own message; counts when nothing could be read back. */
 export function shouldCountUnread(args: {
   latest: WakeLatest | null | undefined;
   selfId: string | null | undefined;
@@ -48,17 +28,12 @@ export function shouldCountUnread(args: {
   return !isOwnLatest(args.latest, args.selfId);
 }
 
-/** One ingest the catch-up runs. */
 export interface CatchUpTarget {
   id: string;
   kind: ConversationKind;
 }
 
-/**
- * The ingests that bring every listed conversation up to date. ONE per group —
- * channel ingest catches up the whole MLS group, all sibling channels with it —
- * plus one per DM. A group with no text channel has nothing to show.
- */
+/** ONE ingest per group (it catches up every channel) plus one per DM. */
 export function catchUpTargets(
   groups: ReadonlyArray<{ channels: ReadonlyArray<{ id: string }> }>,
   dms: ReadonlyArray<{ id: string }>,
@@ -76,11 +51,7 @@ export function catchUpTargets(
   return out;
 }
 
-/**
- * Which ingest a reconnected room needs: a DM room is named by its
- * conversation id; a group room by its group id, caught up through any one of
- * its channels. The inbox room carries no messages.
- */
+/** A DM room is named by conversation id, a group room by group id; the inbox has no messages. */
 export function roomCatchUpTarget(
   roomName: string,
   groups: ReadonlyArray<{ id: string; channels: ReadonlyArray<{ id: string }> }>,

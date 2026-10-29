@@ -1,55 +1,7 @@
 //! #987 acceptance gates P9 (snapshot atomicity) and P10 (batch contiguity).
-//!
-//! These are the two properties that made the MLS control-plane read ONE
-//! endpoint rather than four, and neither fails loudly on its own — which is
-//! why they get tests rather than a comment.
-//!
-//! # P9 — a torn GroupInfo/Welcome pair must not be observable
-//!
-//! `submit_commit` writes the commit, its GroupInfo and its Welcomes in one
-//! `IMMEDIATE` transaction. The client's join gate reads
-//! `ExternalJoin ⟹ !welcome_pending`: it may external-join only when no Welcome
-//! is inbound for it, because joining while one is in flight strands the device
-//! permanently — its own Welcome carries an epoch the join has overwritten.
-//!
-//! That gate is meaningful only if the two facts come from ONE snapshot. Split
-//! across two reads, a caller can land between them and see a GroupInfo without
-//! the Welcome written beside it. The Kani property does not catch that; it
-//! stays *true* and becomes vacuous.
-//!
-//! [`a_split_read_can_observe_a_torn_pair`] shows the hazard is real, with no
-//! race at all: two separate reads with a write in between tear every time.
-//! [`torn_group_info_and_welcome_is_not_observable`] then drives `snapshot`
-//! against a writer flipping the pair on and off as fast as it can, and asserts
-//! the two halves always agree.
-//!
-//! # P10 — a hole must be a FACT, and distinguishable from a prune
-//!
-//! The client's response to a non-contiguous batch is
-//! `forget_local_mls_group_at`: it drops the device's MLS state for that group
-//! and external-joins onto the head. That is the recovery, not the danger — a
-//! device cannot advance a local group across an epoch that does not exist, and
-//! `flows::adversarial::epoch_gap_recovers_via_external_join` pins exactly this
-//! behaviour. What makes it dangerous is a hole that is not real: when the
-//! batch, the head and the retention floor came off separate statements, a
-//! reader could see a gap the log never had and destroy live state recovering
-//! from nothing.
-//!
-//! So the endpoint reports rather than refuses, and reports from ONE
-//! transaction. Refusing would be worse in the other direction: a genuinely
-//! damaged conversation would become permanently unreadable, every read erroring
-//! forever with no path back.
-//!
-//! A *retention prune* (#539) is the third case and must not be confused with
-//! either: it is a legitimate reason for a batch to start above what was asked
-//! for, and `pruned_below` — read in that same transaction — is what separates
-//! "the floor moved" from "a row is missing".
-//!
-//! Note the log DB refuses a forward gap on INSERT
-//! (`trg_mls_commit_log_no_forward_gap`, migration 000005), so these fixtures
-//! build a hole the only way one can actually appear: by removing a row that was
-//! legitimately written — the shape a mis-scoped prune or a partial restore
-//! produces.
+//! P9: the join gate is meaningful only if GroupInfo and Welcome come from one snapshot.
+//! P10: a hole must be a fact, distinguishable from a retention prune (#539).
+//! The log DB refuses forward gaps on INSERT, so fixtures build holes by removing a row.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -77,7 +29,6 @@ fn who() -> Reader {
     }
 }
 
-/// Everything but the commit batch: heads, the GroupInfo head, the Welcome flag.
 fn cheap_query(conversation_id: &str) -> ConversationStateQuery {
     ConversationStateQuery {
         conversation_id: conversation_id.to_string(),
@@ -98,8 +49,6 @@ fn batch_query(conversation_id: &str, since: i64) -> ConversationStateQuery {
     }
 }
 
-/// One commit row at `epoch`. Generation 0 is the pre-migration lineage every
-/// conversation starts in.
 async fn insert_commit(conn: &libsql::Connection, conversation_id: &str, epoch: i64) {
     conn.execute(
         "INSERT INTO mls_commit_log \
@@ -111,8 +60,7 @@ async fn insert_commit(conn: &libsql::Connection, conversation_id: &str, epoch: 
     .expect("insert commit");
 }
 
-/// Publish a GroupInfo AND this device's Welcome in ONE transaction — the shape
-/// `submit_commit` uses.
+/// Publish a GroupInfo and this device's Welcome in one transaction, as `submit_commit` does.
 async fn publish_pair(conn: &libsql::Connection, epoch: i64) {
     let tx = conn.transaction().await.expect("tx");
     tx.execute(
@@ -141,9 +89,7 @@ async fn publish_pair(conn: &libsql::Connection, epoch: i64) {
     tx.commit().await.expect("commit tx");
 }
 
-/// Retract both halves, also in ONE transaction. Together with [`publish_pair`]
-/// this gives the conversation exactly two legal states — both present, or
-/// neither — so ANY observation of one without the other is a torn read.
+/// Retract both halves in one transaction: any observation of one alone is a torn read.
 async fn retract_pair(conn: &libsql::Connection) {
     let tx = conn.transaction().await.expect("tx");
     tx.execute(
@@ -186,18 +132,7 @@ async fn welcome_pending(conn: &libsql::Connection) -> bool {
     rows.next().await.expect("row").is_some()
 }
 
-// ── P9 ───────────────────────────────────────────────────────────────────────
-
-/// The hazard, with no race: two SEPARATE reads with a write in between observe
-/// a GroupInfo that no longer has its Welcome beside it.
-///
-/// This is what the client did before #987 — one query for the published
-/// GroupInfo, another for the pending-Welcome flag — and it is why the read had
-/// to become one endpoint rather than two. A device that lands here
-/// external-joins into its own inbound Welcome and is stranded permanently.
-///
-/// Deterministic on purpose: the point is not that a tear is *likely* but that
-/// nothing about split reads prevents it.
+/// Two separate reads with a write between them observe a torn pair (the pre-#987 client).
 #[tokio::test]
 async fn a_split_read_can_observe_a_torn_pair() {
     let db = log_db().await;
@@ -206,16 +141,11 @@ async fn a_split_read_can_observe_a_torn_pair() {
 
     publish_pair(&conn, 1).await;
 
-    // READ ONE: the GroupInfo is published, so an external join looks available
-    // as far as this half of the question goes.
     let saw_group_info = group_info_present(&conn).await;
     assert!(saw_group_info, "fixture: the pair was published");
 
-    // The world moves between the two reads.
     retract_pair(&conn).await;
 
-    // READ TWO: no Welcome pending. The caller now holds two facts that were
-    // never true at the same instant.
     let saw_welcome = welcome_pending(&conn).await;
 
     assert!(
@@ -225,25 +155,7 @@ async fn a_split_read_can_observe_a_torn_pair() {
     );
 }
 
-/// The gate itself: `snapshot` reads both halves in ONE transaction, so it can
-/// never produce the pair above — no matter how fast the writer flips between
-/// the two legal states.
-///
-/// Multi-threaded on purpose. On the default current-thread runtime the writer
-/// and reader interleave only at await points, which makes "did the reader
-/// actually sample the window?" depend on the scheduler rather than on real
-/// concurrency; the assertion at the end refuses to pass without having sampled
-/// both states, so a degenerate interleaving fails loudly instead of quietly
-/// proving nothing.
-///
-/// That guard used to be a flake source (#1145). The two states are not
-/// symmetric — `published` lasts only between two transactions, while
-/// `retracted` also covers the loop turn — so a fixed sample budget could miss
-/// the window entirely on a contended runner and fail a build for a scheduler
-/// accident. The reader now samples until it has seen BOTH states rather than a
-/// fixed number of times, so missing the window costs extra samples instead of
-/// a red build. The guard keeps its teeth for the case it was written for:
-/// a writer that genuinely stops still fails, at the cap.
+/// `snapshot` never tears; the reader samples until it sees both states, so a stalled writer fails at the cap (#1145).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn torn_group_info_and_welcome_is_not_observable() {
     let db = log_db().await;
@@ -252,8 +164,7 @@ async fn torn_group_info_and_welcome_is_not_observable() {
         insert_commit(&conn, CONV, 0).await;
     }
 
-    // The READER decides when the run ends, so it can never be scheduled after
-    // the writer has already finished and sample nothing.
+    // The reader decides when the run ends, so it always samples.
     let done = Arc::new(AtomicBool::new(false));
 
     let writer_db = Arc::clone(&*db);
@@ -263,12 +174,7 @@ async fn torn_group_info_and_welcome_is_not_observable() {
         let mut epoch = 1i64;
         while !writer_done.load(Ordering::SeqCst) {
             publish_pair(&conn, epoch).await;
-            // Give the reader a scheduling slot while the pair IS published
-            // (#1145). Without this the published state lasts only as long as
-            // the gap between two transactions, while the retracted state also
-            // covers the loop turn — so on a contended runner every one of the
-            // reader's samples can land outside the short window and the
-            // anti-vacuity guard below fires on a scheduler accident.
+            // Yield while published, or a contended runner may never sample that window (#1145).
             tokio::task::yield_now().await;
             retract_pair(&conn).await;
             epoch += 1;
@@ -282,11 +188,7 @@ async fn torn_group_info_and_welcome_is_not_observable() {
         let conn = reader_db.conn().await.expect("reader conn");
         let mut saw_published = 0usize;
         let mut saw_retracted = 0usize;
-        // 2_000 is the MINIMUM number of times the tearing property is checked.
-        // Past that the reader keeps going until it has actually sampled both
-        // states, up to a hard cap — so an unlucky interleaving costs extra
-        // samples rather than a red build, while a writer that genuinely stopped
-        // still fails at the cap (#1145).
+        // Minimum checks; past it, sample until both states are seen, up to a cap (#1145).
         const MIN_SAMPLES: usize = 2_000;
         const MAX_SAMPLES: usize = 200_000;
         let mut taken = 0usize;
@@ -333,13 +235,7 @@ async fn torn_group_info_and_welcome_is_not_observable() {
     );
 }
 
-/// The Welcome flag is per DEVICE: a Welcome addressed to somebody else must NOT
-/// suppress this device's external join, and a Welcome already delivered is
-/// spent.
-///
-/// Asserted because the cheap way to satisfy the test above is to report
-/// `welcome_pending: true` whenever any Welcome row exists — which would deadlock
-/// every device in a conversation behind one undelivered row.
+/// The Welcome flag is per device; a delivered Welcome is spent.
 #[tokio::test]
 async fn the_welcome_flag_is_scoped_to_the_asking_device() {
     let db = log_db().await;
@@ -380,9 +276,6 @@ async fn the_welcome_flag_is_scoped_to_the_asking_device() {
     );
 }
 
-// ── P10 ──────────────────────────────────────────────────────────────────────
-
-/// A contiguous batch is served.
 #[tokio::test]
 async fn a_contiguous_batch_is_served() {
     let db = log_db().await;
@@ -402,12 +295,7 @@ async fn a_contiguous_batch_is_served() {
     assert_eq!(snap.pruned_below, Some(0), "nothing pruned, floor is epoch 0");
 }
 
-/// The P10 regression: a hole is DETECTED and reported, with both epochs.
-///
-/// Not refused — see the module header. The client rebuilds from a reported
-/// hole, which is the correct outcome for a log that really is missing a row;
-/// what it must never do is rebuild from a hole that is not there, and the
-/// single transaction is what rules that out.
+/// A hole is reported with both epochs, not refused.
 #[tokio::test]
 async fn a_hole_in_the_batch_is_reported() {
     let db = log_db().await;
@@ -415,9 +303,7 @@ async fn a_hole_in_the_batch_is_reported() {
     for epoch in 0..6 {
         insert_commit(&conn, CONV, epoch).await;
     }
-    // Remove a MIDDLE row. Inserting past the head is already impossible
-    // (`trg_mls_commit_log_no_forward_gap`), so this is how a hole actually
-    // arises: something removed a row that had been legitimately written.
+    // Remove a middle row: inserting past the head is impossible.
     conn.execute(
         "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch = 3",
         libsql::params![CONV.to_string()],
@@ -439,8 +325,7 @@ async fn a_hole_in_the_batch_is_reported() {
          not say so. Both epochs are named so an operator reading the warning can \
          find the gap without a query."
     );
-    // The batch itself is still served: the client needs the commits BELOW the
-    // gap to ingest anything it had not yet seen there before it rebuilds.
+    // The batch below the gap is still served.
     assert_eq!(
         snap.commits.iter().map(|c| c.epoch).collect::<Vec<_>>(),
         vec![0, 1, 2, 4, 5]
@@ -453,11 +338,7 @@ async fn a_hole_in_the_batch_is_reported() {
     );
 }
 
-/// The other half of P10, and the reason "refuse anything that starts high" is
-/// the WRONG fix: a genuine retention prune (#539) leaves a contiguous batch
-/// that simply begins above `since`, and the client must be told so — that is
-/// its cue to drop the local group and rejoin rather than sit on a permanently
-/// unfillable gap.
+/// A retention prune leaves a contiguous batch starting above `since`, reported so the client rejoins.
 #[tokio::test]
 async fn a_retention_prune_surfaces_as_pruned_below_not_as_an_error() {
     let db = log_db().await;
@@ -465,7 +346,6 @@ async fn a_retention_prune_surfaces_as_pruned_below_not_as_an_error() {
     for epoch in 0..8 {
         insert_commit(&conn, CONV, epoch).await;
     }
-    // Retention collected everything below epoch 5.
     conn.execute(
         "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch < 5",
         libsql::params![CONV.to_string()],
@@ -496,10 +376,7 @@ async fn a_retention_prune_surfaces_as_pruned_below_not_as_an_error() {
     assert_eq!(snap.head, 8, "head is MAX(epoch) + 1, unaffected by the prune");
 }
 
-/// An empty lineage is not a hole. Asked from `since` with no rows at all, the
-/// answer is an empty batch and `pruned_below: None` — "nothing here", which is
-/// what a brand-new conversation looks like and must not be mistaken for either
-/// a prune or a tear.
+/// An empty lineage is not a hole: empty batch, `pruned_below: None`.
 #[tokio::test]
 async fn an_empty_lineage_is_neither_a_hole_nor_a_prune() {
     let db = log_db().await;

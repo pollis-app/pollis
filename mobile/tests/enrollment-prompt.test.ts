@@ -1,7 +1,4 @@
-// #1360: a new device's approval request must reach the phone by itself. Mobile
-// used to drop the DS's `enrollment_requested` nudge at decode, never checked
-// on sign-in or resume, and listed the request only on Self → Security — so a
-// desktop waiting on "Approve from another device" never showed up on a phone.
+// #1360: a new device's approval request must reach the phone by itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -18,7 +15,6 @@ import {
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 test("the DS's enrollment nudge decodes instead of being dropped", () => {
-  // The exact shape `pollis-delivery/src/bootstrap.rs` publishes.
   const wire = JSON.stringify({
     type: "enrollment_requested",
     request_id: "01REQ",
@@ -29,7 +25,6 @@ test("the DS's enrollment nudge decodes instead of being dropped", () => {
   const event = decodeRealtimeEvent(new TextEncoder().encode(wire));
   assert.ok(event, "enrollment_requested must decode");
   assert.equal(event.type, "enrollment_requested");
-  // DS-only: honoured with no publishing participant, dropped with one.
   assert.ok(isTrustedOrigin(event, false));
   assert.ok(!isTrustedOrigin(event, true));
 });
@@ -45,27 +40,21 @@ test("the approval screen only opens inside the signed-in, unlocked app", () => 
   assert.ok(canPresentApproval(["(tabs)", "groups"], false));
   assert.ok(canPresentApproval(["chat", "[id]"], false));
   assert.ok(canPresentApproval(["self", "security"], false));
-  // Locked: unlock first.
   assert.ok(!canPresentApproval(["(tabs)", "groups"], true));
-  // This device is itself signing in or enrolling.
   assert.ok(!canPresentApproval(["(auth)", "enrollment"], false));
   assert.ok(!canPresentApproval(["(auth)", "pin"], false));
-  // Boot redirect, or already showing one.
   assert.ok(!canPresentApproval([], false));
   assert.ok(!canPresentApproval(["approve-device"], false));
 });
 
 test("the inbox subscribes only once the device is in the signed-in app", () => {
-  // Signed in by the email code but still on the PIN / enrollment screens:
-  // the device cannot sign a room-token request yet.
+  // Past the email code but not the PIN: no room-token signature yet.
   assert.ok(!isInSignedInApp(["(auth)", "pin"], false));
   assert.ok(!isInSignedInApp(["(auth)", "enrollment"], false));
   assert.ok(isInSignedInApp(["(tabs)", "groups"], false));
-  // The approval screen itself is in the app.
   assert.ok(isInSignedInApp(["approve-device"], false));
   const inbox = read("../hooks/useInboxRealtime.ts");
   assert.match(inbox, /isInSignedInApp\(segments, isLocked\)/);
-  // A room whose connect failed is re-opened on the way back to the foreground.
   assert.match(inbox, /!isRoomOpen\(room\)/);
 });
 
@@ -97,7 +86,6 @@ test("the pieces are wired: inbox handler, root gate, route", () => {
   assert.match(layout, /useEnrollmentApprovals\(\);/);
   assert.match(layout, /name="approve-device"/);
   const hook = read("../hooks/useEnrollmentApprovals.ts");
-  // Sign-in/unlock and resume both check; neither is a timer.
   assert.match(hook, /list_pending_enrollment_requests/);
   assert.match(hook, /AppState\.addEventListener/);
   assert.doesNotMatch(hook, /setInterval|refetchInterval/);

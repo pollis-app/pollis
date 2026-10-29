@@ -10,29 +10,10 @@ import type { Message } from "../../../types";
 
 interface ThreadMessageRowProps {
   message: Message;
-  /** The thread's root message, rendered above the divider. */
   isRoot?: boolean;
 }
 
-/**
- * A single message inside the thread panel.
- *
- * Deliberately a narrow, panel-shaped row rather than a reuse of
- * `MessageItem`: that component carries the full channel affordances (reply,
- * edit, delete, pin, moderation, skin-aware grouping) and is sized for the
- * main column. A thread row needs the author, the text, and any attachments.
- *
- * **Skin-aware, and never the own-message treatment.** The channel tints your
- * own name with the accent (and admins get a filled chip); a thread row does
- * neither, in either skin. In a panel this narrow the highlight reads as a
- * selection state rather than authorship, and a thread is usually a handful of
- * people going back and forth — colouring one of them differently just adds
- * noise to a column that is already tight.
- *
- * Terminal drops the avatar entirely: terminal is an IRC surface where identity
- * is the name, and a 24px portrait per row in a 18rem column costs more space
- * than it earns. Refined keeps it, because that skin leads with people.
- */
+/** A message in the thread panel: author, text, attachments. No own-message tint in either skin; terminal drops the avatar. */
 export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
   ({ message, isRoot = false }) => {
     const { t } = useTranslation("nav");
@@ -40,10 +21,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const skin = useSkin();
     const isTerminal = skin !== "refined";
     const author = message.sender_username ?? message.sender_id;
-    // App language, not the OS's — see `activeLocale` in `utils/format.ts`.
-    // `toMs` is not optional: without it a seconds-precision `created_at`
-    // renders as 1970 here while the same message reads correctly in the
-    // channel, which is the bug this row shipped with (#874).
+    // App language; `toMs` or seconds-precision timestamps render as 1970 (#874).
     const time = formatClockTime(toMs(message.created_at));
     const testid = isRoot ? "thread-root" : "thread-reply";
 
@@ -60,8 +38,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
             }`}
           >
             {message.content_decrypted}
-            {/* A reply that did not send (#1335) is labelled, with its way out
-                — only our own messages can be in this state. */}
+            {/* An unsent reply (#1335). */}
             {message.status === "failed" && (
               <>
                 <span className="ms-1 text-xs text-muted">
@@ -87,9 +64,6 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     );
 
     if (isTerminal) {
-      // IRC shape: `HH:MM <name>` on the same line as the text where it fits,
-      // no portrait, no indent rail — the same reading rhythm as the channel
-      // in this skin.
       return (
         <div className="px-1 py-0.5" data-testid={testid}>
           <div className="flex items-baseline gap-1.5">

@@ -12,7 +12,7 @@ interface LoginScreenProps {
   knownAccounts: AccountInfo[];
   onAuthSuccess: (result: api.AuthResult) => void | Promise<void>;
   onWipeComplete: () => void;
-  /** Why the previous session ended, when it was not the user's choice (#1338). */
+  /** Why the session ended, when not the user's choice (#1338). */
   notice?: string | null;
 }
 
@@ -108,7 +108,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 </p>
               </div>
 
-              {/* Known accounts row — most recent 3, sorted by last_seen desc */}
               {knownAccounts.length > 0 && authStep === "email" && (
                 <div className="flex flex-col gap-1">
                   <p className="text-xs font-mono text-muted">

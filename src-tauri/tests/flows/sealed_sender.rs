@@ -1,27 +1,4 @@
-//! Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2) —
-//! now UNCONDITIONAL (#607).
-//!
-//! The reader half — attributing every message from the MLS credential inside
-//! the ciphertext rather than the server-writable `message_envelope.sender_id`
-//! column — shipped earlier and is exercised by the whole existing flows suite.
-//! The SENDING half (envelope-sender blinding) is no longer behind a flag: every
-//! outbound `message`/redaction envelope is written `sealed = 1` with the
-//! sentinel `sender_id`. Making it unconditional is what lets edit/delete
-//! authorization move fully client-side (Solution A) — the DS can no longer see
-//! who authored a message, so it stops trying to enforce authorship.
-//!
-//!   - **sealed positive** — the stored envelope is blinded (`sealed = 1`,
-//!     sentinel `sender_id`) yet the recipient still attributes the message to
-//!     the real sender via the credential.
-//!   - **non-member rejected** — a sealed send from a non-member is still
-//!     refused by the DS membership gate (sealing relaxes the
-//!     `sender_id == auth-user` binding, NOT the membership authz).
-//!   - **no opt-out invariant** — there is NO way to emit an unsealed envelope:
-//!     every posted `type='message'` envelope (ordinary sends AND redactions)
-//!     carries `sealed = 1` and the sentinel, never a real id.
-//!
-//! All three run in ONE scenario: they need the same two-member channel, and
-//! building it (two sign-ups and an MLS join) is the expensive part.
+//! Sealed sender (#331), unconditional since #607.
 
 use std::sync::Arc;
 
@@ -29,9 +6,7 @@ use crate::harness::{signed_post_status, wipe, writable_remote, TestClient, TEST
 use pollis_delivery::db::Db;
 use serial_test::serial;
 
-/// Read `(sealed, sender_id)` for one stored `message_envelope` row straight from
-/// the "remote Turso" handle — the server's at-rest view. This is exactly the
-/// artifact sealed sender minimizes: a breach / subpoena dump of this table.
+/// `(sealed, sender_id)` of one stored envelope, as a breach would see it.
 async fn envelope_sealed_and_sender(remote: &Arc<Db>, msg_id: &str) -> (i64, String) {
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
@@ -52,8 +27,6 @@ async fn envelope_sealed_and_sender(remote: &Arc<Db>, msg_id: &str) -> (i64, Str
     )
 }
 
-/// Stand up a two-member group channel and return `(group_id, channel_id)`.
-/// `sender` is the creator/inviter; `receiver` accepts and applies the Welcome.
 async fn two_member_channel(sender: &TestClient, receiver: &TestClient, receiver_username: &str) -> (String, String) {
     let group_id = sender.create_group("Sealed").await;
     sender.invite(&group_id, receiver_username).await;
@@ -71,37 +44,12 @@ async fn two_member_channel(sender: &TestClient, receiver: &TestClient, receiver
     (group_id, channel_id)
 }
 
-/// The three sealed-sender properties, in one two-member channel.
-///
-/// **HEADLINE PROOF: sealing blinds the server-stored sender while attribution
-/// still works.** The stored `message_envelope` row carries `sealed = 1` and the
-/// sentinel `sender_id` (`"sealed"`), NOT Alice's real id — so a Turso breach
-/// reveals nothing about who sent it. Yet Bob ingests the message and attributes
-/// it to Alice's REAL id, because the reader takes the sender from the MLS
-/// credential inside the ciphertext, not the (now-blinded) envelope column.
-///
-/// **A sealed send from a NON-member is still rejected by the DS membership
-/// gate.** Sealing relaxes only the `sender_id == auth-user` binding (the stored
-/// sender is a sentinel, not the auth user); it does NOT relax "the authenticated
-/// writer must be a member of the conversation". Mallory is authenticated
-/// (validly signed) but not a member, so her sealed send gets a 403 (proved
-/// identity, lacking permission), not a 401.
-///
-/// **NO-OPT-OUT INVARIANT (#606/#607): there is NO way to emit an UNSEALED
-/// envelope.** Sealing is unconditional, so every posted `type='message'`
-/// envelope — ordinary sends AND self-delete redactions (which ride the same send
-/// path) — must carry `sealed = 1` and the sentinel `sender_id`, never a real id.
-/// This is the property edit/delete client-side authz (Solution A) leans on: the
-/// DS can never learn who authored a message from the stored envelope. The check
-/// is over the WHOLE `message_envelope` table's `type='message'` rows, so it
-/// catches any code path that might slip an unsealed row through — not just the
-/// one message we can name by id.
+/// Blinded sender with correct attribution, a refused non-member, and no unsealed row anywhere.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn every_send_is_sealed_attributed_and_membership_gated() {
     wipe().await;
 
-    // Sealing is unconditional — every client seals every send.
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let mut mallory = TestClient::new().await;
@@ -114,7 +62,6 @@ async fn every_send_is_sealed_attributed_and_membership_gated() {
 
     let msg_id = alice.send_channel_message_id(&channel_id, "sealed hello").await;
 
-    // ── Server-stored envelope is blinded ──
     let remote = writable_remote().await;
     let (sealed, envelope_sender) = envelope_sealed_and_sender(&remote, &msg_id).await;
     assert_eq!(sealed, 1, "sealed send must store sealed = 1");
@@ -127,7 +74,6 @@ async fn every_send_is_sealed_attributed_and_membership_gated() {
         "the server-stored sender must NOT be alice's real id"
     );
 
-    // ── Recipient attributes correctly from the MLS credential ──
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_msg = bob_msgs
         .iter()
@@ -145,9 +91,7 @@ async fn every_send_is_sealed_attributed_and_membership_gated() {
          credential), even though the envelope column was blinded to the sentinel"
     );
 
-    // ── A non-member's sealed send is refused by the membership gate ──
-    // Mallory signs a sealed send to alice+bob's channel. She is a real,
-    // authenticated device but not a member — the membership gate must reject.
+    // Mallory is authenticated but not a member.
     let body = serde_json::json!({
         "id": "01JSEALEDNONMEMBER00000000",
         "conversation_id": channel_id,
@@ -163,7 +107,6 @@ async fn every_send_is_sealed_attributed_and_membership_gated() {
         "a sealed send from a non-member must be rejected by the DS membership gate"
     );
 
-    // And nothing landed: no envelope row was written for mallory's attempt.
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
@@ -181,15 +124,11 @@ async fn every_send_is_sealed_attributed_and_membership_gated() {
         .expect("count");
     assert_eq!(count, 0, "the rejected sealed send must not have been persisted");
 
-    // ── No opt-out: redactions are sealed too ──
-    // A message alice then self-deletes posts a REDACTION envelope (also a
-    // `type='message'` row) on the same sealed send path.
+    // Redactions ride the same sealed send path.
     let doomed_id = alice.send_channel_message_id(&channel_id, "doomed message").await;
     alice.delete_message(&doomed_id).await;
 
-    // WHOLE-TABLE invariant: NO `type='message'` envelope is unsealed or carries
-    // a non-sentinel sender. This is the load-bearing "no opt-out" assertion —
-    // if any path (send or redaction) emitted an unsealed row, this trips.
+    // Load-bearing: no `type='message'` row in the whole table is unsealed.
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM message_envelope \
@@ -216,16 +155,7 @@ async fn every_send_is_sealed_attributed_and_membership_gated() {
     drop(mallory);
 }
 
-/// **A sealed message's attachment is reference-counted.** Every send is sealed,
-/// so the stored `sender_id` is the sentinel and names no one — and
-/// `/v1/attachments/register` bound each declaration to the envelope's
-/// `sender_id` (#1165), so every real send's reference was refused with a 403
-/// that the best-effort send path only logged. No attachment was ever counted,
-/// and each shared object stayed collectable by the next delete of the same
-/// bytes anywhere: a later "Image unavailable" in every other message carrying
-/// it. The client now proves authorship with the envelope's deletion capability
-/// (#1086); this drives the real send path and reads the server's at-rest
-/// `attachment_ref` row.
+/// Sealed attachments are ref-counted: authorship is proven by the deletion capability (#1165, #1086).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_sealed_messages_attachment_is_reference_counted() {
@@ -275,10 +205,7 @@ async fn a_sealed_messages_attachment_is_reference_counted() {
     drop(alice);
 }
 
-/// **Attachments sent before #1330 are declared on the next unlock.** Those
-/// sends had their declaration refused, so the DS holds no reference for them.
-/// The author's device re-declares them in the background after a PIN unlock,
-/// once: the server row is dropped here to stand for such a send.
+/// Pre-#1330 attachments are re-declared once after a PIN unlock.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_unlock_declares_the_references_older_sends_missed() {

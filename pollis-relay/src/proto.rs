@@ -73,53 +73,22 @@
 //!
 //! # Onion layering (v4, design §6.2)
 //!
-//! A multi-hop circuit is built by **telescoping**. Against hop *i* the client
-//! sends Handshake + `Extend(hop i+1)`; that relay dials hop i+1 over QUIC,
-//! announces itself with a `Layer` frame, and — once hop i+1 acknowledges —
-//! splices the two streams and answers `Ok`. The client then runs **one TLS 1.3
-//! session per hop, nested**, over that spliced pipe (see [`crate::onion`]),
-//! pinning hop i+1's leaf cert. Every subsequent frame the client writes is
-//! therefore wrapped in one encryption layer per remaining hop, and each relay
-//! peels exactly one.
+//! Telescoping: `Extend` makes hop *i* dial hop *i+1*, send `Layer` and splice; the client nests one TLS 1.3 per hop ([`crate::onion`]).
 //!
 //! Consequences, which are the whole point:
 //! - hop 1 sees the client's address and hop 2's address — never the destination;
 //! - a middle hop sees only its two neighbours;
-//! - the last hop sees the destination and its predecessor — never the client's
-//!   address. It still authenticates the client's *device cert*, exactly as the
-//!   single relay does in v0, so the account is not hidden from it; the property
-//!   this protocol delivers is **network-address unlinkability**, not anonymity.
-//!
-//! Hop-to-hop QUIC/TLS is unchanged and still carries everything; the onion
-//! layer rides on top of it rather than replacing it.
+//! - the last hop sees the destination, never the client's address (it does see the account).
 //!
 //! # Versioning
 //!
-//! [`PROTOCOL_VERSION`] is the newest generation this build speaks and
-//! [`MIN_PROTOCOL_VERSION`] the oldest it still accepts. The ALPN token carries
-//! the generation, and a relay offers **every** supported ALPN ([`SUPPORTED_ALPNS`],
-//! newest first) so a v4 client keeps working against the shipped v3 fleet for
-//! single-hop — it simply negotiates `pollis-relay/3` and writes `3` in every
-//! frame's version byte. Anything outside the supported range fails the QUIC ALPN
-//! negotiation outright, so a mismatched peer never gets as far as writing a
-//! frame: versions never silently half-speak, and a stream is never corrupted.
-//! `Extend` / `Layer` / `Anchor` additionally require version ≥ 4 at the frame
-//! level, at both the writer and the reader, so a v3-negotiated connection can
-//! smuggle neither a multi-hop request nor an account anchor.
+//! Versions [`MIN_PROTOCOL_VERSION`]..=[`PROTOCOL_VERSION`] negotiate via ALPN ([`SUPPORTED_ALPNS`]); a mismatch fails outright.
 //!
-//! The Handshake frame and its canonical signed message are **byte-identical
-//! between v3 and v4** — v4 is purely additive — which is exactly what lets one
-//! client speak either generation with a single signing path. That is why
-//! [`HANDSHAKE_DOMAIN`] is unchanged: its job is separation from other protocols,
-//! not from other generations of this one.
+//! The Handshake is byte-identical in v3 and v4, so [`HANDSHAKE_DOMAIN`] is unchanged.
 //!
 //! # Handshake auth — OFFLINE device-certificate chain (design §9.4, §11.1)
 //!
-//! Unlike Slice 1 (which resolved the device key from an in-memory table), the
-//! client now **presents its full identity chain** and the relay verifies it with
-//! **zero I/O** — no Turso query, no network call per connection. That is the
-//! mechanism that keeps the relay tier out of the metadata plane (§11.1). Two
-//! independent checks, both must pass:
+//! The client presents its full identity chain; the relay verifies it with **zero I/O** (§11.1). Both must pass:
 //!
 //! 1. **Possession.** The handshake `signature` verifies, under the presented
 //!    `device_mldsa_pub`, over the canonical message (skew-bounded, nonce'd):
@@ -132,48 +101,21 @@
 //!    presented leaf keys to this `device_id` at `identity_version` / `issued_at`
 //!    ⇒ those device keys were certified by the account.
 //!
-//! Every signature in the chain is ML-DSA-44 as of #668, so a store-now-decrypt-
-//! later adversary with a CRQC cannot forge a relay identity retroactively. The
-//! Ed25519 leaf key is still carried and still bound by the cert — it remains the
-//! classic MLS suite's leaf key until #669 retires that suite — but nothing in
-//! this handshake verifies under it.
+//! Every signature is ML-DSA-44 (#668); the Ed25519 leaf is bound by the cert, but nothing verifies under it.
 //!
-//! Together: "a cryptographically self-consistent Pollis device." Because
-//! destinations are allowlisted to first-party hosts only (§1.2), "a well-formed
-//! device, rate-limited" is sufficient anti-abuse for v0.
+//! With allowlisted first-party destinations, a rate-limited well-formed device is enough for v0.
 //!
 //! # Account anchoring — the optional third check (v4+, #813 Phase E2)
 //!
-//! Self-consistency is not membership: an attacker can mint an account key and a
-//! matching device cert offline, in a loop, and each one is a fresh per-account
-//! rate-limiting identity. The `Anchor` frame closes that by having the client
-//! **present** an inclusion proof binding its `account_id_pub` to the account-key
-//! transparency log, which the relay verifies with **zero I/O** against one
-//! pinned log key — see [`crate::anchor`] for the full argument and its limits.
-//! A relay fetch was the alternative and is ruled out: it would put the relay
-//! back inside the metadata plane, which is the coupling §11.1 removes.
+//! The optional `Anchor` frame proves `account_id_pub` is in the transparency log, offline ([`crate::anchor`]).
 //!
-//! The frame is optional on the wire and gated at version ≥ 4 exactly as
-//! `Extend` / `Layer` are, so a v3 stream can neither send one nor be required to.
-//! Whether a relay *requires* one is node policy ([`crate::anchor::AnchorPolicy`]),
-//! not protocol.
+//! Gated at v ≥ 4; requiring it is node policy ([`crate::anchor::AnchorPolicy`]).
 //!
 //! # Parking — the reverse hop (v4+, #813 Phase D1/P1)
 //!
-//! A **peer-hosted** relay is a consumer device behind NAT: a first-party relay
-//! cannot dial it, and neither end is an ICE agent, so the only connection that
-//! can exist is the one the peer opens **outbound**. `Park` is how it offers
-//! that connection as a middle hop: after the ordinary device handshake — the
-//! same one every client runs, no new credential — the peer names the relay leaf
-//! cert it serves under, and the relay keeps the connection open, keyed on
-//! `sha256(relay_leaf_der)`. A later `Extend` naming that fingerprint is spliced
-//! into the parked connection instead of dialling ([`crate::park`]).
+//! A NAT'd peer relay parks its outbound connection after the ordinary handshake; `Extend`s splice in ([`crate::park`]).
 //!
-//! `Park` is gated at version ≥ 4 at both the writer and the reader, exactly as
-//! the onion and anchor frames are, so a v3-negotiated stream cannot introduce a
-//! v4 concept. The relay acknowledges with the ordinary [`Response`] `Ok`
-//! ([`write_response`]) rather than a frame of its own — no new codec, and a
-//! refused park reports a typed [`RejectReason`] like every other refusal.
+//! Gated at v ≥ 4; acknowledged with the ordinary [`Response`] ([`write_response`]).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -184,49 +126,31 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::anchor::AccountAnchor;
 
 pub use pollis_device_cert::{MLDSA44_PUB_LEN, MLDSA44_SIG_LEN};
-/// The signed-tree-head signature length (ML-DSA-44, 2420 bytes). Named from the
-/// log's own constant rather than the device-cert one so the `Anchor` frame is
-/// tied to the artifact it actually carries.
+/// The signed-tree-head signature length (ML-DSA-44), from the log's own constant.
 pub use verifiable_log::STH_SIG_LEN;
 
-/// An ML-DSA-44 signing key — the device key that proves possession, and the
-/// account key that mints certs. Re-exported so callers need not depend on
-/// `ml-dsa` directly to name the type.
+/// An ML-DSA-44 signing key (device or account), re-exported.
 pub type MlDsaSigningKey = ml_dsa::SigningKey<MlDsa44>;
 
-/// Newest wire protocol version this build speaks. Bumped 3 → 4 for the
-/// multi-hop onion protocol (#813): `Extend` and `Layer` are new frames and a
-/// relay may now forward to another relay instead of only to a destination.
-/// Bumped 2 → 3 for post-quantum authentication (#668).
+/// Newest wire protocol version (4: onion, #813; 3: post-quantum, #668).
 pub const PROTOCOL_VERSION: u8 = 4;
 
-/// Oldest wire protocol version this build still accepts. v3 stays supported so
-/// a v4 client keeps working single-hop against the already-deployed v3 fleet;
-/// multi-hop needs v4 at every hop.
+/// Oldest version still accepted: v3 keeps the deployed single-hop fleet working.
 pub const MIN_PROTOCOL_VERSION: u8 = 3;
 
-/// ALPN for the outer relay-hop QUIC transport, newest generation. Bumped
-/// alongside [`PROTOCOL_VERSION`] so a peer cannot silently half-speak a
-/// generation it does not implement.
+/// ALPN for the outer relay-hop QUIC transport, newest generation.
 pub const ALPN: &[u8] = b"pollis-relay/4";
 
 /// The v3 ALPN, still offered so the shipped single-hop fleet stays reachable.
 pub const ALPN_V3: &[u8] = b"pollis-relay/3";
 
-/// Every ALPN this build accepts, **newest first** — a rustls server picks the
-/// first entry of its own list that the client also offered, so this ordering is
-/// what makes two v4 peers negotiate v4 while a v4 peer still meets a v3 one.
+/// Every ALPN this build accepts, **newest first**: rustls picks the server's first match.
 pub const SUPPORTED_ALPNS: [&[u8]; 2] = [ALPN, ALPN_V3];
 
-/// The ALPN of the **inner** onion layer (the nested TLS 1.3 session a client
-/// runs to each hop past the first). Distinct from the outer QUIC ALPN so a
-/// misrouted stream fails negotiation instead of being misparsed.
+/// The inner onion-layer ALPN, distinct so a misrouted stream fails negotiation.
 pub const ONION_ALPN: &[u8] = b"pollis-onion/1";
 
-/// Domain-separation prefix for the handshake canonical message. Deliberately
-/// **not** bumped with [`PROTOCOL_VERSION`]: the handshake frame is identical in
-/// v3 and v4, and keeping one canonical form is what lets a single client sign
-/// once and speak either generation.
+/// Handshake domain prefix; not bumped with [`PROTOCOL_VERSION`] (the frame is unchanged in v4).
 pub const HANDSHAKE_DOMAIN: &str = "pollis-relay-v3";
 
 /// Accepted clock skew, in seconds, on either side of the relay clock. Matches
@@ -243,34 +167,19 @@ pub(crate) const MSG_PARK: u8 = 6;
 /// First version in which [`MSG_EXTEND`] / [`MSG_LAYER`] are legal.
 pub const ONION_MIN_VERSION: u8 = 4;
 
-/// First version in which [`MSG_ANCHOR`] is legal. Gated the same way the onion
-/// frames are: a v3-negotiated stream must not be able to introduce a v4 concept,
-/// in either direction.
+/// First version in which [`MSG_ANCHOR`] is legal.
 pub const ANCHOR_MIN_VERSION: u8 = 4;
 
-/// First version in which [`MSG_PARK`] is legal. Gated the same way the onion
-/// and anchor frames are, at the writer and at the reader.
-///
-/// There is no distinct `ParkAck` frame: a parked connection is acknowledged
-/// with the ordinary [`write_response`] `Ok`, which costs no new codec on either
-/// side and gives a refusal a typed [`RejectReason`] for free.
+/// First version in which [`MSG_PARK`] is legal; acknowledged by the ordinary `Ok` response.
 pub const PARK_MIN_VERSION: u8 = 4;
 
-/// Cap on the DER leaf a `Park` may carry. A self-signed relay leaf is a few
-/// hundred bytes; the bound exists so a peer cannot force an allocation, and it
-/// is deliberately separate from [`MAX_STRING_LEN`] rather than a loosening of
-/// it.
+/// Cap on the DER leaf a `Park` may carry (a real leaf is a few hundred bytes).
 const MAX_RELAY_LEAF_DER: usize = 8192;
 
-/// Cap on an anchor's audit path. An RFC-6962 path is `ceil(log2(tree_size))`
-/// long, so 64 covers a tree with 2^64 leaves — the bound exists to stop a peer
-/// forcing an allocation, not to limit the log.
+/// Cap on an anchor's audit path (64 covers 2^64 leaves).
 const MAX_AUDIT_PATH: usize = 64;
 
-/// Cap on an anchor's leaf bytes. An account-key leaf is dominated by the hex of
-/// the 1312-byte ML-DSA-44 account key (2624 chars), so a real one is ~2.7 KB;
-/// [`MAX_STRING_LEN`] is far too small for it and this bound is deliberately
-/// separate rather than a loosening of the host/id one.
+/// Cap on an anchor's leaf bytes (a real one is ~2.7 KB, too big for [`MAX_STRING_LEN`]).
 const MAX_ANCHOR_LEAF: usize = 4096;
 
 const STATUS_OK: u8 = 0;
@@ -337,18 +246,9 @@ pub enum RejectReason {
     /// The client tripped a per-account or per-source-IP rate/concurrency limit
     /// (design §11.5). Returned cleanly rather than dropping the stream.
     RateLimited,
-    /// An `Extend` could not be honoured: this relay does not act as a middle
-    /// hop, or the next hop was unreachable / presented the wrong pinned cert /
-    /// did not speak the onion generation. Deliberately one code — a client
-    /// cannot act differently on the distinction, and collapsing them keeps the
-    /// relay from reporting anything about its neighbours.
+    /// An `Extend` could not be honoured; one code, so the relay reports nothing about its neighbours.
     ExtendFailed,
-    /// This node requires a transparency-log account anchor (#813 Phase E2) and
-    /// the client presented none. Deliberately distinct from `Unauthorized`: it
-    /// is the one rejection the client can *act* on — fetch a fresh inclusion
-    /// proof and retry — whereas a presented-but-invalid anchor is an
-    /// authentication failure like any forged credential and reports as
-    /// `Unauthorized`.
+    /// Anchor required but none presented: the one rejection a client can act on (bad ones are `Unauthorized`).
     AnchorRequired,
     /// Relay-side failure.
     Internal,
@@ -382,10 +282,7 @@ impl RejectReason {
     }
 }
 
-/// The device-certificate material a client presents alongside the handshake
-/// signature — the offline chain the relay verifies (§9.4). Mirrors the columns
-/// a device stores after `ensure_device_cert` (see
-/// `pollis-core/src/commands/mls/device.rs`).
+/// The device-certificate material a client presents alongside the handshake signature (§9.4).
 #[derive(Debug, Clone)]
 pub struct DeviceCertMaterial {
     /// The user's ML-DSA-44 account identity public key ([`MLDSA44_PUB_LEN`]).
@@ -400,12 +297,7 @@ pub struct DeviceCertMaterial {
 }
 
 impl DeviceCertMaterial {
-    /// Mint a cert chain by signing the canonical payload with a known account
-    /// key. This is the "minimal seam" (task §2) that lets a holder of the
-    /// account signing key — chiefly tests injecting a known account identity —
-    /// produce a chain the relay will accept. Production certs are minted by
-    /// `pollis-core::commands::account_identity::sign_device_cert`, which signs
-    /// the SAME shared payload.
+    /// Mint a cert chain with a known account key (tests); production signs the same payload.
     pub fn mint(
         account: &MlDsaSigningKey,
         device_id: &str,
@@ -436,13 +328,9 @@ impl DeviceCertMaterial {
 pub struct Handshake {
     pub user_id: String,
     pub device_id: String,
-    /// The device's classic Ed25519 leaf key, PRESENTED in-band. The cert binds
-    /// it, but nothing here verifies under it — it is carried so the cert payload
-    /// can be reconstructed byte-for-byte. (In Pollis: `user_device.mls_signature_pub`.)
+    /// The device's classic Ed25519 leaf key: bound by the cert, never verified under.
     pub device_ed25519_pub: [u8; 32],
-    /// The device's ML-DSA-44 leaf key, PRESENTED in-band. The handshake
-    /// `signature` is verified against it; the `device_cert` chains it to the
-    /// account. (In Pollis: `user_device.mls_signature_pub_pq`.)
+    /// The device's ML-DSA-44 leaf key; the handshake `signature` verifies under it.
     pub device_mldsa_pub: Vec<u8>,
     pub cert: DeviceCertMaterial,
     pub timestamp: i64,
@@ -460,11 +348,7 @@ pub struct Connect {
 
 /// The circuit-extension frame (v4+): "hand this stream to the relay at `addr`".
 ///
-/// `next_cert_sha256` is the SHA-256 of the next hop's DER leaf cert. The
-/// forwarding relay pins on it, which keeps `Extend` from being a "dial anything"
-/// primitive; the client *independently* pins the full DER inside the onion layer
-/// it then runs to that hop, so a forwarding relay that ignored the pin still
-/// could not read or substitute the layer.
+/// `next_cert_sha256` pins the next hop; the client independently pins the full DER in the onion layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Extend {
     pub addr: SocketAddr,
@@ -474,13 +358,7 @@ pub struct Extend {
 /// The parking frame (v4+): "keep this connection; I serve the relay identity
 /// `relay_leaf_der`, and I am reachable only through it."
 ///
-/// It carries the **whole DER**, not the digest, for two reasons: the relay
-/// re-checks live revocation on the full identity (the `cert_sha256_b64`
-/// selector needs the preimage), and the fingerprint an `Extend` names is then
-/// derived here rather than trusted from the peer. The frame is *not* proof that
-/// the sender holds the leaf's private key — that is proven later, and
-/// unavoidably, by the pinned TLS handshake the relay runs into the parked
-/// connection before it splices anything (see [`crate::park`]).
+/// Carries the whole DER for revocation; possession is proven later by the pinned TLS handshake ([`crate::park`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Park {
     pub relay_leaf_der: Vec<u8>,
@@ -498,9 +376,6 @@ pub enum Command {
 /// What a client may legally send after its handshake: at most one optional
 /// [`AccountAnchor`], then exactly one [`Command`] — or, for a peer-hosted
 /// relay, a single [`Park`] instead of a command.
-///
-/// Modelled as one enum with one reader so the ordering is enforced by the type
-/// the caller matches on, rather than by remembering to peek a header first.
 #[derive(Debug, Clone)]
 pub enum ClientFrame {
     /// A transparency-log account anchor (v4+, #813 Phase E2).
@@ -525,10 +400,7 @@ pub struct FrameHeader {
 #[derive(Debug, Clone)]
 pub struct VerifiedClient {
     pub user_id: String,
-    /// `sha256(account_id_pub)`. The rate limiter only ever needs a stable,
-    /// collision-resistant handle for "the same account", and the ML-DSA-44
-    /// account key is 1312 bytes — hashing keeps the limiter's key a cheap
-    /// `Copy` 32 bytes instead of a per-connection heap allocation.
+    /// `sha256(account_id_pub)`: a cheap `Copy` handle for the 1312-byte key.
     pub account_fingerprint: [u8; 32],
 }
 
@@ -573,11 +445,7 @@ pub fn sign_handshake(
     }
 }
 
-/// Verify a handshake with the OFFLINE cert chain (design §9.4, §11.1): bounded
-/// timestamp skew, a signature that checks out under the PRESENTED device key,
-/// and a device cert that binds that key to the claimed `account_id_pub`. No
-/// resolver, no I/O. On success returns the authenticated [`VerifiedClient`].
-/// Never fails open — any failure is a [`RejectReason`].
+/// Verify a handshake offline (§9.4, §11.1): skew, possession and the cert chain. Never fails open.
 pub fn verify_handshake(hs: &Handshake, now: i64) -> Result<VerifiedClient, RejectReason> {
     if hs.user_id.is_empty() || hs.device_id.is_empty() {
         return Err(RejectReason::Unauthorized);
@@ -631,8 +499,6 @@ pub fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-// ---- frame I/O -------------------------------------------------------------
-
 async fn write_string<W: AsyncWrite + Unpin>(w: &mut W, s: &str) -> Result<(), ProtoError> {
     let bytes = s.as_bytes();
     if bytes.len() > MAX_STRING_LEN {
@@ -664,11 +530,7 @@ pub async fn read_frame_header<R: AsyncRead + Unpin>(r: &mut R) -> Result<FrameH
     Ok(FrameHeader { version, msg_type })
 }
 
-/// The gate every frame writer applies before emitting a byte: a generation
-/// this build does not speak, or one below the frame's own floor, is refused
-/// outright. Check-only on purpose — `write_anchor` and `write_park` validate
-/// their body lengths between this and the version byte, and a caller that
-/// asked for an impossible frame must leave the stream untouched.
+/// Version gate every frame writer applies first; check-only, so a refused frame leaves the stream untouched.
 fn check_version(version: u8, min: u8) -> Result<(), ProtoError> {
     if version < min || !version_supported(version) {
         return Err(ProtoError::BadVersion(version));
@@ -688,9 +550,7 @@ pub async fn write_handshake<W: AsyncWrite + Unpin>(
     w.write_u8(MSG_HANDSHAKE).await?;
     write_string(w, &hs.user_id).await?;
     write_string(w, &hs.device_id).await?;
-    // Every post-quantum field is fixed-width on the wire, so a peer cannot use a
-    // length prefix to steer the relay's allocations. Reject wrong-sized material
-    // here rather than emitting a frame no v3 reader could parse.
+    // Fixed-width post-quantum fields: reject wrong sizes rather than emit an unparseable frame.
     if hs.device_mldsa_pub.len() != MLDSA44_PUB_LEN
         || hs.cert.account_id_pub.len() != MLDSA44_PUB_LEN
         || hs.cert.device_cert.len() != MLDSA44_SIG_LEN
@@ -783,9 +643,7 @@ pub async fn read_connect_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Connec
     Ok(Connect { host, port })
 }
 
-/// Write an extend frame. v4+ only — there is no v3 encoding of this frame, so
-/// attempting it on a v3-negotiated connection is a programming error, not a
-/// downgrade.
+/// Write an extend frame (v4+ only; at v3 it is a programming error).
 pub async fn write_extend<W: AsyncWrite + Unpin>(
     w: &mut W,
     e: &Extend,
@@ -837,10 +695,7 @@ pub async fn read_extend_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Extend,
     })
 }
 
-/// Write the relay→relay layer announcement: "the bytes after this are an onion
-/// layer addressed to you; terminate it and serve what's inside." Carries no
-/// payload — everything about the circuit past this point is inside the layer,
-/// which is precisely what keeps it invisible to the sender.
+/// Write the relay→relay `Layer` announcement; everything after it is inside the layer.
 pub async fn write_layer<W: AsyncWrite + Unpin>(w: &mut W, version: u8) -> Result<(), ProtoError> {
     check_version(version, ONION_MIN_VERSION)?;
     w.write_u8(version).await?;
@@ -849,9 +704,7 @@ pub async fn write_layer<W: AsyncWrite + Unpin>(w: &mut W, version: u8) -> Resul
     Ok(())
 }
 
-/// Write an account-anchor frame. v4+ only — like the onion frames, there is no
-/// older encoding of it, so emitting one at v3 is a programming error rather
-/// than a downgrade.
+/// Write an account-anchor frame (v4+ only).
 pub async fn write_anchor<W: AsyncWrite + Unpin>(
     w: &mut W,
     a: &AccountAnchor,
@@ -951,9 +804,7 @@ pub async fn read_park_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Park, Pro
     Ok(Park { relay_leaf_der })
 }
 
-/// Read a command frame (header + body) — what a relay expects once a client's
-/// handshake has verified. `Extend` is refused below [`ONION_MIN_VERSION`] so a
-/// v3-negotiated stream can never request multi-hop forwarding.
+/// Read a command frame; `Extend` is refused below [`ONION_MIN_VERSION`].
 pub async fn read_command<R: AsyncRead + Unpin>(r: &mut R) -> Result<Command, ProtoError> {
     match read_client_frame(r).await? {
         ClientFrame::Command(command) => Ok(command),
@@ -965,10 +816,7 @@ pub async fn read_command<R: AsyncRead + Unpin>(r: &mut R) -> Result<Command, Pr
 /// Read the next post-handshake frame: an optional `Anchor`, then either the
 /// terminal `Command` or a terminal `Park`.
 ///
-/// Every v4-only frame type is refused below its minimum version here as well as
-/// at the writers, so a v3-negotiated stream can neither request multi-hop
-/// forwarding, nor claim a transparency-log anchor, nor park itself as a middle
-/// hop.
+/// Every v4-only frame is refused below its minimum version here too.
 pub async fn read_client_frame<R: AsyncRead + Unpin>(
     r: &mut R,
 ) -> Result<ClientFrame, ProtoError> {
@@ -996,9 +844,7 @@ pub async fn write_response<W: AsyncWrite + Unpin>(
     result: Result<(), RejectReason>,
     version: u8,
 ) -> Result<(), ProtoError> {
-    // A response to a peer whose generation we could not parse still has to go
-    // out; fall back to the oldest supported generation rather than emitting a
-    // version byte nobody can read.
+    // Unparseable peer generation: answer in the oldest supported one.
     let version = if version_supported(version) {
         version
     } else {
@@ -1073,9 +919,7 @@ mod tests {
 
     #[test]
     fn forged_cert_rejected() {
-        // Device key NOT certified by the presented account: the attacker signs a
-        // cert with the WRONG (their own) account key but claims the victim's
-        // account_id_pub.
+        // The attacker signs a cert with their own account key but claims the victim's.
         let victim_account = key(5);
         let attacker_account = key(9);
         let device = key(6);
@@ -1104,9 +948,7 @@ mod tests {
 
     #[test]
     fn swapped_classic_leaf_key_rejected() {
-        // The classic leaf key is bound by the cert too (cert v2, #668), so
-        // presenting a different one breaks membership even though possession of
-        // the ML-DSA key is genuine.
+        // The classic leaf is bound by the cert too (#668), so swapping it breaks membership.
         let account = key(5);
         let device = key(6);
         let cert = DeviceCertMaterial::mint(&account, "d1", &ED_PUB, &pq_pub(&device), 1, 1);
@@ -1168,9 +1010,7 @@ mod tests {
         ));
     }
 
-    /// The v3 gate, at the writer. Same shape as the `Extend` / `Anchor` gates:
-    /// there is no v3 encoding of this frame, so emitting one is a programming
-    /// error rather than a downgrade.
+    /// The v3 gate, at the writer.
     #[tokio::test]
     async fn park_cannot_be_written_at_v3() {
         let park = Park {
@@ -1184,9 +1024,7 @@ mod tests {
         assert!(buf.is_empty(), "nothing may be emitted at v3");
     }
 
-    /// The v3 gate, at the reader — the one that actually protects the relay,
-    /// because a hostile peer does not use our writer. A hand-rolled v3-versioned
-    /// park frame is refused as an unknown message type.
+    /// The v3 gate, at the reader — the one that protects the relay from a hostile peer.
     #[tokio::test]
     async fn a_v3_stream_cannot_smuggle_a_park() {
         let mut raw = vec![MIN_PROTOCOL_VERSION, MSG_PARK, 0, 4, 1, 2, 3, 4];

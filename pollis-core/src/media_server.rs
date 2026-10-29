@@ -1,22 +1,8 @@
 //! Local-loopback HTTP server for cached media.
 //!
-//! The webview renders every `<img>/<audio>/<video>` element via
-//! `src="http://127.0.0.1:<port>/<token>/<hash>"`. The server reads the
-//! AES-GCM-encrypted file from the on-disk media cache, decrypts under
-//! the per-process `db_key`, and streams plaintext bytes back. Only
-//! callers presenting the per-session token (rotated on unlock, cleared
-//! on logout) can access bytes — origin checks are not the protection
-//! here, the token is.
+//! The webview loads media from `http://127.0.0.1:<port>/<token>/<hash>`; the per-session token, not origin checks, is the protection.
 //!
-//! Why a server (rather than asset:// or IPC bytes):
-//! * `asset://` works for `<img>` but Linux WebKitGTK's GStreamer source
-//!   plugin rejects it for `<audio>/<video>` (MEDIA_ERR_SRC_NOT_SUPPORTED).
-//! * IPC bytes → `Blob` URL works for media elements but blows V8's heap
-//!   on multi-MB files and can't do real HTTP Range, so seeking large
-//!   videos stalls.
-//! * A real HTTP server gives proper Range, one URL pattern across
-//!   image/audio/video, and keeps decryption in Rust where the keys
-//!   already live.
+//! A server because `asset://` fails for WebKitGTK `<audio>/<video>` and IPC blobs can't do HTTP Range.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -37,19 +23,11 @@ use bytes::Bytes;
 use crate::commands::r2 as r2cmd;
 use crate::state::AppState;
 
-/// Process-wide screenshare fan-out counters, so the zero-copy win (#480) is
-/// measurable before/after without wiring anything through `AppState`.
-///
-/// `FRAMES_SENT` — decoded frames handed to a WS client's socket (one increment
-/// per client per frame). `FRAMES_DROPPED` — frames a lagged/stalled webview
-/// never received because the broadcast channel overwrote them before that
-/// receiver caught up (latest-frame-wins; see `pump_frames`). Read them with
-/// [`frame_fanout_counters`].
+/// Screenshare fan-out counters (#480), read via [`frame_fanout_counters`].
 static FRAMES_SENT: AtomicU64 = AtomicU64::new(0);
 static FRAMES_DROPPED: AtomicU64 = AtomicU64::new(0);
 
-/// Snapshot of the screenshare fan-out counters as `(frames_sent,
-/// frames_dropped)`. Cheap relaxed loads — intended for a debug/metrics readout.
+/// `(frames_sent, frames_dropped)`, relaxed loads.
 pub fn frame_fanout_counters() -> (u64, u64) {
     (
         FRAMES_SENT.load(Ordering::Relaxed),
@@ -57,17 +35,9 @@ pub fn frame_fanout_counters() -> (u64, u64) {
     )
 }
 
-/// Spawn the loopback media server on an OS-assigned port. Returns the
-/// bound port so the caller can stash it in `AppState`. Server runs until
-/// `AppState::shutdown()` is called (which fires `shutdown_signal`),
-/// at which point axum's graceful-shutdown drains in-flight requests
-/// and the accept loop returns — releasing its hold on the Tokio
-/// runtime so the host process can exit.
+/// Spawn the loopback media server on an OS-assigned port; returns it.
 ///
-/// Pre-#335 this task spawned with no shutdown path and pinned the
-/// runtime alive forever, hanging the host process during auto-update. The
-/// symptom was first hit under the (since-reverted, #386/#389) Electron
-/// shell; the shutdown path here is what keeps the Tauri host able to exit.
+/// `AppState::shutdown()` drains it gracefully so the host process can exit (#335).
 pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -75,10 +45,7 @@ pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     let shutdown_signal = state.shutdown_signal.clone();
     let app = Router::new()
         .route("/{token}/{hash}", get(serve_media))
-        // Decoded remote screenshare frames for the Tauri/WebKitGTK WebGL
-        // render path (spike/tauri-revival). Token-gated like `serve_media`.
-        // 3 segments so it can't collide with the `/{token}/{hash}` media route
-        // (matchit panics on static-vs-param conflicts at the same position).
+        // Decoded screenshare frames for the WebGL path. 3 segments so matchit can't collide with `/{token}/{hash}`.
         .route("/ws/screenshare/{token}", get(ws_screenshare))
         .with_state(state);
 
@@ -97,14 +64,6 @@ pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
 }
 
 /// The loopback URL the renderer fetches `content_hash` from.
-///
-/// Lives beside the route it addresses so the two cannot disagree about the path
-/// shape; `emoji::get_emoji_url` and `r2::get_media_url` each built it from their
-/// own copy of this block.
-///
-/// Both the port and the token must be present. Without an active unlock the
-/// server answers 403 anyway, so there is no point handing out a URL the caller
-/// cannot use.
 pub(crate) async fn loopback_url(
     state: &Arc<AppState>,
     content_hash: &str,
@@ -127,11 +86,7 @@ pub(crate) async fn loopback_url(
 /// The loopback server's only gate: the caller's path token must equal the
 /// secret minted at unlock, compared in constant time.
 ///
-/// Every route runs it and there is one copy of it, so a route added later
-/// cannot pick up a subtly different rule. A missing token (locked, or never
-/// minted) is as much a `false` as a wrong one — callers collapse both to 403
-/// rather than distinguishing them, so the server never reveals which check
-/// failed.
+/// One copy for every route. A missing token is a `false` too; both collapse to 403.
 async fn token_ok(state: &Arc<AppState>, token: &str) -> bool {
     let Some(expected) = state.media_server_token.lock().await.clone() else {
         return false;
@@ -150,22 +105,17 @@ async fn serve_media(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Hash shape sanity. 64 ASCII hex chars — anything else can't be a
-    // real content_hash and we don't want to touch the FS for it.
+    // 64 hex chars, or we never touch the FS.
     if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    // db_key gate — without an active unlock the per-file key can't be
-    // derived, so we can't decrypt anything anyway.
     let db_key = match state.unlock.lock().await.as_ref() {
         Some(u) => u.db_key.to_vec(),
         None => return StatusCode::FORBIDDEN.into_response(),
     };
 
-    // Look the file up by hash. The cache stores `<hash>.<ext>.enc`; the
-    // extension is decorative (we already know the bytes from the hash)
-    // but we use it to set Content-Type.
+    // The cache stores `<hash>.<ext>.enc`; the ext only sets Content-Type.
     let (path, ext) = match r2cmd::find_cached_file(&hash) {
         Some(p) => p,
         None => return StatusCode::NOT_FOUND.into_response(),
@@ -176,12 +126,7 @@ async fn serve_media(
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    // Decrypt once into an owned buffer, then wrap it in `Bytes` so the Range
-    // branch can hand back a sub-slice that SHARES this allocation instead of
-    // copying the range out (`slice.to_vec()`). Range reads are the video-seek
-    // path — warm during scrubbing, not per-frame, but the zero-copy slice is
-    // free now that `Bytes` is in hand (#480 item 3). `Bytes::from(Vec)` takes
-    // ownership without copying; the full-body path below moves it too.
+    // `Bytes` so the Range branch returns a zero-copy sub-slice (#480).
     let plaintext: Bytes = match r2cmd::cache_decrypt(&file_bytes, &db_key, hash.as_bytes()) {
         Ok(p) => Bytes::from(p),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -190,14 +135,11 @@ async fn serve_media(
     let content_type = r2cmd::content_type_for_ext(&ext);
     let total_len = plaintext.len() as u64;
 
-    // Range parsing — single range only. Multi-range responses are a
-    // mess we don't need; browsers/players never request them for
-    // `<audio>/<video>`.
+    // Single range only; players never request multi-range.
     if let Some(range_hdr) = headers.get(header::RANGE) {
         if let Ok(range_str) = range_hdr.to_str() {
             match parse_single_range(range_str, total_len) {
                 Ok(Some((start, end))) => {
-                    // Zero-copy: shares `plaintext`'s allocation, no memcpy.
                     let slice = plaintext.slice(start as usize..=end as usize);
                     let len = end - start + 1;
                     return media_response(
@@ -214,8 +156,7 @@ async fn serve_media(
                     );
                 }
                 Ok(None) => {
-                    // Header present but unparseable as a range we accept —
-                    // fall through to the full-body 200 response.
+                    // Unparseable: fall through to the full-body 200.
                 }
                 Err(()) => {
                     return media_response(
@@ -241,11 +182,6 @@ async fn serve_media(
 
 /// Finish a response from `serve_media` — the single place a body of decrypted
 /// media bytes becomes a `Response`.
-///
-/// Every exit of `serve_media` that carries or describes plaintext goes through
-/// here, so the headers below cannot be attached to two of three paths: the
-/// function takes the half-built `Builder`, and the `Body` never meets it
-/// anywhere else.
 fn media_response(builder: axum::http::response::Builder, body: Body) -> Response {
     let mut resp = builder
         .body(body)
@@ -257,23 +193,11 @@ fn media_response(builder: axum::http::response::Builder, body: Body) -> Respons
 
 /// Keep decrypted bytes out of the webview's own on-disk HTTP cache.
 ///
-/// A 200 with no cache directives at all is *storable by default* (RFC 9111
-/// §3): it has a 200 status, a `GET` method and a `Content-Length`, and nothing
-/// forbids storage — so WebKitGTK, WKWebView and WebView2 are each entitled to
-/// write the response body into their own disk cache, and did. That cache is
-/// the browser engine's, not ours: nothing in this app knows where it is, the
-/// media-cache wipe on logout does not reach it, and its contents are the
-/// plaintext this server exists to decrypt in memory.
+/// A 200 without cache directives is storable (RFC 9111 §3), and webview engines did cache decrypted media to disk.
 ///
-/// `no-store` is the directive that forbids it, and it is the one that has to be
-/// on the 206 range path too — video seeking is served entirely from there, so a
-/// header attached only to the full-body 200 would leave every video the user
-/// scrubbed sitting in the engine's cache.
+/// `no-store` must be on the 206 range path too: video seeking is served from it.
 ///
-/// `Pragma: no-cache` rides along for HTTP/1.0-era caches that predate
-/// `Cache-Control`. It is redundant for every engine this app ships against and
-/// costs 18 bytes a response; it is here because the cost of being wrong about
-/// which intermediary is in the path is a plaintext copy on someone's disk.
+/// `Pragma: no-cache` for HTTP/1.0-era caches, in case one is in the path.
 fn add_no_store_headers(headers: &mut HeaderMap) {
     headers.insert(
         header::CACHE_CONTROL,
@@ -304,7 +228,6 @@ fn parse_single_range(range_str: &str, total: u64) -> Result<Option<(u64, u64)>,
         Some(r) => r,
         None => return Ok(None),
     };
-    // Reject multi-range explicitly.
     if rest.contains(',') {
         return Ok(None);
     }
@@ -318,7 +241,6 @@ fn parse_single_range(range_str: &str, total: u64) -> Result<Option<(u64, u64)>,
     let last = total - 1;
 
     if start_s.is_empty() {
-        // Suffix range: bytes=-N
         let n: u64 = match end_s.parse() {
             Ok(n) => n,
             Err(_) => return Ok(None),
@@ -349,17 +271,9 @@ fn parse_single_range(range_str: &str, total: u64) -> Result<Option<(u64, u64)>,
     Ok(Some((start, end)))
 }
 
-/// `GET /ws/screenshare/<token>` — upgrades to a WebSocket that streams
-/// decoded remote screenshare frames (packed I420, the `pack_frame_bytes`
-/// wire format) as binary messages. This is the Tauri/WebKitGTK render
-/// transport (spike/tauri-revival): the renderer parses each message and
-/// uploads the Y/U/V planes into a WebGL YUV→RGB shader — the path the
-/// `rustwebrtc` PoC proved sustains 1080p60+ where per-frame Tauri IPC
-/// `Channel` dispatch stalled on V8 GC (#305 Phase 1).
+/// `GET /ws/screenshare/<token>`: WebSocket of decoded I420 frames for the WebGL renderer (#305).
 ///
-/// One frame stream serves every track; the renderer dispatches by the
-/// `track_key` carried in each frame's header, exactly as the legacy
-/// `Channel` path did.
+/// One stream serves every track; the renderer dispatches by `track_key`.
 async fn ws_screenshare(
     State(state): State<Arc<AppState>>,
     Path(token): Path<String>,
@@ -373,11 +287,7 @@ async fn ws_screenshare(
     ws.on_upgrade(move |socket| pump_frames(socket, rx))
 }
 
-/// Owns a shared decoded frame so a [`Bytes`] can borrow its bytes without
-/// copying them out of the `Arc`. `Arc<Vec<u8>>` impls `AsRef<Vec<u8>>` but not
-/// `AsRef<[u8]>` (which `Bytes::from_owner` requires), so this thin newtype
-/// bridges the two. Dropping the last `Bytes` clone drops this, decrementing the
-/// `Arc` — the frame's memory frees exactly when no subscriber references it.
+/// Newtype so `Bytes::from_owner` can borrow an `Arc<Vec<u8>>` without copying.
 struct SharedFrame(Arc<Vec<u8>>);
 
 impl AsRef<[u8]> for SharedFrame {
@@ -386,15 +296,9 @@ impl AsRef<[u8]> for SharedFrame {
     }
 }
 
-/// Forward broadcast frames to one WebSocket client until either side
-/// closes. Lagged receivers (a stalled webview) drop the oldest frames
-/// rather than back-pressuring the decoder — latest-frame-wins.
+/// Forward frames to one WebSocket client. Lagged receivers drop frames; never back-pressure.
 ///
-/// Each frame is sent ZERO-COPY: the decoded I420 frame lives once behind an
-/// `Arc<Vec<u8>>` shared across every subscriber, and `Bytes::from_owner` hands
-/// axum a `Bytes` that borrows that shared buffer rather than memcpy-ing a
-/// full-res frame per client per frame (#480). The `Arc` refcount — not a copy —
-/// is what fans the frame out.
+/// Zero-copy: every subscriber borrows the one `Arc` frame (#480).
 async fn pump_frames(
     mut socket: WebSocket,
     mut rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
@@ -409,9 +313,7 @@ async fn pump_frames(
                 }
                 FRAMES_SENT.fetch_add(1, Ordering::Relaxed);
             }
-            // The webview fell behind and the channel overwrote `skipped` frames
-            // before this receiver read them. Count them as dropped and keep
-            // going from the newest frame — never back-pressure the decoder.
+            // Count overwritten frames as dropped and continue from the newest.
             Err(RecvError::Lagged(skipped)) => {
                 FRAMES_DROPPED.fetch_add(skipped, Ordering::Relaxed);
                 continue;
@@ -432,8 +334,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// Generate a fresh 32-byte hex token. Called from the unlock paths to
-/// rotate the per-session secret.
+/// Fresh 32-byte hex token, rotated on unlock.
 pub fn fresh_token() -> String {
     use rand::RngCore;
     let mut buf = [0u8; 32];
@@ -483,10 +384,7 @@ mod tests {
         assert!(!constant_time_eq(b"abc", b"abcd"));
     }
 
-    // The whole point of #480: sending a frame to a subscriber must NOT copy the
-    // bytes out of the shared `Arc`. `Bytes::from_owner(SharedFrame(arc))` has to
-    // borrow the Arc's buffer in place — proven here by the payload pointing at
-    // the exact same address as the Arc's data.
+    // #480: the payload must borrow the Arc's buffer in place (same address).
     #[test]
     fn shared_frame_send_is_zero_copy() {
         let frame = Arc::new(vec![1u8, 2, 3, 4, 5]);
@@ -494,58 +392,42 @@ mod tests {
 
         let payload = Bytes::from_owner(SharedFrame(Arc::clone(&frame)));
 
-        // Same contents...
         assert_eq!(payload.as_ref(), &[1, 2, 3, 4, 5]);
-        // ...and, crucially, the SAME backing memory — no memcpy happened.
         assert_eq!(payload.as_ptr(), src_ptr);
     }
 
-    // The Arc must stay alive exactly as long as some subscriber's `Bytes` still
-    // references it, and free once the last one drops — no leak, no early free.
+    // The Arc lives exactly as long as some subscriber's `Bytes`.
     #[test]
     fn shared_frame_holds_and_releases_the_arc() {
         let frame = Arc::new(vec![9u8; 32]);
         assert_eq!(Arc::strong_count(&frame), 1);
 
         let payload = Bytes::from_owner(SharedFrame(Arc::clone(&frame)));
-        // The owner inside `payload` keeps the Arc alive.
         assert_eq!(Arc::strong_count(&frame), 2);
 
-        // A cheap clone (a second WS client) shares the same buffer, not a copy.
         let payload2 = payload.clone();
         assert_eq!(payload2.as_ptr(), payload.as_ptr());
 
         drop(payload);
         drop(payload2);
-        // Every borrower gone → the Arc is back to just our test handle.
         assert_eq!(Arc::strong_count(&frame), 1);
     }
 
     #[test]
     fn fanout_counters_are_readable() {
-        // Relaxed snapshot; monotonic in the running server. Just prove the
-        // accessor wires to the two atomics without panicking.
+        // Just prove the accessor wires to the two atomics.
         let (sent, dropped) = frame_fanout_counters();
         let _ = (sent, dropped);
     }
 
-    // ── Cache directives (#1000) ───────────────────────────────────────────
-
     /// Bring up the real server over a real cached file and return
     /// `(base_url, content_hash)`.
-    ///
-    /// Everything here is the shipped path: `cache_encrypt` writes the file,
-    /// `find_cached_file` locates it, `serve_media` decrypts it, and the
-    /// assertions read the headers off an actual HTTP response — so a response
-    /// builder that stops attaching a header fails this test rather than
-    /// passing a unit check on a helper nothing calls.
     async fn serving_one_cached_file() -> (String, String) {
         use crate::commands::pin::UnlockState;
 
         const USER: &str = "media-server-headers";
         let db_key = vec![7u8; 32];
-        // 64 hex chars — `serve_media` rejects anything else before it touches
-        // the filesystem.
+        // 64 hex chars, or `serve_media` rejects it.
         let content_hash = "b".repeat(64);
 
         let state = Arc::new(AppState::new_with_parts(
@@ -573,17 +455,7 @@ mod tests {
         (format!("http://127.0.0.1:{port}/{token}"), content_hash)
     }
 
-    /// The webview must not be allowed to keep a copy.
-    ///
-    /// A 200 carrying `Content-Type` and `Content-Length` and no cache
-    /// directives is storable by default (RFC 9111 §3), so WebKitGTK, WKWebView
-    /// and WebView2 each wrote decrypted images, audio and video into their own
-    /// on-disk cache — one nothing in this app clears, not even the media-cache
-    /// wipe on logout.
-    ///
-    /// Both paths, in one test on purpose: the 206 is the one a video seek
-    /// takes, and it is the one a response-builder refactor is most likely to
-    /// leave behind.
+    /// The webview must not keep a copy: both the 200 and the 206 (video seek) carry `no-store`.
     #[tokio::test]
     async fn decrypted_bytes_are_never_storable_by_the_webview() {
         let (base, hash) = serving_one_cached_file().await;
@@ -612,8 +484,7 @@ mod tests {
         assert_no_store("206", ranged.headers());
         assert_eq!(ranged.bytes().await.expect("body").len(), 128);
 
-        // The 416 carries no body, but it does describe one; it goes through
-        // the same funnel and is checked here so the funnel has no exceptions.
+        // The 416 goes through the same funnel.
         let unsatisfiable = client
             .get(format!("{base}/{hash}"))
             .header(reqwest::header::RANGE, "bytes=99999-")
@@ -642,10 +513,7 @@ mod tests {
         );
     }
 
-    /// The structural half of the guarantee: `serve_media` does not build a
-    /// response body itself, so a new exit path cannot ship without the
-    /// directives. Every body it returns is constructed by `media_response`,
-    /// which is the only place the headers are attached.
+    /// Structural half: every body `serve_media` returns comes from `media_response`.
     #[test]
     fn serve_media_never_builds_a_response_body_itself() {
         let source = include_str!("media_server.rs");

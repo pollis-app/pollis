@@ -1,8 +1,4 @@
-// A message sent from this user's OTHER device must show up live on this one,
-// like anyone else's, but never count as unread — and when its wake-up was
-// missed (app backgrounded, room reconnecting) the app must catch up on its
-// own, because the Delivery Service never pushes a sender's own message to
-// their own account.
+// Own-device messages show live but never count unread, and a missed wake-up is caught up.
 import test from "node:test";
 import assert from "node:assert/strict";
 

@@ -1,18 +1,6 @@
 //! pollis-capture-proto
 //!
-//! The single shared definition of the capture helper Unix-socket wire
-//! protocol — both screen capture and webcam capture. Both per-platform
-//! helper subprocesses (`pollis-capture-linux`, `pollis-capture-macos`)
-//! encode frames with this crate; `pollis-core`'s main-process reader
-//! decodes them with it. The helper is launched in either screen or
-//! camera mode; the two modes share the Format + Frame messages and
-//! differ only in their enumeration/selection handshake.
-//!
-//! This crate exists so the wire bytes have exactly one home. It was
-//! factored out of the original hand-rolled encode/decode that lived in
-//! `pollis-capture-linux/src/linux.rs` and
-//! `pollis-core/src/commands/screenshare.rs` — the byte layout is
-//! **unchanged**; only its location moved.
+//! The capture helper Unix-socket wire protocol, shared by both helpers and `pollis-core`.
 //!
 //! Wire protocol (all integers little-endian):
 //!
@@ -30,33 +18,19 @@
 //!
 //!   type 0x03  Sources (helper → parent)
 //!     payload := utf-8 JSON `SourceList`
-//!     Sent once after the helper has enumerated the OS's shareable
-//!     content (macOS only today — built around `SCShareableContent`).
-//!     Linux uses the system portal and never sends this. The parent
-//!     renders the list in its own picker UI, then replies with Select.
+//!     Sent once after enumeration (macOS only); the parent replies with Select.
 //!
 //!   type 0x04  Select (parent → helper)
 //!     payload := utf-8 JSON `Selection`
-//!     The parent's response to Sources. Carries the chosen
-//!     display/window/app identifier; the helper builds an
-//!     `SCContentFilter` from it and proceeds to Format → Frame.
+//!     The parent's response to Sources; the helper builds an `SCContentFilter`.
 //!
 //!   type 0x05  Cameras (helper → parent)
 //!     payload := utf-8 JSON `CameraList`
-//!     Sent once in camera mode after the helper enumerates the OS's
-//!     video-capture devices. The parent renders them in its own picker
-//!     (it lists every device the OS reports — no virtual-camera
-//!     filtering, matching Discord/Zoom), then replies with SelectCamera.
+//!     Sent once in camera mode after enumeration; the parent replies with SelectCamera.
 //!
 //!   type 0x06  SelectCamera (parent → helper)
 //!     payload := utf-8 JSON `CameraSelection`
-//!     The parent's response to Cameras. Carries the opaque per-platform
-//!     device id (macOS `AVCaptureDevice.uniqueID`, Linux V4L2 node path,
-//!     Windows MF symbolic link) — a String, unlike the u32 ids screen
-//!     sources use. The helper opens that device and proceeds to Format →
-//!     Frame. Camera frames reuse the Format + Frame messages unchanged:
-//!     the helper delivers BGRA (alpha ignored) exactly like the screen
-//!     path, so the parent's I420 conversion + LiveKit publish is shared.
+//!     Carries the opaque per-platform device id; camera frames reuse Format + Frame.
 //!
 //!   type 0x07  AudioFormat (helper -> parent)
 //!     payload := [ u32 sample_rate ][ u32 channels ]
@@ -67,10 +41,7 @@
 //!   type 0x08  AudioFrame (helper -> parent)
 //!     payload := [ u32 sample_rate ][ u32 channels ][ i64 timestamp_us ]
 //!                [ i16 interleaved PCM ... ]
-//!     Signed 16-bit interleaved PCM at the announced rate/channel count.
-//!     The parent downmixes to mono and resamples to 48 kHz
-//!     (`screenshare::audio::normalize`) so all three platforms converge
-//!     on one publish path.
+//!     s16 interleaved PCM; the parent downmixes and resamples to 48 kHz.
 //!
 //!   type 0xFF  Error
 //!     payload := utf-8 message
@@ -115,7 +86,6 @@ pub const MSG_ERROR: u8 = 0xFF;
 
 /// Hard cap on a single message payload. An 8K BGRx frame is ~127 MB;
 /// anything past 32 MB is treated as a desync rather than a real frame.
-/// Kept here so encoder and decoder share one definition.
 pub const MAX_PAYLOAD_LEN: usize = 32 * 1024 * 1024;
 
 /// A decoded protocol message.
@@ -162,10 +132,7 @@ pub struct DisplaySource {
     pub height: u32,
     /// Friendly label like "Built-in Retina Display" — for picker UI.
     pub name: String,
-    /// Base64 PNG data URL rendered as the picker tile preview. `None`
-    /// where the source path doesn't ship thumbnails (the macOS capture
-    /// helper). Skipped on wire when absent for forward-compat with
-    /// helpers built against the older proto.
+    /// Base64 PNG data URL for the picker tile; absent on wire when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail_data_url: Option<String>,
 }
@@ -183,13 +150,9 @@ pub struct WindowSource {
     /// The owning application's display name (e.g. "Safari"). Used as
     /// the primary label when `title` is empty.
     pub app_name: String,
-    /// Bundle identifier where known (e.g. "com.apple.Safari"). May be
-    /// empty for daemons / agent processes without a bundle. Always
-    /// empty on Windows (no analog).
+    /// Bundle identifier where known (e.g. "com.apple.Safari"); empty on Windows.
     pub bundle_id: String,
-    /// Base64 PNG data URL rendered as the picker tile preview. `None`
-    /// where the source path doesn't ship thumbnails (the macOS capture
-    /// helper). Skipped on wire when absent.
+    /// Base64 PNG data URL for the picker tile; absent on wire when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnail_data_url: Option<String>,
 }
@@ -203,13 +166,7 @@ pub struct SourceList {
 
 /// What the user picked in the in-app picker. Parent → helper.
 ///
-/// `with_audio` rides on the selection rather than on the helper's
-/// command line because the macOS helper is spawned during
-/// `enumerate_screen_sources` — before the user has seen the picker, and
-/// so before the audio toggle has been read. Linux has no Select round
-/// trip at all (the portal dialog is the picker), so its helper takes the
-/// same decision as an `--audio` flag at spawn time instead. Defaulted so
-/// a Select from an older frontend still deserializes as video-only.
+/// `with_audio` rides here because the macOS helper spawns before the picker; defaulted for old frontends.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Selection {
@@ -237,20 +194,13 @@ impl Selection {
 /// A capturable video-capture device (webcam / capture card / virtual cam).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraSource {
-    /// Opaque, stable per-platform device handle: macOS
-    /// `AVCaptureDevice.uniqueID`, Linux V4L2 node path (e.g.
-    /// `/dev/video0`), Windows MF symbolic link. A String, unlike the
-    /// u32 ids `DisplaySource`/`WindowSource` use — camera handles are
-    /// not small integers. The parent passes it back verbatim in
-    /// `CameraSelection`.
+    /// Opaque, stable per-platform device handle, echoed back in `CameraSelection`.
     pub id: String,
     /// Friendly label like "FaceTime HD Camera" — for picker UI.
     pub name: String,
 }
 
-/// The camera enumeration result sent helper → parent. Lists every
-/// device the OS reports; no virtual-camera filtering (matches the
-/// Discord/Zoom convention — the parent shows them all).
+/// The camera enumeration result sent helper → parent; no virtual-camera filtering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraList {
     pub cameras: Vec<CameraSource>,
@@ -263,11 +213,7 @@ pub struct CameraSelection {
     pub id: String,
 }
 
-// ── Encoding (helper side) ────────────────────────────────────────────────
-
-/// Wall-clock microseconds since the Unix epoch — the `timestamp_us` every
-/// Frame and AudioFrame carries. Lives here so all capture backends stamp
-/// from one clock; a pre-epoch clock yields 0 rather than panicking.
+/// Wall-clock µs since the epoch for `timestamp_us`; a pre-epoch clock yields 0.
 pub fn now_us() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -306,10 +252,7 @@ pub fn encode_frame_header(
     header
 }
 
-/// Frame a JSON-payload message. Every JSON message on this protocol has
-/// the same shape — opcode, u32 length, utf-8 JSON — so the four of them
-/// share one encoder. Serialization of these types cannot fail (plain
-/// structs of owned primitives), hence the `expect`.
+/// Frame a JSON-payload message; serializing these plain structs cannot fail.
 fn encode_json<T: Serialize>(msg_type: u8, value: &T) -> Vec<u8> {
     let json = serde_json::to_vec(value).expect("capture proto message serializes");
     let mut buf = Vec::with_capacity(1 + 4 + json.len());
@@ -349,10 +292,7 @@ pub fn encode_audio_format(sample_rate: u32, channels: u32) -> Vec<u8> {
     buf
 }
 
-/// Serialize a complete AudioFrame message (helper → parent). Audio
-/// blocks are small (a 20 ms stereo block at 48 kHz is 3.8 KB), so unlike
-/// video frames there is nothing to gain from a split header + payload
-/// write — one buffer keeps the call sites simple.
+/// Serialize a complete AudioFrame message (helper → parent).
 pub fn encode_audio_frame(
     sample_rate: u32,
     channels: u32,
@@ -381,8 +321,7 @@ pub fn encode_error(message: &str) -> Vec<u8> {
     buf
 }
 
-/// Write a complete message to an async writer. Convenience for helpers
-/// that already have the full frame buffer in hand.
+/// Write a complete message to an async writer.
 pub async fn write_msg<W>(w: &mut W, msg: &CaptureMsg) -> std::io::Result<()>
 where
     W: AsyncWriteExt + Unpin,
@@ -424,10 +363,6 @@ where
     }
 }
 
-// ── Decoding (parent side) ────────────────────────────────────────────────
-
-/// Every decode failure on this protocol is a desync or a corrupt payload,
-/// which is `InvalidData` in every case.
 fn invalid_data(msg: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, msg)
 }
@@ -469,10 +404,7 @@ where
     ))
 }
 
-/// Read one framed message from an async reader. Returns `Ok(None)` on a
-/// clean EOF (parent closed the socket / helper exited). This is the
-/// exact decode logic that used to live in `screenshare.rs`'s
-/// `SocketReader::read_message`, byte-for-byte.
+/// Read one framed message; `Ok(None)` on a clean EOF.
 pub async fn read_msg<R>(r: &mut R) -> std::io::Result<Option<CaptureMsg>>
 where
     R: AsyncReadExt + Unpin,
@@ -579,8 +511,7 @@ where
 mod tests {
     use super::*;
 
-    // Round-trip every message kind through an in-memory duplex so the
-    // exact wire bytes are exercised by encode -> decode.
+    // Round-trip through an in-memory duplex: encode -> decode.
     async fn roundtrip(msg: CaptureMsg) -> CaptureMsg {
         let (mut a, mut b) = tokio::io::duplex(1024 * 1024);
         write_msg(&mut a, &msg).await.unwrap();
@@ -711,10 +642,7 @@ mod tests {
         }
     }
 
-    // A Select minted by a frontend built before shared audio existed
-    // carries no `with_audio` key at all. It must deserialize as a
-    // video-only share rather than failing the handshake — a helper and a
-    // renderer can be a release apart.
+    // A Select from a pre-audio frontend has no `with_audio`; it must decode as video-only.
     #[test]
     fn select_without_with_audio_defaults_to_video_only() {
         let sel: Selection = serde_json::from_str(r#"{"kind":"display","id":3}"#).unwrap();
@@ -765,8 +693,7 @@ mod tests {
         }
     }
 
-    // An empty block is legal on the wire (a capture backend can hand us a
-    // zero-length period); it must decode as an empty frame, not an error.
+    // An empty block is legal and decodes as an empty frame.
     #[tokio::test]
     async fn empty_audio_frame_roundtrips() {
         match roundtrip(CaptureMsg::AudioFrame {
@@ -782,9 +709,7 @@ mod tests {
         }
     }
 
-    // An odd payload length cannot be a whole number of s16 samples, so it
-    // is a stream desync. Truncating silently would emit a half-sample of
-    // noise on every subsequent block.
+    // An odd payload length is a desync; truncating would emit half-sample noise.
     #[tokio::test]
     async fn odd_length_audio_payload_is_rejected() {
         let mut bytes = encode_audio_frame(48_000, 1, 0, &[1, 2, 3]);

@@ -6,8 +6,7 @@ use std::path::PathBuf;
 pub enum Target {
     /// In-process DS + a local S3 (SeaweedFS) — every hop observable.
     Local,
-    /// The dev DS (api-dev) + dev R2. The DS hop is tapped through a local
-    /// forwarding proxy; R2 traffic goes straight to Cloudflare.
+    /// api-dev + dev R2; only the DS hop is tapped (via a local proxy).
     Dev,
 }
 
@@ -78,8 +77,7 @@ pub fn human(n: u64) -> String {
     }
 }
 
-/// `count` sizes, log-spaced from `min` to `max` (both included), so a run
-/// covers single-chunk, multi-chunk, per-file-cache-cap and over-cap files.
+/// `count` log-spaced sizes from `min` to `max` inclusive.
 pub fn log_spaced(count: usize, min: u64, max: u64) -> Vec<u64> {
     if count == 0 {
         return Vec::new();

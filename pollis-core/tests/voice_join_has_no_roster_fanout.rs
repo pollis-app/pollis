@@ -1,35 +1,7 @@
 //! The voice-join path must not issue one DS round trip per person in the room
 //! (#1045).
 //!
-//! Seeding the participant roster used to call `lookup_avatar_url_for_identity`
-//! once per existing participant, awaited one at a time, as the LAST step before
-//! `join_voice_channel` returned. Every request is a real HTTPS round trip to the
-//! Delivery Service since #988, so a ten-person channel paid eleven of them in
-//! series while the user stared at a dead call — and the busier the channel, the
-//! slower the join. The case that should feel fastest was the slowest.
-//!
-//! The fix batches them into one `lookup_avatar_urls_for_identities`. This guard
-//! exists because the regression is **invisible in a passing test**: a loop of
-//! awaits is correct, returns the right avatars, and shows up only as latency
-//! that grows with a room size no unit test sets up. A reviewer would have to
-//! notice the `.await` inside the loop.
-//!
-//! ## How it decides
-//!
-//! It reads the roster-seeding phase — the span between the `roster_start` and
-//! `roster_ms` timing markers — and fails on a per-identity avatar lookup there,
-//! or on any Delivery Service read awaited inside a per-participant loop. It also
-//! asserts the batched call is still present, so the guard cannot pass by the
-//! phase being deleted.
-//!
-//! Reading source text is a lower bound, not a proof — a fan-out assembled
-//! through a helper would slip past — but it is exactly the shape the defect had,
-//! and the shape the obvious "just add the avatar here" edit would reintroduce.
-//! Verified by mutation: restoring the loop fails both tests.
-//!
-//! Deliberately NOT banned: the single `lookup_avatar_url_for_identity` in the
-//! participant-connected event handler. That is one lookup for one arriving
-//! person, which is O(1) per event and correct.
+//! Reads source text, so it is a lower bound: a fan-out through a helper slips past.
 
 use std::path::PathBuf;
 
@@ -43,13 +15,7 @@ fn lifecycle_source() -> String {
 
 /// The roster-seeding region: `let roster_start` … `let roster_ms`.
 ///
-/// Scoped to that span rather than to the whole function on purpose. The room
-/// event-handler closure is *registered* inside `join_voice_channel`, and it
-/// legitimately looks up one avatar for one arriving participant — banning the
-/// call across the whole function would forbid the correct thing along with the
-/// wrong one. The N+1 lived in this span, and this span is where it would come
-/// back. Both markers are the timing instrumentation the phase already has, so
-/// they cannot be deleted without the timings noticing.
+/// Not the whole function: its event handler rightly looks up one arriving avatar.
 fn roster_seeding_region(source: &str) -> String {
     let start = source
         .find("let roster_start")
@@ -61,8 +27,7 @@ fn roster_seeding_region(source: &str) -> String {
     source[start..end].to_string()
 }
 
-/// Source lines with `//` comments stripped, so prose describing the old defect
-/// does not read as the defect.
+/// Source lines with `//` comments stripped.
 fn code_lines(region: &str) -> Vec<(usize, String)> {
     region
         .lines()
@@ -101,8 +66,7 @@ fn the_join_path_does_not_look_up_avatars_one_participant_at_a_time() {
             .join("\n"),
     );
 
-    // And the batched call must actually be the one in use, so this test cannot
-    // pass by the roster seeding being deleted or quietly moved elsewhere.
+    // So the test cannot pass by the phase being deleted.
     assert!(
         region.contains("lookup_avatar_urls_for_identities"),
         "the roster-seeding phase no longer makes one batched avatar request — if \
@@ -111,10 +75,6 @@ fn the_join_path_does_not_look_up_avatars_one_participant_at_a_time() {
 }
 
 /// The `.await`-in-a-loop shape, stated generally enough to catch the next one.
-///
-/// The avatar fan-out was not special: any per-participant DS read on the join
-/// path costs a round trip per person. This checks the roster-seeding region for
-/// an `await` inside a `for` over participants.
 #[test]
 fn the_join_path_does_not_await_a_ds_read_per_participant() {
     let source = lifecycle_source();
@@ -129,8 +89,7 @@ fn the_join_path_does_not_await_a_ds_read_per_participant() {
         let trimmed = line.trim();
 
         if in_participant_loop && trimmed.contains(".await") {
-            // `ds_` names the Delivery Service client; `lookup_` is the avatar/
-            // pseudonym family that goes through it.
+            // `ds_` is the DS client; `lookup_` goes through it.
             if trimmed.contains("ds_") || trimmed.contains("lookup_") {
                 offenders.push(trimmed.to_string());
             }

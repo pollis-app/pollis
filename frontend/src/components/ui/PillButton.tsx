@@ -4,29 +4,15 @@ interface PillButtonProps {
   accent: string;
   onClick?: () => void;
   title?: string;
-  /** Icon-only square variant — equal padding on all sides, no inner gap. */
   square?: boolean;
   children: React.ReactNode;
   "data-testid"?: string;
   "aria-label"?: string;
-  /**
-   * Any other `data-*` attribute, forwarded verbatim to the button.
-   *
-   * State that callers publish for the tray and for tests to read — the voice
-   * bar's `data-mic-state` / `data-deafened` (#849) — arrives this way. Before
-   * this existed the props were a closed list, so those attributes were
-   * accepted by TypeScript and then silently dropped on the floor.
-   */
+  /** Any `data-*` attribute, forwarded verbatim (e.g. `data-mic-state`, #849). */
   [dataAttribute: `data-${string}`]: unknown;
 }
 
-/**
- * Filled accent-colored pill that inverts to outlined on hover. Used in
- * tight inline contexts (e.g. the bottom voice bar) where the affordance
- * needs to read as clickable at a glance and color itself carries meaning
- * (orange = active, red = destructive, etc.). Pass `square` for an
- * icon-only variant.
- */
+/** Filled accent pill that inverts to outlined on hover; `square` for icon-only. */
 export const PillButton: React.FC<PillButtonProps> = ({
   accent,
   onClick,
@@ -37,8 +23,7 @@ export const PillButton: React.FC<PillButtonProps> = ({
   "aria-label": ariaLabel,
   ...rest
 }) => {
-  // Only `data-*` goes through: className and style stay owned by this
-  // component, so a caller cannot quietly unpick the pill's appearance.
+  // Only `data-*`: className and style stay owned here.
   const dataAttributes = Object.fromEntries(
     Object.entries(rest).filter(([key]) => key.startsWith("data-")),
   );

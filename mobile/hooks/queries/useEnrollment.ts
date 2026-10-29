@@ -1,18 +1,4 @@
-// Device enrollment hooks. Two sides of the same flow:
-//
-// 1. **New device** (auth/enrollment screen):
-//    - `useStartEnrollment` opens an enrollment request and returns a
-//      short verification code the user reads aloud to their existing
-//      device.
-//    - `useEnrollmentStatus` polls Turso for the approval-or-not.
-//    - `useFinalizeEnrollment` finishes setup once status flips to
-//      `approved`.
-//    - `useRecoverWithSecretKey` is the alternate path — enter the
-//      recovery key emitted at first signup.
-//
-// 2. **Existing device** (self/security screen):
-//    - `usePendingEnrollmentRequests` lists requests from sibling devices.
-//    - `useApproveEnrollment` / `useRejectEnrollment` decide them.
+// Device enrollment hooks: the new device's side and the approving device's.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
@@ -30,15 +16,7 @@ export interface EnrollmentStatus {
   status: EnrollmentStatusKind;
 }
 
-/// One open enrollment request, as the APPROVING device sees it.
-///
-/// No verification code, on purpose (#1096) — the approver types the code shown
-/// on the new device, and Rust checks it against the value derived from the
-/// ephemeral key it fetched. The server's copy used to be here and the UI
-/// submitted it straight back, which put the server on both sides of the
-/// comparison the SAS exists to make. `EnrollmentHandle` above still has one:
-/// that is the REQUESTING device's own locally-derived code, the value the user
-/// reads off this screen and types on the other.
+/// No verification code on purpose (#1096): the approver types the one shown on the new device.
 export interface PendingEnrollmentRequest {
   request_id: string;
   new_device_id: string;
@@ -65,8 +43,7 @@ export function useStartEnrollment() {
   });
 }
 
-/** Polls every 3s while the request is pending. Stops as soon as the
- *  server reports a terminal state. */
+/** Polls every 3s while pending; stops on a terminal state. */
 export function useEnrollmentStatus(requestId: string | null) {
   return useQuery({
     queryKey: enrollmentQueryKeys.status(requestId),

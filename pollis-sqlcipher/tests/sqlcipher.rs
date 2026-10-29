@@ -1,25 +1,12 @@
 //! Drives a real database through the vendored SQLCipher and the RustCrypto
 //! provider behind it, then reads the resulting file back as raw bytes.
 //!
-//! `PRAGMA cipher_version` answering proves only that a SQLCipher build is
-//! present — it says nothing about whether the pages that reached the disk are
-//! ciphertext. That is what this file settles, and it settles it on every
-//! platform: the amalgamation is compiled everywhere (see `build.rs`), so a
-//! provider mistake fails the ordinary Linux gate rather than surviving until
-//! the Windows job runs.
-//!
-//! The FFI here is hand-declared rather than routed through `rusqlite` on
-//! purpose. This crate must not depend on `libsqlite3-sys`: a second sqlite3 in
-//! the same test binary is exactly the "which library won the `sqlite3_*`
-//! symbols" ambiguity that hid the Windows plaintext bug for a year.
+//! FFI is hand-declared: a second sqlite3 via `libsqlite3-sys` would make the linked one ambiguous.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::Path;
 
-// Not for its Rust API — it has none worth calling here. Naming the crate is
-// what puts its rlib on the link line, and with it the `sqlcipher.lib` /
-// `libsqlcipher.a` its build script produced plus the `#[no_mangle]` crypto
-// provider the amalgamation calls back into.
+// Links `sqlcipher` and the `#[no_mangle]` provider; no Rust API used.
 use pollis_sqlcipher as _;
 
 const SQLITE_OK: c_int = 0;
@@ -48,8 +35,7 @@ extern "C" {
     fn sqlite3_libversion() -> *const c_char;
 }
 
-/// A `sqlite3*` that closes itself, so a failing assertion cannot leave the
-/// file locked for the next step of the test.
+/// A `sqlite3*` that closes itself, so a failed assertion leaves no lock.
 struct Db(*mut c_void);
 
 impl Drop for Db {
@@ -117,17 +103,13 @@ impl Db {
         }
     }
 
-    /// The key SQLCipher wants before any other statement, in the same
-    /// raw-key form `pollis-core` uses so this exercises that path too.
+    /// Raw-key form, as `pollis-core` uses.
     fn key(&self, key: &[u8]) {
         let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
         self.must_exec(&format!("PRAGMA key = \"x'{hex}'\""));
     }
 
-    /// Keying with a passphrase rather than raw bytes, which is what puts the
-    /// full `kdf_iter`-round PBKDF2 on the page key. `pollis-core` never does
-    /// this, but the interop fixtures do, so that the expensive derivation is
-    /// compared against another implementation too.
+    /// Passphrase keying runs the full PBKDF2 on the page key, as the interop fixtures do.
     fn key_passphrase(&self, passphrase: &str) {
         self.must_exec(&format!("PRAGMA key = '{passphrase}'"));
     }
@@ -141,8 +123,7 @@ fn scratch(name: &str) -> tempfile::TempDir {
     tempfile::Builder::new().prefix(name).tempdir().expect("tempdir")
 }
 
-/// The library that answered is SQLCipher, and it is the provider this crate
-/// built — not some other sqlite3 that drifted into the link.
+/// The library that answered is this crate's SQLCipher provider.
 #[test]
 fn the_linked_library_is_our_sqlcipher() {
     let dir = scratch("cipher-version");
@@ -169,8 +150,7 @@ fn the_linked_library_is_our_sqlcipher() {
     assert_eq!(sqlite, "3.46.1", "vendor/sqlite3.c is not the version PROVENANCE.md records");
 }
 
-/// The whole point. Write a distinctive string into a keyed database, close it,
-/// and look at the bytes that are actually on disk.
+/// Write a distinctive string, close, and inspect the bytes on disk.
 #[test]
 fn a_keyed_database_is_ciphertext_on_disk() {
     let dir = scratch("encrypted-at-rest");
@@ -206,8 +186,7 @@ fn a_keyed_database_is_ciphertext_on_disk() {
     assert_eq!(db.query_one("SELECT body FROM message").as_deref(), Some(MARKER));
 }
 
-/// Reading it back must require the key. A build where the wrong key — or no
-/// key — still returns rows is a build that is not encrypting.
+/// Reading it back must require the key.
 #[test]
 fn the_wrong_key_cannot_read_the_database() {
     let dir = scratch("wrong-key");
@@ -239,11 +218,7 @@ fn the_wrong_key_cannot_read_the_database() {
     assert_eq!(wrong.query_one("SELECT body FROM message"), None);
 }
 
-/// The tests above fit in a handful of pages. A database large enough to span
-/// many of them, written and then re-read across a close, is what actually
-/// exercises the provider's CBC chaining, per-page IVs and per-page MACs at
-/// volume — a provider that got the IV or the chaining wrong on any page but the
-/// first would still pass a single-page round trip.
+/// Many pages, to exercise CBC chaining, per-page IVs and MACs beyond page 1.
 #[test]
 fn a_multi_page_database_round_trips() {
     const ROWS: i64 = 4000;
@@ -283,8 +258,7 @@ fn a_multi_page_database_round_trips() {
     assert_eq!(db.query_one("PRAGMA integrity_check").as_deref(), Some("ok"));
 }
 
-/// SQLCipher 4's defaults are what make the file above ciphertext; a build that
-/// silently negotiated something weaker would still pass the tests above.
+/// SQLCipher 4 defaults, not something weaker.
 #[test]
 fn the_cipher_parameters_are_sqlcipher_4_defaults() {
     let dir = scratch("cipher-params");
@@ -301,8 +275,6 @@ fn the_cipher_parameters_are_sqlcipher_4_defaults() {
     assert_eq!(db.query_one("PRAGMA kdf_iter").as_deref(), Some("256000"));
 }
 
-// ── Cross-provider interop ───────────────────────────────────────────────────
-
 /// Keep in step with `db::local::tests` in `pollis-core`, which writes the
 /// fixtures these constants describe.
 const FIXTURE_PASSPHRASE: &str = "pollis-interop-fixture-passphrase";
@@ -313,9 +285,7 @@ fn fixture_body(id: i64) -> String {
     format!("interop-row-{id:03}-{}", "ab".repeat(96))
 }
 
-/// Copy a checked-in fixture somewhere writable. SQLCipher wants to journal
-/// even for reads, and the fixture is an artifact — a test that mutated it in
-/// place would quietly rewrite the thing it is checking against.
+/// Copy a fixture somewhere writable: SQLCipher journals even on reads.
 fn fixture_copy(dir: &Path, name: &str) -> std::path::PathBuf {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
     let dst = dir.join(name);
@@ -327,19 +297,7 @@ fn fixture_copy(dir: &Path, name: &str) -> std::path::PathBuf {
 /// The check no round trip can perform: read a database **somebody else
 /// encrypted**.
 ///
-/// Every other test in this file writes with this provider and reads with this
-/// provider. That cannot distinguish correct SQLCipher from self-consistent
-/// nonsense — a provider deriving the wrong key derives the same wrong key on
-/// both sides, so the data comes back and the file is still not SQLCipher 4.
-/// The mutation that motivated this (#1002) was exactly that shape: a PBKDF2
-/// mishandling `dkLen` ≠ `hLen` passed all 14 tests here.
-///
-/// These fixtures were written by `pollis-core`'s SQLCipher, which on Linux and
-/// macOS is compiled against OpenSSL/CommonCrypto rather than `src/abi.rs`. If
-/// this provider can read them, the two agree on PBKDF2-HMAC-SHA512 key
-/// derivation, AES-256-CBC page encryption and the per-page HMAC — across
-/// several pages, so page 1's salt handling is not the only thing exercised.
-/// If it cannot, one of them is wrong, and until now nothing would have said so.
+/// Round trips cannot catch a self-consistent wrong key (#1002); OpenSSL/CommonCrypto SQLCipher wrote these.
 #[test]
 fn a_database_another_implementation_encrypted_reads_back() {
     let dir = scratch("interop");

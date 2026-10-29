@@ -1,6 +1,4 @@
-// Timestamp for a conversation row (Messages.dc.html): a clock time today,
-// the weekday within the last week, then a short date. Always formatted in the
-// active app locale, never the host's.
+// A conversation row's timestamp, always in the active app locale.
 
 import { activeLocale } from "../../i18n";
 

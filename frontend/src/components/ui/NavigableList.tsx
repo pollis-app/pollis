@@ -5,51 +5,24 @@ import { horizontalArrowStep, isHorizontalArrow } from "../../utils/direction";
 import { EmptyState } from "./EmptyState";
 import { usePressActivator, type ActivateOn } from "../../hooks/usePressActivation";
 
-// Reusable keyboard-navigable list.
-//
-// Navigation model:
-//   colIndex 0         → the row itself (Enter fires onEnterRow)
-//   colIndex 1..N      → one of the inline-end `controls`
-//
-// Keys: ArrowUp/Down move between rows (and reset colIndex to 0),
-// ArrowLeft/Right move between the row and its controls, Enter either
-// fires onEnterRow (when on the row) or is handled natively by the
-// focused control (e.g. Button/Switch translate Enter to click).
-//
-// The controls sit at the INLINE END of the row (`borderInlineStart` marks
-// the start edge), so under `dir="rtl"` they are drawn on the left and the
-// key that reaches them is ArrowLeft. `horizontalArrowStep` resolves that
-// against the row's real computed direction — see `utils/direction.ts`.
+// Keyboard-navigable list: col 0 is the row, 1..N its inline-end controls (ArrowLeft reaches them under RTL; see `utils/direction.ts`).
 export interface NavigableListProps<T> {
   items: T[];
 
-  // Unique, stable React key per item.
   getKey: (item: T) => string;
 
-  // Main row content — typically the name + subtitle/preview.
   renderRow: (item: T) => React.ReactNode;
 
-  // Right-aligned focusable controls. Return an empty array (or omit) for
-  // a row with no controls. Each element must contain a focusable child
-  // (button, [role="switch"], input, etc.).
+  // Each element must contain a focusable child.
   controls?: (item: T) => React.ReactNode[];
 
-  // Right-aligned non-focusable trailing content (timestamps, labels).
   trailing?: (item: T) => React.ReactNode;
 
-  // Called when Enter is pressed while focus is on the row (colIndex 0).
   onEnterRow?: (item: T) => void;
 
-  // Called when the user clicks (mouse) the body of a row, excluding
-  // its controls. Separate from `onEnterRow` because some consumers
-  // (e.g. Requests) wire Enter to a destructive action that a stray
-  // click should NOT trigger. Clicking on a control inside `controls`
-  // still triggers that control natively; this only fires when the
-  // click lands on the row's main content.
+  // Mouse click on the row body only; separate from `onEnterRow`, which some wire to a destructive action.
   onClickRow?: (item: T) => void;
-  // `"press"`: `onClickRow` runs on a plain mouse pointer-down (#1529) — only
-  // when it navigates (free to undo). Enter and assistive tech still act on
-  // their own path; a mouse press runs it once.
+  // `"press"`: a mouse pointer-down runs `onClickRow` (#1529); only for navigation.
   activateRowOn?: ActivateOn;
 
   isLoading?: boolean;
@@ -59,17 +32,10 @@ export interface NavigableListProps<T> {
   rowTestId?: (item: T) => string;
   testId?: string;
 
-  // Whether the list should grab focus on mount / when items first
-  // appear. Default `true` — keeps the existing keyboard-first list
-  // pages (Members, Requests, Blocked, Invites, …) working with no
-  // changes. Pass `false` when the list is rendered alongside another
-  // element that wants initial focus (e.g. the Join button on the
-  // voice-channel page).
+  // Default true; pass false when a sibling wants initial focus.
   autoFocus?: boolean;
 
-  // Draw the row cursor only while focus is inside the list. For a second
-  // list on the same page (the member page's "Invited" section, #1506), so
-  // two lists never both show a cursor at rest.
+  // Cursor only while focused, for a second list on the page (#1506).
   cursorOnlyWhenFocused?: boolean;
 }
 
@@ -93,8 +59,6 @@ export function NavigableList<T>({
   cursorOnlyWhenFocused = false,
 }: NavigableListProps<T>) {
   const { t } = useTranslation("common");
-  // Resolved at render, not as default parameter values, so the fallbacks
-  // follow a language change.
   const resolvedLoadingLabel = loadingLabel ?? t("states.loading");
   const resolvedEmptyLabel = emptyLabel ?? t("list.empty");
   const [nav, setNav] = useState<NavState>({ rowIndex: 0, colIndex: 0 });
@@ -102,18 +66,13 @@ export function NavigableList<T>({
   const containerRef = useRef<HTMLDivElement>(null);
   const [hasFocusWithin, setHasFocusWithin] = useState(false);
   const showCursor = !cursorOnlyWhenFocused || hasFocusWithin;
-  // Tracks whether the user has actually navigated yet. Until they do,
-  // the nav-following effect below should not grab focus to the
-  // container — it would clobber whatever the parent placed focus on
-  // (e.g. an autoFocus button rendered alongside the list).
+  // Until the user navigates, don't steal focus from what the parent focused.
   const hasNavigatedRef = useRef(false);
 
-  // Reset navigation when the item set changes shape.
   useEffect(() => {
     setNav({ rowIndex: 0, colIndex: 0 });
   }, [items.length]);
 
-  // Move DOM focus to match nav state.
   useEffect(() => {
     if (items.length === 0) {
       return;
@@ -123,14 +82,7 @@ export function NavigableList<T>({
       return;
     }
     if (nav.colIndex === 0) {
-      // Only follow the cursor once the user has actually navigated. The
-      // initial autofocus is the dedicated effect below, and it must NOT be
-      // repeated from here: this effect's deps include `items` and `getKey`,
-      // which consumers almost always pass as fresh literals/arrows, so it
-      // re-runs on EVERY parent render. Focusing a tabIndex={0} container
-      // scrolls it into view, so with `autoFocus` in this condition any
-      // unrelated re-render of the host page yanked the viewport back to the
-      // list (SecurityPage was the visible case, but all nine consumers had it).
+      // Only after real navigation: this re-runs on every parent render, and focusing scrolls into view.
       if (hasNavigatedRef.current) {
         containerRef.current?.focus();
       }
@@ -154,7 +106,6 @@ export function NavigableList<T>({
     focusable?.focus();
   }, [nav, items, getKey]);
 
-  // Take initial focus when there's something to navigate.
   useEffect(() => {
     if (!autoFocus) {
       return;
@@ -173,9 +124,6 @@ export function NavigableList<T>({
       const rowControlCount = item && controls ? controls(item).length : 0;
       const maxCol = rowControlCount;
 
-      // Mark the list as actively navigated so the focus-following
-      // effect is allowed to grab focus from here on (relevant when
-      // `autoFocus={false}` suppressed the initial grab).
       if (
         e.key === "ArrowUp" ||
         e.key === "ArrowDown" ||
@@ -184,9 +132,7 @@ export function NavigableList<T>({
         hasNavigatedRef.current = true;
       }
 
-      // Which way the row actually reads. Resolved per event off the live
-      // container rather than cached, so a language switch takes effect
-      // without remounting the list.
+      // Resolved per event, so a language switch applies without remount.
       const step = horizontalArrowStep(e.key, containerRef.current);
       if (step !== 0) {
         if (maxCol === 0) {
@@ -278,14 +224,10 @@ export function NavigableList<T>({
             data-testid={rowTestId?.(item)}
             className={`flex items-center px-4 py-2 gap-3 text-xs font-mono select-none border-s-2 ${isRowFocused ? "bg-active border-accent" : "border-transparent"}`}
           >
-            {/* Row cursor indicator */}
             <span className="w-3 flex-shrink-0 text-center text-accent">
               {isRowFocused && nav.colIndex === 0 ? ">" : " "}
             </span>
 
-            {/* Main row content. Clickable when `onClickRow` is set —
-                cursor + onClick are gated on that so consumers without
-                row-level click navigation render exactly as before. */}
             <div
               className="flex-1 min-w-0 flex items-center gap-3"
               style={{ cursor: onClickRow ? "pointer" : undefined }}
@@ -294,7 +236,6 @@ export function NavigableList<T>({
               {renderRow(item)}
             </div>
 
-            {/* Focusable controls */}
             {rowControls.length > 0 && (
               <div className="flex items-center gap-8 flex-shrink-0">
                 {rowControls.map((control, i) => (
@@ -305,7 +246,6 @@ export function NavigableList<T>({
               </div>
             )}
 
-            {/* Non-focusable trailing */}
             {trailing && (
               <div className="flex-shrink-0 text-xs font-mono text-muted">
                 {trailing(item)}

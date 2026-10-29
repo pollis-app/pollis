@@ -4,11 +4,7 @@ import { Badge } from "../ui";
 import { Icon } from "../icons";
 import { semantic, fonts, r, space, layout } from "../../theme/tokens";
 
-/**
- * "Message requests" entry at the top of the Direct list (Messages.dc.html):
- * one 52pt panel row with the waiting count, opening the requests screen.
- * Rendered only when there is at least one request.
- */
+/** "Message requests" entry at the top of the Direct list, shown only when there are any. */
 export function RequestsRow({
   count,
   onPress,

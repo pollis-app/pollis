@@ -1,26 +1,4 @@
 //! Receipts (#857) must be **opaque to the Delivery Service**.
-//!
-//! The DS is untrusted. The entire feature is only correct if a server operator
-//! (or anyone with a Turso dump / subpoena) cannot learn *who read what, when*.
-//! That is not a property of the ciphertext alone — it is a property of every
-//! artifact a receipt leaves on the server: the request line, the stored row,
-//! and the columns that row is made of.
-//!
-//! So these tests do not check that receipts work. They try to *find* a receipt
-//! from the DS's point of view, and assert it cannot be found:
-//!
-//! 1. There is no receipt endpoint to call. A `/v1/receipts/*` route would put
-//!    "this is a receipt" in the request line — handing the DS, in plaintext,
-//!    precisely the metadata the ciphertext exists to withhold. Receipts ride
-//!    `/v1/messages/send` for that reason.
-//! 2. A receipt and an ordinary text message produce rows that are identical in
-//!    every stored column's shape — same `type`, same blinded sender, same
-//!    sealed flag, same ciphertext length. The DS cannot sort its envelope
-//!    stream into "messages" and "receipts".
-//! 3. Nothing from the receipt's plaintext — the kind, the reader, the
-//!    acknowledged message ids — survives into any stored column.
-//! 4. The DS never interprets the ciphertext: it round-trips whatever bytes it
-//!    is handed, so there is no server-side parse that could learn anything.
 
 use std::sync::Arc;
 
@@ -31,23 +9,16 @@ use pollis_delivery::writes::WriteOutcome;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
-/// A capability hash whose preimage is known (#1135): every new envelope must
-/// carry one, and a fixture that later edits or deletes the row needs the token.
-/// `base64(SHA-256("fixture-capability"))`.
+/// A capability hash with known preimage (#1135): `base64(SHA-256("fixture-capability"))`.
 const FIXTURE_CAPABILITY_HASH: &str = "MB8lyVjsEQamFuSzLTRZBVKGFQQ8nXoBjHFF7kvNuAo=";
 
 mod common;
 
 
-/// The blinded sender every send writes under unconditional sealed sender
-/// (#607) — receipts included.
 const SEALED_SENTINEL: &str = "sealed";
 
-/// The DM the receipts in these tests are exchanged in.
 const CONV: &str = "dm1";
 
-/// Message ids a receipt acknowledges. If any of these ever appear in a stored
-/// column, the DS has learned which messages were read.
 const ACKED: [&str; 2] = [
     "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     "01J8XQ2M5H7NR3T0V9WZ4KDCEB",
@@ -86,10 +57,7 @@ async fn fresh() -> common::TempDb {
     db
 }
 
-/// The v1 receipt frame (`0xF8`), rebuilt here independently of `pollis-core`.
-/// Writing it out a second time is deliberate: it keeps this crate free of a
-/// dependency on the client, and it means the test knows exactly which bytes
-/// must never reach the server.
+/// The v1 receipt frame (`0xF8`), rebuilt independently to keep this crate client-free.
 fn receipt_plaintext(read: bool, at: &str, ids: &[&str]) -> Vec<u8> {
     let mut buf = vec![0xF8u8, u8::from(read)];
     buf.extend_from_slice(&(at.len() as u32).to_le_bytes());
@@ -99,14 +67,11 @@ fn receipt_plaintext(read: bool, at: &str, ids: &[&str]) -> Vec<u8> {
         buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
         buf.extend_from_slice(id.as_bytes());
     }
-    // Zero-pad to the same 256-byte floor bucket every short frame lands in.
     buf.resize(256, 0u8);
     buf
 }
 
-/// Stand-in for the MLS sealing the client performs before posting. The DS never
-/// holds a group key, so from its side the payload is exactly this: bytes it
-/// cannot invert. Deterministic so the test is reproducible.
+/// Stand-in for client MLS sealing: bytes the DS cannot invert.
 fn seal(plaintext: &[u8]) -> String {
     let mut out = String::from("mls:");
     for (i, b) in plaintext.iter().enumerate() {
@@ -122,21 +87,17 @@ fn body(id: &str, ciphertext: &str) -> SendMessageBody {
         sender_id: Some(SEALED_SENTINEL.to_string()),
         ciphertext: ciphertext.to_string(),
         reply_to_id: None,
-        // The canonical client shape (`+00:00`, never `Z`) — the DS admits no
-        // other (`check_cursor_stamp`).
+        // The canonical client shape (`+00:00`, never `Z`); the DS admits no other.
         sent_at: "2026-08-15T12:00:00+00:00".to_string(),
         sealed: 1,
         generation: None,
         epoch: None,
-        // No push from a unit test — this asserts envelope opacity.
         push_to: None,
         push_mentions: None,
         delete_token_hash: Some(FIXTURE_CAPABILITY_HASH.to_string()),
     }
 }
 
-/// Everything the DS stores for one envelope, as text — the complete
-/// server-side view of it.
 async fn stored_row(db: &Db, id: &str) -> String {
     let mut rows = db
         .conn().await
@@ -160,10 +121,7 @@ async fn stored_row(db: &Db, id: &str) -> String {
     out
 }
 
-/// A `/v1/receipts/*` endpoint — any endpoint whose very name announces the
-/// payload — must not exist. This is the leak that ciphertext cannot fix: the
-/// request line is plaintext to the DS, so a dedicated route would tell an
-/// operator "bob acknowledged something in dm1 at 12:00" on every single read.
+/// No `/v1/receipts/*` route: the request line is plaintext to the DS.
 #[tokio::test]
 async fn ds_exposes_no_receipt_endpoint() {
     let db = fresh().await;
@@ -192,16 +150,12 @@ async fn ds_exposes_no_receipt_endpoint() {
     }
 }
 
-/// The DS cannot tell a receipt from an ordinary short message. Both go through
-/// the real `apply_send_message`; every stored column must come out the same
-/// shape, so there is no server-side predicate that isolates receipts.
+/// A receipt's stored row must be shape-identical to a short text message's.
 #[tokio::test]
 async fn receipt_is_indistinguishable_from_an_ordinary_message() {
     let db = fresh().await;
 
-    // A read receipt acknowledging two messages...
     let receipt_ct = seal(&receipt_plaintext(true, "2026-08-15T12:00:00Z", &ACKED));
-    // ...and an ordinary short text message, padded to the same bucket.
     let mut text = vec![0xF5u8];
     text.extend_from_slice(&2u32.to_le_bytes());
     text.extend_from_slice(b"hi");
@@ -218,8 +172,7 @@ async fn receipt_is_indistinguishable_from_an_ordinary_message() {
     let receipt_row = stored_row(&db, "env_receipt").await;
     let text_row = stored_row(&db, "env_text").await;
 
-    // Column-by-column: everything except the opaque id and the opaque
-    // ciphertext must be literally equal, and those two must match in LENGTH.
+    // All columns but id and ciphertext equal; those two equal in length.
     let r: Vec<&str> = receipt_row.split('\u{1}').collect();
     let t: Vec<&str> = text_row.split('\u{1}').collect();
     assert_eq!(r[2], t[2], "sender_id: both blinded to the same sentinel");
@@ -232,7 +185,6 @@ async fn receipt_is_indistinguishable_from_an_ordinary_message() {
     assert_eq!(r[7], t[7], "sealed flag");
     assert_eq!(r[8], t[8], "sent_at shape");
 
-    // And there is no column anywhere in the table that could name a receipt.
     let mut rows = db
         .conn().await
         .unwrap()
@@ -250,9 +202,7 @@ async fn receipt_is_indistinguishable_from_an_ordinary_message() {
     }
 }
 
-/// Nothing from the receipt's plaintext reaches the server. The kind, the
-/// timestamp the reader stamped, and above all the ids of the messages being
-/// acknowledged must not appear in any stored column.
+/// No receipt plaintext (kind, timestamp, acked ids) reaches any stored column.
 #[tokio::test]
 async fn receipt_plaintext_never_reaches_the_stored_row() {
     let db = fresh().await;
@@ -276,21 +226,14 @@ async fn receipt_plaintext_never_reaches_the_stored_row() {
             "the token {token:?} survived into the DS's view of the envelope",
         );
     }
-    // The reader's identity is not in the row either — the sender column is the
-    // blinded sentinel, and the true reader lives only in the MLS credential
-    // inside the ciphertext.
     assert!(!row.contains("bob"), "the reader must not be attributable from the row");
 
-    // Sanity: the plaintext really did contain what we just proved is absent, so
-    // this test cannot pass vacuously.
+    // Sanity: the plaintext really contained it, so this cannot pass vacuously.
     let as_text = String::from_utf8_lossy(&plaintext);
     assert!(as_text.contains(ACKED[0]) && as_text.contains(ACKED[1]));
 }
 
-/// The DS never parses the ciphertext — it stores and returns whatever bytes it
-/// is handed. Demonstrated by round-tripping a receipt and a deliberately
-/// nonsense payload through the identical code path with identical results:
-/// there is no server-side interpretation that could learn anything.
+/// The DS never parses the ciphertext: a receipt and nonsense round-trip identically.
 #[tokio::test]
 async fn ds_round_trips_ciphertext_without_interpreting_it() {
     let db = fresh().await;
@@ -319,9 +262,7 @@ async fn ds_round_trips_ciphertext_without_interpreting_it() {
     }
 }
 
-/// Membership authz is unchanged for receipts — they are still ordinary
-/// envelope writes, so a non-member cannot inject one. Sealing blinds the stored
-/// sender; it never widens who may write.
+/// Sealing blinds the stored sender; it never widens who may write.
 #[tokio::test]
 async fn a_non_member_cannot_post_a_receipt() {
     let db = fresh().await;

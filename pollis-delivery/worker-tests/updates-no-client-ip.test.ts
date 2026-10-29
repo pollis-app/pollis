@@ -1,16 +1,9 @@
 /*
- * No plain client IPs readable anywhere (the hard privacy rule, the same one
- * pollis-delivery/tests/no_client_ip_exposure.rs enforces for the DS), for the
- * mobile OTA update routes the DS front-door Worker serves itself (#1250).
+ * No plain client IPs for the OTA update routes (#1250).
  *
- * Pinned: both DS wrangler configs keep Workers Logs and Logpush off and add
- * no tail consumer; the updates module logs nothing and reads no
- * client-identifying data; and index.ts answers /updates/ before — never
- * through — the container forward, so an update request never reaches the
- * DS process at all.
+ * Pinned: logs off in both configs, nothing client-identifying read, /updates/ never forwarded.
  *
- * index.ts itself legitimately reads CF-Connecting-IP (to replace it with a
- * keyed bucket before forwarding); that path is covered by the Rust test.
+ * index.ts's own client IP read is covered by the Rust test.
  *
  *   node --test pollis-delivery/worker-tests/*.test.ts
  */
@@ -53,8 +46,7 @@ test("only prod binds the update bucket; both carry the one channel (inert on de
   assert.equal((prod.vars as Record<string, string>).OTA_CHANNEL, "production");
   const dev = jsonc(join(root, "wrangler.dev.jsonc"));
   assert.equal(dev.r2_buckets, undefined);
-  // A worker var both configs must carry (ds-config-manifest.json); without the
-  // bucket it serves nothing.
+  // A var both configs must carry (ds-config-manifest.json).
   assert.equal((dev.vars as Record<string, string>).OTA_CHANNEL, "production");
 });
 

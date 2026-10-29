@@ -1,28 +1,4 @@
-/*
- * The right-hand context panel remembers whether it is OPEN, per user, per
- * device — and nothing about where you are or which skin you wear may change
- * that (#904).
- *
- * The defect this pins down: open/closed used to live in the `?panel=` search
- * param. Nothing in the app carries search params across a navigation, so every
- * click in the sidebar dropped the param and the panel fell back to a default
- * derived from the SKIN — shut in `terminal`, open in `refined`. A terminal user
- * therefore watched the panel slam shut on every navigation, while a refined
- * user watched it spring back open every time they closed it. Same bug, two
- * symptoms, which is why every test below runs in BOTH skins and asserts BOTH
- * directions (an open panel staying open AND a closed one staying closed).
- *
- * WHAT IS AND IS NOT ALLOWED TO MOVE THE PANEL
- * -------------------------------------------
- * Allowed: the user toggling it. That is the whole list.
- * Not allowed: navigating, reloading, switching skin, or another user having
- * used this machine.
- *
- * The panel's CONTENT is the opposite — it must keep following the route, and
- * the last test pins that so the fix cannot be "freeze the whole panel".
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js
- */
+// The right panel's open state persists per user, per device (#904); only the user toggling it may move it.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -42,15 +18,7 @@ const RANDOM = "random";
 const OFFSITE = "offsite";
 /** The DM peer's username — the sidebar labels a DM row with it. */
 const DM_PEER = "dave";
-/**
- * The sidebar's Preferences row — a route with no conversation behind it.
- *
- * Its `data-testid`, not its label (#932): the settings rows are the only
- * sidebar rows whose text is translated, so locating one by label makes this
- * spec fail on a locale change for a reason that has nothing to do with the
- * right panel. Channel and DM rows below stay on their labels — those are
- * user-generated names this fixture controls.
- */
+/** The Preferences row, by testid (#932): settings labels are translated. */
 const PREFERENCES_ROW = "sidebar-row-preferences";
 
 const SKINS = ["terminal", "refined"] as const;
@@ -61,20 +29,14 @@ const TOGGLE = "Control+Shift+B";
 
 type Session = typeof ALICE;
 
-/**
- * Two groups with deliberately different roster sizes — three in Acme, two in
- * Beta — so the panel's content can be identified by a count this fixture
- * controls ("Members — 3" vs "Members — 2") rather than by a label that
- * happens to differ.
- */
+/** Two groups with different roster sizes (3 vs 2), so panel content is identified by count. */
 function preloadState(
   skin: Skin,
   session: Session,
   rightPanelOpenByDefault: boolean | undefined,
 ) {
   const preferences: Record<string, unknown> = { skin };
-  // Absent is a meaningful third value — it is what makes the pre-fix code
-  // consult the skin — so it is written only when the test asks for it.
+  // Absent is a meaningful third value, so it is written only when asked.
   if (rightPanelOpenByDefault !== undefined) {
     preferences.right_panel_open_by_default = rightPanelOpenByDefault;
   }
@@ -156,15 +118,7 @@ function preloadState(
   };
 }
 
-/**
- * Load the app at `path` as `session`.
- *
- * `addInitScript` accumulates and the last registration wins, so calling this
- * again in the same test swaps the signed-in user (or the landing URL) on the
- * next load — which is exactly how the two-user test runs both users through
- * ONE browser context, and therefore one localStorage. A fresh context would
- * prove nothing about scoping.
- */
+/** Load the app at `path` as `session`; init scripts accumulate, so a re-call swaps the user in one context. */
 async function boot(
   page: Page,
   skin: Skin,
@@ -207,14 +161,7 @@ async function expectClosed(page: Page, because: string) {
   await expect(panel(page), because).toHaveCount(0);
 }
 
-/**
- * Click a sidebar row by its visible label — the real navigation path, and the
- * one that reproduced the bug.
- *
- * Matched on the END of the accessible name rather than the whole of it: a
- * DM row's name picks up its leading presence dot (and, in `refined`, the
- * avatar's alt text), so an exact match would silently work in one skin only.
- */
+/** Click a sidebar row by the END of its accessible name (DM rows prefix a presence dot). */
 async function navigateTo(page: Page, label: string) {
   await page
     .getByTestId("sidebar")
@@ -284,10 +231,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("sidebar")).toBeVisible();
       await expectOpen(page, "a reload must not forget that the panel was opened");
 
-      // The load that matters: a COLD start at the app's base URL, which is
-      // what relaunching the desktop shell does. Anything the panel kept in
-      // the address bar is gone here, so only real device-local storage
-      // survives it.
+      // A COLD start at the base URL, as a relaunch does: only device-local storage survives.
       await boot(page, skin, { rightPanelOpenByDefault: false });
       await expectOpen(page, "a cold relaunch must not forget that the panel was opened");
 
@@ -299,9 +243,7 @@ for (const skin of SKINS) {
     });
 
     test("switching skin does not open or close the panel", async ({ page }) => {
-      // No `right_panel_open_by_default` at all — this is the only
-      // configuration in which the OLD code consulted the skin, so it is the
-      // only one that can catch a lingering skin dependency.
+      // No `right_panel_open_by_default`: the only configuration that could expose a skin dependency.
       const other: Skin = skin === "terminal" ? "refined" : "terminal";
       await boot(page, skin);
       await navigateToRow(page, PREFERENCES_ROW);
@@ -390,11 +332,7 @@ for (const skin of SKINS) {
     test("a DM's panel names its members instead of reporting none", async ({
       page,
     }) => {
-      // #906. `MembersPanel` read `appStore.dmConversations`, which nothing
-      // ever wrote — its two setters had zero call sites — so every DM showed
-      // "Members — 0" and the roster was empty. The channel case above passed
-      // throughout, because that path reads a React Query hook; only the DM
-      // branch touched the dead store.
+      // #906: DM members came from a store nothing wrote, so every DM showed "Members — 0".
       await boot(page, skin, { rightPanelOpenByDefault: true });
 
       await navigateTo(page, DM_PEER);

@@ -19,7 +19,6 @@ export default function AuthEmail() {
   const [email, setEmail] = useState("");
   const requestOtp = useRequestOtp();
   const submit = useSubmitLock();
-  // Why the last session ended, when the user did not end it (#1338).
   const notice = useSyncExternalStore(subscribeSessionNotice, getSessionNotice);
 
   const onSubmit = () => {
@@ -85,8 +84,7 @@ export default function AuthEmail() {
         >
           {submit.busy ? t("otp.sending") : t("otp.continue")}
         </Button>
-        {/* Agreeing to the terms is part of creating the account (#1213; App
-            Store 1.2): the terms say abusive content is not tolerated. */}
+        {/* Agreeing to the terms is part of creating the account (#1213). */}
         <Text testID="text-legal" style={[ty.meta, { textAlign: "center" }]}>
           <Trans
             t={t}
@@ -109,10 +107,7 @@ export default function AuthEmail() {
             }}
           />
         </Text>
-        {/* QR device link (#1207): scan the code a signed-in device shows,
-            instead of the email code. Recovery needs no button of its own: a
-            fresh device that verifies the email code is routed to enrollment,
-            which offers the recovery key. */}
+        {/* QR device link (#1207); recovery is offered at enrollment. */}
         <Button
           testID="btn-sign-in-with-device"
           variant="secondary"

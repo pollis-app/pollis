@@ -1,6 +1,4 @@
-// Self -> App: which build this is and where it updates from (#1443).
-// Two rows, exported separately because `Group` draws its dividers between
-// direct children.
+// Self -> App (#1443): two rows, separate because `Group` draws dividers between direct children.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ListRow } from "../ui";
@@ -13,7 +11,6 @@ import { shortUpdateId, type UpdateDestinationKind } from "../../lib/installChan
 
 const GLYPH = 22;
 
-// Proper names, the same in every language.
 const PLACE: Record<UpdateDestinationKind, string> = {
   play: "Google Play",
   appstore: "App Store",
@@ -21,7 +18,6 @@ const PLACE: Record<UpdateDestinationKind, string> = {
   web: "pollis.com",
 };
 
-/** "1.0.16 (1001600)", plus the OTA update it is running, if any. */
 export function VersionRow() {
   const { t } = useTranslation("mobile");
   const info = getBuildInfo();
@@ -53,7 +49,6 @@ export function VersionRow() {
   );
 }
 
-/** Opens the store listing / page this install updates from. */
 export function UpdateRow() {
   const { t } = useTranslation("mobile");
   const { destination } = getBuildInfo();

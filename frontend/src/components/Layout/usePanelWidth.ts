@@ -1,38 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { panelWidthStore, type PanelId } from "../../stores/panelWidthStore";
 
-/**
- * Everything a resizable side panel needs to be one (#985).
- *
- * Both panels wire the same three things — a ref on the `<aside>`, the width
- * to draw it at, and the props for its `ResizeHandle` — so they are derived
- * here once rather than copied into `Sidebar` and `RightPanel`.
- *
- * Must be called from an `observer()` component: the width read below is what
- * repaints the panel after a drag commits or a window resize clamps it.
- */
+/** Ref, width and handle props for a resizable panel (#985). Call from an `observer()`. */
 export function usePanelWidth(id: PanelId, onCollapse: () => void) {
   const ref = useRef<HTMLElement | null>(null);
   const width = panelWidthStore.widthOf(id);
 
-  // Report the rendered width back to the store after every render, and 0 on
-  // unmount. This is the only way the OTHER panel can know how much room it
-  // has left when this one is still on the `--side-w` token: that is a rem
-  // measure, so only the DOM has it in pixels. No dependency array on purpose
-  // — a re-render is exactly when the number can have changed (skin, font
-  // size, open/closed) — and it is one `offsetWidth` read into a non-
-  // observable field, so it cannot loop.
+  // Report the rendered width (0 on unmount) every render: only the DOM knows `--side-w` in px. Can't loop.
   useEffect(() => {
     const el = ref.current;
     if (!el) {
       return;
     }
     panelWidthStore.reportMeasured(id, el.offsetWidth);
-    // Re-clamp on the same beat. A sidebar may legitimately have been dragged
-    // very wide while the right panel was CLOSED — nothing was competing with
-    // it then — so the moment the other panel appears the pair has to be
-    // pulled back inside the window. Converges: the clamp only ever narrows,
-    // and a pass that changes nothing writes nothing, so no render loop.
+  // Re-clamp too; converges since it only narrows.
     panelWidthStore.clampToWindow(window.innerWidth);
     return () => panelWidthStore.reportMeasured(id, 0);
   });
@@ -48,10 +29,7 @@ export function usePanelWidth(id: PanelId, onCollapse: () => void) {
 
   return {
     ref,
-    // `w-side` only while this device has no answer, so the default keeps
-    // tracking the skin's rem token; a dragged width is a runtime-computed
-    // value and belongs in an inline style. Never both — two sources for one
-    // CSS property is exactly the ambiguity the class-order rule forbids.
+    // `w-side` only with no stored width; never both a class and an inline width.
     widthClass: width === null ? "w-side" : "",
     widthStyle: width === null ? undefined : { width },
     handleProps,

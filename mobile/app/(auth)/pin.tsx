@@ -35,25 +35,20 @@ function AuthPIN() {
   const unlockMutation = useUnlock();
   const unlockState = useUnlockState();
   const finalize = useFinalizeEnrollment();
-  // Held from the fourth digit until the screen navigates away (or the call
-  // fails): unlock and set-PIN derive a key with Argon2id and open the
-  // encrypted database, which takes a noticeable moment on a phone.
+  // Held from the fourth digit: Argon2id and opening the encrypted DB take a moment.
   const submit = useSubmitLock();
 
   useEffect(() => {
     unlockState.mutate(undefined, {
       onSuccess: (snapshot) => {
-        // Keep the store's lock flag honest for the auto-lock engine
-        // (lib/autolock.tsx): landing here needing an unlock means locked,
-        // whether we arrived via auto-lock or a cold start.
+        // Keep the store's lock flag honest for the auto-lock engine.
         if (snapshot.pin_set && !snapshot.is_unlocked) {
           appStore.setLocked(true);
         }
         setStage(snapshot.pin_set ? "unlock" : "create-first");
       },
       onError: () => {
-        // Treat a snapshot-read error as first-time setup; set_pin will
-        // re-fail loudly if state is actually inconsistent.
+        // Treat a read error as first-time setup; set_pin re-fails loudly if wrong.
         setStage("create-first");
       },
     });
@@ -62,7 +57,6 @@ function AuthPIN() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A step label only where there are steps (creating a PIN takes two).
   const stepLabel =
     stage === "create-first"
       ? t("mobile:auth.pin.stepEnter")
@@ -124,21 +118,13 @@ function AuthPIN() {
         {
           onSuccess: async () => {
             appStore.setLocked(false);
-            // Now that `set_pin` has opened the local DB, finalize this
-            // device: publish its cert and external-join the account's
-            // groups/DMs. Required after device-linking and Secret-Key
-            // recovery, a no-op for a fresh signup — run unconditionally,
-            // mirroring desktop's handlePinCreated. Best-effort: a failure
-            // here must not strand the user on the PIN screen; the next
-            // unlock re-publishes the cert and welcomes still deliver.
+            // Finalize this device unconditionally (a no-op for a fresh signup). Best-effort: never strand the user here.
             try {
               await finalize.mutateAsync();
             } catch (e) {
               console.error("[pin] finalize_device_enrollment failed:", e);
             }
-            // First-device signup has a one-time recovery key stashed in
-            // the store by `verify_otp`. Show it before initializing so
-            // the user can save it before we drop it from memory.
+            // First-device signup: show the one-time recovery key before initializing.
             const pendingSecretKey =
               appStore.pendingSecretKey;
             if (pendingSecretKey) {
@@ -166,10 +152,7 @@ function AuthPIN() {
     const next = pin + n;
     setPin(next);
     if (next.length === 4) {
-      // Unlock and confirm start slow work: go busy on this very tap, so the
-      // spinner and the disabled pad render before the call starts (the
-      // bridge runs it off the JS thread, so that frame is never blocked).
-      // The first entry of a new PIN only advances to the confirm step.
+      // Go busy on this very tap, so the spinner renders before the slow call starts.
       if (stage !== "create-first") {
         if (!submit.begin()) {
           return;
@@ -214,9 +197,7 @@ function AuthPIN() {
         ) : null}
       </View>
 
-      {/* Always offer a way out of this screen — without it, an error
-          like "no key material to wrap; sign in again" strands the user
-          on the keypad with no path back to sign-in. */}
+      {/* Always offer a way out, or an error strands the user on the keypad. */}
       <View style={{ alignItems: "center" }}>
         <Button
           testID="btn-pin-signout"
@@ -240,8 +221,7 @@ function AuthPIN() {
   return (
     <Screen testID="screen-auth-pin" centered>
       {regular ? (
-        // iPad: heading, dots and keypad as one block centred vertically —
-        // pinned to the bottom, the keypad sat ~500pt below the dots.
+        // iPad: heading, dots and keypad as one centred block.
         <View style={{ flex: 1, justifyContent: "center", gap: 32 }}>
           <View style={{ paddingHorizontal: 24, gap: 24 }}>{pinContent}</View>
           {keypad}

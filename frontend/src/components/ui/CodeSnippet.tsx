@@ -4,11 +4,9 @@ import { AlertCircle, Check, Copy } from "lucide-react";
 import { Button } from "./Button";
 import { writeClipboardText } from "../../bridge";
 
-/** Outcome of the last copy, in the same three states the message
- *  copy-link button uses (#889). */
+/** Same three states as the message copy-link button (#889). */
 type CopyState = "idle" | "copied" | "failed";
 
-/** One string per copy state. */
 interface CopyStateLabels {
   copy: string;
   copied: string;
@@ -16,30 +14,16 @@ interface CopyStateLabels {
 }
 
 interface CodeSnippetProps {
-  /** The exact text shown and copied. */
   value: string;
-  /** Visible button text per state; defaults to the generic copy wording. */
   labels?: Partial<CopyStateLabels>;
-  /** Accessible name per state, when the visible text alone is ambiguous. */
   ariaLabels?: CopyStateLabels;
-  /** Test id on the `<code>` element. */
   "data-testid"?: string;
-  /** Test id on the copy button. */
   copyTestId?: string;
 }
 
-/** How long an outcome stays on the button before it returns to idle. */
 const COPY_FEEDBACK_MS = 2000;
 
-/**
- * A read-only value with a copy button beside it — a shell command, a link.
- *
- * The value wraps instead of scrolling: a horizontal scrollbar under a single
- * line of text is noise, and a wrapped value is still selectable whole. The
- * copy goes through the clipboard bridge rather than `navigator.clipboard`,
- * which is unreliable on WebKitGTK (the Linux webview), and a failed write is
- * shown as a failure instead of a silent success (#898).
- */
+/** Read-only value with a copy button, via the clipboard bridge (`navigator.clipboard` is unreliable on WebKitGTK) (#898). */
 export const CodeSnippet: React.FC<CodeSnippetProps> = ({
   value,
   labels,
@@ -50,8 +34,6 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
   const { t } = useTranslation("common");
   const [copyState, setCopyState] = useState<CopyState>("idle");
 
-  // Clear the outcome a couple of seconds after it appears, and never leave a
-  // timer behind that would set state on an unmounted snippet.
   useEffect(() => {
     if (copyState === "idle") {
       return;
@@ -61,8 +43,7 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
   }, [copyState]);
 
   const handleCopy = async () => {
-    // Back to idle first so a second click on an already-failed button is a
-    // visible state change, and so the feedback timer restarts.
+    // Back to idle first so a repeat click visibly changes state.
     setCopyState("idle");
     const copied = await writeClipboardText(value).catch(() => false);
     setCopyState(copied ? "copied" : "failed");

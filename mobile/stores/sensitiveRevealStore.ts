@@ -1,13 +1,4 @@
-// Which sensitive attachments (#1568) the user has revealed, by attachment id
-// — the mobile twin of desktop's `frontend/src/stores/sensitiveRevealStore.ts`,
-// same shape and same rules.
-//
-// In memory only, so a restart covers everything again: marking media
-// sensitive is about what is on screen when someone looks over your shoulder,
-// and a reveal that outlived the session would defeat that. One store so the
-// message row, the full-screen viewer and the Vault grid agree. Keyed per
-// attachment, never per message: revealing one picture leaves its neighbours
-// covered.
+// Revealed sensitive attachments (#1568), per attachment id, in memory only (desktop's twin).
 
 import { makeAutoObservable } from "mobx";
 

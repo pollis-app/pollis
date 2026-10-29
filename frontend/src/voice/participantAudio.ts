@@ -1,16 +1,8 @@
-// Invariant-preserving transitions for a participant's `ParticipantAudio`
-// state (#385). Pure functions, no MobX — shared by `VoiceSessionManager`
-// (which drives them off LiveKit mute/speaking events) and any component that
-// needs a boolean view of the DU.
-//
-// The single rule "muted ⇒ not speaking" lives in exactly one place here
-// (`audioSetSpeaking`), so it cannot drift: a muted participant can never
-// become a speaker regardless of what speaking events arrive.
+// Pure `ParticipantAudio` transitions (#385); "muted ⇒ not speaking" lives only in `audioSetSpeaking`.
 
 import type { ParticipantAudio } from '../types/voice-state';
 
-/** Apply a mute change. Muting collapses to `muted`; unmuting lands on `idle`
- *  — a fresh unmute is not speaking until a speaking event says so. */
+/** Mute → `muted`; unmute → `idle`. */
 export function audioSetMuted(
   current: ParticipantAudio,
   muted: boolean,
@@ -21,9 +13,7 @@ export function audioSetMuted(
   return { kind: 'idle' };
 }
 
-/** Apply a speaking change. If currently `muted`, the state is returned
- *  unchanged — muted can't speak (the invariant, enforced in this one place).
- *  Otherwise speaking → `speaking`, not-speaking → `idle`. */
+/** Muted stays muted; otherwise `speaking` or `idle`. */
 export function audioSetSpeaking(
   current: ParticipantAudio,
   speaking: boolean,
@@ -37,12 +27,10 @@ export function audioSetSpeaking(
   return { kind: 'idle' };
 }
 
-/** True when this participant is actively speaking. */
 export function isSpeaking(a: ParticipantAudio): boolean {
   return a.kind === 'speaking';
 }
 
-/** True when this participant is muted. */
 export function isMuted(a: ParticipantAudio): boolean {
   return a.kind === 'muted';
 }

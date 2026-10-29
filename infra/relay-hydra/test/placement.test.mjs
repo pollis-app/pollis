@@ -1,6 +1,4 @@
-// The random region placement + rotation policy (reconciler/placement.mjs).
-// Pure functions, no AWS, no network. The rng is injected so the "random" draw is
-// deterministic under test.
+// Region placement + rotation policy (reconciler/placement.mjs); rng injected for determinism.
 //
 // Run: node --test   (from infra/relay-hydra/)
 
@@ -22,8 +20,6 @@ function seqRng(values) {
   let i = 0;
   return () => values[i++ % values.length];
 }
-
-// --- readDesiredTotal --------------------------------------------------------
 
 test("reads the current {total: N} shape", () => {
   assert.equal(readDesiredTotal('{"total":5}'), 5);
@@ -50,13 +46,9 @@ test("total wins over stray sibling keys", () => {
 });
 
 test("a quoted total is rejected, not silently read as the legacy shape", () => {
-  // `aws ssm put-parameter --value '{"total":"3"}'` is an easy mistake. The old
-  // code fell through to the legacy branch, found no numbers, and returned the
-  // floor — a silent downscale of the live pool.
+  // A string total is an easy mistake; it must throw, not silently downscale to the floor.
   assert.throws(() => readDesiredTotal('{"total":"3"}'), /non-negative integer/);
 });
-
-// --- drawPlacement -----------------------------------------------------------
 
 test("draws exactly `total` nodes", () => {
   for (const total of [1, 2, 3, 7]) {
@@ -98,8 +90,6 @@ test("refuses to draw with no allowed regions", () => {
   assert.throws(() => drawPlacement([], 3, Math.random), /no allowed regions/);
 });
 
-// --- placementNeedsRedraw ----------------------------------------------------
-
 const base = { allowedRegions: REGIONS, total: 3, now: 1_000_000, rotationIntervalSeconds: 86_400 };
 
 test("keeps a fresh, still-valid placement", () => {
@@ -135,8 +125,6 @@ test("a placement with no drawn_at is treated as infinitely stale", () => {
   assert.match(placementNeedsRedraw(current, base), /rotation interval elapsed/);
 });
 
-// --- the loop closes: a re-draw always produces a placement that then holds ---
-
 test("a fresh draw immediately satisfies the keep condition", () => {
   // Guards against a rotation loop that re-draws on every single reconcile — which
   // would terminate and relaunch the whole pool every two minutes.
@@ -157,10 +145,7 @@ test("a fractional total can never make the draw disagree with the desired total
 });
 
 test("re-draws over a hand-edited placement with impossible counts", () => {
-  // The README tells operators to edit this parameter to force a rotation, so a
-  // typo is expected. A negative or over-max count that still SUMS correctly used
-  // to satisfy the keep condition forever while UpdateAutoScalingGroup threw on
-  // every reconcile — wedged, with no way to draw back out.
+  // Operators edit this parameter by hand; a bad count that still sums must force a redraw, not wedge.
   const current = { drawn_at: base.now, placement: { "us-east-1": -1, "us-west-2": 4 } };
   assert.match(placementNeedsRedraw(current, base), /malformed count/);
 });
@@ -171,8 +156,6 @@ test("a drawn_at in the future re-draws instead of freezing rotation forever", (
   const current = { drawn_at: base.now + 86_400, placement: { "us-west-2": 3 } };
   assert.match(placementNeedsRedraw(current, base), /in the future/);
 });
-
-// --- mayDrain: a rotation must hand over, not cut over -----------------------
 
 test("does not drain the old regions until the new ones are actually serving", () => {
   // The full-pool-rotation case: the draw moved every node, the incoming regions
@@ -229,15 +212,7 @@ test("health inside a region that is leaving ENTIRELY does not count as retained
   assert.equal(decision.retainedHealthy, 0);
 });
 
-// --- mayDrain: a PARTIAL drain is not a departure ----------------------------
-//
-// The ratchet these pin, observed live on 2026-09-01: desired capacities
-// us-east-1 1, us-east-2 2, us-west-1 1, us-west-2 1 = FIVE running nodes against
-// a drawn placement of {"us-east-2":1,"us-west-2":1} = two. Scale-up is
-// unconditional, scale-down is guarded — so a guard that can never pass makes the
-// pool grow by a region per rotation and never shrink. It could never pass here
-// because us-east-2 was going 2 -> 1: counting it as a total loss left only
-// us-west-2's single node as "retained", forever one short of the floor of 2.
+// A partial drain is not a departure: counting 2 -> 1 as a total loss ratcheted the pool up (live, 2026-09-01).
 
 test("a region reduced but not emptied still counts the nodes it keeps", () => {
   const decision = mayDrain({
@@ -275,8 +250,6 @@ test("a partial drain counts only what is actually healthy, never the target", (
   assert.equal(decision.retainedHealthy, 1);
   assert.equal(decision.ok, false);
 });
-
-// --- clamp -------------------------------------------------------------------
 
 test("clamps desired-state into [floor, max]", () => {
   assert.equal(clamp(0, 2, 3), 2);

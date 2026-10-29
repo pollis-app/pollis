@@ -1,7 +1,4 @@
-// Conversation info — member roster + shared media for a channel or DM.
-// Mobile counterpart of desktop's right-hand context panel (#826): Discord's
-// member list over Messenger's shared-media grid. The chat screen's members
-// button and channel menu navigate here with { id, kind, groupId?, name? }.
+// Conversation info (#826): member roster + shared media for a channel or DM.
 
 import { useMemo } from "react";
 import { View, Text, Pressable, useWindowDimensions } from "react-native";
@@ -33,10 +30,7 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useThemeRerender } from "../../components/theme";
 
-// Cap on grid tiles, matching desktop's MembersPanel (#826): each tile
-// resolves its own bytes through the media transport, so an unbounded grid
-// on a media-heavy conversation would fan out into hundreds of decrypt
-// round-trips the moment the screen opens.
+// Each tile decrypts its own bytes, so the grid is capped.
 const MEDIA_LIMIT = 30;
 
 function ConversationInfo() {
@@ -52,8 +46,7 @@ function ConversationInfo() {
   const conversationId = params.id ?? null;
   const kind: ConversationKind | null =
     params.kind === "channel" || params.kind === "dm" ? params.kind : null;
-  // For a channel the roster lives on the group; fall back to the selected
-  // group when the opener didn't pass it (the chat screen keeps it selected).
+  // Fall back to the selected group (the chat screen keeps it selected).
   const groupId =
     kind === "channel"
       ? (params.groupId ?? appStore.selectedGroupId)
@@ -65,9 +58,7 @@ function ConversationInfo() {
   const { data: groupMembers = [] } = useGroupMembers(groupId);
   const dmChannel = useDMChannel(kind === "dm" ? conversationId : null);
 
-  // Role-then-alphabetical, mirroring desktop's members panel intent —
-  // desktop orders online-first, but mobile has no presence source yet, so
-  // presence ordering awaits one.
+  // Role then alphabetical (no presence source on mobile).
   const roster = useMemo(() => {
     if (kind === "channel") {
       return sortMembersByRole(groupMembers).map((m) => ({
@@ -88,13 +79,8 @@ function ConversationInfo() {
       }));
   }, [kind, groupMembers, dmChannel.data]);
 
-  // Shared media comes from the same message cache the chat screen fills —
-  // the most recent image attachments this device holds, newest first,
-  // capped at MEDIA_LIMIT.
   const { data: messagesData } = useMessages(conversationId, kind);
   const attachments = useMemo(() => {
-    // `flattenPages` yields newest-first, so a forward walk leads the grid
-    // with the most recent media.
     const messages = flattenPages(messagesData);
     const seen = new Set<string>();
     const out: NonNullable<(typeof messages)[number]["attachments"]> = [];
@@ -118,8 +104,6 @@ function ConversationInfo() {
   }, [messagesData]);
 
   const title = params.name ?? t("conversationInfo.fallbackTitle");
-  // Three-column grid: screen width minus the 16pt side gutters and the two
-  // inter-tile gaps.
   const tile = Math.floor((width - 16 * 2 - 6 * 2) / 3);
 
   return (
@@ -169,8 +153,7 @@ function ConversationInfo() {
                       variant={isMe ? "self" : "default"}
                     />
                   }
-                  // One line, truncated in the middle: a long handle gives
-                  // way so the "· you" suffix never wraps onto a line alone.
+                  // Truncated in the middle so "· you" never wraps alone.
                   name={
                     <Text
                       numberOfLines={1}
@@ -232,8 +215,6 @@ function ConversationInfo() {
               paddingVertical: 4,
             }}
           >
-            {/* Each tile opens the full-screen viewer (#1248), as desktop's
-                media grid opens its lightbox. */}
             {attachments.map((a) => (
               <Pressable
                 key={a.id}
@@ -248,8 +229,6 @@ function ConversationInfo() {
           </View>
         )}
 
-        {/* The export block's heading has no top padding of its own; give it
-            the same gap every other section gets above its title. */}
         <View style={{ paddingTop: space.xxxl }}>
           <ExportArchive conversationId={conversationId} />
         </View>

@@ -1,11 +1,5 @@
 //! The attachment key ring (#1382): every write that would fork the ring, roll
 //! a rotation back, or freeze the row is refused by the DS itself.
-//!
-//! A forked ring is the failure that matters: two devices holding different
-//! newest keys would seal files the other half of the conversation can never
-//! open. The DS cannot see the keys, so it enforces the one thing it can see —
-//! the ring's length — under three rules (mint = 1, re-wrap = same, rotate =
-//! +1). These tests pin each rule.
 
 use base64::Engine as _;
 use pollis_delivery::file_keys::{
@@ -19,8 +13,7 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-/// Group `g1`: alice and bob are members, mallory is not. The commit log's
-/// head is epoch 10, so writes up to it are within bounds.
+/// Group `g1`: alice and bob are members, mallory is not; log head is epoch 10.
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("file-keystate.db").await;
     let conn = db.conn().await.unwrap();
@@ -44,7 +37,6 @@ async fn fresh() -> common::TempDb {
     db
 }
 
-/// A wrap of the right shape for a ring of `key_version` keys.
 fn body(actor: &str, op: FileKeystateOp, key_version: i64, epoch: i64) -> UpsertFileKeystateBody {
     UpsertFileKeystateBody {
         conversation_id: "g1".into(),
@@ -85,8 +77,7 @@ fn refused(out: &FileKeystateOutcome) -> bool {
 async fn only_the_first_mint_lands_so_two_minters_cannot_fork_the_ring() {
     let db = fresh().await;
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Mint, 1, 2)).await));
-    // Bob minted his own ring concurrently, at a NEWER epoch: he must lose and
-    // adopt alice's, never replace a ring files may already be sealed under.
+    // Bob's concurrent mint at a newer epoch must lose, not replace alice's ring.
     assert!(refused(&apply(&db, &body("bob", FileKeystateOp::Mint, 1, 5)).await));
     assert_eq!(stored_version(&db).await, Some((1, 2)));
 }
@@ -114,8 +105,6 @@ async fn two_concurrent_rotations_cannot_both_land() {
     let db = fresh().await;
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Mint, 1, 2)).await));
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Rotate, 2, 3)).await));
-    // Bob rotated from the same v1 ring, so he also claims v2 — with a
-    // DIFFERENT new key. It must not replace alice's.
     assert!(refused(&apply(&db, &body("bob", FileKeystateOp::Rotate, 2, 4)).await));
     assert_eq!(stored_version(&db).await, Some((2, 3)));
 }
@@ -125,11 +114,9 @@ async fn a_rewrap_of_the_old_ring_cannot_roll_back_a_rotation() {
     let db = fresh().await;
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Mint, 1, 2)).await));
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Rotate, 2, 3)).await));
-    // Bob still holds the v1 ring and re-wraps it at a newer epoch. Landing it
-    // would drop the key that keeps the removed member out of new files.
+    // Re-wrapping the stale v1 ring would drop the key excluding the removed member.
     assert!(refused(&apply(&db, &body("bob", FileKeystateOp::Rewrap, 1, 6)).await));
     assert_eq!(stored_version(&db).await, Some((2, 3)));
-    // A re-wrap of the CURRENT ring at a newer epoch lands.
     assert!(landed(&apply(&db, &body("bob", FileKeystateOp::Rewrap, 2, 6)).await));
     assert_eq!(stored_version(&db).await, Some((2, 6)));
 }
@@ -168,6 +155,5 @@ async fn an_epoch_above_the_commit_log_head_cannot_freeze_the_ring() {
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Mint, 1, 2)).await));
     let out = apply(&db, &body("bob", FileKeystateOp::Rewrap, 1, 1_000_000)).await;
     assert!(matches!(out, FileKeystateOutcome::AheadOfHead { .. }));
-    // The honest re-wrap still lands afterwards.
     assert!(landed(&apply(&db, &body("alice", FileKeystateOp::Rewrap, 1, 9)).await));
 }

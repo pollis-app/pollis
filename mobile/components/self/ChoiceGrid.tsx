@@ -2,13 +2,7 @@ import { Children, type ReactNode } from "react";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { space } from "../../theme/tokens";
 
-/**
- * Lays its children out in a fixed number of equal-width columns, row by row.
- * Unlike a flexWrap row, the grid does not depend on how wide the platform's
- * font renders each label, so iOS and Android show the same shape and no
- * option is ever left alone on a line. A short last row is padded with empty
- * cells so every cell keeps the same width.
- */
+/** Fixed equal-width columns, so both platforms show the same shape whatever the label widths. */
 export function ChoiceGrid({
   columns,
   children,

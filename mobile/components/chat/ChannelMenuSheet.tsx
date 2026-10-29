@@ -6,11 +6,7 @@ import { semantic } from "../../theme/tokens";
 import { useMutedChannels, useSetChannelMuted } from "../../hooks/queries";
 import { SheetOverlay } from "./SheetOverlay";
 
-/**
- * "More" menu for a channel conversation: the per-channel mute (#1431),
- * conversation details and group settings, as grouped 52pt rows in the
- * standard sheet. `title` is the channel's name (the sheet's spoken name).
- */
+/** "More" menu for a channel: mute (#1431), details, settings. */
 export function ChannelMenuSheet({
   title,
   channelId,
@@ -31,9 +27,7 @@ export function ChannelMenuSheet({
   return (
     <SheetOverlay title={title} onClose={onClose} closeTestID="btn-menu-cancel">
       <Group surface="high">
-        {/* Account-wide, on every device: a muted channel's chatter and @all
-            stop pushing; a direct @mention still does. Optimistic, so the
-            switch flips on the same frame; disabled while the write lands. */}
+        {/* Account-wide mute; a direct @mention still pushes. Optimistic. */}
         <ToggleRow
           testID="toggle-channel-mute"
           label={t("channels:channel.muteLabel")}
@@ -43,8 +37,7 @@ export function ChannelMenuSheet({
           onToggle={() => setMuted.mutate({ channelId, muted: !isMuted })}
         />
       </Group>
-      {/* Navigation rows in a sheet that does not scroll: touch-down (#1529).
-          The mute switch above stays on release. */}
+      {/* Touch-down (#1529); the mute switch stays on release. */}
       <Group surface="high">
         <ListRow
           testID="btn-menu-info"

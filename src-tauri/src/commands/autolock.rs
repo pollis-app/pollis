@@ -1,9 +1,5 @@
 // Generated shim file. Each #[tauri::command] forwards to
 // pollis_core::commands::autolock::*. Edit pollis-core, not here.
-//
-// The one thing that is NOT a forward is the lock sink: pollis-core stays
-// Tauri-runtime-free (`pollis_core::sink::EventSink`), so the adapter that turns
-// "the idle deadline expired" into a global `AppHandle::emit` lives on this side.
 
 #![allow(unused_imports)]
 use std::sync::Arc;
@@ -30,13 +26,7 @@ pub async fn report_user_activity() -> Result<()> {
     pollis_core::commands::autolock::report_user_activity().await
 }
 
-/// Pushes the lock to every window as the global `auto-lock` event.
-///
-/// Gated on the native shell for the same reason as the relay-serving sink:
-/// `AppHandle` defaults to the `Wry` runtime, which a headless
-/// (`--no-default-features`) build does not compile. The two commands above stay
-/// ungated — without a sink the backend still locks, the renderer just isn't
-/// told, which is why installing this is required rather than optional.
+/// Pushes the lock to every window as the global `auto-lock` event. Native shell only (`Wry`).
 #[cfg(feature = "native-shell")]
 struct AppHandleSink(AppHandle);
 
@@ -49,7 +39,6 @@ impl EventSink<()> for AppHandleSink {
     }
 }
 
-/// Wire the auto-lock event to the app handle. Called once during setup.
 #[cfg(feature = "native-shell")]
 pub fn install_auto_lock_sink(app: AppHandle) {
     set_event_sink(Arc::new(AppHandleSink(app)));

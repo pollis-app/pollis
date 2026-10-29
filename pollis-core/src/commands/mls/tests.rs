@@ -1,5 +1,3 @@
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 use super::*;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
@@ -7,9 +5,6 @@ use openmls_traits::crypto::OpenMlsCrypto;
 use openmls_traits::OpenMlsProvider;
 use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
-// Re-export the private items from submodules into this `tests` module
-// so the test bodies (which were originally `use super::*` from the
-// single-file module) can keep referencing them by short name.
 use super::group_state::{create_mls_group_in_suite, load_group_with_signer};
 use super::key_packages::build_key_package_in_suite;
 use super::provider::{signature_scheme, MlsProvider, PollisProvider, CS_PQ};
@@ -17,18 +12,9 @@ use super::self_update::stage_self_update;
 
 /// A suite that is deliberately **not** [`CS_PQ`], used only by the tests.
 ///
-/// #669 retired the classic suite from production, so there is no second suite
-/// to ship — but "a stored group whose suite is not the current one" is a state
-/// the code must still handle, because `CS_PQ`'s code point is provisional and
-/// `draft-ietf-mls-pq-ciphersuites` has renumbered once already. `migrate`, the
-/// suite-mismatch refusal in `stage_reconcile_commit`, `stored_group_ciphersuite`
-/// and `welcome_ciphersuite` all exist for that day; without a second suite in
-/// the test tree they would be untestable, and untestable code rots.
+/// Exercises the not-current-suite paths (`migrate`, suite-mismatch refusals) for a future `CS_PQ` renumber.
 ///
-/// `0x0001` is the natural choice: it is the suite Pollis actually shipped
-/// before #454, so a group on it is a state that genuinely existed, and it is
-/// unlike `CS_PQ` in every dimension (KEM, AEAD, KDF, signature scheme) — which
-/// makes an accidental "these two happen to agree" pass impossible.
+/// `0x0001`, the pre-#454 suite, differs from `CS_PQ` in every dimension.
 const CS_LEGACY: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 /// Create an in-memory SQLite DB with the `mls_kv` table.
@@ -45,8 +31,7 @@ fn make_db() -> rusqlite::Connection {
     conn
 }
 
-/// Synthetic device ID for test users. In tests each "user" maps to a
-/// single device so we derive a deterministic device_id from the user_id.
+/// Synthetic device ID: one device per test user.
 fn test_device_id(user_id: &str) -> String {
     format!("{user_id}_dev")
 }
@@ -115,13 +100,10 @@ fn encrypt_decrypt_roundtrip() {
     let alice_db = make_db();
     let bob_db = make_db();
 
-    // Alice creates the group.
     create_group(&alice_db, conv_id, "alice");
 
-    // Bob generates a key package.
     let bob_kp_bytes = gen_key_package(&bob_db, "bob");
 
-    // Alice adds Bob: add_members → commit + welcome.
     let welcome_bytes: Vec<u8> = {
         let alice_provider = PollisProvider::new(&alice_db);
         let (mut alice_group, alice_signer) =
@@ -136,13 +118,10 @@ fn encrypt_decrypt_roundtrip() {
 
         alice_group.merge_pending_commit(&alice_provider).unwrap();
 
-        // Keep commit_msg in scope to avoid "unused" warn — it would be posted
-        // to mls_commit_log in production.
         let _ = commit_msg.tls_serialize_detached().unwrap();
         welcome_msg.tls_serialize_detached().unwrap()
     };
 
-    // Bob processes the Welcome.
     {
         let bob_provider = PollisProvider::new(&bob_db);
         let mut reader: &[u8] = &welcome_bytes;
@@ -158,26 +137,19 @@ fn encrypt_decrypt_roundtrip() {
             .unwrap();
     }
 
-    // Alice encrypts.
     let plaintext = b"hello mls";
     let ciphertext = try_mls_encrypt(&alice_db, conv_id, plaintext)
         .expect("try_mls_encrypt failed");
 
-    // Bob decrypts.
     let (decrypted, sender) = try_mls_decrypt(&bob_db, conv_id, &ciphertext)
         .expect("try_mls_decrypt failed");
 
     assert_eq!(decrypted, plaintext);
-    // Attribution comes from the MLS-authenticated credential, not any envelope
-    // column (sealed sender, `docs/metadata-minimization-design.md` §2).
+    // Attribution comes from the MLS credential (sealed sender).
     assert_eq!(sender, "alice");
 }
 
-/// The full text-message path through the real MLS crypto: pad the plaintext,
-/// encrypt, decrypt, strip the padding — and get the EXACT original back, for a
-/// spread of sizes. Also proves version-byte back-compat: an OLD, unpadded send
-/// (raw bytes through `try_mls_encrypt`) still decodes when the new reader runs
-/// `strip`. (Issue #331 v2, `docs/metadata-minimization-design.md` §4.1.)
+/// Pad, encrypt, decrypt, strip: exact round-trip across sizes, and old unpadded sends still decode (#331).
 #[test]
 fn padded_text_roundtrip_through_mls() {
     use crate::commands::messages::framing;
@@ -190,7 +162,6 @@ fn padded_text_roundtrip_through_mls() {
     create_group(&alice_db, conv_id, "alice");
     let bob_kp_bytes = gen_key_package(&bob_db, "bob");
 
-    // Alice adds Bob.
     let welcome_bytes: Vec<u8> = {
         let alice_provider = PollisProvider::new(&alice_db);
         let (mut alice_group, alice_signer) =
@@ -204,7 +175,6 @@ fn padded_text_roundtrip_through_mls() {
         welcome_msg.tls_serialize_detached().unwrap()
     };
 
-    // Bob joins.
     {
         let bob_provider = PollisProvider::new(&bob_db);
         let mut reader: &[u8] = &welcome_bytes;
@@ -219,8 +189,7 @@ fn padded_text_roundtrip_through_mls() {
             .unwrap();
     }
 
-    // Padded path: exact round-trip AND same ciphertext-driving bucket for
-    // very different plaintext lengths.
+    // Padded path: exact round-trip and one ciphertext bucket.
     let short = "ok".as_bytes();
     let long = "x".repeat(200);
     let short_ct = {
@@ -231,7 +200,6 @@ fn padded_text_roundtrip_through_mls() {
         let padded = framing::pad(long.as_bytes());
         try_mls_encrypt(&alice_db, conv_id, &padded).expect("encrypt long")
     };
-    // Two very different plaintext lengths collapse to one ciphertext size.
     assert_eq!(
         short_ct.len(),
         long_ct.len(),
@@ -244,16 +212,14 @@ fn padded_text_roundtrip_through_mls() {
     assert_eq!(framing::strip(&long_pt), long.as_bytes());
     assert_eq!(sender, "alice");
 
-    // Back-compat: an OLD client sends unpadded bytes. The new reader's `strip`
-    // must leave them untouched.
+    // Back-compat: `strip` leaves an old client's unpadded bytes untouched.
     let legacy_plain = "legacy unpadded message".as_bytes();
     let legacy_ct = try_mls_encrypt(&alice_db, conv_id, legacy_plain).expect("encrypt legacy");
     let (legacy_pt, _) = try_mls_decrypt(&bob_db, conv_id, &legacy_ct).expect("decrypt legacy");
     assert_eq!(framing::strip(&legacy_pt), legacy_plain);
 }
 
-/// A solo group (no other members) returns None for decrypt — only a member
-/// of the group can decrypt.  But the creator can still encrypt successfully.
+/// A solo group's creator can encrypt, but decrypt returns None.
 #[test]
 fn solo_group_encrypt_returns_some() {
     let conv_id = "01JTEST00000000000000000CD";
@@ -274,8 +240,6 @@ fn missing_group_returns_none() {
     let result = try_mls_decrypt(&db, "no-such-group", b"\x00\x01\x02");
     assert!(result.is_none());
 }
-
-// ── helpers shared by scenario tests ─────────────────────────────────────
 
 /// Alice adds a member to her group. Returns (commit_bytes, welcome_bytes).
 fn add_member_to_group(
@@ -345,7 +309,6 @@ fn remove_member(
     let provider = PollisProvider::new(remover_db);
     let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
-    // Find all leaves for the target user (may have multiple devices).
     let leaf_indices: Vec<LeafNodeIndex> = group.members()
         .filter_map(|m| {
             let cred_user = parse_credential_user_id(&m.credential);
@@ -365,8 +328,6 @@ fn remove_member(
     commit_msg.tls_serialize_detached().unwrap()
 }
 
-// ── scenario tests ────────────────────────────────────────────────────────
-
 /// Alice, Bob, and Carol are all in the same group. Each can encrypt a
 /// message that the other two can decrypt.
 #[test]
@@ -377,34 +338,27 @@ fn three_way_group_messaging() {
     let bob_db = make_db();
     let carol_db = make_db();
 
-    // Alice creates the group.
     create_group(&alice_db, conv_id, "alice");
 
-    // Alice adds Bob.
     let bob_kp = gen_key_package(&bob_db, "bob");
     let (add_bob_commit, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Alice adds Carol. Bob must also apply this commit.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (add_carol_commit, carol_welcome) = add_member_to_group(&alice_db, conv_id, &carol_kp);
     join_via_welcome(&carol_db, &carol_welcome);
     apply_commit(&bob_db, conv_id, &add_carol_commit);
 
-    // Suppress unused-variable warning — add_bob_commit would go to mls_commit_log in prod.
     let _ = add_bob_commit;
 
-    // Alice sends → Bob and Carol both decrypt.
     let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"hello from alice").unwrap();
     assert_eq!(try_mls_decrypt(&bob_db, conv_id, &alice_ct).unwrap().0, b"hello from alice");
     assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap().0, b"hello from alice");
 
-    // Bob sends → Alice and Carol both decrypt.
     let bob_ct = try_mls_encrypt(&bob_db, conv_id, b"hello from bob").unwrap();
     assert_eq!(try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap().0, b"hello from bob");
     assert_eq!(try_mls_decrypt(&carol_db, conv_id, &bob_ct).unwrap().0, b"hello from bob");
 
-    // Carol sends → Alice and Bob both decrypt.
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"hello from carol").unwrap();
     assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0, b"hello from carol");
     assert_eq!(try_mls_decrypt(&bob_db, conv_id, &carol_ct).unwrap().0, b"hello from carol");
@@ -425,20 +379,16 @@ fn removed_member_cannot_decrypt_new_messages() {
     let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Confirm Bob can read messages before removal.
     let pre_remove_ct = try_mls_encrypt(&alice_db, conv_id, b"pre-removal").unwrap();
     assert_eq!(
         try_mls_decrypt(&bob_db, conv_id, &pre_remove_ct).unwrap().0,
         b"pre-removal"
     );
 
-    // Alice removes Bob. Alice's epoch advances; Bob's does not.
     let _remove_commit = remove_member(&alice_db, conv_id, "bob");
 
-    // Alice sends a message at the new epoch.
     let post_remove_ct = try_mls_encrypt(&alice_db, conv_id, b"secret").unwrap();
 
-    // Bob cannot decrypt it — forward secrecy enforced.
     assert!(
         try_mls_decrypt(&bob_db, conv_id, &post_remove_ct).is_none(),
         "removed member must not decrypt messages from new epoch"
@@ -455,21 +405,17 @@ fn new_member_cannot_read_history() {
 
     create_group(&alice_db, conv_id, "alice");
 
-    // Alice sends a message before Bob exists.
     let history_ct = try_mls_encrypt(&alice_db, conv_id, b"private history").unwrap();
 
-    // Alice adds Bob.
     let bob_kp = gen_key_package(&bob_db, "bob");
     let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Bob cannot decrypt the pre-join message.
     assert!(
         try_mls_decrypt(&bob_db, conv_id, &history_ct).is_none(),
         "new member must not decrypt history from before they joined"
     );
 
-    // But Bob can decrypt messages sent after he joined.
     let new_ct = try_mls_encrypt(&alice_db, conv_id, b"welcome bob").unwrap();
     assert_eq!(
         try_mls_decrypt(&bob_db, conv_id, &new_ct).unwrap().0,
@@ -489,22 +435,18 @@ fn epoch_sync_via_commit_processing() {
 
     create_group(&alice_db, conv_id, "alice");
 
-    // Alice adds Bob (epoch 0→1).
     let bob_kp = gen_key_package(&bob_db, "bob");
     let (add_bob_commit, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Bob adds Carol (epoch 1→2). Alice hasn't applied this commit yet.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (add_carol_commit, carol_welcome) = add_member_to_group(&bob_db, conv_id, &carol_kp);
     join_via_welcome(&carol_db, &carol_welcome);
 
-    // Alice applies Bob's add-Carol commit to advance to epoch 2.
     apply_commit(&alice_db, conv_id, &add_carol_commit);
 
     let _ = add_bob_commit;
 
-    // Now all three members are at epoch 2 and can communicate.
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"carol here").unwrap();
     assert_eq!(
         try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0,
@@ -516,9 +458,7 @@ fn epoch_sync_via_commit_processing() {
     );
 }
 
-/// When a member leaves (is removed), the remaining members can still
-/// communicate, the removed member cannot decrypt, and a newly added
-/// member can participate in the group.
+/// After a removal, the rest still talk, the removed member cannot decrypt, and a new member can join.
 #[test]
 fn leave_group_remaining_members_communicate_then_new_member_joins() {
     let conv_id = "01JTEST0000000000000LEAVE1";
@@ -528,7 +468,6 @@ fn leave_group_remaining_members_communicate_then_new_member_joins() {
     let carol_db = make_db();
     let dave_db = make_db();
 
-    // Alice creates group, adds Bob and Carol.
     create_group(&alice_db, conv_id, "alice");
 
     let bob_kp = gen_key_package(&bob_db, "bob");
@@ -541,40 +480,33 @@ fn leave_group_remaining_members_communicate_then_new_member_joins() {
     join_via_welcome(&carol_db, &carol_welcome);
     apply_commit(&bob_db, conv_id, &add_carol_commit);
 
-    // Verify all three can communicate before removal.
     let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"all three here").unwrap();
     assert_eq!(try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap().0, b"all three here");
     assert_eq!(try_mls_decrypt(&carol_db, conv_id, &pre_ct).unwrap().0, b"all three here");
 
-    // Alice removes Bob. Carol applies the commit.
     let remove_bob_commit = remove_member(&alice_db, conv_id, "bob");
     apply_commit(&carol_db, conv_id, &remove_bob_commit);
 
-    // Alice and Carol can still communicate.
     let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
     assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap().0, b"bob is gone");
 
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"confirmed").unwrap();
     assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0, b"confirmed");
 
-    // Bob cannot decrypt post-removal messages.
     assert!(
         try_mls_decrypt(&bob_db, conv_id, &alice_ct).is_none(),
         "removed bob must not decrypt"
     );
 
-    // Alice adds Dave. Carol applies the commit.
     let dave_kp = gen_key_package(&dave_db, "dave");
     let (add_dave_commit, dave_welcome) = add_member_to_group(&alice_db, conv_id, &dave_kp);
     join_via_welcome(&dave_db, &dave_welcome);
     apply_commit(&carol_db, conv_id, &add_dave_commit);
 
-    // All three current members (Alice, Carol, Dave) can communicate.
     let dave_ct = try_mls_encrypt(&dave_db, conv_id, b"dave here").unwrap();
     assert_eq!(try_mls_decrypt(&alice_db, conv_id, &dave_ct).unwrap().0, b"dave here");
     assert_eq!(try_mls_decrypt(&carol_db, conv_id, &dave_ct).unwrap().0, b"dave here");
 
-    // Bob still cannot decrypt.
     assert!(
         try_mls_decrypt(&bob_db, conv_id, &dave_ct).is_none(),
         "bob must still be locked out after new member joins"
@@ -593,45 +525,31 @@ fn key_rotation_across_multiple_membership_changes() {
 
     create_group(&alice_db, conv_id, "alice");
 
-    // Add Bob (epoch 0→1).
     let bob_kp = gen_key_package(&bob_db, "bob");
     let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Add Carol (epoch 1→2). Bob applies commit.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (add_carol_commit, carol_welcome) = add_member_to_group(&alice_db, conv_id, &carol_kp);
     join_via_welcome(&carol_db, &carol_welcome);
     apply_commit(&bob_db, conv_id, &add_carol_commit);
 
-    // Remove Bob (epoch 2→3). Carol applies commit.
     let remove_bob_commit = remove_member(&alice_db, conv_id, "bob");
     apply_commit(&carol_db, conv_id, &remove_bob_commit);
 
-    // Alice and Carol can communicate at epoch 3.
     let ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
     assert_eq!(
         try_mls_decrypt(&carol_db, conv_id, &ct).unwrap().0,
         b"bob is gone"
     );
 
-    // Bob (stuck at epoch 2) cannot decrypt epoch-3 messages.
     assert!(
         try_mls_decrypt(&bob_db, conv_id, &ct).is_none(),
         "removed Bob must not decrypt after key rotation"
     );
 }
 
-/// Simulates account deletion: when a user is removed from a group (as
-/// part of account deletion), the remaining members' keys should rotate
-/// so the deleted user cannot decrypt future messages.
-///
-/// The `delete_account` command (auth.rs) enumerates all groups and DM
-/// channels the user belongs to and broadcasts `membership_changed` for
-/// each before deleting DB rows.  This test verifies the underlying MLS
-/// removal + epoch advance works across multiple groups.
-///
-/// See: https://github.com/pollis-app/pollis/issues/103
+/// Account deletion: removing a user from every group rotates keys so they are locked out (#103).
 #[test]
 fn account_deletion_rotates_keys_for_remaining_members() {
     let group1 = "01JTEST000000000000ACCTDEL1";
@@ -641,7 +559,6 @@ fn account_deletion_rotates_keys_for_remaining_members() {
     let bob_db = make_db();
     let carol_db = make_db();
 
-    // --- Group 1: Alice + Bob + Carol ---
     create_group(&alice_db, group1, "alice");
 
     let bob_kp1 = gen_key_package(&bob_db, "bob");
@@ -653,33 +570,23 @@ fn account_deletion_rotates_keys_for_remaining_members() {
     join_via_welcome(&carol_db, &carol_welcome1);
     apply_commit(&bob_db, group1, &add_carol_commit1);
 
-    // --- Group 2: Alice + Bob (Carol not in this one) ---
     create_group(&alice_db, group2, "alice");
 
     let bob_kp2 = gen_key_package(&bob_db, "bob");
     let (_, bob_welcome2) = add_member_to_group(&alice_db, group2, &bob_kp2);
     join_via_welcome(&bob_db, &bob_welcome2);
 
-    // Verify Bob can read in both groups before deletion.
     let pre_g1 = try_mls_encrypt(&alice_db, group1, b"pre-delete g1").unwrap();
     assert_eq!(try_mls_decrypt(&bob_db, group1, &pre_g1).unwrap().0, b"pre-delete g1");
 
     let pre_g2 = try_mls_encrypt(&alice_db, group2, b"pre-delete g2").unwrap();
     assert_eq!(try_mls_decrypt(&bob_db, group2, &pre_g2).unwrap().0, b"pre-delete g2");
 
-    // --- Simulate account deletion for Bob ---
-    // In production this would be done by delete_account iterating all
-    // groups and broadcasting membership_changed for each. Here we do
-    // the MLS removal manually per group.
-
-    // Remove Bob from group 1 — Carol applies commit.
     let remove_g1 = remove_member(&alice_db, group1, "bob");
     apply_commit(&carol_db, group1, &remove_g1);
 
-    // Remove Bob from group 2 — no other non-alice members to notify.
     let _remove_g2 = remove_member(&alice_db, group2, "bob");
 
-    // --- Verify key rotation: Bob locked out of both groups ---
     let post_g1 = try_mls_encrypt(&alice_db, group1, b"post-delete g1").unwrap();
     assert!(
         try_mls_decrypt(&bob_db, group1, &post_g1).is_none(),
@@ -692,8 +599,6 @@ fn account_deletion_rotates_keys_for_remaining_members() {
         "deleted Bob must not decrypt group2 messages after account deletion"
     );
 
-    // --- Verify remaining members still work ---
-    // Group 1: Alice and Carol can still communicate.
     assert_eq!(
         try_mls_decrypt(&carol_db, group1, &post_g1).unwrap().0,
         b"post-delete g1"
@@ -704,8 +609,6 @@ fn account_deletion_rotates_keys_for_remaining_members() {
         b"carol still here"
     );
 }
-
-// ── multi-device helpers ────────────────────────────────────────────────
 
 /// Create an MLS group with an explicit device_id in the credential.
 fn create_group_with_device(
@@ -767,11 +670,7 @@ fn gen_key_package_with_device(
     bundle.key_package().tls_serialize_detached().unwrap()
 }
 
-/// Generate a key package using a pre-existing signing keypair. This
-/// simulates the production "stable per-device signing key" from
-/// `load_or_create_device_signer`: every KP the device publishes is
-/// signed by the same key, so the credential's signature key bytes
-/// match on every re-issue.
+/// A key package signed with a pre-existing keypair (the stable per-device signer).
 fn gen_key_package_with_existing_signer(
     conn: &rusqlite::Connection,
     user_id: &str,
@@ -823,8 +722,6 @@ fn add_members_batch(
     )
 }
 
-// ── multi-device credential tests ───────────────────────────────────────
-
 /// Credential encodes user_id:device_id; parsing extracts user_id.
 #[test]
 fn credential_roundtrip_with_device() {
@@ -843,8 +740,6 @@ fn credential_legacy_no_device_id() {
     assert_eq!(parse_credential_user_id(&cred), "alice");
 }
 
-// ── multi-device scenario tests ─────────────────────────────────────────
-
 /// Alice has two devices in the group. Bob sends a message. Both Alice
 /// devices decrypt it.
 #[test]
@@ -855,27 +750,22 @@ fn multi_device_both_devices_decrypt() {
     let alice_d2_db = make_db();
     let bob_db = make_db();
 
-    // Alice device 1 creates the group.
     create_group_with_device(&alice_d1_db, conv_id, "alice", "alice_d1");
 
-    // Add Bob.
     let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
     let (add_bob_commit, bob_welcome) =
         add_member_to_group(&alice_d1_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
     let _ = add_bob_commit;
 
-    // Add Alice's second device.
     let alice_d2_kp = gen_key_package_with_device(&alice_d2_db, "alice", "alice_d2");
     let (add_d2_commit, alice_d2_welcome) =
         add_member_to_group(&alice_d1_db, conv_id, &alice_d2_kp);
     join_via_welcome(&alice_d2_db, &alice_d2_welcome);
     apply_commit(&bob_db, conv_id, &add_d2_commit);
 
-    // Bob sends.
     let bob_ct = try_mls_encrypt(&bob_db, conv_id, b"hello both alices").unwrap();
 
-    // Both Alice devices decrypt.
     assert_eq!(
         try_mls_decrypt(&alice_d1_db, conv_id, &bob_ct).unwrap().0,
         b"hello both alices"
@@ -886,9 +776,7 @@ fn multi_device_both_devices_decrypt() {
     );
 }
 
-/// Two devices for the same user are added in a single add_members commit
-/// (matching production reconcile). Both join via the same
-/// Welcome and can decrypt.
+/// Two devices of one user added in a single commit both join via the same Welcome.
 #[test]
 fn multi_device_batch_add_single_commit() {
     let conv_id = "01JTEST00000000000MULTIDEV2";
@@ -899,19 +787,15 @@ fn multi_device_batch_add_single_commit() {
 
     create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
 
-    // Generate KPs for both Bob devices.
     let bob_d1_kp = gen_key_package_with_device(&bob_d1_db, "bob", "bob_d1");
     let bob_d2_kp = gen_key_package_with_device(&bob_d2_db, "bob", "bob_d2");
 
-    // Add both in a single commit.
     let (_commit, welcome) =
         add_members_batch(&alice_db, conv_id, &[bob_d1_kp, bob_d2_kp]);
 
-    // Both Bob devices process the same Welcome.
     join_via_welcome(&bob_d1_db, &welcome);
     join_via_welcome(&bob_d2_db, &welcome);
 
-    // Alice sends — both Bob devices decrypt.
     let ct = try_mls_encrypt(&alice_db, conv_id, b"hello bob devices").unwrap();
     assert_eq!(
         try_mls_decrypt(&bob_d1_db, conv_id, &ct).unwrap().0,
@@ -922,7 +806,6 @@ fn multi_device_batch_add_single_commit() {
         b"hello bob devices"
     );
 
-    // Bob device 1 sends — Alice and Bob device 2 both decrypt.
     let bob_ct = try_mls_encrypt(&bob_d1_db, conv_id, b"from bob d1").unwrap();
     assert_eq!(
         try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap().0,
@@ -954,18 +837,14 @@ fn remove_multi_device_user_removes_all_leaves() {
     join_via_welcome(&bob_d1_db, &welcome);
     join_via_welcome(&bob_d2_db, &welcome);
 
-    // Both can decrypt before removal.
     let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"before removal").unwrap();
     assert!(try_mls_decrypt(&bob_d1_db, conv_id, &pre_ct).is_some());
     assert!(try_mls_decrypt(&bob_d2_db, conv_id, &pre_ct).is_some());
 
-    // Alice removes "bob" — removes both leaf nodes.
     let _remove_commit = remove_member(&alice_db, conv_id, "bob");
 
-    // Alice sends at new epoch.
     let post_ct = try_mls_encrypt(&alice_db, conv_id, b"after removal").unwrap();
 
-    // Neither Bob device can decrypt.
     assert!(
         try_mls_decrypt(&bob_d1_db, conv_id, &post_ct).is_none(),
         "bob device 1 must not decrypt after removal"
@@ -986,33 +865,28 @@ fn second_device_joins_later_cannot_read_history() {
     let alice_d2_db = make_db();
     let bob_db = make_db();
 
-    // Alice device 1 creates group and adds Bob.
     create_group_with_device(&alice_d1_db, conv_id, "alice", "alice_d1");
     let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
     let (_, bob_welcome) = add_member_to_group(&alice_d1_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Messages sent before alice_d2 joins.
     let history_ct = try_mls_encrypt(&bob_db, conv_id, b"history msg").unwrap();
     assert_eq!(
         try_mls_decrypt(&alice_d1_db, conv_id, &history_ct).unwrap().0,
         b"history msg"
     );
 
-    // Alice device 2 joins.
     let alice_d2_kp = gen_key_package_with_device(&alice_d2_db, "alice", "alice_d2");
     let (add_d2_commit, alice_d2_welcome) =
         add_member_to_group(&alice_d1_db, conv_id, &alice_d2_kp);
     join_via_welcome(&alice_d2_db, &alice_d2_welcome);
     apply_commit(&bob_db, conv_id, &add_d2_commit);
 
-    // Device 2 cannot read pre-join history.
     assert!(
         try_mls_decrypt(&alice_d2_db, conv_id, &history_ct).is_none(),
         "second device must not decrypt messages from before it joined"
     );
 
-    // Both devices decrypt new messages.
     let new_ct = try_mls_encrypt(&bob_db, conv_id, b"new msg").unwrap();
     assert_eq!(
         try_mls_decrypt(&alice_d1_db, conv_id, &new_ct).unwrap().0,
@@ -1026,13 +900,7 @@ fn second_device_joins_later_cannot_read_history() {
 
 /// Regression test for the "re-invited user cannot send messages" bug.
 ///
-/// Scenario: Bob joins, Bob leaves (local-only — no remove commit is
-/// posted, which is what production `leave_group` actually does), Alice
-/// re-invites Bob. Because Bob's device signing key is STABLE across
-/// re-enrollments, a naive `add_members` call fails with
-/// `validate_key_uniqueness` — Bob's new leaf signing key is already in
-/// Alice's tree. The fix: detect the stale leaf and issue a combined
-/// remove+add commit via `commit_builder` (reconcile handles this).
+/// Bob leaves locally (no remove commit) and is re-invited; his stable signing key makes a plain `add_members` fail `validate_key_uniqueness`, so the fix is a combined remove+add.
 #[test]
 fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     let conv_id = "01JTEST000000000REINVITE01";
@@ -1040,11 +908,9 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     let alice_db = make_db();
     let bob_db = make_db();
 
-    // Alice creates the group.
     create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
 
-    // Bob's device picks a stable signing key it will reuse across
-    // enrollments (simulates `load_or_create_device_signer`).
+    // A stable signer reused across enrollments.
     let bob_signer = {
         let provider = PollisProvider::new(&bob_db);
         let sk = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
@@ -1052,25 +918,19 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
         sk
     };
 
-    // First enrollment: Bob publishes a KP, Alice adds Bob, Bob joins.
     let bob_kp_v1 =
         gen_key_package_with_existing_signer(&bob_db, "bob", "bob_d1", &bob_signer);
     let (_add1_commit, welcome1) = add_members_batch(&alice_db, conv_id, &[bob_kp_v1]);
     join_via_welcome(&bob_db, &welcome1);
 
-    // Verify Alice and Bob can talk.
     let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"first life").unwrap();
     assert_eq!(
         try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap().0,
         b"first life"
     );
 
-    // Bob "leaves" — in production this wipes Bob's local state but does
-    // NOT post a remove commit to the group. Alice still has Bob's leaf.
-    // We simulate this by leaving Alice's view untouched and dropping
-    // Bob's local group state on the floor.
+    // Bob "leaves": his local state is dropped, but Alice keeps his leaf.
 
-    // Second enrollment: Bob publishes a NEW KP using the SAME signer.
     let bob_db_v2 = make_db();
     let bob_signer_v2 = {
         let provider = PollisProvider::new(&bob_db_v2);
@@ -1079,7 +939,6 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
         sk
     };
 
-    // Store bob_signer's keypair into bob_db_v2 for Bob to decrypt the welcome.
     {
         let provider_v2 = PollisProvider::new(&bob_db_v2);
         bob_signer.store(provider_v2.storage()).unwrap();
@@ -1105,12 +964,10 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
         );
     }
 
-    // Apply the fix: combined remove+add commit via commit_builder.
     let welcome2_bytes: Vec<u8> = {
         let provider = PollisProvider::new(&alice_db);
         let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
-        // Find Bob's stale leaves.
         let stale: Vec<LeafNodeIndex> = group.members()
             .filter_map(|m| {
                 let u = parse_credential_user_id(&m.credential);
@@ -1145,10 +1002,8 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
         welcome.tls_serialize_detached().unwrap()
     };
 
-    // Bob (new local state) joins via the fresh welcome.
     join_via_welcome(&bob_db_v2, &welcome2_bytes);
 
-    // Alice and Bob-v2 can now send and receive.
     let hello = try_mls_encrypt(&alice_db, conv_id, b"welcome back bob").unwrap();
     assert_eq!(
         try_mls_decrypt(&bob_db_v2, conv_id, &hello).unwrap().0,
@@ -1161,10 +1016,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     );
 }
 
-// ── reconcile core tests ────────────────────────────────────────────────
-
-/// Helper: call `reconcile_group_mls_core` with pre-constructed inputs.
-/// Validates raw KP bytes and delegates to the sync core.
+/// Call `reconcile_group_mls_core` with validated raw KP bytes.
 fn reconcile(
     actor_db: &rusqlite::Connection,
     conv_id: &str,
@@ -1348,7 +1200,6 @@ fn reconcile_committer_skip_self_removal() {
     let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // Alice NOT in roster — she can't remove herself.
     let (outcome, commit_data) = reconcile(
         &alice_db,
         conv_id,
@@ -1376,7 +1227,6 @@ fn reconcile_idempotent() {
     let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
     join_via_welcome(&bob_db, &bob_welcome);
 
-    // First reconcile: remove bob.
     let (outcome1, _) = reconcile(
         &alice_db,
         conv_id,
@@ -1387,7 +1237,6 @@ fn reconcile_idempotent() {
     );
     assert_eq!(outcome1.removed.len(), 1);
 
-    // Second reconcile: same roster → no-op.
     let (outcome2, commit_data2) = reconcile(
         &alice_db,
         conv_id,
@@ -1486,8 +1335,7 @@ fn reconcile_remove_multi_device_user() {
     assert!(commit_data.is_some());
 }
 
-/// 10. End-to-end: reconcile removes a stale leaf, remaining members apply
-///     the commit, and the removed member cannot decrypt new messages.
+/// 10. End-to-end: reconcile removes a stale leaf; the removed member cannot decrypt.
 #[test]
 fn reconcile_e2e_remove_then_communicate() {
     let conv_id = "01JTEST00000000000RECONCILEA";
@@ -1508,7 +1356,6 @@ fn reconcile_e2e_remove_then_communicate() {
     join_via_welcome(&carol_db, &carol_welcome);
     apply_commit(&bob_db, conv_id, &add_carol_commit);
 
-    // Bob "leaves" — removed from roster. Alice reconciles.
     let (outcome, commit_data) = reconcile(
         &alice_db,
         conv_id,
@@ -1524,11 +1371,9 @@ fn reconcile_e2e_remove_then_communicate() {
         ("bob".to_string(), "bob_d1".to_string())
     );
 
-    // Carol applies the reconcile commit.
     let data = commit_data.unwrap();
     apply_commit(&carol_db, conv_id, &data.commit_bytes);
 
-    // Alice and Carol can communicate.
     let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
     assert_eq!(
         try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap().0,
@@ -1541,50 +1386,20 @@ fn reconcile_e2e_remove_then_communicate() {
         b"confirmed"
     );
 
-    // Bob cannot decrypt post-reconcile messages.
     assert!(
         try_mls_decrypt(&bob_db, conv_id, &alice_ct).is_none(),
         "removed member must not decrypt after reconcile"
     );
 }
 
-// ── Post-quantum suite (#454, #668) ──────────────────────────────────────────
-//
-// #454 shipped two crypto backends: its hybrid suite was X-Wing / `0x004D`,
-// which only `openmls_libcrux_crypto` implemented, and the classic AES-GCM
-// suite had to stay on RustCrypto because libcrux's AES-GCM tag check is not
-// constant-time (RUSTSEC-2026-0211). Three tests pinned that split — a
-// cross-provider interop flow proving a staged rollout could not brick a group,
-// a pin on libcrux's `supports()` / `supported_ciphersuites()` self-
-// contradiction, and the routing invariant itself.
-//
-// #668 deleted all three along with the second backend. The suite it moves to
-// (`0x0052`) keeps X-Wing as its KEM but signs ML-DSA-44, which RustCrypto
-// implements and libcrux does not, so there is no second provider to interop
-// with, no `supports()` trap to trip, and nothing to route away from. What
-// survives is the part that was never about libcrux: that the PQ suite really
-// is post-quantum, in the key exchange AND now in the signature, through the
-// exact provider Pollis ships.
-
-/// The PQ suite is reachable through the provider Pollis ships, and is
-/// genuinely post-quantum in BOTH halves.
-///
-/// Asserts the suite is advertised, runs a full two-party round-trip on it, and
-/// then makes two structural checks that no amount of "the suite constant says
-/// so" can fake:
-///
-///   - the joiner's `hpke_init_key` is 1216 bytes — ML-KEM-768 public key
-///     (1184) + X25519 (32). A classical X25519-only init key is 32 bytes, so
-///     this is the proof the KEM did not silently fall back.
-///   - the leaf signature key is 1312 bytes — an ML-DSA-44 public key. Ed25519
-///     is 32, so this is the #668 half: authentication, not just
-///     confidentiality, is post-quantum.
+/// The shipped provider's PQ suite is post-quantum in BOTH halves:
+/// - the joiner's `hpke_init_key` is 1216 bytes (ML-KEM-768 + X25519);
+/// - the leaf signature key is 1312 bytes (ML-DSA-44, #668).
 #[test]
 fn pq_suite_reachable_and_genuinely_post_quantum() {
     let alice_db = make_db();
     let bob_db = make_db();
 
-    // The suite must be advertised by the PQ provider.
     {
         let provider = PollisProvider::new(&alice_db);
         assert!(
@@ -1593,7 +1408,6 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
         );
     }
 
-    // Bob builds a KeyPackage on the CS_PQ suite.
     let (bob_kp_bytes, bob_hpke_init_len, bob_sig_pub_len) = {
         let provider = PollisProvider::new(&bob_db);
         let sig = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
@@ -1624,22 +1438,18 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
         )
     };
 
-    // Structural hybrid proof: ML-KEM-768 pubkey (1184) + X25519 (32) = 1216.
-    // A classical X25519-only init key would be 32 bytes; anything but 1216
-    // means the key exchange is NOT the hybrid we think it is.
+    // Hybrid proof: ML-KEM-768 (1184) + X25519 (32) = 1216.
     assert_eq!(
         bob_hpke_init_len, 1216,
         "hybrid hpke_init_key must be ML-KEM-768 (1184) + X25519 (32) = 1216 bytes"
     );
 
-    // Structural PQ-signature proof (#668): an ML-DSA-44 public key is 1312
-    // bytes. Ed25519 — what this suite signed with under #454 — is 32.
+    // PQ-signature proof (#668): ML-DSA-44 is 1312 bytes, Ed25519 32.
     assert_eq!(
         bob_sig_pub_len, 1312,
         "PQ leaf signature key must be an ML-DSA-44 public key (1312 bytes)"
     );
 
-    // Alice creates the group on the hybrid suite and adds Bob.
     let alice_sig = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
     let (welcome_bytes, mut alice_group) = {
         let provider = PollisProvider::new(&alice_db);
@@ -1678,13 +1488,7 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
         (welcome.tls_serialize_detached().unwrap(), group)
     };
 
-    // Bob joins via the hybrid Welcome, then an application message must
-    // decrypt end-to-end on the hybrid suite.
-    //
-    // Driven through openmls directly rather than through `try_mls_encrypt` /
-    // `try_mls_decrypt`: those read the group from `mls_kv` under a Pollis group
-    // id, and this test builds its group by hand to keep the assertions above
-    // structural. `suite_seam_round_trip` covers the production seams.
+    // Driven through openmls directly; `suite_seam_round_trip` covers the production seams.
     {
         let provider = PollisProvider::new(&bob_db);
         let mut reader: &[u8] = &welcome_bytes;
@@ -1731,16 +1535,9 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
 
 /// T4. `validate_key_package` must not panic on a post-quantum KeyPackage.
 ///
-/// `validate_key_package` used to take a concrete `&RustCrypto`. That backend
-/// `unimplemented!()`-PANICS on the X-Wing suite, so the moment #454 P2 mints
-/// real post-quantum KeyPackages, validating one would have aborted the process
-/// rather than returning an error. The signature is now generic over
-/// `OpenMlsCrypto`, so a KeyPackage in a suite the passed backend does not
-/// implement is a runtime `Err` and not an abort.
+/// Generic over `OpenMlsCrypto`, so an unimplemented suite is an `Err`, not a panic.
 ///
-/// Asserts the returned `KeyPackageRef` equals the one openmls computes, so this
-/// proves validation actually happened rather than merely not crashing, and pins
-/// the credential-mismatch path as a normal `Err` on either suite.
+/// Checks the returned `KeyPackageRef` and the credential-mismatch `Err`.
 fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphersuite) {
     let sig = SignatureKeyPair::new(suite.signature_algorithm()).unwrap();
     sig.store(provider.storage()).unwrap();
@@ -1757,7 +1554,6 @@ fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphe
     let kp_bytes = bundle.key_package().tls_serialize_detached().unwrap();
     let expected_ref = bundle.key_package().hash_ref(provider.crypto()).unwrap();
 
-    // The call that would have panicked under RustCrypto on the X-Wing suite.
     let got = validate_key_package(&kp_bytes, "alice", provider.crypto())
         .unwrap_or_else(|e| panic!("validate failed on {suite:?}: {e}"));
     assert_eq!(
@@ -1783,20 +1579,7 @@ fn validate_key_package_handles_any_suite() {
 
 /// **One backend, and it stays RustCrypto.**
 ///
-/// #454 needed this as a *routing* invariant: `deny.toml` carried an ignore for
-/// RUSTSEC-2026-0211 (libcrux's AES-GCM tag check is not constant-time) whose
-/// stated reason was that Pollis never routed AES-GCM through libcrux, and a
-/// well-meaning "simplify the two providers into one" would have turned that
-/// reason into a lie.
-///
-/// #668 removed `openmls_libcrux_crypto` from the tree and #669 removed the
-/// second suite, so the advisory is gone from `deny.toml` rather than argued
-/// away. What is worth pinning now is the weaker but still load-bearing fact
-/// underneath: the single provider every path constructs is RustCrypto-backed,
-/// so reintroducing a backend is a decision that has to face this test rather
-/// than a silent type change.
-///
-/// Type-level, so it cannot be satisfied by accident at runtime.
+/// Type-level: reintroducing a backend (#454 RUSTSEC-2026-0211 routing) has to face this test.
 #[test]
 fn mls_backend_is_rustcrypto() {
     fn backend_of<P: OpenMlsProvider>(_: &P) -> &'static str {
@@ -1811,20 +1594,14 @@ fn mls_backend_is_rustcrypto() {
         backend_of(&provider)
     );
 
-    // The one backend must advertise the one suite. Asserted rather than
-    // assumed because `CS_PQ` is a provisional code point: bumping it to a
-    // value the pinned openmls does not implement would otherwise surface as
-    // every group operation failing at runtime instead of here.
+    // Asserted because `CS_PQ` is a provisional code point.
     let advertised = provider.crypto().supported_ciphersuites();
     assert!(
         advertised.contains(&CS_PQ),
         "RustCrypto must advertise the Pollis suite; got {advertised:?}"
     );
 
-    // The suite Pollis ships is ChaCha20-Poly1305, not AES-GCM. Pinned because
-    // it is the reason the AES-GCM advisory that shaped #454's provider routing
-    // (RUSTSEC-2026-0211) no longer touches any Pollis traffic: a change back to
-    // an AES-GCM suite has to re-open that question, and should fail here first.
+    // ChaCha20-Poly1305, not AES-GCM: a return to AES-GCM re-opens RUSTSEC-2026-0211.
     assert_eq!(
         CS_PQ.aead_algorithm(),
         AeadType::ChaCha20Poly1305,
@@ -1832,31 +1609,16 @@ fn mls_backend_is_rustcrypto() {
     );
 }
 
-// ── The ciphersuite is a real parameter, not a constant (#454 P1b) ──────────
-
 /// The signature scheme is derived from the suite, not a constant.
 ///
-/// It genuinely was a single constant under #454, when both suites signed
-/// Ed25519 and a device presented one signing key everywhere; #668 made it a
-/// real function. #669 leaves only one suite in production, which makes this
-/// look collapsible again — it is not. `signature_scheme` is read off a *stored
-/// group* on every decrypt and commit path, and a group persisted before a code
-/// point change is still on its old suite until `migrate` moves it. A leaf
-/// signed with the wrong stored key is a device that can no longer open its own
-/// groups, so both answers are pinned here.
+/// It is read off a *stored group*, which stays on its old suite until migrated, so both answers are pinned.
 #[test]
 fn signature_scheme_per_suite() {
     assert_eq!(signature_scheme(CS_LEGACY), SignatureScheme::ED25519);
     assert_eq!(signature_scheme(CS_PQ), SignatureScheme::MLDSA44);
 }
 
-/// Drive a full two-party flow — create group, build KeyPackage, validate, add,
-/// Welcome, join, application message — entirely through the PRODUCTION suite
-/// seams (`create_mls_group_in_suite`, `build_key_package_in_suite`,
-/// `load_group_with_signer`, `validate_key_package`) at an arbitrary suite.
-///
-/// Deliberately not hand-rolled openmls: the point is that the parametrisation
-/// is real in the code Pollis actually ships, not merely that openmls can do it.
+/// A full two-party flow through the PRODUCTION suite seams at an arbitrary suite.
 fn suite_seam_round_trip<CA, CB>(
     alice: &MlsProvider<'_, CA>,
     bob: &MlsProvider<'_, CB>,
@@ -1880,8 +1642,7 @@ fn suite_seam_round_trip<CA, CB>(
         "the group must be created in the suite the caller asked for"
     );
 
-    // The production validator must accept the package on this suite (it is
-    // generic over the backend precisely so the hybrid case is not a panic).
+    // Generic over the backend so the hybrid case is not a panic.
     validate_key_package(&bob_kp_bytes, "bob", alice.crypto())
         .unwrap_or_else(|e| panic!("validate key package on {suite:?}: {e}"));
 
@@ -1936,13 +1697,7 @@ fn suite_seam_round_trip<CA, CB>(
 
 /// A suite that is not `CS_PQ` still round-trips through the production seams.
 ///
-/// This is what proves the parametrisation is real rather than decorative now
-/// that production only ever passes one value. `CS_PQ`'s code point is
-/// provisional, so the day it renumbers, every one of these seams —
-/// `create_mls_group_in_suite`, `build_key_package_in_suite`,
-/// `load_group_with_signer`, `validate_key_package` — has to keep working
-/// against groups already stored under the old number. If that ever stops being
-/// true, `migrate` has nothing to migrate *from*.
+/// Proves the parametrisation is real: a `CS_PQ` renumber needs these seams on the old suite.
 #[test]
 fn a_non_current_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
@@ -1956,15 +1711,7 @@ fn a_non_current_suite_round_trips_through_the_production_seams() {
 
 /// The seam is REAL, not cosmetic: passing `CS_PQ` produces a genuinely
 /// post-quantum group through the same production functions.
-///
-/// Since #669 this is the suite `init_mls_group` gives every new conversation,
-/// with no gate and no alternative.
-///
-/// The code point is asserted literally because it is the wire contract: the DS
-/// stores it as the `mls_key_package.ciphersuite` label (`CIPHERSUITE_PQ`), so a
-/// silent change here would strand every published pool. #454 minted it as
-/// `0x004D`, #668 moved it to `0x0052`, and the draft may renumber it again —
-/// which is a deliberate, `migrate`-shaped change, never a quiet one.
+/// The code point is asserted literally: the DS stores it as a wire label (`CIPHERSUITE_PQ`).
 #[test]
 fn pq_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
@@ -1976,14 +1723,7 @@ fn pq_suite_round_trips_through_the_production_seams() {
     assert_eq!(u16::from(CS_PQ), 0x0052);
 }
 
-/// The suite argument selects a genuinely different key exchange, which is the
-/// entire point of #454. Asserted structurally on the KeyPackage the production
-/// builder emits: X25519 alone is a 32-byte HPKE init key, X-Wing is
-/// ML-KEM-768's 1184 plus X25519's 32.
-///
-/// Reads as a tautology and is not: it is the only thing standing between
-/// "Pollis is post-quantum" and a `CS_PQ` that silently resolves to a classical
-/// KEM. The number 1216 is the claim.
+/// The suite argument selects a different key exchange: 32-byte X25519 vs 1216-byte X-Wing init key.
 #[test]
 fn the_suite_parameter_selects_a_different_key_exchange() {
     let legacy_db = make_db();
@@ -1996,7 +1736,6 @@ fn the_suite_parameter_selects_a_different_key_exchange() {
     let (_, hybrid_kp) =
         build_key_package_in_suite(&hybrid, "bob", "bob_dev", CS_PQ).unwrap();
 
-    // Each package is validated by the backend that serves its suite.
     fn init_key_len(bytes: &[u8], crypto: &impl openmls_traits::crypto::OpenMlsCrypto) -> usize {
         let mut reader: &[u8] = bytes;
         KeyPackageIn::tls_deserialize(&mut reader)
@@ -2020,17 +1759,7 @@ fn the_suite_parameter_selects_a_different_key_exchange() {
     );
 }
 
-// ── #454 P3: the suite-dispatch seam ─────────────────────────────────────────
-
-/// A group's ciphersuite is readable from STORAGE ALONE, with no crypto backend
-/// picked yet — `MlsGroup::load` is generic over `StorageProvider`, not
-/// `OpenMlsProvider`, which is what makes `stored_group_ciphersuite` possible.
-///
-/// #454 needed this to break a circularity in suite→backend dispatch: you would
-/// otherwise need a provider to learn which provider to use. #668 collapsed the
-/// backends to one and #669 the suites, so nothing dispatches on the answer any
-/// more — but `migrate` still has to ask "is this group on the current suite?"
-/// before it can answer "must it move?", and it asks by reading storage.
+/// A group's ciphersuite is readable from STORAGE ALONE (`MlsGroup::load` needs only a `StorageProvider`), which `migrate` relies on.
 #[test]
 fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
     for (suite, conv) in [
@@ -2041,7 +1770,6 @@ fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
         create_mls_group_in_suite(&PollisProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
             .unwrap();
 
-        // Read the suite back with no crypto backend at all.
         assert_eq!(
             super::provider::stored_group_ciphersuite(&db, conv),
             Some(suite),
@@ -2050,11 +1778,7 @@ fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
     }
 }
 
-/// A joiner has no local group, so `apply_welcome` reads the suite off the
-/// Welcome itself. `Welcome::ciphersuite()` is `pub(crate)` in openmls, so
-/// `welcome_ciphersuite` parses the wire format per RFC 9420 §12.4.3.1
-/// (cipher_suite is the first field, 2 bytes big-endian) — this pins that
-/// parse against real Welcomes on both suites.
+/// Pins `welcome_ciphersuite`'s RFC 9420 §12.4.3.1 parse against real Welcomes on both suites.
 #[test]
 fn welcome_suite_is_readable_on_both_suites() {
     for (suite, conv) in [
@@ -2112,18 +1836,9 @@ where
 /// created: **a post-quantum group can never contain a member whose KeyPackage
 /// is not post-quantum.**
 ///
-/// Pollis blocks this at three depths, and the deepest one is the protocol
-/// itself. `reconcile` claims KeyPackages scoped to the group's own suite (so a
-/// device with nothing in that suite has nothing to claim and is reported in
-/// `ReconcileOutcome::skipped_no_suite_kp`), `stage_reconcile_commit` re-checks
-/// the claimed package's suite against the group's because the DS is untrusted,
-/// and — asserted here — openmls itself refuses the add.
+/// Asserted here: openmls itself refuses the add (reconcile and `stage_reconcile_commit` also check).
 ///
-/// #669 retired the classic suite, which removes the *fleet* that could have
-/// offered such a package but not the *attack*: the DS is untrusted, and a
-/// hostile one handing back a package in a weaker suite is exactly the
-/// downgrade this forbids. `CS_LEGACY` stands in for whatever that package
-/// claims to be.
+/// The DS is untrusted, so a hostile one offering a weaker suite is still the attack; `CS_LEGACY` stands in for it.
 #[test]
 fn a_group_cannot_admit_a_key_package_from_another_suite() {
     let alice_db = make_db();
@@ -2136,7 +1851,6 @@ fn a_group_cannot_admit_a_key_package_from_another_suite() {
         load_group_with_signer(&alice, "01JTESTNODOWNGRADE00000000", 0).unwrap();
     assert_eq!(alice_group.ciphersuite(), CS_PQ);
 
-    // The package the untrusted DS hands back is in a different, weaker suite.
     let bob = PollisProvider::new(&bob_db);
     let (_, bob_kp_bytes) =
         build_key_package_in_suite(&bob, "bob", "bob_dev", CS_LEGACY).unwrap();
@@ -2152,37 +1866,19 @@ fn a_group_cannot_admit_a_key_package_from_another_suite() {
         .expect_err("adding an off-suite leaf to a PQ group must be impossible");
     crate::diag!("[test] PQ group rejected the off-suite KeyPackage: {err}");
 
-    // The rejected add must leave nothing staged — a failed downgrade attempt
-    // cannot wedge the group.
+    // A rejected add must leave nothing staged.
     alice_group.clear_pending_commit(alice.storage()).unwrap();
     assert_eq!(alice_group.ciphersuite(), CS_PQ, "the group stays post-quantum");
 }
 
-// ── #666: self-update, unmerged leaves, and commit growth ────────────────────
-
 /// The claim #666 rests on, measured rather than asserted: **commit size grows
 /// with the number of members only while their leaves are unmerged.**
 ///
-/// A member added by someone else does not know the secrets of the nodes above
-/// it, so every one of those nodes stays blank and each such leaf lands in a
-/// copath resolution on its own — one HPKE ciphertext per member in every
-/// commit anyone issues. That is a linear cost, and it never decays on its own:
-/// only a commit *from that member* populates its direct path and collapses the
-/// resolution back to a single node.
+/// An unmerged leaf costs one HPKE ciphertext per commit until it commits itself.
 ///
-/// So the test doubles the group and compares the marginal cost of that
-/// doubling. Unmerged, doubling the group roughly doubles the commit; merged,
-/// it adds a couple of ciphertexts — TreeKEM's logarithm, which Pollis was not
-/// getting before the post-join self-update. On the hybrid suite that is 8→16
-/// members costing +10.6 KB unmerged versus +2.4 KB merged (13.4→24.0 KB vs
-/// 8.7→11.1 KB).
+/// Unmerged, doubling the group roughly doubles the commit; merged, it adds a couple of ciphertexts.
 ///
-/// Deliberately a ratio and not a byte ceiling: the *shape* is the invariant,
-/// and it must hold whatever the suite, even though a post-quantum
-/// encapsulation is ~35× larger than X25519's. Running it on `CS_LEGACY` as
-/// well is what makes that a property of TreeKEM rather than a coincidence of
-/// one set of key sizes. Absolute ceilings live in
-/// [`pq_payloads_stay_under_their_ceilings`].
+/// A ratio, not a byte ceiling, run on both suites; ceilings live in [`pq_payloads_stay_under_their_ceilings`].
 #[test]
 fn self_update_turns_linear_commit_growth_into_logarithmic() {
     for suite in [CS_LEGACY, CS_PQ] {
@@ -2196,15 +1892,12 @@ fn self_update_turns_linear_commit_growth_into_logarithmic() {
              (8: {small_unmerged}→{small_merged} B, 16: {large_unmerged}→{large_merged} B)"
         );
 
-        // Merging can only ever help: a member that rotated its own leaf is
-        // strictly cheaper to address than one sitting in a blank subtree.
         assert!(
             large_merged < large_unmerged,
             "{suite:?}: self-updates must shrink the commit ({large_merged} !< {large_unmerged})"
         );
 
-        // The real invariant: the marginal cost of doubling the group collapses.
-        // Unmerged, 8→16 adds eight ciphertexts; merged, it adds two.
+        // Unmerged, 8→16 adds eight ciphertexts; merged, two.
         assert!(
             merged_delta * 3 < unmerged_delta,
             "{suite:?}: doubling the group must cost far less once every leaf is merged \
@@ -2213,12 +1906,7 @@ fn self_update_turns_linear_commit_growth_into_logarithmic() {
     }
 }
 
-/// Size of a commit alice issues into a `members`-strong group, measured twice:
-/// once with every other leaf still unmerged (added by alice, never having
-/// committed), and once after every member has rotated its own leaf.
-///
-/// Both measurements are of the *same* commit under the *same* tree size, so
-/// the only variable is whether the leaves are merged.
+/// Size of a commit alice issues into a `members`-strong group, with leaves unmerged then merged.
 fn commit_growth_probe(suite: Ciphersuite, members: usize, conversation_id: &str) -> (usize, usize) {
     let dbs: Vec<rusqlite::Connection> = (0..members).map(|_| make_db()).collect();
     let providers: Vec<_> = dbs.iter().map(PollisProvider::new).collect();
@@ -2236,8 +1924,6 @@ where
     let alice = &providers[0];
     create_mls_group_in_suite(alice, conversation_id, 0, "m0", "m0_dev", suite).unwrap();
 
-    // One batched add, which is how reconcile actually adds people — and the
-    // reason every joiner starts life as an unmerged leaf.
     let mut kps = Vec::new();
     for (i, p) in providers.iter().enumerate().skip(1) {
         let (_, bytes) =
@@ -2260,20 +1946,16 @@ where
         join_welcome_in_suite(p, &welcome_bytes);
     }
 
-    // Measurement 1: every other leaf is unmerged.
     let unmerged = probe_self_update_size(alice, conversation_id);
 
-    // Every member rotates its own leaf — the post-join self-update, applied by
-    // the whole group exactly as the live path would.
+    // Every member rotates its own leaf (the post-join self-update).
     for i in 1..providers.len() {
         let (_, commit_bytes, _) = stage_self_update(&providers[i], conversation_id, 0)
             .unwrap()
             .expect("a joined member can always self-update");
         for (j, p) in providers.iter().enumerate() {
             if i == j {
-                // The committer merges its own staged commit. Explicitly —
-                // `load_group_with_signer` no longer does it as a side effect of
-                // loading (#1079).
+                // The committer merges its own staged commit explicitly (#1079).
                 let (mut group, _) = load_group_with_signer(p, conversation_id, 0).unwrap();
                 group.merge_pending_commit(p).unwrap();
             } else {
@@ -2282,7 +1964,6 @@ where
         }
     }
 
-    // Measurement 2: same members, same tree size, every leaf merged.
     let merged = probe_self_update_size(alice, conversation_id);
     (unmerged, merged)
 }
@@ -2296,9 +1977,7 @@ where
     let (_, commit_bytes, _) = stage_self_update(provider, conversation_id, 0)
         .unwrap()
         .expect("group exists");
-    // A raw load, and deliberately no merge: the measurement must not advance the
-    // epoch. (`load_group_with_signer` no longer merges either, since #1079, but
-    // this path also wants the group without its signer.)
+    // A raw load with no merge: the measurement must not advance the epoch.
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let mut group = MlsGroup::load(provider.storage(), &group_id)
         .unwrap()
@@ -2347,11 +2026,7 @@ fn apply_commit_in_suite<C>(
     }
 }
 
-/// A self-update must actually rotate this device's leaf key. If a future
-/// openmls decided an empty commit needs no path, the commit would still land
-/// and every caller would still think it had healed — silently giving up
-/// post-compromise security. `force_self_update(true)` is what prevents that,
-/// and this pins it.
+/// A self-update must rotate the leaf key; pins `force_self_update(true)`.
 #[test]
 fn a_self_update_replaces_our_own_leaf_key() {
     let db = make_db();
@@ -2359,7 +2034,6 @@ fn a_self_update_replaces_our_own_leaf_key() {
     let conv = "01JT666LEAFROTATES00000000";
     create_mls_group_in_suite(&provider, conv, 0, "alice", "alice_dev", CS_PQ).unwrap();
 
-    // openmls keeps the raw key bytes crate-private, so compare the key itself.
     let leaf_key_of = |p: &PollisProvider| {
         let (group, _) = load_group_with_signer(p, conv, 0).unwrap();
         group.own_leaf_node().unwrap().encryption_key().clone()
@@ -2379,9 +2053,7 @@ fn a_self_update_replaces_our_own_leaf_key() {
     );
 }
 
-/// Rotation jitter must be deterministic per conversation. A jitter re-rolled
-/// on every check would let a device that restarts often drift past its
-/// deadline indefinitely — the rotation would be perpetually "not quite due".
+/// Jitter must be stable per conversation, or a restarting device drifts past its deadline.
 #[test]
 fn self_update_jitter_is_stable_and_bounded() {
     let a = super::self_update::jitter_for("01JT666JITTERCONVA00000000");
@@ -2403,28 +2075,11 @@ fn self_update_jitter_is_stable_and_bounded() {
 
 /// #454 P3 item 4: absolute byte ceilings for the post-quantum suite.
 ///
-/// The growth *shape* is pinned by
-/// [`self_update_turns_linear_commit_growth_into_logarithmic`]; this pins the
-/// constants. PQ payloads are large by construction — an ML-KEM-768
-/// encapsulation is 1,088 B against X25519's 32, and since #668 every leaf also
-/// carries a 1,312 B ML-DSA-44 public key and every signature is 2,420 B against
-/// Ed25519's 64 — and "large" quietly becoming "unusable" is the failure mode
-/// this has to defend against. A KEM swap, a codepoint change, or an accidental
-/// return to unmerged leaves should surface here as a failing number, not as a
-/// support ticket about a group that stopped working at forty members.
+/// Pins the constants; [`self_update_turns_linear_commit_growth_into_logarithmic`] pins the shape.
 ///
-/// Measured after #668: KeyPackage 8,670 B (classical: 307 B), Welcome 15,241 B,
-/// and a commit into a merged 8-member group 14,839 B. Moving the signature to
-/// ML-DSA-44 roughly tripled all three — a KeyPackage carries one leaf key and
-/// two signatures, so it alone went 2,659 → 8,670 B. Ceilings sit ~1.4× above
-/// each: tight enough that a doubling fails, loose enough to survive openmls
-/// padding and version churn. A classical KeyPackage is built alongside purely
-/// to print the multiplier, so the price of post-quantum stays visible and
-/// honest rather than becoming a number nobody remembers the baseline for.
+/// Measured after #668: KeyPackage 8,670 B, Welcome 15,241 B, merged 8-member commit 14,839 B; ceilings ~1.4× above.
 #[test]
 fn pq_payloads_stay_under_their_ceilings() {
-    // A KeyPackage is published per device and claimed on every add, so it is
-    // the most-transferred post-quantum object there is.
     let kp_db = make_db();
     let (_, hybrid_kp) =
         build_key_package_in_suite(&PollisProvider::new(&kp_db), "alice", "alice_dev", CS_PQ)
@@ -2440,8 +2095,6 @@ fn pq_payloads_stay_under_their_ceilings() {
     );
     assert!(hybrid_kp.len() < 12_288, "hybrid KeyPackage: {} B", hybrid_kp.len());
 
-    // A Welcome carries the group secrets sealed to the joiner's init key —
-    // one hybrid encapsulation, plus the ratchet tree extension.
     let (wa, wb) = (make_db(), make_db());
     let welcome = welcome_for_suite(
         &PollisProvider::new(&wa),
@@ -2452,22 +2105,13 @@ fn pq_payloads_stay_under_their_ceilings() {
     crate::diag!("[test] hybrid Welcome (2 members): {} B", welcome.len());
     assert!(welcome.len() < 21_504, "hybrid Welcome: {} B", welcome.len());
 
-    // The commit is the payload that scales, so it is the one with a real
-    // ceiling. Measured in the state the fleet actually runs in — every leaf
-    // merged, because every member self-updates on join (#666).
+    // Measured with every leaf merged, as the fleet runs (#666).
     let (unmerged, merged) = commit_growth_probe(CS_PQ, 8, "01JT454CEILINGCOMMIT000000");
     crate::diag!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
     assert!(merged < 20_480, "hybrid commit at 8 members: {merged} B");
 }
 
-// ─── #680: commit-apply recovery classification + no-wedge Stop sites ─────────
-//
-// These tests are the regression harness for issue #680. Two properties are
-// pinned: (1) `apply_one_commit` classifies openmls failures by their real error
-// ENUMS (not `Display` strings that silently drift on an openmls bump), and (2)
-// none of the former `Stop` sites wedge a group that exists locally but can never
-// advance — every one turns into an explicit `Recover(reason)` and drops the
-// local group so the caller's external-rejoin backstop rebuilds it.
+// #680: `apply_one_commit` classifies openmls errors by enum, and no former `Stop` site wedges a group.
 
 use super::group_state::{
     apply_one_commit, build_external_commit, export_group_info_blob,
@@ -2478,20 +2122,12 @@ use openmls::prelude::group_info::VerifiableGroupInfo;
 /// The cross-signing material a device has when it can load none: an empty,
 /// unpinned directory, which verdicts every signer `Unverifiable`.
 ///
-/// Paired with `roster: None` that is the provenance of a device whose reads all
-/// failed, and it ADOPTS — the bias `invariants::lineage_adoption` exists to
-/// keep (cert rows that have not replicated must not strand a migration). So it
-/// is also the right default for every test that is about something OTHER than
-/// provenance: those keep exercising the path they were written for instead of
-/// tripping a gate they never meant to address.
+/// With `roster: None` it ADOPTS, so tests about something other than provenance do not trip that gate.
 fn no_identities() -> super::device::IdentityDirectory {
     super::device::IdentityDirectory::new(Vec::new())
 }
 
-/// Layer 1 — the pure classifier. One case per openmls error we classify, plus
-/// the load-bearing #680 guarantee: an UNRECOGNISED error recovers conservatively
-/// rather than wedging. `S = ()` — the classifier is generic over the provider's
-/// storage-error type and never inspects it.
+/// Layer 1, the pure classifier: an unrecognised error recovers rather than wedging (#680).
 mod commit_recovery_classification {
     use super::super::group_state::{classify_process_message_error, RecoverReason};
     use openmls::prelude::*;
@@ -2512,9 +2148,7 @@ mod commit_recovery_classification {
 
     #[test]
     fn own_commit_mismatch_maps_to_forked_tree() {
-        // The case the OLD "created by this client" string used to catch. It is
-        // now a typed `StageCommitError`, and it means our pending state diverged
-        // from what landed — rebuild, do NOT merge our stale pending.
+        // Our pending state diverged from what landed: rebuild, do NOT merge it.
         assert_eq!(
             classify(ProcessMessageError::InvalidCommit(
                 StageCommitError::OwnCommitMismatch
@@ -2565,18 +2199,13 @@ mod commit_recovery_classification {
 
     #[test]
     fn unrecognised_error_recovers_conservatively_never_wedges() {
-        // THE #680 guarantee. A storage error — and, by the same `_` arm, any
-        // future openmls variant this code has never seen — must still RECOVER,
-        // never wedge. When openmls reshapes its error surface, this is the arm
-        // that keeps a group live instead of silently stuck.
+        // THE #680 guarantee: any unrecognised error must recover, never wedge.
         assert_eq!(
             classify(ProcessMessageError::StorageError(())),
             RecoverReason::Unclassified
         );
     }
 }
-
-// ── layer-2 helpers: real MLS group manipulation via `apply_one_commit` ───────
 
 /// Load a member's stored MLS group (generation 0), or `None` if it was deleted.
 fn load_local_group(db: &rusqlite::Connection, conv: &str) -> Option<MlsGroup> {
@@ -2590,10 +2219,7 @@ fn member_epoch(db: &rusqlite::Connection, conv: &str) -> u64 {
     load_local_group(db, conv).expect("group must exist").epoch().as_u64()
 }
 
-/// This member's epoch authenticator — openmls's own "everyone has the same group
-/// state" fingerprint. Two members at the same epoch with equal authenticators
-/// hold identical group state (tree + transcript); it diverges the instant their
-/// trees do, which is exactly the convergence property #680 must preserve.
+/// This member's epoch authenticator: equal at the same epoch iff group state matches.
 fn member_auth(db: &rusqlite::Connection, conv: &str) -> Vec<u8> {
     load_local_group(db, conv)
         .expect("group must exist")
@@ -2602,9 +2228,7 @@ fn member_auth(db: &rusqlite::Connection, conv: &str) -> Vec<u8> {
         .to_vec()
 }
 
-/// Stage a member-add commit but do NOT merge it — the group is left holding a
-/// PENDING commit, exactly the state a committer is in between building its
-/// commit and adopting it. Returns `(commit_bytes, welcome_bytes)`.
+/// Stage a member-add commit without merging it. Returns `(commit_bytes, welcome_bytes)`.
 fn stage_add_without_merge(
     adder_db: &rusqlite::Connection,
     conv: &str,
@@ -2622,8 +2246,7 @@ fn stage_add_without_merge(
     )
 }
 
-/// Self-update and merge, advancing this member's own epoch by one. Returns the
-/// commit bytes other members would apply to follow.
+/// Self-update and merge; returns the commit bytes.
 fn self_update_and_merge(db: &rusqlite::Connection, conv: &str) -> Vec<u8> {
     let provider = PollisProvider::new(db);
     let (_epoch_before, commit_bytes, _gi) =
@@ -2640,11 +2263,7 @@ fn apply_one(db: &rusqlite::Connection, conv: &str, epoch: i64, commit_bytes: &[
     apply_one_commit(&provider, conv, 0, epoch, commit_bytes)
 }
 
-/// Build a two-member group (alice creator + bob via Welcome), both at epoch 1,
-/// and return a THIRD-party commit alice produced at epoch 1 (adding carol,
-/// merged on alice → alice at epoch 2) that bob, still at epoch 1, can apply.
-/// The returned `(commit, welcome)` is a genuine, valid commit — the failure
-/// tests corrupt or misuse it; the happy path applies it.
+/// Two-member group at epoch 1, plus a valid third-party commit alice made at epoch 1 for bob to apply.
 fn two_members_plus_valid_commit(
     conv: &str,
     alice_db: &rusqlite::Connection,
@@ -2664,15 +2283,13 @@ fn two_members_plus_valid_commit(
     (commit2, welcome2)
 }
 
-/// Site 1 (`MlsGroup::load` → `Ok(None)`): a member with NO local group must
-/// recover, not wedge. This is the arm at group_state.rs ~:1632.
+/// Site 1 (`MlsGroup::load` → `Ok(None)`): no local group must recover, not wedge.
 #[test]
 fn stop_site_group_missing_recovers() {
     let conv = "01JT680MISSINGGROUP0000000";
     let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
     let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
 
-    // A brand-new device with no group for this conversation.
     let empty_db = make_db();
     let outcome = apply_one(&empty_db, conv, 1, &commit2);
     assert!(
@@ -2682,37 +2299,30 @@ fn stop_site_group_missing_recovers() {
 }
 
 /// Site 2 (`MlsMessageIn::tls_deserialize` fails): corrupt / truncated commit
-/// bytes must recover, not wedge (group_state.rs ~:1644). Also proves the group
-/// is DELETED so the caller's rejoin has a clean slate, and that the member can
-/// then rejoin and apply the NEXT commit.
+/// bytes must recover, not wedge, deleting the group so the member can rejoin.
 #[test]
 fn stop_site_corrupt_commit_bytes_recovers_and_can_advance() {
     let conv = "01JT680CORRUPTBYTES000000A";
     let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
     let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
 
-    // Truncate the commit so it can't even deserialize.
     let truncated = &commit2[..commit2.len() / 2];
     let outcome = apply_one(&bob_db, conv, 1, truncated);
     assert!(
         matches!(outcome, CommitApply::Recover(RecoverReason::MalformedCommit)),
         "truncated commit bytes must recover, got {outcome:?}",
     );
-    // The wedge is converted to a recovery signal: the stale local group is gone.
     assert!(
         load_local_group(&bob_db, conv).is_none(),
         "recovery must delete the local group so the rejoin path rebuilds it",
     );
 
-    // …and recovery is REAL: bob external-joins alice's published GroupInfo and
-    // then applies alice's NEXT commit, decrypting a fresh message. This is the
-    // whole point of #680 — a group that could not advance is now advancing.
+    // …and recovery is real: rejoin, then apply alice's NEXT commit (#680).
     assert_rejoin_then_next_commit_works(&alice_db, &bob_db, conv);
 }
 
 /// Site 3 (`try_into_protocol_message` fails): bytes that deserialize as an MLS
-/// message but are NOT a protocol message (here, a Welcome) must recover, not
-/// wedge (group_state.rs ~:1651).
+/// message but are NOT a protocol message (here, a Welcome) must recover, not wedge.
 #[test]
 fn stop_site_non_protocol_message_recovers() {
     let conv = "01JT680NONPROTOMESSAGE0000";
@@ -2728,16 +2338,13 @@ fn stop_site_non_protocol_message_recovers() {
     assert!(load_local_group(&bob_db, conv).is_none(), "group must be deleted for rejoin");
 }
 
-/// The DoD's "a commit for an already-merged epoch": bob applies the commit, then
-/// is fed the SAME (now stale) commit again. openmls rejects it (`WrongEpoch`),
-/// which classifies as a forked/diverged tree and recovers — it must NOT wedge.
+/// A stale commit re-fed after it applied is `WrongEpoch`: recover, never wedge.
 #[test]
 fn already_merged_epoch_commit_recovers() {
     let conv = "01JT680ALREADYMERGED00000A";
     let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
     let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
 
-    // Bob applies commit2 normally: epoch 1 → 2.
     assert!(matches!(apply_one(&bob_db, conv, 1, &commit2), CommitApply::Applied { .. }));
     assert_eq!(member_epoch(&bob_db, conv), 2);
 
@@ -2749,34 +2356,21 @@ fn already_merged_epoch_commit_recovers() {
     );
 }
 
-/// The DoD's "a merge failure against a diverged local tree". Two members commit
-/// CONCURRENTLY at epoch 1 and each merges its own, so both sit at "epoch 2" over
-/// DIFFERENT trees. Alice then commits again (epoch 2 → 3) and bob is fed that
-/// epoch-2 commit: it passes the epoch-gap check (bob is at epoch 2) yet cannot
-/// apply against bob's diverged tree. On today's code that wedged; it must now
-/// recover.
+/// Two members commit concurrently at epoch 1 and diverge; bob is then fed alice's next commit, which must recover.
 ///
-/// Note on the merge site (group_state.rs ~:1660): at the pinned openmls rev a
-/// diverged tree is rejected during `process_message` (staging), classified as
-/// `ForkedTree`, before `merge_staged_commit` is reached — so this scenario and
-/// the `merge_staged_commit` arm share one recovery. The merge arm's own contract
-/// (return `Recover(MergeFailed)`, delete the group) is exercised by the code and
-/// covered structurally; a storage-level merge failure is not reproducible in an
-/// in-memory provider without corrupting storage.
+/// openmls rejects the diverged tree while staging (`ForkedTree`), before `merge_staged_commit`.
 #[test]
 fn diverged_tree_commit_recovers() {
     let conv = "01JT680DIVERGEDTREE00000AB";
     let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
     let (_commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
-    // Reset to a clean two-member group so the fork is unambiguous: rebuild.
     let conv = "01JT680DIVERGEDTREE00000CD";
     create_group(&alice_db, conv, "alice");
     let bob_kp = gen_key_package(&bob_db, "bob");
     let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
     join_via_welcome(&bob_db, &welcome1);
 
-    // Concurrent commits at epoch 1: alice and bob each self-update and merge
-    // their OWN, diverging onto distinct epoch-2 trees.
+    // Concurrent epoch-1 commits diverge onto distinct epoch-2 trees.
     let _alice_fork = self_update_and_merge(&alice_db, conv);
     let _bob_fork = self_update_and_merge(&bob_db, conv);
     assert_eq!(member_epoch(&alice_db, conv), 2);
@@ -2787,8 +2381,6 @@ fn diverged_tree_commit_recovers() {
         "the two members must have genuinely diverged trees"
     );
 
-    // Alice commits again (epoch 2 → 3). Feeding bob this epoch-2 commit passes
-    // the gap check but cannot apply against bob's diverged tree.
     let alice_next = self_update_and_merge(&alice_db, conv);
     let outcome = apply_one(&bob_db, conv, 2, &alice_next);
     assert!(
@@ -2798,17 +2390,7 @@ fn diverged_tree_commit_recovers() {
     assert!(load_local_group(&bob_db, conv).is_none(), "group must be deleted for rejoin");
 }
 
-/// The #411 own-commit replay, and the specific misclassification #680 fixes: at
-/// the pinned openmls rev, a committer's OWN commit fanned back to it is surfaced
-/// as CONTENT (an `Ok`) — `OwnPrivateMessage` for Pollis's PrivateMessage-framed
-/// handshake (or `OwnPendingCommit` if it were PublicMessage-framed) — NOT the OLD
-/// "created by this client" error string. The pre-#680 code only matched the
-/// string, so the own commit fell through UNMERGED — counted as applied, left a
-/// dangling pending commit, and the dangling-clear backstop then discarded the
-/// landed commit, stranding the committer at a phantom epoch. This asserts the
-/// fix: `apply_one_commit` MERGES the pending commit, the committer advances to
-/// the real epoch, and it CONVERGES with the members who applied the same commit —
-/// same epoch, same epoch-authenticator.
+/// #411/#680: openmls surfaces a committer's OWN replayed commit as `OwnPrivateMessage` content; `apply_one_commit` must merge the pending commit and converge.
 #[test]
 fn own_pending_commit_is_adopted_and_converges() {
     let conv = "01JT680OWNPENDINGCOMMIT000";
@@ -2819,9 +2401,7 @@ fn own_pending_commit_is_adopted_and_converges() {
     join_via_welcome(&bob_db, &welcome1);
     assert_eq!(member_epoch(&alice_db, conv), 1);
 
-    // Alice STAGES a commit adding carol but does NOT merge it — she holds a
-    // pending commit at epoch 1. This is exactly the #411 state after a lost
-    // success-response: the commit landed in the log, but alice never adopted it.
+    // Alice stages but does not merge: the #411 lost-response state.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (own_commit, welcome2) = stage_add_without_merge(&alice_db, conv, &carol_kp);
     assert_eq!(member_epoch(&alice_db, conv), 1, "alice still at epoch 1 (unmerged)");
@@ -2830,9 +2410,7 @@ fn own_pending_commit_is_adopted_and_converges() {
         "alice holds a pending commit",
     );
 
-    // Alice replays her OWN commit from the log. Pre-#680 this fell through
-    // unmerged; now it must be adopted (merge the pending commit) and count as
-    // applied.
+    // Replaying her own commit must adopt it.
     let outcome = apply_one(&alice_db, conv, 1, &own_commit);
     assert!(
         matches!(outcome, CommitApply::Applied { .. }),
@@ -2844,8 +2422,7 @@ fn own_pending_commit_is_adopted_and_converges() {
         "the pending commit must be merged, not left dangling",
     );
 
-    // Convergence: bob applies the same commit, carol joins via the Welcome, and
-    // all three land at the same epoch over the same tree.
+    // Bob applies it and carol joins: all three converge.
     apply_commit(&bob_db, conv, &own_commit);
     join_via_welcome(&carol_db, &welcome2);
     assert_eq!(member_epoch(&alice_db, conv), member_epoch(&bob_db, conv));
@@ -2854,7 +2431,6 @@ fn own_pending_commit_is_adopted_and_converges() {
     assert_eq!(a, member_auth(&bob_db, conv), "alice and bob trees must match");
     assert_eq!(a, member_auth(&carol_db, conv), "alice and carol trees must match");
 
-    // And the converged group works: alice encrypts, both others decrypt.
     let ct = try_mls_encrypt(&alice_db, conv, b"post-recovery").expect("encrypt");
     let (bob_pt, _) = try_mls_decrypt(&bob_db, conv, &ct).expect("bob decrypts");
     let (carol_pt, _) = try_mls_decrypt(&carol_db, conv, &ct).expect("carol decrypts");
@@ -2862,16 +2438,12 @@ fn own_pending_commit_is_adopted_and_converges() {
     assert_eq!(carol_pt, b"post-recovery");
 }
 
-/// After a Stop-site failure deleted `joiner`'s local group, prove recovery is
-/// real: the joiner external-joins `owner`'s published GroupInfo (the exact MLS
-/// primitive the production external-rejoin uses) and then applies `owner`'s NEXT
-/// commit, decrypting a fresh message. Panics on any failure.
+/// Prove recovery: external-join `owner`'s GroupInfo, then apply its NEXT commit and decrypt.
 fn assert_rejoin_then_next_commit_works(
     owner_db: &rusqlite::Connection,
     joiner_db: &rusqlite::Connection,
     conv: &str,
 ) {
-    // Owner publishes a GroupInfo at its current epoch.
     let gi_bytes = {
         let provider = PollisProvider::new(owner_db);
         export_group_info_blob(&provider, conv, 0).unwrap().expect("owner exports GroupInfo").1
@@ -2885,7 +2457,6 @@ fn assert_rejoin_then_next_commit_works(
         }
     };
 
-    // Joiner external-joins from the GroupInfo, producing an external commit.
     let identities = no_identities();
     let ext_commit = {
         let provider = PollisProvider::new(joiner_db);
@@ -2905,22 +2476,16 @@ fn assert_rejoin_then_next_commit_works(
         .expect("external join builds");
         commit
     };
-    // The joiner is now a fresh member — its rebuilt group exists again.
     assert!(load_local_group(joiner_db, conv).is_some(), "rejoin must rebuild the local group");
 
-    // Owner applies the joiner's external commit to converge onto the shared head.
     apply_commit(owner_db, conv, &ext_commit);
 
-    // Owner drives the NEXT commit; the rejoined member applies it and decrypts a
-    // fresh message — the group is advancing again.
     let next = self_update_and_merge(owner_db, conv);
     apply_commit(joiner_db, conv, &next);
     let ct = try_mls_encrypt(owner_db, conv, b"after recovery").expect("owner encrypts");
     let (pt, _) = try_mls_decrypt(joiner_db, conv, &ct).expect("rejoined member decrypts");
     assert_eq!(pt, b"after recovery", "the rejoined group must apply the next commit");
 }
-
-// ── #875: the shape of the decrypt hot path ──────────────────────────────────
 
 /// Build a two-member group and hand back both members' DBs.
 fn alice_and_bob(conv_id: &str) -> (rusqlite::Connection, rusqlite::Connection) {
@@ -2936,14 +2501,7 @@ fn alice_and_bob(conv_id: &str) -> (rusqlite::Connection, rusqlite::Connection) 
 /// #875 regression guard: a run of envelopes sealed at one epoch must cost ONE
 /// group load, not one per message.
 ///
-/// This is a GUARD, not a proof of correctness — `MlsDecryptor` is a pure
-/// optimisation and the tests that prove it decrypts the right bytes are the
-/// roundtrip tests above. What this pins is the SHAPE: before #875 every
-/// envelope re-read the entire group out of `mls_kv` (measured: 12 SELECTs + 1
-/// UPDATE per message), so a 200-message catch-up ran 2400 statements. The
-/// per-message floor is the one UPDATE openmls itself makes to persist the
-/// ratcheted secret tree — that write is forward secrecy and must never be
-/// optimised away, so it is asserted to still be there.
+/// A shape guard: before #875 each envelope reloaded the group; the one UPDATE per message persists the ratchet (forward secrecy) and must stay.
 #[test]
 fn a_run_of_envelopes_loads_the_group_once() {
     let conv_id = "01JTEST0000000000000000BAT";
@@ -2954,9 +2512,7 @@ fn a_run_of_envelopes_loads_the_group_once() {
         .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("m{i}").as_bytes()).unwrap())
         .collect();
 
-    // The first Pollis load of a group joined with openmls' default config
-    // widens its sender-ratchet window (#1526) — one join-config write, once
-    // per group. Do it outside the measurement, which is about steady state.
+    // Widen the sender-ratchet window (#1526) outside the measurement.
     drop(MlsDecryptor::open(&bob_db, conv_id).expect("group is stored"));
 
     let before = crate::signal::mls_storage::counters::snapshot();
@@ -2970,23 +2526,17 @@ fn a_run_of_envelopes_loads_the_group_once() {
     }
     let (reads, writes) = crate::signal::mls_storage::counters::since(before);
 
-    // One group load, whatever its internal read count, amortised over N
-    // messages — so reads must be far below the old 12-per-message. The bound is
-    // deliberately loose (openmls may add or drop a stored field); what it
-    // forbids is the per-message reload coming back.
+    // One amortised load, so reads stay far below the old 12 per message.
     assert!(
         reads < 2 * N as u64,
         "expected roughly one group load for the whole run, got {reads} reads for {N} messages \
          — the per-envelope group reload is back"
     );
-    // Exactly one secret-tree persist per message. Fewer would mean a consumed
-    // ratchet key survived a crash; more would mean redundant writes.
+    // Exactly one secret-tree persist per message.
     assert_eq!(writes, N as u64, "one message_secrets write per decrypt, no more and no fewer");
 }
 
-/// The same run driven one envelope at a time through the public
-/// [`try_mls_decrypt`] entry point still works — that path opens a decryptor per
-/// call, which is what every non-batched caller does.
+/// The same run through [`try_mls_decrypt`], one decryptor per call.
 #[test]
 fn single_shot_decrypt_still_works_and_costs_a_full_load() {
     let conv_id = "01JTEST0000000000000000SIN";
@@ -3007,10 +2557,7 @@ fn single_shot_decrypt_still_works_and_costs_a_full_load() {
 /// `cargo test -p pollis-core --no-default-features --features test-harness
 /// --lib measure_decrypt -- --nocapture`.
 ///
-/// The statement counts are exact and machine-independent; the timings are a
-/// DEBUG build against in-memory SQLite, so they understate the real gain — a
-/// production build reads through SQLCipher on disk, where a `mls_kv` SELECT
-/// costs far more relative to the crypto.
+/// Statement counts are exact; timings are a debug, in-memory build.
 #[test]
 fn measure_decrypt_statement_count() {
     let conv_id = "01JTEST0000000000000000MEA";
@@ -3046,31 +2593,17 @@ fn measure_decrypt_statement_count() {
     println!("PER-CALL : reads={reads2} writes={writes2} => per-message reads={:.1} time={percall_ms:.2}ms", reads2 as f64 / N as f64);
 }
 
-// ── #1161 C2 / H5 / H4: what a commit-log slot may carry, and what a merge
-//    grafted ─────────────────────────────────────────────────────────────────
-//
-// The DS does not parse commit bytes, so the commit log is an attacker-writable
-// channel in exactly the shape these three findings exploit: a row that is not a
-// commit at all (C2), a row that is one of OUR OWN envelopes replayed (H5), and
-// a commit that grafts a leaf without an Add proposal to read it off (H4).
+// #1161 C2 / H5 / H4: the commit log is attacker-writable, since the DS does not parse commit bytes.
 
 /// C2: a non-commit row must be damage, never a free advance.
 ///
-/// Pre-fix, `process_message` handed back `ApplicationMessage` content, the
-/// catch-all `_` arm logged "skipping", and the function still returned
-/// `Applied` — so the caller's replay counter advanced while the group's real
-/// epoch stood still. From then on every envelope is bucketed at the wrong
-/// epoch, fails to decrypt (`max_past_epochs = 0`), and `watermark.rs` marks it
-/// permanently handled: a fourth message-loss mode, where exactly three are
-/// sanctioned.
+/// Pre-fix it returned `Applied` while the epoch stood still, so later envelopes were lost.
 #[test]
 fn an_application_message_in_the_commit_log_is_damage_not_a_free_advance() {
     let conv = "01JT1161APPMSGINCOMMITSLOT";
     let (alice_db, bob_db) = alice_and_bob(conv);
     assert_eq!(member_epoch(&bob_db, conv), 1, "precondition: bob is at epoch 1");
 
-    // Any member can post this to the commit endpoint: it is a perfectly valid
-    // envelope, simply not a commit.
     let envelope = try_mls_encrypt(&alice_db, conv, b"not a commit").expect("alice seals");
 
     let outcome = apply_one(&bob_db, conv, 1, &envelope);
@@ -3083,10 +2616,7 @@ fn an_application_message_in_the_commit_log_is_damage_not_a_free_advance() {
 /// H5: one of our OWN envelopes, replayed into a commit slot, must not be
 /// mistaken for our own commit.
 ///
-/// openmls returns `OwnPrivateMessage` for ANY `PrivateMessage` whose sender leaf
-/// index is ours — the early return fires before the content is decrypted — so
-/// pre-fix this arm merged a staged commit the log had never accepted, landing
-/// the committer on a phantom epoch (#1079) that no other member shares.
+/// openmls returns `OwnPrivateMessage` for any `PrivateMessage` from our leaf index, so pre-fix this merged a staged commit the log never accepted (#1079).
 #[test]
 fn our_own_envelope_replayed_into_a_commit_slot_never_merges_a_staged_commit() {
     let conv = "01JT1161OWNENVELOPEREPLAY0";
@@ -3096,12 +2626,9 @@ fn our_own_envelope_replayed_into_a_commit_slot_never_merges_a_staged_commit() {
     let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
     join_via_welcome(&bob_db, &welcome1);
 
-    // An ordinary envelope alice sealed at epoch 1 — the bytes an attacker
-    // replays.
     let own_envelope = try_mls_encrypt(&alice_db, conv, b"lunch?").expect("alice seals");
 
-    // Alice then stages a commit adding carol and does NOT adopt it: the #411
-    // lost-response state, and the one in which the own-commit branch merges.
+    // Alice stages a commit and does not adopt it (#411).
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (_own_commit, _welcome2) = stage_add_without_merge(&alice_db, conv, &carol_kp);
     assert_eq!(member_epoch(&alice_db, conv), 1, "precondition: alice unmerged at epoch 1");
@@ -3113,9 +2640,7 @@ fn our_own_envelope_replayed_into_a_commit_slot_never_merges_a_staged_commit() {
     );
 }
 
-/// C2's second half: `Applied` reports the epoch the group ACTUALLY reached, so
-/// the caller can check the equality its watermark safety rests on rather than
-/// assume it.
+/// C2's second half: `Applied` reports the epoch the group actually reached.
 #[test]
 fn applied_reports_the_epoch_the_group_actually_reached() {
     let conv = "01JT1161APPLIEDEPOCHREADS0";
@@ -3138,19 +2663,13 @@ fn applied_reports_the_epoch_the_group_actually_reached() {
 /// H4: a leaf grafted by an EXTERNAL JOIN is reported for cross-signing exactly
 /// like one an Add proposal introduced.
 ///
-/// An external commit carries no Add — the joiner's leaf arrives in the
-/// UpdatePath — so the pre-fix check, which read the staged commit's Add
-/// proposals, returned an empty list and the leaf was never verdicted, never
-/// flagged, and never triggered the eviction reconcile. That is the whole
-/// defence `external_join_group`'s own doc names for admitting unverified
-/// external joins.
+/// An external commit carries no Add, so pre-fix the leaf was never verdicted.
 #[test]
 fn an_externally_joined_leaf_is_reported_for_cross_signing() {
     let conv = "01JT1161EXTERNALJOINLEAF00";
     let (alice_db, bob_db) = alice_and_bob(conv);
     let carol_db = make_db();
 
-    // Alice publishes GroupInfo at epoch 1; carol external-joins off it.
     let gi_bytes = {
         let provider = PollisProvider::new(&alice_db);
         export_group_info_blob(&provider, conv, 0).unwrap().expect("GroupInfo").1
@@ -3182,7 +2701,6 @@ fn an_externally_joined_leaf_is_reported_for_cross_signing() {
         .0
     };
 
-    // Bob replays it from the log, exactly as the DS serves it.
     match apply_one(&bob_db, conv, 1, &ext_commit) {
         CommitApply::Applied { adds, .. } => {
             assert_eq!(
@@ -3201,24 +2719,17 @@ fn an_externally_joined_leaf_is_reported_for_cross_signing() {
 /// #1161 M7: two leaves claiming ONE `(user, device)` must not be
 /// unrepresentable in reconcile's model while being representable in the tree.
 ///
-/// openmls rejects duplicate signature and encryption keys but NOT duplicate
-/// CREDENTIALS, so a second leaf can carry the same `"user:device"` as a real
-/// member. Keyed on the credential, reconcile's `actual` map silently kept one
-/// index, so the removal set could only ever name one of them and the shadowed
-/// leaf survived every reconcile — the step that turns a grafted leaf into a
-/// permanent one.
+/// openmls rejects duplicate keys but not duplicate CREDENTIALS, so reconcile must track every leaf index.
 #[test]
 fn a_duplicate_credential_leaf_is_evicted_rather_than_shadowed() {
     let conv = "01JT1161DUPLICATELEAF00000";
     let (alice_db, bob_db, rogue_db) = (make_db(), make_db(), make_db());
     create_group(&alice_db, conv, "alice");
 
-    // Bob's genuine device joins.
     let bob_kp = gen_key_package(&bob_db, "bob");
     let (_c1, _w1) = add_member_to_group(&alice_db, conv, &bob_kp);
 
-    // A second leaf claiming the SAME "bob:bob_dev" credential, with its own
-    // signature key — the shape openmls permits.
+    // A second leaf with the same credential and its own key.
     let rogue_kp = gen_key_package(&rogue_db, "bob");
     let (_c2, _w2) = add_member_to_group(&alice_db, conv, &rogue_kp);
 
@@ -3238,7 +2749,6 @@ fn a_duplicate_credential_leaf_is_evicted_rather_than_shadowed() {
         "precondition: the tree holds two leaves claiming one device — {claims:?}"
     );
 
-    // A declarative reconcile against the honest roster.
     let (outcome, data) = reconcile(
         &alice_db,
         conv,
@@ -3275,11 +2785,7 @@ fn a_duplicate_credential_leaf_is_evicted_rather_than_shadowed() {
     );
 }
 
-/// The other half of M7: with the duplicate in the tree, removing that user from
-/// the roster must take BOTH leaves. Pre-fix the removal set could name only the
-/// index the map happened to hold, so the shadowed leaf kept its place — and its
-/// copy of the group's key schedule — through the very reconcile that was
-/// supposed to evict the user.
+/// The other half of M7: removing that user takes BOTH leaves.
 #[test]
 fn removing_a_user_takes_every_leaf_claiming_their_device() {
     let conv = "01JT1161DUPLICATEREMOVE000";
@@ -3290,7 +2796,6 @@ fn removing_a_user_takes_every_leaf_claiming_their_device() {
     let rogue_kp = gen_key_package(&rogue_db, "bob");
     let (_c2, _w2) = add_member_to_group(&alice_db, conv, &rogue_kp);
 
-    // Bob leaves the roster entirely.
     let (_outcome, data) = reconcile(
         &alice_db,
         conv,
@@ -3311,18 +2816,12 @@ fn removing_a_user_takes_every_leaf_claiming_their_device() {
 
 /// #1161 M6: an external join must refuse a GroupInfo for a different group.
 ///
-/// The blob comes from the DS, while everything downstream of the join — which
-/// local group is deleted, which lineage the join is recorded under, which
-/// conversation this device then seals messages for — is keyed on the
-/// `(conversation_id, generation)` the caller asked for. Unchecked, a
-/// substituted GroupInfo made the device destroy one group's state and join a
-/// group of the server's choosing under that group's name.
+/// The GroupInfo comes from the DS, so a substituted one could destroy a group and join another under its name.
 #[test]
 fn an_external_join_refuses_a_group_info_for_another_group() {
     let target = "01JT1161EXTJOINPINTARGET00";
     let elsewhere = "01JT1161EXTJOINPINELSEWHR0";
 
-    // A real group the joiner is NOT trying to join, and its GroupInfo.
     let (alice_db, _bob_db) = alice_and_bob(elsewhere);
     let gi_bytes = {
         let provider = PollisProvider::new(&alice_db);
@@ -3336,8 +2835,7 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
         }
     };
 
-    // Carol holds a working local group for the conversation she MEANT to
-    // rejoin, and is handed the wrong lineage's GroupInfo for it.
+    // Carol holds the group she meant to rejoin and is handed the wrong GroupInfo.
     let carol_db = make_db();
     create_group(&carol_db, target, "carol");
     let epoch_before = member_epoch(&carol_db, target);
@@ -3363,8 +2861,7 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
         "the refusal must name the mismatch, got {err}"
     );
 
-    // And the refusal costs nothing: the local group it would have replaced is
-    // untouched.
+    // The refusal leaves her local group untouched.
     assert_eq!(
         member_epoch(&carol_db, target),
         epoch_before,
@@ -3372,16 +2869,7 @@ fn an_external_join_refuses_a_group_info_for_another_group() {
     );
 }
 
-// ── #1161 M6 residual: who is allowed to have BUILT the lineage we adopt ─────
-//
-// The GroupId pin above fixes the lineage's NAME. A GroupId is not a capability
-// — every test in this section creates a group with an arbitrary one, which is
-// the whole point — so a hostile or compromised Delivery Service can stand up
-// its own MLS group under the successor's name, publish its GroupInfo as the
-// conversation's newest lineage, and answer `head_generation = N+1`.
-// `maybe_advance_generation` reads that head as proof a successor exists,
-// external-joins it, and `adopt_generation_locked` then deletes the
-// predecessor's key material. These tests are the gate that stops it.
+// #1161 M6 residual: a GroupId is not a capability, so a hostile DS could build its own successor lineage; these tests gate adoption.
 
 use super::device::{IdentityDirectory, LeafVerdict};
 
@@ -3400,9 +2888,7 @@ fn leaf_signature_key(db: &rusqlite::Connection, conv: &str, user_id: &str) -> V
 /// A pinned directory in which `(user_id, device_id)` is certified — by a real
 /// account key, over a real v2 device cert — as holding `pq_pub`.
 ///
-/// `pq_pub` is the caller's choice on purpose: pass the honest leaf's key and a
-/// leaf presenting any OTHER key verdicts `Uncertified`, which is precisely the
-/// forged-lineage case.
+/// Pass the honest leaf's key; any OTHER key verdicts `Uncertified`.
 fn directory_certifying(user_id: &str, device_id: &str, pq_pub: &[u8]) -> IdentityDirectory {
     use crate::commands::account_identity::{device_cert_signed_payload, AccountSigningKey};
     use base64::Engine as _;
@@ -3471,16 +2957,9 @@ fn published_group_info(
     }
 }
 
-/// The attack in full: a group the DS built itself, under the successor
-/// lineage's exact name, whose GroupInfo is signed by a leaf that CLAIMS a real
-/// roster member's real device but holds a signature key that member's account
-/// key never certified.
+/// The attack: a DS-built group under the successor's name, signed by a leaf whose key the claimed member never certified.
 ///
-/// Everything the #1166 gates look at checks out — the GroupId is exactly
-/// `mls_group_id(conversation_id, generation)`, the roster lists the claimed
-/// signer, and the DS (which answers `may_rejoin_via_external_join`) says the
-/// joiner may rejoin. The only thing that does not is the cross-signing chain,
-/// which is rooted in an account identity key the DS does not hold.
+/// Every #1166 gate passes; only the cross-signing chain, rooted in a key the DS lacks, does not.
 #[test]
 fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
     let conv = "01JT1167FORGEDLINEAGE00000";
@@ -3511,7 +2990,6 @@ fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
         "precondition: the forgery passes the #1166 GroupId pin — that is the gap"
     );
 
-    // Carol, a member being advanced onto the "successor", refuses it.
     let carol_db = make_db();
     let roster: std::collections::HashSet<String> =
         ["alice".to_string(), "carol".to_string()].into_iter().collect();
@@ -3535,8 +3013,7 @@ fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
         "the refusal must name the provenance failure, got {err}"
     );
 
-    // And nothing was adopted: no local group exists on the forged lineage, so
-    // `adopt_generation_locked` never gets the chance to delete the predecessor.
+    // Nothing was adopted, so the predecessor survives.
     assert!(
         MlsGroup::load(
             PollisProvider::new(&carol_db).storage(),
@@ -3551,9 +3028,7 @@ fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
 /// The second shape of the same attack: the DS does not bother claiming a
 /// member's identity and signs with a leaf of its own invention.
 ///
-/// The cross-signing chain cannot speak to a user it has never heard of, so the
-/// verdict here is `Unverifiable` — which alone must NOT refuse. What refuses is
-/// the roster: the signer is demonstrably not a member of this conversation.
+/// `Unverifiable` alone must NOT refuse; the roster does, since the signer is not a member.
 #[test]
 fn an_external_join_refuses_a_lineage_signed_from_outside_the_roster() {
     let conv = "01JT1167OFFROSTERSIGNER000";
@@ -3593,18 +3068,12 @@ fn an_external_join_refuses_a_lineage_signed_from_outside_the_roster() {
 /// The failure bias, end to end: a LEGITIMATE migration whose signer cannot be
 /// verified still goes through.
 ///
-/// Alice really did found the successor; her cert columns simply have not been
-/// published (or replicated) yet, so the directory answers `Unverifiable`. That
-/// is a race, not evidence, and refusing on it would leave real users unable to
-/// follow their conversation onto its successor lineage — a worse outcome than
-/// the attack above. Mirrors the eviction rule: only a positive `Uncertified`
-/// acts.
+/// Missing certs are a race, not evidence; only a positive `Uncertified` acts.
 #[test]
 fn a_legitimate_migration_survives_an_unverifiable_signer() {
     let conv = "01JT1167UNVERIFIABLESIGNER";
     let alice_device = test_device_id("alice");
 
-    // Alice founds the successor lineage herself — an honest migration.
     let alice_db = make_db();
     {
         let provider = PollisProvider::new(&alice_db);
@@ -3674,8 +3143,6 @@ fn a_migration_survives_a_device_that_could_read_neither_roster_nor_certs() {
     .expect("a device that could read nothing must still recover");
 }
 
-// ── #1161 C1 (client half): what a Welcome is allowed to destroy ─────────────
-
 use super::welcomes::join_from_welcome;
 
 /// Extract the inner `Welcome` from serialised Welcome bytes.
@@ -3690,11 +3157,7 @@ fn welcome_from_bytes(welcome_bytes: &[u8]) -> Welcome {
 /// C1: a Welcome at or below our current epoch must never replace the group we
 /// already hold.
 ///
-/// The GroupId lives inside the blob, so it names which of THIS device's groups
-/// gets deleted — and anyone who can claim one of our published KeyPackages can
-/// stand up a group whose GroupId is a conversation we are already in and send us
-/// a Welcome for it. The delete used to be unconditional, so that blob evicted a
-/// working group and replaced it with the attacker's.
+/// The GroupId inside the blob names which of our groups is deleted, so an attacker could evict a working group.
 #[test]
 fn a_foreign_welcome_never_replaces_a_group_we_have_carried_past_it() {
     let conv = "01JT1161WELCOMECLOBBER0000";
@@ -3704,15 +3167,13 @@ fn a_foreign_welcome_never_replaces_a_group_we_have_carried_past_it() {
     let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
     join_via_welcome(&bob_db, &welcome1);
 
-    // Bob's group moves on: alice adds carol at epoch 1 and bob applies it.
     let carol_kp = gen_key_package(&carol_db, "carol");
     let (commit2, _welcome2) = add_member_to_group(&alice_db, conv, &carol_kp);
     apply_commit(&bob_db, conv, &commit2);
     assert_eq!(member_epoch(&bob_db, conv), 2, "precondition: bob is at epoch 2");
     let authenticator_before = member_auth(&bob_db, conv);
 
-    // Mallory stands up her own group under the SAME GroupId and welcomes bob
-    // into it off a freshly-claimed KeyPackage.
+    // Mallory welcomes bob into her own group under the SAME GroupId.
     let mallory_db = make_db();
     create_group(&mallory_db, conv, "mallory");
     let bob_kp2 = gen_key_package(&bob_db, "bob");
@@ -3736,7 +3197,6 @@ fn a_foreign_welcome_never_replaces_a_group_we_have_carried_past_it() {
         authenticator_before,
         "…and survive it unchanged, not be rebuilt from the blob"
     );
-    // The tree is still the real one: alice and carol are in it, mallory is not.
     let members: Vec<String> = load_local_group(&bob_db, conv)
         .unwrap()
         .members()
@@ -3773,8 +3233,7 @@ fn a_welcome_whose_group_id_disagrees_with_its_row_is_refused() {
     );
 }
 
-/// …and the same guard passes a Welcome that agrees with its row, so it refuses
-/// a mismatch rather than refusing Welcomes.
+/// …and passes a Welcome that agrees with its row.
 #[test]
 fn a_welcome_matching_its_row_still_joins() {
     let conv = "01JT1161WELCOMEROWMATCHES0";
@@ -3790,12 +3249,7 @@ fn a_welcome_matching_its_row_still_joins() {
     assert_eq!(member_epoch(&bob_db, conv), 1);
 }
 
-// ── Decrypt failure reasons (#1520) ──────────────────────────────────────────
-
-/// A ciphertext opened twice: the second open finds the generation's key
-/// already consumed, and says so — the openmls `SecretReuseError` the ingest
-/// used to drop. This is the shape a sender reusing a ratchet generation, or
-/// this device consuming a key without storing the row, takes in the logs.
+/// A ciphertext opened twice reports `SecretReuseError` (the key is already consumed).
 #[test]
 fn a_replayed_ciphertext_fails_as_secret_reuse() {
     let conv_id = "01JT1520REPLAYEDCIPHERTEXT";
@@ -3810,8 +3264,7 @@ fn a_replayed_ciphertext_fails_as_secret_reuse() {
     assert!(why.to_string().starts_with("secret reuse ("), "got {why}");
     drop(decryptor);
 
-    // The single-shot path reports the same reason across a fresh group load,
-    // so the consumed key really was persisted.
+    // Same reason after a fresh load, so the consumed key was persisted.
     let again = try_mls_decrypt_why(&bob_db, conv_id, &ct).expect_err("still consumed");
     assert_eq!(again.kind, DecryptFailureKind::SecretReuse);
 }
@@ -3826,7 +3279,6 @@ fn a_foreign_lineage_and_a_foreign_group_are_named() {
     create_group(&alice_db, conv_id, "alice");
     let ct_gen0 = try_mls_encrypt(&alice_db, conv_id, b"old lineage").unwrap();
 
-    // Bob holds only the successor lineage of the same conversation.
     let bob_db = make_db();
     {
         let provider = PollisProvider::new(&bob_db);
@@ -3858,8 +3310,7 @@ fn a_foreign_lineage_and_a_foreign_group_are_named() {
     assert_eq!(why.kind, DecryptFailureKind::WrongGroup, "got {why}");
 }
 
-/// Bytes that are not an MLS message at all fail at the parse step; a real
-/// header over a tampered body fails at AEAD; no group at all is its own reason.
+/// Non-MLS bytes fail at parse, a tampered body at AEAD; no group is its own reason.
 #[test]
 fn a_garbled_body_fails_at_parse_and_a_tampered_one_at_aead() {
     let conv_id = "01JT1520GARBLEDBODY0000000";
@@ -3881,11 +3332,7 @@ fn a_garbled_body_fails_at_parse_and_a_tampered_one_at_aead() {
     assert_eq!(why.to_string(), "no local group");
 }
 
-// ── Sender-ratchet window (#1526) ────────────────────────────────────────────
-
-/// Alice creates a group and adds Bob, who joins with openmls' DEFAULT join
-/// config — the window of 5 every group stored before #1526 carries. Returns
-/// the two databases.
+/// Bob joins alice's group with openmls' DEFAULT (pre-#1526) window of 5.
 fn alice_and_bob_with_default_window(conv_id: &str) -> (rusqlite::Connection, rusqlite::Connection) {
     let alice_db = make_db();
     let bob_db = make_db();
@@ -3918,8 +3365,7 @@ fn alice_and_bob_with_default_window(conv_id: &str) -> (rusqlite::Connection, ru
     (alice_db, bob_db)
 }
 
-/// Bob's stored window, read with openmls directly (no Pollis loader, so no
-/// upgrade on the way).
+/// Bob's stored window, read without the Pollis loader's upgrade.
 fn stored_window(db: &rusqlite::Connection, conv_id: &str) -> u32 {
     let provider = PollisProvider::new(db);
     MlsGroup::load(provider.storage(), &GroupId::from_slice(conv_id.as_bytes()))
@@ -3930,8 +3376,7 @@ fn stored_window(db: &rusqlite::Connection, conv_id: &str) -> u32 {
         .out_of_order_tolerance()
 }
 
-/// The control: under openmls' default window, a message 50 generations behind
-/// the newest one opened from that sender is gone for good.
+/// Control: under the default window, a message 50 generations behind is lost.
 #[test]
 fn the_default_window_loses_a_message_fifty_generations_behind() {
     let conv_id = "01JTEST0000000000000WIN05";
@@ -3956,8 +3401,7 @@ fn the_default_window_loses_a_message_fifty_generations_behind() {
     );
 }
 
-/// The backstop: the same reorder through the Pollis decrypt path opens every
-/// message — the stored default window is widened on load.
+/// Through the Pollis decrypt path the stored window is widened, so all open.
 #[test]
 fn a_message_fifty_generations_behind_still_opens() {
     let conv_id = "01JTEST0000000000000WIN99";
@@ -3979,9 +3423,7 @@ fn a_message_fifty_generations_behind_still_opens() {
     assert_eq!(why.kind, DecryptFailureKind::SecretReuse);
 }
 
-/// A group stored with openmls' default window is upgraded the first time
-/// Pollis loads it, and the upgrade is written, not just applied in memory.
-/// The rest of the stored config survives it.
+/// A default-window group is upgraded and written on first Pollis load; the rest of the config survives.
 #[test]
 fn a_group_stored_with_the_default_window_is_upgraded_on_load() {
     let conv_id = "01JTEST0000000000000WINUP";
@@ -4008,8 +3450,7 @@ fn a_group_stored_with_the_default_window_is_upgraded_on_load() {
 
 }
 
-/// Every group this device creates starts with the wide window — stored, not
-/// only applied on load.
+/// New groups store the wide window.
 #[test]
 fn a_created_group_starts_with_the_wide_window() {
     let conv_id = "01JTEST0000000000000WINNEW";
@@ -4026,8 +3467,6 @@ fn a_created_group_starts_with_the_wide_window() {
         super::provider::OUT_OF_ORDER_TOLERANCE
     );
 }
-
-// ── #1571: the last-resort KeyPackage survives the joins it admits ───────────
 
 /// Add bob to `conversation_id` (a fresh group of alice's) with `kp_bytes`, and
 /// return the Welcome as bob receives it.
@@ -4056,13 +3495,7 @@ where
     }
 }
 
-/// The DS hands the same last-resort package to every committer that finds the
-/// device's pool empty, so the device must be able to join through it again and
-/// again. That holds only if its private key outlives the first join: openmls
-/// skips the delete for a package carrying the LastResort extension, and our
-/// storage (`signal::mls_storage`) must not drop it either. A regular package is
-/// the control: its key is spent by the first join, so a second Welcome to it
-/// cannot be opened.
+/// The DS reuses the last-resort package, so its private key must outlive the first join; a regular package is the control.
 #[test]
 fn a_last_resort_key_package_admits_the_device_to_more_than_one_group() {
     let alice_db = make_db();

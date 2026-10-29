@@ -1,14 +1,7 @@
 //! Command-line arguments (#1337).
 //!
-//! Parsed BEFORE anything else in `main` — before `Config::from_env`, before
-//! the terminal check — so `pollis --help` and `pollis --version` answer with no
-//! TTY and no environment at all. A dev build without its env used to be unable
-//! to print help (`missing env var: R2_S3_ENDPOINT`), and every argument was
-//! silently ignored.
-//!
-//! Pure and hand-rolled: three flags do not justify an argument-parser
-//! dependency, and keeping it a function of an iterator is what lets the unit
-//! tests below pin it.
+//! Parsed before anything else, so `--help` and `--version` need no TTY or env. Hand-rolled and
+//! pure, so it is unit-testable.
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq, Eq)]
@@ -30,8 +23,7 @@ where
     S: AsRef<str>,
 {
     let args: Vec<S> = args.into_iter().collect();
-    // Help wins over everything, the way most tools behave: `pollis --bogus -h`
-    // is someone asking how to use it.
+    // Help wins over everything: `pollis --bogus -h` is asking how to use it.
     if args
         .iter()
         .any(|a| matches!(a.as_ref(), "-h" | "--help" | "help"))
@@ -82,9 +74,7 @@ Docs: https://pollis.com",
 }
 
 /// The message for running the interactive client without a terminal on both
-/// ends. `pollis` draws a full-screen UI and reads raw keystrokes; with stdin or
-/// stdout redirected it used to exit 1 with nothing on screen, the reason
-/// (`entering raw mode: Device not configured`) only in the log.
+/// ends; `pollis` draws a full-screen UI and reads raw keystrokes.
 pub fn not_a_terminal_text(stdin_tty: bool, stdout_tty: bool) -> String {
     let which = match (stdin_tty, stdout_tty) {
         (false, false) => "stdin and stdout are",
@@ -115,7 +105,6 @@ mod tests {
         for flag in ["-V", "--version", "version"] {
             assert_eq!(parse([flag]), Command::Version, "{flag}");
         }
-        // Help anywhere on the line is a request for help.
         assert_eq!(parse(["--bogus", "--help"]), Command::Help);
     }
 
@@ -128,7 +117,6 @@ mod tests {
             }
             other => panic!("expected Invalid, got {other:?}"),
         }
-        // A flag that is valid alone is not silently accepted with extras.
         assert!(matches!(parse(["--version", "x"]), Command::Invalid(_)));
     }
 

@@ -1,7 +1,6 @@
 //! Dev-DS peer for the mobile Maestro `composing` two-client flow (#1507).
 //!
-//! A message that lands in the open conversation while the phone's user is
-//! typing must leave the composer where it was: above the keyboard. This peer
+//! A message landing while the user types must leave the composer above the keyboard. This peer
 //! signs up a fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev
 //! DS — it fixes the OTP), prints its handle, accepts the phone's invite to
 //! its group, posts more than a screen of lines into the group's text channel
@@ -67,7 +66,6 @@ async fn main() -> Result<()> {
     pollis_tui::auth::set_pin_and_init(&state, &me.id, "0000").await?;
     println!("PEER_HANDLE={}", me.username);
 
-    // The phone invites us to its group.
     let started = Instant::now();
     loop {
         if let Some(inv) = groups::get_pending_invites(me.id.clone(), &state).await?.into_iter().next() {
@@ -81,8 +79,7 @@ async fn main() -> Result<()> {
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    // The group's first text channel. The welcome can trail the accept, so
-    // retry the first send until the channel is ready.
+    // The welcome can trail the accept, so retry the first send.
     let channel_id = loop {
         let gs = groups::list_user_groups_with_channels(me.id.clone(), &state).await?;
         if let Some(ch) = gs.iter().flat_map(|g| g.channels.iter()).find(|c| c.channel_type == "text") {
@@ -106,8 +103,7 @@ async fn main() -> Result<()> {
             }
         }
     }
-    // More than a screen of history, so the list scrolls like a real
-    // conversation's rather than sitting short under the header.
+    // More than a screen of history, so the list scrolls.
     for n in 1..=HISTORY {
         send(&state, &me.id, &me.username, &channel_id, &format!("peer history {n}")).await?;
     }

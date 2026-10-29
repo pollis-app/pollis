@@ -27,12 +27,7 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useTheme } from "../../components/theme";
 
-/**
- * Slack-style thread screen (#831): the root message pinned at the top,
- * replies chronologically below, own composer sending with `threadId`.
- * Pushed with its own route state, so thread drafts and lists are isolated
- * per thread and per conversation (#837).
- */
+/** Slack-style thread screen (#831); state is isolated per thread (#837). */
 function ThreadScreen() {
   const { accentHex } = useTheme();
   const router = useNav();
@@ -54,8 +49,7 @@ function ThreadScreen() {
   const listRef = useRef<FlatList<Message>>(null);
   const currentUser = appStore.currentUser;
 
-  // The conversation cache holds the root (roots are ordinary messages;
-  // `read_thread_messages` returns only the replies).
+  // The root comes from the conversation cache; `read_thread_messages` returns only replies.
   const { data: conversationData } = useMessages(conversationId, kind);
   const root = useMemo(
     () => flattenPages(conversationData).find((m) => m.id === threadId) ?? null,
@@ -68,8 +62,6 @@ function ThreadScreen() {
   const retryMessage = useRetryMessage(conversationId, kind, threadId);
   const discardUnsent = useDiscardUnsent(conversationId, kind, threadId);
 
-  // Mentions (#886) — same roster-only pool as the parent conversation.
-  // Channels resolve the group from the store (set when the channel opened).
   const mentionGroupId =
     kind === "channel" ? appStore.selectedGroupId ?? null : null;
   const mentionCandidates = useMentionCandidates(
@@ -98,7 +90,6 @@ function ThreadScreen() {
     sendMessage.mutate({ content: text, threadId });
   };
 
-  // Keep the newest reply in view as the thread grows.
   const newestId = replies[replies.length - 1]?.id;
   useEffect(() => {
     if (!newestId) {
@@ -111,13 +102,11 @@ function ThreadScreen() {
 
   const renderRow = useCallback(
     ({ item: m, index }: { item: Message; index: number }) => {
-      // Same sender again within the window hangs under the previous reply.
       const prev = index > 0 ? replies[index - 1] : null;
       const continued =
         !!prev &&
         prev.sender_id === m.sender_id &&
         m.created_at - prev.created_at < GROUP_WINDOW_MS;
-      // A failed send (#1335) offers Retry when the core stored it.
       const retryId = retryTarget(m);
       const mine = currentUser?.id === m.sender_id;
       const name =
@@ -233,7 +222,6 @@ function ThreadScreen() {
         data={replies}
         keyExtractor={(m) => m.id}
         renderItem={renderRow}
-        // `renderRow` is memoised: re-render the rows on a palette change.
         extraData={accentHex}
         ListHeaderComponent={header}
         style={{ flex: 1 }}

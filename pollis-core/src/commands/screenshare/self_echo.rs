@@ -1,24 +1,10 @@
 //! Keeping the call out of the shared audio.
 //!
-//! Sharing "computer sound" means capturing what the machine is playing.
-//! On Linux that is the default sink's monitor — and the call itself is
-//! playing into that sink, so a naive capture re-publishes every remote
-//! participant's voice back to them a few hundred milliseconds late. That
-//! is the single worst failure mode this feature has, and it is not a
-//! quality nit: it makes a call unusable for everyone but the sharer.
+//! On Linux the sink monitor contains the call, so capture would re-publish it.
 //!
-//! macOS and Windows solve it at the OS: ScreenCaptureKit takes
-//! `excludesCurrentProcessAudio`, and WASAPI takes a process-loopback
-//! activation that excludes our own process tree. **Neither has an
-//! equivalent on the PipeWire monitor path**, which is a mix — by the
-//! time we see it, our contribution is already summed in and cannot be
-//! filtered out by source.
+//! macOS/Windows exclude our process at the OS; PipeWire's monitor can't.
 //!
-//! But it can be *subtracted*, because we are the ones who put it there.
-//! `voice::playback`'s mixer produces the exact mono signal that goes to
-//! the speaker, at a known 10 ms cadence. Feeding that to an echo
-//! canceller as the render reference and running the captured loopback
-//! through it as the capture stream removes the call from the share:
+//! So we subtract it: the voice mixer's output is the AEC render reference.
 //!
 //! ```text
 //!   voice mixer 10 ms mix ──→ analyze_render ─┐
@@ -26,21 +12,7 @@
 //!   sink-monitor loopback ──→ run_capture ────┘           shared audio
 //! ```
 //!
-//! Two things make this converge far better than the mic-side AEC it
-//! borrows: the echo path is a pure digital loopback, so it is linear and
-//! time-invariant with no room, no speaker distortion and no clock drift
-//! between reference and capture; and the reference is bit-exact rather
-//! than an estimate of what a speaker radiated.
-//!
-//! **AEC only — every other APM stage is off.** Noise suppression and AGC
-//! are tuned for speech and would audibly wreck music, which is most of
-//! what anyone shares audio for. The high-pass filter would strip the bass
-//! for the same reason.
-//!
-//! Not needed, and deliberately not engaged, where the OS already excludes
-//! us: [`SelfEchoCanceller::new`] is only called on the Linux capture path.
-//! On Windows it would be inert anyway — `webrtc-audio-processing` has no
-//! MSVC build, so `voice_apm`'s processor is a stub there.
+//! AEC only: NS/AGC/HPF would wreck music.
 
 use std::sync::{Arc, Mutex};
 
@@ -50,35 +22,18 @@ use super::audio::{SharedAudioResampler, SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDI
 
 /// The slot the voice mixer publishes its render reference into.
 ///
-/// Lives on `VoiceState` rather than in screenshare state because the
-/// mixer task outlives any individual share and is rebuilt on an
-/// output-device switch: both sides hold the same `Arc`, so a share that
-/// starts after the mixer, or survives a device switch, still gets its
-/// reference. `None` means no share is capturing system audio and the
-/// mixer's per-tick cost is one uncontended lock and a null check.
+/// On `VoiceState` so it outlives shares and mixer rebuilds.
 pub type SelfEchoSlot = Arc<Mutex<Option<RenderTap>>>;
 
-/// What an armed slot holds: the canceller's processor handle plus the
-/// resampler that carries an off-rate reference's partial frames across
-/// mixer ticks. The resampler must live here and not per call — one 10 ms
-/// block can never complete a whole 48 kHz frame on its own (the
-/// interpolator holds back the last input sample until its successor
-/// arrives), so a per-call resampler emits nothing, ever, and the
-/// canceller silently runs without a reference.
+/// Armed slot: the processor plus a resampler that must persist across ticks.
 pub struct RenderTap {
     processor: Arc<Processor>,
     resampler: SharedAudioResampler,
 }
 
-/// Feed the mixer's 10 ms mono frame to the shared-audio echo canceller,
-/// if one is armed. Called from the voice mixer's hot loop; resampling to
-/// the canceller's 48 kHz happens here so the mixer stays rate-agnostic.
+/// Feed the mixer's 10 ms mono frame to the armed canceller, at 48 kHz.
 ///
-/// `mix_rate` is the voice pipeline's APM rate, which tracks the mic
-/// device and is 48 kHz in every case but a Bluetooth headset stuck in
-/// SCO. Nothing here fails loudly: a render frame the canceller cannot use
-/// is dropped, and the worst outcome is that the call leaks back into the
-/// shared audio — the same place we would be without this module.
+/// Never fails loudly: an unusable frame is dropped.
 pub fn analyze_render(slot: &SelfEchoSlot, mix: &[f32], mix_rate: u32) {
     let mut guard = match slot.lock() {
         Ok(g) => g,
@@ -89,17 +44,11 @@ pub fn analyze_render(slot: &SelfEchoSlot, mix: &[f32], mix_rate: u32) {
         None => return,
     };
     if mix_rate == SHARED_AUDIO_RATE_HZ {
-        // The common case, and the one that matters: the reference is
-        // already the canceller's rate and frame size, so it goes in
-        // untouched and stays sample-aligned with the capture stream.
+        // Common case: already 48 kHz 10 ms, so it stays sample-aligned.
         let _ = voice_apm::analyze_render(&tap.processor, mix, mix.len());
         return;
     }
-    // Off-rate voice session (Bluetooth SCO mic). Resample the reference
-    // rather than disable cancellation — a slightly imperfect reference
-    // still removes most of the call, and no reference removes none of it.
-    // The slot's resampler carries the partial frame each tick leaves
-    // behind, so roughly every tick from the second onward completes one.
+    // Off-rate (Bluetooth SCO): an imperfect reference still removes most of it.
     tap.resampler.set_src_rate(mix_rate);
     let pcm: Vec<i16> = mix
         .iter()
@@ -123,18 +72,12 @@ pub struct SelfEchoCanceller {
 // allow is conditional rather than blanket.
 #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
 impl SelfEchoCanceller {
-    /// Build the canceller and arm `slot` so the voice mixer starts
-    /// publishing its render reference. Returns `None` if APM is
-    /// unavailable, in which case the caller publishes the raw loopback —
-    /// audio with an echo beats no audio, and the UI has already told the
-    /// user this platform captures the whole system.
+    /// Build the canceller and arm `slot`; `None` if APM is unavailable.
     pub fn new(slot: &SelfEchoSlot) -> Option<Self> {
         let config = ApmConfig {
             mic_boost_db: 0,
             agc_enabled: false,
-            // Ignored while `agc_enabled` is false; the field has no
-            // "unset" and the struct is not `Default`-friendly here
-            // because every other field is a deliberate off.
+            // Ignored while `agc_enabled` is false.
             agc_target_dbfs: 6,
             ns_level: NsLevel::Off,
             aec_enabled: true,
@@ -175,8 +118,7 @@ impl SelfEchoCanceller {
     }
 }
 
-/// Disarm the mixer's render tap. Idempotent, and safe to call when no
-/// share ever armed it — every stop path runs through here.
+/// Disarm the mixer's render tap. Idempotent.
 pub fn disarm(slot: &SelfEchoSlot) {
     if let Ok(mut guard) = slot.lock() {
         *guard = None;
@@ -217,9 +159,7 @@ mod tests {
         analyze_render(&s, &vec![0.0; SHARED_AUDIO_FRAME_SAMPLES], 48_000);
     }
 
-    /// A frame that isn't exactly 10 ms is dropped rather than handed to
-    /// APM, which would trip its debug assertion and, in release, read a
-    /// mismatched buffer.
+    /// A frame that isn't exactly 10 ms is dropped rather than handed to APM.
     #[test]
     fn wrong_sized_frames_are_left_alone() {
         let s = slot();
@@ -229,23 +169,16 @@ mod tests {
         assert!(short.iter().all(|s| *s == 1234));
     }
 
-    /// The invariant this module exists for: with the call as the only
-    /// content in both the render reference and the capture stream, the
-    /// published frame must come out quieter than it went in. Anything
-    /// else means the reference is not reaching the canceller and every
-    /// participant would hear themselves.
+    /// Core invariant: with the call in both streams, output must be quieter.
     ///
-    /// Skipped on Windows, where `voice_apm` is a documented no-op stub —
-    /// there the OS excludes our process from the loopback instead.
+    /// Skipped on Windows, where `voice_apm` is a stub.
     #[test]
     #[cfg(not(target_os = "windows"))]
     fn the_call_is_attenuated_out_of_the_shared_audio() {
         let s = slot();
         let aec = SelfEchoCanceller::new(&s).expect("stage");
 
-        // 400 Hz tone standing in for the call, present identically in the
-        // reference and in the "loopback" — the exact digital-loopback
-        // case, no room and no delay.
+        // 400 Hz tone as the call, identical in reference and loopback.
         let tone: Vec<f32> = (0..SHARED_AUDIO_FRAME_SAMPLES)
             .map(|i| {
                 (i as f32 * 2.0 * std::f32::consts::PI * 400.0
@@ -257,8 +190,7 @@ mod tests {
 
         let mut input_energy = 0.0f64;
         let mut output_energy = 0.0f64;
-        // AEC3's adaptive filter needs time to converge; measure only the
-        // back half so the pre-convergence frames don't mask the result.
+        // Measure only the back half, after AEC3 converges.
         const FRAMES: usize = 300;
         for n in 0..FRAMES {
             analyze_render(&s, &tone, SHARED_AUDIO_RATE_HZ);
@@ -282,13 +214,7 @@ mod tests {
         );
     }
 
-    /// The off-rate regression: with the voice pipeline at 44.1 kHz (a
-    /// Bluetooth mic pulls the whole APM to the device rate), the render
-    /// reference is resampled before it reaches the canceller. One 10 ms
-    /// block can never complete a whole 48 kHz frame on its own, so this
-    /// only passes if the resampler's partial output survives across
-    /// ticks — a per-call resampler delivers no reference at all and the
-    /// tone comes out untouched.
+    /// Off-rate (44.1 kHz): passes only if the resampler's partial output persists.
     #[test]
     #[cfg(not(target_os = "windows"))]
     fn an_off_rate_render_reference_still_cancels() {
@@ -296,8 +222,7 @@ mod tests {
         let s = slot();
         let aec = SelfEchoCanceller::new(&s).expect("stage");
 
-        // The same 400 Hz call stand-in, generated at each stream's own
-        // rate so reference and capture describe the same signal.
+        // The same tone, generated at each stream's own rate.
         let tone_at = |rate: u32, n: usize| -> Vec<f32> {
             (0..n)
                 .map(|i| {
@@ -308,16 +233,7 @@ mod tests {
         let mix = tone_at(MIX_RATE, MIX_RATE as usize / 100);
         let capture = tone_at(SHARED_AUDIO_RATE_HZ, SHARED_AUDIO_FRAME_SAMPLES);
 
-        // Prime one tick of reference before the first capture. The off-rate
-        // resampler holds its first block back (it cannot emit a 48 kHz frame
-        // until a second 10 ms block completes it), so without this every
-        // reference frame reaches the canceller one tick AFTER the capture it
-        // matches. An echo canceller can only subtract what it has already
-        // seen, so that ordering is uncancellable; it passed on Linux only
-        // because a steady tone repeats every 10 ms and the late copy still
-        // lined up (#1209: it failed deterministically on Apple silicon). A
-        // real call is never in that order — the mix reaches the sink monitor
-        // only after the playback buffer, tens of ms behind the reference.
+        // Prime one reference tick first, else each reference lands after its capture (#1209).
         analyze_render(&s, &mix, MIX_RATE);
 
         let mut input_energy = 0.0f64;

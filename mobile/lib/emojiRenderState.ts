@@ -1,9 +1,4 @@
-// What every mounted custom emoji is showing right now — its image, or its
-// `:shortcode:` fallback text (#1562). Read only by `EmojiProbe`, the
-// invisible e2e hook <Screen> draws: an emoji sits inside a message row or a
-// list row, each ONE accessible element, so the image's own testID is hidden
-// from the Maestro tier. Pure (no react-native), so tests/emoji-retry.test.ts
-// pins it.
+// What every mounted custom emoji shows (#1562), read only by `EmojiProbe` for Maestro. Pure.
 
 export type EmojiShown = "image" | "fallback";
 
@@ -20,11 +15,7 @@ function notify(): void {
   }
 }
 
-/**
- * Record that one mounted emoji now shows `state` (null: neither, e.g. still
- * loading). Returns the function that withdraws it, for the unmount or the
- * next state.
- */
+/** Null: neither yet. Returns the withdrawal, for unmount or the next state. */
 export function reportEmojiShown(shortcode: string, state: EmojiShown | null): () => void {
   if (state === null) {
     return () => {};
@@ -51,7 +42,6 @@ export function reportEmojiShown(shortcode: string, state: EmojiShown | null): (
   };
 }
 
-/** Every shortcode with at least one mounted emoji in `state`, sorted. */
 export function shortcodesShowing(state: EmojiShown): string[] {
   return [...shown.entries()]
     .filter(([, c]) => c[state] > 0)
@@ -66,7 +56,6 @@ export function subscribeEmojiShown(listener: () => void): () => void {
   };
 }
 
-/** Changes whenever anything above does (a `useSyncExternalStore` snapshot). */
 export function emojiShownVersion(): number {
   return version;
 }

@@ -1,36 +1,12 @@
 #!/usr/bin/env node
-/*
- * Single-client RESTART PERSISTENCE E2E (issue #570, single-user).
- *
- * Proves the "same device keeps its data" invariant: after a full app restart
- * against the SAME POLLIS_DATA_DIR, the account is still recognised — the app
- * does NOT fall back to a blank first-run signup. Whatever resume path the app
- * takes (auto-resume to app-ready, PIN unlock, or re-auth with the account
- * pre-known), the test drives it back to app-ready.
- *
- * Choreography:
- *   1. Sign up (fresh account) → app-ready. The data dir now holds the local
- *      SQLite DB + MLS state + keystore + accounts index.
- *   2. Tear the app down (delete the WebDriver session, kill the driver) but KEEP
- *      the data dir.
- *   3. Relaunch a new app instance on the SAME data dir.
- *   4. Assert persistence: the app resumes to one of app-ready / pin-entry-screen
- *      / auth-screen-with-a-known-account — never a blank signup — and is driven
- *      back to app-ready.
- *
- * Needs the backend (DS for OTP verify on the re-auth path). Run start-backend.sh
- * first (POLLIS_DELIVERY_URL must be set).
- */
+// Restart persistence (#570): a relaunch on the same POLLIS_DATA_DIR still knows the account.
 
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const h = require("./lib/harness");
 
-// Kill this client's driver/webdriver/app but SPARE the shared Vite server and
-// the external DS — the relaunch loads its UI from that same Vite server, so a
-// full h.reap() (which pkills bin/vite) would leave the relaunch on a dead port
-// ("Connection refused"). Mirrors reap() minus vite/pollis-delivery.
+// Kill this client but spare the shared Vite (the relaunch loads from it) and the external DS.
 function reapClientKeepVite() {
   for (const p of ["tauri-driver", "WebKitWebDriver"]) {
     spawnSync("pkill", ["-9", "-f", p], { stdio: "ignore" });
@@ -43,8 +19,7 @@ const shot = h.makeShot(ARTIFACTS);
 const PIN = "1357";
 const DATA_DIR = path.join(__dirname, ".tmp-data-restart");
 
-// Env for the app. `wipe` is true only for the first (signup) launch; the
-// restart reuses the SAME dir untouched — that's the whole point.
+// `wipe` only for the first (signup) launch.
 function appEnvFor(devEnv, turso, deliveryUrl, wipe) {
   if (wipe) {
     fs.rmSync(DATA_DIR, { recursive: true, force: true });
@@ -88,7 +63,6 @@ async function signUp(browser, email) {
 // After relaunch, drive whatever resume screen appears back to app-ready and
 // return a label describing the persistence path taken.
 async function resumeToAppReady(browser, email) {
-  // Wait for the app to settle on one of the known post-boot screens.
   const screens = ["app-ready", "pin-entry-screen", "auth-screen"];
   const end = Date.now() + 60000;
   let landed = null;

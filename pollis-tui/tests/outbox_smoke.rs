@@ -1,11 +1,7 @@
-//! The durable outbox from the CLI (#1335): the CLI sends through the same core
-//! path as the apps, so a send that fails is kept and marked, and the CLI's
-//! `R` (retry) and `x` (discard) reach the same core commands the apps'
-//! Retry / Discard do. Driven through `pollis_tui::send`, the layer the keys
-//! call, and checked against what `pollis_tui::timeline` draws.
+//! The durable outbox from the CLI (#1335): failed sends are kept and marked, and `R` / `x`
+//! reach the apps' core commands.
 //!
-//! Its own test binary: it flips the process-wide "client outdated" switch to
-//! make a send fail, which must not leak into any other test.
+//! Its own binary: it flips the process-wide "client outdated" switch.
 
 mod common;
 

@@ -2,66 +2,29 @@
 //!
 //! # The gap this closes
 //!
-//! The v0 handshake proves a device is *cryptographically self-consistent*: the
-//! connecting party holds a device key, and some account key certified it
-//! ([`crate::proto::verify_handshake`]). It does **not** prove that account key
-//! is a real, published Pollis account — an attacker can mint an account keypair
-//! and a matching device cert entirely offline, in a loop.
+//! The handshake proves self-consistency, not that the account key is published; keys mint offline in a loop.
 //!
-//! That matters for one concrete reason beyond tidiness: the rate limiter keys
-//! per-account limits on `sha256(account_id_pub)`
-//! ([`crate::proto::account_fingerprint`]). An adversary who can generate an
-//! unlimited supply of self-consistent account keys has an unlimited supply of
-//! *distinct* rate-limiting identities, so the per-account limits bound nothing.
-//! Anchoring makes each identity cost a real signup that is publicly visible in
-//! an append-only log.
+//! Unlimited account keys mean unlimited per-account rate-limit identities; anchoring costs each a public signup.
 //!
 //! # How it is done without a fetch
 //!
-//! `docs/relay-operations.md` names the two candidate mechanisms — "either a
-//! fetch or a client-presented inclusion proof" — and rules the first one out:
-//! a relay that queries the log per connection is back inside the metadata
-//! plane, which is the exact coupling this whole design removes (§11.1). So the
-//! **client presents the proof** and the relay verifies it with zero I/O:
+//! A per-connection log query would re-enter the metadata plane (§11.1), so the **client presents the proof**:
 //!
 //! 1. the leaf bytes — the account-key tenant's frozen `AccountKeyLeaf` encoding;
 //! 2. an RFC-6962 inclusion proof for that leaf;
 //! 3. the ML-DSA-44 **signed tree head** the proof is anchored against.
 //!
-//! The relay holds one pinned log public key, compiled in or configured, and
-//! checks: the head verifies under it **in the account-keys domain**, the proof
-//! carries the leaf into that head's root, and the leaf's
-//! `(user_id, identity_version, account_id_pub)` are **exactly** the ones the
-//! handshake presented. All of it is CPU: a signature verify plus a `log₂(N)`
-//! SHA-256 audit path. No socket, no Turso, no DS.
+//! The relay checks the head under its pinned key in the account-keys domain, the proof, and an exact leaf/handshake match.
 //!
 //! # What an anchor does and does not prove
 //!
-//! **Proves:** the account key this device chains to was published in the
-//! account-key transparency log at a head the relay's pinned key signed. Combined
-//! with the handshake (which proves possession of a device key that key
-//! certified), the pair means "a device of a *published* account". Stealing
-//! someone else's anchor buys nothing — anchors are public data, and without
-//! that account's device cert the handshake still fails.
+//! **Proves:** the account key was published; a stolen anchor is useless without that account's device cert.
 //!
-//! **Does not prove:** that the presented `identity_version` is the account's
-//! *current* one. Proving that needs the whole tree, which needs a fetch. A
-//! rotated-away key keeps verifying, exactly as its device certs do — this is
-//! the same "no live device revocation" limit already documented in
-//! `docs/relay-operations.md`, not a new one. [`AnchorVerifier::max_age_secs`]
-//! bounds how stale a *head* may be; it does not and cannot bound key rotation.
+//! **Does not prove:** that `identity_version` is current; [`AnchorVerifier::max_age_secs`] bounds head age only.
 //!
 //! # Rollout
 //!
-//! Enforcement is per-node and **off by default** ([`AnchorPolicy`]). A node
-//! with no log key configured makes no anchoring claim at all; a keyed node
-//! always verifies what is presented and treats a bad anchor as an auth failure;
-//! only a node explicitly set to require one rejects a client that presents
-//! none. Requiring anchors before clients ship the frame — or before a
-//! just-signed-up account appears in the daily publish — is a self-inflicted
-//! outage, so the mechanism ships enforceable and the policy is switched on
-//! afterwards. Same publish-then-enforce ordering as relay revocation (#813
-//! Phase C).
+//! Per-node and **off by default** ([`AnchorPolicy`]); publish first, enforce later, as with revocation.
 
 use std::sync::Arc;
 
@@ -70,52 +33,27 @@ use verifiable_log::{verify_inclusion_proof, verifying_key_from_hex, Entry, Incl
 
 /// The tenant name the account-key tree's entries carry.
 ///
-/// Mirrors `verifiable_log_builder::account_key::TENANT`. It is duplicated
-/// rather than imported because `verifiable-log-builder` carries a libsql
-/// dependency and a Turso client has no business in a relay binary; the golden
-/// vector in this module's tests pins the resulting leaf hash so a drift on
-/// either side fails a test rather than silently un-anchoring everyone.
+/// Duplicated from `verifiable_log_builder::account_key::TENANT` (libsql dep); a golden vector pins it.
 pub const ACCOUNT_KEY_TENANT: &str = "account-key";
 
 /// The STH domain-separation context for the **account-keys** tree.
 ///
-/// One log key signs three trees (commit log, account keys, binaries) and only
-/// the context tells them apart, so verifying in the wrong context would let a
-/// genuinely-signed head from a *different* tree anchor an account proof. This
-/// is the same cross-artifact confusion guard `REVOCATION_TYPE` provides for the
-/// directory and revocation list.
-///
-/// Re-exported from `verifiable-log` rather than restated: a copy of these bytes
-/// that drifts does not fail loudly, it just stops agreeing with the tree.
+/// One log key signs three trees, so the wrong context would accept another tree's head.
 pub use verifiable_log::STH_CONTEXT_ACCOUNT_KEYS as ACCOUNT_KEYS_STH_CONTEXT;
 
 /// Default bound on how old a presented signed tree head may be, in seconds.
 ///
-/// The account tree publishes daily, and a head is byte-stable forever once
-/// published, so a tight bound buys little and a missed publish must not lock
-/// the fleet out. Seven days keeps a cached anchor usable across a publishing
-/// outage while still requiring the presenter to have met the live log at some
-/// point in the recent past.
+/// Seven days: heads publish daily, and a missed publish must not lock the fleet out.
 pub const DEFAULT_ANCHOR_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
 
-/// Tolerated clock skew on a head's timestamp, in seconds. A head from the
-/// future beyond this is rejected — the publisher's clock and ours should not
-/// disagree by more than the handshake already tolerates.
+/// Tolerated clock skew on a head's timestamp, in seconds.
 const MAX_FUTURE_SKEW_SECS: u64 = crate::proto::MAX_SKEW_SECS as u64;
 
 /// The account-key tree's leaf, in its **frozen** encoding.
 ///
-/// The on-the-wire leaf is compact JSON of this struct with fields in exactly
-/// this declared order (`user_id`, `identity_version`, `account_id_pub`, `seq`);
-/// serde emits declaration order with no insignificant whitespace, so the
-/// encoding is deterministic. `account_id_pub` is lowercase hex of the raw
-/// 1312-byte ML-DSA-44 account identity key — the same bytes the handshake
-/// carries in `DeviceCertMaterial::account_id_pub`.
+/// Compact JSON in declaration order; `account_id_pub` is lowercase hex of the 1312-byte key.
 ///
-/// The relay parses the leaf only to *bind* it to the handshake. The bytes it
-/// hashes are the ones the client transmitted, never a re-serialization of this
-/// struct, so a client that encodes the leaf slightly differently fails the
-/// inclusion proof rather than silently anchoring to something else.
+/// Parsed only to bind; the hashed bytes are the client's, never a re-serialization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountKeyLeaf {
     pub user_id: String,
@@ -126,9 +64,7 @@ pub struct AccountKeyLeaf {
 
 /// A client-presented proof that its account key is in the transparency log.
 ///
-/// The head's `tree_size` is carried **once** and used for both the head and the
-/// proof: `verify_inclusion_proof` requires them to agree, so representing them
-/// separately would only create a mismatch that has no legitimate meaning.
+/// `tree_size` is carried once because the head and the proof must agree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountAnchor {
     /// The exact leaf bytes that were hashed into the tree.
@@ -181,9 +117,7 @@ impl AccountAnchor {
     }
 }
 
-/// Why an anchor was refused. **Every variant is a refusal** — there is no
-/// "couldn't tell, allow it" outcome, because a client that went to the trouble
-/// of presenting an anchor has no legitimate reason to present a bad one.
+/// Why an anchor was refused; every variant is a refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AnchorError {
     #[error("the pinned transparency-log key is not a valid ML-DSA-44 public key")]
@@ -208,9 +142,7 @@ pub struct AnchorVerifier {
 }
 
 impl AnchorVerifier {
-    /// Build a verifier pinned to `log_pubkey_hex` — the hex of the account-key
-    /// tree's ML-DSA-44 public key, i.e. what `/v1/account-keys/public_key.json`
-    /// serves and what `PINNED_LOG_PUBLIC_KEYS` pins in the client.
+    /// Build a verifier pinned to the hex ML-DSA-44 account-key log public key.
     pub fn new(log_pubkey_hex: &str, max_age_secs: u64) -> Result<AnchorVerifier, AnchorError> {
         let verifying_key =
             verifying_key_from_hex(log_pubkey_hex.trim()).map_err(|_| AnchorError::BadPinnedKey)?;
@@ -222,9 +154,7 @@ impl AnchorVerifier {
 
     /// Verify `anchor` against the account this handshake claims.
     ///
-    /// Checks run cheapest-first so junk is dropped before the ML-DSA-44
-    /// signature verify — the only expensive step, and the one an unauthenticated
-    /// flood would want to reach.
+    /// Cheapest checks first, so junk never reaches the ML-DSA-44 verify.
     pub fn verify(
         &self,
         anchor: &AccountAnchor,
@@ -233,9 +163,7 @@ impl AnchorVerifier {
         identity_version: u32,
         now_secs: i64,
     ) -> Result<(), AnchorError> {
-        // 1. Binding, before anything cryptographic. An anchor is public data —
-        //    anyone can fetch anyone's — so a proof that is not bound to THIS
-        //    handshake's account proves nothing about the connecting device.
+        // 1. Binding first: anchors are public, so an unbound proof proves nothing.
         let leaf = anchor.leaf()?;
         if leaf.user_id != user_id
             || leaf.identity_version != u64::from(identity_version)
@@ -244,9 +172,7 @@ impl AnchorVerifier {
             return Err(AnchorError::LeafMismatch);
         }
 
-        // 2. Head age. Signed, so it cannot be backdated by an on-path attacker;
-        //    it bounds how stale a cached anchor may be, nothing more (see the
-        //    module docs on what anchoring does NOT prove).
+        // 2. Head age (signed, so not backdatable).
         let head_secs = anchor.sth_timestamp_ms / 1000;
         let now = now_secs.max(0) as u64;
         if head_secs > now.saturating_add(MAX_FUTURE_SKEW_SECS) {
@@ -256,9 +182,7 @@ impl AnchorVerifier {
             return Err(AnchorError::StaleTreeHead);
         }
 
-        // 3. The head is genuinely the log's, IN THE ACCOUNT-KEYS DOMAIN. Without
-        //    the context a real head of the commit-log or binaries tree — same
-        //    key, same signature scheme — would anchor an account proof.
+        // 3. The head is the log's, in the account-keys domain.
         let sth = anchor.sth();
         if !sth.verify_with_context(&self.verifying_key, ACCOUNT_KEYS_STH_CONTEXT) {
             return Err(AnchorError::BadTreeHead);
@@ -283,19 +207,13 @@ impl std::fmt::Debug for AnchorVerifier {
 
 /// What this node does about account-anchoring.
 ///
-/// The ladder is deliberately three-rung, and [`AnchorPolicy::Require`] cannot
-/// be constructed without a verifier — "require an anchor but have no key to
-/// check it with" is not a representable state.
+/// [`AnchorPolicy::Require`] cannot exist without a verifier.
 #[derive(Debug, Clone, Default)]
 pub enum AnchorPolicy {
-    /// No transparency-log key configured. This node makes **no anchoring
-    /// claim**: it neither requires an anchor nor pretends to have checked one.
-    /// It must not reject a presented anchor either — it has no basis to.
+    /// No log key: neither requires nor judges anchors.
     #[default]
     Ignore,
-    /// Verify every anchor presented; a bad one is an authentication failure.
-    /// A client that presents none is still served (the shipped fleet, and any
-    /// account not yet in the daily publish).
+    /// Verify every anchor presented; a client presenting none is still served.
     Verify(Arc<AnchorVerifier>),
     /// Verify, **and** require one. A client presenting none is refused with
     /// [`crate::proto::RejectReason::AnchorRequired`].
@@ -393,11 +311,7 @@ mod tests {
 
     /// The frozen leaf encoding, pinned byte-for-byte.
     ///
-    /// This is the one thing that cannot be checked against
-    /// `verifiable-log-builder` from here (it would drag libsql into the relay's
-    /// dev graph). If the account tenant ever reorders a field, renames one, or
-    /// stops emitting compact JSON, this assertion fails — instead of every
-    /// anchor in the fleet silently failing its inclusion proof.
+    /// Cannot be checked against `verifiable-log-builder` from here, so pin it.
     #[test]
     fn account_key_leaf_encoding_is_frozen() {
         let bytes = leaf_bytes("u_123", 2, &[0xab, 0xcd], 7);
@@ -435,9 +349,7 @@ mod tests {
         let anchor = anchor_for(&sk, &leaves, 0, ACCOUNT_KEYS_STH_CONTEXT, NOW as u64 * 1000);
         let verifier = AnchorVerifier::new(&pinned(&sk), DEFAULT_ANCHOR_MAX_AGE_SECS).unwrap();
 
-        // Genuine head, genuine proof, genuine leaf — but the handshake presents
-        // a DIFFERENT account key. This is the check that makes an anchor mean
-        // anything: without it, any published leaf would anchor any handshake.
+        // Genuine anchor, but the handshake presents a DIFFERENT account key.
         assert_eq!(
             verifier.verify(&anchor, USER, &[0x09, 0x09], 3, NOW),
             Err(AnchorError::LeafMismatch)
@@ -501,9 +413,7 @@ mod tests {
         let verifier = AnchorVerifier::new(&pinned(&sk), DEFAULT_ANCHOR_MAX_AGE_SECS).unwrap();
         verifier.verify(&good, USER, &account, 1, NOW).unwrap();
 
-        // Flip a sibling hash: the recomputed root no longer matches the signed
-        // one, and the head's signature still checks out — so ONLY the merkle
-        // step can catch this.
+        // Flip a sibling hash: only the merkle step can catch this.
         let mut tampered = good.clone();
         tampered.audit_path[0][0] ^= 0xff;
         assert_eq!(

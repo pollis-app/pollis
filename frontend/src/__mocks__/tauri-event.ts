@@ -1,13 +1,4 @@
-/**
- * Browser-side mock for @tauri-apps/api/event used when VITE_PLAYWRIGHT=true.
- *
- * Listeners used to be dropped on the floor, which made every backend-pushed
- * event untestable in the browser tier. They are now kept in a registry and
- * `window.__tauriEmit(name, payload)` delivers to them, so a spec can drive a
- * Rust-originated event (the idle auto-lock, #851) the same way the real shell
- * would. Registering a handler is still side-effect-free, so existing specs
- * that never emit behave exactly as before.
- */
+/** Browser mock for @tauri-apps/api/event; `window.__tauriEmit(name, payload)` delivers to listeners. */
 
 type UnlistenFn = () => void;
 type Handler = (event: { payload: unknown }) => void;
@@ -44,17 +35,12 @@ export function once(
   return Promise.resolve(unlisten);
 }
 
-/**
- * Deliver an event to everything currently listening. Note the
- * `{ payload }` envelope: `bridge/invoke.ts` unwraps `e.payload` before
- * handing the value to app code, exactly as real Tauri does.
- */
+/** Deliver `{ payload }`, which `bridge/invoke.ts` unwraps as real Tauri does. */
 function deliver(event: string, payload?: unknown): void {
   const set = listeners.get(event);
   if (!set) {
     return;
   }
-  // Snapshot: a handler is allowed to unlisten itself (see `once`).
   for (const handler of [...set]) {
     handler({ payload: payload ?? null });
   }
@@ -65,6 +51,4 @@ export function emit(event: string, payload?: unknown): Promise<void> {
   return Promise.resolve();
 }
 
-// The test-side entry point. Specs call this from `page.evaluate` to stand in
-// for the Rust shell's `AppHandle::emit`.
 (window as unknown as Record<string, unknown>).__tauriEmit = deliver;

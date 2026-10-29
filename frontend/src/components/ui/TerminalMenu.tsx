@@ -11,25 +11,17 @@ export interface TerminalMenuItem {
   action?: () => void;
   disabled?: boolean;
   icon?: React.ReactNode;
-  // "separator" renders a horizontal rule; "system" dims the item (for nav/action items vs content items)
+  // "separator": a rule; "system": dimmed.
   type?: "separator" | "system";
   testId?: string;
-  // Unread count badge — shown next to label when > 0
   badge?: number;
-  // Optional inline icon rendered between label and unread badge — used for
-  // glanceable status (verified shield, key-changed warning) without
-  // overloading `icon` (which always renders to the left of the label).
+  // Inline status icon between label and badge.
   trailingIndicator?: React.ReactNode;
-  // Secondary action rendered as a ⋮ button on the right of the row
   secondaryAction?: () => void;
   secondaryActionLabel?: string;
-  // Fires when the row first becomes the selected item (via hover or keyboard
-  // navigation). Used for "intent" warmups — e.g. eagerly preparing a voice
-  // channel connection so clicking Join feels instant.
+  // On first becoming selected; for warmups (e.g. a voice connection).
   onSelect?: () => void;
-  // `"press"`: a plain mouse press acts on pointer-down (#1529) — only for an
-  // item whose accidental press is free to undo (navigation). Logout, exit,
-  // block, joining a voice channel and the like stay on click.
+  // `"press"`: pointer-down (#1529), only for navigation items.
   activateOn?: ActivateOn;
 }
 
@@ -62,8 +54,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     }
   }, [autoFocus]);
 
-  // Reset selection to first navigable item only when the actual item IDs change,
-  // not on every parent re-render that produces a new array reference.
+  // Reset only when item IDs change, not on a new array reference.
   const itemIds = items.map((i) => i.id).join(",");
   useEffect(() => {
     const first = items.findIndex((item) => item.type !== "separator");
@@ -71,7 +62,6 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemIds]);
 
-  // Skip separators when navigating
   const navigableIndices = items
     .map((item, i) => ({ item, i }))
     .filter(({ item }) => item.type !== "separator")
@@ -125,10 +115,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     itemRefs.current[selectedIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedIndex]);
 
-  // Fire `onSelect` for the currently-highlighted row so callers can prefetch
-  // / warm up resources tied to that item (e.g. LiveKit DNS+TLS for a voice
-  // channel about to be joined). Intentionally re-runs when the items array
-  // identity changes so a freshly-rendered list still warms its first row.
+  // Warm up the highlighted row; re-runs on item change so a new list warms its first row.
   useEffect(() => {
     const item = items[selectedIndex];
     if (item && item.type !== "separator" && !item.disabled) {
@@ -155,7 +142,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
       onFocus={() => setIsFocused(true)}
       onBlur={() => setIsFocused(false)}
       onMouseDown={(e) => {
-        // Keep keyboard focus on the menu when clicking anywhere in it, including dead zones below the last item
+        // Keep focus on the menu, even for clicks in dead zones.
         if (document.activeElement !== containerRef.current) {
           e.preventDefault();
           containerRef.current?.focus();
@@ -164,7 +151,6 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
       role="menu"
       aria-label={t("menu.navigationLabel")}
     >
-      {/* Keyboard hints */}
       <div
         className="flex items-center gap-1 px-4 text-xs font-mono flex-shrink-0 h-bar border-b border-line text-muted"
       >
@@ -181,7 +167,6 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
         )}
       </div>
 
-      {/* Items */}
       <div className="overflow-y-auto">
         {items.map((item, index) => {
           if (item.type === "separator") {
@@ -214,7 +199,6 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               role="menuitem"
               aria-disabled={item.disabled}
             >
-              {/* Chevron indicator — stays centered in the full row height */}
               <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
                 {isSelected
                   ? <ChevronRight className="w-4 h-4 rtl-mirror text-accent" />

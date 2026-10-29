@@ -1,36 +1,5 @@
 #!/usr/bin/env node
-/*
- * Single-client PUSH-TO-TALK + SELF-DEAFEN E2E (#849).
- *
- * Covers the two behaviours a unit test cannot see: that the controls are
- * actually on screen, and that each distinct gate state is *visibly*
- * distinct rather than collapsing into "muted".
- *
- * The interesting assertion is the deafen round-trip. Deafen implies
- * self-mute, so undeafening has to put back the mute state it displaced —
- * blindly unmuting is the classic bug, and it is exactly the one that
- * pushes a live mic at a room that thought it was muted. We drive it both
- * ways here: deafen-from-unmuted must come back unmuted, and
- * deafen-from-muted must come back MUTED.
- *
- * One client is enough — a solo group is its own MLS group, so the voice
- * E2EE key derives fine and the join is self-contained. No second party is
- * needed to observe local gate state.
- *
- * Choreography:
- *   1. A signs up.
- *   2. A creates a group + a VOICE channel, and joins it.
- *   3. ASSERT: mic reads `live`, deafen reads off.
- *   4. Deafen → mic reads `deafened` (NOT plain `muted`), deafen reads on.
- *   5. Undeafen → mic is back to `live`. (Restored the prior UNMUTED state.)
- *   6. Mute → `muted`. Deafen → `deafened`. Undeafen → still `muted`.
- *      (Restored the prior MUTED state — did not blindly unmute.)
- *   7. Unmute, then switch Input Mode to Push to Talk in voice settings.
- *   8. ASSERT: mic reads `ptt-idle` — armed, not muted, and visibly its own
- *      state.
- *
- * On failure, dumps A-FAIL.* into e2e/artifacts/.
- */
+// PTT + self-deafen (#849): undeafen must restore the prior mute state, never blindly unmute.
 
 const fs = require("fs");
 const path = require("path");
@@ -152,12 +121,7 @@ async function openVoiceChannel(browser, groupName, channelName, groupTimeoutMs)
   throw new Error(`group "${groupName}" never appeared`);
 }
 
-// ── Gate-state helpers ─────────────────────────────────────────────────────
-//
-// The tray publishes the resolved indicator on `data-mic-state`
-// (live | muted | deafened | ptt-idle) and `data-deafened`. Asserting on
-// those attributes is what makes "PTT-idle is DISTINCT from muted" a real
-// assertion rather than a screenshot someone has to eyeball.
+// Gate state is asserted on the tray's data-mic-state / data-deafened, not a screenshot.
 
 async function readAttr(browser, testId, attr) {
   return browser.execute((id, a) => {
@@ -239,10 +203,7 @@ async function main() {
     await h.clickTestId(A.browser, "voice-join-cta");
     await h.waitTestId(A.browser, "voice-channel-view", JOIN_TIMEOUT_MS);
 
-    // This scenario needs a real capture device: with none, the join goes
-    // listen-only and the mute toggle is replaced by a static indicator
-    // (that path is covered by voice-channel-no-mic.js). Fail loudly rather
-    // than silently skipping the assertions.
+    // Needs a real capture device (no-mic is voice-channel-no-mic.js); fail loudly rather than skip.
     const listenOnly = await h.presentSelector(A.browser, '[data-testid="voice-tray-listen-only"]');
     if (listenOnly) {
       throw new Error(
@@ -251,12 +212,12 @@ async function main() {
     }
     await h.waitTestId(A.browser, "voice-tray-mute", STATE_TIMEOUT_MS);
 
-    // ── 3. Baseline ────────────────────────────────────────────────────────
+    // 3. Baseline.
     await expectMic(A.browser, "live");
     await expectDeafened(A.browser, false);
     await shot(A.browser, "ptt-01-joined-live.png");
 
-    // ── 4. Deafen from UNMUTED ─────────────────────────────────────────────
+    // 4. Deafen from UNMUTED.
     console.log("[ptt] A: deafening (from unmuted)");
     await h.clickTestId(A.browser, "voice-tray-deafen");
     await expectDeafened(A.browser, true);
@@ -265,14 +226,14 @@ async function main() {
     await expectMic(A.browser, "deafened");
     await shot(A.browser, "ptt-02-deafened.png");
 
-    // ── 5. Undeafen restores UNMUTED ───────────────────────────────────────
+    // 5. Undeafen restores UNMUTED.
     console.log("[ptt] A: undeafening — must restore the prior UNMUTED state");
     await h.clickTestId(A.browser, "voice-tray-deafen");
     await expectDeafened(A.browser, false);
     await expectMic(A.browser, "live");
     await shot(A.browser, "ptt-03-undeafened-live.png");
 
-    // ── 6. Deafen from MUTED must come back MUTED ──────────────────────────
+    // 6. Deafen from MUTED must come back MUTED.
     console.log("[ptt] A: muting");
     await h.clickTestId(A.browser, "voice-tray-mute");
     await expectMic(A.browser, "muted");
@@ -289,7 +250,7 @@ async function main() {
     await expectMic(A.browser, "muted");
     await shot(A.browser, "ptt-05-undeafened-still-muted.png");
 
-    // ── 7. Back to unmuted, then switch to push-to-talk ────────────────────
+    // 7. Back to unmuted, then push-to-talk.
     console.log("[ptt] A: unmuting");
     await h.clickTestId(A.browser, "voice-tray-mute");
     await expectMic(A.browser, "live");
@@ -300,7 +261,7 @@ async function main() {
     await shot(A.browser, "ptt-06-input-mode-setting.png");
     await h.clickTestId(A.browser, "voice-input-mode-push_to_talk");
 
-    // ── 8. The tray now shows PTT armed-and-idle ───────────────────────────
+    // 8. The tray shows PTT armed-and-idle.
     // Back to the channel; the session is still joined, so the tray is live.
     await h.clickTestId(A.browser, "voice-bar-channel-name");
     await h.waitTestId(A.browser, "voice-tray-mute", 20000);

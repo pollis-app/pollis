@@ -1,13 +1,4 @@
-/*
- * #1548: the Security events screen's quick filters and page arguments
- * (`mobile/lib/securityEvents.ts`), held to desktop's table
- * (`frontend/src/components/Security/securityEvents.ts`) so the two apps
- * filter identically.
- *
- * The row component and the describe switch import react-native, so the parts
- * of them worth pinning are checked against their source text, like
- * `rtl-boot.test.ts` does.
- */
+/* #1548: the Security events filters and page arguments, held to desktop's table. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,8 +14,7 @@ import {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
-// Desktop's module imports the renderer's i18n (Vite `import.meta`), which
-// neither node nor mobile's tsc can load, so its table is compared as text.
+// Desktop's module cannot load under node, so its table is compared as text.
 test("the filter table matches desktop's", () => {
   const squash = (s: string) => s.replace(/\s+/g, "").replace(/,([\]}])/g, "$1");
   const desktop = squash(read("../frontend/src/components/Security/securityEvents.ts"));

@@ -29,8 +29,7 @@ export const GroupPage: React.FC = observer(() => {
   const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
   const { data: joinRequests = [] } = useGroupJoinRequests(isAdmin ? groupId : null);
 
-  // One batched preview fetch for the whole channel list (#874) instead of one
-  // IPC call per row. Computed above the early returns because hooks must be.
+  // One batched preview fetch (#874); above the early returns since it's a hook.
   const previewChannelIds = useMemo(
     () => (group?.channels ?? []).filter((ch) => ch.channel_type !== "voice").map((ch) => ch.id),
     [group]
@@ -81,11 +80,9 @@ export const GroupPage: React.FC = observer(() => {
     },
     badge: unreadCounts[ch.id] ?? 0,
     testId: `channel-option-${ch.id}`,
-    // Opening a text channel is free to undo: pointer-down (#1529). Voice
-    // rows below can auto-join, which others see, so they stay on click.
+    // Text channels open on press (#1529); voice rows may auto-join, so they stay on click.
     activateOn: "press" as const,
-    // A muted channel (#1431) is drawn in the dimmed tier, with a bell-off
-    // mark so the state is not carried by colour alone.
+    // Muted (#1431): dimmed plus a bell-off mark, not colour alone.
     ...(mutedChannels?.has(ch.id)
       ? {
         type: "system" as const,
@@ -111,15 +108,13 @@ export const GroupPage: React.FC = observer(() => {
       action: () => {
         navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
       },
-      // Selecting (hover or keyboard) a voice row signals intent to maybe
-      // join — pre-warm DNS/TLS to LiveKit so the actual Join is fast.
+      // Pre-warm LiveKit on voice-row intent.
       onSelect: () => warmVoiceChannel(ch.id),
       badge: count > 0 ? count : 0,
       testId: `channel-option-${ch.id}`,
     };
   });
 
-  // Insert a separator before voice channels only when both sections are non-empty
   const voiceSeparator: TerminalMenuItem[] =
     textChannels.length > 0 && voiceChannels.length > 0
       ? [{ id: "__voice-sep__", label: "", type: "separator" as const }]
@@ -139,8 +134,7 @@ export const GroupPage: React.FC = observer(() => {
       testId: "menu-item-members",
       activateOn: "press" as const,
     },
-    // Any MEMBER can add a custom emoji (#848) — the cost is bounded per
-    // person rather than gatekept — so this sits outside the admin block.
+    // Any member may add emoji (#848), so outside the admin block.
     {
       id: "group-emoji",
       label: t("group.customEmoji"),

@@ -68,7 +68,6 @@ async fn main() -> Result<()> {
         .and_then(|m| m.username.clone())
         .unwrap_or_default();
     pollis_tui::send::accept_dm(&state, &me.id, &dm_id).await?;
-    // Join the DM's MLS group before sending into it.
     pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await?;
 
     let send = |text: String, reply_to: Option<String>, thread: Option<String>| {

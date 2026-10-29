@@ -1,6 +1,4 @@
-// End-to-end proof of the §3 directory contract: sign exactly as the reconciler
-// does, then run the client's verification path (lib/directory-verify.mjs) over
-// it — including every documented rejection case. No AWS, no network.
+// §3 directory contract: sign as the reconciler does, verify via lib/directory-verify.mjs.
 //
 // Run: node --test   (from infra/relay-hydra/)
 
@@ -72,12 +70,7 @@ test("rejects an expired directory", () => {
   assert.throws(() => verifyDirectory(env, pubRawB64, now), /expired/);
 });
 
-// ── Cross-artifact confusion (the directory's half of REVOCATION_TYPE) ───────
-//
-// One key signs the directory AND revocations.json, so a signature proves who
-// signed, never WHICH artifact. The Rust twins are
-// net::directory::tests::{accepts_a_directory_that_names_its_own_artifact_type,
-// rejects_a_revocation_list_signed_by_the_same_key}.
+// One key signs the directory and revocations.json, so the type tag names the artifact.
 
 test("a directory that names its own artifact type verifies", () => {
   const dir = verifyDirectory(signEnvelope(freshDirectory({ type: DIRECTORY_TYPE })), pubRawB64, now);
@@ -117,12 +110,7 @@ test("rejects malformed envelope JSON", () => {
   assert.throws(() => verifyDirectory("{not json", pubRawB64, now), /malformed envelope/);
 });
 
-// ── Backward compatibility of the FROZEN §3 contract (#813 Phase C) ──────────
-//
-// The revocation work added ONE optional top-level field to the payload. The
-// §3 contract is shared with already-shipped client binaries we cannot update,
-// so the tests below are the guarantee that they keep working — not a nice-to-
-// have. If any of them ever fails, the change must not ship.
+// Frozen §3 contract (#813 Phase C): shipped clients must keep verifying; if these fail, do not ship.
 
 test("OLD CLIENT: a revocation-carrying directory still verifies unchanged", () => {
   // This is verbatim the pre-#813 verification path — the one baked into shipped
@@ -150,8 +138,6 @@ test("OLD CLIENT: relay entries gained no new required fields", () => {
 });
 
 test("OLD CLIENT: unknown future payload fields are ignored, not rejected", () => {
-  // The same property, generalized: additive extension is the ONLY way this
-  // contract may grow.
   const dir = verifyDirectory(
     signEnvelope(freshDirectory({ some_field_from_2027: { nested: true } })),
     pubRawB64,
@@ -160,10 +146,7 @@ test("OLD CLIENT: unknown future payload fields are ignored, not rejected", () =
   assert.equal(dir.relays.length, 1);
 });
 
-// ── Peer-hosted relays: the SECOND additive field (#813 wave 3) ──────────────
-//
-// Everything above is the guarantee phase C established for `revocation`. These
-// re-establish it for `peers`, because "we did it right last time" is not a test.
+// Peers (#813 wave 3): the second additive field, same guarantee.
 
 const PEER_CERT_B64 = Buffer.from("peer-leaf-der").toString("base64");
 const PEER_DIGEST_B64 = createHash("sha256").update(Buffer.from("peer-leaf-der")).digest("base64");

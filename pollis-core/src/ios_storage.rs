@@ -1,12 +1,5 @@
 //! iOS-only placement of the core's data directory (#1306).
 //!
-//! Everything the core keeps — the local SQLCipher DB, `keystore.pks`,
-//! `accounts.json`, the media cache, `logs/` — lives under `dirs_path()`. On
-//! iOS that used to fall back to `std::env::temp_dir()`, i.e. the sandbox's
-//! `tmp/`, which the system may purge while the app is not running. A purge
-//! would leave a Keychain KEK with nothing to unwrap: a silently re-enrolled
-//! device, which is not one of the acceptable losses.
-//!
 //! The directory is `Library/Application Support/pollis` inside the app
 //! container: persistent, never purged, and not user-visible. It is excluded
 //! from iCloud/iTunes backup so a restore onto another phone cannot carry the

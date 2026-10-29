@@ -9,30 +9,24 @@ import { markConversationRead } from "../../hooks/queries";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { useThemeRerender } from "../../components/theme";
 
-// A single group's page on phones, reached by route (invite links, deep
-// links, search results). Creating a group lands on the Groups tab instead. Renders the same panel the Groups tab shows under
-// its pill strip, under a top back bar.
+// A single group's page on phones, reached by route.
 function GroupDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const groupId = id ?? null;
   const insets = useSafeAreaInsets();
 
-  // Being on this list means no conversation is open — clear the channel
-  // selection so realtime `new_message` events for the channel the user just
-  // left count as unread again (same rule as the tab lists).
+  // On this list no conversation is open: clear the selection so realtime counts unread again.
   useFocusEffect(
     useCallback(() => {
       appStore.setSelectedChannelId(null);
     }, []),
   );
 
-  // No bottom safe-area edge: the panel runs to the screen's bottom edge
-  // (no black strip under it) and pads its own list by the inset instead.
+  // No bottom safe-area edge: the panel pads its own list by the inset.
   return (
     <Screen testID="screen-group" aboveTabBar wide>
-      {/* Back-only bar: the group panel below carries the title. With
-          nothing to pop (cold deep link / invite) back goes to the Groups tab. */}
+      {/* Back-only bar; with nothing to pop it goes to the Groups tab. */}
       <Header
         bordered={false}
         onBack={() => {
@@ -50,7 +44,6 @@ function GroupDetail() {
           onOpenChannel={(c) => {
             appStore.setSelectedGroupId(groupId);
             appStore.setSelectedChannelId(c.id);
-            // Opening a conversation clears its unread count.
             markConversationRead(c.id);
             router.push({
               pathname: "/chat/[id]",
@@ -63,10 +56,7 @@ function GroupDetail() {
   );
 }
 
-// Regular width (iPad) shows a group in the Groups tab's two-pane, never as
-// this standalone page: select it and return to the tab. Call sites use
-// useOpenConversation().openGroup to go there directly; this is the net for
-// anything that still lands here (e.g. a cold deep link).
+// Regular width shows a group in the Groups tab's two-pane, never this page.
 function GroupRedirect() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();

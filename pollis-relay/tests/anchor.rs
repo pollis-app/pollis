@@ -1,24 +1,17 @@
 //! **Transparency-log account-anchoring, end to end on the wire** (#813 Phase E2).
 //!
-//! `pollis_relay::anchor` unit-tests the verifier. This file tests the relay:
-//! that it asks, that it binds the answer to the handshake in front of it, and
-//! that nothing about the frame lets a client be better off lying than staying
-//! silent.
+//! Tests that the relay asks for an anchor and binds it to this handshake.
 //!
 //! Written so the permissive version of each rule fails:
 //!
 //! - E1: a node that requires an anchor refuses a client with none, cleanly, and
 //!   dials nothing.
 //! - E2: a genuine anchor is accepted and the circuit carries bytes.
-//! - E3: **the binding.** A head and an inclusion proof that are entirely genuine
-//!   — signed by the real log key, for a leaf really in the tree — are refused
-//!   when the leaf is not *this* handshake's account. Without this check any
-//!   published leaf would anchor any handshake, and anchors are public data.
+//! - E3: **the binding.** A fully genuine anchor for another account's leaf is refused.
 //! - E4: a self-consistent tree signed by somebody else's key is refused.
 //! - E5: a genuinely-signed head from **another tree** (same key, different
 //!   domain context) cannot anchor an account.
-//! - E6: presenting a bad anchor is never better than presenting none — under a
-//!   node that only *verifies*, a forged anchor is still fatal.
+//! - E6: a forged anchor is fatal even on a verify-only node.
 //! - E7: an unkeyed node makes no claim: it neither requires nor judges.
 //! - E8: a v3 stream cannot present an anchor at all.
 //! - E9: two anchors on one stream are a malformed exchange, not a re-check.
@@ -67,8 +60,6 @@ fn client_identity() -> Arc<ClientIdentity> {
     );
     Arc::new(ClientIdentity::new(USER, DEVICE, DEVICE_ED_PUB, device, cert))
 }
-
-// ---- the transparency log --------------------------------------------------
 
 fn log_key(seed: u8) -> verifiable_log::SigningKey {
     verifiable_log::SigningKey::from_seed(&[seed; 32].into())
@@ -137,8 +128,6 @@ fn genuine_anchor(sk: &verifiable_log::SigningKey) -> AccountAnchor {
     anchor_for(sk, &published_leaves(), 1, ACCOUNT_KEYS_STH_CONTEXT, now_ms())
 }
 
-// ---- test relays -----------------------------------------------------------
-
 struct TestRelay {
     addr: SocketAddr,
     cert: CertificateDer<'static>,
@@ -187,12 +176,6 @@ async fn spawn_echo() -> (SocketAddr, Arc<AtomicUsize>) {
 
 /// Speak one exchange to `relay`: handshake, then zero or more anchors, then
 /// `Connect`. Returns the live pipe on success, or the relay's typed rejection.
-///
-/// The frames are driven by hand because the client half of the anchor plumbing
-/// (sourcing a proof from `verify.pollis.com` and caching it) lives in
-/// `pollis-core`, outside this crate — see the coordination note. Driving the
-/// wire is also the honest shape for a security test: it can send exchanges no
-/// well-behaved client would.
 async fn exchange(
     relay: &TestRelay,
     anchors: &[AccountAnchor],
@@ -234,8 +217,6 @@ fn assert_rejected(
     }
 }
 
-// ---- E1 --------------------------------------------------------------------
-
 /// A node that requires an anchor refuses a client that presents none — cleanly,
 /// with the actionable reason code, and without dialing anything.
 #[tokio::test]
@@ -257,8 +238,6 @@ async fn e1_a_required_anchor_is_actually_required() {
     assert!(relay.stats.rejected() >= 1);
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
-
-// ---- E2 --------------------------------------------------------------------
 
 /// A genuine anchor is accepted and the circuit carries bytes as usual.
 #[tokio::test]
@@ -285,17 +264,9 @@ async fn e2_a_genuine_anchor_is_accepted() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 1);
 }
 
-// ---- E3: the binding -------------------------------------------------------
-
-/// The load-bearing test. Everything about this anchor is genuine — the log key
-/// is the real one, the head is really signed, the leaf is really in the tree,
-/// the audit path really carries it to the root — and it is still refused,
-/// because the leaf is somebody else's account.
+/// Everything about this anchor is genuine, and it is still refused: the leaf is someone else's.
 ///
-/// Anchors are public data: the whole tree is downloadable. If the relay checked
-/// only "is this a valid proof", any attacker could take any published leaf and
-/// anchor their own freshly-minted account key with it, and anchoring would prove
-/// nothing at all.
+/// Anchors are public, so without the binding any published leaf would anchor any key.
 #[tokio::test]
 async fn e3_a_genuine_proof_for_another_account_is_refused() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -337,8 +308,6 @@ async fn e3_a_genuine_proof_for_another_account_is_refused() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
 
-// ---- E4 --------------------------------------------------------------------
-
 /// An attacker's own perfectly-self-consistent log does not verify: the relay
 /// pins one key and the tree it publishes is not that log.
 #[tokio::test]
@@ -361,8 +330,6 @@ async fn e4_a_tree_signed_by_another_key_is_refused() {
     assert_eq!(relay.stats.dials(), 0);
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
-
-// ---- E5 --------------------------------------------------------------------
 
 /// One log key signs three trees; only the domain context tells them apart. A
 /// genuinely-signed head of the **commit-log** tree must not anchor an account.
@@ -391,12 +358,7 @@ async fn e5_a_head_from_another_tree_cannot_anchor_an_account() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
 
-// ---- E6 --------------------------------------------------------------------
-
-/// On a node that only *verifies*, a client with no anchor is served — but a
-/// client with a forged one is not. Lying must never be at least as good as
-/// staying silent, or every enforcement rung below `Require` would be bypassable
-/// by sending garbage.
+/// On a verify-only node no anchor is served but a forged one is not: lying must never beat silence.
 #[tokio::test]
 async fn e6_a_bad_anchor_is_fatal_even_when_one_is_not_required() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -430,12 +392,7 @@ async fn e6_a_bad_anchor_is_fatal_even_when_one_is_not_required() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 1);
 }
 
-// ---- E7 --------------------------------------------------------------------
-
-/// A node with no log key makes no anchoring claim. It does not require one, and
-/// it does not pretend to have judged one it cannot check — so the counters stay
-/// at zero either way. This is the shipped default, and it is why turning the
-/// feature on is a deployment decision rather than a protocol break.
+/// A node with no log key neither requires nor judges anchors (the shipped default).
 #[tokio::test]
 async fn e7_an_unkeyed_node_neither_requires_nor_judges() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -461,12 +418,7 @@ async fn e7_an_unkeyed_node_neither_requires_nor_judges() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 2);
 }
 
-// ---- E8 --------------------------------------------------------------------
-
-/// A v3-generation stream cannot present an anchor: the writer refuses to encode
-/// one, and a hand-crafted v3 anchor frame is refused by the relay rather than
-/// parsed. A v4 concept must not be reachable from a v3 stream in either
-/// direction.
+/// A v3 stream cannot present an anchor: the writer refuses, and the relay rejects a hand-crafted frame.
 #[tokio::test]
 async fn e8_a_v3_stream_cannot_present_an_anchor() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -516,11 +468,7 @@ async fn e8_a_v3_stream_cannot_present_an_anchor() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
 
-// ---- E9 --------------------------------------------------------------------
-
-/// Two anchors on one stream is a malformed exchange. There is no legitimate
-/// reason to present a second one, and allowing it would mean a later frame could
-/// be used to try to displace an earlier verdict.
+/// Two anchors on one stream are malformed: a later frame must not displace a verdict.
 #[tokio::test]
 async fn e9_two_anchors_on_one_stream_are_malformed() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -539,8 +487,6 @@ async fn e9_two_anchors_on_one_stream_are_malformed() {
     assert_eq!(relay.stats.dials(), 0);
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
-
-// ---- E10 -------------------------------------------------------------------
 
 /// A stale head is refused at the relay, not just in the unit tests — the
 /// configured age bound is actually plumbed through.

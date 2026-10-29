@@ -1,19 +1,4 @@
-/*
- * Accepting a group invite is optimistic (#1560).
- *
- * The accept used to end its busy state and then leave the screen unchanged
- * until unawaited refetches came back. Now the invite leaves the pending list
- * and the group joins the group lists on the same frame, a failure restores
- * both, and the mutation stays pending until the refetches land. The rule
- * that matters is that the UI never shows NEITHER the invite nor the group.
- *
- * The cache rules are pure (hooks/queries/inviteAcceptOptimistic.ts) and run
- * against an in-memory cache; the hook's wiring is checked in its source,
- * since this runner has no React renderer. The desktop half is
- * frontend/tests/invite-accept-optimistic.test.ts.
- *
- *   node --test mobile/tests/
- */
+/* Accepting a group invite is optimistic (#1560): never NEITHER the invite nor the group. Pure rules + the hook's source. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -77,11 +62,9 @@ test("accepting drops the invite and lists the group in the same pass", () => {
   assert.deepEqual(ids(cache.getQueryData(INVITES_KEY)), ["inv_2"]);
   assert.deepEqual(ids(cache.getQueryData(GROUPS_KEY)), ["g_old", "g_new"]);
   assert.deepEqual(ids(cache.getQueryData(WITH_CHANNELS_KEY)), ["g_old", "g_new"]);
-  // Channels fill in on the refetch; the optimistic row has none yet.
   const row = (cache.getQueryData(WITH_CHANNELS_KEY) as Array<{ id: string; name: string; channels: unknown[] }>)[1];
   assert.equal(row.name, "crew");
   assert.deepEqual(row.channels, []);
-  // The settle refreshes the joined group's own caches by this id.
   assert.equal(snapshot.groupId, "g_new");
 });
 
@@ -152,12 +135,10 @@ test("useAcceptGroupInvite is optimistic, rolls back, and awaits its refetches",
   const body = src.slice(start, src.indexOf("export function useDeclineGroupInvite()"));
   assert.ok(start >= 0);
 
-  // poll_mls_welcomes stays on the accept path and is awaited.
   assert.match(body, /await invoke\("accept_group_invite"/);
   assert.match(body, /await invoke\("poll_mls_welcomes"/);
   assert.match(body, /onMutate: async[\s\S]*cancelQueries[\s\S]*applyAcceptedInvite\(queryClient/);
   assert.match(body, /onError: [\s\S]*rollbackAcceptedInvite\(queryClient, snapshot\)/);
-  // The invalidations are returned, so the mutation settles after them.
   assert.match(body, /onSettled: \([^)]*snapshot\) =>\s*Promise\.all\(\[[\s\S]*invalidateQueries[\s\S]*\]\)/);
   for (const key of ["invitesKey", "groupsKey", "withChannelsKey"]) {
     assert.match(body, new RegExp(`invalidateQueries\\(\\{ queryKey: ${key} \\}\\)`));

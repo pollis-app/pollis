@@ -2,72 +2,36 @@
 //!
 //! # Why a peer connection has to be parked
 //!
-//! A peer-hosted relay is a consumer device behind NAT or CGNAT. A first-party
-//! relay cannot dial it, and neither end is an ICE agent, so hole-punching was
-//! never on the table between them. The one connection that always works is the
-//! one the **peer opens outbound**. So a peer dials each first-party relay it
-//! knows from the signed directory, runs the ordinary device handshake, sends a
-//! [`crate::proto::Park`] naming the relay leaf cert it serves under, and leaves
-//! the connection open. A later `Extend` naming that leaf's fingerprint is
-//! **spliced into that connection** instead of dialling. Nothing about the onion
-//! wire changes — only who dialled whom.
+//! A NAT'd peer cannot be dialled, so it parks an outbound connection; an `Extend` for its leaf fingerprint is spliced in.
 //!
 //! # What is in the map, and what is deliberately not
 //!
 //! `sha256(relay_leaf_der) -> { the live connection, that DER }`.
-//! Nothing else. No client identity, no addresses, no counts, no traffic
-//! metadata, no persistence, and no logging of who connected. §5.2/§11.7 forbid
-//! a relay recording **who its users are**; a parked peer is *infrastructure*
-//! whose identity is already public in the signed directory (it has to be, or
-//! clients could not pin its cert). An open socket cannot live in S3, so the map
-//! itself is irreducible — but it holds only what splicing into that socket
-//! needs:
+//! Nothing else: no client identity, addresses, counts or persistence (§5.2/§11.7).
 //!
 //! - the **connection**, because that IS the parked socket;
-//! - the **DER leaf**, because live revocation's `cert_sha256_b64` selector takes
-//!   the preimage, not the digest, and checking only the address would fail
-//!   *open* for exactly the per-peer identities that selector exists for. It is
-//!   the fingerprint's preimage and is public directory data either way.
+//! - the **DER leaf**, because revocation's `cert_sha256_b64` selector needs the preimage.
 //!
 //! Entries are dropped the moment the parking stream ends — which a dead
 //! connection also ends — so nothing accumulates.
 //!
 //! # Splicing: a QUIC connection inside a QUIC connection
 //!
-//! The peer runs its relay engine on **loopback** and bridges it to the parked
-//! connection (`pollis-core`'s `net::peer::park`). This module is the mirror
-//! image on the relay side: [`ParkedPeer::splice`] opens **one bi-stream on the
-//! parked connection per circuit** and bridges it to a loopback UDP socket, so
-//! the relay's ordinary `Extend` machinery can dial *that* address with the same
-//! pinned-fingerprint client config it would have used on a real dial.
+//! [`ParkedPeer::splice`] opens one bi-stream per circuit, bridged to a loopback UDP socket `Extend` dials.
 //!
-//! Every stream the relay opens on a parked connection **is** a splice — no
-//! preamble, no discriminator, because that connection has no other use. Each
-//! carries the next hop's QUIC packets length-delimited
-//! ([`write_tunnel_datagram`]): `u16` big-endian length, then that many bytes,
-//! ceiling [`MAX_TUNNEL_DATAGRAM`]. `pollis-core`'s device side reads and writes
-//! the identical framing.
+//! Each splice stream carries length-delimited QUIC packets ([`write_tunnel_datagram`]), as `pollis-core` does.
 //!
 //! Three things fall out of dialling a loopback socket, all load-bearing:
 //!
-//! 1. **The fingerprint pin still binds.** The tunnelled TLS terminates at the
-//!    peer's own leaf, so a device that parked under a fingerprint it does not
-//!    hold the private key for fails the handshake and carries nothing. That is
-//!    what makes `Park` safe without a new credential: possession is proven by
-//!    use, not by the frame.
+//! 1. **The fingerprint pin still binds:** a device without the leaf's key fails the handshake.
 //! 2. **Revocation still binds** — checked before the splice on the full
 //!    identity, and again on the leaf actually presented.
 //! 3. **The onion wire is unchanged.** The peer sees a `Layer` frame arriving on
 //!    a QUIC connection, exactly as a dialled relay does.
 //!
-//! One stream per circuit, rather than one shared pipe: head-of-line blocking
-//! then reaches no further than the circuit that caused it, and a circuit ending
-//! closes exactly its own stream.
+//! One stream per circuit, so head-of-line blocking stays within a circuit.
 //!
-//! The two directions of a splice run as **separate tasks, never one `select!`**.
-//! A framed read is not cancel-safe — dropping a `read_exact` midway through a
-//! length prefix resynchronises the tunnel onto garbage — and `select!` cancels
-//! the loser of every iteration.
+//! The two directions run as **separate tasks, never one `select!`**: framed reads are not cancel-safe.
 //!
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -83,26 +47,16 @@ use crate::proto::cert_fingerprint;
 /// an `Extend` carries in `next_cert_sha256`.
 pub type PeerFingerprint = [u8; 32];
 
-/// Ceiling on one tunnelled packet. Well above any QUIC packet a tunnelled
-/// connection will emit (quinn probes no higher than 1452), so the bound exists
-/// to stop a peer forcing an allocation, not to constrain the tunnel. Matches
-/// `pollis-core`'s `net::peer::park::MAX_TUNNEL_DATAGRAM` — the two sides read
-/// and write the same frames, so the ceiling has to agree.
+/// Ceiling on one tunnelled packet (quinn stays under 1452); must match `pollis-core`'s `MAX_TUNNEL_DATAGRAM`.
 pub const MAX_TUNNEL_DATAGRAM: usize = 4096;
 
 /// Every peer currently parked at this node.
-///
-/// Cloneable behind an `Arc`, like [`crate::server::RelayStats`]: the server
-/// holds one, and the health endpoint reads the fingerprints out of the same
-/// one so what an operator (and the directory reconciler) sees is what the relay
-/// would actually splice into.
 #[derive(Default)]
 pub struct ParkedPeers {
     map: Mutex<HashMap<PeerFingerprint, ParkedEntry>>,
 }
 
-/// One parked peer. See the module docs for why each field is here and why there
-/// is not a fourth.
+/// One parked peer (see the module docs).
 struct ParkedEntry {
     connection: quinn::Connection,
     leaf_der: Arc<Vec<u8>>,
@@ -116,13 +70,7 @@ impl ParkedPeers {
     /// Register `connection` as the way to reach the relay identity
     /// `leaf_der`, returning a registration that unparks it when dropped.
     ///
-    /// `None` means the fingerprint is already parked here by a **live**
-    /// connection, and the caller must refuse. First registration wins for as
-    /// long as it lasts: last-wins would let any authenticated device evict a
-    /// genuine peer at will, whereas an incumbent that is actually serving keeps
-    /// serving. Neither ordering can be gamed into *intercepting* traffic — a
-    /// squatter cannot complete the pinned handshake (module docs) — so the
-    /// choice is only about which denial is easier, and this is the harder one.
+    /// `None` if a live connection already holds this fingerprint: first wins, so a squatter cannot evict a serving peer.
     pub(crate) fn park(
         self: &Arc<Self>,
         leaf_der: Vec<u8>,
@@ -157,9 +105,7 @@ impl ParkedPeers {
     pub(crate) fn lookup(&self, fingerprint: &PeerFingerprint) -> Option<ParkedPeer> {
         let map = self.lock();
         let entry = map.get(fingerprint)?;
-        // A connection that has closed but whose registration has not been
-        // reaped yet is not a next hop. Splicing into it would fail anyway; this
-        // just makes the answer immediate.
+        // A closed but unreaped connection is not a next hop.
         if entry.connection.close_reason().is_some() {
             return None;
         }
@@ -178,14 +124,7 @@ impl ParkedPeers {
 
     /// The parked peers' own DER leaf certs, ordered by fingerprint.
     ///
-    /// This — plus the fingerprints above, which are just its digest — is the
-    /// **entire** external view of the registry, and it is what the health
-    /// endpoint publishes for the directory reconciler. A peer's leaf is public
-    /// by construction: the signed directory has to carry it or a client could
-    /// not pin the peer's cert, so surfacing it here is not a new disclosure.
-    ///
-    /// Nothing else may follow it out: not who is connected, not how many
-    /// clients a peer is serving, not a byte count, not an address.
+    /// The registry's entire external view; leaves are public directory data.
     pub fn peer_leaves(&self) -> Vec<Vec<u8>> {
         let map = self.lock();
         let mut entries: Vec<(&PeerFingerprint, &ParkedEntry)> = map.iter().collect();
@@ -220,9 +159,7 @@ impl std::fmt::Debug for ParkedPeers {
     }
 }
 
-/// Holds a peer's registration for as long as its parking stream lives. Dropping
-/// it unparks — so a closed stream, a dead connection, an error path and a
-/// cancelled task all reap the entry identically, and none of them can leak one.
+/// Holds a registration while its parking stream lives; dropping it unparks on every path.
 pub(crate) struct ParkRegistration {
     peers: Arc<ParkedPeers>,
     fingerprint: PeerFingerprint,
@@ -232,9 +169,7 @@ pub(crate) struct ParkRegistration {
 impl Drop for ParkRegistration {
     fn drop(&mut self) {
         let mut map = self.peers.lock();
-        // Only reap our OWN registration: if this fingerprint has since been
-        // re-parked by a different connection, that one is live and is not ours
-        // to remove.
+        // Only reap our own registration, not a newer re-park.
         if let Some(entry) = map.get(&self.fingerprint) {
             if entry.connection.stable_id() == self.connection_id {
                 map.remove(&self.fingerprint);
@@ -259,18 +194,12 @@ impl ParkedPeer {
     /// Splice one circuit into this peer: open a stream on the parked connection
     /// and bridge it to a loopback UDP address the relay's `Extend` machinery can
     /// dial as if it were the peer's own.
-    ///
-    /// The stream does not reach the peer until something is written on it —
-    /// QUIC creates a stream lazily — which the tunnelled connection's first
-    /// packet does.
     pub(crate) async fn splice(&self) -> anyhow::Result<Tunnel> {
         let (send, recv) = self.connection.open_bi().await?;
         let socket = Arc::new(UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?);
         let addr = socket.local_addr()?;
 
-        // Where to send what comes back. The relay dials this socket from its own
-        // extend endpoint, which keeps one source port per connection, and it
-        // always speaks first — so the return path is known before any reply.
+        // The relay always speaks first from one port, so the return path is known before any reply.
         let hop: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
 
         let to_peer = tokio::spawn(pump_socket_to_stream(
@@ -342,9 +271,7 @@ async fn pump_stream_to_socket(
                     let _ = socket.send_to(&datagram, target).await;
                 }
             }
-            // Clean end of stream, or a frame we cannot trust to resynchronise
-            // from. Either way this splice is over; the circuit on it fails and
-            // the client rebuilds.
+            // Clean end or an untrustworthy frame: this splice is over.
             Ok(None) | Err(_) => {
                 return;
             }
@@ -354,9 +281,7 @@ async fn pump_stream_to_socket(
 
 /// Write one tunnelled packet: `u16` big-endian length, then that many bytes.
 ///
-/// `pollis-core`'s device side reads exactly this, so the encoding is shared
-/// wire, not an internal detail. `len == 0` is legal and means an empty packet,
-/// not an end of stream.
+/// Shared wire with `pollis-core`; `len == 0` is an empty packet, not EOF.
 pub async fn write_tunnel_datagram<W: AsyncWrite + Unpin>(
     w: &mut W,
     datagram: &[u8],
@@ -401,10 +326,7 @@ pub async fn read_tunnel_datagram<R: AsyncRead + Unpin>(
 mod tests {
     use super::*;
 
-    /// The registry's behaviour is testable without a QUIC connection only up to
-    /// the point where one is needed; the live-connection paths (splice, evict,
-    /// revoked) are proven end to end in `tests/park.rs`, which is where a real
-    /// parked peer exists.
+    /// Live-connection paths are proven end to end in `tests/park.rs`.
     #[test]
     fn an_empty_registry_exposes_nothing() {
         let peers = ParkedPeers::new();
@@ -413,19 +335,14 @@ mod tests {
         assert!(peers.lookup(&[0u8; 32]).is_none());
     }
 
-    /// `Debug` must stay a count. If this ever prints a fingerprint or an
-    /// address, the registry has grown a logging path for the one thing it must
-    /// never log.
+    /// `Debug` must stay a count.
     #[test]
     fn debug_reveals_only_a_count() {
         let peers = ParkedPeers::new();
         assert_eq!(format!("{peers:?}"), "ParkedPeers { parked: 0 }");
     }
 
-    /// The tunnel framing is shared wire — `pollis-core`'s device side reads and
-    /// writes these exact bytes — so packet boundaries have to survive a stream
-    /// that concatenates them, and an empty packet has to stay distinguishable
-    /// from an end of stream.
+    /// Packet boundaries survive concatenation, and an empty packet is not EOF.
     #[tokio::test]
     async fn tunnel_datagrams_round_trip_and_keep_their_boundaries() {
         let mut buf = Vec::new();

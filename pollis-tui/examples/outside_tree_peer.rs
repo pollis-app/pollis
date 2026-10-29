@@ -1,11 +1,7 @@
 //! Dev-DS peers for the mobile Maestro `device-outside-tree` flow (#1571).
 //!
-//! The incident: a user's second device (a phone) was enrolled, then a peer
-//! opened a DM with the user, the user accepted on their FIRST device and the
-//! two exchanged messages — all while the phone never ran. When the phone
-//! finally opened the DM it was empty. This drives exactly that, with the
-//! phone's KeyPackage pool spent first, so the only thing that can add it is
-//! its last-resort package.
+//! Reproduces a phone enrolled but never running while a DM it belongs to is opened and used,
+//! with its KeyPackage pool spent so only its last-resort package can add it.
 //!
 //! Two roles, two processes (each its own data dir):
 //!
@@ -38,8 +34,7 @@ use pollis_core::state::AppState;
 const DEFAULT_OTP: &str = "000000";
 /// How long to wait for the phone, the other peer or the script at each step.
 const WAIT: Duration = Duration::from_secs(600);
-/// The phone's regular pool (`key_packages::POOL_TARGET`): this many adds
-/// spend it.
+/// The phone's regular pool (`key_packages::POOL_TARGET`).
 const POOL: usize = 5;
 
 pub const FIRST: &str = "sent while your phone was off";
@@ -156,10 +151,7 @@ async fn creator(email: &str, owner_id: &str, owner_email: &str) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    // Spend the phone's regular pool the way it is spent in life: every
-    // conversation the owner is invited to adds each of the owner's devices at
-    // invite time, claiming one package from each, and the phone is not running
-    // to refill. After `POOL` invites its regular pool is empty.
+    // Each invite adds every owner device, claiming a package; the phone never refills.
     for i in 0..POOL {
         let made = groups::create_group(format!("Outside the tree {i}"), None, me.clone(), Some(true), Some(false), &state)
             .await

@@ -25,10 +25,7 @@ function ChangeEmail() {
   const [stage, setStage] = useState<Stage>("enter-email");
   const [newEmail, setNewEmail] = useState("");
   const [code, setCode] = useState("");
-  // The second proof (#1161): a code to the address the account is on today.
-  // The device signature and the new-address code are both satisfied by whoever
-  // is holding this phone unlocked, so without this one a borrowed device could
-  // move the account's recovery address.
+  // The second proof (#1161): a borrowed unlocked phone must not move the recovery address.
   const [currentCode, setCurrentCode] = useState("");
   const scrollRef = useRef<ScrollView>(null);
   const currentCodeRef = useRef<TextInput>(null);
@@ -85,9 +82,7 @@ function ChangeEmail() {
     }
   };
 
-  // #1231: with the number pad up, the second code field could sit behind the
-  // keyboard. Once the first code is complete, move focus on to the second and
-  // scroll it into view.
+  // #1231: once the first code is complete, focus and scroll to the second.
   const onCodeChange = (v: string) => {
     const next = v.replace(/[^0-9]/g, "").slice(0, CODE_LENGTH);
     setCode(next);

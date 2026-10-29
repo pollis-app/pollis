@@ -1,57 +1,8 @@
 //! Custom per-group emoji (#848) — re-encoding, upload, listing, and the
 //! "which emoji may this user send" rule.
 //!
-//! ## What is stored, and why it is not encrypted
-//!
-//! An emoji is a **content-addressed, unencrypted R2 object** plus a metadata
-//! row per group that uses it (see the DS module `pollis_delivery::emoji` and
-//! migration `000015_custom_emoji.sql`). Everything else Pollis puts in R2 is
-//! convergently encrypted; this deliberately is not, and the reason is
-//! structural. #848 asks for Discord's rule: a member of group A may use A's
-//! emoji while talking in group B, and everyone in B must RENDER it even though
-//! they have no access to A. There is no key a B-only member could hold that
-//! would decrypt an A-scoped secret — an encrypted emoji is an emoji that cannot
-//! cross a group boundary. Message CONTENT stays E2EE exactly as before; what
-//! leaves the envelope is `<:shortcode:hash>`, and the operator could already
-//! see that an object exists.
-//!
-//! ## The re-encoder is the whole size story
-//!
-//! [`encode_emoji`] never stores what the user picked off disk. It decodes,
-//! shrinks, and re-encodes to WebP (static) or GIF (animated), degrading
-//! resolution and then frame count until the result fits [`EMOJI_MAX_BYTES`]
-//! (48 KiB). That ceiling is a **postcondition**, not a check: the function
-//! either returns bytes under it or returns an error, and
-//! `the_size_bound_holds_for_every_input` in the tests below pins that.
-//!
-//! It is also the app's main **decoder attack surface** — it is the one place
-//! that parses an image a stranger chose. So, in order:
-//!
-//!   1. The input is size-capped ([`EMOJI_MAX_INPUT_BYTES`]) before anything
-//!      parses it.
-//!   2. The format is SNIFFED from magic bytes and allowlisted. No declared MIME
-//!      and no file extension is consulted anywhere in this module — the caller
-//!      does not even pass one.
-//!   3. Dimensions are read from the header and rejected above
-//!      [`EMOJI_MAX_SOURCE_DIM`] *before* a full decode, so a 60000×60000 PNG
-//!      header never becomes a 14 GB allocation.
-//!   4. The decode itself runs under `image::Limits`, which caps allocation
-//!      independently of what the header claimed.
-//!   5. Animations are capped at [`EMOJI_MAX_SOURCE_FRAMES`] decoded frames, so
-//!      a GIF bomb is bounded in time as well as space.
-//!   6. Anything that fails to decode, or that decodes but cannot be re-encoded,
-//!      is REJECTED rather than passed through. Nothing reaches R2 that this
-//!      module did not itself produce.
-//!
-//! ## Shortcodes cannot be an injection vector
-//!
-//! A shortcode is `[a-z0-9_]{2,32}`, validated here and again at the DS
-//! chokepoint (which is authoritative). The charset contains no `<`, `&`, `:`,
-//! `/` or whitespace, so a shortcode can neither carry markup into rendered
-//! message text nor break the `<:name:hash>` token grammar
-//! [`parse_emoji_tokens`] scans for. Rendering never interpolates a shortcode
-//! into markup anyway — but a grammar whose alphabet makes the attack
-//! unrepresentable is worth more than a rule about how to render it.
+//! Unencrypted on purpose: members of B must render A's emoji (#848).
+//! [`encode_emoji`] is the decoder attack surface; output is always <= [`EMOJI_MAX_BYTES`].
 
 use std::sync::Arc;
 
@@ -61,58 +12,39 @@ use crate::commands::r2;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-// ── Bounds (the DS is authoritative; these must agree) ───────────────────────
+// Bounds: must agree with the DS (authoritative).
 
-/// Hard ceiling on ONE stored emoji object. Must equal
-/// `pollis_delivery::emoji::EMOJI_MAX_BYTES` — the DS re-checks it on
-/// registration and binds it into the presigned PUT's signature, so a
-/// disagreement shows up as a refused upload rather than as a silently larger
-/// object.
+/// Hard ceiling on one stored emoji. Must equal `pollis_delivery::emoji::EMOJI_MAX_BYTES`.
 pub const EMOJI_MAX_BYTES: usize = 48 * 1024;
 
-/// Largest source file [`encode_emoji`] will even look at. Rejected before any
-/// parsing, so a huge file costs a length check.
+/// Largest source file [`encode_emoji`] will parse.
 pub const EMOJI_MAX_INPUT_BYTES: usize = 8 * 1024 * 1024;
 
-/// Largest source dimension accepted, checked from the header before a full
-/// decode. Generous for a real emoji (nobody uploads a 4096px party parrot on
-/// purpose) and small enough that the subsequent decode is bounded.
+/// Largest source dimension, checked from the header before a full decode.
 pub const EMOJI_MAX_SOURCE_DIM: u32 = 4096;
 
-/// Cap on decoded animation frames. Bounds decode time for a GIF bomb — a file
-/// whose frame count, not whose dimensions, is the weapon.
+/// Cap on decoded animation frames (bounds a GIF bomb's decode time).
 pub const EMOJI_MAX_SOURCE_FRAMES: usize = 300;
 
-/// Ceiling on the DECODE-side allocation, handed to `image::Limits`. Independent
-/// of the header check above: a lying header is caught here instead.
+/// Decode-side allocation cap for `image::Limits`; catches a lying header.
 const EMOJI_MAX_DECODE_ALLOC: u64 = 256 * 1024 * 1024;
 
-/// The rendered size an emoji is displayed at, and so the largest square the
-/// re-encoder ever targets. Discord renders custom emoji at 32-48 px inline and
-/// stores 128 px; 64 px is the compromise that survives a 2× display without
-/// paying for pixels nobody sees.
+/// Largest square the re-encoder targets (survives a 2× display).
 const EMOJI_TARGET_DIM: u32 = 64;
 
-/// The degrade ladder. [`encode_emoji`] walks it until the output fits, so
-/// "under 48 KiB" is reached by making the image smaller rather than by giving
-/// up. Static images essentially never leave the first rung; animations may.
+/// Degrade ladder [`encode_emoji`] walks until the output fits.
 const SIZE_LADDER: [u32; 4] = [EMOJI_TARGET_DIM, 56, 48, 32];
 
-/// Frame budgets paired with the size ladder for animations. An emoji is a
-/// gesture, not a film — 60 frames is already a long loop, and 12 still reads as
-/// motion.
+/// Frame budgets paired with the size ladder for animations.
 const FRAME_LADDER: [usize; 4] = [60, 40, 24, 12];
 
-// ── Wire types (keep in sync with `frontend/src/types`) ──────────────────────
+// Wire types (keep in sync with `frontend/src/types`).
 
-/// One emoji as the UI sees it: the group that registered it, its shortcode, and
-/// the object it points at.
+/// One emoji as the UI sees it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CustomEmoji {
     pub group_id: String,
-    /// The group's display name, for the picker's section headers. Denormalised
-    /// into the row on read because the picker groups by source group and would
-    /// otherwise need a second round trip per group.
+    /// The group's display name, denormalised for the picker's section headers.
     pub group_name: String,
     pub shortcode: String,
     pub content_hash: String,
@@ -126,8 +58,7 @@ pub struct CustomEmoji {
 #[derive(Debug, Clone)]
 pub struct EncodedEmoji {
     pub bytes: Vec<u8>,
-    /// `image/webp` or `image/gif` — the only two this module emits, and exactly
-    /// the two the DS allowlists.
+    /// `image/webp` or `image/gif`, the two the DS allowlists.
     pub content_type: &'static str,
     pub animated: bool,
     pub width: u32,
@@ -136,11 +67,9 @@ pub struct EncodedEmoji {
     pub frames: usize,
 }
 
-// ── Validation (mirrors the DS; the DS is authoritative) ─────────────────────
+// Validation (mirrors the DS, which is authoritative).
 
-/// `[a-z0-9_]{2,32}`. Duplicated from `pollis_delivery::emoji::shortcode_is_valid`
-/// because pollis-core must not depend on the DS crate. The DS re-validates, so
-/// a drift here can only ever make the client stricter, never the server looser.
+/// `[a-z0-9_]{2,32}`. Mirrors `pollis_delivery::emoji::shortcode_is_valid`; the DS re-validates.
 pub fn shortcode_is_valid(shortcode: &str) -> bool {
     let len = shortcode.len();
     if !(2..=32).contains(&len) {
@@ -151,9 +80,7 @@ pub fn shortcode_is_valid(shortcode: &str) -> bool {
         .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-/// 64 lowercase hex characters — the exact form every content hash is written
-/// in. Case-sensitive on purpose: accepting both cases would let one image
-/// occupy two rows and two blobs.
+/// 64 lowercase hex chars. Case-sensitive so one image cannot occupy two rows.
 pub fn content_hash_is_valid(hash: &str) -> bool {
     hash.len() == 64
         && hash
@@ -161,9 +88,7 @@ pub fn content_hash_is_valid(hash: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// The R2 key an emoji object lives at. Mirrors `pollis_delivery::emoji::
-/// emoji_r2_key`; the DS derives the same key and stores ITS version, so the two
-/// agreeing is checked by the upload succeeding.
+/// The R2 key an emoji object lives at; mirrors `pollis_delivery::emoji::emoji_r2_key`.
 fn emoji_r2_key(content_hash: &str, content_type: &str) -> Result<String> {
     let ext = match content_type {
         "image/webp" => "webp",
@@ -177,8 +102,6 @@ fn emoji_r2_key(content_hash: &str, content_type: &str) -> Result<String> {
     Ok(format!("emoji/{content_hash}.{ext}"))
 }
 
-// ── The `<:shortcode:hash>` token grammar ────────────────────────────────────
-
 /// One custom-emoji reference found in message text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmojiToken {
@@ -191,13 +114,7 @@ pub struct EmojiToken {
 
 /// Scan `text` for `<:shortcode:content_hash>` references.
 ///
-/// Both halves must be well-formed for the run to count as a token; anything
-/// else is ordinary text and is left alone. That is deliberate — a message
-/// containing `<:not a real token:>` must render as those literal characters,
-/// not disappear, and the parser must not be the thing that decides otherwise.
-///
-/// The grammar is unambiguous because neither field's alphabet contains `:` or
-/// `>`, so a token cannot be nested inside another or run past its terminator.
+/// Malformed runs stay literal text. Neither field's alphabet has `:` or `>`, so no nesting.
 pub fn parse_emoji_tokens(text: &str) -> Vec<EmojiToken> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
@@ -218,8 +135,6 @@ pub fn parse_emoji_tokens(text: &str) -> Vec<EmojiToken> {
         };
         let hash_end = hash_start + rel_gt;
 
-        // `from_utf8` cannot fail here: the alphabet check below is ASCII-only,
-        // and a multi-byte character would fail it anyway.
         let (Ok(shortcode), Ok(hash)) = (
             std::str::from_utf8(&bytes[name_start..name_end]),
             std::str::from_utf8(&bytes[hash_start..hash_end]),
@@ -247,28 +162,16 @@ pub fn emoji_token_text(shortcode: &str, content_hash: &str) -> String {
     format!("<:{shortcode}:{content_hash}>")
 }
 
-// ── The re-encoder ───────────────────────────────────────────────────────────
-
 /// Re-encode arbitrary, untrusted image bytes into a small emoji object.
 ///
-/// Returns bytes that are guaranteed `<= EMOJI_MAX_BYTES`, or an error. There is
-/// no third outcome: the function never returns something oversized and never
-/// passes the input through unmodified. See the module docs for the ordered list
-/// of defences and why each one is where it is.
-///
-/// Animated input that cannot be squeezed under the ceiling even at the bottom
-/// of both ladders falls back to its FIRST FRAME as a static image. A still
-/// party-parrot is a worse emoji than an animated one and a much better outcome
-/// than a refused upload or an unbounded object, and it makes the postcondition
-/// unconditional: the static path's floor (a 32×32 lossless WebP) is a few
-/// kilobytes for any input at all.
+/// Output is always `<= EMOJI_MAX_BYTES` or an error. Animations that cannot fit fall back
+/// to their first frame as a static image.
 pub fn encode_emoji(input: &[u8]) -> Result<EncodedEmoji> {
     use image::ImageFormat;
 
     if input.is_empty() {
         return Err(Error::Other(anyhow::anyhow!("emoji file is empty")));
     }
-    // (1) Cap the input before anything parses it.
     if input.len() > EMOJI_MAX_INPUT_BYTES {
         return Err(Error::Other(anyhow::anyhow!(
             "emoji source is {} bytes; the limit is {EMOJI_MAX_INPUT_BYTES}",
@@ -276,8 +179,7 @@ pub fn encode_emoji(input: &[u8]) -> Result<EncodedEmoji> {
         )));
     }
 
-    // (2) Sniff the format from magic bytes and allowlist it. The caller never
-    // supplies a MIME type, so there is nothing here to be lied to about.
+    // Sniff the format from magic bytes; no MIME type is ever consulted.
     let format = image::guess_format(input)
         .map_err(|_| Error::Other(anyhow::anyhow!("unrecognised image format")))?;
     if !matches!(
@@ -289,7 +191,6 @@ pub fn encode_emoji(input: &[u8]) -> Result<EncodedEmoji> {
         )));
     }
 
-    // (3) Header dimensions, before a full decode.
     let (src_w, src_h) = probe_dimensions(input, format)?;
     if src_w == 0 || src_h == 0 {
         return Err(Error::Other(anyhow::anyhow!("image has a zero dimension")));
@@ -301,7 +202,6 @@ pub fn encode_emoji(input: &[u8]) -> Result<EncodedEmoji> {
         )));
     }
 
-    // (4)+(5) Decode under allocation limits, with a frame cap for animations.
     let frames = decode_frames(input, format)?;
     if frames.is_empty() {
         return Err(Error::Other(anyhow::anyhow!("image contains no frames")));
@@ -311,8 +211,7 @@ pub fn encode_emoji(input: &[u8]) -> Result<EncodedEmoji> {
         if let Some(encoded) = encode_animated(&frames)? {
             return Ok(encoded);
         }
-        // Fell off the bottom of both ladders — keep the first frame. See the
-        // doc comment: this is what makes the postcondition unconditional.
+        // Fell off both ladders: keep the first frame.
     }
     encode_static(&frames[0].image)
 }
@@ -348,9 +247,7 @@ fn probe_dimensions(input: &[u8], format: image::ImageFormat) -> Result<(u32, u3
 }
 
 fn decode_err(e: image::ImageError) -> Error {
-    // The decoder's own message can quote attacker-controlled bytes, so it is
-    // deliberately not surfaced verbatim; the shape of the failure is all a user
-    // can act on anyway.
+    // The decoder's message can quote attacker bytes, so it is not surfaced.
     let _ = e;
     Error::Other(anyhow::anyhow!("could not decode that image"))
 }
@@ -364,11 +261,6 @@ fn decode_limits() -> image::Limits {
 }
 
 /// Decode every frame (capped at [`EMOJI_MAX_SOURCE_FRAMES`]) as RGBA.
-///
-/// GIF and animated WebP go through `AnimationDecoder`; everything else is a
-/// single frame. A still GIF/WebP simply yields one frame and takes the static
-/// path, which is what we want — "animated" should mean "actually moves", not
-/// "was stored in a container that can move".
 fn decode_frames(input: &[u8], format: image::ImageFormat) -> Result<Vec<RawFrame>> {
     use image::AnimationDecoder as _;
     use std::io::Cursor;
@@ -396,8 +288,7 @@ fn decode_frames(input: &[u8], format: image::ImageFormat) -> Result<Vec<RawFram
         for frame in frames.take(EMOJI_MAX_SOURCE_FRAMES) {
             let frame = frame.map_err(decode_err)?;
             let (numer, denom) = frame.delay().numer_denom_ms();
-            // A zero or absurd delay is normalised, not trusted: GIFs in the
-            // wild carry 0 to mean "as fast as possible", and browsers clamp.
+            // GIFs use 0 for "as fast as possible"; normalise like browsers do.
             let delay_ms = numer
                 .checked_div(denom)
                 .map_or(100, |ms| ms.clamp(20, 10_000));
@@ -411,8 +302,7 @@ fn decode_frames(input: &[u8], format: image::ImageFormat) -> Result<Vec<RawFram
         }
     }
 
-    // Static path: a limited reader so a lying header cannot force a large
-    // allocation.
+    // Limited reader so a lying header cannot force a large allocation.
     let mut reader = image::ImageReader::new(Cursor::new(input));
     reader.set_format(format);
     reader.limits(decode_limits());
@@ -423,8 +313,7 @@ fn decode_frames(input: &[u8], format: image::ImageFormat) -> Result<Vec<RawFram
     }])
 }
 
-/// Scale to fit inside `target`×`target`, preserving aspect ratio. Never scales
-/// UP — a 16×16 pixel-art emoji stays 16×16 rather than being blurred to 64.
+/// Scale to fit inside `target`×`target`, preserving aspect ratio; never scales up.
 fn fit(image: &image::RgbaImage, target: u32) -> image::RgbaImage {
     let (w, h) = (image.width(), image.height());
     if w <= target && h <= target {
@@ -438,10 +327,7 @@ fn fit(image: &image::RgbaImage, target: u32) -> image::RgbaImage {
 
 /// Encode one frame as lossless WebP, walking the size ladder until it fits.
 ///
-/// Lossless rather than lossy because `image`'s WebP encoder is lossless-only,
-/// and because emoji are flat-colour artwork with hard edges — exactly the
-/// content lossless WebP compresses well and lossy compression ruins. At 64×64
-/// that lands in the low single-digit kilobytes for real artwork.
+/// `image`'s WebP encoder is lossless-only.
 fn encode_static(source: &image::RgbaImage) -> Result<EncodedEmoji> {
     for target in SIZE_LADDER {
         let scaled = fit(source, target);
@@ -478,8 +364,7 @@ fn webp_lossless(image: &image::RgbaImage) -> Result<Vec<u8>> {
 
 /// Encode an animation as GIF, walking the (size, frame-budget) ladder.
 ///
-/// `Ok(None)` means every rung was still too big — the caller falls back to a
-/// static first frame. `Err` is a real encoder failure.
+/// `Ok(None)`: every rung was too big.
 fn encode_animated(frames: &[RawFrame]) -> Result<Option<EncodedEmoji>> {
     for (target, budget) in SIZE_LADDER.into_iter().zip(FRAME_LADDER) {
         let kept = subsample(frames, budget);
@@ -508,10 +393,6 @@ fn encode_animated(frames: &[RawFrame]) -> Result<Option<EncodedEmoji>> {
 
 /// Reduce `frames` to at most `budget` by taking an evenly-spaced subset, and
 /// fold the dropped frames' delays into the frame that replaces them.
-///
-/// Folding the delays is the part that matters: dropping every other frame
-/// without doubling the remaining delays makes the animation play twice as fast,
-/// which is a visibly different emoji rather than a smaller one.
 fn subsample(frames: &[RawFrame], budget: usize) -> Vec<(&RawFrame, u32)> {
     if frames.len() <= budget || budget == 0 {
         return frames.iter().map(|f| (f, f.delay_ms)).collect();
@@ -535,9 +416,7 @@ fn gif_encode(frames: &[(image::RgbaImage, u32)]) -> Result<Vec<u8>> {
 
     let mut out = Vec::new();
     {
-        // Speed 30 is the encoder's fastest quantiser. Emoji are tiny and
-        // flat-coloured, so the quality difference against speed 1 is invisible
-        // while the time difference on a 60-frame animation is not.
+        // Speed 30: fastest quantiser; the quality loss is invisible on emoji.
         let mut encoder = GifEncoder::new_with_speed(&mut out, 30);
         encoder
             .set_repeat(Repeat::Infinite)
@@ -562,16 +441,8 @@ fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
-// ── Commands ─────────────────────────────────────────────────────────────────
-
-/// Every custom emoji `user_id` may USE, across every group they are a member
-/// of. This is the picker's source AND the permission rule in one query, which
-/// is the point: the set the UI offers and the set the rule permits cannot drift
-/// because they are the same set.
-///
-/// Discord's rule exactly (#848): membership of ANY registering group grants use
-/// in ANY conversation. Note the absence of a conversation argument — scoping
-/// this to the conversation is the obvious-looking rule and the wrong one.
+/// Every custom emoji `user_id` may use: the picker's source and the permission rule in one.
+/// No conversation argument on purpose: any registering group grants use anywhere (#848).
 pub async fn list_usable_emoji(_user_id: String, state: &Arc<AppState>) -> Result<Vec<CustomEmoji>> {
     let body = pollis_api::account_reads::EmojiReadBody {
         want_usable: true,
@@ -583,34 +454,13 @@ pub async fn list_usable_emoji(_user_id: String, state: &Arc<AppState>) -> Resul
 
 /// Every custom emoji registered to one group — the management page's list.
 ///
-/// #917: members-only, and that does **not** contradict #848.
-///
-/// #848 requires that a user who is in NONE of an emoji's groups still SEES it
-/// when someone sends it. That requirement is discharged entirely by the render
-/// path — `get_emoji_url` takes a content hash, verifies `sha256(bytes)` and
-/// serves the object, with no group argument and deliberately no membership
-/// check. Nothing in rendering reaches this function.
-///
-/// Resolving one hash you were handed and enumerating a group's whole emoji set
-/// are different acts. The first is "show me the decoration in this message I
-/// can already read"; the second is "tell me what that group has", which is
-/// group metadata — the shortcodes alone (`:q3-layoffs-parrot:`) leak the same
-/// way channel names do, plus `created_by` names members. So the hash stays
-/// open and the LIST closes, which is the narrowest rule that keeps #848's
-/// cross-group rendering intact.
-///
-/// The picker never used this: `list_usable_emoji` has always joined through
-/// `group_member`, because it is simultaneously the picker's source and the
-/// send-permission rule. This function is the management page's list, and the
-/// management page is only reachable from inside the group.
+/// Members-only (#917); cross-group rendering (#848) goes through `get_emoji_url` instead.
 pub async fn list_group_emoji(
     group_id: String,
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<CustomEmoji>> {
-    // Membership and the emoji set in ONE request. The DS applies the same
-    // members-only rule this preflight expressed, using the same predicate it
-    // uses to authorize the WRITES to `group_emoji`.
+    // Membership and the emoji set in ONE request; the DS applies the members-only rule.
     let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, true).await?;
     if !resp.authorized {
         return Err(Error::Other(anyhow::anyhow!(
@@ -620,8 +470,7 @@ pub async fn list_group_emoji(
     Ok(resp.emoji.into_iter().map(emoji_from_wire).collect())
 }
 
-/// Wire → domain for one custom emoji. One conversion, so the usable-set and
-/// per-group paths cannot map the same row differently.
+/// Wire → domain for one custom emoji.
 fn emoji_from_wire(e: pollis_api::directory::CustomEmojiWire) -> CustomEmoji {
     CustomEmoji {
         group_id: e.group_id,
@@ -638,22 +487,8 @@ fn emoji_from_wire(e: pollis_api::directory::CustomEmojiWire) -> CustomEmoji {
 
 /// Add an emoji to a group from a file on disk.
 ///
-/// The file is read here rather than passed as bytes over IPC, matching
-/// `upload_media` — and the read is size-checked from the filesystem metadata
-/// first, so an 8 GB file costs a `stat` rather than 8 GB of RSS.
-///
-/// Order of operations, and why:
-///
-///   1. **Re-encode first.** The content hash is of the RE-ENCODED bytes, so
-///      dedup keys on what is actually stored. Hashing the source instead would
-///      mean two people uploading the same picture in different formats stored
-///      it twice — the exact "fifteen party-parrots" failure.
-///   2. **Probe Turso for the hash.** A hit means the bytes are already in R2;
-///      skip the upload entirely.
-///   3. **Upload under a length-bound presign,** then register through the DS.
-///      Registration last, because a registered row pointing at a missing object
-///      is a broken emoji, while an uploaded object with no row is merely
-///      garbage the sweep collects.
+/// Re-encode first so dedup keys on the stored bytes; register last, so a failure leaves
+/// an orphaned object (swept) rather than a row pointing at nothing.
 pub async fn upload_group_emoji(
     group_id: String,
     shortcode: String,
@@ -680,9 +515,7 @@ pub async fn upload_group_emoji(
         .map_err(|e| Error::Other(anyhow::anyhow!("read {path}: {e}")))?;
 
     let encoded = encode_emoji(&raw)?;
-    // The postcondition, asserted at the boundary rather than trusted. If the
-    // encoder ever regresses, the upload fails here instead of putting an
-    // oversized object in a public bucket.
+    // Assert the postcondition rather than trust it: the bucket is public.
     if encoded.bytes.len() > EMOJI_MAX_BYTES {
         return Err(Error::Other(anyhow::anyhow!(
             "internal: re-encoded emoji is {} bytes, over the {EMOJI_MAX_BYTES} ceiling",
@@ -718,10 +551,7 @@ pub async fn upload_group_emoji(
         .await?;
     }
 
-    // `created_by` is the DS's no-auth fallback for the acting user
-    // (`resolve_actor`): with request signing off, a body without it resolves to
-    // no actor and the endpoint 403s outright. On the signed path it is bound to
-    // — and must equal — the authenticated user, so naming it grants nothing.
+    // `created_by` is the DS's no-auth actor fallback; when signed it must equal the signer.
     let actor_id = crate::commands::mls::current_user_id(state).await?;
     crate::commands::mls::ds_post_ok(
         state,
@@ -751,12 +581,7 @@ pub async fn upload_group_emoji(
 
 /// Remove an emoji from a group, then sweep whatever that orphaned.
 ///
-/// The sweep runs here — event-driven, on the action that can create garbage —
-/// rather than on a timer, per the repo's no-polling rule. The DS returns the R2
-/// keys it collected, and this deletes those blobs; a failed blob delete is
-/// logged and ignored, because the row is already gone and the next sweep will
-/// not re-offer it. That leaves at worst an orphaned object, which is a cost
-/// bound by the same 48 KiB ceiling as everything else here.
+/// A failed blob delete is logged and ignored: the row is gone, so it strands <= 48 KiB.
 pub async fn remove_group_emoji(
     group_id: String,
     shortcode: String,
@@ -778,31 +603,15 @@ pub async fn remove_group_emoji(
 
 /// How many collected emoji blobs to delete at once (#915).
 ///
-/// Each deletion costs a DS presign plus an R2 DELETE, so this is a concurrency
-/// bound on our OWN delivery service as much as on R2. Eight keeps a large sweep
-/// from serialising into hundreds of sequential round trips without turning it
-/// into a burst.
+/// Bounds load on our own DS (each deletion is a presign plus an R2 DELETE).
 const EMOJI_GC_DELETE_CONCURRENCY: usize = 8;
 
-/// Ask the DS to collect every unreferenced emoji object, then delete the R2
-/// blobs it collected. Safe to call at any time: it is idempotent and can only
-/// touch objects no group references.
+/// Ask the DS to collect unreferenced emoji objects, then delete their R2 blobs. Idempotent.
 pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
     let parsed =
         crate::commands::mls::ds_post_json(state, &pollis_api::emoji::EmojiGcBody {}).await?;
 
-    // Delete the collected blobs with bounded concurrency (#915).
-    //
-    // Each deletion is TWO sequential network round trips — a DS presign, then
-    // the R2 DELETE — and they were being issued strictly one after another, so
-    // a sweep that collected 200 objects took 400 serialised round trips for
-    // work with no ordering requirement between items. Bounded rather than
-    // unbounded: the presign half hits our own DS, and a sweep is exactly the
-    // kind of thing that should not look like a burst to it.
-    //
-    // Still best-effort per item. The Turso row is already gone, so a failure
-    // strands a <=48 KiB blob rather than breaking anything, and one failure
-    // must not abandon the rest of the sweep.
+    // Best-effort per item: the row is gone, so a failure strands a <=48 KiB blob.
     use futures_util::stream::StreamExt as _;
     futures_util::stream::iter(parsed.r2_keys)
         .for_each_concurrent(EMOJI_GC_DELETE_CONCURRENCY, |key| async move {
@@ -816,29 +625,15 @@ pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
 
 /// Resolve an emoji to a loopback URL the webview can use as `<img src>`.
 ///
-/// Same shape as `get_media_url`, and it writes into the SAME on-disk cache, so
-/// the existing media server serves it with no changes. Two things differ.
-///
-/// First, the fetch: an emoji object is stored in the clear, so there is no
-/// convergent decryption step — and that makes the integrity check load-bearing
-/// rather than belt-and-braces. Nothing but the hash proves these bytes are the
-/// emoji that was registered, so the hash is verified before the bytes are
-/// cached, and an oversized response is refused outright.
-///
-/// Second, the content type is LOOKED UP, not passed in. It could have been a
-/// parameter, but the wire token (`<:name:hash>`) carries only the hash, so
-/// every caller would have had to guess — and a guess of `image/webp` for an
-/// animated emoji derives the wrong R2 key and 404s. Deriving it from the row
-/// that owns the object makes that mismatch unrepresentable. The lookup is
-/// skipped entirely on a cache hit, which is the common case.
+/// Shares `get_media_url`'s cache. The content type is looked up from the row, since the
+/// token carries only the hash; the lookup is skipped on a cache hit.
 pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Result<String> {
     if !content_hash_is_valid(&content_hash) {
         return Err(Error::Other(anyhow::anyhow!("malformed emoji content hash")));
     }
     let url = crate::media_server::loopback_url(state, &content_hash).await?;
 
-    // Cache hit needs no content type at all — the cached file's own extension
-    // is what the media server serves it with.
+    // A cache hit is served by its file extension; no content type needed.
     if r2::find_cached_file(&content_hash).is_some() {
         return Ok(url);
     }
@@ -859,8 +654,7 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
     };
     let encrypted = r2::cache_encrypt(bytes, &db_key, content_hash.as_bytes())?;
 
-    // Atomic write, mirroring `get_media_url`: a half-written cache file would
-    // be served as a corrupt image rather than re-fetched.
+    // Atomic write: a half-written cache file would be served as corrupt.
     let mut tmp = target.clone();
     let final_ext = target.extension().and_then(|s| s.to_str()).unwrap_or("enc");
     tmp.set_extension(format!("{final_ext}.tmp"));
@@ -874,16 +668,8 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
     Ok(url)
 }
 
-/// Fetch an emoji object from R2 and verify the bytes against their content
-/// hash. The shared fetch core of [`get_emoji_url`] (desktop: cache-encrypts
-/// the bytes and serves them over the loopback media server) and the mobile
-/// bridge's `get_emoji_path` arm (no loopback server in a sandboxed RN app,
-/// so the verified plaintext is materialised to a sandbox file instead).
-///
-/// An emoji object is stored in the clear, so the hash check here is the ONLY
-/// thing attesting that these bytes are the emoji that was registered — every
-/// consumer must go through it, which is why the check lives here and not in
-/// the callers. Returns the verified bytes plus the row's content type.
+/// Fetch an emoji from R2 and verify it against its content hash. Objects are stored in the
+/// clear, so this check is the only integrity proof; every consumer must go through it.
 pub async fn download_verified_emoji(
     content_hash: &str,
     state: &Arc<AppState>,
@@ -892,10 +678,7 @@ pub async fn download_verified_emoji(
         return Err(Error::Other(anyhow::anyhow!("malformed emoji content hash")));
     }
     let (r2_key, content_type) = {
-        // Deliberately NOT membership-gated (#848): resolving a hash you were
-        // already handed is part of reading a message you can already read, and
-        // is a different act from enumerating a group's emoji set — which IS
-        // members-only, in `list_group_emoji`.
+        // Deliberately NOT membership-gated (#848); `list_group_emoji` is.
         let body = pollis_api::account_reads::EmojiReadBody {
             want_usable: false,
             content_hashes: vec![content_hash.to_string()],
@@ -910,9 +693,7 @@ pub async fn download_verified_emoji(
             }
         }
     };
-    // Re-derive the key rather than trusting the stored string: the DS derives
-    // it the same way, so a disagreement is a bug worth failing on, not
-    // something to follow into an arbitrary bucket path.
+    // Re-derive the key rather than trusting the stored string.
     let expected_key = emoji_r2_key(content_hash, &content_type)?;
     if r2_key != expected_key {
         return Err(Error::Other(anyhow::anyhow!(
@@ -922,9 +703,7 @@ pub async fn download_verified_emoji(
 
     let get_url = r2::presign_r2_with_length(state, "get", &expected_key, None).await?;
     let overlay = state.overlay_handle();
-    // The ceiling is passed IN rather than checked on the result: an emoji is
-    // 48 KiB, and reading an unbounded body before measuring it hands whoever
-    // chose the URL a memory bomb the check would arrive too late to stop.
+    // Ceiling passed IN: reading an unbounded body before measuring it is a memory bomb.
     let Some(bytes) =
         r2::r2_get_url(overlay.as_deref(), &get_url, EMOJI_MAX_BYTES as u64).await?
     else {
@@ -939,24 +718,15 @@ pub async fn download_verified_emoji(
              refusing to render substituted bytes"
         )));
     }
-    // The public API owes an owned `Vec`; `Vec::from` moves the `Bytes`
-    // allocation rather than copying it when it uniquely owns one (#915).
+    // `Vec::from` moves the `Bytes` allocation when uniquely owned (#915).
     Ok((Vec::from(bytes), content_type))
 }
 
 /// Strip any custom-emoji token `user_id` is not permitted to use from outgoing
 /// message text, leaving the shortcode as plain `:name:` text.
 ///
-/// This is the "use" rule applied at the last moment before a message is sealed.
-/// It cannot live on the server: message content is E2EE, so the DS never learns
-/// which emoji a message carries — that is the product working as designed, not
-/// a gap. So the rule is enforced where the plaintext exists, on the sender's
-/// device, against the same predicate that populates the picker
-/// ([`list_usable_emoji`]).
-///
-/// It DEGRADES rather than refuses. A message is not worth failing over an
-/// emoji, and `:parrot:` is what every other chat client shows for an emoji you
-/// cannot render — the recipient sees a comprehensible message either way.
+/// Enforced on the sender's device because the DS cannot see message content. Degrades
+/// rather than refuses: the recipient sees plain `:name:`.
 pub async fn prepare_emoji_text(
     user_id: String,
     text: String,
@@ -974,10 +744,6 @@ pub async fn prepare_emoji_text(
 
 /// The pure half of [`prepare_emoji_text`]: rewrite `text`, keeping every token
 /// whose hash is in `allowed` and degrading the rest to plain `:shortcode:`.
-///
-/// Split out from the I/O so the rule itself is directly testable — the DB
-/// lookup is uninteresting, the rewriting is where an off-by-one would silently
-/// eat a character of somebody's message.
 pub fn strip_disallowed_emoji(
     text: &str,
     allowed: &std::collections::HashSet<&str>,
@@ -1003,8 +769,6 @@ pub fn strip_disallowed_emoji(
 mod tests {
     use super::*;
 
-    // ── The token grammar ────────────────────────────────────────────────────
-
     fn h(seed: char) -> String {
         seed.to_string().repeat(64)
     }
@@ -1020,9 +784,7 @@ mod tests {
         assert_eq!(&text[tokens[0].start..tokens[0].end], emoji_token_text("parrot", &hash));
     }
 
-    /// A malformed run must stay literal text. The parser is not allowed to
-    /// "helpfully" interpret something that is not a token — a message
-    /// containing `<:oops:>` has to render as those characters.
+    /// A malformed run must stay literal text.
     #[test]
     fn malformed_runs_are_left_alone() {
         for text in [
@@ -1043,9 +805,6 @@ mod tests {
         }
     }
 
-    /// The injection case, at the grammar level: markup inside a would-be token
-    /// cannot produce a token, so a renderer that trusts tokens is never handed
-    /// one containing markup.
     #[test]
     fn markup_cannot_ride_inside_a_token() {
         let hash = h('a');
@@ -1058,16 +817,7 @@ mod tests {
         assert!(!shortcode_is_valid("../../etc/passwd"));
     }
 
-    // ── The "use" rule, applied to outgoing text ─────────────────────────────
-
-    /// The sender-side half of the #848 permission rule, on the exact worked
-    /// example from the ticket.
-    ///
-    /// B is in group A, so B keeps group A's emoji **while typing in group B**;
-    /// C is in neither, so C's copy of the same token degrades to plain
-    /// `:parrot:` rather than failing the send. The membership set — never the
-    /// conversation — is what decides, which is why B's line is the interesting
-    /// assertion here.
+    /// The #848 worked example: membership, never the conversation, decides.
     #[test]
     fn a_disallowed_emoji_degrades_to_its_shortcode_and_nothing_else_moves() {
         let parrot = h('a');
@@ -1079,8 +829,7 @@ mod tests {
         let b_text = format!("morning all <:parrot:{parrot}> — standup in 5");
         assert_eq!(strip_disallowed_emoji(&b_text, &allowed), b_text);
 
-        // C, not permitted: only the token is rewritten; every other byte of the
-        // message is untouched.
+        // C, not permitted: only the token is rewritten.
         let c_text = format!("morning all <:parrot:{stranger}> — standup in 5");
         assert_eq!(
             strip_disallowed_emoji(&c_text, &allowed),
@@ -1095,15 +844,12 @@ mod tests {
             format!("<:parrot:{parrot}>:parrot:")
         );
 
-        // Text with no tokens is returned byte-for-byte, including near-misses
-        // that must not be touched.
+        // No tokens: returned byte-for-byte.
         for untouched in ["", "no emoji here", "<:oops:>", "a :parrot: b"] {
             assert_eq!(strip_disallowed_emoji(untouched, &allowed), untouched);
         }
 
-        // Multi-byte text around a stripped token survives — the rewrite slices
-        // on byte offsets the parser produced, so a token adjacent to non-ASCII
-        // must not split a character.
+        // Multi-byte text around a stripped token survives.
         let unicode = format!("héllo 🎉 <:parrot:{stranger}> wörld");
         assert_eq!(
             strip_disallowed_emoji(&unicode, &allowed),
@@ -1111,8 +857,6 @@ mod tests {
         );
     }
 
-    /// Nothing permitted at all — the empty-allow-set edge, which is what a user
-    /// in no groups sees.
     #[test]
     fn with_nothing_permitted_every_token_degrades() {
         let allowed: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -1120,11 +864,7 @@ mod tests {
         assert_eq!(strip_disallowed_emoji(&text, &allowed), ":a_b: :c_d:");
     }
 
-    // ── The re-encoder ───────────────────────────────────────────────────────
-
-    /// A deterministic test image with enough colour variation that it does not
-    /// compress to nothing — a solid square would prove nothing about the size
-    /// bound.
+    /// Deterministic noise, so it does not compress to nothing.
     fn noisy_png(w: u32, h: u32) -> Vec<u8> {
         use image::ImageEncoder as _;
         let mut img = image::RgbaImage::new(w, h);
@@ -1142,9 +882,7 @@ mod tests {
         out
     }
 
-    /// A flat-coloured PNG — what a real emoji actually looks like, and the only
-    /// way to reach the 4096px dimension ceiling without exceeding the 8 MiB
-    /// input ceiling first (4096² of noise is 55 MB on disk).
+    /// Flat PNG: the only way to reach 4096px without exceeding the 8 MiB input ceiling.
     fn flat_png(w: u32, h: u32) -> Vec<u8> {
         use image::ImageEncoder as _;
         let mut img = image::RgbaImage::new(w, h);
@@ -1158,8 +896,7 @@ mod tests {
         out
     }
 
-    /// A deterministic animated GIF: `frames` frames of full-size noise, which is
-    /// as hostile as an animation gets for the size bound.
+    /// A deterministic animated GIF of full-size noise.
     fn noisy_gif(w: u32, h: u32, frames: usize) -> Vec<u8> {
         use image::codecs::gif::GifEncoder;
         use image::{Delay, Frame};
@@ -1187,13 +924,7 @@ mod tests {
         out
     }
 
-    /// **The size bound, on every shape of input including the hostile ones.**
-    ///
-    /// This is the assertion #848 asks for: "the size bound actually holds after
-    /// re-encode". It is a postcondition of `encode_emoji`, so it is checked for
-    /// large photographic noise (worst case for a lossless codec), for long
-    /// animations, and for the degenerate small cases — not just for a
-    /// well-behaved sample.
+    /// The size bound (#848) holds on every shape of input, including the hostile ones.
     #[test]
     fn the_size_bound_holds_for_every_input() {
         let cases: Vec<(&str, Vec<u8>)> = vec![
@@ -1231,9 +962,7 @@ mod tests {
         }
     }
 
-    /// Dedup rests on the re-encoder being deterministic: the same source must
-    /// produce byte-identical output, or the "same image twice = one object"
-    /// promise is decoration.
+    /// Dedup rests on the re-encoder being deterministic.
     #[test]
     fn re_encoding_is_deterministic_which_is_what_makes_dedup_work() {
         let png = noisy_png(256, 256);
@@ -1249,8 +978,6 @@ mod tests {
         );
     }
 
-    /// An animation stays animated when it can, which is the whole point of
-    /// paying for the GIF path.
     #[test]
     fn a_modest_animation_survives_as_an_animation() {
         // Flat-coloured frames, i.e. what a real animated emoji looks like.
@@ -1292,9 +1019,6 @@ mod tests {
         assert!(encode_emoji(&huge).is_err());
     }
 
-    /// A source larger than the dimension ceiling is refused from its HEADER —
-    /// the point being that the rejection happens before the pixels are
-    /// allocated, so an image-bomb costs a header parse.
     #[test]
     fn oversized_dimensions_are_refused_from_the_header() {
         // A 5000x8 PNG is tiny on disk but over the ceiling in one axis.
@@ -1303,16 +1027,12 @@ mod tests {
         assert!(err.contains("limit is"), "unexpected error: {err}");
     }
 
-    /// Static output never scales a small source up: a 16×16 pixel-art emoji
-    /// stays crisp rather than being resampled to 64×64 mush.
     #[test]
     fn a_small_source_is_not_scaled_up() {
         let encoded = encode_emoji(&noisy_png(16, 16)).unwrap();
         assert_eq!((encoded.width, encoded.height), (16, 16));
     }
 
-    /// Aspect ratio survives the fit — a wide banner emoji must not be squashed
-    /// into a square.
     #[test]
     fn aspect_ratio_is_preserved() {
         let encoded = encode_emoji(&noisy_png(512, 128)).unwrap();
@@ -1320,8 +1040,6 @@ mod tests {
         assert_eq!(encoded.height, EMOJI_TARGET_DIM / 4);
     }
 
-    /// Subsampling folds the dropped frames' delays forward, so a halved frame
-    /// count still plays at the original speed rather than at double.
     #[test]
     fn subsampling_preserves_total_duration() {
         let frames: Vec<RawFrame> = (0..40)

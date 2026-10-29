@@ -18,7 +18,6 @@ import { SensitiveCover } from "../Media/SensitiveCover";
 import { SensitiveHideButton } from "../Media/SensitiveHideButton";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 
-// Shared styles for lightbox action buttons (download / esc).
 const lightboxBtnStyle: React.CSSProperties = {
   border: "2px solid transparent",
   borderRadius: 4,
@@ -28,14 +27,9 @@ const lightboxBtnStyle: React.CSSProperties = {
 
 interface AttachmentDisplayProps {
   attachment: MessageAttachment;
-  /** Grid mode: the image/video card fills its cell as a square instead of
-   * the fixed 96×96 chat thumb. Everything else — blurhash placeholder, the
-   * rounded corners, the lightbox on click — is identical, which is the
-   * point: the right panel's media grid and the search-result thumbnails
-   * render the very same component as the message log. */
+  /** Grid mode: the card fills its cell as a square instead of the 96×96 thumb. */
   tile?: boolean;
-  /** Overrides the default `attachment-<id>` test id — a surface that shows
-   * an attachment the log is also showing needs its own handle. */
+  /** Overrides the default `attachment-<id>` test id. */
   testId?: string;
 }
 
@@ -45,23 +39,18 @@ export const AttachmentDisplay = observer(({
   testId,
 }: AttachmentDisplayProps) => {
   const { t } = useTranslation("chat");
-  // Sensitive media (#1568): blurred until the user reveals it, and the
-  // reveal is shared with every other surface showing this attachment.
+  // Sensitive media (#1568): the reveal is shared across surfaces.
   const sensitivity = useSensitiveReveal(attachment);
   const isImage = attachment.content_type.startsWith("image/");
   const isVideo = attachment.content_type.startsWith("video/");
   const isAudio = attachment.content_type.startsWith("audio/");
   const cardTestId = testId ?? `attachment-${attachment.id}`;
-  // The thumb's box: a fixed 96×96 in the log, a square filling the cell in
-  // a grid.
   const thumbBox: React.CSSProperties = tile
     ? { width: "100%", aspectRatio: "1 / 1" }
     : { width: 96, height: 96 };
-  // object_key is empty while the upload is still in progress (optimistic stub).
   const isPending = !attachment.object_key;
 
-  // A sensitive thumb sits in a box of its own so the hide button can be its
-  // sibling — the thumb is a button, and a button cannot hold another.
+  // Own box so the hide button can be a sibling: a button cannot hold another.
   const withSensitiveChrome = (thumb: React.ReactNode) =>
     sensitivity.sensitive ? (
       <div className="relative flex-shrink-0" style={thumbBox}>
@@ -73,9 +62,7 @@ export const AttachmentDisplay = observer(({
     ) : (
       thumb
     );
-  // The hidden thumb: the cover, and one click (never a press, it is not
-  // free to undo) reveals it — and does nothing else, so a video's reveal
-  // never starts it playing.
+  // A click only reveals, so a video's reveal never starts playback.
   const hiddenThumb = () => (
     <PressButton
       data-testid={cardTestId}
@@ -100,13 +87,10 @@ export const AttachmentDisplay = observer(({
       <SensitiveCover blurhash={attachment.blurhash} />
     </PressButton>
   );
-  // While sensitive and revealed, the thumb fills the box above instead of
-  // carrying its own size.
   const cardBox: React.CSSProperties = sensitivity.sensitive
     ? { width: "100%", height: "100%" }
     : thumbBox;
 
-  // Seed state with the local preview URL if available (images sent by this device).
   const [downloadUrl, setDownloadUrl] = useState<string | null>(
     attachment.localPreviewUrl ?? null
   );
@@ -114,11 +98,9 @@ export const AttachmentDisplay = observer(({
   const [error, setError] = useState<string | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "downloading" | "done">("idle");
-  // Video-specific state.
   const [duration, setDuration] = useState<number | null>(null);
   const [poster, setPoster] = useState<string | null>(null);
 
-  // Revoke the generated poster blob URL when it's replaced or on unmount.
   const prevPosterRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevPosterRef.current && prevPosterRef.current !== poster) {
@@ -130,17 +112,10 @@ export const AttachmentDisplay = observer(({
     };
   }, [poster]);
 
-  // Guard: only attempt poster capture once per component lifetime.
-  // Without this, setting downloadUrl (on lightbox open) re-triggers the
-  // effect and creates a second GStreamer pipeline on the same blob URL,
-  // which races with the lightbox video and causes intermittent failures.
-  // Tracks the specific src we last attempted a poster capture for. A boolean
-  // latch here would block a late-arriving downloadUrl from ever producing a
-  // poster; keying on the src value lets a new src re-run exactly once.
+  // Last src a poster capture ran for: a second GStreamer pipeline on the same blob races the lightbox.
   const posterAttemptedSrcRef = useRef<string | null>(null);
 
-  // Intercept Escape in the capture phase so AppShell's navigation handler
-  // doesn't also fire while the lightbox is open.
+  // Capture phase, so AppShell's Escape handler doesn't also fire.
   useEffect(() => {
     if (!viewerOpen) { return; }
     const handler = (e: KeyboardEvent) => {
@@ -153,10 +128,7 @@ export const AttachmentDisplay = observer(({
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [viewerOpen]);
 
-  // After the lightbox closes, return focus to the chat input. MessageItem
-  // doesn't own the input ref, so signal via a window event that MainContent
-  // listens for. Only fire on a true→false transition so unrelated unmounts
-  // (virtualized scroll, channel switch) don't steal focus.
+  // Return focus to the chat input on close only (true→false), via a window event.
   const prevViewerOpenRef = useRef(viewerOpen);
   useEffect(() => {
     if (prevViewerOpenRef.current && !viewerOpen) {
@@ -165,21 +137,15 @@ export const AttachmentDisplay = observer(({
     prevViewerOpenRef.current = viewerOpen;
   }, [viewerOpen]);
 
-  // Video: read duration + capture a poster frame via canvas.
-  // Safe to seek now that gst-plugins-good is installed.
   useEffect(() => {
     if (!isVideo) { return; }
     const src = attachment.localPreviewUrl ?? downloadUrl;
     if (!src || posterAttemptedSrcRef.current === src) { return; }
-    // Mark this src before starting so concurrent dep changes don't trigger a
-    // second run for the same src, while a *new* src can still re-run.
     posterAttemptedSrcRef.current = src;
     let mounted = true;
 
     captureVideoPoster(src).then((result) => {
       if (!result) { return; }
-      // Component unmounted mid-capture — drop the poster and revoke its blob
-      // URL so it doesn't leak (the poster-revoke effect only tracks state).
       if (!mounted) { URL.revokeObjectURL(result.url); return; }
       if (result.duration > 0) { setDuration(result.duration); }
       setPoster(result.url);
@@ -188,24 +154,15 @@ export const AttachmentDisplay = observer(({
     return () => { mounted = false; };
   }, [isVideo, attachment.localPreviewUrl, downloadUrl]);
 
-  // Guard against a fetch-succeeds-but-render-fails loop: `<img onError>` nulls
-  // downloadUrl, which re-fires the auto-load effect below. A URL that fetches
-  // fine yet fails to render would otherwise loop forever (fetch→render→error→
-  // null→fetch). Cap how many render failures we retry before giving up.
+  // Caps render-failure retries: onError nulls downloadUrl, which re-fetches.
   const renderFailuresRef = useRef(0);
   const MAX_RENDER_RETRIES = 1;
 
-  // Auto-load images and audio from R2 once confirmed (object_key populated, no local URL).
-  // One URL pattern across image and audio: the loopback media server
-  // returns `http://127.0.0.1:<port>/<token>/<hash>`. Bytes never cross
-  // the JSON IPC; disk cache is encrypted at rest under the session
-  // db_key; HTTP Range works for `<audio>` / `<video>` natively.
+  // Auto-load images and audio once confirmed, via the loopback media server.
   useEffect(() => {
     if ((!isImage && !isAudio) || isPending || downloadUrl) {
       return;
     }
-    // A previously fetched URL rendered and then errored past the retry cap —
-    // stop re-fetching, surface the failure instead of spinning.
     if (renderFailuresRef.current > MAX_RENDER_RETRIES) {
       setError(t("attachment.failedToLoad"));
       return;
@@ -222,14 +179,9 @@ export const AttachmentDisplay = observer(({
       if (mounted) { setIsLoading(false); }
     });
     return () => { mounted = false; };
-    // Key on every input the guard reads, not just object_key. Previously a
-    // confirmed attachment (isPending flips false) or a downloadUrl reset back
-    // to null (failed load) never re-fired this effect, so the media never retried.
   }, [isImage, isAudio, isPending, downloadUrl, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
-  // Revoke decrypted blob URLs we created when they're replaced or on unmount.
-  // Skip non-blob URLs (e.g. tauri convertFileSrc paths) and skip the
-  // sender-owned localPreviewUrl, which is freed by the optimistic-send code.
+  // Revoke blobs we created; localPreviewUrl is freed by the optimistic send.
   const ownedBlobRef = useRef<string | null>(null);
   useEffect(() => {
     const isBlob = !!downloadUrl && downloadUrl.startsWith("blob:");
@@ -247,20 +199,7 @@ export const AttachmentDisplay = observer(({
     };
   }, [downloadUrl, attachment.localPreviewUrl]);
 
-  // Save to a user-chosen path via the native save panel. The `<a download>`
-  // trick doesn't work on WebKitGTK: `download` is ignored across origins
-  // (loopback media URL vs the app's tauri:// origin), so the webview just
-  // navigates to the URL and shows the browser's built-in audio/video player
-  // instead of triggering a download.
-  //
-  // The write itself is Rust's (`save_media_to_path`), not a `writeFile` of
-  // bytes the renderer fetched. Two reasons, one of them the point: the bytes
-  // no longer round-trip through the webview, and — an attachment is a file a
-  // STRANGER sent — the file lands with this platform's provenance marker on
-  // it (macOS `com.apple.quarantine`, Windows mark-of-the-web). Saved through
-  // the fs plugin it arrived indistinguishable from a file the user authored,
-  // so Gatekeeper and SmartScreen both stood down. See
-  // `pollis-core/src/downloads.rs`.
+  // Rust writes the file (`save_media_to_path`) so it gets the platform quarantine marker; see pollis-core/src/downloads.rs.
   const triggerSave = async (): Promise<boolean> => {
     const target = await dialogSave({ defaultPath: attachment.filename });
     if (!target) {
@@ -270,9 +209,7 @@ export const AttachmentDisplay = observer(({
       ...mediaArgs(attachment),
       targetPath: target,
     });
-    // The bytes are saved either way — a marker that could not be written (a
-    // FAT32 stick, a network share) is not worth failing the save over — but it
-    // is not something to swallow silently.
+    // A failed marker (FAT32, network share) doesn't fail the save, but is reported.
     if (marking.startsWith("failed")) {
       console.warn("[attachment] saved without a download marker:", marking);
     }
@@ -301,9 +238,6 @@ export const AttachmentDisplay = observer(({
     }
     setIsLoading(true);
     try {
-      // Video uses the same loopback URL pattern as image/audio. The
-      // server honours HTTP Range so seeking works without buffering
-      // the whole file.
       const url = await getMediaUrl(attachment);
       setDownloadUrl(url);
       setViewerOpen(true);
@@ -314,7 +248,6 @@ export const AttachmentDisplay = observer(({
     }
   };
 
-  // ── Shared lightbox action bar ─────────────────────────────────────────────
   const renderLightboxBar = () => (
     <div
       className="flex items-center gap-3 mt-3"
@@ -353,7 +286,6 @@ export const AttachmentDisplay = observer(({
     </div>
   );
 
-  // ── Shared caption bar ─────────────────────────────────────────────────────
   const renderCaptionBar = (extra?: React.ReactNode) => (
     <div
       className="flex items-center gap-2 px-2 py-1"
@@ -389,7 +321,6 @@ export const AttachmentDisplay = observer(({
     </div>
   );
 
-  // ── Image card — uniform 96×96 thumb, click to open lightbox ──────────────
   if (isImage) {
     return (
       <>
@@ -442,7 +373,6 @@ export const AttachmentDisplay = observer(({
         </PressButton>
         ))}
 
-        {/* Full-screen lightbox */}
         {viewerOpen && downloadUrl && !sensitivity.hidden && (
           <div
             style={{
@@ -479,7 +409,6 @@ export const AttachmentDisplay = observer(({
     );
   }
 
-  // ── Audio card ─────────────────────────────────────────────────────────────
   if (isAudio) {
     return (
       <>
@@ -514,7 +443,6 @@ export const AttachmentDisplay = observer(({
           {renderCaptionBar()}
         </div>
 
-        {/* Audio lightbox — full player */}
         {viewerOpen && downloadUrl && (
           <div
             style={{
@@ -549,7 +477,6 @@ export const AttachmentDisplay = observer(({
     );
   }
 
-  // ── Video card — uniform 96×96 thumb with play overlay ────────────────────
   if (isVideo) {
     return (
       <>
@@ -629,7 +556,6 @@ export const AttachmentDisplay = observer(({
         </PressButton>
         ))}
 
-        {/* Video lightbox */}
         {viewerOpen && downloadUrl && !sensitivity.hidden && (
           <div
             style={{
@@ -645,7 +571,6 @@ export const AttachmentDisplay = observer(({
             }}
             onClick={() => setViewerOpen(false)}
           >
-            {/* autoFocus lets the browser handle Space/Enter for play/pause */}
             <video
               autoFocus
               src={downloadUrl}
@@ -667,7 +592,6 @@ export const AttachmentDisplay = observer(({
     );
   }
 
-  // ── Generic file card ──────────────────────────────────────────────────────
   const FileTypeIcon = getFileIcon(attachment.filename);
   return (
     <div

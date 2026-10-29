@@ -5,14 +5,12 @@ import { Group, ListRow } from "../ui";
 import { Icon } from "../icons";
 import { semantic } from "../../theme/tokens";
 
-// The "+" at the end of the group strip: create a group or find one.
 export function AddGroupSheet({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation("mobile");
   const router = useRouter();
   return (
     <SheetOverlay title={t("groups.addGroup")} onClose={onClose} testID="sheet-add-group">
-      {/* The sheet does not scroll and both rows only open a page, so they act
-          on touch-down (#1529). */}
+      {/* Touch-down (#1529). */}
       <Group surface="high">
         <ListRow
           testID="btn-create-group"

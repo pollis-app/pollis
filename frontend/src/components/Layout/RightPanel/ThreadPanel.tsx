@@ -12,22 +12,12 @@ import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../
 import { ThreadMessageRow } from "./ThreadMessageRow";
 
 interface ThreadPanelProps {
-  /** ULID of the thread's root message. Guaranteed present by the router. */
   threadId: string;
   channelId: string | null;
   conversationId: string | null;
 }
 
-/**
- * One thread's conversation (#825) — Slack's thread pane, in the generic right
- * panel slot from #824.
- *
- * The root message is read out of the channel's already-loaded page rather
- * than refetched; a thread is always opened from a message that is on screen.
- * When the root has scrolled out of the loaded window it simply renders
- * without the quoted header, which is better than blocking the replies on a
- * second round trip.
- */
+/** One thread (#825). The root is read from the loaded channel page; if out of window it renders without it. */
 export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
   ({ threadId, channelId, conversationId }) => {
     const { t } = useTranslation("nav");
@@ -46,10 +36,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
       if ((!contentText && attachments.length === 0) || !currentUser) {
         return;
       }
-      // Same hand-off the channel composer uses: the core stores the bytes
-      // with the row and the outbox uploads them (#1335), so a file dropped in
-      // a thread is indistinguishable on the wire from one dropped in the
-      // channel, and survives a kill mid-upload the same way.
+      // Same outbox hand-off as the channel composer (#1335).
       let outgoing: OutgoingAttachment[];
       try {
         outgoing = await outgoingAttachments(attachments);
@@ -94,16 +81,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           )}
         </div>
 
-        {/* The thread's OWN composer, not a second style of input.
-            `ChatInput` keeps its attachment list in component state, so a
-            thread instance and the channel instance cannot share a pending
-            file — which is the bug this replaced: the thread had only a bare
-            textarea, so the only attach button on screen belonged to the
-            channel and every file went there.
-
-            No label: the panel header already says Thread and the placeholder
-            says the rest, so a "Reply in thread" label above a "Reply in
-            thread…" placeholder was the same sentence twice. */}
+        {/* Its own ChatInput, so a pending file can't land in the channel's. */}
         <div className="shrink-0 border-t border-line p-2">
           <ChatInput
             onSend={submit}

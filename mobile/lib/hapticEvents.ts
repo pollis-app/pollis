@@ -1,38 +1,19 @@
-// Which tactile feedback each physical interaction gets (#1286). Pure, so
-// tests/haptics.test.ts can pin it without a device; lib/haptics.ts plays it.
-//
-// iOS uses the UIKit feedback generators (impact / selection). Android uses
-// View.performHapticFeedback constants, not the vibrator: they follow the
-// phone's own "touch feedback" setting and feel like the rest of the system.
-// performHapticFeedback ignores a constant the phone's API level predates
-// (Confirm / Reject are API 30), so those are silent on older phones rather
-// than wrong.
+// Which tactile feedback each interaction gets (#1286); pure. Android uses performHapticFeedback, never the vibrator.
 
 export type HapticEvent =
-  // Swipe to reply crossed the threshold: letting go now replies.
   | "swipeArmed"
-  // Dragged back under the threshold: letting go now cancels.
   | "swipeDisarmed"
-  // A double tap started a reply.
   | "doubleTapReply"
-  // A long press opened the message sheet.
   | "longPress"
-  // A reaction was added or removed.
   | "reactionAdd"
   | "reactionRemove"
-  // A message left the composer.
   | "send"
-  // A PIN keypad key (digit or delete) was tapped.
   | "keyTap"
-  // A switch flipped, or a mark toggled (saved, verified off, unblock, role).
   | "toggle"
-  // The first tap of a two-tap destructive confirm: the next tap commits.
+  // The first tap of a two-tap destructive confirm.
   | "confirmArm"
-  // A constructive action completed (verified, reported, approved, saved…).
   | "success"
-  // A destructive action completed (blocked, deleted, removed, left…).
   | "destructive"
-  // An action the user took failed (wrong PIN or code, a send that failed…).
   | "error";
 
 export type IosHaptic =
@@ -67,14 +48,7 @@ export const HAPTICS: Record<
   error: { ios: { kind: "notification", type: "error" }, android: "reject" },
 };
 
-/**
- * A mutation's haptics, set as `meta: { haptic }` on its useMutation and
- * played by the MutationCache in lib/queryClient.ts — one chokepoint, so a
- * hook opts in with one line and no screen calls haptic() for a result.
- * `mutate` plays at once (an optimistic action: send, react), `success` when
- * it lands; a meta-tagged mutation that fails plays "error" unless
- * `error: false`. Either may depend on the variables.
- */
+/** A mutation's haptics as `meta: { haptic }`, played by lib/queryClient.ts. A tagged failure plays "error" unless `error: false`. */
 export type MutationHaptic<V = unknown> = {
   mutate?: HapticEvent | ((vars: V) => HapticEvent | null);
   success?: HapticEvent | ((vars: V) => HapticEvent | null);
@@ -91,11 +65,7 @@ export function resolveHaptic<V>(
   return typeof spec === "function" ? spec(vars) : spec;
 }
 
-/**
- * The haptic for a change in the swipe's armed state, or none when it did
- * not change. Called from the gesture worklet on every update, so the
- * common case (no change) costs a comparison and no bridge hop.
- */
+/** Null when unchanged: called from the worklet on every update. */
 export function armHaptic(wasArmed: boolean, isArmed: boolean): HapticEvent | null {
   "worklet";
   if (wasArmed === isArmed) {

@@ -2,11 +2,7 @@ use crate::harness::{await_wake_up, enroll_second_device, wipe, TestClient};
 use serde_json::json;
 use serial_test::serial;
 
-// ─── Smoke test ─────────────────────────────────────────────────────────────
-
-/// Minimal end-to-end path: one client signs up, creates a group, and can
-/// list it back. Validates the whole stack — Config → AppState → keystore →
-/// MLS init → signed POST to the in-process DS and back — on real code paths.
+/// Minimal end-to-end path: sign up, create a group, list it back.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn single_client_signup_and_create_group() {
@@ -34,18 +30,11 @@ async fn single_client_signup_and_create_group() {
     assert_eq!(groups.len(), 1, "should see the group we just created");
     assert_eq!(groups[0]["name"], "Test Group");
 
-    // Force the borrow checker to keep the client alive past the final
-    // assertion (otherwise it may be dropped early in some builds, closing
-    // the local DB handle mid-assertion).
+    // Keep the client (and its local DB handle) alive past the assertions.
     drop(alice);
 }
 
-/// Two distinct clients in the same test process. Proves:
-///   - Per-client `InMemoryKeystore`s keep sessions isolated.
-///   - Both clients round-trip through the shared test Turso.
-///   - `search_user_by_username` from one client resolves a user registered
-///     by another — the basic read-after-write contract the invite / DM
-///     flows are built on.
+/// Two clients: isolated keystores, and cross-client username search.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn two_clients_see_each_other_via_turso() {
@@ -57,10 +46,8 @@ async fn two_clients_see_each_other_via_turso() {
     let alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    // Distinct user IDs — keystores are independent.
     assert_ne!(alice_profile.id, bob_profile.id);
 
-    // Bob can find Alice via the real search command.
     let hit: serde_json::Value = bob
         .invoke_json(
             "search_user_by_username",
@@ -70,8 +57,6 @@ async fn two_clients_see_each_other_via_turso() {
     assert_eq!(hit["id"], alice_profile.id);
     assert_eq!(hit["username"], alice_profile.username);
 
-    // And vice versa — proves the shared remote is symmetric, not just
-    // single-writer.
     let hit: serde_json::Value = alice
         .invoke_json(
             "search_user_by_username",
@@ -84,13 +69,7 @@ async fn two_clients_see_each_other_via_turso() {
     drop(bob);
 }
 
-// ─── Scenarios ──────────────────────────────────────────────────────────────
-
-/// Alice invites Bob by username. Bob sees the pending invite, accepts it,
-/// and appears in the group member list. Alice then removes Bob: he no longer
-/// appears in the member list and the group drops off his own list. (The
-/// removal half was `removed_member_loses_access`, which repeated this whole
-/// invite → accept setup.)
+/// Invite, accept, then remove.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn group_invite_accept_then_remove_flow() {
@@ -116,19 +95,15 @@ async fn group_invite_accept_then_remove_flow() {
     bob.accept_invite(&invite_id).await;
     bob.poll().await;
 
-    // Bob should no longer see a pending invite.
     assert!(bob.first_pending_invite().await.is_none());
 
-    // Both appear in the member list.
     let ids = alice.group_member_ids(&group_id).await;
     assert!(ids.contains(&alice_profile.id));
     assert!(ids.contains(&bob_profile.id));
     assert_eq!(ids.len(), 2);
 
-    // Bob's own group list now includes the group.
     assert!(bob.list_group_ids().await.contains(&group_id));
 
-    // Removal: bob leaves the roster and the group drops off his own list.
     alice.remove_member(&group_id, &bob_profile.id).await;
 
     let ids = alice.group_member_ids(&group_id).await;
@@ -139,8 +114,6 @@ async fn group_invite_accept_then_remove_flow() {
     drop(bob);
 }
 
-/// Bob declines Alice's invite. The invite row goes away and Bob does not
-/// become a member.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn group_invite_decline_flow() {
@@ -162,7 +135,6 @@ async fn group_invite_decline_flow() {
 
     assert!(bob.first_pending_invite().await.is_none());
 
-    // Membership unchanged — only Alice.
     let ids = alice.group_member_ids(&group_id).await;
     assert_eq!(ids, vec![alice_profile.id]);
     assert!(!bob.list_group_ids().await.contains(&group_id));
@@ -172,11 +144,7 @@ async fn group_invite_decline_flow() {
     drop(bob);
 }
 
-/// #1506: the member page lists a pending invite (invitee, inviter, when) to
-/// every member, a plain member may not withdraw it, and the inviter can. A
-/// revoke must also take the invitee's devices back out of the MLS tree: they
-/// were grafted in at invite time, and a pending invitee who stays in the tree
-/// keeps receiving everything sealed for the group.
+/// #1506: pending invites are listed; revoking one also removes the invitee's devices from the tree.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_revoked_invite_leaves_the_list_and_the_tree() {
@@ -206,7 +174,6 @@ async fn a_revoked_invite_leaves_the_list_and_the_tree() {
         "precondition: a pending invitee is grafted into the tree at invite time"
     );
 
-    // Every member sees the pending invite, with who sent it.
     let listed = carol.list_group_invites(&group_id).await;
     assert_eq!(listed.len(), 1, "carol should see bob's pending invite: {listed:?}");
     let invite = &listed[0];
@@ -216,7 +183,6 @@ async fn a_revoked_invite_leaves_the_list_and_the_tree() {
     assert!(invite["created_at"].as_str().is_some_and(|s| !s.is_empty()));
     let invite_id = invite["id"].as_str().expect("invite id").to_string();
 
-    // Carol neither sent it nor is an admin.
     assert!(
         carol
             .try_revoke_invite(&group_id, &invite_id)
@@ -245,7 +211,6 @@ async fn a_revoked_invite_leaves_the_list_and_the_tree() {
         "the removal is a published commit"
     );
 
-    // The group still works for the members who are left.
     let channel_id = alice.general_channel_id(&group_id).await;
     carol.process_commits_for(&channel_id).await;
     alice.send_channel_message(&channel_id, "after the revoke").await;
@@ -260,9 +225,7 @@ async fn a_revoked_invite_leaves_the_list_and_the_tree() {
     drop(carol);
 }
 
-/// The mobile `membership` flow's sequence (#1506): bob accepts and posts at
-/// once, alice then posts, invites carol (left pending) and makes bob an admin.
-/// Bob must read alice's post, and can revoke carol's invite as an admin.
+/// The mobile `membership` flow's sequence (#1506).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_new_member_reads_the_creator_after_an_invite_and_a_promotion() {
@@ -306,8 +269,6 @@ async fn a_new_member_reads_the_creator_after_an_invite_and_a_promotion() {
     drop(carol);
 }
 
-/// Carol's request is rejected. She does not become a member and the pending
-/// list clears.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn group_join_request_reject_flow() {
@@ -337,32 +298,7 @@ async fn group_join_request_reject_flow() {
     drop(carol);
 }
 
-// ─── #917 — group reads take a caller ────────────────────────────────────────
-
-/// The roster, the channel list and the emoji list used to take a group id and
-/// NO caller, so any signed-in user who named a group id got all three. Group
-/// ids are enumerable (every client holds a whole-DB read-only Turso token, and
-/// `search_group_by_slug` maps guessable names onto ids), so this was reachable
-/// rather than theoretical.
-///
-/// All three are exercised in one scenario on purpose: they share a chokepoint
-/// (`authz::require_member`), and a fix that guards two of three is the bug
-/// again. Both sides of each are asserted — a guard that denied everyone would
-/// pass a deny-only test while breaking the product.
-///
-/// Mallory is signed up and authenticated; she is simply outside the group. So
-/// a denial here is "not a member", never "unknown user".
-///
-/// The same scenario also carries the #875 admin gate (formerly
-/// `join_requests_and_invite_links_are_admin_only`, which built this exact
-/// admin / plain member / outsider world):
-/// the two admin-gated group READS used to answer `Ok(vec![])` for a
-/// non-member and for a plain member alike, which is byte-identical to "there
-/// is nothing here". A caller could not tell a permission boundary from an
-/// empty page, and neither could the UI.
-///
-/// Both cases are exercised separately on purpose: "not a member at all" and
-/// "a member without the role" are different conditions and must say so.
+/// Roster, channels and emoji require membership (#917); admin reads distinguish non-member from non-admin (#875).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn group_reads_are_members_only() {
@@ -378,8 +314,7 @@ async fn group_reads_are_members_only() {
 
     let group_id = alice.create_group("Private Group").await;
 
-    // Bob joins as a plain member — the roster guard is about membership, not
-    // about the admin role, so the allowed case must include a non-admin.
+    // A plain member, so the allowed case includes a non-admin.
     alice.invite(&group_id, &bob_profile.username).await;
     bob.poll().await;
     let invite = bob.first_pending_invite().await.expect("bob was invited");
@@ -394,7 +329,6 @@ async fn group_reads_are_members_only() {
     )
     .await;
 
-    // ── The allowed cases still work ────────────────────────────────────────
     let alice_members = alice.group_member_ids(&group_id).await;
     assert_eq!(alice_members.len(), 2, "the admin must still see the roster");
     let bob_members = bob.group_member_ids(&group_id).await;
@@ -419,9 +353,6 @@ async fn group_reads_are_members_only() {
         "a member must still see the group's emoji list"
     );
 
-    // ── The roster ─────────────────────────────────────────────────────────
-    // The headline exposure: usernames and avatar URLs for everyone in a group
-    // the caller has no relationship to.
     let err = mallory
         .invoke_try(
             "get_group_members",
@@ -434,7 +365,6 @@ async fn group_reads_are_members_only() {
         "a non-member should be told they are outside the group, got: {err}"
     );
 
-    // ── The channel list ───────────────────────────────────────────────────
     let err = mallory
         .invoke_try(
             "list_group_channels",
@@ -447,10 +377,7 @@ async fn group_reads_are_members_only() {
         "a non-member should be told they are outside the group, got: {err}"
     );
 
-    // ── The emoji list ─────────────────────────────────────────────────────
-    // Listing a group's emoji is group metadata (shortcodes name things, and
-    // `created_by` names members). Distinct from RESOLVING one hash, which
-    // stays open — see `emoji_rendering_ignores_group_membership`.
+    // Listing is gated; resolving one hash stays open (`emoji_rendering_ignores_group_membership`).
     let err = mallory
         .invoke_try(
             "list_group_emoji",
@@ -463,8 +390,6 @@ async fn group_reads_are_members_only() {
         "a non-member should be told they are outside the group, got: {err}"
     );
 
-    // ── #875: the admin-gated reads ─────────────────────────────────────────
-    // The admin can create and see an invite link.
     let created: serde_json::Value = alice
         .invoke_json(
             "create_group_invite_link",
@@ -485,7 +410,6 @@ async fn group_reads_are_members_only() {
         "the admin must still see the link — the fix must not deny the allowed case"
     );
 
-    // A member without the role is told which role is missing …
     let bob_links = bob
         .invoke_try(
             "list_group_invite_links",
@@ -509,8 +433,6 @@ async fn group_reads_are_members_only() {
         "a member should be told which role is missing, got: {bob_reqs}"
     );
 
-    // … and a non-member is told they are not in the group at all, which is a
-    // different condition and used to be the same empty vec.
     let mallory_links = mallory
         .invoke_try(
             "list_group_invite_links",
@@ -528,17 +450,7 @@ async fn group_reads_are_members_only() {
     drop(mallory);
 }
 
-/// GUARD, not a proof of the fix: #848 requires that an emoji from a group you
-/// are in NONE of still RENDERS when someone sends it, because the content hash
-/// resolves without a membership check by design. #917 closes the emoji
-/// *listing*, and the risk is that the guard is put one layer too low and takes
-/// rendering with it.
-///
-/// The assertion is that a non-member and a member reach the SAME outcome —
-/// membership is not an input to this path at all. The shared outcome is the
-/// object-key mismatch `seed_group_emoji` arms deliberately, which is reached
-/// after the object lookup and before any network call, so the test is hermetic
-/// and its failure mode is a wrong error rather than a flake.
+/// GUARD (#848): a non-member and a member reach the SAME outcome when rendering an emoji.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn emoji_rendering_ignores_group_membership() {
@@ -585,18 +497,7 @@ async fn emoji_rendering_ignores_group_membership() {
     drop(mallory);
 }
 
-/// GUARD for the regression this fix is most likely to cause: `search_group_by_slug`
-/// is how a stranger FINDS a group to join, so it deliberately keeps taking no
-/// membership check. What changed is the SHAPE — it now answers with the minimal
-/// public projection instead of the whole `groups` row.
-///
-/// Asserts the full join path end to end from OUTSIDE the group (search →
-/// request → approve → member), and that the projection carries what the join
-/// prompt renders and nothing more. It is also the join-request APPROVE flow
-/// (formerly `group_join_request_approve_flow`, which ran the same request →
-/// approve on the same two users): the admin sees exactly carol's request, a
-/// non-member asking for the request list is told why (#875), and an approved
-/// request stops being pending.
+/// GUARD: `search_group_by_slug` stays open to strangers but returns only the join prompt's fields.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_non_member_can_still_find_and_join_a_group() {
@@ -610,17 +511,13 @@ async fn a_non_member_can_still_find_and_join_a_group() {
 
     let group_id = alice.create_group("Joinable Group").await;
 
-    // ── Discovery works for someone with no relationship to the group ──────
     let found = carol
         .invoke_json("search_group_by_slug", json!({ "slug": "joinable-group" }))
         .await;
     assert_eq!(found["id"].as_str(), Some(group_id.as_str()));
     assert_eq!(found["name"].as_str(), Some("Joinable Group"));
 
-    // ── …and discloses only the join prompt's fields ───────────────────────
-    // `owner_id` names a specific user and is the #917 roster leak in
-    // miniature; `created_at` has no consumer. Asserted as absent KEYS, so
-    // re-adding either to the returned struct fails here.
+    // Asserted as absent keys, so re-adding either fails here.
     assert!(
         found.get("owner_id").is_none(),
         "the public projection must not name the group's owner, got: {found}"
@@ -629,11 +526,7 @@ async fn a_non_member_can_still_find_and_join_a_group() {
         found.get("created_at").is_none(),
         "the public projection must not carry the group's creation time, got: {found}"
     );
-    // Sorted before comparing: `serde_json`'s `Map` is a `BTreeMap` here (the
-    // `preserve_order` feature is not enabled anywhere in the tree), so the
-    // wire order is alphabetical, not declaration order. The property under
-    // test is the SET of disclosed fields, so compare it as a set and leave
-    // field ordering — which nothing depends on — unpinned.
+    // `Map` is a `BTreeMap` here, so compare as a set.
     let mut keys: Vec<&str> = found
         .as_object()
         .expect("object")
@@ -647,8 +540,7 @@ async fn a_non_member_can_still_find_and_join_a_group() {
         "the public projection is exactly the join prompt's fields"
     );
 
-    // ── The roster is NOT reachable from a search hit ───────────────────────
-    // Finding a group must not become a second door onto the thing #917 closed.
+    // A search hit must not open the roster (#917).
     let err = carol
         .invoke_try(
             "get_group_members",
@@ -658,15 +550,12 @@ async fn a_non_member_can_still_find_and_join_a_group() {
         .expect_err("finding a group must not confer its roster");
     assert!(err.contains("not a member of this group"), "got: {err}");
 
-    // ── The rest of the join flow still completes ──────────────────────────
     carol.request_group_access(&group_id).await;
     let requests = alice.list_join_requests(&group_id).await;
     assert_eq!(requests.len(), 1, "the admin must see the pending request");
     assert_eq!(requests[0]["requester_id"], carol_profile.id);
     let request_id = requests[0]["id"].as_str().expect("request id").to_string();
 
-    // #875: a non-member used to receive `[]` here — the same answer as "nobody
-    // has asked to join". It now reports the real condition.
     let err = carol
         .invoke_try(
             "get_group_join_requests",
@@ -682,7 +571,6 @@ async fn a_non_member_can_still_find_and_join_a_group() {
     alice.approve_join_request(&request_id).await;
     carol.poll().await;
 
-    // Request no longer pending for the admin.
     assert!(alice.list_join_requests(&group_id).await.is_empty());
 
     let ids = alice.group_member_ids(&group_id).await;
@@ -690,7 +578,6 @@ async fn a_non_member_can_still_find_and_join_a_group() {
     assert!(ids.contains(&alice_profile.id));
     assert_eq!(ids.len(), 2);
 
-    // And now that she is inside, the guarded reads open up for her.
     assert!(
         !carol.list_group_channels(&group_id).await.is_empty(),
         "a newly approved member must be able to read the channel list"
@@ -705,13 +592,7 @@ async fn a_non_member_can_still_find_and_join_a_group() {
     drop(carol);
 }
 
-// ─── Group-structure wake-ups ────────────────────────────────────────────────
-
-/// Without the media stack (the mobile build, and this headless one) the core
-/// holds no LiveKit `Room`, so a group-room wake-up must go through the DS's
-/// SendData — these used to be no-ops there, and a channel made on a phone
-/// reached nobody's sidebar live. With media on, the same publishers ride the
-/// connected room instead, which the suite has none of.
+/// Without media, group-room wake-ups go through the DS's SendData.
 #[cfg(not(feature = "media"))]
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -748,19 +629,7 @@ async fn group_structure_wake_ups_leave_a_core_without_a_room() {
     drop(bob);
 }
 
-// ─── A user's own devices ────────────────────────────────────────────────────
-
-/// A group created on one of a user's devices reaches their OTHER devices
-/// without a refresh — desktop to phone and phone to desktop alike, since both
-/// run this core.
-///
-/// The other device has nothing to notice on its own: it is not in the new
-/// group's room (it does not know the group exists), so nothing it listens to
-/// says a word about it. The creator has to wake it, on the one room every
-/// device of the account is always in — its inbox — with the
-/// `membership_changed` every client already answers by pulling its Welcomes
-/// and refetching the group list. `create_group` used to send nothing at all,
-/// so the group appeared on the other device only after a hard refresh.
+/// A new group reaches the creator's other devices via a wake-up on the account inbox.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_group_created_on_one_device_wakes_the_users_other_devices() {
@@ -773,9 +642,7 @@ async fn a_group_created_on_one_device_wakes_the_users_other_devices() {
 
     let group = d1.create_group("Made on d1").await;
 
-    // The wake-up, to the account's own inbox, naming the group — and let
-    // through by the DS's authz (the suite has no LiveKit, so an accepted
-    // request ends in 503 "not configured"; a refused one is a 4xx).
+    // No LiveKit here: accepted = 503 "not configured", refused = 4xx.
     let inbox = format!("inbox-{}", me.id);
     let wake = await_wake_up(&inbox, |p| {
         p["type"] == "membership_changed" && p["group_id"] == group.as_str()
@@ -783,12 +650,9 @@ async fn a_group_created_on_one_device_wakes_the_users_other_devices() {
     .await
     .unwrap_or_else(|| panic!("create_group must wake the user's other devices on {inbox}"));
     assert!(!(400..500).contains(&wake.status), "the DS refused the wake-up: {wake:?}");
-    // A bare wake-up: no `kind`, so no device raises an invite alert for a
-    // group its own user just made.
+    // No `kind`, so no invite alert for the user's own group.
     assert!(wake.payload.get("kind").map_or(true, |k| k.is_null()), "{wake:?}");
 
-    // What d2 does with it (`apply_membership_wake`, then the list refetch):
-    // the group is listed, and its Welcome was already waiting.
     d2.poll().await;
     assert!(
         d2.list_group_ids().await.contains(&group),

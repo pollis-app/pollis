@@ -1,6 +1,4 @@
-// The durable outbox's renderer half (#1335): a send the core stored before
-// any network work is one row on screen, never two, and a failed one keeps a
-// way out. `src/utils/pendingMessages.ts` holds the rules; this pins them.
+// The outbox's renderer half (#1335): one row per send, never two; a failed one keeps a way out.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,8 +32,7 @@ test("a refetch keeps a stub the store does not hold, and drops one it does", ()
   // Stored (pending) under the stub's id: one row, the stored one.
   const stored = row("01A", outboxFields("01A", "pending"));
   assert.deepEqual(carryStubs([row("a"), stored], [row("a"), inFlight]).map((m) => m.id), ["a", "01A"]);
-  // The send failed before the core stored anything (size limit, a paste no
-  // longer staged): the failed stub stays, but as Discard-only.
+  // Failed before the core stored it: stays, Discard-only.
   const orphan = row("pending-2", { status: "failed", outbox_id: "01B" });
   const carried = carryStubs([row("a")], [orphan]);
   assert.deepEqual(carried.map((m) => m.id), ["a", "pending-2"]);

@@ -1,22 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client DM BIDIRECTIONAL E2E (issue #570, extends M2).
- *
- * two-client.js proves A -> B DM delivery. This adds the reverse leg: after the
- * DM is established and A's message converges into B, B REPLIES and A's UI
- * eventually renders B's message. Both directions of a 1:1 DM must work.
- *
- * Same isolation + backend assumptions as two-client.js (two isolated instances,
- * one shared external backend from start-backend.sh, one Vite server).
- *
- * Choreography:
- *   1. A + B sign up.
- *   2. A DMs B by email; B accepts the request.
- *   3. A sends msg-A; both A (local) and B (converged) render it.
- *   4. B sends msg-B (the reply); both B (local) and A (converged) render it.
- *
- * On failure, dumps per-client A-FAIL.* / B-FAIL.* into e2e/artifacts/.
- */
+// Two-client DM, both directions (#570): A -> B, then B replies and A renders it.
 
 const fs = require("fs");
 const path = require("path");
@@ -110,7 +93,6 @@ async function messageVisible(browser, token) {
   }, token);
 }
 
-// Open the (only) DM conversation on this client — Home -> DMs -> first option.
 async function openDm(browser) {
   await h.clickTestId(browser, "sidebar-row-dms").catch(() => {});
   await h.sleep(1000);
@@ -187,7 +169,6 @@ async function main() {
     console.log("[dm-reply] B: accepting the DM request…");
     await acceptIncomingDm(B.browser, REQUEST_TIMEOUT_MS);
 
-    // Forward leg: A -> B.
     console.log(`[dm-reply] A: sending msg-A (${tokenA})`);
     await sendMessage(A.browser, `hi from A ${tokenA}`);
     await waitForMessage(A.browser, tokenA, 30000);
@@ -195,7 +176,6 @@ async function main() {
     console.log("[dm-reply] forward leg converged (A -> B)");
     await shot(B.browser, "dm-reply-B-got-A.png");
 
-    // Reverse leg: B -> A (the reply — the new coverage).
     console.log(`[dm-reply] B: replying with msg-B (${tokenB})`);
     await openDm(B.browser);
     await sendMessage(B.browser, `reply from B ${tokenB}`);

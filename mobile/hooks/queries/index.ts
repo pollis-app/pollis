@@ -1,6 +1,4 @@
-// Re-export hub for query hooks. Mirrors `frontend/src/hooks/queries/index.ts`.
-// Add new hooks by importing them here so screens have one import path:
-//   import { useUserGroups } from "../../hooks/queries";
+// Re-export hub for query hooks.
 
 export * from "./useUserProfile";
 export * from "./useUserGroups";

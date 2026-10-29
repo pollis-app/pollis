@@ -10,7 +10,6 @@ export const blocksQueryKeys = {
   blockedUsers: (userId: string | null) => ["blockedUsers", userId] as const,
 };
 
-// Query: inbound DM requests awaiting accept/decline.
 export function useDMRequests() {
   const currentUser = useObserver(() => appStore.currentUser);
 
@@ -29,7 +28,6 @@ export function useDMRequests() {
   });
 }
 
-// Mutation: accept a pending DM request, moving it into the conversations list.
 export function useAcceptDMRequest() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -51,8 +49,6 @@ export function useAcceptDMRequest() {
   });
 }
 
-// Mutation: block a user. Any in-progress DM/channel with them should
-// disappear from the conversations list on next refetch.
 export function useBlockUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -77,9 +73,7 @@ export function useBlockUser() {
 
 export type ReportReason = "spam" | "harassment" | "illegal" | "other";
 
-// Mutation: report a user (#1213), optionally pointing at one of their
-// messages, optionally blocking them too. Sends ids and a reason only; no
-// message text ever leaves this device.
+// Report a user (#1213): ids and a reason only, never message text.
 export function useReportUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -110,7 +104,6 @@ export function useReportUser() {
   });
 }
 
-// Mutation: unblock a user.
 export function useUnblockUser() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -133,7 +126,6 @@ export function useUnblockUser() {
   });
 }
 
-// Query: users the current user has blocked.
 export function useBlockedUsers() {
   const currentUser = useObserver(() => appStore.currentUser);
 

@@ -1,6 +1,4 @@
-//! Track-B fuzz target for `next_watermark` (I3, the delivery-watermark safety
-//! function — `pollis_core::commands::messages::watermark`). Asserts the SAME
-//! three properties its Kani harnesses prove (see `watermark.rs` P1/P2/P3):
+//! Fuzz target for `next_watermark` (I3), asserting the same properties as its Kani harnesses:
 //!
 //!   * **P1 (no-skip / anti-F3):** the returned watermark is STRICTLY below the
 //!     `sent_at` of the first un-handled envelope — the next `sent_at > watermark`
@@ -9,28 +7,18 @@
 //!   * **P3 (handled-liveness):** if every envelope is handled, the watermark
 //!     equals the max `sent_at`.
 //!
-//! Like the Kani harness this fuzzes SMALL FIXED-DOMAIN INTEGER envelopes (not
-//! Strings), sorted ascending by key to match the real caller's
-//! `ORDER BY sent_at ASC`. P2/P3 are only clean under distinct keys (a
-//! handled/un-handled `sent_at` tie correctly pulls the cursor back), so they are
-//! asserted only when the generated keys are strictly increasing; P1 is asserted
-//! on every input, ties included — ties are exactly where the `>=`-vs-`>` mutant
-//! trips.
+//! P2/P3 are asserted only under strictly increasing keys; P1 on every input, ties included.
 //!
-//! NEGATIVE CHECK (teeth): build with `--cfg fuzz_mutant` and the target computes
-//! the watermark with a buggy `>` (instead of `>=`) break, which lets the cursor
-//! advance onto a `sent_at` tie and violates P1 — the fuzzer finds it fast.
+//! Teeth: `--cfg fuzz_mutant` breaks on `>` instead of `>=`, violating P1.
 #![no_main]
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use pollis_core::commands::messages::watermark::{next_watermark, EnvKind};
 
-/// Bound on the generated envelope count — keeps inputs tiny (the tie / no-skip
-/// counterexamples are 2-3-element phenomena, matching the Kani bound of 4).
+/// Bound on the generated envelope count (counterexamples are 2-3 elements).
 const MAX_LEN: usize = 6;
-/// Small integer domain for keys and epochs (mirrors the Kani `0..=3` domain,
-/// widened slightly). Kept `< MAX_LEN` so distinct-key fills stay satisfiable.
+/// Small integer domain; kept `< MAX_LEN` so distinct-key fills stay satisfiable.
 const DOMAIN: u8 = 5;
 
 #[derive(Debug, Arbitrary)]
@@ -59,8 +47,7 @@ fn kind_of(raw: u8) -> EnvKind {
     }
 }
 
-/// Independent oracle for the private `is_handled` — replicated verbatim so the
-/// property check does not depend on the function under test.
+/// Independent copy of the private `is_handled`.
 fn handled(kind: EnvKind, epoch: Option<u64>, max_fired: Option<u64>) -> bool {
     match kind {
         EnvKind::Message | EnvKind::Edit => match (epoch, max_fired) {
@@ -75,9 +62,7 @@ fn handled(kind: EnvKind, epoch: Option<u64>, max_fired: Option<u64>) -> bool {
     }
 }
 
-/// The watermark under test. Clean build → the REAL production `next_watermark`.
-/// `--cfg fuzz_mutant` → a buggy copy that breaks on `>` instead of `>=`, letting
-/// the cursor advance onto a handled/un-handled `sent_at` tie (the F3 bug).
+/// The watermark under test; `--cfg fuzz_mutant` swaps in the `>` bug.
 fn compute(envs: &[(u8, EnvKind, Option<u64>)], max_fired: Option<u64>) -> Option<u8> {
     #[cfg(not(fuzz_mutant))]
     {

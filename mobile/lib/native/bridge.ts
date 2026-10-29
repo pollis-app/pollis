@@ -1,22 +1,4 @@
-// Native bridge seam. This is the single point where the mobile app talks
-// to the Rust core (`pollis-core`) — everything else goes through `invoke()`
-// in ./invoke.ts.
-//
-// Two implementations live behind the same NativeBridge interface:
-//
-//   1. `pollisNativeBridge` (default in production) — calls into the
-//      `pollis-native` JSI turbo-module. JSON-marshals args, awaits the
-//      Rust `invoke()` promise, JSON-parses the result. Call sites that
-//      use `invoke<T>(cmd, args)` get fully-typed results back.
-//
-//   2. `defaultBridge` (fallback) — used when neither the real native
-//      module nor an explicit override has been installed. Defers to the
-//      `registerMockCommand` registry, and throws a clear error for any
-//      unregistered command. Useful for jest / typecheck / unit work.
-//
-// Production code calls `initializeNativeBridge()` once at app startup
-// (see app/_layout.tsx) which calls Rust's `initPollis()` with config
-// and then swaps in `pollisNativeBridge`.
+// Native bridge seam: the one place the app talks to the Rust core. Falls back to the mock registry until initializeNativeBridge().
 
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
@@ -31,12 +13,7 @@ export interface NativeBridge {
 type MockHandler = (args?: Record<string, unknown>) => unknown | Promise<unknown>;
 const mockHandlers = new Map<string, MockHandler>();
 
-/**
- * Register a mock implementation for a command. Mocks always take precedence
- * over the underlying bridge — handy for screen-development without a real
- * backend, or for jest tests that don't want to spin up Turso. Returns a
- * disposer.
- */
+/** Register a mock for a command; mocks always take precedence. Returns a disposer. */
 export function registerMockCommand(cmd: string, handler: MockHandler): () => void {
   mockHandlers.set(cmd, handler);
   return () => {
@@ -44,9 +21,7 @@ export function registerMockCommand(cmd: string, handler: MockHandler): () => vo
   };
 }
 
-// Why `initializeNativeBridge` failed, when it did. Every command then lands on
-// `defaultBridge`, and the reason the core refused to start (e.g. a build
-// missing its R2 origins) is what the caller needs to see, not "no handler".
+// Why `initializeNativeBridge` failed, surfaced instead of "no handler".
 let initFailure: string | null = null;
 
 const defaultBridge: NativeBridge = {
@@ -66,12 +41,7 @@ const defaultBridge: NativeBridge = {
   },
 };
 
-/**
- * Production bridge — routes invoke() through `pollis-native`'s JSI module
- * into the Rust dispatcher in `pollis-core/src/bridge.rs`. Mocks still win
- * if registered, so individual commands can be stubbed during UI work even
- * after the bridge is installed.
- */
+/** Routes invoke() into pollis-core's dispatcher. Registered mocks still win. */
 const pollisNativeBridge: NativeBridge = {
   async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     const mock = mockHandlers.get(cmd);
@@ -96,63 +66,31 @@ const pollisNativeBridge: NativeBridge = {
 
 let currentBridge: NativeBridge = defaultBridge;
 
-/**
- * Swap the underlying bridge implementation. Most call sites should not
- * touch this — `initializeNativeBridge()` is the normal entry point. Exposed
- * for tests that want to inject a fully custom bridge.
- */
+/** Swap the underlying bridge (tests). */
 export function setNativeBridge(bridge: NativeBridge): void {
   currentBridge = bridge;
 }
 
 export interface InitConfig {
-  // No Turso URL or token (#987). The client holds NO database credential —
-  // every remote read and write is a signed POST to the Delivery Service, and
-  // the Rust core does not link libsql at all — so there is nothing for the
-  // bundle to carry. `EXPO_PUBLIC_TURSO_*` can be dropped from every .env; the
-  // Rust side ignores unknown keys, so an app still passing them boots fine.
-  // R2 access credentials moved server-side to the DS secrets broker (#393); the
-  // bundle no longer carries them. Only the non-secret endpoint/public URL remain.
+  // The client holds NO credential (#987, #393): only non-secret endpoints.
   r2Endpoint?: string;
   r2PublicUrl?: string;
-  // LiveKit API key/secret moved server-side to the DS broker (#393); the bundle
-  // no longer carries them. Only the non-secret ws URL remains (the SFU dial URL,
-  // also returned by the DS token endpoint).
   livekitUrl?: string;
-  // No Resend key (#995). The DS sends the OTP mail; the core has no
-  // `resend_api_key` field to receive one and never did. Reading the env var
-  // here was the one thing that made Expo inline it into the bundle — the other
-  // stale `EXPO_PUBLIC_*` secrets are unreferenced and so never reach a build.
-  // Never re-add it.
-  // Delivery Service base URL (api-dev.pollis.com / api.pollis.com). Since #987
-  // this is the ONLY backend: OTP bootstrap, every remote read and every remote
-  // write go through it. Optional in the type only because the Rust side
-  // defaults it; an app without it can open its local database and nothing else.
+  // No Resend key (#995): reading it made Expo inline it. Never re-add it.
   pollisDeliveryUrl?: string;
-  // The dev DS gate key (#1242): dev builds only, sent by Rust only to a
-  // non-prod DS. A store, APK or OTA build refuses to configure with it set.
+  // The dev DS gate key (#1242): dev builds only.
   devAccessKey?: string;
 }
 
 let initialized = false;
 
 /**
- * Boot the Rust core and install the JSI-backed bridge. Idempotent — safe to
- * call multiple times; subsequent calls are no-ops. Call once during app
- * startup before any `invoke()` consumer mounts (the root layout in
- * `app/_layout.tsx` is the right place).
- *
- * Throws if `init_pollis` on the Rust side fails (e.g. the config JSON is
- * malformed).
- */
+/** Boot the Rust core and install the JSI bridge. Idempotent; throws if `init_pollis` fails. */
 export async function initializeNativeBridge(config: InitConfig): Promise<void> {
   if (initialized) {
     return;
   }
-  // Android's rustls-native-certs reads /etc/ssl/certs, which is empty on
-  // Android. Rust ships a Mozilla CA bundle and writes it under `data_dir`; we
-  // need to hand it a writable path. Expo's documentDirectory comes back as a
-  // `file://` URL — strip the scheme for Rust's PathBuf.
+  // Android has no /etc/ssl/certs: Rust writes its CA bundle under `data_dir`.
   const dataDir =
     Platform.OS === "android" && FileSystem.documentDirectory
       ? FileSystem.documentDirectory.replace(/^file:\/\//, "")

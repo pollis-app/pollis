@@ -1,13 +1,4 @@
 //! #1090: a push token belongs to the device that registered it.
-//!
-//! `push_token.token` is the primary key and the conflict branch reassigned
-//! `user_id` unconditionally, so anyone holding a victim's Expo token string
-//! could register it to their own account: the victim's phone then received the
-//! attacker's notifications and stopped receiving its own.
-//!
-//! Refusing every reassignment would have broken the case the original design
-//! served — switching accounts on one phone. The two are told apart by WHICH
-//! DEVICE asks, using the server-verified `X-Pollis-Device`, never the body.
 
 use pollis_api::devices::PushTokenBody;
 use pollis_delivery::devices::{
@@ -54,7 +45,6 @@ async fn owner_of(conn: &libsql::Connection, token: &str) -> Option<String> {
     rows.next().await.unwrap().map(|row| row.get(0).unwrap())
 }
 
-/// The finding, in one test: a stolen token string is not enough.
 #[tokio::test]
 async fn another_device_cannot_steal_a_registered_token() {
     let db = fresh().await;
@@ -80,8 +70,7 @@ async fn another_device_cannot_steal_a_registered_token() {
     );
 }
 
-/// And the case the original design was serving still works: one phone, new
-/// account. Same device, so it is an account switch, not a theft.
+/// Same device, new account: an account switch, not a theft.
 #[tokio::test]
 async fn the_same_device_may_switch_accounts() {
     let db = fresh().await;
@@ -97,8 +86,7 @@ async fn the_same_device_may_switch_accounts() {
     assert_eq!(owner_of(&conn, TOKEN).await.as_deref(), Some(MALLORY));
 }
 
-/// A row written before this migration carries no binding; the first device to
-/// re-register adopts it, rather than the row being permanently unclaimable.
+/// A legacy unbound row is adopted by the first device to re-register.
 #[tokio::test]
 async fn a_legacy_unbound_row_is_adopted_then_defended() {
     let db = fresh().await;
@@ -113,7 +101,6 @@ async fn a_legacy_unbound_row_is_adopted_then_defended() {
     apply_register_push_token(&conn, Some(VICTIM), Some("victim-phone"), &body(TOKEN))
         .await
         .unwrap();
-    // Now bound — so the thief is refused.
     let out =
         apply_register_push_token(&conn, Some(MALLORY), Some("mallory-phone"), &body(TOKEN))
             .await
@@ -143,7 +130,6 @@ async fn tokens_per_user_are_capped_oldest_first() {
     let n = PUSH_TOKENS_PER_USER + 5;
     for i in 0..n {
         let mut b = body(&format!("ExponentPushToken[tok{i}]"));
-        // Ascending stamps, so the low indices are the oldest.
         b.updated_at = format!("2026-01-01T00:00:{:02}.000000000+00:00", i);
         apply_register_push_token(&conn, Some(VICTIM), Some("the-phone"), &b)
             .await
@@ -161,7 +147,6 @@ async fn tokens_per_user_are_capped_oldest_first() {
     assert_eq!(kept, PUSH_TOKENS_PER_USER, "the cap holds");
     drop(rows);
 
-    // The oldest went, the newest stayed.
     assert!(owner_of(&conn, "ExponentPushToken[tok0]").await.is_none(), "oldest evicted");
     assert!(
         owner_of(&conn, &format!("ExponentPushToken[tok{}]", n - 1)).await.is_some(),

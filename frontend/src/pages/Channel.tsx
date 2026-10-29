@@ -23,19 +23,12 @@ export const ChannelPage: React.FC = observer(() => {
   const { togglePins } = useRightPanel();
 
   useEffect(() => {
-    // selectedGroupId drives the LiveKit room id used by the typing
-    // publisher; without it, this client's typing events never go out.
-    // setSelectedGroupId also nulls channelId, so set the group first.
+    // The group drives the typing room id, and setting it nulls channelId, so set it first.
     if (appStore.selectedGroupId !== groupId) {
       setSelectedGroupId(groupId);
     }
     setSelectedChannelId(channelId);
-    // Clear the unread badge regardless of how the user got here — direct
-    // URL, breadcrumb back-nav, deep link. Previously markRead only fired
-    // from the Group page's channel-list click handler, so a direct route
-    // visit left the bottom-bar count stuck.
-    // Clears the badge optimistically AND advances the persisted cursor, so
-    // the channel is still read after a restart (#844).
+    // Clear on any nav path, with a durable cursor (#844).
     markConversationRead(channelId);
     return () => { setSelectedChannelId(null); };
   }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId, markConversationRead]);

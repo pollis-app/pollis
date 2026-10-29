@@ -27,12 +27,7 @@ pub async fn get_user_profile(
 }
 
 /// Wire → domain for one user profile.
-///
-/// **No `phone`** since #987. The column exists and the old `SELECT` handed it
-/// to every caller — including the ones that only wanted an avatar — but nothing
-/// in the app renders it, and a phone number is the most re-identifying field on
-/// the row. It does not cross the boundary at all now, rather than crossing it
-/// and being ignored.
+/// No `phone` (#987): unrendered and the most re-identifying field.
 fn profile_from_wire(u: pollis_api::directory::UserWire) -> UserProfile {
     UserProfile {
         id: u.id,
@@ -50,8 +45,7 @@ pub async fn update_user_profile(
     avatar_url: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // Route the profile write through the Delivery Service (the write API).
-    // Server-side authz binds the edit to the authenticated user's own row.
+    // Server-side authz binds the edit to the caller's own row.
     let body = pollis_api::profile::UpdateProfileBody {
         user_id: user_id.clone(),
         username: username.clone(),
@@ -61,12 +55,7 @@ pub async fn update_user_profile(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // The two local copies of our own username follow the remote one. Neither
-    // is authoritative and both are only caches, but each is read on a path
-    // that never consults the DS: `get_session` (the name the composer stamps
-    // on an optimistic row) reads the accounts index, and the message log
-    // reads `user_cache` for sender names. Left alone, both showed the
-    // enrollment-time name until something happened to refill them.
+    // Refresh both local username caches; neither read path consults the DS.
     if let Some(username) = username {
         if let Err(e) = crate::accounts::rename_account(&user_id, &username) {
             crate::diag!("[profile] accounts index not updated after rename: {e}");
@@ -90,9 +79,7 @@ pub async fn get_preferences(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<String> {
-    // Remote is authoritative so changes made on another device are visible
-    // immediately on this one. The local row is a last-known-good cache used
-    // only when the remote read fails (offline / flaky connection).
+    // Remote first so other devices' changes show; local is the offline fallback.
     match fetch_remote_preferences(state, &user_id).await {
         Ok(Some(prefs)) => {
             upsert_local_preferences(state, &prefs).await;
@@ -136,8 +123,6 @@ pub async fn save_preferences(
 ) -> Result<()> {
     upsert_local_preferences(state, &preferences_json).await;
 
-    // Route the remote preferences upsert through the Delivery Service. The
-    // local cache above is written unconditionally beforehand.
     let body = pollis_api::profile::SavePreferencesBody {
         user_id,
         preferences: preferences_json,
@@ -162,15 +147,7 @@ async fn upsert_local_preferences(state: &Arc<AppState>, preferences_json: &str)
 }
 
 /// Resolve ONE person from what the user typed — a username or an email.
-///
-/// The resolution is the DS's `directory::user_by_identifier` (`POST
-/// /v1/directory/users`): an identifier containing `@` is matched against
-/// `users.email` ONLY, anything else against `users.username` ONLY, and the DS
-/// refuses any username that contains an `@` (`profile::is_valid_username` +
-/// the `000021` triggers). So the one row the DS answers with is unambiguous;
-/// the `.next()` here is not "first of several candidates", it is the answer.
-/// It used to be `username = ?1 OR email = ?1`, whose first row an account
-/// that had set its username to the target's email address won.
+/// The DS matches `@` identifiers to email only, others to username only, so `.next()` is the answer.
 pub async fn search_user_by_username(
     username: String,
     state: &Arc<AppState>,
@@ -184,9 +161,7 @@ pub async fn search_user_by_username(
     )
 }
 
-// The remaining tests pin schema constraints (CHECK, UNIQUE, PRIMARY KEY,
-// ON DELETE CASCADE) against the shipped remote schema. Query-simulation tests
-// for the client SQL #987 removed were deleted.
+// These pin schema constraints against the shipped remote schema.
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -194,9 +169,7 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        // The SHIPPED schema: baseline plus every numbered migration, in the order
-        // `scripts/db-apply.sh` applies them. #875 — applying the baseline alone left
-        // the fixture on a pre-migration schema no deploy has run for months.
+        // Baseline plus every migration, as `scripts/db-apply.sh` applies them (#875).
         for sql in pollis_schema::main_scripts() {
             conn.execute_batch(sql).unwrap();
         }
@@ -214,12 +187,7 @@ mod tests {
         ).unwrap();
     }
 
-    // ── search_user_by_username ────────────────────────────────────────────
-    //
-    // The lookup itself lives on the DS (`directory::user_by_identifier`); what
-    // these pin against the SHIPPED schema is the contract it relies on: an
-    // identifier goes to exactly one column, chosen by `@`, and the schema
-    // refuses the username that would make that choice ambiguous.
+    // search_user_by_username: an identifier maps to one column, chosen by `@`.
 
     fn lookup(conn: &Connection, identifier: &str) -> Option<String> {
         let column = if identifier.contains('@') { "email" } else { "username" };
@@ -231,9 +199,7 @@ mod tests {
         .ok()
     }
 
-    /// The shipped schema (`000021`) makes an email-shaped username
-    /// unrepresentable, so no row can ever compete with `alice@x.com` for an
-    /// email-shaped identifier — the premise the `@` dispatch above rests on.
+    /// `000021` makes an email-shaped username unrepresentable.
     #[test]
     fn username_with_at_sign_is_unrepresentable() {
         let conn = db();
@@ -254,14 +220,11 @@ mod tests {
         assert_eq!(lookup(&conn, "alice@x.com").as_deref(), Some("alice"));
     }
 
-    // ── preferences upsert ─────────────────────────────────────────────────
-
     #[test]
     fn preferences_upsert_insert_then_update() {
         let conn = db();
         setup(&conn);
 
-        // First save — INSERT
         conn.execute(
             "INSERT INTO user_preferences (user_id, preferences, updated_at) VALUES (?1, ?2, datetime('now'))
              ON CONFLICT(user_id) DO UPDATE SET preferences = ?2, updated_at = datetime('now')",
@@ -275,7 +238,6 @@ mod tests {
         ).unwrap();
         assert_eq!(prefs, r#"{"theme":"dark"}"#);
 
-        // Second save — UPDATE via ON CONFLICT
         conn.execute(
             "INSERT INTO user_preferences (user_id, preferences, updated_at) VALUES (?1, ?2, datetime('now'))
              ON CONFLICT(user_id) DO UPDATE SET preferences = ?2, updated_at = datetime('now')",
@@ -289,7 +251,6 @@ mod tests {
         ).unwrap();
         assert_eq!(prefs, r#"{"theme":"light","font_size":14}"#);
 
-        // Still only one row
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM user_preferences WHERE user_id = 'alice'",
             [],
@@ -317,8 +278,6 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 0, "preferences should be cascade-deleted with user");
     }
-
-    // ── email uniqueness ───────────────────────────────────────────────────
 
     #[test]
     fn duplicate_email_rejected() {

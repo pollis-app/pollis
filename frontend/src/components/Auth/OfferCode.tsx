@@ -7,34 +7,22 @@ import { AuthError } from "./AuthError";
 import * as api from "../../services/api";
 import { errorMessage } from "../../utils/errorMessage";
 
-/// How many codes in a row this screen shows on its own before it stops and
-/// asks. Each lives two minutes, so this is about ten minutes of an unattended
-/// sign-in screen; after that a person has to ask for another.
+/// Codes shown unattended before asking (each lives two minutes).
 const AUTO_REFRESHES = 5;
 
 interface OfferCodeProps {
   deviceName: string;
-  /// A signed-in device accepted the code: this device is signed in and must
-  /// now enroll (the scanning device approves it).
   onSignedIn: (result: api.AuthResult) => void | Promise<void>;
 }
 
-/**
- * The QR this NEW device shows for a signed-in phone to scan (#1361) — the
- * reverse of #1207. It carries this device's ephemeral public key and a link
- * id, never a secret: the phone wraps the account key to exactly the key it
- * reads here, and this device collects its session with a poll secret the QR
- * does not carry. Waiting is one awaited Rust call per code; a code that lapses
- * is replaced, up to `AUTO_REFRESHES`.
- */
+/** QR for a signed-in phone to scan (#1361): this device's ephemeral key and a link id, never a secret. */
 export const OfferCode: React.FC<OfferCodeProps> = ({ deviceName, onSignedIn }) => {
   const { t } = useTranslation("auth");
   const [handle, setHandle] = useState<api.DeviceOfferHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
-  // Bumped on every new code and on unmount: a late answer for a superseded
-  // code must not steer the screen.
+  // Bumped per code and on unmount, so late answers are ignored.
   const generation = useRef(0);
   const refreshes = useRef(0);
 
@@ -99,8 +87,7 @@ export const OfferCode: React.FC<OfferCodeProps> = ({ deviceName, onSignedIn }) 
       ) : handle ? (
         <>
           <div className="self-start p-3 rounded-lg bg-accent" data-testid="link-offer-qr">
-            {/* Dark modules on the accent: themed, and still normal polarity
-                (dark on light), which every camera decoder reads. */}
+            {/* Dark on accent: themed, still normal polarity for decoders. */}
             <QRCodeSVG
               value={handle.qr_payload}
               size={208}
@@ -111,8 +98,7 @@ export const OfferCode: React.FC<OfferCodeProps> = ({ deviceName, onSignedIn }) 
               title={t("link.qrAlt")}
             />
           </div>
-          {/* For a code read by hand on another computer; selectable, but
-              never needed when a phone scans it. */}
+          {/* For reading by hand. */}
           <code
             data-testid="link-offer-payload"
             className="font-mono text-xs text-dim break-all select-all leading-relaxed"

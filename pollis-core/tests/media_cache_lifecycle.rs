@@ -1,28 +1,6 @@
 //! The media-cache wipe, driven through the four commands that own it.
 //!
-//! The cache holds every image, video and voice clip the user opened, decrypted
-//! on the way in and re-encrypted under the session's `db_key`. Three commands
-//! promise to empty it — `logout`, `set_pin`, `unlock` — and a fourth,
-//! `wipe_local_data`, promises to leave nothing on the computer at all. None of
-//! them did.
-//!
-//! * The three lifecycle callers resolved the directory from ambient state
-//!   (`CURRENT_CACHE_USER`) and every one of them called at a moment when that
-//!   state named the wrong user: `logout` after `unload_user_db` had cleared it,
-//!   `set_pin` and `unlock` before `load_user_db_with_key` had set it. All three
-//!   wiped `media-cache/_anon/`, which is empty, and reported success.
-//! * `wipe_local_data` removed `db::local::dirs_path()`, while the cache root is
-//!   the shell's `app_data_dir().join("media-cache")`. Those are different
-//!   directories on Linux and Windows (only macOS makes them coincide), so
-//!   "wipe this computer" left the entire cache behind.
-//!
-//! Ambient state is what made all four wrong, so the fix is a scope argument and
-//! this is the test that the argument is right at every call site. It seeds a
-//! real file in the real cache directory, runs the real command, and looks.
-//!
-//! Its own test binary, and one test in phases rather than four: the data
-//! directory and the cache root are both process-global, so pointing them
-//! somewhere is a whole-process act — and phase 4 deletes the data directory.
+//! One test in phases: the data dir and cache root are process-global.
 
 use std::sync::Arc;
 
@@ -39,11 +17,7 @@ fn config() -> Config {
         r2_endpoint: String::new(),
         r2_public_url: String::new(),
         livekit_url: String::new(),
-        // No Delivery Service: every command below is local, and the
-        // best-effort DS calls at the tail of `set_pin` / `unlock` fail fast
-        // and are logged rather than propagated. That is the shipped behaviour
-        // for an offline client, so the test drives the same code an offline
-        // user does.
+        // No DS: the best-effort DS calls fail fast, as for an offline client.
         pollis_delivery_url: None,
         overlay_mode: pollis_relay::OverlayMode::Off,
         overlay_relay_url: None,
@@ -79,14 +53,10 @@ async fn every_lifecycle_wipe_actually_empties_this_user_s_media_cache() {
         Arc::new(InMemoryKeystore::new()),
     ));
 
-    // A known account, as `verify_otp` would have left one. No email: since
-    // #999 the accounts index does not carry one, and the keystore does.
     pollis_core::accounts::upsert_account(USER, "cache-tester", None)
         .expect("seed accounts index");
 
-    // ── Phase 1: set_pin ─────────────────────────────────────────────────
-    // The key material `set_pin` wraps comes from `AppState.unlock`, exactly as
-    // it does after signup.
+    // Phase 1: set_pin
     *state.unlock.lock().await = Some(pollis_core::commands::pin::UnlockState {
         user_id: USER.to_string(),
         db_key: zeroize::Zeroizing::new(vec![3u8; 32]),
@@ -101,7 +71,7 @@ async fn every_lifecycle_wipe_actually_empties_this_user_s_media_cache() {
         "set_pin left this user's cached media on disk"
     );
 
-    // ── Phase 2: unlock ──────────────────────────────────────────────────
+    // Phase 2: unlock
     pollis_core::commands::pin::lock(&state).await.expect("lock");
     let seeded = seed_cache_entry(&cache_root, "unlock");
     pollis_core::commands::pin::unlock(&state, USER.to_string(), PIN.to_string())
@@ -112,9 +82,7 @@ async fn every_lifecycle_wipe_actually_empties_this_user_s_media_cache() {
         "unlock left this user's cached media on disk"
     );
 
-    // ── Phase 3: logout ──────────────────────────────────────────────────
-    // `delete_data: false` — the session ends, the account stays known. The
-    // cache must go either way.
+    // Phase 3: logout (`delete_data: false`; the cache must go either way)
     let seeded = seed_cache_entry(&cache_root, "logout");
     pollis_core::commands::auth::logout(&state, false)
         .await
@@ -124,9 +92,7 @@ async fn every_lifecycle_wipe_actually_empties_this_user_s_media_cache() {
         "logout left this user's cached media on disk"
     );
 
-    // ── Phase 4: wipe_local_data ─────────────────────────────────────────
-    // The one that was looking at the wrong ROOT, not merely the wrong user —
-    // so this phase asserts on a second user's directory too.
+    // Phase 4: wipe_local_data, which must also clear other users' dirs
     let mine = seed_cache_entry(&cache_root, "wipe");
     let theirs = cache_root.join("someone-else").join("ffff.png.enc");
     std::fs::create_dir_all(theirs.parent().unwrap()).expect("other user dir");

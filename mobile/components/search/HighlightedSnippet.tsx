@@ -3,12 +3,7 @@ import { semantic, type as ty, fonts } from "../../theme/tokens";
 import type { SearchSnippet } from "../../hooks/queries/useSearch";
 import { splitSnippet } from "../../lib/searchSnippet";
 
-/**
- * A search snippet with its matched terms marked. `highlights` are
- * `[start, end)` pairs in UTF-16 code units — plain JS string indices — so the
- * text is sliced directly, never rendered as markup (the snippet is user
- * content). Mirrors desktop's `HighlightedSnippet`.
- */
+/** A search snippet sliced by UTF-16 index, never rendered as markup (user content). */
 export function HighlightedSnippet({
   snippet,
   numberOfLines = 2,

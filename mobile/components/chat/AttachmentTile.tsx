@@ -1,13 +1,4 @@
-// One attachment in a message row. Every kind opens the full-screen media
-// viewer on tap (#1248) — desktop's AttachmentDisplay opens its lightbox the
-// same way: images as a decrypted thumbnail, video as its blurhash under a
-// play glyph (expo-image cannot draw a video frame), audio and other files
-// as a named chip.
-//
-// A sensitive image or video (#1568) is covered — its blurhash under a
-// crossed-out eye — until a tap reveals it. That tap only reveals: it never
-// opens the viewer, so a video's reveal never starts it playing. A revealed
-// one carries an eye in its top-right corner that covers it again.
+// One attachment in a message row; every kind opens the viewer (#1248). A sensitive one (#1568) is covered until a tap reveals it.
 
 import { useMemo, type ReactNode } from "react";
 import { observer } from "mobx-react-lite";
@@ -26,8 +17,6 @@ import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { tileTap } from "../../lib/sensitiveMedia";
 import { SensitiveCover, SensitiveHideButton } from "./SensitiveCover";
 
-// Image sizing: fixed max width, height follows the aspect ratio within
-// sane bounds; unknown dimensions get a square fallback.
 const IMAGE_MAX_W = 220;
 function imageSize(att: MessageAttachment): { width: number; height: number } {
   if (att.width && att.height) {
@@ -46,17 +35,15 @@ export const AttachmentTile = observer(function AttachmentTile({
   onLongPress,
 }: {
   attachment: MessageAttachment;
-  // Absent where the row cannot open a viewer (no conversation context).
+  // Absent with no conversation context.
   onOpen?: (attachment: MessageAttachment) => void;
-  // The row's own long press (message actions), so pressing an attachment
-  // still reaches it.
+  // The row's long press, so pressing an attachment still reaches it.
   onLongPress?: () => void;
 }) {
   useThemeRerender();
   const { t } = useTranslation("chat");
   const kind = mediaKind(attachment.content_type);
   const sensitivity = useSensitiveReveal(attachment);
-  // An upload still in flight with no local file has nothing to show yet.
   const openable =
     !!onOpen && (!!attachment.object_key || !!attachment.localPreviewUri);
   const testID = `btn-attachment-${attachment.id}`;
@@ -92,8 +79,7 @@ export const AttachmentTile = observer(function AttachmentTile({
       </Pressable>
     );
   }
-  // A revealed sensitive tile sits in a box with its hide button beside it —
-  // a sibling, so covering it again never also opens the viewer.
+  // The hide button is a sibling, so hiding never opens the viewer.
   const withHide = (tile: ReactNode) =>
     sensitivity.sensitive ? (
       <View style={{ alignSelf: "flex-start" }}>
@@ -155,7 +141,6 @@ export const AttachmentTile = observer(function AttachmentTile({
     );
   }
 
-  // Audio and other files: a named chip.
   return (
     <Pressable
       {...press}

@@ -1,7 +1,6 @@
 import { View, Text } from "react-native";
 import { semantic, type as ty } from "../../theme/tokens";
 
-// Date separator in the timeline: a muted 13/600 label between hairlines.
 export function DaySeparator({ label }: { label: string }) {
   return (
     <View

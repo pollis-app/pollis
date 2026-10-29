@@ -1,20 +1,4 @@
-/*
- * Shareable invite links (#847) — create, copy once, revoke. BOTH skins.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`; the mock
- * reimplements `create_group_invite_link` / `list_group_invite_links` /
- * `revoke_group_invite_link` with the same semantics as
- * `pollis-core/src/commands/groups/invites.rs` — admins only, a `selector.
- * secret` token returned exactly once by create, a summary list that carries no
- * token at all, and a revoke that STAMPS the row rather than deleting it.
- *
- * The security property under test is the one the UI is responsible for: the
- * token appears in exactly one place, for exactly as long as that one card is
- * on screen, and no list view can ever hand it back.
- *
- * `e2e/invite-links.js` is the WebDriver scenario for the same feature against
- * the real binary; this is the UI-level half and runs anywhere.
- */
+// Invite links (#847), UI half: the token shows on exactly one card, once; no list hands it back.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -29,12 +13,7 @@ type Skin = (typeof SKINS)[number];
 // base64, and only the hash of the second one ever reaches a server.
 const INVITE_URL_RE = /^https:\/\/pollis\.com\/invite\/[^.\s]+\.[^.\s]+$/;
 
-/**
- * A link minted before this session — i.e. one whose token is already gone.
- * The mock's store is rebuilt from the preload on every load, so this is how a
- * "come back to it later" link is expressed; there is no persistence across a
- * reload to lean on, and pretending otherwise would be the fake part.
- */
+/** A link minted before this session, so its token is already gone. */
 const EARLIER_LINK = {
   id: "il_earlier",
   group_id: GROUP_ID,
@@ -118,9 +97,7 @@ for (const skin of SKINS) {
       const url = await createLink(page, "24", "1");
       expect(url).toMatch(INVITE_URL_RE);
 
-      // The two bound controls still show what this link was created under.
-      // These are the entire control surface of an admission boundary, so
-      // "which one is chosen" has to be readable, not inferred from the card.
+      // The bound controls still show what this link was created under.
       await expect(page.getByTestId("expiry-option-24")).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -131,9 +108,7 @@ for (const skin of SKINS) {
         "false",
       );
 
-      // The card is emphatic that this is the only viewing. That warning is
-      // load-bearing: the server holds only sha256(secret), so nobody — us
-      // included — can produce this string again.
+      // The one-time warning is load-bearing: the server holds only sha256(secret).
       await expect(page.getByTestId("created-invite-link")).toContainText(
         "Copy it now — this is the only time it can be shown.",
       );
@@ -141,7 +116,6 @@ for (const skin of SKINS) {
       // created by accident.
       await expect(page.getByTestId("created-invite-link")).toContainText("1 use");
 
-      // The link is now in the management list, as an active one.
       const row = page.getByTestId("invite-link-row");
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(/active/i);
@@ -170,10 +144,7 @@ for (const skin of SKINS) {
       // The button confirms, which is also the signal the async write settled.
       await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
 
-      // Read back through the mocked Rust command, because that is now what
-      // performs the write: `navigator.clipboard` is unreliable on WebKitGTK,
-      // the Linux webview this app ships on, which is why the bridge exists
-      // and why this button no longer calls the browser API (#898).
+      // Read back through the mocked Rust command: the clipboard bridge does the write (#898).
       const clipboard = await page.evaluate(
         () =>
           (window as unknown as { __tauriMock: { clipboard: string } })
@@ -189,11 +160,7 @@ for (const skin of SKINS) {
     test("a copy that fails says so instead of looking like a success", async ({
       page,
     }) => {
-      // `failClipboard` models the OS write failing — the Rust command returns
-      // false rather than throwing, which is precisely the return this button
-      // used to drop on the floor with a `console.error` (#898). A link that
-      // can only ever be shown once is the worst thing to falsely report as
-      // copied: the user closes the card believing they have it.
+      // failClipboard: the Rust command returns false; a once-only link must not be reported copied (#898).
       await openInvitePage(page, skin, [], { failClipboard: true });
       await createLink(page, "24", "1");
 
@@ -273,9 +240,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("created-invite-link")).toBeVisible();
       await page.getByTestId("revoke-invite-link").click();
 
-      // Revocation STAMPS the row — `revoke_group_invite_link` sets
-      // `revoked_at` and the list still returns it, now with `is_live` false.
-      // So the row stays, as a dead one, and loses its revoke affordance.
+      // Revocation stamps `revoked_at`: the row stays, dead, without its revoke affordance.
       const row = page.getByTestId("invite-link-row");
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(/revoked/i);

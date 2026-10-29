@@ -4,11 +4,7 @@ import { Icon } from "../icons";
 import { fonts, layout, semantic, type as ty } from "../../theme/tokens";
 import { PressInPressable } from "../ui";
 
-/**
- * Sits on top of the composer while a reply is being written (#1270),
- * desktop's ReplyPreview: who is being answered, one line of what they
- * said, and a 44pt dismiss. Tapping the quote scrolls to the original.
- */
+/** Over the composer while replying (#1270); tapping the quote scrolls to the original. */
 export function ReplyBar({
   name,
   snippet,
@@ -37,7 +33,7 @@ export function ReplyBar({
       }}
     >
       <Icon.reply size={16} color={semantic.dim} />
-      {/* Jumping to the original is free to undo: touch-down (#1529). */}
+      {/* Touch-down (#1529). */}
       <PressInPressable
         pressIn
         onPress={onPressQuote}

@@ -12,15 +12,7 @@ interface UnlockStateSnapshot {
   last_active_user: string | null;
 }
 
-/**
- * Boot router. Decides where the first frame lands:
- *   - signed-out  → /(auth)/email
- *   - signed-in, locked, PIN set → /(auth)/pin (unlock flow)
- *   - signed-in, no PIN set (first run on this device) → /(auth)/pin (create)
- *   - signed-in and already unlocked → /(tabs)/groups
- *
- * Runs once; downstream screens own the rest of the flow.
- */
+/** Boot router: where the first frame lands. Runs once. */
 export default function Index() {
   useThemeRerender();
   const router = useRouter();
@@ -38,7 +30,6 @@ export default function Index() {
           router.replace("/(auth)/email");
           return;
         }
-        // Have a session — find out where to land based on unlock state.
         const snap = await invoke<UnlockStateSnapshot>("get_unlock_state");
         if (cancelled) {
           return;
@@ -73,9 +64,7 @@ export default function Index() {
         justifyContent: "center",
       }}
     >
-      {/* The native splash's glyph, same size and dead centre, so the
-          splash → app handoff is seamless instead of the logo blinking
-          into a bare spinner. 120 matches `imageWidth` in app.json. */}
+      {/* The native splash's glyph at the same size (app.json `imageWidth`), so the handoff is seamless. */}
       <Image
         source={require("../assets/splash-glyph.png")}
         style={{ width: 120, height: 120 }}
@@ -84,7 +73,6 @@ export default function Index() {
       {!routed ? (
         <ActivityIndicator
           color={semantic.accent}
-          // Below the glyph, out of flow, so the glyph never shifts.
           style={{ position: "absolute", top: "50%", marginTop: 96 }}
         />
       ) : null}

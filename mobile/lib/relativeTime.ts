@@ -1,7 +1,4 @@
-// Short relative time for Security rows ("just now", "5m ago", "3d ago", then
-// a short date). Server timestamps are SQLite `datetime('now')` — UTC with no
-// zone — so they are parsed as UTC (`parseServerTimestamp`); `new Date()` would
-// read them in the viewer's zone and shift every age by their UTC offset.
+// Short relative time for Security rows; server timestamps are zone-less UTC (`parseServerTimestamp`).
 
 import i18n, { activeLocale } from "../i18n";
 import { parseServerTimestamp } from "./newMember";

@@ -1,7 +1,4 @@
-//! A recording reverse proxy: the client is configured to reach the DS (and,
-//! on the local target, object storage) THROUGH it, so every request and
-//! response body crosses a point where the soak can inspect it — the
-//! "in transit" proof. Bodies are scanned off the request path.
+//! A recording reverse proxy the client reaches the DS (and local storage) through.
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, RwLock};
@@ -17,16 +14,14 @@ pub struct Exchange {
     pub seq: usize,
     pub service: &'static str,
     pub method: String,
-    /// Path only — a presigned query string carries a signature, and the
-    /// report must not.
+    /// Path only: a presigned query string carries a signature.
     pub path: String,
     pub status: u16,
     /// Upstream round trip, request sent to response body read.
     pub millis: u128,
     pub request: BlobVerdict,
     pub response: BlobVerdict,
-    /// Kept for small (DS) bodies, so the final rescan covers secrets that
-    /// only became known after the request went out.
+    /// Kept for small (DS) bodies so the final rescan covers later-known secrets.
     pub request_body: Option<Vec<u8>>,
     pub response_body: Option<Vec<u8>>,
 }
@@ -54,11 +49,7 @@ impl Tap {
             exchanges: Mutex::new(Vec::new()),
             pending: Mutex::new(Vec::new()),
             seq: Default::default(),
-            // No pooled connections on either leg: hyper's server drops a
-            // keep-alive connection that idles past its header-read timeout,
-            // and a client that reuses one in that window fails a request the
-            // soak would then blame on the product. `Connection: close` on
-            // every response (below) does the same for the client's side.
+            // No pooled connections: an idled keep-alive drop would be blamed on the product.
             client: soak_reqwest::Client::builder()
                 .redirect(soak_reqwest::redirect::Policy::none())
                 .pool_max_idle_per_host(0)
@@ -71,7 +62,6 @@ impl Tap {
         *self.scanner.write().unwrap() = scanner;
     }
 
-    /// Bind on loopback and serve; returns `http://127.0.0.1:<port>`.
     pub async fn serve(self: &Arc<Self>) -> String {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("tap bind");
         let addr: SocketAddr = listener.local_addr().expect("tap addr");
@@ -82,7 +72,6 @@ impl Tap {
         format!("http://{addr}")
     }
 
-    /// Wait for every in-flight body analysis.
     pub async fn settle(&self) {
         let handles: Vec<_> = std::mem::take(&mut *self.pending.lock().unwrap());
         for h in handles {
@@ -100,9 +89,7 @@ impl Tap {
         v
     }
 
-    /// Rescan every retained body with `scanner` (which may know secrets the
-    /// one in force at request time did not). Returns (exchanges rescanned,
-    /// findings).
+    /// Rescan retained bodies with a newer `scanner`. Returns (exchanges, findings).
     pub fn rescan(&self, scanner: &Scanner) -> (usize, Vec<String>) {
         let ex = self.exchanges.lock().unwrap();
         let mut findings = Vec::new();
@@ -175,7 +162,6 @@ async fn proxy(State(tap): State<Arc<Tap>>, req: Request<Body>) -> Response<Body
     };
 
     let millis = started.elapsed().as_millis();
-    // Analyse off the request path; `settle` joins these.
     let scanner = tap.scanner.read().unwrap().clone();
     let (rq, rs) = (req_bytes.clone(), resp_bytes.clone());
     let path = parts.uri.path().to_string();

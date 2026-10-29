@@ -32,7 +32,6 @@ import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
 
-/** `file://` URI → bare filesystem path for the Rust side. */
 function uriToPath(uri: string): string {
   if (uri.startsWith("file://")) {
     return decodeURIComponent(uri.slice("file://".length));
@@ -51,11 +50,7 @@ function GroupEmoji() {
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
   const { data: members = [] } = useGroupMembers(id);
-  // The group's own list is a separate DS read that can lag far behind on a
-  // busy bridge (a just-created group is still setting up MLS), which left
-  // this page on "Loading…". The usable set the composer already fetched
-  // holds every emoji of every group the user is in, so its slice for this
-  // group stands in until the group's own list arrives.
+  // The group's own list can lag; the composer's usable set stands in until it arrives.
   const groupEmoji = useGroupEmoji(id);
   const usable = useUsableEmoji();
   const fromUsable = useMemo(
@@ -68,8 +63,7 @@ function GroupEmoji() {
   const upload = useUploadGroupEmoji(id);
   const remove = useRemoveGroupEmoji(id);
 
-  // Any member may add (#848); only admins may remove (#1280). The DS enforces
-  // both — this only decides which controls are drawn.
+  // Any member may add (#848); only admins remove (#1280). The DS enforces both.
   const myRole = members.find((m) => m.user_id === currentUser?.id)?.role;
   const iAmAdmin = myRole === "admin" || myRole === "owner";
 
@@ -82,8 +76,7 @@ function GroupEmoji() {
 
   const onPickAndUpload = async () => {
     setPickError(null);
-    // The button stays enabled (a disabled secondary reads as plain text);
-    // a missing or bad shortcode is explained instead.
+    // Enabled on purpose (a disabled secondary reads as text); errors explain instead.
     if (!shortcode) {
       setPickError(t("manage.shortcodeRequired"));
       return;
@@ -109,7 +102,6 @@ function GroupEmoji() {
 
   const onRemove = (code: string) => {
     if (confirmRemove !== code) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRemove(code);
       return;

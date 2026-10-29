@@ -1,11 +1,4 @@
-/*
- * A message sent from the user's OTHER device arrives on the same `new_message`
- * wake-up as anyone else's, and the wake-up names no sender. It must be shown,
- * but never alert or count as unread — decided after ingest from the newest
- * local row's MLS-attributed sender.
- *
- *   node --test frontend/tests/
- */
+/* Our own other-device messages show but never alert or count unread, decided after ingest. */
 import test from "node:test";
 import assert from "node:assert/strict";
 
