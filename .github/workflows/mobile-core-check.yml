@@ -26,51 +26,63 @@
 # secret is consumed: the artifact is signed with the throwaway Android debug
 # keystore that the Expo template generates — Play/App Store upload signing is
 # the deliberately-blocked half of PL-18 (needs the Play console + an Apple
-# account, #723). `expo-doctor` runs as its own cheap job. All three heavy jobs
-# are path-filtered (they never run on unrelated PRs), so nothing here is an
-# always-on gate.
+# account, #723). `expo-doctor` runs as its own cheap job.
+#
+# Scoped per job (#698 pattern, as in mls-tests.yml / windows-link.yml): a
+# seconds-cheap `changes` job decides which jobs this PR can affect, and the
+# always-reporting `mobile-gate` collapses the outcome — mark `mobile-gate`, not
+# a heavy job, as the required check. The three surfaces:
+#
+#   native  pollis-core and every crate it reaches by `path =` (the same closure
+#           mobile/fingerprint.config.js hashes; tests/ci-paths.test.ts fails if
+#           the two drift), the workspace manifests, the toolchain pin, the
+#           ubrn module, and this workflow. Runs everything.
+#   app     the JS app and the catalogues Metro bundles from frontend/. Runs
+#           android-build + expo-doctor; the Rust cross-compiles (one of them on
+#           a 10x macOS runner) cannot see a JS change.
+#   tests   files outside mobile/ that mobile/tests or the OTA worker tests read
+#           (desktop mirrors in frontend/src, the DS Worker's update routes, the
+#           release workflows the OTA tests pin). Runs expo-doctor only.
+#
+# A mobile-JS-only PR used to pay for both Rust cross-compiles, ios-check alone
+# ~1.6 min on macOS (~20 billed minutes at the 10x multiplier) for code that
+# cannot reach it.
 name: Mobile core (cross-compile + Android build)
 
 on:
+  # No paths filter on PRs: the workflow must always run so `mobile-gate`
+  # always reports. Exemption is decided in the `changes` job instead.
   pull_request:
-    paths:
-      - 'pollis-core/**'
-      # pollis-core re-exports the schema from here now.
-      - 'pollis-schema/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'mobile/**'
-      # The translation catalogues are shared with mobile (#1074): a new locale
-      # or namespace must regenerate mobile/i18n/resources.ts.
-      - 'frontend/src/i18n/locales/**'
-      - 'scripts/mobile-i18n-resources.mjs'
-      - 'scripts/i18n-check.mjs'
-      # OTA updates (#1250): the update routes in the DS front-door Worker, the
-      # release workflows the mobile tests pin, and the frozen leaf the OTA
-      # records must match.
-      - 'pollis-delivery/worker/**'
-      - 'pollis-delivery/worker-tests/**'
-      - 'pollis-delivery/wrangler.*.jsonc'
-      - '.github/workflows/mobile-ota-release.yml'
-      - '.github/workflows/mobile-apk-release.yml'
-      - 'verifiable-log-builder/src/binaries.rs'
-      - '.github/workflows/mobile-core-check.yml'
-  # Same paths on `main`, for ONE reason: to write the Rust caches PR runs
+  # Path-filtered on `main`, for ONE reason: to write the Rust caches PR runs
   # restore. Caches are ref-scoped — a cache saved by a PR is visible only to
   # later pushes on that same PR, never to another PR — so while this workflow
   # ran on PRs alone every new PR started cold, and every PR's ~2.2 GiB of
   # saved caches was pure duplication that pushed the repo over GitHub's
   # 10 GiB budget (#759) and evicted the caches other gates depend on. Now only
-  # `main` saves (`save-if` below) and every PR restores from it.
+  # `main` saves (`save-if` below) and every PR restores from it. The list is
+  # the union of the `changes` filters below; keep the two in step.
   push:
     branches: [main]
     paths:
       - 'pollis-core/**'
+      - 'pollis-api/**'
+      - 'pollis-capture-proto/**'
+      - 'pollis-device-cert/**'
+      - 'pollis-libsql-connector/**'
+      - 'pollis-relay/**'
       - 'pollis-schema/**'
+      - 'pollis-sqlcipher/**'
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      - 'patches/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.cargo/**'
       - 'mobile/**'
-      - 'frontend/src/i18n/locales/**'
+      - 'frontend/src/**'
+      - 'website/android.html'
       - 'scripts/mobile-i18n-resources.mjs'
       - 'scripts/i18n-check.mjs'
       - 'pollis-delivery/worker/**'
@@ -78,19 +90,110 @@ on:
       - 'pollis-delivery/wrangler.*.jsonc'
       - '.github/workflows/mobile-ota-release.yml'
       - '.github/workflows/mobile-apk-release.yml'
-      - 'verifiable-log-builder/src/binaries.rs'
       - '.github/workflows/mobile-core-check.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  # dorny/paths-filter reads the PR's changed-file list via the API (no checkout).
+  pull-requests: read
 
 concurrency:
   group: mobile-core-check-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Allow-lists (default `some` quantifier): a PR runs a job when ANY changed
+  # file is on a surface that job can see. Non-PR events run everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_native: ${{ steps.decide.outputs.run_native }}
+      run_build: ${{ steps.decide.outputs.run_build }}
+      run_doctor: ${{ steps.decide.outputs.run_doctor }}
+    steps:
+      - name: Detect mobile-relevant changes (PRs only)
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            native:
+              - 'pollis-core/**'
+              - 'pollis-api/**'
+              - 'pollis-capture-proto/**'
+              - 'pollis-device-cert/**'
+              - 'pollis-libsql-connector/**'
+              - 'pollis-relay/**'
+              - 'pollis-schema/**'
+              - 'pollis-sqlcipher/**'
+              - 'verifiable-log/**'
+              - 'verifiable-log-builder/**'
+              - 'verifiable-log-serve/**'
+              # The workspace's [patch] crates apply to every build in it.
+              - 'patches/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              # ubrn.config.yaml carries the iOS deployment-target pin ios-check
+              # reads, and the module is what android-build generates into.
+              - 'mobile/modules/pollis-native/**'
+              - '.github/workflows/mobile-core-check.yml'
+            app:
+              - 'mobile/**'
+              # Metro bundles these straight from frontend/ (metro.config.js
+              # watchFolders, #1074).
+              - 'frontend/src/i18n/locales/**'
+            tests:
+              # Desktop originals the mobile tests hold their mirrors to
+              # (identityFields, username, securityEvents, enrollmentSas, ...).
+              - 'frontend/src/**'
+              - 'website/android.html'
+              - 'scripts/mobile-i18n-resources.mjs'
+              - 'scripts/i18n-check.mjs'
+              # OTA updates (#1250): the update routes in the DS front-door
+              # Worker and the release workflows the mobile tests pin.
+              - 'pollis-delivery/worker/**'
+              - 'pollis-delivery/worker-tests/**'
+              - 'pollis-delivery/wrangler.*.jsonc'
+              - '.github/workflows/mobile-ota-release.yml'
+              - '.github/workflows/mobile-apk-release.yml'
+      - name: Decide which mobile jobs must run
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          NATIVE: ${{ steps.filter.outputs.native }}
+          APP: ${{ steps.filter.outputs.app }}
+          TESTS: ${{ steps.filter.outputs.tests }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            NATIVE=true
+            APP=true
+            TESTS=true
+          fi
+          native=false
+          build=false
+          doctor=false
+          if [ "$NATIVE" = "true" ]; then
+            native=true
+          fi
+          if [ "$NATIVE" = "true" ] || [ "$APP" = "true" ]; then
+            build=true
+          fi
+          if [ "$build" = "true" ] || [ "$TESTS" = "true" ]; then
+            doctor=true
+          fi
+          {
+            echo "run_native=$native"
+            echo "run_build=$build"
+            echo "run_doctor=$doctor"
+          } >> "$GITHUB_OUTPUT"
+          echo "event=$EVENT native=$NATIVE app=$APP tests=$TESTS -> cross-compiles=$native android-build=$build expo-doctor=$doctor"
+
   android-check:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_native == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -125,6 +228,8 @@ jobs:
           cargo check -p pollis-core --no-default-features --target aarch64-linux-android
 
   ios-check:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_native == 'true' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -209,6 +314,8 @@ jobs:
   # Gradle) so it gives fast independent signal and never holds up the APK
   # artifact. If it flags anything, the first-run output is the enumeration.
   expo-doctor:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_doctor == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -250,6 +357,8 @@ jobs:
   # assembly, and an uploaded APK. Everything runs on a stock ubuntu-latest
   # runner with no EAS account and no signing secret.
   android-build:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_build == 'true' }}
     runs-on: ubuntu-latest
     # ~28 min cold before the single-ABI change; nothing needs six hours.
     timeout-minutes: 50
@@ -403,3 +512,46 @@ jobs:
           name: pollis-android-apk
           path: mobile/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+  # One stable check for the whole workflow: green only when every job passed
+  # or was skipped because the decision said so; red on any failure or cancel,
+  # a failed decision, or a skip the decision did not ask for. Fail-closed.
+  mobile-gate:
+    needs: [changes, android-check, ios-check, expo-doctor, android-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate mobile jobs
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RUN_NATIVE: ${{ needs.changes.outputs.run_native }}
+          RUN_BUILD: ${{ needs.changes.outputs.run_build }}
+          RUN_DOCTOR: ${{ needs.changes.outputs.run_doctor }}
+          ANDROID_CHECK: ${{ needs.android-check.result }}
+          IOS_CHECK: ${{ needs.ios-check.result }}
+          EXPO_DOCTOR: ${{ needs.expo-doctor.result }}
+          ANDROID_BUILD: ${{ needs.android-build.result }}
+        run: |
+          echo "changes=$CHANGES native=$RUN_NATIVE build=$RUN_BUILD doctor=$RUN_DOCTOR"
+          echo "android-check=$ANDROID_CHECK ios-check=$IOS_CHECK expo-doctor=$EXPO_DOCTOR android-build=$ANDROID_BUILD"
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Decision job did not succeed ($CHANGES) — failing closed."
+            exit 1
+          fi
+          fail=0
+          check() {
+            if [ "$2" = "success" ]; then
+              return 0
+            fi
+            if [ "$3" = "false" ] && [ "$2" = "skipped" ]; then
+              echo "$1: correctly skipped (no change on its surface)."
+              return 0
+            fi
+            echo "::error::$1 did not pass ($2)."
+            fail=1
+          }
+          check android-check "$ANDROID_CHECK" "$RUN_NATIVE"
+          check ios-check "$IOS_CHECK" "$RUN_NATIVE"
+          check android-build "$ANDROID_BUILD" "$RUN_BUILD"
+          check expo-doctor "$EXPO_DOCTOR" "$RUN_DOCTOR"
+          exit "$fail"

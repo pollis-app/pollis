@@ -17,22 +17,77 @@ name: Kani proofs
 
 on:
   pull_request:
-    # Only the pure proof surface matters here. Any change to pollis-core or the
-    # workflow itself re-runs the proofs; unrelated surfaces are exempt.
+    # Only the proof surface and what compiles into it matter here; unrelated
+    # surfaces are exempt. Nothing requires this check, so a workflow-level
+    # filter cannot wedge a PR.
     paths:
       - 'pollis-core/**'
-      # pollis-core re-exports the schema from here now.
+      # Every crate pollis-core or pollis-delivery reaches by `path =`: the
+      # harnesses compile against them. pollis-core re-exports the schema.
+      - 'pollis-api/**'
+      - 'pollis-capture-proto/**'
+      - 'pollis-device-cert/**'
+      - 'pollis-libsql-connector/**'
+      - 'pollis-relay/**'
       - 'pollis-schema/**'
+      - 'pollis-sqlcipher/**'
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
       # 21 of the 35 harnesses live in pollis-delivery/src/commit.rs (the I1 head
       # arithmetic and the I4 retention floor), and this path was missing (#877):
-      # a PR touching only commit.rs skipped the gate that proves commit.rs. It
-      # still ran on push-to-main, so nothing landed unproven — but the proofs
-      # were being checked after review rather than during it.
-      - 'pollis-delivery/**'
+      # a PR touching only commit.rs skipped the gate that proves commit.rs.
+      # `cargo kani --lib` compiles only the crate's library, so its Worker
+      # (TypeScript), worker-tests and integration tests cannot move a proof.
+      - 'pollis-delivery/src/**'
+      - 'pollis-delivery/Cargo.toml'
+      # The workspace manifests, lockfile, [patch] crates and build config decide
+      # what those crates compile to.
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'patches/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
       - 'scripts/kani-inventory.sh'
+      - 'scripts/ci-apt-retries.sh'
       - '.github/workflows/kani.yml'
+  # `main` runs on the same list. It used to run on every push as a backstop
+  # for paths the PR list missed (#877); with the closure above complete, a
+  # push outside it leaves every harness input unchanged, and each such merge
+  # paid a ~4 min Kani run for nothing.
   push:
     branches: [main]
+    paths:
+      - 'pollis-core/**'
+      # Every crate pollis-core or pollis-delivery reaches by `path =`: the
+      # harnesses compile against them. pollis-core re-exports the schema.
+      - 'pollis-api/**'
+      - 'pollis-capture-proto/**'
+      - 'pollis-device-cert/**'
+      - 'pollis-libsql-connector/**'
+      - 'pollis-relay/**'
+      - 'pollis-schema/**'
+      - 'pollis-sqlcipher/**'
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      # 21 of the 35 harnesses live in pollis-delivery/src/commit.rs (the I1 head
+      # arithmetic and the I4 retention floor), and this path was missing (#877):
+      # a PR touching only commit.rs skipped the gate that proves commit.rs.
+      # `cargo kani --lib` compiles only the crate's library, so its Worker
+      # (TypeScript), worker-tests and integration tests cannot move a proof.
+      - 'pollis-delivery/src/**'
+      - 'pollis-delivery/Cargo.toml'
+      # The workspace manifests, lockfile, [patch] crates and build config decide
+      # what those crates compile to.
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'patches/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
+      - 'scripts/kani-inventory.sh'
+      - 'scripts/ci-apt-retries.sh'
+      - '.github/workflows/kani.yml'
   workflow_dispatch:
 
 permissions:

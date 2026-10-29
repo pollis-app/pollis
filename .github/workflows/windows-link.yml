@@ -33,15 +33,23 @@ on:
   # without this every PR would link the whole native stack from cold.
   push:
     branches: [main]
+    # The same allow-list as the `changes` job's `rust` filter below.
     paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      # The vendored SQLCipher amalgamation and the header its crypto provider
-      # is compiled against — neither is a .rs file, and both decide what the
-      # Windows link contains (#992).
+      - 'pollis-core/**'
+      - 'pollis-api/**'
+      - 'pollis-capture-proto/**'
+      - 'pollis-device-cert/**'
+      - 'pollis-libsql-connector/**'
+      - 'pollis-relay/**'
+      - 'pollis-schema/**'
       - 'pollis-sqlcipher/**'
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      - 'Cargo.toml'
       - 'Cargo.lock'
-      - '.cargo/config.toml'
+      - 'patches/**'
+      - '.cargo/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/windows-link.yml'
   workflow_dispatch:
@@ -62,41 +70,44 @@ jobs:
     outputs:
       run_link: ${{ steps.decide.outputs.run_link }}
     steps:
-      # Same ignore-list as mls-tests.yml: a changed file trips `rust` only if
-      # it is NOT under an exempt surface, so any real Rust/workspace change
-      # (including Cargo.toml / Cargo.lock / .cargo/config.toml, which is where
-      # this whole class of bug is introduced) runs the gate.
-      - name: Detect non-exempt changes (PRs only)
+      # Allow-list, not the ignore-list mls-tests.yml uses: this job builds and
+      # tests exactly two crates (`pollis-core` and `pollis-sqlcipher`), so only
+      # their `path =` closure and what decides how the workspace compiles can
+      # change its outcome. The ignore-list it used to share ran the ~5 min
+      # Windows link (2x minutes) on PRs touching only pollis-delivery,
+      # pollis-tui, src-tauri or a root dotfile — none of which this build
+      # compiles. Cargo.lock / Cargo.toml / .cargo/** (where this whole class of
+      # link bug is introduced, #988) are on it, as are this workflow and the
+      # release workflow whose Windows job it mirrors.
+      - name: Detect Windows-link-relevant changes (PRs only)
         id: filter
         if: ${{ github.event_name == 'pull_request' }}
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
-          predicate-quantifier: 'every'
           filters: |
             rust:
-              - '!frontend/**'
-              - '!website/**'
-              - '!docs/**'
-              - '!**/*.md'
-              - '!.github/**'
-              - '!scripts/**'
-              - '!.codesight/**'
-              - '!infra/**'
-              - '!learn/**'
-              - '!specs/**'
-              - '!e2e/**'
-              # The mobile app and the root JS manifests: nothing under them is
-              # compiled into, or read by, the pollis-core Windows build (see the
-              # same list in mls-tests.yml).
-              - '!mobile/**'
-              - '!package.json'
-              - '!pnpm-lock.yaml'
-              - '!pnpm-workspace.yaml'
-            # ...but a change to THIS workflow, or to the release workflow whose
-            # Windows job this one mirrors, must still run it.
-            # One pattern per filter, deliberately: `predicate-quantifier: every`
-            # applies to EVERY filter in this block, so a two-pattern filter would
-            # demand a file matching both names and could never fire.
+              # pollis-core and every crate it reaches by `path =`
+              # (mobile/fingerprint.config.js computes the same closure).
+              - 'pollis-core/**'
+              - 'pollis-api/**'
+              - 'pollis-capture-proto/**'
+              - 'pollis-device-cert/**'
+              - 'pollis-libsql-connector/**'
+              - 'pollis-relay/**'
+              - 'pollis-schema/**'
+              # The vendored SQLCipher amalgamation and its crypto provider
+              # header — not .rs files, and both decide what the link contains
+              # (#992).
+              - 'pollis-sqlcipher/**'
+              - 'verifiable-log/**'
+              - 'verifiable-log-builder/**'
+              - 'verifiable-log-serve/**'
+              # Workspace-wide build inputs.
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'patches/**'
+              - '.cargo/**'
+              - 'rust-toolchain.toml'
             harness:
               - '.github/workflows/windows-link.yml'
             release:
