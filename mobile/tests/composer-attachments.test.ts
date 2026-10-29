@@ -169,6 +169,27 @@ test("the toolbar is the theme's filled control: raised surface, text glyph, der
   assert.doesNotMatch(src, /["'`]#[0-9a-fA-F]{3,8}["'`]|rgba?\(/);
 });
 
+test("the play badge is the theme's filled control: raised (high with no frame), text glyph", () => {
+  const src = read("components/media/PlayBadge.tsx");
+  assert.match(src, /backgroundColor: overFrame \? semantic\.raised : semantic\.high,/);
+  assert.match(src, /<Icon\.play size=\{[^}]+\} color=\{semantic\.text\} \/>/);
+  assert.doesNotMatch(src, /semantic\.bg\b/);
+  assert.doesNotMatch(src, /border(Width|Style|Color)/);
+  assert.doesNotMatch(src, /["'`]#[0-9a-fA-F]{3,8}["'`]|rgba?\(/);
+});
+
+test("every video play glyph goes through the themed badge", () => {
+  for (const file of [
+    "components/chat/ComposerAttachmentPreview.tsx",
+    "components/chat/AttachmentTile.tsx",
+    "components/vault/VaultMediaGrid.tsx",
+  ]) {
+    const src = read(file);
+    assert.match(src, /<PlayBadge /, file);
+    assert.doesNotMatch(src, /Icon\.play/, file);
+  }
+});
+
 test("toolbar buttons reach 44pt and a toggle reports its state", () => {
   const src = read("components/chat/AttachmentToolbar.tsx");
   assert.match(src, /const BUTTON = 26;/);

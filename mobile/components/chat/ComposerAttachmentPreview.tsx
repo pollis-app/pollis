@@ -10,6 +10,7 @@ import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
+import { PlayBadge } from "../media/PlayBadge";
 import { AttachmentToolbar, TOOLBAR_GLYPH } from "./AttachmentToolbar";
 import { useVideoPoster } from "../../hooks/useVideoPoster";
 import {
@@ -65,18 +66,7 @@ export function ComposerAttachmentPreview({
             accessible={false}
           />
         ) : null}
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: semantic.bg,
-          }}
-        >
-          <Icon.play size={20} color={semantic.text} />
-        </View>
+        <PlayBadge size={44} overFrame={!!poster} />
       </>
     );
   } else {

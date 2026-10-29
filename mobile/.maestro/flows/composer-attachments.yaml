@@ -127,6 +127,51 @@ tags:
     timeout: 60000
 - takeScreenshot: composer-attachments-04-sent
 
+# Send the video too: the sent row draws its tile with the themed play badge.
+# The chat ignores Send while the previous send is in flight (the first MLS
+# send in a fresh group can take a minute), so wait for it to land first.
+- extendedWaitUntil:
+    notVisible:
+      id: "row-message-pending-.*"
+    timeout: 120000
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "Video(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "composer-attachment-0"
+    timeout: 10000
+# Keep pressing Send until the strip clears: a press while the previous
+# send is still settling is ignored (as subflows/send-vault-picks.yaml).
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+      index: 1
+    timeout: 60000
+- takeScreenshot: composer-attachments-09-sent-video
+
 # The Vault composer draws the same card.
 - tapOn:
     id: "btn-back"
@@ -163,10 +208,18 @@ tags:
     id: "btn-attach"
 - waitForAnimationToEnd:
     timeout: 5000
+# Android indexes `addMedia` files a moment after the push; wait for the
+# sixth photo to reach the picker before selecting.
 - runFlow:
     when:
       platform: Android
-    file: ../subflows/pick-six-photos-android.yaml
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: "Photo taken on.*"
+            index: 5
+          timeout: 20000
+      - runFlow: ../subflows/pick-six-photos-android.yaml
 - runFlow:
     when:
       platform: iOS
@@ -185,6 +238,8 @@ tags:
     direction: LEFT
 - waitForAnimationToEnd:
     timeout: 3000
+# A card past the first screenful is now in view. (Android's picker can
+# drop one of the six taps, so this checks the fifth, not the sixth.)
 - assertVisible:
-    id: "composer-attachment-5"
+    id: "composer-attachment-4"
 - takeScreenshot: composer-attachments-07-several-scrolled
