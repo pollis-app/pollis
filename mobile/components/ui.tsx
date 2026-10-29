@@ -27,7 +27,7 @@ import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
 import { haptic } from "../lib/haptics";
-import { createPressInGuard, pressInAllowed } from "../lib/pressIn";
+import { createPressInGuard, pressInAllowed, pressInSupported } from "../lib/pressIn";
 
 // Primitives for the redesigned app (design: Main/Chat/Messages/Actions/You
 // .dc.html). Rules every primitive follows: 44pt minimum touch targets; one
@@ -286,6 +286,9 @@ function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
 }
 
 /* ── Press-in ─────────────────────────────────────────────────────── */
+// True inside a SheetOverlay (a Modal). See pressInSupported.
+export const InSheetContext = React.createContext(false);
+
 // Opt-in touch-down activation for fixed chrome whose accidental press is
 // free to undo (#1529; rules in lib/pressIn.ts). Spread the result onto a
 // Pressable. With `enabled` false it is plain `onPress`, so a control that
@@ -300,7 +303,8 @@ export function usePressIn(
   const guard = React.useRef<ReturnType<typeof createPressInGuard> | null>(null);
   const latest = React.useRef(onPress);
   latest.current = onPress;
-  if (!enabled || !onPress) {
+  const inSheet = React.useContext(InSheetContext);
+  if (!enabled || !onPress || !pressInSupported(Platform.OS, inSheet)) {
     return { onPress };
   }
   if (!guard.current) {

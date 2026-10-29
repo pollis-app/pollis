@@ -54,9 +54,12 @@ guard shared by a list's rows) for anything else. The rule is pure in
 - `onClick` stays the path for the keyboard and assistive tech (Enter / Space /
   VoiceOver click with `detail === 0`, always acted on), touch, pen and
   modified clicks.
-- If the action moved focus (search opens with its field focused), the press's
-  own `mousedown` default is prevented so the button does not take focus back;
-  otherwise `mousedown` is untouched.
+- Once a press has acted, its own `mousedown` default is prevented, so the
+  pressed element never takes focus back from what the action focused (search
+  opens with its field focused; Reply focuses the composer a frame later).
+- A press that starts on a control nested inside a pressable row (a terminal
+  menu row's settings button, the audio card's play button) is left to that
+  control.
 - Outside-click listeners (`MessageActions`, `EmojiPickerButton`) listen on
   `mousedown` and test their own wrapper, which contains the trigger, so the
   press that opened a panel cannot close it; a viewer backdrop that opens
@@ -85,7 +88,7 @@ for the release.
 
 **Mobile** (`mobile/CLAUDE.md` → "Press-in"): a `pressIn` prop on the
 `components/ui.tsx` primitives, fixed chrome only — never a row inside a
-`ScrollView` / `FlatList`.
+`ScrollView` / `FlatList`, and on Android never inside a `SheetOverlay`.
 
 ### Design tokens: utilities, not `var()` (#874)
 

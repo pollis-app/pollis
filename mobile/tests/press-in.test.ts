@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPressInGuard, pressInAllowed } from "../lib/pressIn.ts";
+import { createPressInGuard, pressInAllowed, pressInSupported } from "../lib/pressIn.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
@@ -111,6 +111,24 @@ test("pressIn is refused together with a long press", () => {
   assert.match(ui, /usePressIn\(disabled \? undefined : onPress, pressInAllowed\(pressIn, !!onLongPress\)\)/);
 });
 
+test("Android keeps every control inside a sheet on release", () => {
+  // Dismissing a Modal on touch-down strands that touch on Android, and the
+  // next tap on the screen underneath was lost (the tour's first Back).
+  assert.equal(pressInSupported("android", true), false);
+  assert.equal(pressInSupported("android", false), true);
+  assert.equal(pressInSupported("ios", true), true);
+  assert.equal(pressInSupported("ios", false), true);
+  const overlay = read("components/chat/SheetOverlay.tsx");
+  // The provider wraps the whole Modal body: the backdrop, Close and rows.
+  const start = overlay.indexOf("<InSheetContext.Provider value={true}>");
+  const end = overlay.indexOf("</InSheetContext.Provider>");
+  assert.ok(start > 0 && end > start);
+  const body = overlay.slice(start, end);
+  for (const part of ["accessible={false}", "testID={closeTestID}", "{children}"]) {
+    assert.ok(body.includes(part), `${part} must sit inside the sheet context`);
+  }
+});
+
 test("the shared primitives take pressIn and keep onPress for screen readers", () => {
   const ui = read("components/ui.tsx");
   for (const call of [
@@ -123,7 +141,7 @@ test("the shared primitives take pressIn and keep onPress for screen readers", (
   // The hook always hands Pressable an onPress (TalkBack activates through
   // it), and adds onPressIn only when opted in.
   const hook = ui.slice(ui.indexOf("export function usePressIn"), ui.indexOf("export function PressInPressable"));
-  assert.match(hook, /if \(!enabled \|\| !onPress\) \{\s*return \{ onPress \};/);
+  assert.match(hook, /if \(!enabled \|\| !onPress \|\| !pressInSupported\(Platform\.OS, inSheet\)\) \{\s*return \{ onPress \};/);
   assert.match(hook, /onPress: \(\) => g\.onPress\(run\)/);
   // Navigation never plays a haptic (mobile/CLAUDE.md).
   assert.doesNotMatch(hook, /haptic/);
@@ -137,8 +155,8 @@ test("the shared primitives take pressIn and keep onPress for screen readers", (
 const CONVERTED: Record<string, string[]> = {
   "components/TabBar.tsx": ["<PressInPressable\n            key={tab.name}\n            pressIn"],
   "components/chat/SheetOverlay.tsx": [
-    "<PressInPressable\n            pressIn\n            onPress={onClose}\n            accessible={false}",
-    "<PressInPressable\n                pressIn\n                onPress={onClose}\n                testID={closeTestID}",
+    "<PressInPressable\n              pressIn\n              onPress={onClose}\n              accessible={false}",
+    "<PressInPressable\n                  pressIn\n                  onPress={onClose}\n                  testID={closeTestID}",
   ],
   "app/chat/[id].tsx": ['testID="btn-pins"\n              pressIn', 'testID="btn-members"\n              pressIn', 'testID="btn-chat-menu"\n              pressIn'],
   "components/chat/Composer.tsx": ['pressIn\n          testID="btn-attach"', 'pressIn\n                testID="btn-composer-emoji"'],

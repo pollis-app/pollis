@@ -56,6 +56,16 @@ export function createPressInGuard(
   };
 }
 
+// Android only: a control inside a Modal (every SheetOverlay, its Close and
+// backdrop included) keeps acting on release. Closing the sheet, or
+// navigating away, on touch-down dismisses the Modal's window while its touch
+// is still down; that touch then never ends in JS, and the stale touch
+// swallowed the next tap on the screen underneath (the first Back after a
+// sheet's menu row did nothing). iOS ends the touch, so it keeps touch-down.
+export function pressInSupported(platform: string, inSheet: boolean): boolean {
+  return !(platform === "android" && inSheet);
+}
+
 // `pressIn` is refused on a control with a long press: the action would run
 // before the hold could become a long press. Such a control keeps acting on
 // release.

@@ -1552,6 +1552,13 @@ quote, `GroupPanel`'s header (menu, invite, search), Direct's new message,
 the Vault view chips, the media viewer's prev / next / open-settings, the
 menu rows of `ChannelMenuSheet` / `GroupMenuSheet` (not Leave) /
 `AddGroupSheet`, and `AudioPage`'s play / pause / skip (not the seek bar).
+**On Android nothing inside a `SheetOverlay` acts on touch-down** (Close,
+the backdrop and the sheet's rows fall back to release through
+`InSheetContext` / `pressInSupported`): dismissing the Modal while its
+touch is still down left that touch unfinished in JS, and the next tap on
+the screen underneath was swallowed (the tour's first Back after
+`btn-menu-info` did nothing). iOS ends the touch, so sheets keep touch-down
+there.
 Rules: **never on a row inside a `ScrollView` / `FlatList` / `Body`** —
 touch-down lands before the scroll takes the touch, so the row would open on
 every scroll that starts on it (those rows keep `onPress`; a
