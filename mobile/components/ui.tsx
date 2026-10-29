@@ -27,6 +27,7 @@ import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
 import { haptic } from "../lib/haptics";
+import { createPressInGuard, pressInAllowed } from "../lib/pressIn";
 
 // Primitives for the redesigned app (design: Main/Chat/Messages/Actions/You
 // .dc.html). Rules every primitive follows: 44pt minimum touch targets; one
@@ -284,6 +285,51 @@ function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
   return React.cloneElement(node, { color });
 }
 
+/* ── Press-in ─────────────────────────────────────────────────────── */
+// Opt-in touch-down activation for fixed chrome whose accidental press is
+// free to undo (#1529; rules in lib/pressIn.ts). Spread the result onto a
+// Pressable. With `enabled` false it is plain `onPress`, so a control that
+// sends, persists, notifies others or confirms is unchanged. The action runs
+// once per touch: onPressIn for a finger (and VoiceOver's synthesised tap),
+// onPress for TalkBack's click, which has no touch-down. Never use it on a
+// row inside a ScrollView / FlatList, or with a long press.
+export function usePressIn(
+  onPress: (() => void) | undefined,
+  enabled: boolean | undefined,
+): { onPress?: () => void; onPressIn?: () => void; onPressOut?: () => void } {
+  const guard = React.useRef<ReturnType<typeof createPressInGuard> | null>(null);
+  const latest = React.useRef(onPress);
+  latest.current = onPress;
+  if (!enabled || !onPress) {
+    return { onPress };
+  }
+  if (!guard.current) {
+    guard.current = createPressInGuard();
+  }
+  const g = guard.current;
+  const run = () => latest.current?.();
+  return {
+    onPressIn: () => g.onPressIn(run),
+    onPress: () => g.onPress(run),
+    onPressOut: () => g.onPressOut(),
+  };
+}
+
+// A Pressable with the opt-in `pressIn` (#1529), for the few bare
+// Pressables in fixed chrome (tab cells, the sheet's Close and backdrop, the
+// composer's attach / emoji buttons). Without `pressIn` it is a Pressable.
+export function PressInPressable({
+  onPress,
+  pressIn,
+  ...rest
+}: Omit<React.ComponentProps<typeof Pressable>, "onPress" | "onPressIn" | "onPressOut" | "onLongPress"> & {
+  onPress?: () => void;
+  pressIn?: boolean;
+}) {
+  const press = usePressIn(rest.disabled ? undefined : onPress, pressIn);
+  return <Pressable {...rest} {...press} />;
+}
+
 /* ── IconButton ───────────────────────────────────────────────────── */
 // A 44×44 icon-only control. `accessibilityLabel` is required — the icon is
 // silent. `filled` gives it the round raised background (Direct's "New
@@ -305,9 +351,13 @@ export function IconButton({
   disabled,
   tone = "accent",
   style,
+  pressIn,
 }: {
   icon: React.ReactNode;
   onPress?: () => void;
+  // Act on touch-down (#1529): only for fixed chrome whose accidental press
+  // is free to undo (back, close, open a menu or sheet). See usePressIn.
+  pressIn?: boolean;
   accessibilityLabel: string;
   testID?: string;
   filled?: boolean;
@@ -320,9 +370,10 @@ export function IconButton({
     : tone === "inherit"
       ? icon
       : tintGlyph(icon, tone === "neutral" ? semantic.text : semantic.accent);
+  const press = usePressIn(disabled ? undefined : onPress, pressIn);
   return (
     <Pressable
-      onPress={disabled ? undefined : onPress}
+      {...press}
       disabled={disabled}
       testID={testID}
       accessibilityRole="button"
@@ -421,6 +472,8 @@ export function Header({
   const backLabel =
     backLabelProp ??
     (backTo ? t("mobile:ui.backTo", { name: backTo }) : t("common:actions.back"));
+  // The title opens a menu or sheet, free to undo: touch-down (#1529).
+  const titlePress = usePressIn(onTitlePress, true);
 
   const titleBlock = title === undefined ? (
     <View style={{ flex: 1 }} />
@@ -474,6 +527,8 @@ export function Header({
           testID={backTestID}
           accessibilityLabel={backLabel}
           onPress={onBack ?? (() => router.back())}
+          // Going back is free to undo (#1529): it acts on touch-down.
+          pressIn
           tone="neutral"
           icon={<Icon.chevronLeft size={24} color={semantic.text} />}
         />
@@ -482,7 +537,7 @@ export function Header({
       ) : null}
       {onTitlePress ? (
         <Pressable
-          onPress={onTitlePress}
+          {...titlePress}
           accessibilityRole="button"
           accessibilityLabel={titleAccessibilityLabel ?? title ?? ""}
           style={{ flex: 1, minWidth: 0, minHeight: layout.touchMin, justifyContent: "center" }}
@@ -587,9 +642,13 @@ export function Chip({
   disabled,
   leading,
   trailing,
+  pressIn,
 }: {
   children: React.ReactNode;
   variant?: "default" | "on" | "solid" | "subtle" | "outline";
+  // Act on touch-down (#1529) — fixed chrome only (a view switch), never a
+  // chip inside a scroller. See usePressIn.
+  pressIn?: boolean;
   // Same as variant "on"; also announced as selected.
   selected?: boolean;
   onPress?: () => void;
@@ -627,9 +686,10 @@ export function Chip({
         ? semantic.dim
         : semantic.accent;
   const label = typeof children === "string" ? children : undefined;
+  const press = usePressIn(disabled ? undefined : onPress, pressIn);
   return (
     <Pressable
-      onPress={disabled ? undefined : onPress}
+      {...press}
       disabled={disabled || !onPress}
       testID={testID}
       accessibilityRole={onPress ? "button" : undefined}
@@ -711,8 +771,12 @@ export function Button({
   testID,
   accessibilityLabel,
   surface = "base",
+  pressIn,
 }: {
   children: string;
+  // Act on touch-down (#1529): only for a button whose accidental press is
+  // free to undo (navigation). Never send, save, confirm or destroy.
+  pressIn?: boolean;
   variant?: "primary" | "secondary" | "subtle" | "danger" | "default";
   full?: boolean;
   onPress?: () => void;
@@ -730,9 +794,10 @@ export function Button({
 }) {
   const off = !!disabled || !!loading;
   const c = buttonColors(currentTheme(), variant, off, surface);
+  const press = usePressIn(off ? undefined : onPress, pressIn);
   return (
     <Pressable
-      onPress={off ? undefined : onPress}
+      {...press}
       disabled={off}
       testID={testID}
       accessibilityRole="button"
@@ -885,6 +950,13 @@ export function Badge({
 }
 
 /* ── ListRow ──────────────────────────────────────────────────────── */
+// `pressIn` (#1529) acts on touch-down — only for a row in a sheet or page
+// that does not scroll (a row in a ScrollView / FlatList would open on every
+// scroll that starts on it). It cannot be combined with `onLongPress`.
+type ListRowPressProps =
+  | { pressIn?: false; onLongPress?: () => void }
+  | { pressIn: true; onLongPress?: undefined };
+
 // One tappable row = one control with one spoken label. Min height 44
 // (channels), 52 (settings/actions, the default) or 64 (conversations).
 // `glyph`: 20–22pt icon or an Avatar. `name`: 16pt title (bold when
@@ -909,7 +981,8 @@ export function ListRow({
   accessibilityLabel,
   accessibilityHint,
   disabled,
-}: {
+  pressIn,
+}: ListRowPressProps & {
   glyph?: React.ReactNode;
   name: React.ReactNode;
   sub?: React.ReactNode;
@@ -921,7 +994,6 @@ export function ListRow({
   selected?: boolean;
   minHeight?: number;
   onPress?: () => void;
-  onLongPress?: () => void;
   nameStyle?: StyleProp<TextStyle>;
   // `row-<kind>-<id>` so flows can target a specific record.
   testID?: string;
@@ -935,9 +1007,12 @@ export function ListRow({
     (p): p is string => typeof p === "string" && p.length > 0,
   );
   const spoken = accessibilityLabel ?? (parts.length ? parts.join(", ") : undefined);
+  // A long-press row never acts on touch-down (the types refuse the pair;
+  // this holds it at runtime too).
+  const press = usePressIn(disabled ? undefined : onPress, pressInAllowed(pressIn, !!onLongPress));
   return (
     <Pressable
-      onPress={disabled ? undefined : onPress}
+      {...press}
       onLongPress={
         disabled || !onLongPress
           ? undefined

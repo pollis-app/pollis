@@ -2,6 +2,7 @@ import { View, Text, Pressable } from "react-native";
 import { Trans, useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { fonts, layout, semantic, type as ty } from "../../theme/tokens";
+import { PressInPressable } from "../ui";
 
 /**
  * Sits on top of the composer while a reply is being written (#1270),
@@ -36,7 +37,9 @@ export function ReplyBar({
       }}
     >
       <Icon.reply size={16} color={semantic.dim} />
-      <Pressable
+      {/* Jumping to the original is free to undo: touch-down (#1529). */}
+      <PressInPressable
+        pressIn
         onPress={onPressQuote}
         disabled={!onPressQuote}
         accessibilityRole="button"
@@ -57,7 +60,7 @@ export function ReplyBar({
         <Text numberOfLines={1} style={[ty.secondary, { color: semantic.text }]}>
           {snippet}
         </Text>
-      </Pressable>
+      </PressInPressable>
       <Pressable
         testID="btn-reply-dismiss"
         onPress={onDismiss}

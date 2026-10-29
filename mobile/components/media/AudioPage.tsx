@@ -9,7 +9,7 @@ import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";
-import { IconButton } from "../ui";
+import { IconButton, PressInPressable } from "../ui";
 import { Icon } from "../icons";
 import { MediaStatus } from "./MediaStatus";
 import { formatClock } from "../../lib/media/viewer";
@@ -161,15 +161,20 @@ export function AudioPage({
           {clock}
         </Text>
 
+        {/* Play, pause and skip are free to undo, so they act on touch-down
+            (#1529). The seek bar above stays on release: it reads where the
+            finger lifts. */}
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: space.xxl }}>
           <IconButton
             testID="btn-media-audio-back"
+            pressIn
             filled
             accessibilityLabel={t("media.seekBack")}
             onPress={() => seekTo(current - SEEK_STEP_S)}
             icon={<Icon.seekBack size={20} />}
           />
-          <Pressable
+          <PressInPressable
+            pressIn
             testID="btn-media-audio-play"
             accessibilityRole="button"
             accessibilityLabel={status.playing ? t("media.pause") : t("media.play")}
@@ -189,9 +194,10 @@ export function AudioPage({
             ) : (
               <Icon.play size={24} color={semantic.onAccent} />
             )}
-          </Pressable>
+          </PressInPressable>
           <IconButton
             testID="btn-media-audio-forward"
+            pressIn
             filled
             accessibilityLabel={t("media.seekForward")}
             onPress={() => seekTo(current + SEEK_STEP_S)}

@@ -43,9 +43,12 @@ export function ChannelMenuSheet({
           onToggle={() => setMuted.mutate({ channelId, muted: !isMuted })}
         />
       </Group>
+      {/* Navigation rows in a sheet that does not scroll: touch-down (#1529).
+          The mute switch above stays on release. */}
       <Group surface="high">
         <ListRow
           testID="btn-menu-info"
+          pressIn
           glyph={<Icon.info size={22} color={semantic.text} />}
           name={t("nav:panel.ariaLabel")}
           chevron
@@ -54,6 +57,7 @@ export function ChannelMenuSheet({
         {onGroupSettings ? (
           <ListRow
             testID="btn-menu-group-settings"
+            pressIn
             glyph={<Icon.gear size={22} color={semantic.text} />}
             name={t("chat.groupSettings")}
             chevron

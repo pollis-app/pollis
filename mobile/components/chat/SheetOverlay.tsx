@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
-  Pressable,
   Text,
   View,
   AccessibilityInfo,
@@ -22,7 +21,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { semantic, type as ty, r, space, layout } from "../../theme/tokens";
 import { useTheme } from "../theme";
 import { Icon } from "../icons";
-import { useBottomInset } from "../ui";
+import { useBottomInset, PressInPressable } from "../ui";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 
 // Entry timing (#1193): in line with the ~200 ms stack transitions — fast
@@ -205,8 +204,10 @@ export function SheetOverlay({
           ]}
         >
           {/* The backdrop is a plain tap target, hidden from screen readers:
-              the Close button is the accessible way out. */}
-          <Pressable
+              the Close button is the accessible way out. Closing is free to
+              undo, so both act on touch-down (#1529). */}
+          <PressInPressable
+            pressIn
             onPress={onClose}
             accessible={false}
             importantForAccessibility="no"
@@ -256,7 +257,8 @@ export function SheetOverlay({
               >
                 {title ?? ""}
               </Text>
-              <Pressable
+              <PressInPressable
+                pressIn
                 onPress={onClose}
                 testID={closeTestID}
                 accessibilityRole="button"
@@ -272,7 +274,7 @@ export function SheetOverlay({
                 }}
               >
                 <Icon.close size={20} color={semantic.text} />
-              </Pressable>
+              </PressInPressable>
             </View>
             {children}
           </Animated.View>

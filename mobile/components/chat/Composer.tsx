@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, Platform, ScrollView, type TextInput } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { Avatar, Field } from "../ui";
+import { Avatar, Field, PressInPressable } from "../ui";
 import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
 import {
   applyMention,
@@ -314,7 +314,10 @@ export function Composer({
           backgroundColor: semantic.bg,
         }}
       >
-        <Pressable
+        {/* Opening the picker is free to undo: touch-down (#1529). Send is
+            not, and stays on release. */}
+        <PressInPressable
+          pressIn
           testID="btn-attach"
           accessibilityRole="button"
           accessibilityLabel={t("composer.addAttachment")}
@@ -333,7 +336,7 @@ export function Composer({
           })}
         >
           <Icon.plus size={22} color={onAttach ? semantic.accent : semantic.dim} />
-        </Pressable>
+        </PressInPressable>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Field
             ref={inputRef}
@@ -374,7 +377,9 @@ export function Composer({
               textAlignVertical: "center",
             }}
             trailing={
-              <Pressable
+              // Opening the picker is free to undo: touch-down (#1529).
+              <PressInPressable
+                pressIn
                 testID="btn-composer-emoji"
                 accessibilityRole="button"
                 accessibilityLabel={t("emoji:picker.triggerLabel")}
@@ -389,7 +394,7 @@ export function Composer({
                 }}
               >
                 <Icon.smile size={22} color={semantic.dim} />
-              </Pressable>
+              </PressInPressable>
             }
           />
           {draft === "" ? (
