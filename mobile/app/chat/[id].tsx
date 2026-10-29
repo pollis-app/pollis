@@ -641,6 +641,7 @@ function TextChat(props: ChatViewProps = {}) {
           onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
           onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
+          editUnsent={m.edit_unsent}
           reactions={reactionsByMessage?.get(m.id)}
           currentUserId={currentUser?.id}
           receipt={receiptsByMessage?.get(m.id)}

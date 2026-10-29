@@ -98,12 +98,16 @@ export type RawChannelMessage = {
   undecryptable?: boolean;
   /** Our own message the durable outbox has not delivered yet (#1335). */
   send_state?: SendState;
+  /** Our edit of it the DS has not confirmed yet (#1555); `content` is the edit. */
+  edit_state?: SendState;
 };
 
 /** Mirror of `pollis_core::commands::messages::OutboxReport`. */
 type OutboxReport = {
   delivered: string[];
   failed: string[];
+  edits_delivered: string[];
+  edits_failed: string[];
 };
 
 type MessagePage = {
@@ -223,6 +227,8 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
     edited_at: m.edited_at,
     deleted_at: m.deleted_at,
     undecryptable: m.undecryptable,
+    // A pending edit reads as an ordinary edit; only a failed one is labelled.
+    edit_unsent: m.edit_state === 'failed' || m.edit_state === 'rejected',
     // `delivered` / `status` / `outbox_id` from the durable outbox (#1335).
     ...outboxFields(m.id, m.send_state),
   };
@@ -531,7 +537,12 @@ export async function flushOutbox(
 ): Promise<void> {
   try {
     const report = await invoke<OutboxReport>("flush_outbox");
-    if ((report?.delivered?.length ?? 0) + (report?.failed?.length ?? 0) > 0) {
+    const touched =
+      (report?.delivered?.length ?? 0) +
+      (report?.failed?.length ?? 0) +
+      (report?.edits_delivered?.length ?? 0) +
+      (report?.edits_failed?.length ?? 0);
+    if (touched > 0) {
       await queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
       await queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     }

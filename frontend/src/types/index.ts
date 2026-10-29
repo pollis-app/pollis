@@ -87,6 +87,9 @@ export interface Message {
   // Edit/delete metadata
   edited_at?: string; // ISO timestamp if message was edited
   deleted_at?: string; // ISO timestamp if message was soft-deleted
+  // Our edit of it is stored but its delivery failed (#1555); the outbox
+  // drain retries it. `content_decrypted` is already the edited text.
+  edit_unsent?: boolean;
   // A placeholder for a message this device could not decrypt (#1312)
   undecryptable?: boolean;
   // How many consecutive placeholders this row stands for (MessageList collapses runs)

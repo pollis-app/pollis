@@ -6,6 +6,7 @@
     "encrypted": "[encrypted]",
     "redacted": "[redacted]",
     "edited": "(edited)",
+    "editUnsent": "(edit not sent)",
     "newMember": "new",
     "newMemberTitle": "Joined in the last 7 days",
     "undecryptable": {

@@ -6,6 +6,7 @@
     "encrypted": "[chiffré]",
     "redacted": "[expurgé]",
     "edited": "(modifié)",
+    "editUnsent": "(modification non envoyée)",
     "newMember": "nouveau",
     "newMemberTitle": "A rejoint le groupe ces 7 derniers jours"
   },

@@ -594,6 +594,23 @@ renderer halves are `frontend/tests/pending-messages.test.ts` and
 and `mobile/.maestro/flows/outbox.yaml` (mobile: a real `stopApp` mid-send, and
 on Android an airplane-mode send that fails and is retried).
 
+### Killing an edit part-way (#1555)
+
+`Crash::EditAfterEnqueue` ends an edit with it stored in the edit outbox and
+nothing posted — where, before #1555, the sender's row had already changed —
+and `Crash::EditAfterPost` ends it after the DS took the envelope and before the
+device recorded that. `flows/zero_loss.rs`
+(`an_editor_killed_between_storing_and_posting_converges`,
+`an_editor_killed_after_the_post_converges_without_a_fork`,
+`an_edit_that_times_out_unlanded_is_delivered_by_the_drain`) asserts that the
+other members keep the original until the post lands, the editor's read shows
+the edit with `edit_state`, and after `lock` + `unlock` and a drain every
+member's copy matches with nothing left pending. The soak arms all three kill
+points at random and requires, at the end, the final text and no `edit_state`
+on every device. Unit coverage: `commands::messages::edit_outbox::tests`; the
+desktop UI: `e2e/outbox.spec.ts` (an edit that cannot go is labelled, then
+delivered by the `online` drain).
+
 ## The `DsFault` seam — injecting DS-side faults
 
 `/v1/commits` is the ONE path the harness serves itself, mounted on an outer

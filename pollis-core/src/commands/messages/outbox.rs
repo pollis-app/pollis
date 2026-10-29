@@ -18,6 +18,8 @@
 //! unlock (which is also every cold start) and called by both renderers on a
 //! realtime reconnect and (mobile) on returning to the foreground — and by
 //! [`retry_message`] when the user taps Retry. All event-driven; nothing polls.
+//! The same drain also delivers edits still in the edit outbox (#1555,
+//! `edit_outbox`).
 //!
 //! **Idempotency.** A retry reuses the message id, which is the envelope id.
 //! If an earlier attempt's envelope did land (the process died before it could
@@ -644,14 +646,14 @@ pub(super) async fn is_unsent(state: &Arc<AppState>, id: &str) -> Result<bool> {
 /// Hold `id`'s outbox lock for the life of the guard, and drop the map entry
 /// afterwards when nobody else is waiting on it, so the map does not grow by
 /// one entry per message sent this session.
-struct OutboxLock {
+pub(super) struct OutboxLock {
     state: Arc<AppState>,
     id: String,
     guard: Option<tokio::sync::OwnedMutexGuard<()>>,
 }
 
 impl OutboxLock {
-    async fn acquire(state: &Arc<AppState>, id: &str) -> Self {
+    pub(super) async fn acquire(state: &Arc<AppState>, id: &str) -> Self {
         let entry = {
             let mut map = state.outbox_locks.lock().await;
             map.entry(id.to_string())
@@ -666,7 +668,7 @@ impl OutboxLock {
         }
     }
 
-    async fn release(mut self) {
+    pub(super) async fn release(mut self) {
         self.guard.take();
         let mut map = self.state.outbox_locks.lock().await;
         if let Some(entry) = map.get(&self.id) {
@@ -836,8 +838,19 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
     Ok(queued)
 }
 
-/// Deliver one unsent message again — the renderer's Retry (#1335).
+/// Deliver one unsent message again — the renderer's Retry (#1335). Naming a
+/// delivered message whose edit is still queued delivers that edit (#1555).
 pub async fn retry_message(message_id: String, state: &Arc<AppState>) -> Result<Message> {
+    if !is_unsent(state, &message_id).await?
+        && super::edit_outbox::has_pending_edit(state, &message_id).await?
+    {
+        super::edit_outbox::deliver_edit(state, &message_id).await?;
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        return load(db.conn(), &message_id)?
+            .map(|(m, _)| m)
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Message not found")));
+    }
     deliver(state, &message_id, None).await
 }
 
@@ -929,6 +942,10 @@ pub struct OutboxReport {
     pub delivered: Vec<String>,
     /// Ids whose attempt failed; they are marked `'failed'` and stay queued.
     pub failed: Vec<String>,
+    /// Messages whose stored edit is now confirmed (#1555), by message id.
+    pub edits_delivered: Vec<String>,
+    /// Messages whose stored edit failed again; it stays queued.
+    pub edits_failed: Vec<String>,
 }
 
 /// Deliver every unsent message, oldest first (#1335).
@@ -991,6 +1008,11 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
             }
         }
     }
+    // Edits after sends: an edit only ever targets a delivered message, so
+    // nothing here waits on the loop above (#1555).
+    let (edits_delivered, edits_failed) = super::edit_outbox::drain_edits(state).await?;
+    report.edits_delivered = edits_delivered;
+    report.edits_failed = edits_failed;
     Ok(report)
 }
 
@@ -1000,11 +1022,17 @@ pub(crate) fn spawn_outbox_flush(state: &Arc<AppState>) {
     let state = state.clone();
     tokio::spawn(async move {
         match flush_outbox(&state).await {
-            Ok(report) if report.delivered.is_empty() && report.failed.is_empty() => {}
+            Ok(report)
+                if report.delivered.is_empty()
+                    && report.failed.is_empty()
+                    && report.edits_delivered.is_empty()
+                    && report.edits_failed.is_empty() => {}
             Ok(report) => crate::diag!(
-                "[outbox] after unlock: {} delivered, {} still unsent",
+                "[outbox] after unlock: {} delivered, {} still unsent; {} edits delivered, {} still unsent",
                 report.delivered.len(),
-                report.failed.len()
+                report.failed.len(),
+                report.edits_delivered.len(),
+                report.edits_failed.len()
             ),
             Err(e) => crate::diag!("[outbox] drain after unlock failed: {e}"),
         }

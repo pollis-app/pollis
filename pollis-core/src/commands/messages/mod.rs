@@ -6,6 +6,7 @@
 
 mod delete_capability;
 mod edit_delete;
+mod edit_outbox;
 pub(crate) mod framing;
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_surface;

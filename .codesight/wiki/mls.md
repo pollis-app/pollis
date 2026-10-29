@@ -915,6 +915,22 @@ row (`outbox::SOFT_DELETE_SQL`) also settles it: a delete targets only an envelo
 that exists, and leaving the state set would trip the CHECK and hold the ingest
 cursor.
 
+**Edits go through an outbox too (#1555).** An edit used to rewrite the
+sender's local row and then post, outside the outbox — a kill in between left
+the sender's copy edited and everyone else's not, with no retry. Now
+`edit_message` stores the edit in `outbox_edit` first (`messages/edit_outbox.rs`)
+and leaves the row as every member holds it; `edit_delete::post_edit` seals and
+posts, and only after the DS has the envelope does `confirm_edit_on` write the
+text to the row and drop the entry, in one transaction. Reads overlay the pending
+text with `edit_state` (`pending` drawn as an ordinary edit, `failed` /
+`rejected` labelled "edit not sent"). Every attempt at one edit reuses its
+envelope id; the DS's edit write replaces the target's pending edit envelope,
+so a retry after a post that landed unseen replaces it with the same text. One
+attempt per target at a time (the outbox lock keyed `edit:<id>`); a target
+deleted meanwhile drops the edit. The same drain delivers them, after the
+messages (`OutboxReport.edits_delivered` / `edits_failed`), and `retry_message`
+on an edited message retries its edit.
+
 **Drained, event-driven, single-flight.** `unlock` (every cold start) spawns
 `flush_outbox`; the renderers call it after launch, on a realtime reconnect, on
 the browser `online` event (desktop) and on resume (mobile). Those triggers

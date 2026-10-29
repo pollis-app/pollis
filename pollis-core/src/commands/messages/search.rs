@@ -923,7 +923,7 @@ pub struct CachedConversation {
 /// Remember what these conversation ids mean, locally.
 ///
 /// Called from the two reads that already list channels and DMs, mirroring the
-/// way `attach_sender_usernames_local` writes `user_cache`. Without it a search
+/// way `hydrate_rows` writes `user_cache`. Without it a search
 /// result can only render a UUID, `pages/Search.tsx` cannot tell a channel from
 /// a DM (and so routed EVERY hit to a DM route), and search is useless offline.
 ///

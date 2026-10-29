@@ -48,6 +48,8 @@ interface MockMessage {
   thread_id?: string;
   /** The durable outbox (#1335): our own message not delivered yet. */
   send_state?: 'pending' | 'failed';
+  /** The edit outbox (#1555): our edit, not confirmed yet; `content` holds it. */
+  edit_state?: 'pending' | 'failed';
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -1704,13 +1706,31 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'flush_outbox': {
-      const report = { delivered: [] as string[], failed: [] as string[] };
+      const report = {
+        delivered: [] as string[],
+        failed: [] as string[],
+        edits_delivered: [] as string[],
+        edits_failed: [] as string[],
+      };
       for (const message of unsentMessages()) {
         try {
           deliverMock(message);
           report.delivered.push(message.id);
         } catch {
           report.failed.push(message.id);
+        }
+      }
+      // Then the edit outbox (#1555).
+      const edited = Object.values(store.messages)
+        .flat()
+        .filter((m) => m.edit_state !== undefined);
+      for (const message of edited) {
+        if (store.failSends) {
+          message.edit_state = 'failed';
+          report.edits_failed.push(message.id);
+        } else {
+          delete message.edit_state;
+          report.edits_delivered.push(message.id);
         }
       }
       return report;
@@ -1729,6 +1749,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+        // The core stores the edit before posting it (#1555): a failed post
+        // keeps it, read back with `edit_state`, for the drain to deliver.
+        if (store.failSends) {
+          message.edit_state = 'failed';
+          throw new Error('network unreachable');
+        }
+        delete message.edit_state;
       }
       return null;
     }

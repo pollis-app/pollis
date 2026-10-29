@@ -139,6 +139,7 @@ function ThreadScreen() {
           onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
           onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
+          editUnsent={m.edit_unsent}
           continued={continued}
           mentionNames={mentionNames}
           selfName={selfName}
@@ -174,6 +175,7 @@ function ThreadScreen() {
           attachments={root.attachments}
           onOpenAttachment={openMedia}
           edited={!!root.edited_at}
+          editUnsent={root.edit_unsent}
           mentionNames={mentionNames}
           selfName={selfName}
         />

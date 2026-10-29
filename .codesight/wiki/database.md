@@ -1338,6 +1338,20 @@ transaction that swaps the row's provisional `_att` content for the finished
 envelope) and with the message on a discard; kept, like the rest of the outbox,
 across a keep-data sign-out.
 
+### outbox_edit (#1555)
+- `target_message_id` TEXT PK — the edited message (one pending edit per message; a newer edit replaces an unconfirmed older one)
+- `envelope_id` TEXT NOT NULL UNIQUE — the edit envelope's id, kept across every attempt at the same text (a new text gets a new id)
+- `conversation_id`, `sender_id`, `content` TEXT NOT NULL — where, whose, and the edited text
+- `send_state` TEXT NOT NULL DEFAULT `pending` CHECK IN (`pending`, `failed`, `rejected`) — as `message.send_state`; the drain retries pending and failed
+- `created_at` TEXT NOT NULL DEFAULT now — drain order, and the `edited_at` reads show
+
+The edit outbox. `edit_message` stores the edit here before any network work and
+leaves the `message` row alone; only once the DS holds the envelope does one
+transaction write the text to the row and delete this entry (conditional on the
+envelope id, so a late confirmation of a superseded edit changes nothing). Until
+then every `ChannelMessage` read shows the pending text over the row, with
+`edit_state`. Kept across a keep-data sign-out like the rest of the outbox.
+
 ### known_envelope (#1312)
 - `id` TEXT PK — an envelope id
 - `kind` TEXT NOT NULL CHECK IN (`own`, `opened`)

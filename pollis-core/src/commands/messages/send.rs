@@ -776,6 +776,13 @@ pub mod test_hooks {
         /// has no error path, so it unwinds — a dead process runs nothing
         /// after that point either.
         AfterDecrypt,
+        /// An edit is stored in the edit outbox; nothing has touched the
+        /// network (#1555) — where an edit used to have already rewritten the
+        /// sender's copy.
+        EditAfterEnqueue,
+        /// The DS holds the edit envelope; this device has not recorded that
+        /// (#1555).
+        EditAfterPost,
     }
 
     #[cfg(feature = "test-harness")]

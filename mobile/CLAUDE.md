@@ -1255,7 +1255,10 @@ Current state:
   sealed first withdraws it from everyone. Pure
   rules + tests: `pendingMessages.ts`, `tests/pending-messages.test.ts`;
   device tier: `.maestro/flows/outbox.yaml`. A core change, so phones get it
-  with the next store build.
+  with the next store build. **Edits too (#1555):** `edit_message` stores the
+  edit in the core's edit outbox before posting and the row reads back with
+  `edit_state` until the DS confirms; `MessageRow` labels a failed one
+  "(edit not sent)" (`editUnsent`), and the same drain delivers it.
 - **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a
