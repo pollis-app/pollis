@@ -482,7 +482,7 @@
     "direct": "Direct",
     "groups": "Groups",
     "self": "Self",
-    "signInDevice": "Sign in device",
+    "signInDevice": "Link",
     "withUnread_one": "{{label}}, {{count}} unread",
     "withUnread_other": "{{label}}, {{count}} unread"
   },

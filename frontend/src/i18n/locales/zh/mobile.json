@@ -458,7 +458,7 @@
     "direct": "私信",
     "groups": "群组",
     "self": "我的",
-    "signInDevice": "登录设备",
+    "signInDevice": "关联",
     "withUnread_other": "{{label}}，{{count}} 条未读"
   },
   "thread": {

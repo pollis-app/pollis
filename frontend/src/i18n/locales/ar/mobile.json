@@ -523,7 +523,7 @@
     "direct": "المباشرة",
     "groups": "المجموعات",
     "self": "أنا",
-    "signInDevice": "تسجيل جهاز",
+    "signInDevice": "ربط",
     "withUnread_few": "{{label}}، {{count}} رسائل غير مقروءة",
     "withUnread_many": "{{label}}، {{count}} رسالة غير مقروءة",
     "withUnread_one": "{{label}}، رسالة واحدة غير مقروءة",

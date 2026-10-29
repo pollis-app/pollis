@@ -471,7 +471,7 @@
     "direct": "Directos",
     "groups": "Grupos",
     "self": "Tú",
-    "signInDevice": "Conectar equipo",
+    "signInDevice": "Vincular",
     "withUnread_one": "{{label}}, {{count}} sin leer",
     "withUnread_other": "{{label}}, {{count}} sin leer"
   },

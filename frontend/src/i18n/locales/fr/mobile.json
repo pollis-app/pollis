@@ -471,7 +471,7 @@
     "direct": "Messages",
     "groups": "Groupes",
     "self": "Moi",
-    "signInDevice": "Lier un appareil",
+    "signInDevice": "Lier",
     "withUnread_one": "{{label}}, {{count}} non lu",
     "withUnread_other": "{{label}}, {{count}} non lus"
   },

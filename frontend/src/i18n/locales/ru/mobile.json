@@ -497,7 +497,7 @@
     "direct": "Личные",
     "groups": "Группы",
     "self": "Профиль",
-    "signInDevice": "Вход устройства",
+    "signInDevice": "Связать",
     "withUnread_few": "{{label}}, {{count}} непрочитанных",
     "withUnread_many": "{{label}}, {{count}} непрочитанных",
     "withUnread_one": "{{label}}, {{count}} непрочитанное",

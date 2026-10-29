@@ -497,7 +497,7 @@
     "direct": "Особисті",
     "groups": "Групи",
     "self": "Профіль",
-    "signInDevice": "Вхід пристрою",
+    "signInDevice": "Зв’язати",
     "withUnread_few": "{{label}}, {{count}} непрочитані",
     "withUnread_many": "{{label}}, {{count}} непрочитаних",
     "withUnread_one": "{{label}}, {{count}} непрочитане",

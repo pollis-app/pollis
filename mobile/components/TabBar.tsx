@@ -11,7 +11,7 @@ import { appStore } from "../stores/appStore";
 import { emitTabReselect } from "../lib/tabReselect";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
-// Groups / Direct / Sign in device / Self (Main.dc.html): 22pt icon over a
+// Groups / Direct / Link / Self (Main.dc.html): 22pt icon over a
 // 12pt label, set 10pt below the bar's top hairline; active = accent icon and
 // label, a bolder label, and a short rounded accent bar at the top of the
 // cell (so where you are is not told by colour alone); inactive = dim. The

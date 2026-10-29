@@ -1031,7 +1031,7 @@ screens disable the edge swipe, so their top-left back is the only way out.
 Sub-screens are stack pushes outside `(tabs)`.
 
 Tabs and search (#1550): the bar is Groups · Direct · shield · Self. The
-shield (`tab-link-device`, "Sign in device") is a shortcut, not a tab: it
+shield (`tab-link-device`, labelled "Link") is a shortcut, not a tab: it
 pushes `self/link-device` (Scan to sign in a device, the same page and PIN
 confirm as Self → Security) onto the root stack, so back returns to the tab
 it was tapped from, and it is never the selected cell. `TabBar` matches cells
