@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { MediaImage } from "../Media";
 import { Icon } from "../icons";
+import { PlayBadge } from "../media/PlayBadge";
 import { AttachmentTile } from "../chat/AttachmentTile";
 import { isRollMedia, mediaKind } from "../../lib/media/viewer";
 import { semantic, type as ty, space, r } from "../../theme/tokens";
@@ -121,18 +122,7 @@ function VaultMediaTile({
               style={{ position: "absolute", top: 0, bottom: 0, start: 0, end: 0 }}
             />
           ) : null}
-          <View
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: semantic.bg,
-            }}
-          >
-            <Icon.play size={18} color={semantic.text} />
-          </View>
+          <PlayBadge size={36} overFrame={!!attachment.blurhash} />
         </View>
       )}
     </Pressable>

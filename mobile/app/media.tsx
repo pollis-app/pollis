@@ -38,6 +38,7 @@ import {
   type ConversationKind,
 } from "../hooks/queries";
 import { vaultViewerItems } from "../lib/vault";
+import { draftViewerItems, getDraftForViewer } from "../lib/composerAttachments";
 import {
   mediaCacheGeneration,
   releaseNamedMediaUri,
@@ -77,9 +78,11 @@ export default function MediaViewerScreen() {
     attachmentId?: string;
     threadId?: string;
     // "vault": walk the Vault's entries (#1316) instead of a conversation.
+    // "draft": the composer's pending attachments, before send (#1585).
     source?: string;
   }>();
   const fromVault = params.source === "vault";
+  const fromDraft = params.source === "draft";
   const conversationId = params.conversationId ?? null;
   const kind: ConversationKind | null =
     params.kind === "channel" || params.kind === "dm" ? params.kind : null;
@@ -90,8 +93,11 @@ export default function MediaViewerScreen() {
   const { data: conversationData } = useMessages(conversationId, kind);
   const { data: replies } = useThreadMessages(threadId);
   const { data: vaultEntries } = useVaultMessages(fromVault);
+  // Read once per open: the strip that opened the page sits under it and
+  // cannot change while the viewer is on top.
+  const [draft] = useState(() => (fromDraft ? getDraftForViewer() : []));
   const messages = useMemo(() => {
-    if (fromVault) {
+    if (fromVault || fromDraft) {
       return [];
     }
     const conversation = flattenPages(conversationData);
@@ -102,7 +108,7 @@ export default function MediaViewerScreen() {
     // out of the main timeline).
     const root = conversation.find((m) => m.id === threadId);
     return [...(root ? [root] : []), ...(replies ?? [])];
-  }, [conversationData, replies, threadId, fromVault]);
+  }, [conversationData, replies, threadId, fromVault, fromDraft]);
 
   // Both ids follow a pending → confirmed swap (`currentAttachmentId`): the
   // viewer may open on a just-sent attachment before its send settles. The
@@ -111,12 +117,14 @@ export default function MediaViewerScreen() {
   // (newest first), so a swipe walks what the grid showed (#1492).
   const { items, index: initialIndex } = useMemo(
     () =>
-      fromVault
-        ? vaultViewerItems(vaultEntries ?? [], currentAttachmentId(attachmentId))
-        : collectViewerItems(messages, currentAttachmentId(attachmentId)),
-    [fromVault, vaultEntries, messages, attachmentId],
+      fromDraft
+        ? draftViewerItems(draft, attachmentId)
+        : fromVault
+          ? vaultViewerItems(vaultEntries ?? [], currentAttachmentId(attachmentId))
+          : collectViewerItems(messages, currentAttachmentId(attachmentId)),
+    [fromDraft, draft, fromVault, vaultEntries, messages, attachmentId],
   );
-  const sourceLoaded = fromVault ? !!vaultEntries : !!conversationData;
+  const sourceLoaded = fromDraft ? true : fromVault ? !!vaultEntries : !!conversationData;
 
   // Track the page by attachment id, not index: a message arriving or being
   // deleted while the viewer is open shifts indices, not identities.

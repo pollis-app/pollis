@@ -24,6 +24,8 @@ import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
 import { EmojiPickerSheet } from "../emoji/EmojiPickerSheet";
 import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { PickedAttachment } from "../../lib/attachments";
+import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
+import { useOpenDraftMediaViewer } from "../../hooks/useOpenMediaViewer";
 
 /**
  * Bottom composer bar (Chat.dc.html): a 44pt round attach button, a raised
@@ -79,6 +81,7 @@ export function Composer({
   placeholder?: string;
 }) {
   const { t } = useTranslation("common");
+  const openDraft = useOpenDraftMediaViewer();
   const [caret, setCaret] = useState(0);
   // iOS: a multiline field grows with its lines but keeps that height when its
   // `value` is reset to "" (the send clears the draft), so after a two-line
@@ -254,51 +257,35 @@ export function Composer({
         </View>
       ) : null}
       {pendingAttachments && pendingAttachments.length > 0 ? (
-        <View
+        // Desktop's preview row: cards side by side, scrolling sideways when
+        // they outgrow the width (#1585).
+        <ScrollView
           testID="strip-attachments"
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
+            flexGrow: 0,
+            borderTopWidth: 1,
+            borderTopColor: semantic.hairSoft,
+          }}
+          contentContainerStyle={{
             gap: 8,
             paddingHorizontal: 12,
             paddingTop: 8,
             paddingBottom: 2,
-            borderTopWidth: 1,
-            borderTopColor: semantic.hairSoft,
           }}
         >
-          {pendingAttachments.map((att) => (
-            <Pressable
+          {pendingAttachments.map((att, index) => (
+            <ComposerAttachmentPreview
               key={att.id}
-              testID={`chip-attachment-${att.id}`}
-              accessibilityRole="button"
-              accessibilityLabel={t("composer.removeAttachment", {
-                name: att.name,
-              })}
-              onPress={() => onRemoveAttachment?.(att.id)}
-              // 32pt chip; the slop brings the target to 44pt.
-              hitSlop={6}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                minHeight: 32,
-                paddingStart: 12,
-                paddingEnd: 8,
-                borderRadius: r.pill,
-                backgroundColor: semantic.raised,
-              }}
-            >
-              <Text
-                numberOfLines={1}
-                style={[ty.secondary, { color: semantic.text, maxWidth: 160 }]}
-              >
-                {att.name}
-              </Text>
-              <Icon.close color={semantic.muted} size={16} />
-            </Pressable>
+              attachment={att}
+              index={index}
+              onRemove={(id) => onRemoveAttachment?.(id)}
+              onOpen={(picked) => openDraft(pendingAttachments, picked.id)}
+            />
           ))}
-        </View>
+        </ScrollView>
       ) : null}
       <View
         style={{

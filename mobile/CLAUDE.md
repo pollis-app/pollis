@@ -1120,7 +1120,13 @@ Current state:
   clipboard copy via expo-clipboard); attachments (picker → `upload_media`
   path arg → desktop's exact `_att`/`_txt` envelope from `lib/attachments.ts`;
   inbound images render via `components/Media.tsx` + `get_media_path`; tapping any
-  attachment opens the full-screen viewer `app/media.tsx`, #1248); quote replies
+  attachment opens the full-screen viewer `app/media.tsx`, #1248; the picker takes
+  photos and videos, and a pending one shows in the composer as desktop's
+  preview card — `components/chat/ComposerAttachmentPreview.tsx`, 120pt (desktop's
+  80px + #1568's half), a video's first frame via `hooks/useVideoPoster.ts`, the
+  shared top-end `AttachmentToolbar` (remove; #1568's sensitive toggle goes
+  there), tap → the viewer on the picked file (`source=draft`), rules in
+  `lib/composerAttachments.ts`, #1585); quote replies
   (#1270, desktop's Reply: `send_message` with `replyToId`, a `ReplyBar` over the
   composer, a quote line on the replying row via `lib/replyPreview.ts`, tap jumps
   to the original). A reply starts from a Discord-style **swipe toward the start

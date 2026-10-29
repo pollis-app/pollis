@@ -1,0 +1,245 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# COMPOSER ATTACHMENT PREVIEWS (#1585) — desktop's composer preview on the
+# phone: a thumbnail card per pending attachment, the filename under it, a
+# top-end toolbar holding remove, and a tap that opens the viewer before send.
+#   attach an image and a video → both cards → tap the image → the viewer on
+#   the picked file → Close → remove the video → send → the message renders.
+# Then the Vault composer shows the same card.
+# Self-contained: a fresh disposable account, no peer.
+#
+# The pick goes through the SYSTEM picker, whose cells carry no testIDs: the
+# seeded files are picked by accessibility label — "Photo, …" / "Video, …" on
+# iOS, "Photo taken on …" / "Video taken on …" on Android 13+ — never by a
+# coordinate (see media-viewer.yaml). iOS sorts by date added first, as
+# subflows/pick-newest-photo.yaml explains.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Composer Previews"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Composer Previews, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# Seed one image and one video, then pick both in one picker session.
+- addMedia:
+    - "../fixtures/media-viewer.png"
+    - "../fixtures/composer-video.mp4"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Sort and Filter"
+      - tapOn: "Added"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- tapOn:
+    text: "Photo(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "Video(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+
+# Two cards, each with its own remove button in the toolbar.
+- assertVisible:
+    id: "composer-attachment-0"
+- assertVisible:
+    id: "composer-attachment-1"
+- assertVisible:
+    id: "btn-remove-attachment-0"
+- assertVisible:
+    id: "btn-remove-attachment-1"
+- takeScreenshot: composer-attachments-01-image-and-video
+
+# Tap the image card (picked first, so first in the strip): the viewer opens
+# on the picked file, before send.
+- tapOn:
+    id: "composer-attachment-0"
+- extendedWaitUntil:
+    visible:
+      id: "screen-media-viewer"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "media-page-.*"
+    timeout: 10000
+- takeScreenshot: composer-attachments-02-viewer
+- tapOn:
+    id: "btn-media-close"
+- assertVisible:
+    id: "screen-chat"
+- assertVisible:
+    id: "composer-attachment-1"
+
+# Remove the second card: one is left.
+- tapOn:
+    id: "btn-remove-attachment-1"
+- assertNotVisible:
+    id: "composer-attachment-1"
+- assertVisible:
+    id: "composer-attachment-0"
+- takeScreenshot: composer-attachments-03-after-remove
+
+# Send: the strip clears and the message renders with its attachment.
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    notVisible:
+      id: "strip-attachments"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 60000
+- takeScreenshot: composer-attachments-04-sent
+
+# Send the video too: the sent row draws its tile with the themed play badge.
+# The chat ignores Send while the previous send is in flight (the first MLS
+# send in a fresh group can take a minute), so wait for it to land first.
+- extendedWaitUntil:
+    notVisible:
+      id: "row-message-pending-.*"
+    timeout: 120000
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: "Video(,| taken on) .*"
+    index: 0
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "composer-attachment-0"
+    timeout: 10000
+# Keep pressing Send until the strip clears: a press while the previous
+# send is still settling is ignored (as subflows/send-vault-picks.yaml).
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+      index: 1
+    timeout: 60000
+- takeScreenshot: composer-attachments-09-sent-video
+
+# The Vault composer draws the same card.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- assertVisible:
+    id: "composer-attachment-0"
+- assertVisible:
+    id: "btn-remove-attachment-0"
+- takeScreenshot: composer-attachments-05-vault
+- tapOn:
+    id: "btn-remove-attachment-0"
+- assertNotVisible:
+    id: "strip-attachments"
+
+# Several cards scroll sideways, as desktop's row does.
+- addMedia:
+    - "../fixtures/vault-swipe-01.png"
+    - "../fixtures/vault-swipe-02.png"
+    - "../fixtures/vault-swipe-03.png"
+    - "../fixtures/vault-swipe-04.png"
+    - "../fixtures/vault-swipe-05.png"
+    - "../fixtures/vault-swipe-06.png"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+# Android indexes `addMedia` files a moment after the push; wait for the
+# sixth photo to reach the picker before selecting.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: "Photo taken on.*"
+            index: 5
+          timeout: 20000
+      - runFlow: ../subflows/pick-six-photos-android.yaml
+- runFlow:
+    when:
+      platform: iOS
+    file: ../subflows/pick-six-photos-ios.yaml
+- tapOn:
+    text: "(?i)(add|done).*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "composer-attachment-0"
+    timeout: 10000
+- takeScreenshot: composer-attachments-06-several
+- swipe:
+    from:
+      id: "composer-attachment-2"
+    direction: LEFT
+- waitForAnimationToEnd:
+    timeout: 3000
+# A card past the first screenful is now in view. (Android's picker can
+# drop one of the six taps, so this checks the fifth, not the sixth.)
+- assertVisible:
+    id: "composer-attachment-4"
+- takeScreenshot: composer-attachments-07-several-scrolled

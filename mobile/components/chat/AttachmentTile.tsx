@@ -10,6 +10,7 @@ import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { MediaImage } from "../Media";
 import { Icon } from "../icons";
+import { PlayBadge } from "../media/PlayBadge";
 import { mediaKind } from "../../lib/media/viewer";
 import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { r, semantic, type as ty } from "../../theme/tokens";
@@ -104,18 +105,7 @@ export function AttachmentTile({
             style={{ position: "absolute", top: 0, bottom: 0, start: 0, end: 0 }}
           />
         ) : null}
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 22,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: semantic.bg,
-          }}
-        >
-          <Icon.play size={20} color={semantic.text} />
-        </View>
+        <PlayBadge size={44} overFrame={!!placeholder} />
       </Pressable>
     );
   }
