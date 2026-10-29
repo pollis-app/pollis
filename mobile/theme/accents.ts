@@ -1,13 +1,9 @@
-// The accent presets offered by Self → Preferences → Accent, and the two
-// default bases. Pure (no react-native) so tests/theme-contrast.test.ts can
-// check every preset against the derived theme.
+// The accent presets and the two default bases. Pure.
 
-// Brand amber — same as the desktop app + website.
 export const DEFAULT_ACCENT_HEX = "#fabf5a";
-// Just-above-black.
 export const DEFAULT_BACKGROUND_HEX = "#0a0907";
 
-// `n` is the stable wire/lookup name; the rendered label is translated.
+// `n` is the stable lookup name; the label is translated.
 export const ACCENT_PRESETS = [
   { n: "Amber", c: DEFAULT_ACCENT_HEX },
   { n: "Citron", c: "#c9d65a" },

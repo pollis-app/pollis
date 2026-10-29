@@ -39,7 +39,6 @@ test("Android plays system haptics, never the raw vibrator", () => {
   const s = src("lib/haptics.ts");
   assert.match(s, /performAndroidHapticsAsync/);
   assert.doesNotMatch(s, /Vibration|vibrate\(/);
-  // Every Android constant the table names is mapped.
   for (const { android } of Object.values(HAPTICS)) {
     assert.ok(s.includes(`"${android}"`), android);
   }
@@ -120,10 +119,7 @@ test("mutation haptics play from one MutationCache", () => {
   assert.equal(resolveHaptic((v: { verified: boolean }) => (v.verified ? "success" : "toggle"), { verified: false }), "toggle");
 });
 
-// A user action that changes something gets feedback. These are the
-// mutations that deliberately have none: background or plumbing steps the
-// user does not perform as an action (and the preferences writer, whose
-// switch already ticked).
+// Mutations that deliberately play nothing (plumbing, or already ticked).
 const NO_HAPTIC = new Set([
   "useUnlockState",
   "useInitializeIdentity",

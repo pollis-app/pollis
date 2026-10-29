@@ -1,5 +1,4 @@
-// The placeholder a media viewer page shows while its file is being
-// decrypted, or when it could not be.
+// A viewer page's decrypting / failed placeholder.
 
 import { ActivityIndicator, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";

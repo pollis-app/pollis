@@ -1,15 +1,4 @@
-/*
- * The mobile copy of the username rule (`lib/username.ts`) — a verbatim twin of
- * `frontend/src/utils/username.ts` (mobile imports no desktop TypeScript), both
- * mirroring what the Delivery Service enforces on `POST /v1/profile/update`.
- *
- * Two things are pinned: that the mirror refuses what the DS refuses (the `@`
- * above all — the DS resolves an identifier with one against emails ONLY, which
- * is sound exactly because no username may contain it), and that the two
- * client copies have not drifted apart.
- *
- *   cd mobile && pnpm test
- */
+/* The mobile username rule refuses what the DS refuses (the `@` above all) and matches desktop's copy. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

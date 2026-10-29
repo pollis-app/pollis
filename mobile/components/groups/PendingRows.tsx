@@ -11,9 +11,7 @@ import {
   type PendingInvite,
 } from "../../hooks/queries";
 
-// Things waiting on you across every group, shown above the Groups tab's
-// channel list: join requests in groups you administer (#1216) and invites
-// you have not answered yet. Renders nothing when there are none.
+// Join requests you administer (#1216) and unanswered invites, above the channel list.
 export function PendingRows({
   groups,
   pendingByGroup,
@@ -24,7 +22,6 @@ export function PendingRows({
   invites: PendingInvite[];
 }) {
   const { t } = useTranslation("mobile");
-  // iPad two-pane: group pages open in the detail pane (useNav).
   const router = useNav();
   const acceptInvite = useAcceptGroupInvite();
   const declineInvite = useDeclineGroupInvite();
@@ -106,7 +103,7 @@ export function PendingRows({
               />
             ))}
           </Group>
-          {/* A failed accept puts the invite back (#1560); say why it is there. */}
+          {/* A failed accept puts the invite back (#1560). */}
           {acceptInvite.isError ? (
             <Text
               testID="text-accept-invite-error"

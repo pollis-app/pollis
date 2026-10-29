@@ -2,15 +2,7 @@ import { EmojiText, renderEmojiSegments } from "../emoji/EmojiText";
 import { MentionToken } from "./MentionToken";
 import { findMentions } from "../../lib/mentions";
 
-/**
- * A message body: resolved `@username` tokens highlighted (self-mentions
- * loud), everything between them rendered through the emoji pipeline (port
- * of desktop's MessageBody composition). Only mentions that resolve against
- * `mentionNames` highlight — `@notauser` stays plain text.
- *
- * Returns inline fragments — the caller provides the wrapping <Text> so
- * (edited) suffixes and shared styles stay where they are.
- */
+/** A message body: resolved mentions highlighted, the rest through the emoji pipeline; returns inline fragments. */
 export function MessageBodyInline({
   text,
   mentionNames,
@@ -36,7 +28,6 @@ export function MessageBodyInline({
         ...renderEmojiSegments(text.slice(cursor, m.start), `pre-${i}`, emojiSize),
       );
     }
-    // `@all` speaks to everyone, so it is a mention of the reader too.
     const isSelf = m.name === "all" || m.name === selfName;
     nodes.push(<MentionToken key={`m-${i}`} name={m.raw} isSelf={isSelf} />);
     cursor = m.end;

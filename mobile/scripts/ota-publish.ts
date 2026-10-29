@@ -1,31 +1,5 @@
 #!/usr/bin/env node
-// Over-the-air JS update pipeline for the mobile app (#1250).
-//
-//   node scripts/ota-publish.ts <command> [options]          (from mobile/)
-//
-// Each command is one step of .github/workflows/mobile-ota-release.yml and can
-// be run by hand with the same result (runbook: mobile/CLAUDE.md "OTA updates").
-//
-//   build                 expo export with prod EXPO_PUBLIC values, runtime
-//                         versions from the fingerprint, safety checks, unsigned
-//                         manifests            → <dir>/plan.json + <dir>/files/
-//                         Refuses an update no recorded store build would take
-//                         (store/runtime-versions.json); `--unreached warn` only warns.
-//                         Each update is also issued, re-signed, under every
-//                         ledger runtime version aliased to its own (#1446)
-//   prepare-republish     re-serve an earlier group's bytes under new update ids
-//                         (rollback to a known-good update)
-//   prepare-rollback      rollBackToEmbedded directives (rollback to the store
-//                         binary's own bundle)
-//   sign                  re-check everything, then sign with OTA_CODE_SIGNING_KEY
-//                         (the only step that sees the key)
-//   upload                assets, archive, then the live pointers, to R2
-//   attest                stage the files + BinaryRecord leaves for the log
-//   log-append            merge the leaves into the transparency accumulator
-//   verify                re-fetch through the Worker; check signature + hashes
-//
-// Only node: built-ins at the top level. `build` loads Expo from node_modules
-// lazily, so `sign` runs from a bare checkout.
+// OTA update pipeline (#1250); one command per step of mobile-ota-release.yml. Only node: built-ins at top level, so `sign` runs from a bare checkout.
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -81,10 +55,6 @@ const REPO = resolve(MOBILE, "..");
 const CERT_PATH = join(MOBILE, "store", "ota-code-signing.pem");
 const ACCUMULATOR_KEY = "internal/binary-records.json";
 const LEDGER_PATH = join(MOBILE, "store", "runtime-versions.json");
-
-// ---------------------------------------------------------------------------
-// small helpers
-// ---------------------------------------------------------------------------
 
 function fail(message: string): never {
   console.error(`ota-publish: ${message}`);
@@ -182,8 +152,6 @@ function toolchain(): Plan["toolchain"] {
   const rustc = /channel\s*=\s*"([^"]+)"/.exec(rt)?.[1] ?? fail("rust-toolchain.toml has no channel");
   const pm = (JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { packageManager?: string }).packageManager;
   const pnpm = /^pnpm@(.+)$/.exec(pm ?? "")?.[1] ?? fail("root package.json has no pnpm packageManager");
-  // GitHub-hosted runners export ImageOS + ImageVersion (the dated image), the
-  // same identity desktop leaves record; a workstation records itself as such.
   const image = process.env.ImageOS && process.env.ImageVersion
     ? `${process.env.ImageOS}@${process.env.ImageVersion}`
     : `local-${osPlatform()}-${osRelease()}`;
@@ -240,10 +208,6 @@ function emitSummary(plan: Plan, dir: string, extra = ""): void {
   console.log(text);
 }
 
-// ---------------------------------------------------------------------------
-// build
-// ---------------------------------------------------------------------------
-
 interface ExportMetadata {
   fileMetadata: Record<string, { bundle: string; assets: { path: string; ext: string }[] }>;
 }
@@ -260,7 +224,6 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
     fail(`${out} already holds a plan; use a fresh directory`);
   }
 
-  // Same checks as a store build, before spending a minute on Metro.
   assertPublicEnv(process.env);
   assertOnlyPublicEnvReads(sourceFiles());
   readCertificate();
@@ -269,10 +232,7 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
     fail("the working tree has uncommitted changes; the transparency log records a commit, so publish from a clean tree");
   }
 
-  // The OTA build is a prod build: app.config.js must evaluate exactly as it
-  // does for a store build (updates on, code-signed). EXPO_NO_DOTENV keeps a
-  // workstation's mobile/.env (often api-dev) out of the bundle — the values
-  // come from this process's environment only.
+  // EXPO_NO_DOTENV keeps a workstation's mobile/.env (often api-dev) out of the bundle.
   process.env.POLLIS_OTA = "production";
   process.env.EXPO_NO_DOTENV = "1";
   process.env.NODE_ENV = "production";
@@ -309,8 +269,7 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
   }
   run(join(MOBILE, "node_modules", ".bin", "expo"), args, { capture: false });
 
-  // Nothing the export did may move the fingerprint: if it did, the bundle was
-  // built from a tree whose native layer is not the one the runtime version names.
+  // Nothing the export did may move the fingerprint.
   const after = await runtimeVersions();
   for (const p of platforms) {
     if (before[p] !== after[p]) {
@@ -386,8 +345,7 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
     });
   }
 
-  // #1446: the same update for every recorded binary whose native code is
-  // identical to the one it was built for, under that binary's own runtime version.
+  // #1446: also issue it under every ledger alias of its runtime version.
   plan.entries = expandAliases(plan.entries, builds, randomUUID);
   for (const e of plan.entries) {
     assertManifestShape(e.body, { runtimeVersion: e.runtimeVersion, baseUrl: plan.baseUrl });
@@ -398,11 +356,7 @@ async function cmdBuild(opts: Record<string, string>): Promise<void> {
   emitSummary(plan, out, reachSummary(reach));
 }
 
-// An update reaches only binaries whose baked runtime version it names (#1427),
-// directly or as a ledger alias of it (#1446: re-issued under the alias).
-// Compare against every store build on record: a platform that reaches none is
-// a loud warning, and an update that reaches no binary at all is refused unless
-// `--unreached warn` (dry runs, which exist to look at exactly that case).
+// A platform reaching no recorded binary warns; reaching none at all is refused unless `--unreached warn`.
 function checkReach(runtimeVersions: Record<string, string>, builds: StoreBuild[], mode: string): Reach[] {
   if (mode !== "warn" && mode !== "fail") {
     fail(`--unreached must be warn or fail, got ${mode}`);
@@ -428,7 +382,6 @@ function checkReach(runtimeVersions: Record<string, string>, builds: StoreBuild[
   return reach;
 }
 
-// "play 1.0.16, sideload 1.0.16 (alias 27b59ee3…)".
 function binaryNames(r: Reach): string {
   return r.binaries
     .map((b) => `${b.channel} ${b.version}${b.runtimeVersion === r.runtimeVersion ? "" : ` (alias ${b.runtimeVersion})`}`)
@@ -445,10 +398,6 @@ function reachSummary(reach: Reach[]): string {
   }
   return lines.join("\n") + "\n";
 }
-
-// ---------------------------------------------------------------------------
-// R2 (S3 API through the aws CLI, exactly as the release workflows do it)
-// ---------------------------------------------------------------------------
 
 interface R2 {
   bucket: string;
@@ -471,11 +420,7 @@ function aws(args: string[]): string {
   return run("aws", args, { env: AWS_ENV });
 }
 
-// The update store is the `ota/` prefix of the release bucket. These three
-// helpers (and the live-pointer listing in prepare-rollback) are the only
-// update-store I/O, and they take keys relative to that prefix — the same keys
-// the Worker reads (pollis-delivery/worker/updates.ts). The transparency
-// accumulator (log-append) lives in its own bucket and is not prefixed.
+// Update-store keys are relative to the `ota/` prefix, as the Worker reads them.
 function storeKey(key: string): string {
   return `${OTA_KEY_PREFIX}${key}`;
 }
@@ -503,10 +448,6 @@ function writeTemp(contents: string | Buffer): string {
   writeFileSync(p, contents);
   return p;
 }
-
-// ---------------------------------------------------------------------------
-// republish / rollback
-// ---------------------------------------------------------------------------
 
 interface UpdateArchive {
   platform: Platform;
@@ -559,9 +500,7 @@ function cmdPrepareRepublish(opts: Record<string, string>): void {
   for (const e of manifests) {
     const archive = JSON.parse(r2Get(r2, `updates/${e.updateId}.json`).toString("utf8")) as UpdateArchive;
     first ??= archive;
-    // A republish is a NEW update (new id, new createdAt) carrying the old
-    // bytes: the client only moves to an update newer than the one it runs,
-    // so re-serving the old manifest unchanged would roll nobody back.
+    // A NEW update carrying the old bytes: clients only move to a newer one.
     const manifest = JSON.parse(archive.body) as Record<string, unknown>;
     manifest.id = randomUUID();
     manifest.createdAt = createdAt;
@@ -585,10 +524,8 @@ function cmdPrepareRepublish(opts: Record<string, string>): void {
       assets: archive.assets,
     });
   }
-  // An aliased binary rolls back with its target (#1446), even when the group
-  // being re-served predates the alias.
+  // An aliased binary rolls back with its target (#1446).
   plan.entries = expandAliases(plan.entries, readLedger(), randomUUID);
-  // The leaves describe bytes built from the original commit, so they record it.
   plan.commit = first!.commit;
   plan.sourceDateEpoch = first!.sourceDateEpoch;
   plan.toolchain = first!.toolchain;
@@ -624,7 +561,6 @@ function cmdPrepareRollback(opts: Record<string, string>): void {
     }
     let rvs: string[];
     if (rvOpt === "all") {
-      // Every runtime version that currently has a live pointer: the panic button.
       const listing = aws(["s3", "ls", `s3://${r2.bucket}/${storeKey(`current/${CHANNEL}/${p}/`)}`, "--endpoint-url", r2.endpoint]);
       rvs = [...listing.matchAll(/\s(\S+)\.json\s*$/gm)].map((m) => m[1]);
     } else {
@@ -637,16 +573,10 @@ function cmdPrepareRollback(opts: Record<string, string>): void {
   if (plan.entries.length === 0) {
     fail("nothing to roll back: no live pointer matches");
   }
-  // A named runtime version takes its ledger aliases with it (#1446); `all`
-  // already lists their live pointers.
   plan.entries = expandAliases(plan.entries, readLedger(), randomUUID);
   writePlan(out, plan);
   emitSummary(plan, out);
 }
-
-// ---------------------------------------------------------------------------
-// sign — the approval-gated step
-// ---------------------------------------------------------------------------
 
 function cmdSign(opts: Record<string, string>): void {
   const dir = resolve(need(opts, "in"));
@@ -668,8 +598,7 @@ function cmdSign(opts: Record<string, string>): void {
     }
     slots.add(slot);
     if (e.kind === "manifest") {
-      // Re-derive every claim from the bytes, independently of the build job:
-      // that job ran Metro and the whole npm tree, this one ran neither.
+      // Re-derive every claim from the bytes, independently of the build job.
       const m = assertManifestShape(e.body, { runtimeVersion: e.runtimeVersion, baseUrl: plan.baseUrl });
       if (m.id !== e.updateId) {
         fail(`${slot}: manifest id does not match the plan`);
@@ -697,8 +626,7 @@ function cmdSign(opts: Record<string, string>): void {
       }
     }
   }
-  // Aliases (#1446) are checked against this checkout's ledger, not the build
-  // job's word: an update may land only on a binary recorded native-identical.
+  // Aliases (#1446) are checked against this checkout's ledger.
   assertAliasEntries(plan.entries, readLedger());
   for (const e of plan.entries) {
     e.signature = signBody(e.body, key);
@@ -708,13 +636,7 @@ function cmdSign(opts: Record<string, string>): void {
   console.log(`signed ${plan.entries.length} entr${plan.entries.length === 1 ? "y" : "ies"} of group ${plan.groupId}`);
 }
 
-// ---------------------------------------------------------------------------
-// upload
-// ---------------------------------------------------------------------------
-
-// `--phase content` uploads the bytes and the archive (nothing a phone sees);
-// `--phase live` flips the pointers. The workflow appends to the transparency
-// log BETWEEN the two, so no update is ever live that is not in the log.
+// The workflow appends to the transparency log between `content` and `live`.
 function cmdUpload(opts: Record<string, string>): void {
   const r2 = r2From(opts);
   const dir = resolve(need(opts, "in"));
@@ -725,7 +647,6 @@ function cmdUpload(opts: Record<string, string>): void {
   const plan = readPlan(dir);
   const cert = readCertificate();
   for (const e of plan.entries) {
-    // Never put a pointer up that a phone would refuse.
     verifyBody(e.body, pointerFor(e).signature, cert);
   }
   if (phase !== "live") {
@@ -737,7 +658,7 @@ function cmdUpload(opts: Record<string, string>): void {
 }
 
 function uploadContent(r2: R2, dir: string, plan: Plan): void {
-  // 1. Content-addressed bytes. Immutable, so an existing object is skipped.
+  // 1. Content-addressed and immutable: existing objects are skipped.
   for (const [sha, meta] of Object.entries(plan.files)) {
     const key = `assets/${sha}`;
     if (r2Exists(r2, key)) {
@@ -747,7 +668,7 @@ function uploadContent(r2: R2, dir: string, plan: Plan): void {
     r2Put(r2, key, join(dir, "files", sha), meta.contentType, "public, max-age=31536000, immutable");
   }
 
-  // 2. The archive (republish source + audit trail). Never served.
+  // 2. The archive. Never served.
   for (const e of plan.entries) {
     if (e.kind !== "manifest") {
       continue;
@@ -778,7 +699,7 @@ function uploadContent(r2: R2, dir: string, plan: Plan): void {
 }
 
 function uploadPointers(r2: R2, plan: Plan): void {
-  // 3. Live pointers LAST, so no phone is ever told about bytes not yet there.
+  // 3. Live pointers LAST, so no phone sees bytes not yet there.
   for (const e of plan.entries) {
     if (e.kind === "manifest") {
       for (const sha of [e.launchSha256 as string, ...(e.assets ?? []).map((a) => a.sha256)]) {
@@ -791,10 +712,6 @@ function uploadPointers(r2: R2, plan: Plan): void {
     console.log(`live: ${e.platform} ${e.runtimeVersion} -> ${e.kind}${e.updateId ? ` ${e.updateId}` : ""}`);
   }
 }
-
-// ---------------------------------------------------------------------------
-// transparency log
-// ---------------------------------------------------------------------------
 
 function cmdAttest(opts: Record<string, string>): void {
   const dir = resolve(need(opts, "in"));
@@ -812,8 +729,7 @@ function cmdAttest(opts: Record<string, string>): void {
 function cmdLogAppend(opts: Record<string, string>): void {
   const r2 = r2From(opts);
   const records = JSON.parse(readFileSync(resolve(need(opts, "records")), "utf8")) as BinaryRecord[];
-  // Optimistic concurrency on the shared accumulator: desktop releases append
-  // to the same object. Read with its ETag, write only if it is unchanged.
+  // Optimistic concurrency: desktop releases append to the same object.
   for (let attempt = 1; attempt <= 5; attempt++) {
     const tmp = join(mkdtempSync(join(tmpdir(), "ota-")), "acc.json");
     const got = spawnSync(
@@ -858,10 +774,6 @@ function cmdLogAppend(opts: Record<string, string>): void {
   }
   fail("could not append to the accumulator after 5 attempts");
 }
-
-// ---------------------------------------------------------------------------
-// verify — through the Worker, as a phone would
-// ---------------------------------------------------------------------------
 
 async function fetchUpdate(baseUrl: string, platform: Platform, runtimeVersion: string): Promise<{ status: number; headers: Headers; body: Buffer }> {
   const res = await fetch(`${baseUrl}/api/manifest`, {
@@ -927,8 +839,6 @@ async function cmdVerify(opts: Record<string, string>): Promise<void> {
   }
   await verifyOne(baseUrl, cert, need(opts, "platform") as Platform, need(opts, "runtime-version"));
 }
-
-// ---------------------------------------------------------------------------
 
 const HELP = `usage: node scripts/ota-publish.ts <command> [options]
 

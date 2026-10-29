@@ -1,16 +1,4 @@
-// Mobile preferences hook. Reads + writes the user's free-form
-// preferences blob via the desktop-shared `get_preferences` /
-// `save_preferences` commands. Mobile and desktop share the same Turso
-// row keyed by `user_id` — to avoid clobbering desktop-side keys
-// (`accent_color`, `noise_suppression_level`, etc.) we always merge the
-// remote object with our mobile patch before writing back.
-//
-// The mobile UI persists:
-//   - `accent_hex`             — color picker, also drives ThemeProvider
-//   - `mobile_behavior`        — toggle map for the BEHAVIOR list
-//
-// Mobile-only keys are namespaced with `mobile_` so future desktop reads
-// see them as opaque pass-through, not interpretable preferences.
+// Preferences blob shared with desktop: always merge before writing, so desktop keys survive. Mobile-only keys use `mobile_`.
 
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,17 +9,11 @@ import { useObserver } from "mobx-react-lite";
 export interface MobilePreferencesPatch {
   accent_hex?: string;
   mobile_behavior?: Record<string, boolean>;
-  /**
-   * Synced, desktop-shared key (NOT `mobile_`-namespaced on purpose): the
-   * Rust receipt chokepoints read exactly `send_read_receipts` from the
-   * blob's top level, defaulting to true. See
-   * pollis-core/src/commands/messages/receipts.rs::receipts_enabled.
-   */
+  /** Desktop-shared on purpose: the core's receipt chokepoints read exactly this key (default true). */
   send_read_receipts?: boolean;
 }
 
-/** The full blob as it lives in Turso. Mobile fields are typed; desktop
- *  keys ride along as `unknown` so we don't drop them during merge. */
+/** Desktop keys ride along as `unknown` so a merge never drops them. */
 export type PreferencesBlob = MobilePreferencesPatch & Record<string, unknown>;
 
 export const preferencesQueryKeys = {
@@ -49,7 +31,7 @@ function parseBlob(raw: string | null | undefined): PreferencesBlob {
       return parsed as PreferencesBlob;
     }
   } catch {
-    // Server returned malformed JSON — treat as empty.
+    // Malformed JSON: treat as empty.
   }
   return {};
 }
@@ -78,9 +60,6 @@ export function usePreferences() {
       if (!currentUser) {
         throw new Error("No current user");
       }
-      // Merge against the latest cached blob so desktop-side fields are
-      // preserved. If the cache is empty (first save after install) we
-      // start from `{}` — losing nothing.
       const current =
         queryClient.getQueryData<PreferencesBlob>(
           preferencesQueryKeys.user(currentUser.id),
@@ -110,11 +89,7 @@ export function usePreferences() {
   return { ...query, save, update };
 }
 
-/**
- * The user's read-receipts choice — reciprocal by design (the core gates
- * both emitting and recording on the same flag). Missing key reads as true,
- * matching the Rust default.
- */
+/** Reciprocal by design; missing reads as true, like the Rust default. */
 export function useSendReadReceipts(): boolean {
   const { data } = usePreferences();
   const value = data?.send_read_receipts;

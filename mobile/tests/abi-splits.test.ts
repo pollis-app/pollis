@@ -1,14 +1,4 @@
-/*
- * plugins/withAbiSplits.js — optional per-ABI APK splits for the sideload release.
- *
- * Pinned: splits are off unless POLLIS_ABI_SPLITS=true (so no other build changes
- * shape), the split ABIs are exactly the ones pollis-core is built for in
- * modules/pollis-native/ubrn.config.yaml (an APK for any other ABI would install
- * and crash loading the core), there is no universal APK, and re-running
- * prebuild is idempotent.
- *
- *   cd mobile && pnpm test
- */
+/* plugins/withAbiSplits.js: off unless POLLIS_ABI_SPLITS=true, exactly pollis-core's ABIs, no universal APK, idempotent. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

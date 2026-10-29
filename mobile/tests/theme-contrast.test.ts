@@ -1,16 +1,4 @@
-/*
- * The derived theme meets WCAG contrast for every accent the app offers.
- *
- * The theme has two bases (accent, background); every other colour is derived
- * in `theme/derive.ts`. A preset that drifts or a derivation tweak that drops a
- * tier below AA fails here instead of on someone's phone:
- *
- *   - text / dim / muted / accent: ≥ 4.5:1 on bg, panel, raised and high
- *   - edge (control borders): ≥ 3:1 against raised (WCAG 1.4.11 non-text)
- *   - onAccent (text on an accent fill): ≥ 4.5:1 on the accent
- *
- *   cd mobile && pnpm test
- */
+/* The derived theme meets WCAG AA for every accent the app offers. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -52,7 +40,6 @@ test("the default theme lands on the mockup ramp", () => {
   assert.equal(theme.bg, "#0a0907");
   assert.equal(theme.accent, "#fabf5a");
   assert.equal(theme.onAccent, "#0a0907");
-  // The surface ramp climbs in lightness: bg < panel < raised < high.
   const lum = (k: "bg" | "panel" | "raised" | "high") => contrast(theme[k], "#000000");
   assert.ok(lum("bg") < lum("panel") && lum("panel") < lum("raised") && lum("raised") < lum("high"));
 });

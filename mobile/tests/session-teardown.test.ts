@@ -1,17 +1,4 @@
-/*
- * Decrypted data does not outlive the session (#1256).
- *
- * Sign-out left decrypted attachments in `pollis-media/`, export archives in
- * `pollis-export/` and message bodies in the React Query cache; a crashed
- * run left the same plaintext on disk until the next sign-out. Every path
- * that ends a session now goes through `endSession()` (lib/session), whose
- * pure half is `tearDownSession`, and the root layout sweeps leftovers once
- * per process at startup.
- *
- * Pinned here: the teardown clears every piece (and keeps going when one
- * fails), no sign-out path goes around it, and the startup sweep runs once,
- * from the root layout, never from the re-enterable boot screen.
- */
+/* Decrypted data does not outlive the session (#1256): `endSession()` clears everything, and the startup sweep runs once. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -76,8 +63,7 @@ async function quietly<T>(fn: () => Promise<T>): Promise<T> {
 test("the teardown resets the store, leaves the signed-in screens, then clears everything", async () => {
   const calls: string[] = [];
   await tearDownSession(recordingDeps(calls));
-  // Screens go before the caches, so none is left mounted to refetch into
-  // or re-read what is being cleared.
+  // Screens go before the caches, so none refetches into them.
   assert.deepEqual(calls.slice(0, 2), ["resetStore", "leaveSignedInScreens"]);
   assert.deepEqual(new Set(calls.slice(2)), new Set([
     "clearQueryCache",
@@ -151,8 +137,7 @@ test("the root layout sweeps before rendering; the re-enterable boot screen neve
   const layout = read("app/_layout.tsx");
   assert.match(layout, /sweepStalePlaintext\(\)\.finally\(\(\) => setSweepReady\(true\)\)/);
   assert.match(layout, /if \(!loaded \|\| !bridgeReady \|\| !languageReady \|\| !sweepReady\)/);
-  // app/index.tsx is re-entered mid-session (app/invite/[token].tsx routes
-  // back to "/"), so a sweep there would delete media mounted screens use.
+  // app/index.tsx is re-entered mid-session.
   for (const rel of ["app/index.tsx", "app/invite/[token].tsx"]) {
     assert.doesNotMatch(read(rel), /sweepStalePlaintext|clearMediaCache/, `${rel} must not sweep`);
   }
@@ -162,13 +147,10 @@ test("every sign-out path goes through endSession", () => {
   for (const rel of [
     "hooks/queries/useAuth.ts",
     "app/self/delete-account.tsx",
-    // The revoked-device sign-out (#1338), whichever way it is learned.
     "app/_layout.tsx",
   ]) {
     assert.match(read(rel), /endSession\(\)/, `${rel} no longer calls endSession()`);
   }
-  // The live nudge hands off to that same handler rather than signing out on
-  // its own (#1338).
   assert.match(read("hooks/useInboxRealtime.ts"), /deviceWasRevoked\(\)/);
 });
 
@@ -186,11 +168,9 @@ test("nothing but endSession resets the store on sign-out", () => {
 
 test("the media viewer's named copies respect a sign-out clear", () => {
   const cache = read("lib/media/cache.ts");
-  // A copy that finishes after the clear is deleted, not handed out.
   assert.match(cache, /copyAsync[\s\S]*?if \(startedIn !== generation\)[\s\S]*?deleteAsync\(dir/);
   assert.match(cache, /releaseNamedMediaUri\([\s\S]*?resolvedIn\?: number[\s\S]*?resolvedIn !== generation/);
-  // Every release passes the generation it resolved in: the viewer closes
-  // (and its hooks unmount) after the clear when sign-out pops it.
+  // Every release passes the generation it resolved in.
   for (const rel of ["app/media.tsx", "hooks/useNamedMediaUri.ts"]) {
     const src = read(rel);
     const calls = src.match(/releaseNamedMediaUri\([^;]*\);/g) ?? [];

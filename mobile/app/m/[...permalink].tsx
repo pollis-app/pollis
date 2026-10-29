@@ -11,14 +11,7 @@ import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { useThemeRerender } from "../../components/theme";
 
-/**
- * Deep-link target for `pollis://m/<conversation_id>/<message_id>` (#887).
- * Resolves locally via `resolve_message_permalink`; on success it replaces
- * itself with the conversation, scrolled to the message (the jump rides
- * `messageJumpStore`, as on desktop), on a miss it shows desktop's exact
- * non-oracle copy and navigates nowhere (a malformed link, a failed lookup,
- * and a message this device does not hold are indistinguishable).
- */
+/** `pollis://m/<conversation>/<message>` (#887): a local resolve; every miss shows the same non-oracle copy. */
 export default function PermalinkScreen() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
@@ -51,7 +44,6 @@ export default function PermalinkScreen() {
         setState("missing");
         return;
       }
-      // The conversation opens scrolled to the message (#1315).
       messageJumpStore.request(conversationId, messageId);
       const route = routeFor(conversationId);
       openConversation(

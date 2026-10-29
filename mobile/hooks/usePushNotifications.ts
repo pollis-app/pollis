@@ -1,22 +1,4 @@
-// App-level push wiring. Mounted once after login (see app/_layout.tsx).
-//
-// Gated on the current user: it does nothing until someone is signed in.
-// Bridge readiness is implied by mount position — the root layout only
-// renders its tree (and therefore this hook) after the native bridge has
-// finished initializing.
-//
-// This installs the notification LISTENERS only — a tap navigates to the
-// conversation; a foreground receipt re-runs envelope ingest so the
-// (encrypted) message is pulled and decrypted locally, which also re-reads the
-// unread counts so the conversation badges (#1422). It does NOT ask for
-// permission: that prompt is fired contextually the first time a conversation
-// is opened (see `ensurePushRegistration` wired in `app/chat/[id].tsx`), not
-// at login. Listeners are torn down on unmount / sign-out.
-//
-// A tap is held until the device is in the signed-in app (#1422): on a cold
-// start it arrives before the session is restored — before any listener — and
-// on a warm start the app may be locked. It used to be dropped in the first
-// case and pushed over the PIN screen in the second.
+// App-level push listeners, once signed in. No permission prompt here (see app/chat/[id].tsx). A tap is held until past the PIN (#1422).
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSegments } from "expo-router";
@@ -49,19 +31,15 @@ export function usePushNotifications() {
   const ready = !!userId && isInSignedInApp(segments, isLocked);
   const ingest = useIngestConversation();
 
-  // Keep the listener callbacks reading current values without re-installing
-  // the subscriptions on every render.
   const routerRef = useRef(router);
   routerRef.current = router;
-  // Phones push the conversation; iPad opens it in its tab's two-pane.
   const { openConversation } = useOpenConversation();
   const openRef = useRef(openConversation);
   openRef.current = openConversation;
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
 
-  // Opens a tapped notification once the gate lets it through. Resolving the
-  // handle happens here, after unlock, because it is a signed DS call.
+  // Resolving the handle is a signed DS call, so it happens after unlock.
   const [gate] = useState<TapGate<unknown>>(() =>
     createTapGate<unknown>((data) => {
       void (async () => {
@@ -82,8 +60,6 @@ export function usePushNotifications() {
     }),
   );
 
-  // Install notification listeners while signed in, and pick up the tap that
-  // launched the app, if any.
   useEffect(() => {
     if (!userId) {
       gate.clear();
@@ -107,11 +83,9 @@ export function usePushNotifications() {
     return dispose;
   }, [userId, gate]);
 
-  // Open a held tap the moment the device is past the PIN.
   useEffect(() => {
     gate.setReady(ready);
   }, [ready, gate]);
 
-  // #1423: keep the token registered (sign-in/unlock, foreground, rotation).
   usePushRegistration(userId);
 }

@@ -42,14 +42,10 @@ function Self() {
   const { minutes: autoLockMinutes } = useAutoLockMinutes();
   const lockNow = useLockNow();
 
-  // Global search lives at the top of Self (#1550), the way iOS / Android
-  // Settings do it: focusing the field or typing swaps the menu below for
-  // results in place, and Cancel, the clear button or a second tap on the
-  // Self tab brings the menu back. No navigation either way.
+  // Global search at the top of Self (#1550): the menu swaps for results in place.
   const params = useLocalSearchParams<{ search?: string }>();
   const searchRef = useRef<TextInput>(null);
   const [q, setQ] = useState("");
-  // The exact-match account lookup, run on return only (#1216).
   const [userQuery, setUserQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const searching = searchFocused || q.length > 0;
@@ -62,11 +58,9 @@ function Self() {
     searchRef.current?.blur();
   };
 
-  // A second tap on the Self tab ends a search, like a tab root popping.
   useEffect(() => onTabReselect("self", endSearch), []);
 
-  // Android back ends a search before it leaves Self. Only while Self is the
-  // focused screen: a page pushed on top keeps its own back.
+  // Android back ends a search, only while Self is focused.
   useFocusEffect(
     useCallback(() => {
       if (!searching) {
@@ -80,7 +74,6 @@ function Self() {
     }, [searching]),
   );
 
-  // A group's "Search <group>" lands here with `search=1`: open the field.
   useEffect(() => {
     if (params.search) {
       searchRef.current?.focus();
@@ -109,7 +102,6 @@ function Self() {
       return;
     }
     confirmSignOut(() => {
-      // `useLogout` ends the session either way, which lands on sign-in.
       logout.mutate();
     });
   };

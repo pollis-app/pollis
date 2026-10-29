@@ -1,11 +1,4 @@
-/*
- * Message author labels. Your own rows must read the same before and after a
- * send reconciles: the optimistic stub, send_message's row and the refetched
- * row carry different sender_username values, and the label used to flip from
- * "you" to the username mid-send.
- *
- *   cd mobile && pnpm test
- */
+/* Your own rows' author label never flips mid-send. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

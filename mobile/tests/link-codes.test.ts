@@ -1,7 +1,4 @@
-// #1361: the QR sign-in goes both ways, and each screen must take only its own
-// direction's code — the scanner a code the NEW device shows (v2), the new
-// device a code a signed-in device shows (v1). The prefixes are Rust's
-// (`pollis-core/src/commands/device_link.rs`).
+// #1361: each screen takes only its own direction's QR code.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -27,7 +24,6 @@ test("the scanner is a scanner now, and the new phone can show a code", () => {
   const scanner = read("../app/self/link-device.tsx");
   assert.match(scanner, /CameraView/);
   assert.match(scanner, /acceptDeviceOffer\(/);
-  // The QR this screen used to show is gone.
   assert.doesNotMatch(scanner, /create_device_link|useCreateDeviceLink|<QrCode/);
   const signIn = read("../app/(auth)/link.tsx");
   assert.match(signIn, /<OfferCodeView/);
@@ -35,10 +31,7 @@ test("the scanner is a scanner now, and the new phone can show a code", () => {
   assert.equal(phoneDeviceName("android"), "Pollis on Android");
 });
 
-// Neither sign-in code may ever open the app from outside it (#1361, design doc
-// § v2 "Never a link"). Read with the system camera, a code is inert text; only
-// the in-app scanner, behind the PIN, can act on one. Registering a handler for
-// it would turn "scan this" into a one-tap path for QR-login phishing.
+// A sign-in code is never an OS link (#1361): that would be one-tap QR-login phishing.
 test("a sign-in code is never a link the OS can hand to the app", () => {
   for (const prefix of [SHOWN_BY_SIGNED_IN, SHOWN_BY_NEW_DEVICE]) {
     assert.ok(!/^(https?|pollis):/.test(prefix), `${prefix} must not be a URL the app is registered for`);

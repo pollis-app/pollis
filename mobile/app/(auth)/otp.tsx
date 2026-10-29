@@ -14,8 +14,7 @@ import { reopenKeyboard } from "../../lib/codeFieldFocus";
 import { useThemeRerender } from "../../components/theme";
 
 const CODE_LENGTH = 6;
-// Zero-width U+2060 after the address: forbids a line break between it and the
-// sentence's closing punctuation, so Android never strands the "." on a line.
+// U+2060 so Android never strands the closing "." on its own line.
 const WORD_JOINER = "\u2060";
 
 export default function AuthOTP() {
@@ -29,8 +28,7 @@ export default function AuthOTP() {
   const input = useRef<TextInput>(null);
   const cells = Array.from({ length: CODE_LENGTH });
   const verifyOtp = useVerifyOtp();
-  // verify_otp is the slow sign-in step: a DS round trip and, for a new
-  // account, generating the identity and MLS keys.
+  // The slow sign-in step: a DS round trip, and key generation for a new account.
   const submit = useSubmitLock();
 
   const onSubmit = () => {
@@ -41,9 +39,7 @@ export default function AuthOTP() {
       { email, code },
       {
         onSuccess: (profile) => {
-          // Existing user signing in on a new device — needs to enroll
-          // first (sibling-device approval or recovery key) before any
-          // local key material exists for the PIN screen to wrap.
+          // A new device must enroll before any key material exists.
           if (profile.enrollment_required) {
             router.push("/(auth)/enrollment");
             return;
@@ -77,10 +73,7 @@ export default function AuthOTP() {
         />
 
         <View testID="otp-code-field">
-          {/* The six boxes are a picture of the hidden input below; a tap on
-              them reopens the keyboard, even after a dismiss that left the
-              input focused (lib/codeFieldFocus). Screen readers get the input
-              itself, so the boxes are hidden from them. */}
+          {/* A picture of the hidden input; a tap reopens the keyboard (lib/codeFieldFocus). Hidden from screen readers. */}
           <Pressable
             onPress={() => reopenKeyboard(input.current, KeyboardController.isVisible())}
             accessible={false}
@@ -90,7 +83,6 @@ export default function AuthOTP() {
           >
             {cells.map((_, i) => {
               const filled = i < code.length;
-              // The box the next digit lands in (the last box once full).
               const active =
                 focused && (i === code.length || (code.length === CODE_LENGTH && i === CODE_LENGTH - 1));
               return (
@@ -101,8 +93,6 @@ export default function AuthOTP() {
                     maxWidth: 52,
                     minHeight: 60,
                     borderRadius: r.md,
-                    // Borderless: the box the next digit lands in is the
-                    // accentSoft fill (plus the accent caret inside it).
                     backgroundColor: active ? semantic.accentSoft : semantic.raised,
                     alignItems: "center",
                     justifyContent: "center",
@@ -119,9 +109,7 @@ export default function AuthOTP() {
               );
             })}
           </Pressable>
-          {/* input-otp is an opacity:0 proxy over the visual boxes,
-              autofocused on mount — Maestro types into it without a tap.
-              It takes no touches, so every tap reaches the boxes' handler. */}
+          {/* opacity:0 proxy, autofocused; it takes no touches. */}
           <TextInput
             ref={input}
             testID="input-otp"

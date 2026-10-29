@@ -1,8 +1,3 @@
-// Pending group-invite hooks for the receiving (invitee) side, plus the
-// send-side mutation for the inviter (used from group/[id]/invite). The
-// member-list + leave-group hooks live here too because they all sit on
-// the group detail screen and share invalidation patterns.
-
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
@@ -46,17 +41,12 @@ export interface GroupInvite {
 export const groupInviteQueryKeys = {
   pending: (userId: string | null) => ["group-invites", "pending", userId] as const,
   members: (groupId: string | null) => ["groups", groupId, "members"] as const,
-  // A group's outgoing pending invites (#1506) — desktop's key.
   groupInvites: (groupId: string | null) => ["group-invites", "group", groupId] as const,
 };
 
 const ROLE_RANK: Record<string, number> = { owner: 0, admin: 1 };
 
-/**
- * Roster display order for member lists: role first (owner, admins, members),
- * then alphabetical. Desktop's members panel orders online-first, but mobile
- * has no presence source yet — presence ordering awaits one.
- */
+/** Role first, then alphabetical (mobile has no presence source for desktop's online-first). */
 export function sortMembersByRole(members: GroupMember[]): GroupMember[] {
   return [...members].sort((a, b) => {
     const ar = ROLE_RANK[a.role] ?? 2;
@@ -87,13 +77,7 @@ export function usePendingGroupInvites() {
   });
 }
 
-/**
- * Accept an invite (#1560). Optimistic: the invite leaves the pending list and
- * the group joins the group lists on the same frame as the tap, so the screen
- * never sits showing neither. A failure puts both back and the caller shows
- * the error. The mutation stays pending until the refetches that replace the
- * optimistic rows have landed.
- */
+/** Accept an invite (#1560), optimistic; stays pending until the refetches have landed. */
 export function useAcceptGroupInvite() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -109,9 +93,7 @@ export function useAcceptGroupInvite() {
         throw new Error("No current user");
       }
       await invoke("accept_group_invite", { inviteId, userId: currentUser.id });
-      // The MLS welcome may have already landed (the inviter queued it when
-      // sending the invite). Pull it before the accept settles, so opening the
-      // new group straight away can decrypt its channels. Never fire-and-forget.
+      // Pull the MLS welcome before settling, so the new group's channels decrypt at once.
       try {
         await invoke("poll_mls_welcomes", { userId: currentUser.id });
       } catch (e) {
@@ -119,7 +101,6 @@ export function useAcceptGroupInvite() {
       }
     },
     onMutate: async (inviteId: string): Promise<AcceptSnapshot> => {
-      // An in-flight refetch must not land on top of the optimistic rows.
       await Promise.all([
         queryClient.cancelQueries({ queryKey: invitesKey }),
         queryClient.cancelQueries({ queryKey: groupsKey }),
@@ -139,7 +120,6 @@ export function useAcceptGroupInvite() {
         inviteId,
         groupLists: [
           { key: groupsKey, row: group },
-          // Channels fill in on the refetch below.
           {
             key: withChannelsKey,
             row: (invite): GroupWithChannels => ({
@@ -154,9 +134,7 @@ export function useAcceptGroupInvite() {
     onError: (_err, _inviteId, snapshot) => {
       rollbackAcceptedInvite(queryClient, snapshot);
     },
-    // Returned, so the mutation stays pending until the real rows are in. The
-    // group's own caches go too: a panel that opened on the optimistic row may
-    // have read its channels or roster before the accept landed.
+    // Returned, so the mutation stays pending until the real rows are in.
     onSettled: (_data, _err, _inviteId, snapshot) =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: invitesKey }),
@@ -246,10 +224,7 @@ export function useGroupInvites(groupId: string | null) {
   });
 }
 
-/**
- * Withdraw a pending invite. The DS allows the inviter and the group's admins;
- * the core then commits the invitee's devices out of the MLS tree.
- */
+/** Withdraw a pending invite; the core commits the invitee's devices out of the MLS tree. */
 export function useRevokeGroupInvite(groupId: string | null) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -473,12 +448,7 @@ export function useGroupJoinRequests(groupId: string | null) {
   });
 }
 
-/**
- * Pending join requests for every group the viewer administers, as
- * groupId → count. Desktop's `useAllPendingJoinRequests` twin: only admin
- * groups are asked (the core refuses a non-admin), and each query shares the
- * per-group cache key, so approving on the requests screen updates this too.
- */
+/** Pending join requests per administered group (desktop's `useAllPendingJoinRequests`). */
 export function useAdminPendingJoinRequestCounts(adminGroupIds: string[]): Map<string, number> {
   const currentUser = useObserver(() => appStore.currentUser);
   const results = useQueries({
@@ -601,9 +571,7 @@ export function useGroupBySlug(slug: string | null) {
       if (!slug) {
         return null;
       }
-      // Mirrors the Rust `GroupPreview` (#917) — the deliberately minimal
-      // public projection, and nothing more. The previously declared `slug`
-      // field was never returned by the command; the caller derives it.
+      // Mirrors the Rust `GroupPreview` (#917): deliberately minimal.
       return await invoke<{
         id: string;
         name: string;
@@ -615,12 +583,9 @@ export function useGroupBySlug(slug: string | null) {
   });
 }
 
-// ── #847 shareable invite links (desktop parity: frontend useGroups.ts) ──────
+// #847 shareable invite links.
 
-// A freshly minted invite link. Mirrors `CreatedInviteLink` in
-// `pollis-core/src/commands/groups/types.rs`. `token`/`url` arrive exactly
-// once, from the create call — the server stores only `sha256(secret)`, so
-// once this value is discarded the link can never be displayed again.
+// `token`/`url` arrive exactly once: the server stores only `sha256(secret)`.
 export interface CreatedInviteLink {
   id: string;
   token: string;
@@ -629,9 +594,7 @@ export interface CreatedInviteLink {
   max_uses?: number | null;
 }
 
-// An existing link as shown in the management list. Mirrors
-// `InviteLinkSummary` — deliberately has no token field; the server has no
-// token to give back.
+// Deliberately has no token field: the server has none to give back.
 export interface InviteLinkSummary {
   id: string;
   created_at: string;
@@ -643,7 +606,6 @@ export interface InviteLinkSummary {
   is_live: boolean;
 }
 
-// Mirrors `RedeemedInvite`.
 export interface RedeemedInvite {
   group_id: string;
   group_name?: string | null;
@@ -738,8 +700,7 @@ export function useRedeemGroupInviteLink() {
       });
     },
     onSuccess: () => {
-      // The redeemer just crossed into a group they could not see before, so
-      // most group-scoped caches are stale. Invalidate broadly, like desktop.
+      // The redeemer can now see a new group: invalidate broadly, like desktop.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
     },
   });

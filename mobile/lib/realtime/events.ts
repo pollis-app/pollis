@@ -1,11 +1,4 @@
-// Realtime data-channel event wire format.
-//
-// Ported from the desktop `RealtimeEvent` union in
-// `frontend/src/hooks/useLiveKitRealtime.ts`. Mobile only consumes the
-// message-relevant members today (foreground delivery + ingest hints);
-// the desktop union carries voice/call/typing/presence members that mobile
-// does not act on. Field names match the desktop/Rust shape exactly so the
-// same JSON payload decodes on both clients.
+// Realtime data-channel wire format, the message-relevant subset of desktop's `RealtimeEvent`.
 
 export type RealtimeEvent =
   | {
@@ -46,9 +39,7 @@ export type RealtimeEvent =
       sender_username: string | null;
     }
   | {
-      // Per-user @username mention (#843). Same shape as all_mention — the
-      // difference is the audience: the backend publishes this ONLY to the
-      // members the message names.
+      // Published ONLY to the members the message names (#843).
       type: "user_mention";
       group_id: string;
       channel_id: string;
@@ -60,49 +51,33 @@ export type RealtimeEvent =
       group_id: string;
     }
   | {
-      // A refetch hint (§5.3): no ids. Membership is never announced in a
-      // timeline (#1506).
+      // A refetch hint (§5.3): no ids (#1506).
       type: "roster_changed";
       conversation_id: string;
       epoch_before: number;
       epoch_after: number;
     }
   | {
-      // Carries nothing (#836). It never usefully did: the handler treats the
-      // payload as advisory and spoofable, ignores any device id in it, and
-      // re-checks registration authoritatively — so the ids were pure leakage
-      // on a cleartext channel.
+      // Carries nothing (#836): the handler re-checks registration itself.
       type: "device_revoked";
     }
   | {
-      // Emitted by the Delivery Service, never by a client, when a new device
-      // of this account files its enrollment request (#1360). The ids are
-      // advisory: the approval screen re-reads the request and Rust checks the
-      // code typed off the new device against the key it fetched itself.
-      // `link_id` is set when the request belongs to a QR device link, which
-      // the device on the other end of that QR approves — there is no code to
-      // type, so the typed-code approval is never offered for it.
+      // DS-only (#1360); ids are advisory. `link_id` marks a QR link request, which needs no typed code.
       type: "enrollment_requested";
       request_id: string;
       new_device_id: string;
       link_id?: string | null;
     }
   | {
-      // Emitted by the Delivery Service, never by a client, when this
-      // account's channel mutes changed on one of its devices (#1431).
-      // Carries nothing: the mutes are re-read over the signed channel.
+      // DS-only (#1431); mutes are re-read over the signed channel.
       type: "channel_mutes_changed";
     }
   | {
-      // LOCAL, never on the wire (`decodeRealtimeEvent` refuses it): the room's
-      // LiveKit connection healed after a drop. Wake-ups published meanwhile
-      // are lost, so listeners catch the room up from the Delivery Service.
+      // LOCAL, never on the wire: the room reconnected and wake-ups were lost.
       type: "realtime_reconnected";
       room: string;
     };
 
-// The set of `type` discriminants this client understands. An event whose
-// `type` is not in this set decodes to `null` so callers can ignore it.
 const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "new_message",
   "edited_message",
@@ -118,14 +93,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "channel_mutes_changed",
 ]);
 
-/**
- * Decode a LiveKit data-channel payload into a typed `RealtimeEvent`.
- * Accepts the raw `Uint8Array` LiveKit hands us (UTF-8 JSON) or an
- * already-decoded string. Returns `null` on any parse failure, a
- * non-object payload, a missing/non-string `type`, or an unknown type —
- * the realtime path is advisory, so a malformed packet is dropped, not
- * thrown.
- */
+/** Decode a data-channel payload; `null` for anything malformed or unknown. */
 export function decodeRealtimeEvent(
   payload: Uint8Array | string,
 ): RealtimeEvent | null {
@@ -157,13 +125,7 @@ export function decodeRealtimeEvent(
   return parsed as RealtimeEvent;
 }
 
-/**
- * Whether an event may be acted on, given who published it. The Delivery
- * Service's own `SendData` arrives with NO participant; a packet a room member
- * published arrives with one. `enrollment_requested` is DS-only (the DS refuses
- * it from any client's send-data), so one with a participant is a spoof and is
- * dropped — the rule desktop's `dispatch_data` applies.
- */
+/** `enrollment_requested` with a participant is a spoof (DS sends arrive with none). */
 export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean): boolean {
   if (event.type === "enrollment_requested" || event.type === "channel_mutes_changed") {
     return !fromParticipant;

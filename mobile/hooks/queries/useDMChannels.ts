@@ -1,8 +1,4 @@
-// DM listing hooks. Mirrors the read paths of
-// `frontend/src/hooks/queries/useMessages.ts::useDMConversations` —
-// transforms the Rust `DmChannel` shape into the mobile UI's lighter
-// `DMConversation` view-model, picking the "other side" relative to the
-// currently signed-in user.
+// DM listing hooks, mirroring desktop's useDMConversations read path.
 
 import {
   useMutation,
@@ -71,13 +67,7 @@ export function useDMChannels() {
   });
 }
 
-/**
- * One DM channel with its full member roster — the same `get_dm_channel`
- * source `list_dm_channels` rows come from (#907). Shared by the DM info and
- * conversation info screens so the roster and count can never disagree with
- * the list. Keyed under the `["dm"]` prefix, so the inbox realtime's
- * `dm_created` / `roster_changed` invalidations refresh it too.
- */
+/** One DM channel with its full roster (#907), under the `["dm"]` prefix so realtime refreshes it. */
 export function useDMChannel(dmChannelId: string | null) {
   return useQuery({
     queryKey: dmQueryKeys.channel(dmChannelId),
@@ -92,12 +82,7 @@ export function useDMChannel(dmChannelId: string | null) {
   });
 }
 
-/**
- * Remove matching rows from the cached message requests at once (#1561), so
- * the request row and the Direct tab badge drop on the tap. The mutation's
- * own invalidation then confirms against the server, and a failure refetches
- * the list to put the row back.
- */
+/** Drop rows from the cached requests at once (#1561); a failure refetches to restore them. */
 export async function dropDMRequests(
   queryClient: QueryClient,
   userId: string | null,
@@ -122,17 +107,14 @@ export function useAcceptDMRequest() {
         dmChannelId,
         userId: currentUser.id,
       });
-      // The other side queued an MLS welcome for us when they opened
-      // the DM. Pull it now so the conversation appears as fully-keyed
-      // immediately instead of after the next ingest.
+      // Pull the MLS welcome now so the conversation is fully keyed at once.
       try {
         await invoke("poll_mls_welcomes", { userId: currentUser.id });
       } catch (e) {
         console.warn("[mls] poll_mls_welcomes after dm accept failed:", e);
       }
     },
-    // The request leaves the list, and the Direct tab badge, on the tap
-    // (#1561) — not after the accept and the welcome poll round-trip.
+      // Leaves the list and the badge on the tap (#1561).
     onMutate: async (dmChannelId: string) => {
       await dropDMRequests(queryClient, currentUser?.id ?? null, (r) => r.id === dmChannelId);
     },

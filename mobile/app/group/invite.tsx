@@ -26,9 +26,7 @@ import {
 } from "../../hooks/queries";
 import { useThemeRerender } from "../../components/theme";
 
-// Expiry presets, mirroring desktop's InviteLinkManager (#847). A fixed list
-// rather than a date picker on purpose — every preset here is one a person
-// actually asks for.
+// Expiry presets, mirroring desktop's InviteLinkManager (#847).
 const EXPIRY_OPTIONS: {
   id: string;
   label: (t: TFunction) => string;
@@ -72,7 +70,6 @@ export default function InviteToGroup() {
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === groupId);
 
-  // ── #847 shareable link mint state ──────────────────────────────────
   const [expiryHours, setExpiryHours] = useState<number | null>(24 * 7);
   const [maxUses, setMaxUses] = useState<number | null>(null);
   const [created, setCreated] = useState<CreatedInviteLink | null>(null);

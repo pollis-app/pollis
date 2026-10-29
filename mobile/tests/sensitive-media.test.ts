@@ -1,15 +1,4 @@
-/*
- * Sensitive media, message side (#1568).
- *
- * The `_att` entry's `sens: true` (inside the encrypted envelope) reaches the
- * attachment; a covered tile's tap reveals and does nothing else, so the tap
- * that uncovers a video never opens the viewer or starts it playing; the
- * reveal is per attachment, shared by every surface, and an attachment still
- * uploading keeps its reveal to itself. A Vault caption edit keeps the flag.
- * The rendering itself is the Maestro tier's.
- *
- *   node --test mobile/tests/
- */
+/* Sensitive media, message side (#1568): `sens` reaches the attachment, a covered tile's tap only reveals. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -54,9 +43,7 @@ test("a covered tile's tap reveals; it never opens — a video does not play on 
   const [, , clip, plain] = parsed();
   assert.equal(isCovered(clip, false), true);
   assert.equal(tileTap(clip, false), "reveal");
-  // Revealed, a second tap opens the viewer as for any video.
   assert.equal(tileTap(clip, true), "open");
-  // An unmarked attachment opens on the first tap, as before.
   assert.equal(isCovered(plain, false), false);
   assert.equal(tileTap(plain, false), "open");
 });
@@ -68,7 +55,6 @@ test("revealing one attachment reveals only that one, and hiding covers it again
   assert.equal(sensitiveRevealStore.isRevealed(a.id), true);
   assert.equal(sensitiveRevealStore.isRevealed(b.id), false);
   assert.equal(sensitiveRevealStore.isRevealed(clip.id), false);
-  // The same attachment parsed again (the viewer, the Vault grid) agrees.
   const again = parsed()[0];
   assert.equal(sensitiveRevealStore.isRevealed(revealKey(again)!), true);
   sensitiveRevealStore.hide(a.id);
@@ -106,14 +92,11 @@ test("the message tile, the viewer and the Vault grid all read the reveal", () =
     assert.match(src, /observer\(/, file);
     assert.match(src, /SensitiveCover/, file);
   }
-  // The covered tile's press is the reveal, never `onOpen`.
   const tile = readFileSync(new URL("../components/chat/AttachmentTile.tsx", import.meta.url), "utf8");
   const covered = tile.slice(tile.indexOf('=== "reveal"'), tile.indexOf("const withHide"));
   assert.match(covered, /onPress=\{sensitivity\.reveal\}/);
   assert.doesNotMatch(covered, /onOpen/);
 });
-
-// ── Composer half ───────────────────────────────────────────────────────────
 
 test("only a picture or a video offers the toggle, and a marked card does not open", async () => {
   const { canMarkSensitive, cardOpens, pickedToMessageAttachment } = await import(
@@ -124,8 +107,7 @@ test("only a picture or a video offers the toggle, and a marked card does not op
   assert.equal(canMarkSensitive("application/pdf"), false);
   assert.equal(cardOpens({ mimeType: "image/jpeg" }), true);
   assert.equal(cardOpens({ mimeType: "image/jpeg", sensitive: true }), false);
-  // The optimistic row is covered from the first frame, with the composer's
-  // blurhash.
+  // The optimistic row is covered from the first frame.
   const row = pickedToMessageAttachment(
     { id: "p1", uri: "file:///a.jpg", name: "a.jpg", mimeType: "image/jpeg", sensitive: true, blurhash: "LKO2" },
     0,
@@ -143,7 +125,6 @@ test("the eye sits before remove, and a marked attachment is sent sensitive", ()
   assert.match(card, /canMarkSensitive\(attachment\.mimeType\)/);
   assert.match(card, /if \(sensitive\) \{\s*body = <SensitiveCover/);
   const lib = readFileSync(new URL("../lib/attachments.ts", import.meta.url), "utf8");
-  // The outbox path and the Vault's own envelope, both only when set.
   assert.match(lib, /\.\.\.\(att\.sensitive \? \{ sensitive: true \} : \{\}\)/);
   assert.match(lib, /\.\.\.\(attachments\[i\]\?\.sensitive \? \{ sens: true \} : \{\}\)/);
   for (const screen of ["app/chat/[id].tsx", "app/vault.tsx"]) {

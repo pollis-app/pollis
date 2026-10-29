@@ -9,23 +9,7 @@ import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 import { layoutRestartPending, setLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 
-/**
- * Language picker for the Preferences screen — the mobile counterpart of
- * desktop's `Preferences/LanguageSection`.
- *
- * A row of chips, each labelled with the language's own name for itself: the
- * person reaching for this control is the one who cannot read the English
- * name. The choice is stored on the device (scoped to the signed-in user),
- * never in the synced blob.
- *
- * Switching between an LTR and an RTL language flips the layout only on the
- * next launch (`I18nManager` is applied at startup), so the section says so
- * rather than leaving a mirrored chip row under an unmirrored screen.
- */
-// Geist covers Latin and Cyrillic only. A label in another script (Arabic,
-// Chinese) set in Geist falls back to the platform font at its regular weight
-// on Android — dimmer and smaller than its neighbours — so those labels use the
-// system font at the same size, weight and colour instead.
+// Geist covers Latin and Cyrillic only; other scripts use the system font so they match their neighbours.
 const GEIST_SCRIPTS = /^[\u0000-\u024F\u0400-\u04FF\s]*$/;
 
 function ChipLabel({ label, selected }: { label: string; selected: boolean }) {
@@ -87,8 +71,7 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
           );
         })}
       </View>
-      {/* #1231: a lone Text doesn't follow the layout direction on its own.
-          "left" is the start edge — React Native swaps it under RTL. */}
+      {/* #1231: "left" is the start edge under RTL. */}
       <Text style={[ty.meta, { textAlign: "left" }]}>{t("language.description")}</Text>
       {restartPending ? (
         <View

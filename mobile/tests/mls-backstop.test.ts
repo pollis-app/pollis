@@ -64,7 +64,6 @@ test("a pass already running is joined, not doubled", async () => {
   release();
   await first;
   assert.equal(backstops, 1);
-  // And once it is done, the next resume runs its own pass.
   await catchUpThenBackstop(targets, () => Promise.resolve(), async () => {
     backstops += 1;
   });

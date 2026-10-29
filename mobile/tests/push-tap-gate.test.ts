@@ -1,11 +1,4 @@
-/*
- * Holding a notification tap until the app can route it (#1422),
- * `mobile/lib/push/tapGate.ts`.
- *
- * A cold-start tap arrives before the session is restored, and a warm one can
- * arrive while the app is locked. The first used to be dropped (no listener
- * yet) and the second pushed the conversation over the PIN screen.
- */
+/* Holding a notification tap until the app can route it (#1422). */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -38,7 +31,6 @@ test("a tap before ready is held, then opened once ready", () => {
   assert.deepEqual(opened, []);
   gate.setReady(true);
   assert.deepEqual(opened, ["conv-1"]);
-  // Only once: later readiness changes do not re-open it.
   gate.setReady(false);
   gate.setReady(true);
   assert.deepEqual(opened, ["conv-1"]);
@@ -76,6 +68,5 @@ test("the push hook routes the launch tap and every live tap through the gate", 
   assert.match(hook, /onTap: \(data\) => \{\s*gate\.tap\(data\);/);
   assert.match(hook, /gate\.setReady\(ready\)/);
   const push = readFileSync(join(root, "lib/push/index.ts"), "utf8");
-  // A handled tap is cleared so the launch check never routes it twice.
   assert.match(push, /clearLastNotificationResponse\(\)/);
 });

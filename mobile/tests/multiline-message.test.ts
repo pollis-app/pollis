@@ -1,9 +1,4 @@
-/*
- * Multi-line messages (#1247). Return in the composer inserts a newline, so a
- * draft can span lines; these pin that the line breaks survive the send
- * normalisation and the render-side splitting (mentions, custom emoji), so
- * the row shows the message exactly as typed, as desktop does.
- */
+/* Multi-line messages (#1247): line breaks survive the send and the render-side splitting. */
 import test from "node:test";
 import assert from "node:assert/strict";
 

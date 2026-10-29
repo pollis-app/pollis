@@ -2,16 +2,11 @@ import { View } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { semantic } from "../../theme/tokens";
 
-// A deterministic scatter: the same field on every launch.
 const COUNT = 90;
 const W = 390;
 const H = 844;
 
-/**
- * The Initializing screen's quiet backdrop: a sparse, static field of small
- * accent squares behind the card. Decorative only — hidden from screen
- * readers, never animated.
- */
+/** The Initializing backdrop: static, decorative, hidden from screen readers. */
 export function DotField() {
   return (
     <View

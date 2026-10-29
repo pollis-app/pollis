@@ -1,6 +1,4 @@
-// The OTP screen's code boxes must reopen the keyboard after it was dismissed
-// (Android back hides it without blurring the input, and RN's focus() is a
-// no-op on the already-focused input).
+// The OTP boxes must reopen the keyboard after Android back dismissed it.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -8,7 +6,6 @@ import { reopenKeyboard, type FocusableInput } from "../lib/codeFieldFocus.ts";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
-// Models RN's TextInputState: focus() is ignored while already focused.
 function fakeInput(initiallyFocused: boolean) {
   const calls: string[] = [];
   let focused = initiallyFocused;

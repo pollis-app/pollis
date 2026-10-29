@@ -1,12 +1,4 @@
-/*
- * Group settings for a non-admin (#1281): the name and description are text,
- * not inputs, and an empty description is not shown at all — an empty box
- * reading "What's this group for?" invites typing the viewer cannot do.
- *
- * The rule lives in lib/identityFields.ts; desktop's rename page uses a
- * hand-kept mirror (frontend/src/utils/identityFields.ts), pinned equal here.
- * The device-tier proof is .maestro/two-client/join-request/5-peer-settings.yaml.
- */
+/* Group settings for a non-admin (#1281): text, not inputs; an empty description is not shown. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -38,7 +30,6 @@ test("a non-admin sees a real value as read-only text", () => {
 });
 
 test("desktop's copy declares the same rule", () => {
-  // Read as text, not imported: mobile imports no desktop TypeScript.
   const fnOf = (src: string) => {
     const m = src.match(/export function identityFieldMode\([^]*?\n}\n/);
     assert.ok(m, "identityFieldMode must be declared");
@@ -62,8 +53,7 @@ test("admin is read from the roster first, then the group row", () => {
 });
 
 test("group settings renders inputs only in edit mode", () => {
-  // No disabled-but-editable-looking input any more: the inputs are mounted
-  // only for an editor, and a non-editor gets ReadOnlyField.
+  // Inputs are mounted only for an editor.
   assert.doesNotMatch(settingsSrc, /editable=\{iAmAdmin\}/);
   assert.match(settingsSrc, /identityFieldMode\(iAmAdmin, group\?\.description\)/);
   assert.match(settingsSrc, /descriptionMode === "edit" \? \(\s*<LabeledField[^]*?testID="input-group-description"/);

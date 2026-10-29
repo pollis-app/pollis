@@ -1,9 +1,4 @@
-// Username/email search hook for DM creation. Wraps the
-// `search_user_by_username` command — the DS matches an identifier that
-// contains `@` against emails ONLY and anything else against usernames ONLY
-// (exact, case-sensitive; see `directory::user_by_identifier`). Returns
-// `null` when nothing matches; the create-DM screen shows an empty-state row
-// in that case.
+// Exact-match user lookup for DM creation: an identifier with `@` matches emails ONLY, else usernames ONLY.
 
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";

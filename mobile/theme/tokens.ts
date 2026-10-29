@@ -7,46 +7,32 @@ import { deviceAccentBackend } from "./deviceAccent";
 
 export { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX, ACCENT_PRESETS } from "./accents";
 
-// Pollis Mobile — design tokens.
-//
-// Exactly TWO base colours: the accent and the background. Every other colour
-// is derived from them in `theme/derive.ts` (pure, unit-tested by
-// tests/theme-contrast.test.ts). Both bases are runtime-configurable; the
-// `palette` / `semantic` / `type` colours are getters over the current derived
-// theme, so changing a base re-derives everything on the next render.
+// Exactly TWO base colours, accent and background; everything else is derived (theme/derive.ts).
 
-// The accent starts as the one this device last showed (#1447), read
-// synchronously while this module loads — before any component renders and
-// before any module could capture a colour — so a cold start opens in the
-// user's palette instead of flashing amber until the synced preference lands.
+// The accent this device last showed (#1447), read synchronously at load so a cold start never flashes amber.
 const _bootAccentHex = loadBootAccent(deviceAccentBackend);
 let _accentRgb = hexToRgbTriplet(_bootAccentHex);
 let _bgRgb = hexToRgbTriplet(DEFAULT_BACKGROUND_HEX);
 let _theme: Theme = deriveTheme(_accentRgb, _bgRgb);
 
-/** Sets the accent from an "r, g, b" triplet and re-derives the theme. */
 export function setAccentRgb(rgb: string) {
   _accentRgb = rgb;
   _theme = deriveTheme(_accentRgb, _bgRgb);
 }
 
-/** Sets the background from an "r, g, b" triplet and re-derives the theme. */
 export function setBackgroundRgb(rgb: string) {
   _bgRgb = rgb;
   _theme = deriveTheme(_accentRgb, _bgRgb);
 }
 
-/** Sets the accent from "#rrggbb". */
 export function setAccentHex(hex: string) {
   setAccentRgb(hexToRgbTriplet(hex));
 }
 
-/** Sets the background from "#rrggbb". */
 export function setBackgroundHex(hex: string) {
   setBackgroundRgb(hexToRgbTriplet(hex));
 }
 
-/** The live accent as "#rrggbb". */
 export function currentAccentHex(): string {
   return rgbTripletToHex(_accentRgb);
 }
@@ -56,17 +42,14 @@ export function bootAccentHex(): string {
   return _bootAccentHex;
 }
 
-/** The live background as "#rrggbb". */
 export function currentBackgroundHex(): string {
   return rgbTripletToHex(_bgRgb);
 }
 
-/** The current derived theme (every colour token as a string). */
 export function currentTheme(): Theme {
   return _theme;
 }
 
-/** "#rrggbb" → "r, g, b". */
 export function hexToRgbTriplet(hex: string): string {
   const h = hex.replace("#", "");
   const r = parseInt(h.slice(0, 2), 16);
@@ -75,22 +58,18 @@ export function hexToRgbTriplet(hex: string): string {
   return `${r}, ${g}, ${b}`;
 }
 
-/** "r, g, b" → "#rrggbb". */
 export function rgbTripletToHex(rgb: string): string {
   const [r, g, b] = rgb.split(",").map((n) => parseInt(n.trim(), 10));
   const to = (n: number) => n.toString(16).padStart(2, "0");
   return `#${to(r)}${to(g)}${to(b)}`;
 }
 
-// Translucent accent tier. Reads the *current* accent each call. Prefer the
-// opaque semantic tokens; this stays for the few call sites that tint.
+// Translucent accent tier. Prefer the opaque semantic tokens.
 export const t = (alpha: number) => `rgba(${_accentRgb}, ${alpha})`;
 
-// The same tier pre-composited over the background: identical colour where it
-// sits on the bare background, but OPAQUE (#1193).
+// The same tier pre-composited over the background: OPAQUE (#1193).
 export const tOpaque = (alpha: number) => compositeOver(_accentRgb, alpha, _bgRgb);
 
-// The two bases (plus deprecated aliases kept so old call sites compile).
 export const palette = {
   get bg() {
     return _theme.bg;
@@ -112,10 +91,8 @@ export const palette = {
   },
 };
 
-// Getter object — every read resolves against the live derived theme.
 export const semantic = {
   /* ── Current names ── */
-  // Body text, names, titles.
   get text() {
     return _theme.text;
   },
@@ -127,7 +104,6 @@ export const semantic = {
   get muted() {
     return _theme.muted;
   },
-  // The background (screens, chat).
   get bg() {
     return _theme.bg;
   },
@@ -143,7 +119,6 @@ export const semantic = {
   get high() {
     return _theme.high;
   },
-  // Hairline separators (translucent accent).
   get hair() {
     return _theme.hair;
   },
@@ -154,13 +129,10 @@ export const semantic = {
   get edge() {
     return _theme.edge;
   },
-  // The accent itself: active, mentions, send, links.
   get accent() {
     return _theme.accent;
   },
-  // Accent tints, opaque over bg: 10% (highlighted message row), 16%
-  // (selected pill / row), 22% (mention chip, own avatar), 55% (selected pill
-  // border).
+  // Accent tints, opaque over bg: 10%, 16%, 22%, 55%.
   get accentFaint() {
     return _theme.accentFaint;
   },
@@ -177,7 +149,6 @@ export const semantic = {
   get accentDisabled() {
     return _theme.accentDisabled;
   },
-  // Text and icons drawn on an accent fill.
   get onAccent() {
     return _theme.onAccent;
   },
@@ -185,12 +156,10 @@ export const semantic = {
   get danger() {
     return _theme.danger;
   },
-  // Scrim behind sheets.
   get backdrop() {
     return _theme.backdrop;
   },
-  // Sheet surface. Opaque (#1193): a translucent sheet lets the header and
-  // composer show through its buttons.
+  // Opaque (#1193): a translucent sheet lets the header show through.
   get sheetBg() {
     return _theme.raised;
   },
@@ -219,7 +188,6 @@ export const semantic = {
   },
 };
 
-// Corner radii (mockups): chips/pills are fully rounded (height / 2).
 export const r = {
   xs: 4,
   sm: 10,
@@ -230,19 +198,16 @@ export const r = {
   pill: 999,
 };
 
-// Spacing scale.
 export const space = { xs: 6, sm: 8, md: 10, lg: 12, xl: 14, xxl: 16, xxxl: 20 };
 
-// System monospace — no bundled font. iOS has no generic "monospace" alias,
-// so name the platform face explicitly.
+// iOS has no generic "monospace" alias.
 const SYSTEM_MONO = Platform.select({
   ios: "Menlo",
   android: "monospace",
   default: "monospace",
 });
 
-// Geist, one family name per weight. Never combine these with `fontWeight`:
-// Android then synthesises a weight instead of using the loaded face.
+// One family per weight. Never with `fontWeight`: Android would synthesise a weight.
 export const fonts = {
   regular: "Geist_400Regular",
   medium: "Geist_500Medium",
@@ -257,9 +222,7 @@ export const fonts = {
   sora700: "Geist_700Bold",
 };
 
-// Type scale (Tokens.dc.html). Sentence case throughout, no tracked capitals,
-// nothing below 12. Colours are getters so a flattened style tracks the live
-// theme.
+// Colours are getters so a flattened style tracks the live theme.
 export const type = {
   display: {
     fontFamily: fonts.bold,
@@ -353,33 +316,18 @@ export const type = {
 };
 
 export const layout = {
-  // Minimum touch target (Apple HIG / WCAG 2.5.5).
   touchMin: 44,
-  // Header bar content height (below the status bar inset).
   header: 52,
-  // Tab bar content height (above the home-indicator inset): a 10pt gap
-  // under the hairline (the active-tab bar sits in it), the 22pt icon, the
-  // 12pt label and a little air below.
   tabBar: 56,
   composer: 58,
-  // Tallest the composer / edit-bar text field grows (about five lines of
-  // 16pt body plus its padding); past it the field scrolls inside.
+  // Past it the field scrolls inside.
   composerInputMax: 140,
   // Deprecated: the old bottom context strip.
   ctx: 52,
   statusBar: 38,
-  // The ONE content width on regular (iPad) width: every full-screen page
-  // (tab roots, sub pages, forms, a tab's empty state) and every page drawn
-  // in the two-pane's right pane centres its content in a column at most
-  // this wide, unless it opts out with `wide` (chat, two-pane).
   screenMaxWidth: 640,
-  // The narrower column the auth steps share (email, OTP, PIN, link,
-  // enrollment, emergency kit, initializing) — `<Screen centered>`. Nothing
-  // outside app/(auth) uses it.
+  // The auth steps' narrower column (`<Screen centered>`).
   authMaxWidth: 560,
-  // Max width of a bottom sheet card on regular width (centred; the backdrop
-  // still covers the whole screen).
   sheetMaxWidth: 520,
-  // Two-pane left (list) column width.
   listPaneWidth: 340,
 };

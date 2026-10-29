@@ -34,8 +34,7 @@ function Members() {
   const group = groups.find((g) => g.id === id);
   const removeMember = useRemoveMember(id);
   const setRole = useSetMemberRole(id);
-  // Pending invites (#1506): who was invited, by whom, when. Every member
-  // sees them; the inviter and the group's admins can revoke.
+  // Pending invites (#1506); the inviter and admins can revoke.
   const { data: invites = [] } = useGroupInvites(id);
   const revokeInvite = useRevokeGroupInvite(id);
   const revokingId = revokeInvite.isPending ? revokeInvite.variables : undefined;
@@ -44,9 +43,7 @@ function Members() {
     return ms === null ? createdAt : new Date(ms).toLocaleDateString(activeLocale());
   };
 
-  // Role-then-alphabetical, mirroring desktop's members panel intent —
-  // desktop orders online-first, but mobile has no presence source yet, so
-  // presence ordering awaits one.
+  // Role then alphabetical (no presence source on mobile).
   const sortedMembers = useMemo(() => sortMembersByRole(members), [members]);
 
   const myRole = useMemo(
@@ -59,7 +56,6 @@ function Members() {
 
   const onRemove = (memberId: string) => {
     if (confirmRemove !== memberId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRemove(memberId);
       return;
@@ -123,8 +119,7 @@ function Members() {
                             })
                     }
                   />
-                  {/* Admin actions sit under the member, not inside the
-                      row, so the row stays one control with one label. */}
+                  {/* Under the member, so the row stays one control. */}
                   {iAmAdmin && !isMe && !isOwner ? (
                     <View
                       style={{

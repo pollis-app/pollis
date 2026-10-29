@@ -1,5 +1,4 @@
-// The bridge hands screens the core's own error text, without uniffi's
-// `BridgeError.<Variant>: ` prefix (#1305).
+// Screens get the core's error text without uniffi's prefix (#1305).
 import test from "node:test";
 import assert from "node:assert/strict";
 

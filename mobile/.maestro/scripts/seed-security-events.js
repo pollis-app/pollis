@@ -1,18 +1,4 @@
-// Seeds 40 security events for the signed-in Maestro account (#1548), so the
-// Security events screen has more than one page to scroll and every filter has
-// rows. Runs on the HOST (Maestro's JS engine), against the LOCAL DS's sqld —
-// a client has no database credential and the DS has no "write me 40 events"
-// endpoint, so this is the only way to get a deterministic, multi-page log.
-//
-// Env: SQLD_URL (e.g. http://127.0.0.1:8090 — the sqld behind a local DS) and
-// EMAIL (the account `sign-in.yaml` just created). With no SQLD_URL (a run
-// against the dev DS) nothing is written and `output.securitySeeded` is false;
-// the flow then checks only what an unseeded account can show.
-//
-// The rows are dated 2099 so they sort ABOVE the account's real sign-up events
-// and the newest three are known: mae-039, mae-038, mae-037. Kinds cycle by
-// index % 5: device_enrolled, device_revoked, email_changed, identity_rotated,
-// recovery_blob_fetched.
+// Seeds 40 security events (#1548) via the LOCAL DS's sqld (SQLD_URL); dated 2099 so they sort first. No SQLD_URL: nothing written.
 
 var url = typeof SQLD_URL === "string" ? SQLD_URL : "";
 output.securitySeeded = false;
@@ -24,8 +10,7 @@ if (url.indexOf("http") === 0) {
     "identity_rotated",
     "recovery_blob_fetched",
   ];
-  // The ids are fixed (the flow asserts on them), so clear a previous run's
-  // rows first; `id` is the table's primary key.
+  // The ids are fixed (the flow asserts on them): clear a previous run's rows.
   var requests = [
     { type: "execute", stmt: { sql: "DELETE FROM security_event WHERE id LIKE 'mae-%'" } },
   ];
@@ -45,8 +30,7 @@ if (url.indexOf("http") === 0) {
         args: [
           { type: "text", value: "mae-" + n },
           { type: "text", value: kind },
-          // Two rows per second: page boundaries fall inside equal
-          // timestamps, which only the id tiebreak keeps straight.
+          // Two rows per second: only the id tiebreak orders page boundaries.
           { type: "text", value: "2099-01-01 00:00:" + ("0" + Math.floor(i / 2)).slice(-2) },
           metadata,
           { type: "text", value: EMAIL },

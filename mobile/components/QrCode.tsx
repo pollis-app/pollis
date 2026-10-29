@@ -3,17 +3,12 @@ import { View } from "react-native";
 import Svg, { Path, Rect } from "react-native-svg";
 import QRCode from "qrcode";
 
-// Defaults are scanner-safe black on white. Callers may theme it, but keep the
-// polarity: DARK modules on a LIGHT field (e.g. the app background on the
-// accent). An inverted, light-on-dark code fails on some camera decoders.
+// Keep the polarity, DARK on LIGHT: inverted codes fail some decoders.
 const DARK = "#000000";
 const LIGHT = "#ffffff";
 const QUIET = 2;
 
-/**
- * A QR code drawn with react-native-svg from `qrcode`'s module matrix — the
- * encoder only, no canvas. Used for the QR device link (#1207).
- */
+/** A QR code drawn with react-native-svg from `qrcode`'s module matrix (#1207). */
 export function QrCode({
   value,
   size,
@@ -28,9 +23,7 @@ export function QrCode({
   testID?: string;
   dark?: string;
   light?: string;
-  // Extra margin of the light field around the code, in points, drawn as a
-  // rounded tile (`radius`) — keeps the scanner-safe polarity at the edge
-  // instead of the screen colour.
+  // A light rounded tile around the code, keeping the polarity at the edge.
   frame?: number;
   radius?: number;
 }) {

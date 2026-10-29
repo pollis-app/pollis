@@ -1,17 +1,4 @@
-// Mobile MobX store — mirrors `frontend/src/stores/appStore.ts` shape.
-//
-// Same rules as desktop:
-//   - This holds UI state only (selected group/channel/conversation,
-//     temporary session data, current user reference).
-//   - Server data (messages, members, etc.) is NOT stored here. When the
-//     mobile data layer is wired up (React Query or equivalent over
-//     `invoke()`), that becomes the source of truth.
-//   - Mobile drops voice/screen-share state (see mobile/CLAUDE.md).
-//
-// Lists kept here today (`groups`, `channels`, `dmConversations`,
-// `messageQueue`) are temporary write-through caches matching the desktop
-// store, kept so the upcoming data-layer port can move incrementally. They
-// should be migrated to React Query just like the desktop did.
+// MobX UI state only, mirroring desktop's appStore; server data lives in React Query.
 
 import { makeAutoObservable } from "mobx";
 import type {
@@ -26,65 +13,45 @@ import { messageJumpStore } from "./messageJumpStore";
 import { unreadBadges, type UnreadCount } from "../lib/unread";
 
 class AppStore implements AppState {
-  // ── Core / user ────────────────────────────────────────────────────────
   currentUser: User | null = null;
-  // User profile fields — pulled out of `currentUser` for the same
-  // reason the desktop does it: they get mutated independently (rename,
-  // avatar change) and we want fine-grained subscribers.
   username: string | null = null;
   userAvatarUrl: string | null = null;
 
-  // ── Selected views ─────────────────────────────────────────────────────
   selectedGroupId: string | null = null;
   selectedChannelId: string | null = null;
   selectedConversationId: string | null = null;
 
-  // ── Data (messages managed by React Query, not here) ───────────────────
   groups: Group[] = [];
   channels: Record<string, Channel[]> = {};
   dmConversations: DMConversation[] = [];
   messageQueue: MessageQueueItem[] = [];
 
-  // ── UI state ───────────────────────────────────────────────────────────
   replyToMessageId: string | null = null;
   isLoading = false;
   error: string | null = null;
 
-  // Unread message counts keyed by conversation_id or channel_id. Hydrated
-  // from the persisted read cursors (hooks/queries/useUnread.ts, #1422); a
-  // live wake-up bumps it in between.
+  // Hydrated from the persisted read cursors (#1422); live wake-ups bump it in between.
   unreadCounts: Record<string, number> = {};
 
-  // The conversation whose chat screen is focused, phone or iPad pane. Set by
-  // the chat screen itself, so it is right however the screen was reached (a
-  // list row, Search, a notification tap). It never badges.
+  // Set by the focused chat screen itself, however it was reached. Never badges.
   openConversationId: string | null = null;
 
-  // True while the session is PIN-locked (manual "Lock now" or auto-lock,
-  // see lib/autolock.tsx). Cleared when the PIN screen unlocks or a fresh
-  // PIN is set. Guards against double-locking; NOT persisted — a cold start
-  // re-derives lock state from `get_unlock_state`.
+  // NOT persisted: a cold start re-derives it from `get_unlock_state`.
   isLocked = false;
 
-  // Transient first-signup state. The Rust side returns `new_secret_key`
-  // once on `verify_otp` — we shuttle it through the PIN setup screen to
-  // the Emergency Kit display, then drop it on the floor. Stored in memory
-  // only; never persisted.
+  // `new_secret_key` from `verify_otp`, held in memory only until the Emergency Kit shows it.
   pendingSecretKey: string | null = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
   }
 
-  // ── Actions ────────────────────────────────────────────────────────────
   setCurrentUser(user: User | null) {
     this.currentUser = user;
   }
 
   setUsername(username: string | null) {
     this.username = username;
-    // Keep currentUser in sync so components reading currentUser.username
-    // see the updated value without a full reload — mirrors desktop.
     if (this.currentUser) {
       this.currentUser = {
         ...this.currentUser,
@@ -181,21 +148,18 @@ class AppStore implements AppState {
     this.openConversationId = id;
   }
 
-  // Clears the open conversation, unless another one has taken its place
-  // (focus moves to the new screen before the old one blurs).
+  // Unless another one has taken its place (focus moves before blur).
   clearOpenConversationId(id: string) {
     if (this.openConversationId === id) {
       this.openConversationId = null;
     }
   }
 
-  // Replace the whole badge set from the persisted cursors (#1422). See
-  // `unreadBadges` for why it is a replacement and not a merge.
+  // A replacement, not a merge (#1422; see `unreadBadges`).
   hydrateUnread(counts: UnreadCount[]) {
     this.unreadCounts = unreadBadges(counts, this.openConversationId);
   }
 
-  // Clears the unread count for a conversation or channel
   markRead(id: string) {
     if (!(id in this.unreadCounts)) {
       return;
@@ -205,7 +169,6 @@ class AppStore implements AppState {
     this.unreadCounts = next;
   }
 
-  // Increments the unread count for a conversation or channel by 1
   incrementUnread(id: string) {
     this.unreadCounts = {
       ...this.unreadCounts,

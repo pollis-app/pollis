@@ -1,35 +1,23 @@
-// Pure rules behind the composer's pending-attachment previews (#1585):
-// mobile's port of desktop's `AttachmentPreview` in ChatInput.tsx. No
-// react-native or expo imports, so `tests/composer-attachments.test.ts` can
-// pin them under plain node.
+// Pure rules behind the composer's pending-attachment previews (#1585).
 
 import type { MessageAttachment } from "../types";
 import type { PickedAttachment } from "./attachments";
 import { collectViewerItems, mediaKind, type MediaKind, type ViewerItems } from "./media/viewer.ts";
 
 /**
- * Side of a preview card, in points. Desktop's composer preview is 80px and
- * #1568 takes it up by half, to 120, when the sensitive toggle joins remove
- * in the toolbar; the phone matches that. With the filename under it the
- * strip stays well under a third of the shortest phone screen.
- */
+/** Desktop's 80px plus half (#1568). */
 export const COMPOSER_PREVIEW_SIZE = 120;
 
-/** What a card draws: the image, a video's poster frame, or a file card. */
 export function previewKind(mimeType: string): MediaKind {
   return mediaKind(mimeType);
 }
 
-/**
- * Whether tapping the card opens the media viewer. As on desktop, only an
- * image or a video expands; a file card has nothing more to show before send.
- */
+/** Only an image or a video expands, as on desktop. */
 export function canOpenPreview(mimeType: string): boolean {
   const kind = previewKind(mimeType);
   return kind === "image" || kind === "video";
 }
 
-/** Test ids, by the card's position in the strip (0-based). */
 export function composerAttachmentTestID(index: number): string {
   return `composer-attachment-${index}`;
 }
@@ -40,28 +28,16 @@ export function sensitiveToggleTestID(index: number): string {
   return `btn-sensitive-attachment-${index}`;
 }
 
-/**
- * Whether a card offers the sensitive toggle (#1568): pictures and videos
- * only, as on desktop — a file card has nothing on screen to cover.
- */
 export function canMarkSensitive(mimeType: string): boolean {
   return canOpenPreview(mimeType);
 }
 
-/**
- * Whether tapping the card opens the viewer. A marked card stays covered in
- * the composer too: opening it would put the media on screen, which is what
- * marking it was for.
- */
+/** A marked card stays covered in the composer too. */
 export function cardOpens(att: Pick<PickedAttachment, "mimeType" | "sensitive">): boolean {
   return canOpenPreview(att.mimeType) && att.sensitive !== true;
 }
 
-/**
- * A picked attachment as the viewer and the optimistic row read it: no
- * object key yet, so every consumer draws the picker's local file
- * (`localPreviewUri`) and never touches the media transport.
- */
+/** No object key yet: every consumer draws the picker's local file. */
 export function pickedToMessageAttachment(
   att: PickedAttachment,
   uploadedAt: number,
@@ -84,11 +60,7 @@ export function pickedToMessageAttachment(
   };
 }
 
-/**
- * The viewer's pages for a tapped draft card: the strip's images and videos
- * in strip order, so a swipe walks what the strip shows. The draft is treated
- * as one message, which is what it becomes on send.
- */
+/** The strip's images and videos in strip order; the draft is one message. */
 export function draftViewerItems(
   picked: readonly PickedAttachment[],
   attachmentId: string,
@@ -105,10 +77,7 @@ export function draftViewerItems(
   );
 }
 
-// The draft the viewer was last opened on. A pushed page takes string params
-// only, and a picked file's URI is long and private to this process, so the
-// strip hands its attachments over here instead. One at a time is enough:
-// only the screen on top can open the viewer.
+// Handed over here: a pushed page takes string params only, and the URIs are private.
 let draftForViewer: readonly PickedAttachment[] = [];
 
 export function setDraftForViewer(picked: readonly PickedAttachment[]): void {
@@ -119,7 +88,6 @@ export function getDraftForViewer(): readonly PickedAttachment[] {
   return draftForViewer;
 }
 
-/** The subset of an `expo-image-picker` asset the composer reads. */
 export interface PickerAsset {
   assetId?: string | null;
   uri: string;
@@ -130,11 +98,7 @@ export interface PickerAsset {
   height?: number;
 }
 
-/**
- * Picked library assets → pending attachments. A video the picker could not
- * name or type gets a `.mp4` name and `video/mp4`, not the image fallback, so
- * the strip draws it as a video and the recipient's player can open it.
- */
+/** An untyped video gets `.mp4` / `video/mp4`, not the image fallback. */
 export function pickedFromAssets(assets: readonly PickerAsset[], now: number): PickedAttachment[] {
   return assets.map((asset, i) => {
     const isVideo = asset.type === "video" || !!asset.mimeType?.startsWith("video/");

@@ -1,15 +1,4 @@
-// What a sensitive attachment (#1568) shows while covered: its blurhash with
-// one crossed-out eye centred on it — the same on a composer card, a message
-// row, the viewer and the Vault grid, and desktop's `SensitiveCover`. With no
-// blurhash (a video whose poster could not be read) it is a plain surface
-// with the same eye, never the media. Purely visual: it fills its parent,
-// which owns the reveal. The eye sits on the theme's raised disc, the same
-// filled control as the toolbar and the play glyph — never a near-black one.
-//
-// `SensitiveHideButton` is the top-right eye on a revealed one: one tap
-// covers it again. It IS the attachment toolbar, with one action — the same
-// capsule as the composer card's, an open eye (what is true now: the media
-// shows).
+// A covered sensitive attachment (#1568): its blurhash under a crossed-out eye, purely visual. `SensitiveHideButton` covers a revealed one again.
 
 import { View } from "react-native";
 import { Image } from "expo-image";

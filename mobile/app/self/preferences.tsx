@@ -17,14 +17,9 @@ import { appStore } from "../../stores/appStore";
 import { ensurePushRegistration, openNotificationSettings } from "../../lib/push";
 import type { TFunction } from "i18next";
 
-// The presets live in theme/accents.ts so the contrast test can check each.
 const SWATCHES = ACCENT_PRESETS;
 
-// NOTE: read receipts are deliberately NOT in this list — they are not a
-// mobile-local behavior toggle but the synced, desktop-shared top-level
-// `send_read_receipts` key the Rust receipt chokepoints read (default true).
-// The old `mobile_behavior.read_receipts` entry was a no-op: nested under a
-// namespace the core never looks at, with an inverted default.
+// Read receipts are NOT here: they are the synced top-level `send_read_receipts` key.
 const BEHAVIOR_KEYS = [
   { key: "show_inline_timestamps", defaultOn: true },
   { key: "show_member_avatars", defaultOn: true },
@@ -48,10 +43,7 @@ function behaviorLabel(
   }
 }
 
-// Notification permission status + control. The OS permission is the source
-// of truth (we can't toggle it from JS), so this reflects it and routes the
-// tap correctly: fire the in-app OS prompt while it's still undetermined, else
-// deep-link to system Settings (where a prior allow/deny can be changed).
+// The OS permission is the source of truth: prompt while undetermined, else open Settings.
 function NotificationsSetting() {
   const { t } = useTranslation("settings");
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -67,11 +59,8 @@ function NotificationsSetting() {
   const onPress = () => {
     void (async () => {
       if (!granted && info?.canAskAgain && userId) {
-        // Still undetermined — fire the single in-app OS prompt.
         await ensurePushRegistration(userId);
       } else {
-        // Granted (manage / turn off there) or denied (only Settings can
-        // re-enable — the in-app prompt is spent).
         await openNotificationSettings();
       }
       refresh();
@@ -128,8 +117,7 @@ export default function Preferences() {
       >
         <View onLayout={sectionLayout("accent")}>
           <Group title={t("mobile:self.preferences.accentHeading")}>
-            {/* A fixed 3 × 2 grid with equal cells, so the swatches line up the
-                same on iOS and Android whatever the label widths. */}
+            {/* A fixed 3 × 2 grid, so swatches line up on both platforms. */}
             <ChoiceGrid
               columns={3}
               gap={space.xs}

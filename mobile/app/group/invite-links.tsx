@@ -16,12 +16,7 @@ import { activeLocale } from "../../i18n";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
 
-// #847 (mobile) — review and revoke a group's shareable invite links.
-//
-// There is deliberately NO copy button anywhere on this screen:
-// `InviteLinkSummary` carries no token because the server stores only
-// `sha256(secret)` and has no token to give back. A link is copyable exactly
-// once, at creation, on the invite screen.
+// #847: review and revoke invite links. NO copy button: the server has no token to give back.
 export default function GroupInviteLinks() {
   useThemeRerender();
   const { t } = useTranslation("channels");
@@ -35,12 +30,10 @@ export default function GroupInviteLinks() {
   const { data: links = [], isLoading } = useGroupInviteLinks(id);
   const revokeLink = useRevokeGroupInviteLink(id);
 
-  // Two-tap confirm, same pattern as channel delete in group/settings.
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
 
   const onRevoke = (linkId: string) => {
     if (confirmRevoke !== linkId) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmRevoke(linkId);
       return;
@@ -51,8 +44,7 @@ export default function GroupInviteLinks() {
   };
 
   const statusOf = (link: InviteLinkSummary): string => {
-    // `is_live` is computed server-side so this badge cannot disagree with
-    // what redemption will actually do.
+    // `is_live` is server-computed, so it matches what redemption does.
     if (link.revoked_at) {
       return t("inviteLinks.statusRevoked");
     }

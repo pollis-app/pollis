@@ -24,33 +24,15 @@ import { Icon } from "../icons";
 import { useBottomInset, PressInPressable, InSheetContext } from "../ui";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 
-// Entry timing (#1193): in line with the ~200 ms stack transitions — fast
-// enough to read as a response to the tap, not a presentation.
+// Entry timing (#1193), in line with the ~200 ms stack transitions.
 const ENTER_MS = 180;
-// Upper bound on the entrance: past this the sheet is shown statically.
 const SETTLE_FALLBACK_MS = 600;
 
-// The end state, applied as plain React styles AFTER the animated ones once
-// the entrance settles. If Reanimated never wrote the view (its UI-thread
-// update was dropped), these are what the view shows. The animated styles
-// stay attached, because detaching one does not revert what it already wrote.
+// Applied AFTER the animated styles once settled, in case Reanimated never wrote the view.
 const SETTLED_BACKDROP = { opacity: 1 };
 const SETTLED_CARD = { transform: [{ translateY: 0 }] };
 
-/**
- * Runs `fn` once a sheet that was just closed (its SheetOverlay unmounted in
- * the same handler) is really gone. Use it for whatever a sheet action does
- * NEXT that presents or navigates: a push / replace, or opening another sheet.
- *
- * iOS needs it: a sheet is a Modal, i.e. a presented view controller, and the
- * unmount only dismisses it when Fabric mounts the commit on the UI thread.
- * A navigation push or a second Modal started in the same tick races that
- * dismissal — UIKit can drop the dismiss (the screen keeps a stale presented
- * controller) or refuse the new presentation ("already presenting"), so the
- * next sheet silently never appears. Two frames covers the commit plus the
- * non-animated dismissal. Android has no presenting controller, so it runs
- * `fn` immediately and behaves exactly as before.
- */
+/** Run `fn` once a just-closed sheet is gone: iOS drops a push or Modal raced against the dismissal. */
 export function afterSheetClose(fn: () => void): void {
   if (Platform.OS !== "ios") {
     fn();
@@ -59,22 +41,7 @@ export function afterSheetClose(fn: () => void): void {
   requestAnimationFrame(() => requestAnimationFrame(fn));
 }
 
-/**
- * Bottom sheet (Actions.dc.html). Rendered in a transparent `Modal`, so the
- * backdrop covers the WHOLE screen — status bar and home-indicator area
- * included — and screen-reader focus is confined to the sheet. The card is
- * anchored to the bottom edge, edge to edge, with a 20pt top radius and the
- * bottom safe-area inset as extra padding. On regular width (iPad) the card
- * is at most `layout.sheetMaxWidth` wide and centred (review6 #4); the
- * backdrop still covers the whole screen. No drag handle: the header row
- * carries the title and a 44×44 Close button; a backdrop tap or Android back
- * also closes.
- *
- * `title` is optional only so unmigrated sheets compile; every sheet should
- * pass one (it is the dialog's spoken name). Dismissal is immediate, since a
- * sheet's actions usually navigate away and must not wait on an exit
- * animation.
- */
+/** Bottom sheet in a transparent `Modal` (full-screen backdrop, focus confined). Dismissal is immediate. */
 export function SheetOverlay({
   onClose,
   title,
@@ -85,39 +52,23 @@ export function SheetOverlay({
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
-  // Anchor on the sheet card for e2e flows.
   testID?: string;
-  // The Close button's id; sheets whose flows tap an older dismiss id pass it.
   closeTestID?: string;
 }) {
   useTheme();
   const { t } = useTranslation("common");
-  // The root SafeAreaProvider's insets reach the Modal through React context.
-  // They are the right ones here because the Modal is statusBarTranslucent +
-  // navigationBarTranslucent: its window is full-screen under both system
-  // bars, exactly like the activity's. (A nested SafeAreaProvider would
-  // measure the same values but render nothing until its first native
-  // measurement, delaying the sheet.) Android gets the nav-bar floor.
+  // Root insets are right here: the Modal is translucent under both system bars.
   const bottomInset = useBottomInset();
   const regular = useIsRegular();
-  // Off-screen start for the card: the window height is below the screen
-  // edge whatever the card's size, so the slide needs no measurement and can
-  // start the moment the Modal is shown (#1249). Read once: a rotation
-  // mid-entrance only changes where an already-running slide began.
+  // Start below the screen edge: no measurement needed (#1249).
   const { height: windowHeight } = useWindowDimensions();
   const offscreen = useRef(windowHeight).current;
-  // 0 → 1 over the entrance, on the UI thread (Reanimated). Backdrop opacity
-  // and card translateY both derive from it in useAnimatedStyle, so once the
-  // timing starts no frame waits on the JS thread.
+  // 0 → 1 over the entrance, on the UI thread.
   const progress = useSharedValue(0);
-  // Reanimated reads the system setting at app start; the AccessibilityInfo
-  // query below catches a change made since. A ref, not state: it is only
-  // read when the entrance would start, and must not cost a re-render.
+  // A ref: read only when the entrance would start.
   const reduceMotionAtLaunch = useReducedMotion();
   const reduceMotion = useRef(reduceMotionAtLaunch);
-  // The entrance is over (or was skipped): render plain static styles from
-  // here on, so the sheet's visibility no longer depends on Reanimated at
-  // all. Reduced motion starts settled, so no animation ever runs.
+  // Once settled, plain static styles: visibility no longer depends on Reanimated.
   const [settled, setSettled] = useState(reduceMotionAtLaunch);
   const markSettled = useCallback(() => setSettled(true), []);
 
@@ -129,11 +80,7 @@ export function SheetOverlay({
       .catch(() => {});
   }, []);
 
-  // The Modal's window is on screen. On iOS the content mounts before the
-  // modal view controller is presented; an animation started then can be
-  // lost, leaving the sheet present (its Close button findable) but invisible
-  // — review #1. So the entrance starts here, straight from the event: no
-  // state round-trip, no layout measurement.
+  // iOS can lose an animation started before the modal is presented (review #1): start on onShow.
   const onShow = () => {
     if (settled) {
       return;
@@ -154,17 +101,13 @@ export function SheetOverlay({
     );
   };
 
-  // Belt and braces: whatever happens to onShow or the animation, the sheet
-  // is fully visible shortly after it mounts.
+  // Belt and braces: fully visible shortly after mount.
   useEffect(() => {
     const timer = setTimeout(() => setSettled(true), SETTLE_FALLBACK_MS);
     return () => clearTimeout(timer);
   }, []);
 
-  // On settling, pin the shared value to its end too: a timing that stalled
-  // part-way (Reanimated 4.4+ can drop UI-thread work for a view mounted
-  // under JS-thread load — gorhom #2721) would otherwise hold the props it
-  // last wrote, which override the static SETTLED_* styles.
+  // A stalled timing (gorhom #2721) would hold props that override the SETTLED_* styles.
   useEffect(() => {
     if (!settled) {
       return;
@@ -188,8 +131,7 @@ export function SheetOverlay({
       onRequestClose={onClose}
       onShow={onShow}
     >
-      {/* Android keeps every control in here on release: see
-          pressInSupported in lib/pressIn.ts. */}
+      {/* Android keeps every control in here on release (lib/pressIn.ts). */}
       <InSheetContext.Provider value={true}>
         <View style={{ flex: 1 }}>
           <Animated.View
@@ -206,9 +148,7 @@ export function SheetOverlay({
               settled ? SETTLED_BACKDROP : null,
             ]}
           >
-            {/* The backdrop is a plain tap target, hidden from screen readers:
-                the Close button is the accessible way out. Closing is free to
-                undo, so both act on touch-down on iOS (#1529). */}
+            {/* Hidden from screen readers: Close is the accessible way out. */}
             <PressInPressable
               pressIn
               onPress={onClose}
@@ -217,11 +157,7 @@ export function SheetOverlay({
               style={{ flex: 1 }}
             />
           </Animated.View>
-          {/* A sheet with a field (emoji search) must ride above the keyboard,
-              on both platforms, the same way <Screen> does (#1246).
-              keyboard-controller follows the keyboard inside a Modal's own
-              window on Android too. Taps outside the card fall through to the
-              backdrop. */}
+          {/* Rides above the keyboard, like Screen (#1246). */}
           <KeyboardAvoidingView
             pointerEvents="box-none"
             behavior="padding"
@@ -233,8 +169,7 @@ export function SheetOverlay({
               accessibilityViewIsModal
               style={[
                 {
-                  // Opaque: the sheet floats over the header and composer, and a
-                  // translucent card let them show through its buttons (#1193).
+                  // Opaque (#1193).
                   backgroundColor: semantic.sheetBg,
                   width: "100%",
                   maxWidth: regular ? layout.sheetMaxWidth : undefined,

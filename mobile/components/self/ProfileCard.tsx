@@ -4,7 +4,7 @@ import { Avatar, IconButton } from "../ui";
 import { Icon } from "../icons";
 import { semantic, type as ty, r, space } from "../../theme/tokens";
 
-/** Top of the Self tab (You.dc.html): avatar, name, handle, and an Edit profile icon button. */
+/** Top of the Self tab. */
 export function ProfileCard({
   displayName,
   handle,
@@ -32,8 +32,7 @@ export function ProfileCard({
           accessibilityLabel={`${displayName}, ${sub}`}
           style={{ flex: 1, minWidth: 0, gap: 2 }}
         >
-          {/* One line each, cut at the end — long generated names and
-              handles must not wrap and then truncate mid-word. */}
+          {/* One line each, cut at the end. */}
           <Text
             accessibilityRole="header"
             numberOfLines={1}
@@ -46,7 +45,7 @@ export function ProfileCard({
             {sub}
           </Text>
         </View>
-        {/* Icon only (user's call); the spoken label keeps the full name. */}
+        {/* Icon only; the spoken label keeps the full name. */}
         <IconButton
           testID="btn-edit-profile"
           filled

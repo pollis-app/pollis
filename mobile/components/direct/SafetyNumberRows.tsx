@@ -11,10 +11,7 @@ export interface SafetyPeer {
   username?: string | null;
 }
 
-// The DM's "Verify safety number" entry (#1563). A safety number belongs to a
-// PAIR — your key with theirs — so a 1:1 shows one row and a group DM one row
-// per other member ("You & @name"), never one number for the conversation.
-// Shared by DM info and the members screen the chat header opens.
+// "Verify safety number" (#1563): one row per other member, never one per conversation.
 export function SafetyNumberRows({ peers }: { peers: SafetyPeer[] }) {
   useThemeRerender();
   const { t } = useTranslation("dms");

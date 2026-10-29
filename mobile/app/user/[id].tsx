@@ -79,8 +79,7 @@ function UserProfile() {
       { memberIds: [peerId] },
       {
         onSuccess: (channel) => {
-          // Phones: replace this profile with the DM. iPad: the DM opens
-          // in the Direct tab's two-pane.
+          // Phones replace this profile; iPad opens the two-pane.
           openConversation({ id: channel.id, kind: "dm" }, { replace: true });
         },
       },
@@ -144,8 +143,7 @@ function UserProfile() {
           </Txt>
         ) : (
           <>
-            {/* Destructive actions: their own group at the end, told apart by
-                label and icon (danger is the accent — no third hue). */}
+            {/* Destructive actions: their own group, by label and icon. */}
             <Group title={t("mobile:user.safetyActionsHeading")}>
               <ListRow
                 testID="btn-report-user"

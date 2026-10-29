@@ -1,12 +1,4 @@
-/*
- * When the app sends its push token to the DS (`mobile/lib/push/registration.ts`).
- *
- * #1423: a DM could arrive with no notification because registration could
- * silently stick. A failed `register_push_token` still marked the user
- * registered for the session, and a rotated token never reached the DS. These
- * pin the fix: registered means the DS ACCEPTED this token, a failure is
- * retried, the quiet triggers never prompt, and a rotation re-registers.
- */
+/* When the app sends its push token to the DS (#1423): registered means ACCEPTED. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -86,7 +78,6 @@ test("sign-in, unlock and foreground never fire the OS prompt", async () => {
   assert.equal(f.prompts, 0);
   assert.equal(f.registered.length, 0);
 
-  // The contextual moment (a chat open) may prompt, and then registers.
   assert.equal(await r.ensure("alice", { prompt: true }), "ExponentPushToken[one]");
   assert.equal(f.prompts, 1);
 });

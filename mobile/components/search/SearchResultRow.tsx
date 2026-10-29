@@ -6,12 +6,7 @@ import { activeLocale } from "../../i18n";
 import type { SearchMessageResult } from "../../hooks/queries/useSearch";
 import { HighlightedSnippet } from "./HighlightedSnippet";
 
-/**
- * One message hit: who and when, where it lives (channel · group or DM, plus
- * "in a thread" / "attachment"), and the highlighted snippet. The same three
- * lines desktop's SearchView shows, in the mobile row idiom. Sits inside a
- * <Group>, which draws the separators; one control, one spoken label.
- */
+/** One message hit: who and when, where, and the highlighted snippet; one control. */
 export function SearchResultRow({
   result,
   isSelf = false,
@@ -19,7 +14,6 @@ export function SearchResultRow({
   onPress,
 }: {
   result: SearchMessageResult;
-  // The reader's own message: the amber "self" avatar, as in the chat.
   isSelf?: boolean;
   conversationLabel: string | null;
   onPress: () => void;
@@ -62,7 +56,6 @@ export function SearchResultRow({
         backgroundColor: pressed ? semantic.high : "transparent",
       })}
     >
-      {/* The chat timeline's avatar: 40pt, amber for the reader's own. */}
       <Avatar label={sender} size="md" variant={isSelf ? "self" : "default"} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View
@@ -72,7 +65,6 @@ export function SearchResultRow({
             gap: space.sm,
           }}
         >
-          {/* The sender as the chat's MessageRow sets it: bold, accent. */}
           <Text
             numberOfLines={1}
             style={{

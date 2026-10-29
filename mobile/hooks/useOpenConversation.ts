@@ -1,14 +1,4 @@
-// Opening a conversation or a group from anywhere outside its tab (Search,
-// Saved, a profile's "Message", New message, a notification, a permalink, an
-// invite, a just-created group).
-//
-// Compact (phones): exactly the old push/replace of `chat/[id]` /
-// `group/[id]`.
-// Regular (iPad): the conversation belongs in its tab's two-pane — list on
-// the left, conversation on the right, tab bar visible — so select it in the
-// store and return to the tab (`dismissTo` pops whatever was pushed over the
-// tabs, or replaces when nothing was, e.g. a cold deep link). The tab screen
-// renders the selection in its detail pane.
+// Opening a conversation or group from outside its tab. Regular (iPad): select it and `dismissTo` the tab's two-pane.
 
 import { useCallback } from "react";
 import { useRouter, useSegments, type Href } from "expo-router";
@@ -20,13 +10,11 @@ export type ConversationTarget = {
   id: string;
   kind: "channel" | "dm";
   name?: string;
-  // The channel's group, when the caller knows it; looked up otherwise.
   groupId?: string;
 };
 
 type Mode = { replace?: boolean };
 
-// Store side of "open this conversation in its tab". Returns the tab route.
 export function selectConversation(
   target: ConversationTarget,
   groupIdForChannel: string | null,
@@ -48,8 +36,6 @@ export function useOpenConversation() {
   const router = useRouter();
   const regular = useIsRegular();
   const { data: groups } = useUserGroupsWithChannels();
-  // Already inside the tab navigator (Search, a pane page): switch tabs.
-  // From a screen pushed over the tabs: pop back down to them.
   const segments = useSegments();
   const inTabs = segments[0] === "(tabs)";
   const goToTab = useCallback(
@@ -73,10 +59,7 @@ export function useOpenConversation() {
         goToTab(selectConversation(target, groupId));
         return;
       }
-      // The chat screen joins a channel's realtime room by the selected
-      // group. A caller that came from outside the group (a notification
-      // tap, a permalink) has not selected it, so select it here, as the
-      // Search rows do before calling in.
+      // The chat screen joins a channel's room by the selected group: select it.
       if (target.kind === "channel") {
         const groupId =
           target.groupId ??

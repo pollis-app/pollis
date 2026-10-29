@@ -8,12 +8,7 @@ import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import type { MessageAttachment } from "../../types";
 
-/**
- * One Vault entry (#107): time, a Pinned mark, "(edited)", the caption and
- * its attachments — desktop's VaultEntryRow. Desktop's hover actions (pin,
- * edit, delete) live in the entry sheet a long press opens; a screen reader
- * gets them as actions on the row, which is one element.
- */
+/** One Vault entry (#1316); a screen reader gets the sheet's actions on the row. */
 export function VaultEntryRow({
   entryId,
   time,
@@ -41,7 +36,6 @@ export function VaultEntryRow({
 }) {
   const { t } = useTranslation("vault");
 
-  // A long press by touch confirms itself as the sheet opens (#1286).
   const onLongPressTouch = () => {
     haptic("longPress");
     onOpenActions();

@@ -32,16 +32,13 @@ function DMInfo() {
   const currentUser = appStore.currentUser;
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // Same `get_dm_channel` source the DM list rows come from (#907) — the
-  // shared hook keys it under the ["dm"] prefix so realtime roster/DM events
-  // invalidate this roster along with the list.
+  // Keyed under ["dm"] (#907), so realtime events refresh this roster.
   const channel = useDMChannel(channelId);
 
   const leave = useLeaveDM();
 
   const onLeave = () => {
     if (!confirmLeave) {
-      // The first tap arms the confirm: warn by touch (#1286).
       haptic("confirmArm");
       setConfirmLeave(true);
       return;
@@ -55,8 +52,7 @@ function DMInfo() {
   };
 
   const members = channel.data?.members ?? [];
-  // A safety number belongs to a pair (#1563): one per other member, never
-  // one for "the conversation".
+  // A safety number belongs to a pair (#1563): one per other member.
   const peers = members.filter((m) => m.user_id !== currentUser?.id);
 
   return (
@@ -118,7 +114,6 @@ function DMInfo() {
 
         <SafetyNumberRows peers={peers} />
 
-        {/* ExportArchive pads itself (shared with conversation info). */}
         <ExportArchive conversationId={channelId ?? null} />
 
         <SectionTitle>{t("dm.danger")}</SectionTitle>

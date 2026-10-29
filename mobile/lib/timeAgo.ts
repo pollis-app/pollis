@@ -1,6 +1,4 @@
-// Compact relative timestamp for conversation-list rows ("now", "5m", "2h",
-// "3d", then a short date). Mobile counterpart to desktop's `utils/timeAgo`,
-// shortened to fit a list row's trailing slot.
+// Compact relative timestamp for conversation rows.
 
 import i18n, { activeLocale } from "../i18n";
 

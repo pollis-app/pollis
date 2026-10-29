@@ -1,6 +1,4 @@
-// #1338: a revoked device's commands all fail with `device_revoked`; the
-// bridge hands every failure to `noticeDeviceRevoked`, which must end the
-// session exactly once, and only for that error.
+// #1338: `noticeDeviceRevoked` ends the session exactly once, only for that error.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

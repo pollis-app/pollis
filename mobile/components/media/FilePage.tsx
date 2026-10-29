@@ -1,6 +1,4 @@
-// The viewer page for an attachment that is not image, video or audio
-// (#1248): its name and size, and a pointer to Share — the share sheet is
-// how a phone opens a file in another app (desktop saves it to disk).
+// The viewer page for other files (#1248): name, size, and Share.
 
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";

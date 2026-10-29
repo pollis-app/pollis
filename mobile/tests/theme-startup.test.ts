@@ -1,20 +1,4 @@
-/*
- * The saved palette paints the first frame, and every surface follows a
- * change (#1447).
- *
- * The accent used to live only in the synced preferences blob, which lands
- * after sign-in and a DS round trip, so every cold start drew amber first.
- * And a change re-rendered only the few components that subscribed to the
- * theme: <Screen> did, but the rows a route passes it as `children` are the
- * route's elements, so React skipped them, and observer() (a memo) skipped
- * its own subtree too — the page stayed amber until navigation happened to
- * re-render it.
- *
- * The first half drives the load path (theme/accentStore.ts) with fake
- * stores. The second pins the wiring the device tier can't reach from here:
- * the synchronous boot read, and that every route, every memoised component
- * and every memoised list re-renders on a palette change.
- */
+/* The saved palette paints the first frame, and every surface follows a change (#1447): the load path, then the wiring. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -46,8 +30,6 @@ function memoryStore(initial: Record<string, string> = {}) {
   };
   return { data, backend };
 }
-
-/* ── Load path ─────────────────────────────────────────────────────── */
 
 test("a cold start paints the stored accent", () => {
   const { backend } = memoryStore({ [ACCENT_STORE_KEY]: LILAC });
@@ -123,15 +105,13 @@ test("the synced preference: a saved accent always wins once loaded", () => {
 });
 
 test("the pre-unlock {} never undoes the boot accent", () => {
-  // Found on the emulator: before the PIN the read fails and answers {}, which
-  // read as "no accent" painted the PIN screen amber again.
+  // Before the PIN the read fails and answers {}.
   assert.equal(accentFromPreferences({}, false), null);
   assert.equal(accentFromPreferences({ accent_hex: 42 }, false), null);
 });
 
 test("a post-unlock read with no accent means the default", () => {
-  // A second account (or an iOS reinstall, whose keychain survives) must not
-  // keep a colour this account never picked.
+  // A second account (or an iOS reinstall) must not keep this colour.
   assert.equal(accentFromPreferences({}, true), DEFAULT_ACCENT_HEX);
   assert.equal(accentFromPreferences({ accent_hex: "nope" }, true), DEFAULT_ACCENT_HEX);
 });
@@ -143,15 +123,12 @@ test("sign-out returns to the default; a cold start or sign-in does not", () => 
   assert.equal(accentOnUserChange("u1", "u1"), null);
 });
 
-/* ── Wiring ────────────────────────────────────────────────────────── */
-
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
 test("theme/tokens.ts seeds the accent from the device store while it loads", () => {
   const src = read("theme/tokens.ts");
   assert.match(src, /const _bootAccentHex = loadBootAccent\(deviceAccentBackend\);/);
   assert.match(src, /let _accentRgb = hexToRgbTriplet\(_bootAccentHex\);/);
-  // The read must be synchronous, or it lands after the first frame.
   const device = read("theme/deviceAccent.ts");
   assert.match(device, /SecureStore\.getItem\(/);
   assert.doesNotMatch(device, /getItemAsync/);
@@ -163,7 +140,6 @@ test("ThemeProvider starts from the live tokens and persists every change", () =
   assert.doesNotMatch(src, /useState\(DEFAULT_ACCENT_HEX\)/);
   assert.match(src, /persistAccent\(deviceAccentBackend, hex\)/);
   assert.match(src, /accentFromPreferences\(prefs, trusted\)/);
-  // The pre-unlock {} must not sit in the cache past the unlock.
   assert.match(src, /if \(unlocked\) \{[\s\S]*?refetch\(\)/);
   assert.match(src, /accentOnUserChange\(/);
 });

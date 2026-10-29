@@ -1,13 +1,4 @@
-/*
- * Swipe to reply (#1270): the drag curve, the gesture's ranges, the reply
- * preview, and the wiring Maestro cannot see.
- *
- * The gesture itself is proven on devices (.maestro/flows/reply.yaml swipes
- * and double-taps on iOS and Android). What is pinned here is what keeps it
- * smooth and safe: the row's motion is computed on the UI thread with JS
- * called only when a reply fires, the pan never claims the back gesture or
- * a vertical scroll, and a reply cannot leak into another conversation.
- */
+/* Swipe to reply (#1270): the curve, the ranges, the preview, and the wiring Maestro cannot see. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -46,7 +37,6 @@ test("the row follows 1:1 to the threshold, then resists, then stops", () => {
   const past = dragDistance(threshold + 40);
   assert.ok(past > threshold && past < threshold + 40, "past the threshold the row lags the finger");
   assert.equal(dragDistance(10_000), max);
-  // Monotonic: the row never jumps back while the finger moves on.
   let last = -1;
   for (let x = 0; x <= 400; x += 4) {
     const d = dragDistance(x);
@@ -70,8 +60,7 @@ test("the reply arms exactly at the threshold, and the arrow is full there", () 
 test("the pan claims only travel toward the start edge, never a scroll", () => {
   const { activateX, failY } = SWIPE_REPLY;
   const ltr = panRanges(-1);
-  // Activates after activateX to the left; any rightward travel (the iOS
-  // back swipe, Android's back gesture) fails it.
+  // Any rightward travel (the back gestures) fails it.
   assert.equal(ltr.activeOffsetX[0], -activateX);
   assert.ok(ltr.activeOffsetX[1] > 1000);
   assert.equal(ltr.failOffsetX[1], activateX);
@@ -80,8 +69,7 @@ test("the pan claims only travel toward the start edge, never a scroll", () => {
   const rtl = panRanges(1);
   assert.equal(rtl.activeOffsetX[1], activateX);
   assert.equal(rtl.failOffsetX[0], -activateX);
-  // Vertical travel gives the touch back to the list sooner than a swipe
-  // can start, so a wobbly scroll never becomes a reply.
+  // A wobbly scroll gives the touch back before a swipe can start.
   assert.ok(failY <= activateX);
 });
 
@@ -109,8 +97,6 @@ test("reply targets are indexed in one pass, and only the replied-to ones", () =
   assert.equal(replyTargets([{ id: "x", content: "", attachments: [] }]).size, 0);
 });
 
-// ── Wiring ────────────────────────────────────────────────────────────────
-
 const swipe = read("components/chat/SwipeToReply.tsx");
 const row = read("components/chat/MessageRow.tsx");
 const chat = read("app/chat/[id].tsx");
@@ -121,13 +107,11 @@ test("the row moves on the UI thread; JS runs only when a reply fires or the arm
   assert.doesNotMatch(swipe, /Animated\.timing|new Animated\.Value|PanResponder/);
   const onUpdate = swipe.slice(swipe.indexOf(".onUpdate("), swipe.indexOf(".onEnd("));
   assert.ok(onUpdate.length > 0);
-  // No JS call per frame: the one hop is the haptic (#1286), and only on the
-  // frame the armed state flips.
+  // No JS call per frame: only the haptic, when armed flips.
   assert.doesNotMatch(onUpdate, /runOnJS/, "no JS call per frame");
   assert.equal(onUpdate.match(/scheduleOnRN/g)?.length ?? 0, 1);
   assert.match(onUpdate, /if \(event\) \{\s*scheduleOnRN\(buzz, event\);/);
-  // The reset is in onEnd, which only an ACTIVE pan reaches: a tap also
-  // begins the pan, and resetting in onFinalize would cancel the nudge.
+  // Reset in onEnd: onFinalize would cancel the double tap's nudge.
   assert.doesNotMatch(swipe, /\.onFinalize\(/);
   assert.match(swipe, /numberOfTaps\(2\)/);
   assert.match(swipe, /Gesture\.Race\(pan, doubleTap\)/);

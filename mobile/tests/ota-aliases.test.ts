@@ -1,24 +1,4 @@
-/*
- * Runtime-version aliases (#1446). The sideload APKs 1.0.14–1.0.16 baked a
- * runtime version polluted by build-time state (#1429) while their native code
- * is the Play build's of the same commit. The ledger records that with
- * `nativeIdenticalTo`, and every update built for the Play runtime version is
- * also issued, re-signed, under the sideload one. Pinned:
- *
- *   - the shipped ledger validates and records exactly the three aliases;
- *   - an alias must name a recorded runtime version of the same platform and
- *     commit, never itself, never another alias; a runtime version is never
- *     both an alias and real;
- *   - aliases follow only the update's own runtime version (an update for
- *     today's 8f1befed reaches sideload 1.0.16, never 1.0.14/1.0.15);
- *   - an alias manifest is the original with only id + runtimeVersion changed,
- *     and the signer's check refuses anything else;
- *   - through the Worker, a sideload-runtime request gets a manifest naming
- *     its own runtime version that verifies against the certificate — the
- *     original's bytes filed under the alias would not be served.
- *
- *   cd mobile && pnpm test
- */
+/* Runtime-version aliases (#1446): the ledger's `nativeIdenticalTo` and the re-signed alias manifests. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -60,10 +40,6 @@ const SIDE_15 = "a2ebce84423d3f01e2a1f4805b5da1d1c16d1697";
 const PLAY_16 = "8f1befed077744ecff198dc91a0366852132f4a8";
 const SIDE_16 = "27b59ee394cc3224b66c6bb87420560a6415eadc";
 
-// ---------------------------------------------------------------------------
-// The ledger
-// ---------------------------------------------------------------------------
-
 test("the shipped ledger records each sideload APK as native-identical to Play of its commit", () => {
   const aliased = ledger.filter((b) => b.nativeIdenticalTo !== undefined);
   assert.deepEqual(
@@ -104,15 +80,10 @@ test("no alias chains, and a runtime version is never both an alias and real", (
   const b = { ...base, channel: "sideload", runtimeVersion: "b".repeat(40), nativeIdenticalTo: "a".repeat(40) };
   const c = { ...base, channel: "other", runtimeVersion: "c".repeat(40), nativeIdenticalTo: "b".repeat(40) };
   assert.throws(() => parseStoreBuilds(ledgerOf(base, b, c)), /is itself an alias/);
-  // A Play build recorded with the alias's value would take the target's updates
-  // without the ledger saying its native code matches.
+  // A real build recorded with the alias's value.
   const realB = { ...base, channel: "play-again", runtimeVersion: "b".repeat(40) };
   assert.throws(() => parseStoreBuilds(ledgerOf(base, b, realB)), /both as an alias/);
 });
-
-// ---------------------------------------------------------------------------
-// Reach
-// ---------------------------------------------------------------------------
 
 test("aliases follow only the update's own runtime version", () => {
   assert.deepEqual(aliasesOf("android", PLAY_16, ledger), [SIDE_16]);
@@ -132,10 +103,6 @@ test("an update for today's runtime version reaches Play and sideload 1.0.16 and
     ["play 1.0.16", "sideload 1.0.16"],
   );
 });
-
-// ---------------------------------------------------------------------------
-// The plan: expansion and the signer's check
-// ---------------------------------------------------------------------------
 
 function primaryEntry(rv: string = PLAY_16): PlanEntry {
   const bundle = Buffer.from("hermes bytecode … https://api.pollis.com …");
@@ -219,10 +186,6 @@ test("the signer refuses an alias the ledger does not record, a doctored alias, 
   assert.throws(() => assertAliasEntries([primary], ledger), /no entry for it/);
 });
 
-// ---------------------------------------------------------------------------
-// Through the Worker, as the sideload 1.0.16 binary asks
-// ---------------------------------------------------------------------------
-
 class MemoryBucket implements BucketLike {
   objects = new Map<string, Buffer>();
   async get(key: string): Promise<StoredObject | null> {
@@ -271,9 +234,7 @@ test("a sideload-runtime request gets the same update, naming its own runtime ve
     const manifest = parts.find((p) => partName(p) === "manifest");
     assert.ok(manifest);
     assert.doesNotThrow(() => verifyBody(manifest.body, manifest.headers["expo-signature"], signer.certPem));
-    // expo-updates launches only an update whose runtimeVersion equals the
-    // binary's own (LauncherSelectionPolicyFilterAware), so this is what makes
-    // the sideload binary take it.
+    // expo-updates launches only an update whose runtimeVersion equals the binary's own.
     const m = JSON.parse(manifest.body.toString("utf8"));
     assert.equal(m.runtimeVersion, rv);
     assert.equal(m.launchAsset.hash, JSON.parse(entries[0].body).launchAsset.hash);
@@ -283,8 +244,7 @@ test("a sideload-runtime request gets the same update, naming its own runtime ve
   assert.equal((await ask(bucket, SIDE_15)).status, 204);
   assert.equal((await ask(bucket, SIDE_14)).status, 204);
 
-  // Copying the original's signed bytes under the alias instead would not be
-  // served (and a phone would not launch it).
+  // The original's signed bytes under the alias would not be served.
   bucket.objects.set(pointerKey("production", "android", SIDE_16), Buffer.from(JSON.stringify(pointerFor(entries[0]))));
   assert.equal((await ask(bucket, SIDE_16)).status, 500);
 });

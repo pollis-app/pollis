@@ -7,10 +7,7 @@ export type NotificationPermission = {
   canAskAgain: boolean;
 };
 
-/**
- * The OS notification permission, re-read whenever the screen gains focus so
- * returning from system Settings reflects a change. `null` until first read.
- */
+/** Re-read on focus, so a change in system Settings shows. `null` until first read. */
 export function useNotificationPermission(): {
   info: NotificationPermission | null;
   refresh: () => void;

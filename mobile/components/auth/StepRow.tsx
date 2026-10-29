@@ -6,12 +6,7 @@ export type StepState = "done" | "active" | "error" | "todo";
 
 const MARK = 20;
 
-/**
- * One line of the Initializing checklist: a mark, the step name and its
- * status. The mark's SHAPE carries the state (filled check, half ring,
- * alert, empty ring) so it never rests on colour alone; the row speaks as
- * one element ("Keys loaded, OK").
- */
+/** One Initializing checklist line; the mark's SHAPE carries the state. One element. */
 export function StepRow({ name, status, state }: { name: string; status: string; state: StepState }) {
   const mark =
     state === "done" ? (

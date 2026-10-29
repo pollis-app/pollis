@@ -1,26 +1,13 @@
-// Pure pieces of the OTA publish pipeline (#1250): manifest building, code
-// signing and verification, the bundle/env safety checks, multipart parsing,
-// and the transparency-log records. No I/O beyond what callers pass in, and
-// ONLY `node:` built-ins — the signing job runs this file from a bare checkout
-// with no node_modules, so it cannot be handed a poisoned dependency tree.
-//
-// The CLI that drives it is mobile/scripts/ota-publish.ts; tests are
-// mobile/tests/ota-*.test.ts.
+// Pure pieces of the OTA publish pipeline (#1250). ONLY `node:` built-ins: the signer runs it with no node_modules.
 
 import { createHash, sign, verify, X509Certificate, createPrivateKey } from "node:crypto";
 
 export const PROD_DS = "https://api.pollis.com";
 export const PROD_DS_HOST = "api.pollis.com";
 export const DEV_DS_HOST = "api-dev.pollis.com";
-// The update server is the DS front-door Worker (pollis-delivery/worker/updates.ts),
-// answering under /updates/ on the prod DS host without touching the container.
 export const UPDATES_BASE_URL = `${PROD_DS}/updates`;
 export const MANIFEST_URL = `${UPDATES_BASE_URL}/api/manifest`;
-// The update store is the `ota/` prefix of the public release bucket (`pollis`,
-// the one behind cdn.pollis.com). Every update-store key this pipeline reads or
-// writes is relative to it, exactly as the Worker reads them
-// (pollis-delivery/worker/updates.ts OTA_KEY_PREFIX; mobile/tests/ota-worker.test.ts
-// pins that the two agree).
+// Keys are relative to the `ota/` prefix, exactly as the Worker reads them.
 export const OTA_BUCKET = "pollis";
 export const OTA_KEY_PREFIX = "ota/";
 export const CHANNEL = "production";
@@ -32,9 +19,7 @@ export const CODE_SIGNING_EKU = "1.3.6.1.5.5.7.3.3";
 export const PLATFORMS = ["ios", "android"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
-// The EXPO_PUBLIC_* names the app reads, all public endpoints. Anything else
-// with that prefix is refused outright: Expo inlines every referenced
-// EXPO_PUBLIC_* value into the bundle, and an OTA skips store review.
+// The EXPO_PUBLIC_* names the app may read; any other is refused (an OTA skips store review).
 export const PUBLIC_EXPO_VARS = [
   "EXPO_PUBLIC_POLLIS_DELIVERY_URL",
   "EXPO_PUBLIC_LIVEKIT_URL",
@@ -42,9 +27,7 @@ export const PUBLIC_EXPO_VARS = [
   "EXPO_PUBLIC_R2_PUBLIC_URL",
 ] as const;
 
-// Read by the app in DEV builds only (#1242: the dev DS gate key). The read is
-// allowed, but an OTA must never be built with one set: assertPublicEnv refuses
-// any of these in the environment, so the bundle inlines `undefined`.
+// Dev builds only (#1242); an OTA must never be built with one set.
 export const DEV_ONLY_EXPO_VARS = ["EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY"] as const;
 
 export function sha256Hex(bytes: Buffer | string): string {
@@ -62,10 +45,6 @@ export function md5Hex(bytes: Buffer | string): string {
 export function base64UrlToHex(b64url: string): string {
   return Buffer.from(b64url, "base64url").toString("hex");
 }
-
-// ---------------------------------------------------------------------------
-// Same checks as a store build
-// ---------------------------------------------------------------------------
 
 export function assertPublicEnv(env: Record<string, string | undefined>): void {
   const problems: string[] = [];
@@ -90,9 +69,7 @@ export function assertPublicEnv(env: Record<string, string | undefined>): void {
   if (env.EXPO_PUBLIC_POLLIS_DELIVERY_URL !== PROD_DS) {
     problems.push(`EXPO_PUBLIC_POLLIS_DELIVERY_URL must be exactly ${PROD_DS}`);
   }
-  // Without both R2 origins the core refuses to start (pollis-core's
-  // `r2_config_problem`), so an update built without them would take every
-  // phone that applies it down.
+  // Without both R2 origins the core refuses to start.
   for (const name of ["EXPO_PUBLIC_R2_ENDPOINT", "EXPO_PUBLIC_R2_PUBLIC_URL"]) {
     if (!(env[name] ?? "").trim()) {
       problems.push(`${name} must be set`);
@@ -103,9 +80,7 @@ export function assertPublicEnv(env: Record<string, string | undefined>): void {
   }
 }
 
-// Every `process.env.EXPO_PUBLIC_X` read in the app's sources. A read is what
-// inlines a value (an unread .env entry is inert), so this is the check that
-// would have caught #995.
+// Every `process.env.EXPO_PUBLIC_X` read: a read is what inlines a value (#995).
 export function findEnvReads(files: { path: string; text: string }[]): { name: string; path: string }[] {
   const out: { name: string; path: string }[] = [];
   const re = /process\.env(?:\.|\[\s*["'])(EXPO_PUBLIC_[A-Z0-9_]+)/g;
@@ -140,9 +115,7 @@ export function assertBundleTargetsProd(bundle: Buffer, label: string): void {
   }
 }
 
-// Belt and braces: no secret the publishing process can see may appear in the
-// bundle verbatim. Names that look like credentials, values long enough not to
-// match by accident.
+// No secret the publishing process can see may appear verbatim in the bundle.
 export function assertNoSecretValues(bundle: Buffer, env: Record<string, string | undefined>, label: string): void {
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || value.length < 16) {
@@ -156,10 +129,6 @@ export function assertNoSecretValues(bundle: Buffer, env: Record<string, string 
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Manifests and directives (Expo Updates protocol v1)
-// ---------------------------------------------------------------------------
 
 const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
@@ -188,8 +157,7 @@ export interface AssetRef {
   sha256: string;
   // base64url sha256 — what expo-updates checks every download against.
   hash: string;
-  // md5 hex — the asset key `expo export` and the embedded manifest use, so a
-  // client can reuse an asset it already has instead of downloading it.
+  // md5 hex — the asset key `expo export` uses, so clients reuse assets they have.
   key: string;
   contentType: string;
   fileExtension: string;
@@ -243,9 +211,7 @@ export function buildManifest(input: ManifestInput): string {
     launchAsset: wireAsset(input.launch),
     assets: input.assets.map(wireAsset),
     metadata: {},
-    // Constants.expoConfig in an updated app is read from here — the push
-    // registration reads extra.eas.projectId through it — so it is the full
-    // public app config, as `expo export` would embed it.
+    // Read back as Constants.expoConfig (push reads extra.eas.projectId).
     extra: { expoClient: input.expoClient },
   });
 }
@@ -294,9 +260,7 @@ export function assertManifestShape(body: string, expect: { runtimeVersion: stri
   if (m.launchAsset.contentType !== "application/javascript") {
     throw new Error("launch asset is not javascript");
   }
-  // The public config (what an updated app reads back as Constants.expoConfig)
-  // must be the prod one. Expo strips the code-signing fields from a public
-  // config, so those are checked on the app config itself (tests/ota-config).
+  // Expo strips code-signing fields from a public config; tests/ota-config checks those.
   const updates = (m.extra?.expoClient?.updates ?? {}) as Record<string, unknown>;
   const headers = (updates.requestHeaders ?? {}) as Record<string, unknown>;
   if (updates.enabled !== true || updates.url !== MANIFEST_URL || headers["expo-channel-name"] !== CHANNEL) {
@@ -304,10 +268,6 @@ export function assertManifestShape(body: string, expect: { runtimeVersion: stri
   }
   return m;
 }
-
-// ---------------------------------------------------------------------------
-// Code signing (RSASSA-PKCS1-v1_5 / SHA-256 over the exact body bytes)
-// ---------------------------------------------------------------------------
 
 export function signatureHeader(signatureBase64: string, keyid: string = KEY_ID): string {
   return `sig="${signatureBase64}", keyid="${keyid}", alg="${ALG}"`;
@@ -382,10 +342,6 @@ export function assertKeyMatchesCertificate(privateKeyPem: string, certPem: stri
   verifyBody(probe, signBody(probe, privateKeyPem), certPem);
 }
 
-// ---------------------------------------------------------------------------
-// multipart/mixed (what the Worker returns)
-// ---------------------------------------------------------------------------
-
 export interface Part {
   headers: Record<string, string>;
   body: Buffer;
@@ -407,7 +363,6 @@ export function parseMultipart(contentType: string, body: Buffer): Part[] {
     if (body.subarray(pos, pos + 2).toString() === "--") {
       break;
     }
-    // Skip the CRLF after the delimiter line.
     pos += 2;
     const next = body.indexOf(delimiter, pos);
     if (next < 0) {
@@ -437,10 +392,6 @@ export function partName(part: Part): string | null {
   return m ? m[1] : null;
 }
 
-// ---------------------------------------------------------------------------
-// The publish plan — what the build job hands the signer
-// ---------------------------------------------------------------------------
-
 export type EntryKind = "manifest" | "directive";
 
 export interface PlanEntry {
@@ -449,14 +400,11 @@ export interface PlanEntry {
   kind: EntryKind;
   // The exact bytes to sign and serve.
   body: string;
-  // Filled by the signer.
   signature?: string;
-  // Manifest entries only.
   updateId?: string;
   launchSha256?: string;
   assets?: { sha256: string; key: string; fileExtension: string; contentType: string }[];
-  // #1446: this entry is the entry for `aliasOf` (same platform, same plan)
-  // re-issued under a runtime version the ledger records as native-identical.
+  // #1446: the entry for `aliasOf`, re-issued under a native-identical runtime version.
   aliasOf?: string;
 }
 
@@ -473,7 +421,6 @@ export interface Plan {
   commit: string;
   sourceDateEpoch: number;
   toolchain: { rustc: string; node: string; pnpm: string; runnerImage: string };
-  // Republish only: the group being re-served.
   fromGroupId?: string;
   entries: PlanEntry[];
   // Every content-addressed file the entries reference (launch bundles and
@@ -504,13 +451,7 @@ export function assetListFile(entry: PlanEntry): string {
   return lines.join("\n") + (lines.length > 0 ? "\n" : "");
 }
 
-// ---------------------------------------------------------------------------
-// Binary transparency leaves (verifiable-log-builder BinaryRecord, unchanged)
-// ---------------------------------------------------------------------------
-
-// Field order is the frozen leaf encoding (verifiable-log-builder/src/binaries.rs);
-// the builder re-serialises from its struct, but keeping the same order here
-// makes the accumulator diffable against what the tree commits to.
+// Field order is the frozen leaf encoding (verifiable-log-builder/src/binaries.rs).
 export interface BinaryRecord {
   release_tag: string;
   commit: string;
@@ -526,7 +467,6 @@ export interface BinaryRecord {
 }
 
 export interface AttestedFile {
-  // The file name under which the bytes are attested and their provenance published.
   artifactName: string;
   bytes: Buffer;
   record: BinaryRecord;
@@ -534,11 +474,7 @@ export interface AttestedFile {
 
 export const PROVENANCE_HOST_PREFIX = "cdn.pollis.com/releases/mobile-ota";
 
-// One update becomes three leaves (manifest, launch bundle, asset list); one
-// directive becomes one. `arch` carries the runtime version: the native binary
-// an update targets is its "architecture", and it keeps the fork key
-// (tag, platform, arch, bundle, layer) unique when a rollback names several
-// runtime versions of one platform.
+// One update becomes three leaves, one directive one; `arch` carries the runtime version.
 export function attestedFiles(plan: Plan, launchBytes: (entry: PlanEntry) => Buffer): AttestedFile[] {
   const tag = releaseTag(plan);
   const files: AttestedFile[] = [];
@@ -584,9 +520,7 @@ export function attestedFiles(plan: Plan, launchBytes: (entry: PlanEntry) => Buf
   return files;
 }
 
-// Merge this group's leaves into the accumulator transparency-publish.yml reads.
-// Idempotent: a group already present is left alone (re-appending would double
-// its leaves), the same rule desktop-release.yml's attest-and-log applies.
+// Idempotent: re-appending a group already present would double its leaves.
 export function mergeRecords(accumulator: BinaryRecord[], records: BinaryRecord[]): BinaryRecord[] | null {
   const tags = new Set(records.map((r) => r.release_tag));
   if (tags.size !== 1) {
@@ -599,24 +533,14 @@ export function mergeRecords(accumulator: BinaryRecord[], records: BinaryRecord[
   return [...accumulator, ...records];
 }
 
-// ---------------------------------------------------------------------------
-// The store-build ledger (#1427): mobile/store/runtime-versions.json
-// ---------------------------------------------------------------------------
-
-// One binary in a store or on pollis.com, and the runtime version baked into it
-// (the AAB/APK's `assets/fingerprint`, the IPA's
-// `Pollis.app/EXUpdates.bundle/fingerprint`). An update reaches the binaries
-// whose runtime version it names, plus those recorded as native-identical to it.
+// One shipped binary and the runtime version baked into it.
 export interface StoreBuild {
   platform: Platform;
   channel: string;
   version: string;
   commit: string;
   runtimeVersion: string;
-  // #1446: this binary's baked runtime version is stray (polluted by build-time
-  // state, #1429) but its native code is identical to the binary of the same
-  // platform and commit that carries THIS runtime version. Every update built
-  // for that runtime version is also published, re-signed, under this one.
+  // #1446: a stray baked value, native-identical to the same platform+commit build carrying THIS one.
   nativeIdenticalTo?: string;
 }
 
@@ -624,7 +548,6 @@ export interface Reach {
   platform: Platform;
   runtimeVersion: string;
   binaries: StoreBuild[];
-  // The ledger runtime versions that alias this one (each also gets the update).
   aliases: string[];
 }
 
@@ -662,9 +585,7 @@ export function parseStoreBuilds(text: string): StoreBuild[] {
     if (b.nativeIdenticalTo === b.runtimeVersion) {
       throw new Error(`runtime-versions.json builds[${i}]: nativeIdenticalTo names its own runtime version`);
     }
-    // The equivalence is only ever between two builds of ONE commit on ONE
-    // platform: the same native sources, one value polluted at build time. An
-    // alias across commits could land an update on different native code.
+    // Only between builds of ONE commit on ONE platform.
     const target = builds.filter(
       (t) => t.platform === b.platform && t.commit === b.commit && t.runtimeVersion === b.nativeIdenticalTo,
     );
@@ -691,10 +612,7 @@ export function parseStoreBuilds(text: string): StoreBuild[] {
   return builds;
 }
 
-// Every ledger runtime version of `platform` that is native-identical to
-// `runtimeVersion` (never `runtimeVersion` itself), sorted. Only aliases of the
-// update's OWN runtime version count, so an update never lands on a binary
-// whose native code differs from the one it was built for.
+// Ledger aliases of `runtimeVersion` on `platform` (never itself), sorted.
 export function aliasesOf(platform: Platform, runtimeVersion: string, builds: StoreBuild[]): string[] {
   const out = new Set<string>();
   for (const b of builds) {
@@ -705,9 +623,6 @@ export function aliasesOf(platform: Platform, runtimeVersion: string, builds: St
   return [...out].sort();
 }
 
-// Which recorded binaries each platform's update would reach: those carrying
-// its runtime version, and those carrying an alias of it (which get the same
-// update, re-signed under their own runtime version).
 export function reachOf(runtimeVersions: Partial<Record<Platform, string>>, builds: StoreBuild[]): Reach[] {
   const out: Reach[] = [];
   for (const p of PLATFORMS) {
@@ -727,12 +642,7 @@ export function reachOf(runtimeVersions: Partial<Record<Platform, string>>, buil
   return out;
 }
 
-// The same update for another runtime version: identical bytes (launch bundle,
-// assets, config), its own update id and the alias's runtimeVersion. The
-// runtime version is inside the signed body and the client only launches an
-// update whose runtimeVersion equals its own (expo-updates
-// LauncherSelectionPolicyFilterAware), so an alias is re-built and re-signed,
-// never a copy of the original's bytes.
+// The same update re-signed under an alias: runtimeVersion is inside the signed body.
 export function aliasManifest(body: string, runtimeVersion: string, id: string): string {
   if (!UUID_RE.test(id)) {
     throw new Error(`update id must be a lowercase UUID, got ${id}`);
@@ -744,9 +654,7 @@ export function aliasManifest(body: string, runtimeVersion: string, id: string):
   return JSON.stringify({ ...m, id, runtimeVersion });
 }
 
-// Add, for every entry in the plan, the same update (or directive) under each
-// ledger alias of its runtime version that the plan does not already cover.
-// `newId` mints the alias manifest's update id.
+// Add each entry's ledger aliases the plan does not already cover.
 export function expandAliases(entries: PlanEntry[], builds: StoreBuild[], newId: () => string): PlanEntry[] {
   const slots = new Set(entries.map((e) => `${e.platform}/${e.runtimeVersion}`));
   const out = [...entries];
@@ -771,11 +679,7 @@ export function expandAliases(entries: PlanEntry[], builds: StoreBuild[], newId:
   return out;
 }
 
-// What the signer checks before it signs an alias (it does not trust the build
-// job): the ledger records the alias for that runtime version; the target entry
-// is in the same plan; the alias carries exactly the target's bytes with only
-// its id and runtimeVersion changed. Also: every ledger alias of every
-// non-alias entry has an entry, so no aliased binary is silently left behind.
+// The signer's own alias checks; it does not trust the build job.
 export function assertAliasEntries(entries: PlanEntry[], builds: StoreBuild[]): void {
   const bySlot = new Map(entries.map((e) => [`${e.platform}/${e.runtimeVersion}`, e]));
   for (const e of entries) {

@@ -1,38 +1,5 @@
-// What the OTA runtime version is a hash OF (#1250).
-//
-// `runtimeVersion.policy: "fingerprint"` (app.json) makes the runtime version a
-// hash of the app's native layer, computed by @expo/fingerprint — locally, with
-// no EAS involved: expo-updates' own build phase (Xcode script / Gradle plugin)
-// writes it into the binary, and mobile/scripts/ota-publish.mjs computes the
-// same hash with the same function before it builds a manifest. An update is
-// only ever served to a binary whose fingerprint equals the update's runtime
-// version, so a JS update can never land on native code it was not built for.
-//
-// Out of the box that fingerprint does NOT cover the part of this app most
-// likely to change: pollis-core, the Rust core behind the uniffi bridge. Its
-// generated C++/TS lives in gitignored directories of modules/pollis-native,
-// and the Rust sources are outside the Expo project entirely. So this file:
-//
-//   1. hashes every git-tracked file of pollis-core and of each workspace crate
-//      it reaches through `path =` dependencies (computed, not listed, so a new
-//      crate dependency is covered the day it is added), plus the workspace
-//      Cargo files and the pinned toolchain — any change there means a new
-//      store build before any update can target it;
-//   2. ignores the ubrn-GENERATED files in modules/pollis-native (they exist on
-//      a machine that ran `ubrn build` and not on one that did not, and are a
-//      pure function of (1) plus the ubrn version, which is hashed too) so the
-//      store build and the publish job agree;
-//   3. skips the version fields (package.json `version` / POLLIS_BUILD — they
-//      move without the native code moving) and the `updates` block (whether a
-//      build has OTA switched on is not native-compatibility information, and
-//      the native build phase re-reads the config without the Expo CLI's env),
-//      and `extra.installChannel` (#1443, the same: build env, not native code);
-//   4. hashes the OTA code-signing CERTIFICATE (store/ota-code-signing.pem).
-//      A binary only accepts updates signed for the certificate compiled into
-//      it, so a rotated certificate must mean a new runtime version: old
-//      binaries keep their own pointers (signed by the old key) instead of
-//      sharing one with binaries that trust a different key;
-//   5. normalises node_modules files that GRADLE REWRITES IN PLACE (#1427).
+// Widens the OTA runtime-version fingerprint (#1250) to pollis-core; see mobile/CLAUDE.md "OTA updates". It also
+// normalises node_modules files that GRADLE REWRITES IN PLACE (#1427).
 //      @react-native-masked-view/masked-view's build.gradle strips
 //      `package="org.reactnative.maskedview"` from its own
 //      android/src/main/AndroidManifest.xml whenever Gradle configures it. A
@@ -41,11 +8,6 @@
 //      whole dir, so one commit got two runtime versions and OTAs never
 //      reached Play binaries. Hashing both as the rewritten form makes them
 //      agree and keeps every binary already built (with the rewrite) valid.
-//      Likewise build output a tool leaves inside a package (the npm ubrn
-//      bin's cargo `target/`, Kotlin's `.kotlin/` session state, #1429) is
-//      ignored rather than hashed.
-//
-// tests/ota-config.test.ts pins 1-4; tests/ota-fingerprint.test.ts pins 5.
 
 const { execFileSync } = require("child_process");
 const crypto = require("crypto");
@@ -57,7 +19,6 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 // Files outside any crate that change what the Rust core compiles to.
 const WORKSPACE_FILES = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".cargo/config.toml"];
 
-// Paths inside a crate that never reach the compiled library.
 function isNonBuildPath(rel) {
   const parts = rel.split("/");
   if (parts.some((p) => p === "tests" || p === "benches" || p === "fuzz" || p === "examples")) {
@@ -66,7 +27,6 @@ function isNonBuildPath(rel) {
   return rel.endsWith(".md");
 }
 
-// pollis-core plus the transitive closure of its `path = "../x"` dependencies.
 function rustCrateClosure() {
   const seen = new Set();
   const queue = ["pollis-core"];
@@ -103,8 +63,7 @@ function rustCoreDigest() {
     const bytes = fs.readFileSync(path.join(REPO_ROOT, rel));
     return `${crypto.createHash("sha256").update(bytes).digest("hex")}  ${rel}`;
   });
-  // The generated bindings are a function of the Rust sources AND of the ubrn
-  // version that generated them; the npm half is pinned in package.json.
+  // Generated bindings also depend on the ubrn version.
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
   lines.push(`uniffi-bindgen-react-native ${pkg.dependencies["uniffi-bindgen-react-native"]}`);
   lines.push(`@ubjs/core ${pkg.dependencies["@ubjs/core"]}`);
@@ -124,56 +83,35 @@ const GENERATED_NATIVE_BRIDGE = [
   "modules/pollis-native/PollisNativeFramework.xcframework/**/*",
 ];
 
-// Build output that tools write INTO an installed package (see 5. above). The
-// npm `ubrn` bin (node_modules/.bin/uniffi-bindgen-react-native) compiles the
-// CLI from source on first use, leaving ~1 GB of cargo output and a Cargo.lock
-// in the package dir, which iOS autolinking hashes whole. CI installs ubrn with
-// `cargo install` and never has them; the npm version is hashed in (1) anyway.
-//
-// `.kotlin/` is the Kotlin Gradle plugin's (2.x) per-build state directory,
-// created in the root of every Gradle build that applies it — including the
-// included builds that live in node_modules, such as
-// expo-updates/expo-updates-gradle-plugin, which is hashed as a whole dir. For
-// as long as the build runs it holds `sessions/kotlin-compiler-<n>.salive`,
-// deleted when the build ends. expo-updates bakes the runtime version DURING
-// the build (`createReleaseUpdatesResources`), so the sideload APK hashed a
-// session file that neither the OTA job nor any later recompute ever sees: the
-// 1.0.15/1.0.16 APKs each got their own runtime version, and no OTA reached
-// them (#1429). Nothing in it is ever compiled into the app.
+// Build output tools write INTO installed packages (ubrn's cargo target/, Kotlin's .kotlin/ session state, #1429).
 const NODE_MODULES_BUILD_OUTPUT = [
   "node_modules/uniffi-bindgen-react-native/target/**/*",
   "node_modules/uniffi-bindgen-react-native/Cargo.lock",
   "node_modules/**/.kotlin/**/*",
 ];
 
-// Drop `updates` from the hashed Expo config (see 3. above). Everything else in
-// the config — plugins, permissions, entitlements — stays in.
+// Drop `updates` from the hashed Expo config.
 function stripUpdatesBlock(source, chunk) {
   if (source.type !== "contents" || source.id !== "expoConfig" || chunk == null) {
     return chunk;
   }
   const config = JSON.parse(chunk.toString());
   delete config.updates;
-  // The install channel (#1443) is set by the native build's env, which the
-  // OTA job never has: hashing it would give every store/sideload binary a
-  // runtime version no update is ever built for. It is not native code either.
+  // The install channel (#1443) comes from the native build's env, which the OTA job never has.
   if (config.extra && typeof config.extra === "object") {
     delete config.extra.installChannel;
   }
   return JSON.stringify(config);
 }
 
-// Files a dependency's build.gradle rewrites inside node_modules (see 5.
-// above), each with the exact edit Gradle makes. Keyed by the path relative to
-// the project root, as @expo/fingerprint names it.
+// Files a dependency's build.gradle rewrites inside node_modules (#1427), with the exact edit.
 const GRADLE_REWRITTEN_FILES = {
   // masked-view android/build.gradle, AGP >= 7: manifestContent.replaceAll(PACKAGE_PROP, '')
   "node_modules/@react-native-masked-view/masked-view/android/src/main/AndroidManifest.xml": (text) =>
     text.split('package="org.reactnative.maskedview"').join(""),
 };
 
-// A file's bytes as Gradle leaves them. Idempotent, so a file Gradle already
-// rewrote hashes the same as a pristine one.
+// Idempotent, so a rewritten file hashes the same as a pristine one.
 function normaliseGradleRewrite(filePath, text) {
   const rewrite = GRADLE_REWRITTEN_FILES[filePath];
   if (rewrite == null) {

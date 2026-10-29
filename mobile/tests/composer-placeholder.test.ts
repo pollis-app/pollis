@@ -1,12 +1,4 @@
-/*
- * The empty composer is ONE line tall (chat, thread and Vault). A multiline
- * TextInput sizes to its placeholder, so a hint too long for the width wrapped
- * and made the empty field two lines tall — and on iOS the composer then
- * recorded that as its "one-line" height. The hint is drawn by the Composer as
- * a single-line, ellipsized overlay instead, and the native input gets none.
- * The rendered height is proved on device (Maestro `vault.yaml`); these pin
- * the source shape that makes it hold, plus the copy rules for the Vault hint.
- */
+/* The empty composer is ONE line tall: the hint is a single-line overlay and the native input gets no placeholder. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -14,8 +6,7 @@ import { readFileSync, readdirSync } from "node:fs";
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const composer = read("../components/chat/Composer.tsx");
 
-// The props of the <Field> that renders `input-composer`, up to its
-// `trailing` (the emoji button, whose own props are not the input's).
+// The `input-composer` Field's props, up to its `trailing`.
 const fieldElement = (() => {
   const start = composer.indexOf("<Field");
   assert.ok(start >= 0, "Composer renders a <Field>");
@@ -41,11 +32,9 @@ test("the hint overlay is one line, ellipsized at the end, and lets touches thro
   assert.match(overlay, /ellipsizeMode="tail"/);
   assert.match(overlay, /pointerEvents="none"/);
   assert.match(overlay, /importantForAccessibility="no-hide-descendants"/);
-  // start/end edges so it mirrors in RTL, never left/right.
   assert.match(overlay, /\bstart:/);
   assert.match(overlay, /\bend:/);
   assert.doesNotMatch(overlay, /\b(left|right):/);
-  // The native placeholder's colour.
   assert.match(overlay, /color: semantic\.muted/);
 });
 

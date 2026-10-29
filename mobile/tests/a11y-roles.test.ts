@@ -1,11 +1,4 @@
-// Accessibility roles that only one platform accepts must never reach the
-// other. React Native on Android throws "Invalid accessibility role value"
-// for an iOS-only role and the whole app crashes when that view mounts — the
-// redesign's tab bar did exactly that with `accessibilityRole="tabbar"`.
-//
-// A role written as a plain string literal is sent to both platforms, so a
-// platform-specific role has to be chosen by `Platform.OS`, never written
-// literally.
+// A platform-only accessibility role must be chosen by `Platform.OS`: Android crashes on "tabbar".
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";

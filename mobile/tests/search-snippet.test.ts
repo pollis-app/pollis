@@ -1,8 +1,4 @@
-/*
- * Search-hit highlighting on mobile (#1202). The snippet is user content, so
- * it is sliced by index, never rendered as markup; these pin that the slicing
- * is lossless and robust to ranges the core should never send but might.
- */
+/* Search-hit highlighting (#1202): sliced by index, never markup; lossless and robust. */
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -37,7 +33,6 @@ test("overlapping, empty, inverted and out-of-bounds ranges never corrupt the te
 });
 
 test("indices are UTF-16 code units, so astral characters stay whole", () => {
-  // "🔒" is two UTF-16 units; the hit covers exactly "key".
   const text = "🔒 key";
   const parts = splitSnippet(text, [[3, 6]]);
   assert.deepEqual(parts, [

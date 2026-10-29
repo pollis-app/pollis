@@ -11,9 +11,7 @@ import { appStore } from "../../stores/appStore";
 import { endSession } from "../../lib/session";
 import { useThemeRerender } from "../../components/theme";
 
-// The word the user must type to arm deletion. Matches desktop's
-// SecurityPage: deliberately a constant, not translatable copy, so the
-// comparison and the instruction can never drift apart.
+// Deliberately not translatable, so comparison and instruction cannot drift.
 const DELETE_CONFIRM_WORD = "DELETE";
 
 function DeleteAccount() {
@@ -30,8 +28,6 @@ function DeleteAccount() {
       return;
     }
     deleteAccount.mutate(currentUser.id, {
-      // The account is gone server-side and this device's data is wiped.
-      // Drop everything the UI still holds and land on the sign-in screen.
       onSuccess: () => endSession(),
     });
   };

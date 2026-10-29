@@ -31,13 +31,7 @@ import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
 
 SplashScreen.preventAutoHideAsync();
 
-// App-level signed-in services, mounted under the providers so they have a
-// QueryClient + router and only run after the bridge is ready. Each hook is a
-// no-op until a user is signed in: push installs notification listeners; inbox
-// realtime keeps the groups/DM lists live while foregrounded; a new device's
-// approval request opens the approval screen (#1360); unread badges follow
-// the persisted read cursors (#1422); the language re-resolves so a user's
-// own stored choice wins over the pre-auth screens'.
+// App-level signed-in services; each is a no-op until a user is signed in.
 function SignedInServicesGate() {
   usePushNotifications();
   useInboxRealtime();
@@ -52,8 +46,7 @@ function SignedInServicesGate() {
   return null;
 }
 
-// The root stack, under <ThemeProvider> so its scene background follows a
-// palette change like every other surface (#1447).
+// Under ThemeProvider so the scene background follows a palette change (#1447).
 function RootStack({ children }: { children: React.ReactNode }) {
   useThemeRerender();
   return (
@@ -61,9 +54,6 @@ function RootStack({ children }: { children: React.ReactNode }) {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: semantic.bg },
-        // Drilling further into a route (tab → group → channel) pushes
-        // the new screen in from the right; back reverses it. Timing
-        // lives in lib/transitions.
         ...drillIn,
       }}
     >
@@ -84,36 +74,26 @@ export default function RootLayout() {
   const [languageReady, setLanguageReady] = useState(false);
   const [sweepReady, setSweepReady] = useState(false);
 
-  // Delete plaintext a crashed or killed run left on disk (decrypted media,
-  // export archives) before the boot screen restores any session (#1256).
-  // Here rather than in app/index.tsx, which is re-entered mid-session; and
-  // once per process (lib/session), so a remount of this layout can't sweep
-  // media out from under mounted screens either.
+  // Sweep plaintext a killed run left on disk (#1256), once per process, before any session restores.
   useEffect(() => {
     sweepStalePlaintext().finally(() => setSweepReady(true));
   }, []);
 
-  // The stored language is read asynchronously; holding the splash for it is
-  // what keeps a Spanish user from seeing one English frame on every launch.
+  // Holding the splash for the stored language avoids an English first frame.
   useEffect(() => {
     hydrateLanguage().finally(() => setLanguageReady(true));
   }, []);
 
-  // #1338: this device was revoked from another device on the account. The
-  // core has already refused the command that found out; end the session (the
-  // core wipes a revoked device's keys and id whatever `deleteData` says) and
-  // say why on sign-in, instead of leaving every screen empty.
+  // #1338: this device was revoked; end the session and say why on sign-in.
   useEffect(
     () =>
       onDeviceRevoked(async () => {
-        // A rejection can land late, after a sign-out or another account's
-        // sign-in: act only if the core says THIS device is the revoked one.
+        // Act only if the core says THIS device is the revoked one.
         const revoked = await invoke<boolean>("is_current_device_revoked").catch(() => false);
         if (!revoked) {
           return;
         }
         console.warn("[session] this device was removed from the account — signing out");
-        // The core wipes a revoked device itself; the app never asks for it.
         await invoke("logout", { deleteData: false }).catch((e) =>
           console.warn("[session] logout of a revoked device failed:", e),
         );
@@ -129,15 +109,11 @@ export default function RootLayout() {
       r2PublicUrl: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
       livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,
       pollisDeliveryUrl: process.env.EXPO_PUBLIC_POLLIS_DELIVERY_URL,
-      // Dev builds only (#1242); undefined in every prod bundle, which
-      // app.config.js and the OTA publish check both enforce.
+      // Dev builds only (#1242).
       devAccessKey: process.env.EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY,
     })
       .then(() => setBridgeReady(true))
       .catch((e) => {
-        // Surfacing the error here at least makes it obvious during dev
-        // that the bridge didn't come up — the alternative is silent
-        // "every command throws" later, which is harder to diagnose.
         console.error("[bridge] initializeNativeBridge failed:", e);
         setBridgeError(e);
         setBridgeReady(true);
@@ -154,29 +130,22 @@ export default function RootLayout() {
     return null;
   }
 
-  // Bridge errors are non-fatal at the layout level — the auth screen will
-  // surface a clearer error when the user tries to sign in. We still log
-  // above so device logs show what went wrong.
+  // Non-fatal here: the auth screen surfaces a clearer error.
   void bridgeError;
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: semantic.bg }}>
       <SafeAreaProvider>
-        {/* Tracks the soft keyboard for every <Screen> and sheet (#1246):
-            the real IME inset under edge-to-edge, animated in step. */}
+        {/* Tracks the soft keyboard (#1246). */}
         <KeyboardProvider>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <StatusBar style="light" />
             <SignedInServicesGate />
-            {/* Auto-lock (#899): captures touch starts to refresh the idle
-                deadline and locks on background-elapsed / foreground-idle. */}
+            {/* Auto-lock (#899). */}
             <AutoLockProvider>
             <RootStack>
-              {/* Boot router cuts in with nothing. Entering the tab container
-                  fades — this is the Initializing → app handoff (and cold-boot
-                  → app); tab switches *inside* (tabs) stay un-animated, handled
-                  by the tab navigator. */}
+              {/* Entering the tab container fades (the Initializing handoff). */}
               <Stack.Screen name="index" options={{ animation: "none" }} />
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
@@ -196,14 +165,10 @@ export default function RootLayout() {
               <Stack.Screen name="conversation/pins" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="chat/thread" />
-              {/* Full-screen attachment viewer (#1248): a page, not a modal. */}
               <Stack.Screen name="media" />
-              {/* The Vault (#107/#1316): reached from the top of Direct. */}
               <Stack.Screen name="vault" />
               <Stack.Screen name="user/[id]" />
               <Stack.Screen name="report" options={settingsPage} />
-              {/* Personal settings pages (settingsPage = drillIn since the
-                  redesign, so the edge swipe pops them like any push). */}
               <Stack.Screen
                 name="self/preferences"
                 options={settingsPage}
@@ -241,8 +206,6 @@ export default function RootLayout() {
                 options={settingsPage}
               />
               <Stack.Screen name="m/[...permalink]" />
-              {/* A new device's approval request (#1360), opened over whatever
-                  is on screen by useEnrollmentApprovals. */}
               <Stack.Screen name="approve-device" options={settingsPage} />
               <Stack.Screen
                 name="self/delete-account"

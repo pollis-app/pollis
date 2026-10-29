@@ -1,23 +1,4 @@
-/*
- * The app side of OTA updates (#1250): app.config.js's `updates` block and the
- * fingerprint the runtime version is computed from (fingerprint.config.js).
- *
- * Pinned:
- *   - only POLLIS_OTA=production switches updates on; every other build
- *     (dev clients, Maestro's api-dev Release builds, CI's debug APK) has
- *     `enabled: false` and NO url, so it cannot ask the update server anything;
- *   - a prod build carries the code-signing certificate + metadata, refuses to
- *     configure without the certificate, and refuses an api-dev DS;
- *   - checks on launch in the background (ON_LOAD, fallbackToCacheTimeout 0);
- *   - the runtime version policy is `fingerprint`, and the fingerprint covers
- *     pollis-core + every crate it reaches, ignores ubrn's generated output,
- *     hashes the OTA certificate, and ignores the version fields and the
- *     updates block;
- *   - the prod builds (sideload APK workflow) set POLLIS_OTA=production, and
- *     the OTA release's signing job runs in the protected environment.
- *
- *   cd mobile && pnpm test
- */
+/* The app side of OTA updates (#1250): app.config.js's `updates` block and fingerprint.config.js. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -62,7 +43,6 @@ test("a build that talks to a DS refuses to configure without both R2 origins", 
   assert.throws(() => evaluate({ ...ds, ...R2, EXPO_PUBLIC_R2_PUBLIC_URL: " " }), /EXPO_PUBLIC_R2_PUBLIC_URL is not/);
   assert.throws(() => evaluate({ ...ds, ...R2, EXPO_PUBLIC_R2_ENDPOINT: "" }), /EXPO_PUBLIC_R2_ENDPOINT is not/);
   assert.doesNotThrow(() => evaluate({ ...ds, ...R2 }));
-  // No DS at all (CI's compile-only APK): nothing to fetch media for.
   assert.doesNotThrow(() => evaluate({}));
 });
 
@@ -78,10 +58,7 @@ test("update requests carry no per-install identifier: EAS-Client-ID is a consta
   assert.equal(u.requestHeaders["EAS-Client-ID"], OTA.OTA_NEUTRAL_CLIENT_ID);
   assert.match(OTA.OTA_NEUTRAL_CLIENT_ID, /^0{8}-0{4}-0{4}-0{4}-0{12}$/);
   assert.equal(u.requestHeaders["Expo-Fatal-Error"], "");
-  // The override only works because both native downloaders apply
-  // config.requestHeaders AFTER their own EAS-Client-ID, on manifest and asset
-  // requests alike. Pin that ordering in the installed expo-updates, so an
-  // upgrade that moves it fails here instead of silently re-identifying installs.
+  // Pin that both native downloaders apply requestHeaders AFTER their own EAS-Client-ID.
   const ios = readFileSync(join(mobile, "node_modules", "expo-updates", "ios", "EXUpdates", "AppLoader", "FileDownloader.swift"), "utf8");
   for (const fn of ["private func setHTTPHeaderFields(", "private func setManifestHTTPHeaderFields("]) {
     const body = ios.slice(ios.indexOf(fn), ios.indexOf("\n  }\n", ios.indexOf(fn)));
@@ -123,7 +100,6 @@ test("a prod build refuses to see the dev DS gate key (#1242); an empty one is f
     /must not carry the dev DS key/,
   );
   assert.doesNotThrow(() => updatesConfigFor({ ...prod, EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "" }, true));
-  // A dev build carries it freely: expo-updates is off and no prod URL is set.
   assert.deepEqual(updatesConfigFor({ EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY: "k" }, true), { enabled: false });
 });
 
@@ -143,14 +119,12 @@ test("a prod build is code-signed, checks on load in the background, and names t
       "Expo-Fatal-Error": "",
     },
   });
-  // The URL a prod build asks is the URL the pipeline publishes for.
   assert.equal(u.url, MANIFEST_URL);
 });
 
 test("app.config.js evaluates the committed certificate when one exists", () => {
   const certPath = join(mobile, OTA.OTA_CERT_PATH);
   if (!existsSync(certPath)) {
-    // Not generated yet (owner step): a prod build must then fail loudly.
     assert.throws(() => evaluate({ POLLIS_OTA: "production" }), /missing/);
     return;
   }
@@ -221,7 +195,6 @@ test("the fingerprint skips version fields and the updates block", () => {
   const hook = fingerprint.fileHookTransform;
   const config = JSON.stringify({ name: "Pollis", plugins: ["x"], updates: { enabled: true, url: "u" } });
   assert.deepEqual(JSON.parse(hook({ type: "contents", id: "expoConfig" }, config, true, "utf8")), { name: "Pollis", plugins: ["x"] });
-  // Every other source passes through untouched.
   assert.equal(hook({ type: "file", filePath: "a" }, "bytes", true, "utf8"), "bytes");
   assert.equal(hook({ type: "contents", id: "pollis-core" }, "digest", true, "utf8"), "digest");
 });
@@ -230,7 +203,6 @@ test("prod builds switch OTA on; the signing job is behind the protected environ
   const apk = readFileSync(join(repo, ".github", "workflows", "mobile-apk-release.yml"), "utf8");
   assert.match(apk, /POLLIS_OTA: production/);
   const ota = readFileSync(join(repo, ".github", "workflows", "mobile-ota-release.yml"), "utf8");
-  // The key is referenced exactly once, in the job that declares the environment.
   const uses = ota.split("secrets.OTA_CODE_SIGNING_KEY").length - 1;
   assert.equal(uses, 1);
   const signJob = /\n {2}sign:\n([\s\S]*?)(?=\n {2}[a-z-]+:\n)/.exec(ota)?.[1] ?? "";

@@ -21,13 +21,9 @@ import GroupInviteLinks from "../app/group/invite-links";
 import GroupEmoji from "../app/group/emoji";
 import JoinRequests from "../app/group/requests";
 
-// Two-pane master-detail primitives for the regular (iPad) layout — issue #622.
-// Only rendered when `useLayoutClass() === "regular"`; the compact tree never
-// mounts these, so phone behavior is untouched.
+// Two-pane master-detail primitives for the regular (iPad) layout (#622).
 
-// The page drawn for each pane route — the very same component the route file
-// renders on phones. They read params with `useRouteParams` and navigate with
-// `useNav`, so inside the pane they get the entry's params and pane pushes.
+// The same component each route file renders on phones.
 const PANE_SCREENS: Record<PanePath, ComponentType> = {
   "/chat/thread": ThreadScreen,
   "/conversation/info": ConversationInfo,
@@ -43,7 +39,6 @@ const PANE_SCREENS: Record<PanePath, ComponentType> = {
   "/group/requests": JoinRequests,
 };
 
-// Right-pane empty state — shown when nothing is selected yet.
 export function DetailPlaceholder() {
   const { t } = useTranslation("mobile");
   return (
@@ -62,8 +57,6 @@ export function DetailPlaceholder() {
   );
 }
 
-// Provides a tab's pane stack to everything under it: the left column (group
-// pages opened from the group panel push into the pane) and the right pane.
 export function PaneProvider({
   pane,
   children,
@@ -74,10 +67,7 @@ export function PaneProvider({
   return <PaneContext.Provider value={pane}>{children}</PaneContext.Provider>;
 }
 
-// The right pane: its root (the open conversation, or the placeholder) with
-// the pages pushed over it. Every page stays mounted while it is covered —
-// only the top one is displayed — so going back returns to the conversation
-// with its draft and scroll position intact, the way a stack pop does.
+// Covered pages stay mounted, so back keeps the conversation's draft and scroll.
 export function DetailPane({
   pane,
   root,
@@ -88,7 +78,7 @@ export function DetailPane({
   const depth = pane.entries.length;
   const back = pane.api.back;
 
-  // Android tablets: the hardware back pops the pane before it leaves the tab.
+  // Android tablets: hardware back pops the pane first.
   useEffect(() => {
     if (depth === 0) {
       return;
@@ -120,8 +110,6 @@ export function DetailPane({
   );
 }
 
-// Left list column (fixed `listPaneWidth`) + 1px hairline divider + flexible
-// right detail column, mirroring desktop's sidebar+content split.
 export function TwoPane({
   list,
   detail,
@@ -138,9 +126,7 @@ export function TwoPane({
   );
 }
 
-// A tab's empty state on regular width: no two-pane (there is nothing to
-// select), one column centred on the screen — the same width as every other
-// full-screen page (`layout.screenMaxWidth`).
+// A tab's empty state on regular width: one centred column.
 export function CenteredColumn({ children }: { children: ReactNode }) {
   return (
     <View

@@ -1,21 +1,4 @@
-/*
- * The enrollment SAS input rule (`mobile/lib/enrollmentSas.ts`), and its twin in
- * `frontend/src/utils/enrollmentSas.ts`.
- *
- * #1096: the approval screen used to DISPLAY the Delivery Service's copy of the
- * verification code and submit it back on one click, so the comparison the
- * short-authentication-string exists to make was performed by nobody — a DS that
- * swapped the new device's ephemeral key and its stored code to match satisfied
- * every programmatic check. The approver now types what the NEW device shows,
- * and `approve_device_enrollment` checks it against the code it derives from the
- * ephemeral key it fetched itself.
- *
- * That only works if the two sides agree on the alphabet and the length. Rust is
- * the source of truth (`pollis-core/src/commands/device_enrollment.rs`,
- * `SAS_ALPHABET` / `SAS_LEN`); these assertions quote it, so a change there that
- * is not mirrored here fails the build rather than silently rejecting every
- * legitimate code.
- */
+/* The enrollment SAS input rule (#1096) and its desktop twin; Rust's SAS_ALPHABET / SAS_LEN are the source of truth. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -65,9 +48,7 @@ test("separators a human adds while reading aloud are dropped", () => {
 });
 
 test("an excluded glyph is DROPPED, never mapped to a lookalike", () => {
-  // The tempting "helpful" behaviour is O→0 and I→1. It must not happen: it
-  // would let a mis-read code compare equal to the derived one, which is
-  // precisely the failure the typed comparison exists to catch.
+  // O→0 / I→1 would let a mis-read code compare equal: never.
   assert.equal(normalizeSasInput("O0"), "0");
   assert.equal(normalizeSasInput("I1"), "1");
   assert.equal(normalizeSasInput("L1"), "1");

@@ -1,23 +1,4 @@
-// Full-screen media viewer (#1248) — mobile's port of desktop's attachment
-// lightbox (AttachmentDisplay) and its walkable roll (MediaGalleryView).
-//
-// A pushed page, never a modal: Close/back at the top-start, the system edge
-// swipe pops it, and so does a downward drag on the media (#1492) — both
-// only while nothing is zoomed, when a drag pans instead. An image or video
-// walks the conversation's images and videos (from the Vault: the media
-// grid's, in grid order) by horizontal swipe or with the previous/next
-// buttons (desktop's arrows, wrapping like desktop's roll), with "12 / 100"
-// under the filename; audio and other files open alone. Save to photos
-// (images, video) and Share (anything) replace desktop's Download, and act
-// on the page on screen.
-//
-// The pager is virtualised for rolls of hundreds: only the page on screen
-// and one each side are mounted. An image page decrypts on mount and
-// releases (unlinks) its plaintext file on unmount; a video page takes its
-// file only while on screen, and pauses when swiped away.
-//
-// Every byte shown here is the locally decrypted file the chat already uses
-// (`useMediaUri` / `get_media_path`); nothing is fetched in plaintext.
+// Full-screen media viewer (#1248, #1492): a pushed page, virtualised pager (on-screen page ± 1), only locally decrypted files.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, FlatList, Linking, Text, View } from "react-native";
@@ -77,8 +58,7 @@ export default function MediaViewerScreen() {
     kind?: string;
     attachmentId?: string;
     threadId?: string;
-    // "vault": walk the Vault's entries (#1316) instead of a conversation.
-    // "draft": the composer's pending attachments, before send (#1585).
+    // "vault" (#1316) or "draft" (#1585).
     source?: string;
   }>();
   const fromVault = params.source === "vault";
@@ -89,12 +69,10 @@ export default function MediaViewerScreen() {
   const threadId = params.threadId ?? null;
   const attachmentId = params.attachmentId ?? "";
 
-  // The same caches the chat and thread screens fill — no new reads.
   const { data: conversationData } = useMessages(conversationId, kind);
   const { data: replies } = useThreadMessages(threadId);
   const { data: vaultEntries } = useVaultMessages(fromVault);
-  // Read once per open: the strip that opened the page sits under it and
-  // cannot change while the viewer is on top.
+  // Read once per open: the strip under the viewer cannot change.
   const [draft] = useState(() => (fromDraft ? getDraftForViewer() : []));
   const messages = useMemo(() => {
     if (fromVault || fromDraft) {
@@ -104,17 +82,12 @@ export default function MediaViewerScreen() {
     if (!threadId) {
       return conversation;
     }
-    // A thread's roll is its root plus its replies (replies are filtered
-    // out of the main timeline).
+    // A thread's roll is its root plus its replies.
     const root = conversation.find((m) => m.id === threadId);
     return [...(root ? [root] : []), ...(replies ?? [])];
   }, [conversationData, replies, threadId, fromVault, fromDraft]);
 
-  // Both ids follow a pending → confirmed swap (`currentAttachmentId`): the
-  // viewer may open on a just-sent attachment before its send settles. The
-  // swap lands with the cache update that re-renders this screen.
-  // From the Vault the roll is the media grid's, in the grid's order
-  // (newest first), so a swipe walks what the grid showed (#1492).
+  // Ids follow a pending → confirmed swap (`currentAttachmentId`).
   const { items, index: initialIndex } = useMemo(
     () =>
       fromDraft
@@ -126,8 +99,7 @@ export default function MediaViewerScreen() {
   );
   const sourceLoaded = fromDraft ? true : fromVault ? !!vaultEntries : !!conversationData;
 
-  // Track the page by attachment id, not index: a message arriving or being
-  // deleted while the viewer is open shifts indices, not identities.
+  // By attachment id, not index: arrivals and deletions shift indices.
   const [trackedId, setCurrentId] = useState(attachmentId);
   const currentId = currentAttachmentId(trackedId);
   const foundIndex = items.findIndex((a) => a.id === currentId);
@@ -141,23 +113,17 @@ export default function MediaViewerScreen() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const listRef = useRef<FlatList<MessageAttachment>>(null);
 
-  // A zoomed image pans with a drag, so the edge swipe must not pop the
-  // page under it.
+  // A zoomed image pans with a drag: no edge swipe.
   useEffect(() => {
     navigation.setOptions({ gestureEnabled: !zoomed });
   }, [navigation, zoomed]);
 
-  // Feedback belongs to the item it was about, and a new page starts at 1×
-  // (the previous page resets its own zoom when it goes inactive).
   useEffect(() => {
     setFeedback(null);
     setZoomed(false);
   }, [currentId]);
 
-  // Named copies handed to the share sheet stay on disk until the viewer
-  // closes: the receiving app may read the file after the sheet returns.
-  // Each keeps the cache generation it was taken in, so a close after a
-  // sign-out clear releases nothing.
+  // Shared copies stay until the viewer closes: the receiving app may read later.
   const shared = useRef(new Map<string, { attachment: MessageAttachment; resolvedIn: number }>());
   useEffect(() => {
     const held = shared.current;
@@ -190,7 +156,6 @@ export default function MediaViewerScreen() {
         const result = await saveToPhotoLibrary(uri);
         announce(result === "saved" ? "saved" : "denied");
       } finally {
-        // The library has its own copy once the save resolves.
         void releaseNamedMediaUri(current, resolvedIn);
       }
     } catch {
@@ -210,7 +175,6 @@ export default function MediaViewerScreen() {
       const resolvedIn = mediaCacheGeneration();
       const uri = await resolveNamedMediaUri(current);
       if (shared.current.has(current.id)) {
-        // Already held from an earlier share: drop the extra reference.
         void releaseNamedMediaUri(current, resolvedIn);
       } else {
         shared.current.set(current.id, { attachment: current, resolvedIn });
@@ -241,11 +205,7 @@ export default function MediaViewerScreen() {
     [items, currentIndex],
   );
 
-  // Swipe down to dismiss (#1492). The pan is simultaneous with the pager's
-  // own scroll gesture and fails as soon as the drag turns sideways, so a
-  // horizontal swipe always pages; it starts only downwards, with one
-  // finger (a pinch stays the image's), and not at all while zoomed, when
-  // a drag pans the image.
+  // Swipe down to dismiss (#1492): downwards only, one finger, never while zoomed.
   const pagerGesture = useMemo(() => Gesture.Native(), []);
   const dragY = useSharedValue(0);
   const pageHeight = size?.height ?? 0;
@@ -282,8 +242,7 @@ export default function MediaViewerScreen() {
   });
 
   const kindOfCurrent = current ? mediaKind(current.content_type) : "file";
-  // An optimistic send still uploading has neither bytes in R2 nor, unless
-  // it was picked on this device, a local file.
+  // Still uploading and not picked here: no bytes anywhere.
   const unavailable = !!current && !current.object_key && !current.localPreviewUri;
   const subtitle = current
     ? [
@@ -335,9 +294,7 @@ export default function MediaViewerScreen() {
                   offset: size.width * index,
                   index,
                 })}
-                // One page each side: neighbours decrypt ahead of the swipe,
-                // and nothing further away is mounted, so nothing further
-                // away holds plaintext on disk — however long the roll.
+                // Nothing further than one page away holds plaintext on disk.
                 windowSize={3}
                 initialNumToRender={1}
                 maxToRenderPerBatch={1}
@@ -404,8 +361,7 @@ export default function MediaViewerScreen() {
               ) : null}
             </View>
           ) : null}
-          {/* Prev / next only move the pager, free to undo: touch-down
-              (#1529). Save and share stay on release. */}
+          {/* Touch-down (#1529); save and share stay on release. */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
             {multiple ? (
               <IconButton

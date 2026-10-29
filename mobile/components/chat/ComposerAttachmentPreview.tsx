@@ -1,16 +1,4 @@
-// One pending attachment in the composer (#1585), mobile's port of desktop's
-// `AttachmentPreview` (ChatInput.tsx): a square thumbnail card with the
-// filename underneath and the toolbar at its top-end corner. An image shows
-// itself, a video its first frame under a play glyph, anything else a file
-// card. Tapping an image or video opens the full-screen viewer on the
-// picked file, before anything is sent.
-//
-// An image or video can be marked sensitive (#1568) with the toolbar's eye,
-// before remove. A marked card shows its blurhash under the centred
-// crossed-out eye, like desktop's, and a tap on it opens nothing — the point
-// is that the media is not on screen. The blurhash is worked out from the
-// picked file (a video's from its poster frame) the first time it is marked,
-// and travels with the attachment, so receivers see the same colours.
+// One pending attachment card in the composer (#1585); a marked sensitive card (#1568) shows its blurhash and opens nothing.
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -43,12 +31,10 @@ export function ComposerAttachmentPreview({
   onChange,
 }: {
   attachment: PickedAttachment;
-  // Position in the strip; names the test ids.
   index: number;
   onRemove: (id: string) => void;
   onOpen?: (attachment: PickedAttachment) => void;
-  // Marks or unmarks it sensitive, and stores the blurhash worked out for
-  // its cover. Absent where the composer cannot mark (the toggle is hidden).
+  // Absent where the composer cannot mark.
   onChange?: (id: string, patch: Partial<PickedAttachment>) => void;
 }) {
   const { t } = useTranslation("chat");
@@ -58,9 +44,7 @@ export function ComposerAttachmentPreview({
   const openable = !!onOpen && cardOpens(attachment);
   const poster = useVideoPoster(kind === "video" ? attachment.uri : null);
 
-  // The cover's blurhash, once, the first time the card is marked. The
-  // callback is read through a ref: the screens pass a fresh arrow each
-  // render, which must not restart the work.
+  // The cover's blurhash, once; the callback via a ref (screens pass a fresh arrow).
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const hashSource = kind === "video" ? poster : kind === "image" ? attachment.uri : null;
@@ -91,7 +75,6 @@ export function ComposerAttachmentPreview({
       <Image
         source={{ uri: attachment.uri }}
         contentFit="cover"
-        // The picker's own file; nothing decrypted, but no second copy either.
         cachePolicy="none"
         style={{ width: SIZE, height: SIZE }}
         accessible={false}
@@ -152,8 +135,7 @@ export function ComposerAttachmentPreview({
                 {
                   key: "sensitive",
                   testID: sensitiveToggleTestID(index),
-                  // Open while the media shows, crossed out once it is marked;
-                  // the accent glyph is the "on" state.
+                  // The accent glyph is the "on" state.
                   accessibilityLabel: tc(
                     sensitive ? "composer.unmarkSensitive" : "composer.markSensitive",
                     { name: attachment.name },
@@ -180,7 +162,6 @@ export function ComposerAttachmentPreview({
       />
       <Text
         numberOfLines={1}
-        // The card already says the name to a screen reader.
         importantForAccessibility="no"
         accessibilityElementsHidden
         style={[ty.meta, { marginTop: 4, color: semantic.dim }]}

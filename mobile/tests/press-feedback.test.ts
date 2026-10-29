@@ -1,11 +1,4 @@
-/*
- * Touch feedback on a message row (#1282): the timings, the surfaces, and
- * the wiring that keeps it on the UI thread and out of the way of the swipe.
- *
- * The highlight itself is visual and not assertable by Maestro; the flows
- * that drive the row (messaging.yaml's long press, reply.yaml's swipe,
- * double tap, quote tap and long press) prove the gestures still work.
- */
+/* Touch feedback on a message row (#1282): timings, surfaces, UI-thread wiring. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -26,10 +19,8 @@ const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
 
 test("the fade waits out a scroll flick and is fully in before the sheet opens", () => {
   const { delayMs, fadeInMs, fadeOutMs } = PRESS_FEEDBACK;
-  // Long enough that a list fling, which takes the touch within a few
-  // frames, never flashes the rows under it.
+  // A list fling never flashes the rows under it.
   assert.ok(delayMs >= 80, `delay ${delayMs} ms`);
-  // The row is at full highlight before the long press fires.
   assert.ok(delayMs + fadeInMs < LONG_PRESS_MS, `${delayMs} + ${fadeInMs} vs ${LONG_PRESS_MS}`);
   assert.ok(fadeInMs > 0 && fadeOutMs > 0 && fadeOutMs <= 250);
 });
@@ -37,7 +28,6 @@ test("the fade waits out a scroll flick and is fully in before the sheet opens",
 test("a pressed row steps one surface up from where it rests", () => {
   assert.equal(restingSurface(false), "bg");
   assert.equal(pressedSurface(false), "raised");
-  // A mention or jump-to tint keeps its hue under the finger.
   assert.equal(restingSurface(true), "accentFaint");
   assert.equal(pressedSurface(true), "accentSoft");
 });
@@ -57,8 +47,6 @@ for (const preset of ACCENT_PRESETS) {
   });
 }
 
-// ── Wiring ────────────────────────────────────────────────────────────────
-
 const row = read("components/chat/MessageRow.tsx");
 const swipe = read("components/chat/SwipeToReply.tsx");
 
@@ -71,7 +59,6 @@ test("the highlight is a Reanimated shared value, not React state", () => {
   assert.match(row, /onPressOut=\{onPressOut\}/);
   assert.match(row, /withDelay\(\s*PRESS_FEEDBACK\.delayMs/);
   assert.match(row, /delayLongPress=\{LONG_PRESS_MS\}/);
-  // The resting colour still carries the mention and jump-to tint.
   assert.match(row, /const tinted = mentionsSelf \|\| highlighted;/);
 });
 

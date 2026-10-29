@@ -22,9 +22,7 @@ export default function Enrollment() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
   const router = useRouter();
-  // Signed in by a QR device link (#1207): no chooser and no code to read
-  // out — the request starts at once and the device that showed the QR
-  // approves it on the link tag.
+  // Signed in by a QR device link (#1207): no chooser, no code; the request starts at once.
   const { linked } = useLocalSearchParams<{ linked?: string }>();
   const isLinked = linked === "1";
   const autoStarted = useRef(false);
@@ -35,20 +33,14 @@ export default function Enrollment() {
 
   const start = useStartEnrollment();
   const recover = useRecoverWithSecretKey();
-  // Recovery unwraps the account key with the Secret Key and re-derives this
-  // device's keys before the PIN step: slow, and must not run twice.
+  // Slow, and must not run twice.
   const recovering = useSubmitLock();
   const starting = useSubmitLock();
   const status = useEnrollmentStatus(
     mode === "polling" ? handle?.request_id ?? null : null,
   );
 
-  // When the existing device approves, go straight to PIN-create. Finalize
-  // (publish this device's cert, external-join the account's groups) needs
-  // the local DB, which only `set_pin` opens — so it runs on the PIN screen
-  // after `set_pin`, exactly as desktop's handlePinCreated does. Calling it
-  // here, before the PIN, failed every device-linking sign-in with "not
-  // signed in for DS request signing".
+  // On approval go to PIN-create; finalize needs the local DB, which only `set_pin` opens.
   useEffect(() => {
     if (status.data?.status === "approved") {
       router.replace("/(auth)/pin");
@@ -118,8 +110,7 @@ export default function Enrollment() {
           ? t("auth.enrollment.recoveryIntro")
           : t("auth.enrollment.chooserIntro");
 
-  // "Waiting for approval…" with a spinner. The text stays one element: the
-  // two-client device-link flow waits for it by its text.
+  // One text element: the device-link flow waits for it by its text.
   const waiting = (testID?: string) => (
     <View
       style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}
@@ -175,9 +166,7 @@ export default function Enrollment() {
               }}
             >
               <Text style={ty.section}>{t("auth.enrollment.verificationCode")}</Text>
-              {/* Exactly the 8 code characters in ONE Text, with no
-                  accessibilityLabel of its own: the two-client device-link
-                  script reads it off the accessibility tree. */}
+              {/* Exactly the 8 code characters in ONE Text: the device-link script reads it. */}
               <Text
                 selectable
                 style={{

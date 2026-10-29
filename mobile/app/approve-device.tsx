@@ -10,17 +10,7 @@ import { SAS_LENGTH, normalizeSasInput } from "../lib/enrollmentSas";
 import { useSubmitLock } from "../hooks/useSubmitLock";
 import { useThemeRerender } from "../components/theme";
 
-/**
- * A new device of this account asks to be approved (#1360) — mobile's twin of
- * desktop's `EnrollmentApprovalPrompt`, opened over whatever is on screen by
- * `hooks/useEnrollmentApprovals`. Backing out leaves the request listed under
- * Self → Security.
- *
- * The approver TYPES the code shown on the new device (#1096). Nothing here
- * shows it: Rust compares what was typed against the code it derives from the
- * ephemeral key it fetched itself, so a server that swapped that key cannot
- * also supply the matching code.
- */
+/** A new device asks to be approved (#1360). The approver TYPES its code (#1096); nothing here shows it. */
 export default function ApproveDevice() {
   useThemeRerender();
   const { t } = useTranslation("auth");
@@ -33,8 +23,7 @@ export default function ApproveDevice() {
   const reject = useRejectEnrollment();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // One lock for both choices: approving wraps the account key for the new
-  // device, and neither may run twice or race the other.
+  // One lock for both choices: neither may run twice or race the other.
   const submit = useSubmitLock();
   const busy = submit.busy;
   const [acting, setActing] = useState<"approve" | "reject">("approve");
@@ -54,8 +43,7 @@ export default function ApproveDevice() {
         onSuccess: () => router.back(),
         onError: (e) => {
           submit.end();
-          // A wrong code is the signal to re-read the other screen, not to
-          // nudge one character and retry.
+          // A wrong code means re-reading the other screen.
           setCode("");
           setError((e as Error).message || t("approval.approveFailed"));
         },
@@ -121,8 +109,7 @@ export default function ApproveDevice() {
         </View>
         {error ? <ErrorText testID="text-approve-device-error">{error}</ErrorText> : null}
       </ScrollView>
-      {/* Pinned above the keyboard, which the code field raises: on a small
-          phone both choices must stay reachable without dismissing it. */}
+      {/* Pinned above the keyboard: both choices stay reachable. */}
       <BottomAction>
         <Button
           variant="primary"

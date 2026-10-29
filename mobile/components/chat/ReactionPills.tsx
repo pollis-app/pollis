@@ -5,10 +5,7 @@ import type { Reaction } from "../../hooks/queries/useReactions";
 import { splitEmojiSegments } from "../emoji/emojiTokens";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
 
-/**
- * The emoji face of one pill. A reaction's emoji string is opaque — either a
- * Unicode emoji or a `<:name:hash>` custom token — so both must render.
- */
+/** A reaction's emoji is a Unicode emoji or a `<:name:hash>` custom token. */
 function ReactionFace({ emoji }: { emoji: string }) {
   const segments = splitEmojiSegments(emoji);
   const first = segments[0];
@@ -24,10 +21,6 @@ function ReactionFace({ emoji }: { emoji: string }) {
   return <Text style={{ fontSize: 16 }}>{emoji}</Text>;
 }
 
-/**
- * Reaction pills under a message. Tapping a pill toggles the current user's
- * reaction for that emoji (remove when already present, add otherwise).
- */
 export function ReactionPills({
   messageId,
   reactions,
@@ -74,7 +67,6 @@ export function ReactionPills({
                   })
             }
             onPress={() => onToggle(reaction.emoji, reacted)}
-            // 32pt visual pill; the slop brings the target to 44pt.
             hitSlop={6}
             style={({ pressed }) => ({
               flexDirection: "row",
@@ -83,9 +75,7 @@ export function ReactionPills({
               minHeight: 32,
               paddingHorizontal: 10,
               borderRadius: r.pill,
-              // Reacted = accent outline, no fill: an accent fill sat behind
-              // the emoji and swallowed the default (yellow) skin tone. Every
-              // pill carries the border so toggling never shifts the layout.
+              // Accent outline, no fill: a fill swallowed the default skin tone. Every pill has the border.
               borderWidth: 1.5,
               borderColor: reacted ? semantic.accent : "transparent",
               backgroundColor: pressed
@@ -96,8 +86,7 @@ export function ReactionPills({
             })}
           >
             <ReactionFace emoji={reaction.emoji} />
-            {/* Reacted = accent outline + bold count (the others: dark fill +
-                medium count), never colour alone. */}
+            {/* Reacted = accent outline + bold count, never colour alone. */}
             <Text
               style={[
                 ty.meta,

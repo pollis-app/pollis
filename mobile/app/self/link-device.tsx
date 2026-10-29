@@ -16,24 +16,7 @@ import { isNewDeviceCode, isSignInCode } from "../../lib/linkCodes";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
 
-/**
- * Scan to sign in a device (#1361): the device being signed in — a desktop at
- * "Sign in with another device", or a new phone — shows a QR; this signed-in
- * phone scans it, confirms with its PIN, and the other device is in, nothing
- * typed or pasted.
- *
- * The code carries the new device's ephemeral public key and a link id, never
- * a secret. The PIN is verified in Rust before anything is sent; Rust then
- * wraps the account key ONLY to an enrollment request whose key is
- * byte-for-byte the one scanned here, so neither the server nor anyone who
- * photographed the code can substitute their own. Waiting is one awaited Rust
- * call, never a poll.
- *
- * This replaced the QR this screen used to SHOW (#1207's direction): a phone
- * scans better than it is scanned, a desktop cannot scan at all, and a
- * 70-character code read off a phone and typed into a desktop was the only
- * way that ever worked. Desktop still shows its own code for a new phone.
- */
+/** Scan to sign in a device (#1361). The code carries no secret; Rust wraps the account key ONLY to the key scanned here. */
 
 type Step =
   | { kind: "scan" }
@@ -46,8 +29,7 @@ export default function ScanToSignIn() {
   useThemeRerender();
   const { t } = useTranslation("settings");
   const router = useRouter();
-  // The tab bar's shield (#1550) opens this page from any tab, so back there
-  // is plain "Back", not "Back to Security".
+  // Opened from the tab bar's shield too (#1550): then back is plain "Back".
   const { from } = useLocalSearchParams<{ from?: string }>();
   const regular = useIsRegular();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -59,10 +41,8 @@ export default function ScanToSignIn() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Synchronous twin of `busy`: a second tap in the same frame as the fourth
-  // digit must not submit the PIN twice.
+  // Synchronous twin of `busy`: no double submit in one frame.
   const submitting = useRef(false);
-  // The camera reports every frame the code is in view; take it once.
   const taken = useRef(false);
   const generation = useRef(0);
   const linkId = useRef<string | null>(null);
@@ -90,7 +70,6 @@ export default function ScanToSignIn() {
     }
     taken.current = true;
     setScanError(null);
-    // A code was read: felt like a toggle, the way a scanner clicks.
     haptic("toggle");
     setStep({ kind: "pin", payload: text });
   };
@@ -142,8 +121,7 @@ export default function ScanToSignIn() {
       finish(accepted.link_id, accepted.device_name);
     } catch (e) {
       const message = (e as Error).message || t("linkDevice.pinFailed");
-      // A wrong PIN stays on the keypad; anything else (an expired or used
-      // code) means scanning again.
+      // A wrong PIN stays on the keypad; anything else means scanning again.
       if (/pin/i.test(message)) {
         setPinError(message);
       } else {
@@ -188,8 +166,7 @@ export default function ScanToSignIn() {
     return (
       <Screen testID="screen-link-device">
         {crumb}
-        {/* iPad: the PIN block (heading, dots, keypad) centred vertically
-            rather than the keypad pinned to the bottom edge. */}
+        {/* iPad: the PIN block centred vertically. */}
         <View style={regular ? { flex: 1, justifyContent: "center", gap: 32 } : { flex: 1 }}>
           <View style={{ flex: regular ? 0 : 1, paddingHorizontal: 24, paddingTop: regular ? 0 : 32, gap: 32 }}>
             <Heading

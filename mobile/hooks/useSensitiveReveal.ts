@@ -1,6 +1,4 @@
-// Whether a sensitive attachment (#1568) is covered right now, and the two
-// things the user can do about it. Read inside an `observer()` component.
-// Desktop's `frontend/src/hooks/useSensitiveReveal.ts`, same rules.
+// A sensitive attachment's (#1568) covered state, read inside an `observer()`; desktop's twin.
 
 import { useState } from "react";
 import { isCovered, revealKey } from "../lib/sensitiveMedia";

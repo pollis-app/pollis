@@ -1,7 +1,4 @@
-// The whole security-event log (#1548): keyset pages from the DS, the next one
-// fetched as the list nears its end, narrowed by quick-filter chips. Self →
-// Security shows only the newest three and links here. Desktop twin:
-// `frontend/src/pages/SecurityEventsPage.tsx`.
+// The whole security-event log (#1548), keyset-paged and filterable; desktop's SecurityEventsPage twin.
 
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Text, View } from "react-native";
@@ -50,8 +47,7 @@ export default function SecurityEvents() {
   const header = (
     <View style={{ gap: space.lg, paddingBottom: space.lg }}>
       <Text style={ty.secondary}>{t("security.eventsDescription")}</Text>
-      {/* Wraps rather than scrolls sideways, so every filter stays in view at
-          large text sizes. */}
+      {/* Wraps, so every filter stays in view at large text sizes. */}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
         {SECURITY_EVENT_FILTER_ORDER.map((f) => (
           <Chip
@@ -82,7 +78,6 @@ export default function SecurityEvents() {
 
   const last = events.length - 1;
   const renderItem = ({ item, index }: { item: SecurityEvent; index: number }) => (
-    // One rounded group, drawn row by row so the list can virtualize.
     <View
       style={{
         backgroundColor: semantic.raised,
@@ -91,9 +86,7 @@ export default function SecurityEvents() {
         borderBottomLeftRadius: index === last ? r.lg : 0,
         borderBottomRightRadius: index === last ? r.lg : 0,
         overflow: "hidden",
-        // The previous filter's rows stay up, dimmed, until the new filter's
-        // first page lands — feedback on the same frame as the tap, and no
-        // flash of an empty list.
+        // The previous filter's rows stay up, dimmed, until the new first page lands.
         opacity: isPlaceholderData ? 0.5 : 1,
       }}
     >
@@ -110,7 +103,6 @@ export default function SecurityEvents() {
         data={events}
         keyExtractor={(e) => e.id}
         renderItem={renderItem}
-        // `renderItem` closes over these: re-render the rows when they move.
         extraData={`${last}:${isPlaceholderData}`}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}

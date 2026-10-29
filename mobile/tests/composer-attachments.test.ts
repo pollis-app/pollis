@@ -1,9 +1,4 @@
-/*
- * Composer attachment previews (#1585): mobile's port of desktop's
- * `AttachmentPreview`. The rules are pure (lib/composerAttachments.ts) and
- * pinned directly; the card and toolbar are pinned at the source level, as
- * the RN renderer is not available under node.
- */
+/* Composer attachment previews (#1585): pure rules, plus the card and toolbar at the source level. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -162,20 +157,16 @@ test("the toolbar and card have no borders (mobile design rule)", () => {
 
 test("the toolbar is ONE capsule on the raised surface, never a row of discs", () => {
   const src = read("components/chat/AttachmentToolbar.tsx");
-  // The capsule carries the only fill, clipped so a pressed button's step
-  // follows its rounded ends.
+  // The capsule carries the only fill.
   assert.match(src, /backgroundColor: semantic\.raised,/);
   assert.match(src, /overflow: "hidden",/);
   assert.match(src, /height: BUTTON,/);
-  // A button has no fill of its own except the pressed step, and no radius
-  // of its own: two separate rounded buttons side by side were rejected.
+  // No per-button fill or radius: separate rounded buttons were rejected.
   assert.match(src, /backgroundColor: pressed \? semantic\.high : "transparent",/);
   const button = src.slice(src.indexOf("<Pressable"));
   assert.doesNotMatch(button, /borderRadius/);
   assert.doesNotMatch(src, /semantic\.onAccent/);
-  // A toggle that is on shows it with its glyph alone, in the accent.
   assert.match(src, /action\.icon\(on \? semantic\.accent : semantic\.text\)/);
-  // No near-black disc or ring, and no hand-picked colour.
   assert.doesNotMatch(src, /semantic\.bg\b/);
   assert.doesNotMatch(src, /["'`]#[0-9a-fA-F]{3,8}["'`]|rgba?\(/);
 });
@@ -206,10 +197,8 @@ test("toolbar buttons reach 44pt without overlapping, and a toggle reports its s
   assert.match(src, /const BUTTON = 26;/);
   assert.match(src, /export const TOOLBAR_GLYPH = 14;/);
   assert.match(src, /const SLOP = \(44 - BUTTON\) \/ 2;/);
-  // A lone button is a 26pt circle with slop all round.
   assert.match(src, /lone\s*\? SLOP/);
   assert.match(src, /width: lone \? BUTTON : SHARED_WIDTH,/);
-  // In a row, width plus the one outer slop is 44; inner edges slop nothing.
   assert.match(src, /const SHARED_WIDTH = 34;/);
   assert.match(src, /const SHARED_OUTER_SLOP = 44 - SHARED_WIDTH;/);
   assert.match(src, /const start = first \? SHARED_OUTER_SLOP : 0;/);

@@ -4,12 +4,7 @@ import { Icon } from "../icons";
 import { Button } from "../ui";
 import { layout, semantic, type as ty, space } from "../../theme/tokens";
 
-/**
- * Replaces the composer while a Vault entry waits on its delete (desktop's
- * vault delete bar): what is about to happen, a Cancel and a Delete. Deleting
- * removes the entry on every device and cannot be undone, so it is always a
- * second, deliberate tap.
- */
+/** Replaces the composer while a Vault delete waits: on every device, cannot be undone, so a second tap. */
 export function VaultDeleteBar({
   onCancel,
   onConfirm,

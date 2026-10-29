@@ -1,18 +1,4 @@
-/*
- * End to end, minus the network: what the publish pipeline signs, the update
- * routes in the DS front-door Worker (pollis-delivery/worker/updates.ts) serve,
- * and a client can verify with nothing but the certificate compiled into the
- * app.
- *
- * Pinned: the bytes a phone receives are byte-for-byte the bytes that were
- * signed; the signature verifies against the certificate; every asset URL in
- * the manifest resolves through the Worker to bytes matching its manifest
- * hash; a rollback directive round-trips the same way; and a Worker that
- * altered the manifest would be caught. The pipeline and the Worker also agree
- * on where the update store is (bucket + key prefix) and where it is served.
- *
- *   cd mobile && pnpm test
- */
+/* End to end, minus the network: what the pipeline signs, the DS Worker serves and a client verifies against the compiled-in certificate. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -164,10 +150,8 @@ function jsonc(path: string): Record<string, unknown> {
 }
 
 test("the pipeline and the DS Worker agree on the update store and its URL", async () => {
-  // Same key prefix on both sides.
   assert.equal(OTA_KEY_PREFIX, WORKER_KEY_PREFIX);
-  // The prod DS config binds the bucket the pipeline writes, and every workflow
-  // step that touches the update store names it.
+  // The prod DS config binds the bucket the pipeline writes.
   const prod = jsonc(join(repo, "pollis-delivery", "wrangler.prod.jsonc"));
   assert.deepEqual(prod.r2_buckets, [{ binding: "UPDATES", bucket_name: OTA_BUCKET }]);
   const workflow = readFileSync(join(repo, ".github", "workflows", "mobile-ota-release.yml"), "utf8");
@@ -177,14 +161,12 @@ test("the pipeline and the DS Worker agree on the update store and its URL", asy
     assert.ok(b === OTA_BUCKET || b === '"$R2_BUCKET"', `unexpected --bucket ${b}`);
   }
   assert.doesNotMatch(workflow, /R2_UPDATES_|updates\.pollis\.com/);
-  // The URLs the app and the manifests use are routes the DS claims.
   for (const url of [MANIFEST_URL, `${UPDATES_BASE_URL}/assets/${"0".repeat(64)}`]) {
     const u = new URL(url);
     assert.equal(u.host, "api.pollis.com");
     assert.ok(isUpdatesPath(u.pathname), url);
   }
-  // And a pointer the pipeline files under OTA_KEY_PREFIX is what the DS
-  // bindings serve.
+  // A pointer filed under OTA_KEY_PREFIX is what the DS serves.
   const bucket = new MemoryBucket();
   const entry = publish(bucket);
   const prefixed = new MemoryBucket();

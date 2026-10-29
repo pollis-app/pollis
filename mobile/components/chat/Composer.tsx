@@ -27,26 +27,7 @@ import type { PickedAttachment } from "../../lib/attachments";
 import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
 import { useOpenDraftMediaViewer } from "../../hooks/useOpenMediaViewer";
 
-/**
- * Bottom composer bar (Chat.dc.html): a 44pt round attach button, a raised
- * pill field that grows with its text (emoji button inside at the end), and
- * a 44pt round accent send button. When
- * `mentionCandidates` is provided, typing `@…` opens a suggestion list
- * above the input (#886) — candidates come from the visible roster only,
- * ranked like desktop (prefix beats substring, alphabetical within rank).
- *
- * Typing `:…` opens the same list for emoji, and typing the closing `:` of a
- * complete shortcode substitutes it outright, Slack-style. Both tracks mirror
- * desktop: a trigger only opens at a word start (so `http://` and `10:30` are
- * inert), custom emoji beat standard ones, and everything is substituted HERE,
- * before send — a standard emoji becomes the literal character, a custom one
- * the existing `<:shortcode:hash>` token, so the wire format is unchanged.
- *
- * PRECEDENCE: an open mention query suppresses the emoji one. The two cannot
- * in fact both be open — neither body alphabet contains the other's trigger —
- * but the order is fixed so a future widening has one place to be reasoned
- * about.
- */
+/** Bottom composer bar. `@…` and `:…` open suggestions; shortcodes are substituted HERE, before send, so the wire format is unchanged. */
 export function Composer({
   draft,
   onChangeDraft,
@@ -69,33 +50,20 @@ export function Composer({
   sendPending: boolean;
   editable: boolean;
   mentionCandidates?: MentionCandidate[];
-  /** Every custom emoji the user may send. Omitted, only standard ones complete. */
   customEmoji?: CustomEmoji[];
   onAttach?: () => void;
   pendingAttachments?: PickedAttachment[];
   onRemoveAttachment?: (id: string) => void;
   /** Marks a pending attachment sensitive, or records its cover's blurhash (#1568). */
   onChangeAttachment?: (id: string, patch: Partial<PickedAttachment>) => void;
-  /** True when attachments alone make the message sendable. */
   canSendEmptyText?: boolean;
-  // Each increase focuses the field (a reply starting, #1270). 0 never does.
   focusRequest?: number;
-  // The field's hint; the chat's own when omitted (the Vault passes its own).
   placeholder?: string;
 }) {
   const { t } = useTranslation("common");
   const openDraft = useOpenDraftMediaViewer();
   const [caret, setCaret] = useState(0);
-  // iOS: a multiline field grows with its lines but keeps that height when its
-  // `value` is reset to "" (the send clears the draft), so after a two-line
-  // message the empty composer stayed two lines tall (Android re-measures on
-  // its own). Record the field's natural one-line height the first time it
-  // lays out empty, and cap an empty field at it. Measured at runtime, so it
-  // follows the system text size instead of hard-coding one. That first
-  // layout is one line only because the native input has no placeholder: a
-  // multiline TextInput sizes to its placeholder, so a hint that wrapped made
-  // the empty composer (and this measurement) two lines tall. The hint is
-  // the single-line overlay below instead.
+  // iOS keeps a multiline field's grown height when `value` resets: cap an empty field at its measured one-line height.
   const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -119,13 +87,11 @@ export function Composer({
       return;
     }
     onChangeDraft(next.text);
-    // RN moves the native caret to the end after a programmatic value
-    // change; track the logical caret so the query closes either way.
+    // RN moves the native caret to the end after a programmatic change.
     setCaret(next.caret);
   };
 
-  // The standard half is ~1600 rows off a table this app already bundles for
-  // the picker, so it is built once per mount rather than per keystroke.
+  // ~1600 rows: built once per mount, not per keystroke.
   const shortcodeEntries = useMemo(
     () => [...customShortcodeEntries(customEmoji ?? []), ...standardShortcodeEntries()],
     [customEmoji],
@@ -153,12 +119,7 @@ export function Composer({
     setCaret(next.caret);
   };
 
-  // Slack's direct substitution, on the way through: the ':' that CLOSES a
-  // known shortcode is swallowed and the emoji takes its place. Gated on a
-  // single-character insertion so a paste ending in a colon is left alone.
-  // RN's `onChangeText` carries no caret, so this only fires for a colon typed
-  // at the END of the draft — the overwhelmingly common case, and editing back
-  // into the middle of a line still has the suggestion list.
+  // The ':' closing a known shortcode is swallowed for the emoji (single-character insertions at the end only).
   const handleChangeText = (next: string) => {
     if (next.length === draft.length + 1 && next.endsWith(":")) {
       const closed = completedShortcodeAt(next, next.length);
@@ -179,8 +140,6 @@ export function Composer({
     onChangeDraft(next);
   };
 
-  // The in-field emoji button inserts the picked emoji (or custom token) at
-  // the caret.
   const insertEmoji = (insert: string) => {
     const at = Math.min(caret, draft.length);
     onChangeDraft(draft.slice(0, at) + insert + draft.slice(at));
@@ -260,8 +219,6 @@ export function Composer({
         </View>
       ) : null}
       {pendingAttachments && pendingAttachments.length > 0 ? (
-        // Desktop's preview row: cards side by side, scrolling sideways when
-        // they outgrow the width (#1585).
         <ScrollView
           testID="strip-attachments"
           horizontal
@@ -305,8 +262,7 @@ export function Composer({
           backgroundColor: semantic.bg,
         }}
       >
-        {/* Opening the picker is free to undo: touch-down (#1529). Send is
-            not, and stays on release. */}
+        {/* Touch-down (#1529). Send stays on release. */}
         <PressInPressable
           pressIn
           testID="btn-attach"
@@ -321,8 +277,6 @@ export function Composer({
             borderRadius: layout.touchMin / 2,
             alignItems: "center",
             justifyContent: "center",
-            // No border. Unavailable: the solid raised disc + a dim glyph
-            // (accent when available), never a fade.
             backgroundColor: pressed && onAttach ? semantic.high : semantic.raised,
           })}
         >
@@ -333,15 +287,12 @@ export function Composer({
             ref={inputRef}
             testID="input-composer"
             accessibilityLabel={t("composer.inputLabel")}
-            // The visible hint is the overlay below, which screen readers skip;
-            // they hear it here instead.
+            // The visible hint is an overlay screen readers skip.
             accessibilityHint={hint}
             value={draft}
             onChangeText={handleChangeText}
             onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
-            // Return inserts a newline (the Slack/Discord mobile convention,
-            // #1247); only the send button sends. The field grows with its
-            // lines up to `layout.composerInputMax`, then scrolls inside.
+            // Return inserts a newline (#1247); only the send button sends.
             multiline
             autoCapitalize="sentences"
             editable={editable}
@@ -368,7 +319,6 @@ export function Composer({
               textAlignVertical: "center",
             }}
             trailing={
-              // Opening the picker is free to undo: touch-down (#1529).
               <PressInPressable
                 pressIn
                 testID="btn-composer-emoji"
@@ -389,11 +339,7 @@ export function Composer({
             }
           />
           {draft === "" ? (
-            // The placeholder, drawn here rather than by the native input so it
-            // is always ONE line: it ellipsizes at the end instead of wrapping,
-            // whatever its length, the language or the system text size. It
-            // spans the text area (start padding to the emoji button), so
-            // start/end follow RTL, and lets every touch through to the input.
+            // Drawn here so it is always ONE line (a multiline input sizes to its placeholder).
             <View
               pointerEvents="none"
               accessibilityElementsHidden
@@ -422,9 +368,7 @@ export function Composer({
             </View>
           ) : null}
         </View>
-        {/* Always the accent fill with a dark glyph and no border (user's
-            call). With nothing to send it is announced as disabled and leaves
-            the focus order; a tap then does nothing. */}
+        {/* With nothing to send it is announced disabled and leaves the focus order. */}
         <Pressable
           onPress={onSend}
           disabled={sendDisabled}
@@ -456,14 +400,11 @@ export function Composer({
   );
 }
 
-// The field's insets and its trailing emoji button, shared with the
-// placeholder overlay so it covers exactly the text area.
 const FIELD_PAD_START = 16;
 const FIELD_PAD_END = 4;
 const FIELD_GAP = 4;
 const EMOJI_BUTTON_WIDTH = 36;
 
-// The suggestion popover above the composer (mentions / emoji shortcodes).
 function suggestionBox() {
   return {
     marginHorizontal: 12,

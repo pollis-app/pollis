@@ -31,9 +31,7 @@ import type { Channel } from "../../types";
 import { ChatView } from "../chat/[id]";
 import { useThemeRerender } from "../../components/theme";
 
-// The Groups tab (Main.dc.html): a strip of group pills, then the selected
-// group's channel panel. Picking a pill switches the group in place; the
-// choice is remembered across launches.
+// The Groups tab: group pills, then the selected group's channel panel.
 function Groups() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
@@ -50,19 +48,14 @@ function Groups() {
   const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id ?? null;
   const [addOpen, setAddOpen] = useState(false);
-  // On regular (iPad) width the strip + panel are the left column of a
-  // two-pane master-detail; on compact they are the whole screen.
   const isRegular = useLayoutClass() === "regular";
-  // The right pane's own page stack (channel info, members, settings, a
-  // thread…) on regular width. A different group or conversation starts it
-  // over — whoever changed the selection (this list, Search, a deep link).
+  // The right pane's page stack; a different selection starts it over.
   const pane = usePaneStack();
   const resetPane = pane.api.reset;
   useEffect(() => {
     resetPane();
   }, [selectedGroupId, selectedChannelId, resetPane]);
 
-  // The group last picked here, from a previous launch.
   const [storedGroupId, setStoredGroupId] = useState<string | null>(null);
   useEffect(() => {
     if (!me) {
@@ -79,18 +72,13 @@ function Groups() {
     };
   }, [me]);
 
-  // The shown group: the app-wide selection (set by opening a channel or a
-  // group anywhere), else the remembered one, else the first.
   const current =
     groups.find((g) => g.id === selectedGroupId) ??
     groups.find((g) => g.id === storedGroupId) ??
     groups[0] ??
     null;
 
-  // On compact, being on this list means no conversation is open — clear the
-  // selection so realtime `new_message` events for the conversation the user
-  // just left count as unread again. On regular the detail pane keeps the
-  // conversation visible, so the selection (and unread suppression) stands.
+  // On compact, this list means nothing is open: clear the selection so realtime counts unread again.
   useFocusEffect(
     useCallback(() => {
       if (!isRegular) {
@@ -99,13 +87,7 @@ function Groups() {
     }, [isRegular]),
   );
 
-  // Regular width: a selected group with no conversation open shows its
-  // first channel (#General) in the right pane rather than "Select a
-  // conversation" — e.g. right after creating a group, or switching pills.
-  // Only while this tab is focused: the tab stays mounted under Direct, and
-  // selecting a channel there would close the open DM. When the selection is
-  // a group the list has not refetched yet (just created), wait for it rather
-  // than opening a channel of the fallback group. Compact never auto-opens.
+  // Regular width: auto-open the first channel, only while focused, and only once the list knows the group.
   const focused = useIsFocused();
   const autoChannel =
     isRegular &&
@@ -124,7 +106,6 @@ function Groups() {
       appStore.setSelectedGroupId(autoGroupId);
     }
     appStore.setSelectedChannelId(autoChannel.id);
-    // Showing a conversation clears its unread count, as opening it does.
     markConversationRead(autoChannel.id);
   }, [autoChannel, autoGroupId]);
 
@@ -142,12 +123,8 @@ function Groups() {
   const openChannel = (groupId: string, c: Channel) => {
     selectGroup(groupId);
     appStore.setSelectedChannelId(c.id);
-    // Opening a conversation clears its unread count (desktop does the same
-    // in its Channel page).
     markConversationRead(c.id);
-    // Re-opening the channel already shown closes any page over it.
     resetPane();
-    // On regular the right pane updates in place; on compact push the chat.
     if (!isRegular) {
       router.push({
         pathname: "/chat/[id]",
@@ -233,10 +210,7 @@ function Groups() {
     );
   }
 
-  // Regular width: list + conversation side by side while there is a group to
-  // pick from; with none (or still loading) the empty state is one centred
-  // column — a two-pane would squeeze its call to action into the list column
-  // beside a "Select a conversation" that has nothing to select.
+  // Regular width with no group: one centred column, not a squeezed two-pane.
   let body: React.ReactNode = column;
   if (isRegular && current) {
     body = (

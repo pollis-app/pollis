@@ -23,9 +23,7 @@ export default function NewDM() {
   const { openConversation } = useOpenConversation();
   const { t } = useTranslation("mobile");
   const [query, setQuery] = useState("");
-  // Exact-match lookup on Find / return only, never while typing: per-key
-  // lookups let anyone walk the directory one prefix at a time (#1216).
-  // Desktop's Start DM looks up on submit the same way.
+  // Exact-match lookup on submit only (#1216).
   const [submitted, setSubmitted] = useState("");
   const search = useUserSearch(submitted);
   const submit = () => {
@@ -41,8 +39,7 @@ export default function NewDM() {
       { memberIds: [userId] },
       {
         onSuccess: (channel) => {
-          // Phones: replace this form with the DM. iPad: the DM opens in the
-          // Direct tab's two-pane.
+          // Phones replace this form; iPad opens the two-pane.
           openConversation({ id: channel.id, kind: "dm" }, { replace: true });
         },
       },

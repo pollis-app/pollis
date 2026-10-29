@@ -1,16 +1,4 @@
-/*
- * The QR device-linking scanner (app/(auth)/link.tsx) needs the camera on both
- * platforms (#1255).
- *
- * Pinned: the config resolved exactly as `expo config --type introspect` does
- * (prebuild config + every plugin's mods, introspect-only, nothing written) keeps
- * android.permission.CAMERA in the AndroidManifest with no tools:node="remove",
- * and iOS carries the pairing NSCameraUsageDescription. Any plugin option of
- * `cameraPermission: false` (expo-image-picker turns that into a blocked CAMERA
- * on Android and a deleted usage string on iOS) fails this.
- *
- *   cd mobile && pnpm test
- */
+/* The QR scanner needs the camera on both platforms (#1255); `cameraPermission: false` anywhere fails this. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

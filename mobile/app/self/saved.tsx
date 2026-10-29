@@ -37,15 +37,10 @@ function timeAgo(iso: string): string {
   return i18n.t("common:timeAgo.days", { count: Math.floor(s / 86400) });
 }
 
-/**
- * Saved messages (#887). Rows open the message's conversation via
- * `resolve_message_permalink`; a miss shows desktop's exact non-oracle copy
- * and navigates nowhere.
- */
+/** Saved messages (#887); a miss shows desktop's non-oracle copy. */
 export default function SavedScreen() {
   useThemeRerender();
   const { t } = useTranslation("saved");
-  // Phones push the conversation; iPad opens it in its tab's two-pane.
   const { openConversation } = useOpenConversation();
   const { data: saved = [], isLoading } = useSavedMessages();
   const unsave = useUnsaveMessage();
@@ -63,7 +58,6 @@ export default function SavedScreen() {
       setUnresolved(true);
       return;
     }
-    // Opens scrolled to the message, like a permalink (#1315).
     messageJumpStore.request(item.conversation_id, item.message_id);
     const route = routeFor(item.conversation_id);
     openConversation({

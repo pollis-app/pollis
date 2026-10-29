@@ -1,6 +1,4 @@
-// Quote replies (#1270): what a reply shows of the message it answers, the
-// same reference desktop draws (MessageItem's reply line, ReplyPreview's
-// bar). Pure, so the node tests can pin it.
+// Quote replies (#1270): what a reply shows of its original. Pure.
 
 export const REPLY_SNIPPET_MAX = 80;
 
@@ -10,9 +8,7 @@ type Quotable = {
   attachments: { filename: string }[];
 };
 
-// One line of the replied-to message: its text cut at 80 characters, or, for
-// an attachment-only message, the first file's name. Empty when there is
-// neither; the caller supplies the placeholder copy.
+// Text cut at 80 characters, or the first file's name; empty when neither.
 export function replySnippet(message: Quotable): string {
   const text = message.content.replace(/\s+/g, " ").trim();
   if (text) {
@@ -23,9 +19,7 @@ export function replySnippet(message: Quotable): string {
   return message.attachments[0]?.filename ?? "";
 }
 
-// The loaded messages that something replies to, in ONE pass, keyed by id
-// (desktop's #874 shape: no per-row search of the whole log). A reply whose
-// target is not loaded is simply absent, and its row says so.
+// ONE pass, keyed by id (#874); an unloaded target is absent.
 export function replyTargets<M extends Quotable & { reply_to_id?: string | null }>(
   messages: readonly M[],
 ): Map<string, M> {

@@ -12,16 +12,7 @@ import { OfferCodeView } from "../../components/auth/OfferCodeView";
 import { isSignInCode, phoneDeviceName } from "../../lib/linkCodes";
 import { useThemeRerender } from "../../components/theme";
 
-/**
- * Sign in with another device. Three ways in, one screen, laid out like Sign
- * in (a back button to email, a title, one line, then the body):
- *
- * - scan (#1207): the camera reads the code a signed-in desktop shows under
- *   Security → Link a new device;
- * - code: the same code, typed or pasted;
- * - show (#1361): this phone shows ITS code for a signed-in phone to scan
- *   under Security → Scan to sign in a device.
- */
+/** Sign in with another device: scan (#1207), type the code, or show this phone's (#1361). */
 export default function LinkSignIn() {
   useThemeRerender();
   const { t } = useTranslation("auth");
@@ -32,7 +23,6 @@ export default function LinkSignIn() {
   const manual = mode === "code";
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // The camera reports every frame the code is in view; claim once.
   const claimed = useRef(false);
 
   const submit = (payload: string) => {
@@ -55,8 +45,7 @@ export default function LinkSignIn() {
 
   return (
     <Screen testID="screen-auth-link" centered>
-      {/* Back to email. The id predates the top bar: the tour flow taps it
-          to return from this screen. */}
+      {/* The tour flow taps this id to return from this screen. */}
       <Header
         bordered={false}
         backTestID="btn-link-use-email"
@@ -125,8 +114,7 @@ export default function LinkSignIn() {
           </View>
         ) : null}
 
-        {/* Held through success until the enrollment screen replaces this
-            one, so the spinner never blinks off before navigation. */}
+        {/* Held through success, so the spinner never blinks off before navigation. */}
         {claim.isPending || claim.isSuccess ? (
           <View
             style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 }}

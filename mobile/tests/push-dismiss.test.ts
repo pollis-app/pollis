@@ -1,14 +1,4 @@
-/*
- * Clearing read notifications from the tray (#1508): `mobile/lib/push/dismiss.ts`
- * and the wiring around it.
- *
- * A message notification used to stay in the tray after its message was read,
- * unless it was the one the user tapped. Every tray notification is now matched
- * by its opaque handle — `data.h` when the app presented it, the Android tag
- * (which the DS sets to the handle) when the system posted it — and cleared on
- * this device's own read, on the DS's silent `{ d: [...] }` push after a read
- * anywhere, and on a foreground catch-up for a push that never arrived.
- */
+/* Clearing read notifications from the tray (#1508): lib/push/dismiss.ts and its wiring. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -35,18 +25,15 @@ test("a notification the app presented is matched by its payload handle", () => 
 });
 
 test("a notification Android posted in the background is matched by its tag", () => {
-  // What expo-notifications reports for a notification it did not build: the
-  // payload is gone, the tag (= the handle) survives in the identifier.
+  // A notification expo did not build: only the tag (= handle) survives.
   const identifier = `expo-notifications://foreign_notifications?tag=${H2}&id=0`;
   assert.equal(handleOfPresented({ identifier, data: { "android.title": "New message" } }), H2);
-  // Order of the query parameters does not matter.
   assert.equal(handleOfPresented({ identifier: `expo-notifications://foreign_notifications?id=0&tag=${H2}`, data: null }), H2);
 });
 
 test("anything else has no handle", () => {
   for (const n of [
     { identifier: "expo-notifications://foreign_notifications?id=7", data: {} },
-    // FCM's own default tag, from a push sent before the DS set one.
     { identifier: "expo-notifications://foreign_notifications?tag=FCM-Notification%3A123&id=0", data: {} },
     { identifier: "some-local-notification", data: { conversationId: "c1" } },
     { identifier: "x", data: { h: "" } },
@@ -58,15 +45,12 @@ test("anything else has no handle", () => {
 });
 
 test("the silent push is read in the shapes the listener and the task see", () => {
-  // As sent.
   assert.deepEqual(readDismissPayload({ d: [H1, H2] }), [H1, H2]);
-  // As the background task receives it on both platforms: the data blob as a
-  // JSON string under `dataString`.
+  // As the background task receives it: a JSON string under `dataString`.
   assert.deepEqual(
     readDismissPayload({ data: { dataString: JSON.stringify({ d: [H1] }) }, notification: null }),
     [H1],
   );
-  // Android also spreads the raw FCM data, whose values are strings.
   assert.deepEqual(readDismissPayload({ data: { d: JSON.stringify([H2]) } }), [H2]);
 });
 
@@ -80,7 +64,6 @@ test("an ordinary message push, or anything malformed, dismisses nothing", () =>
     { d: "not json" },
     { d: [] },
     { d: [42, null, ""] },
-    // A tap response on Android also reaches the task.
     { actionIdentifier: "expo.modules.notifications.actions.DEFAULT", notification: {} },
   ]) {
     assert.equal(readDismissPayload(p), null, JSON.stringify(p));
@@ -118,16 +101,11 @@ test("the background task is registered before the app renders", () => {
   const src = read("lib/push/dismissTask.ts");
   assert.match(src, /TaskManager\.defineTask/);
   assert.match(src, /Notifications\.registerTaskAsync\(DISMISS_TASK\)/);
-  // Headless-safe: no native bridge, no store.
   assert.doesNotMatch(src, /from "\.\.\/native"|appStore/);
 });
 
 test("R8 keeps the headless loader the killed-app task needs", () => {
-  // expo-modules-core names `RNHeadlessAppLoader` only in manifest meta-data and
-  // loads it by reflection, so a minified release build strips it. Then the
-  // first data-only push to an app with no process died in
-  // `TaskService.executeTask` (ClassNotFoundException -> NullPointerException):
-  // seen on the emulator before this rule.
+  // `RNHeadlessAppLoader` is loaded by reflection, so R8 stripped it and the killed-app task crashed.
   const app = JSON.parse(read("app.json")).expo;
   const props = app.plugins.find((p: unknown) => Array.isArray(p) && p[0] === "expo-build-properties");
   assert.equal(props?.[1]?.android?.enableMinifyInReleaseBuilds, true);
@@ -149,11 +127,8 @@ test("every read clears this device's tray, and landing/resume catches up", () =
     hook,
     /appStore\.markRead\(conversationId\);\s*void dismissConversationNotifications\(conversationId\);/,
   );
-  // Both the landing effect and the foreground effect reconcile.
   assert.equal(hook.match(/void reconcileReadNotifications\(userId\);/g)?.length, 2);
   const push = read("lib/push/index.ts");
   assert.match(push, /invoke<string\[\]>\("dismissed_push_handles", \{ userId, handles \}\)/);
-  // The catch-up trusts only the DS's record of a read, never local counts: a
-  // notification for a message not yet ingested here would look read.
   assert.doesNotMatch(push.slice(push.indexOf("export async function reconcileReadNotifications")), /get_unread_counts|unreadCounts/);
 });

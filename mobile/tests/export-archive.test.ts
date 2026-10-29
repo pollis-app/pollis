@@ -1,10 +1,4 @@
-/*
- * The naming of the on-device export (#856) — the part that has to agree
- * with desktop's save-dialog suggestion, pinned without a renderer. Wording
- * is catalogue copy and is covered by `scripts/i18n-check.mjs`.
- *
- *   node --test mobile/tests/
- */
+/* The on-device export's naming (#856), which must agree with desktop's. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
