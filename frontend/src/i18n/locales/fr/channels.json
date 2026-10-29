@@ -135,7 +135,8 @@
     "empty": "Aucune invitation en attente.",
     "invitedBy": "Invité par {{name}}",
     "accept": "accepter",
-    "decline": "refuser"
+    "decline": "refuser",
+    "acceptFailed": "Impossible d'accepter l'invitation. Réessayez."
   },
   "inviteMember": {
     "pageTitle": "Inviter un membre :: {{group}}",

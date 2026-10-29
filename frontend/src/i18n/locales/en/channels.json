@@ -139,7 +139,8 @@
     "empty": "No pending invites.",
     "invitedBy": "Invited by {{name}}",
     "accept": "accept",
-    "decline": "decline"
+    "decline": "decline",
+    "acceptFailed": "Couldn't accept the invite. Try again."
   },
   "inviteMember": {
     "pageTitle": "Invite Member :: {{group}}",

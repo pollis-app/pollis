@@ -47,11 +47,21 @@ tags:
 - takeScreenshot: membership-01-invite
 - tapOn:
     id: "btn-accept-invite-.*"
+# Optimistic accept (#1560): the invite row goes and the group is listed on the
+# same frame, before the accept or any refetch has answered. Plain asserts, no
+# extended wait or relaunch: a screen showing neither fails here.
+- assertNotVisible:
+    id: "row-invite-.*"
+- assertVisible:
+    id: "row-group-.*"
+- assertVisible:
+    id: "btn-group-menu"
+    text: "${GROUP_NAME}, .*"
+- takeScreenshot: membership-01b-accepted
+# Open it: the channels arrive with the refetch the accept waits on.
 - extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "${GROUP_NAME}, .*"
-    timeout: 60000
+    visible: "General"
+    timeout: 30000
 
 - tapOn: "General"
 - extendedWaitUntil:

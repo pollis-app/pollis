@@ -149,6 +149,20 @@ interface MockGroupInvite {
   created_at: string;
 }
 
+/**
+ * An invite waiting on the signed-in user (#1560). Mirrors `PendingInvite` in
+ * `hooks/queries/useGroups`; `channels` is what the group holds once joined.
+ */
+interface MockPendingInvite {
+  id: string;
+  group_id: string;
+  group_name: string;
+  inviter_id: string;
+  inviter_username?: string;
+  created_at: string;
+  channels?: MockChannel[];
+}
+
 /** Mirrors `VoiceInputMode` in `pollis-core/src/commands/voice/gate.rs`. */
 type MockVoiceInputMode = 'voice_activity' | 'push_to_talk';
 
@@ -230,6 +244,8 @@ interface MockStore {
   // row, as it is server-side.
   inviteLinks: MockInviteLink[];
   groupInvites: MockGroupInvite[];
+  /** Invites waiting on the signed-in user (#1560). */
+  pendingInvites: MockPendingInvite[];
   /** Open device-enrollment requests the approval takeover renders (#1096). */
   pendingEnrollments: MockPendingEnrollment[];
   /** What the UI actually submitted to `approve_device_enrollment`. */
@@ -395,6 +411,7 @@ const store: MockStore = {
   customEmoji: preload.customEmoji ?? [],
   inviteLinks: preload.inviteLinks ?? [],
   groupInvites: preload.groupInvites ?? [],
+  pendingInvites: preload.pendingInvites ?? [],
   pendingEnrollments: preload.pendingEnrollments ?? [],
   enrollmentApprovals: [],
   deviceLinkPin: (preload.deviceLinkPin as string | undefined) ?? '1234',
@@ -1099,7 +1116,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // `= []` destructuring defaults only cover `undefined`, not `null`.
     case 'list_peer_verifications':
     case 'list_pending_invites':
-    case 'get_pending_invites':
     case 'list_dm_requests':
     case 'list_join_requests':
     case 'get_join_requests':
@@ -2009,6 +2025,36 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
             (l.expires_at == null || Date.parse(l.expires_at) > Date.now()) &&
             (l.max_uses == null || l.uses < l.max_uses),
         }));
+    }
+
+    // Invites waiting on the signed-in user (#1560).
+    case 'get_pending_invites':
+      return store.pendingInvites.map(({ channels: _c, ...rest }) => rest);
+
+    // Accepting makes the user a member: the group and its channels appear in
+    // `list_user_groups_with_channels`, as the DS reports after the accept.
+    case 'accept_group_invite': {
+      const { inviteId } = args as { inviteId: string };
+      const invite = store.pendingInvites.find((i) => i.id === inviteId);
+      if (!invite) {
+        throw new Error('invite not found');
+      }
+      store.pendingInvites = store.pendingInvites.filter((i) => i.id !== inviteId);
+      store.groups.push({
+        id: invite.group_id,
+        name: invite.group_name,
+        owner_id: invite.inviter_id,
+        created_at: invite.created_at,
+        current_user_role: 'member',
+      });
+      store.channels[invite.group_id] = invite.channels ?? [];
+      return null;
+    }
+
+    case 'decline_group_invite': {
+      const { inviteId } = args as { inviteId: string };
+      store.pendingInvites = store.pendingInvites.filter((i) => i.id !== inviteId);
+      return null;
     }
 
     // The member page's pending invites (#1506). Members only, as in Rust.

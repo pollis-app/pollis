@@ -97,13 +97,25 @@ export function PendingRows({
                       selected
                       onPress={() => acceptInvite.mutate(inv.id)}
                     >
-                      {acceptInvite.isPending ? "…" : t("groups.accept")}
+                      {acceptInvite.isPending && acceptInvite.variables === inv.id
+                        ? "…"
+                        : t("groups.accept")}
                     </Chip>
                   </View>
                 }
               />
             ))}
           </Group>
+          {/* A failed accept puts the invite back (#1560); say why it is there. */}
+          {acceptInvite.isError ? (
+            <Text
+              testID="text-accept-invite-error"
+              accessibilityLiveRegion="polite"
+              style={[ty.secondary, { paddingStart: space.sm }]}
+            >
+              {t("channels:invites.acceptFailed")}
+            </Text>
+          ) : null}
         </View>
       ) : null}
     </View>
