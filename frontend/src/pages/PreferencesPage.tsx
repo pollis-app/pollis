@@ -1002,7 +1002,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 {t("voice.heading")}
               </h2>
               <div className="self-start">
-                <Button variant="secondary" size="sm" onClick={() => navigate({ to: "/voice-settings" })}>
+                <Button variant="secondary" size="sm" activateOn="press" onClick={() => navigate({ to: "/voice-settings" })}>
                   {t("voice.openButton")}
                 </Button>
               </div>

@@ -111,6 +111,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                 {isMember ? (
                   <Button
                     data-testid="go-to-group-button"
+                    activateOn="press"
                     onClick={() => navigate({ to: "/groups/$groupId", params: { groupId: foundGroup.id } })}
                   >
                     {t("group.goToGroup")}

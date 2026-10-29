@@ -528,6 +528,7 @@ export const SecurityPage: React.FC = observer(() => {
             <div className="self-start">
               <Button
                 data-testid="change-pin-button"
+                activateOn="press"
                 onClick={() => navigate({ to: "/security/change-pin" })}
               >
                 {t("security.changePinButton")}
@@ -591,7 +592,7 @@ export const SecurityPage: React.FC = observer(() => {
               <h2 className={sectionHeaderClass}>{t("linkDevice.heading")}</h2>
               <p className="text-sm text-muted">{t("linkDevice.rowSub")}</p>
               <div>
-                <Button data-testid="link-device-button" variant="secondary" onClick={() => navigate({ to: "/security/link-device" })}>
+                <Button data-testid="link-device-button" variant="secondary" activateOn="press" onClick={() => navigate({ to: "/security/link-device" })}>
                   {t("linkDevice.heading")}
                 </Button>
               </div>

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Play, Pause } from "lucide-react";
 import { formatDuration } from "../../utils/format";
+import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
 
 interface InlineAudioPlayerProps {
   src: string;
@@ -9,6 +10,9 @@ interface InlineAudioPlayerProps {
   className?: string;
   autoPlay?: boolean;
   onClick?: () => void;
+  /** `"press"`: a plain mouse press on the card (not on its play button or
+      seek bar) runs `onClick` on pointer-down (#1529). */
+  activateOn?: ActivateOn;
 }
 
 export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
@@ -17,12 +21,14 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
   className = "",
   autoPlay = false,
   onClick,
+  activateOn,
 }) => {
   const { t } = useTranslation("common");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const press = usePressActivation<HTMLDivElement>(onClick, activateOn);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -82,7 +88,16 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
       style={{
         cursor: onClick ? "pointer" : "default",
       }}
-      onClick={onClick}
+      onClick={press.onClick}
+      onPointerDown={(e) => {
+        // The play button and the seek bar are their own controls: a press
+        // on them must not open the viewer.
+        if ((e.target as Element).closest("button, input")) {
+          return;
+        }
+        press.onPointerDown?.(e);
+      }}
+      onMouseDown={press.onMouseDown}
     >
       <audio ref={audioRef} src={src} autoPlay={autoPlay} preload="metadata" />
 

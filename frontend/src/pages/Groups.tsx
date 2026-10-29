@@ -65,6 +65,7 @@ export const GroupsPage: React.FC = observer(() => {
           },
           badge: totalUnread > 0 ? totalUnread : undefined,
           testId: `group-option-${g.id}`,
+          activateOn: "press",
         };
       });
 
@@ -76,6 +77,7 @@ export const GroupsPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/new" }),
       type: "system",
       testId: "menu-item-create-group",
+      activateOn: "press",
     },
     {
       id: "search-group",
@@ -84,6 +86,7 @@ export const GroupsPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/search" }),
       type: "system",
       testId: "menu-item-find-group",
+      activateOn: "press",
     },
   ];
 
@@ -94,6 +97,7 @@ export const GroupsPage: React.FC = observer(() => {
 
   items.push({
     id: "__back__",
+    activateOn: "press",
     label: t("common:actions.goBack"),
     icon: <ArrowLeft size={14} className="rtl-mirror" />,
     action: () => navigate({ to: "/" }),

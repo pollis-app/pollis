@@ -114,6 +114,7 @@ export const SavedPage: React.FC = () => {
               }
             />
           )}
+          activateRowOn="press"
           onClickRow={(item) => void handleOpen(item)}
           onEnterRow={(item) => void handleOpen(item)}
           controls={(item) => [
