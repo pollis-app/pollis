@@ -41,18 +41,7 @@ const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
   other: "saveFailed",
 };
 
-/**
- * The Vault (#107): a private, end-to-end-encrypted space that works like a
- * chat with yourself — Signal's Note to Self, with Drive semantics. Entries
- * sync across every enrolled device (the account key decrypts them, so a new
- * device starts FULL here, not empty), files ride the normal attachment
- * pipeline, and the media toggle flips the same content into a
- * Photos-style roll (`MediaGalleryView`, deliberately generic so channels
- * and DMs can adopt it later).
- *
- * Confirmation and edit flows replace the composer bar — the house pattern
- * (`MainContent`'s edit/delete bars); no modals.
- */
+/** The Vault (#107): an E2EE note-to-self synced across enrolled devices, with a media roll. No modals. */
 export const VaultPage: React.FC = observer(() => {
   const { t } = useTranslation("vault");
   const [view, setView] = useState<VaultView>("chat");
@@ -70,15 +59,13 @@ export const VaultPage: React.FC = observer(() => {
   const chatInputRef = useRef<ChatInputHandle>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
-  // Keep the log pinned to the newest entry, chat-style.
   useEffect(() => {
     if (view === "chat" && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [entries.length, view]);
 
-  // Client-side search over decrypted entries — the server cannot search
-  // what it cannot read.
+  // Searched client-side; the server can't read it.
   const visibleEntries = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
     if (!needle) {
@@ -94,7 +81,6 @@ export const VaultPage: React.FC = observer(() => {
     });
   }, [entries, searchQuery]);
 
-  // Every attachment across the vault, newest entry first — the media roll.
   const allAttachments = useMemo(() => {
     const out: MessageAttachment[] = [];
     const seen = new Set<string>();
@@ -109,8 +95,7 @@ export const VaultPage: React.FC = observer(() => {
     return out;
   }, [entries]);
 
-  // A save that failed (#1497): why, for the line above the composer. The
-  // draft itself goes back into the composer, and "Try again" sends it.
+  // A failed save (#1497): reason above the composer; the draft goes back in.
   const [saveFailure, setSaveFailure] = useState<VaultSaveFailure | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -148,9 +133,7 @@ export const VaultPage: React.FC = observer(() => {
     }
     const parsed = parseContent(editingEntry.content, "vault");
     const attachments = parsed.attachments ?? [];
-    // An entry with files keeps them across a text edit: rebuild the same
-    // envelope with the new caption. The wire field names mirror
-    // `buildMessageContent`.
+    // Keep files across a text edit; fields mirror `buildMessageContent`.
     const newContent =
       attachments.length > 0
         ? JSON.stringify({
@@ -190,8 +173,7 @@ export const VaultPage: React.FC = observer(() => {
     );
   }, [pendingDeleteId, deleteMutation]);
 
-  // Escape backs out of the edit/delete bars before the window-level
-  // nav.back shortcut can navigate the page away — the MainContent pattern.
+  // Escape leaves the edit/delete bars before nav.back fires.
   useEffect(() => {
     if (!editingEntry && !pendingDeleteId) {
       return;

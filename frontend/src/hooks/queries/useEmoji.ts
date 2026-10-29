@@ -6,25 +6,12 @@ import type { CustomEmoji } from "../../types";
 
 export const emojiQueryKeys = {
   all: ["emoji"] as const,
-  // Every custom emoji the user may SEND — the picker's source and the
-  // permission rule in one query (see `list_usable_emoji` in Rust).
+  // Every emoji the user may send: the picker and the permission rule.
   usable: (userId: string | null) => ["emoji", "usable", userId] as const,
-  // One group's emoji — the management page.
   group: (groupId: string) => ["emoji", "group", groupId] as const,
 };
 
-/**
- * Every custom emoji `userId` may use, across every group they are a member of.
- *
- * This is deliberately the ONLY source the picker draws its custom section from,
- * because it is also the permission predicate: a user may send any emoji from
- * any group they are in, in any conversation (#848, Discord's rule). Filtering
- * the picker from a different query than the one that decides permission is how
- * the two drift apart.
- *
- * Long `staleTime`: emoji change when someone adds one, which is rare, and the
- * add/remove mutations invalidate this key directly.
- */
+/** Every emoji `userId` may use (#848); the picker's only source, since it is the permission rule. */
 export function useUsableEmoji(userId: string | null) {
   return useQuery({
     queryKey: emojiQueryKeys.usable(userId),
@@ -36,13 +23,7 @@ export function useUsableEmoji(userId: string | null) {
   });
 }
 
-/**
- * One group's custom emoji, for the group's emoji management page.
- *
- * #917: members-only. This does NOT affect rendering an emoji from a group you
- * are not in — that path is `useEmojiImage` → `get_emoji_url`, which takes a
- * content hash and no group, exactly as #848 requires.
- */
+/** One group's emoji (members-only, #917); rendering uses `get_emoji_url` by hash. */
 export function useGroupEmoji(groupId: string) {
   const currentUser = useObserver(() => appStore.currentUser);
 
@@ -59,12 +40,7 @@ export function useGroupEmoji(groupId: string) {
   });
 }
 
-/**
- * Add an emoji to a group from a file on disk.
- *
- * `path` is a filesystem path, not bytes: the Rust side reads, re-encodes and
- * uploads it, so a multi-megabyte source never crosses the JSON IPC.
- */
+/** Add an emoji from a path; Rust reads and re-encodes it. */
 export function useUploadGroupEmoji() {
   const queryClient = useQueryClient();
 
@@ -85,9 +61,7 @@ export function useUploadGroupEmoji() {
       });
     },
     onSuccess: () => {
-      // Invalidate the whole emoji tree: a new emoji changes both the group's
-      // list and the usable set of every member, and the key for "every member"
-      // is not knowable from here.
+      // Invalidate all: every member's usable set changed.
       queryClient.invalidateQueries({ queryKey: emojiQueryKeys.all });
     },
   });

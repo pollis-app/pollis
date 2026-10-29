@@ -17,17 +17,7 @@ export const SearchPage: React.FC = observer(() => {
   const { q } = useSearch({ strict: false }) as { q?: string };
   const { data: groups = [] } = useUserGroupsWithChannels();
 
-  /**
-   * Open a hit where it actually lives.
-   *
-   * This page used to navigate every result to `/dms/$conversationId`, so every
-   * channel hit landed on a broken DM route. The result now carries its own
-   * `conversation_kind` and `group_id` from `conversation_cache`; the local
-   * group tree is the fallback for a conversation this device has never listed.
-   *
-   * The jump is queued before navigating — `MessageList` claims it once the
-   * target row exists, scrolls to it and flashes it (#854's machinery, reused).
-   */
+  /** Open a hit at its real route (channel or DM), queuing the jump for `MessageList` (#854). */
   const openResult = (result: SearchResult) => {
     messageJumpStore.request(result.conversation_id, result.message_id);
 

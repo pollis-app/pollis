@@ -4,8 +4,7 @@ import type { EmojiAnnotationStack } from "./emojiAnnotations";
 import type { PickerEmoji } from "./emojiSearch";
 import { pickerEmojiId } from "./emojiSearch";
 
-/** Cells per row. Must match the `grid-cols-*` class below — the picker's
- * arrow-key navigation uses it to move a whole row at a time. */
+/** Must match the `grid-cols-*` class; arrow keys move by a row. */
 export const EMOJI_COLUMNS = 9;
 
 interface EmojiSectionProps {
@@ -13,29 +12,14 @@ interface EmojiSectionProps {
   title: string;
   items: readonly PickerEmoji[];
   toneIndex: number;
-  /** Localized names for the cell labels — see `useEmojiAnnotations`. */
   annotations: EmojiAnnotationStack;
-  /** Index of this section's FIRST cell in the picker's flat nav order. */
   baseIndex: number;
   onSelect: (item: PickerEmoji) => void;
   onPreview: (item: PickerEmoji | null) => void;
   scrollRoot: HTMLElement | null;
 }
 
-/**
- * One titled block of the picker, with a sticky header.
- *
- * The grid is mounted LAZILY. A full standard emoji set is ~1800 cells, and
- * mounting all of them makes opening the picker visibly slow in the WebKitGTK
- * webview — the categories a user never scrolls to should not cost anything. An
- * `IntersectionObserver` with a generous root margin swaps a correctly-sized
- * placeholder for the real grid shortly before the section comes into view, and
- * once mounted the grid stays mounted so scrolling back up never re-flashes.
- *
- * The placeholder is sized from the item count so the scrollbar is honest from
- * the first frame — otherwise the scroll position would jump as sections mount
- * underneath the user.
- */
+/** A titled block whose grid mounts lazily (IntersectionObserver) behind a correctly-sized placeholder; ~1800 cells are slow on WebKitGTK. */
 export const EmojiSection: React.FC<EmojiSectionProps> = ({
   id,
   title,
@@ -58,8 +42,6 @@ export const EmojiSection: React.FC<EmojiSectionProps> = ({
     if (!element) {
       return;
     }
-    // No IntersectionObserver (very old webview, or a test environment) →
-    // render everything rather than render nothing.
     if (typeof IntersectionObserver === "undefined") {
       setMounted(true);
       return;
@@ -82,7 +64,6 @@ export const EmojiSection: React.FC<EmojiSectionProps> = ({
     return null;
   }
 
-  // 2rem cell + 0.125rem gap, rounded up to whole rows.
   const rows = Math.ceil(items.length / EMOJI_COLUMNS);
   const placeholderHeight = `${rows * 2.125}rem`;
 

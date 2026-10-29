@@ -1,11 +1,4 @@
-/*
- * Another admin's name chip (#1488) is filled with that user's stable
- * colour and carries dark `text-ink` on top. Pins that every possible fill
- * stays readable under the ink, and that the fill is the same colour the
- * user's name gets as text on the (default) dark theme.
- *
- *   node --test frontend/tests/
- */
+/* Admin name-chip fills (#1488) stay readable under `text-ink` and match the dark-theme name colour. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

@@ -8,9 +8,7 @@ import { CanvasAddon } from "@xterm/addon-canvas";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalViewProps {
-  // True when the terminal pane is the active view. The component stays
-  // mounted across toggles (so the PTY + scrollback survive); we just
-  // refit/refocus when it becomes visible again.
+  // Stays mounted across toggles (PTY + scrollback survive).
   visible: boolean;
 }
 
@@ -21,11 +19,7 @@ function cssVar(name: string, fallback: string): string {
   return v.length > 0 ? v : fallback;
 }
 
-/**
- * Real terminal emulator pane. Spawns the user's $SHELL behind a PTY in
- * Rust on first mount and keeps it alive for the app's lifetime. Renders
- * with xterm.js + the WebGL addon.
- */
+/** A $SHELL behind a PTY in Rust, kept for the app's lifetime; xterm.js renderer. */
 const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
   const { t } = useTranslation("nav");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,18 +48,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
-    // Renderer, best first. xterm has three and the gap between them is the
-    // difference between typing feeling instant and feeling staggered:
-    // WebGL > canvas > DOM, and DOM repaints spans on the CPU.
-    //
-    // This matters far more on Linux than macOS. WKWebView is accelerated, so
-    // macOS gets WebGL. On Linux the app launches with
-    // WEBKIT_DISABLE_COMPOSITING_MODE=1 (src-tauri/src/main.rs — it is there to
-    // stop WebKitGTK aborting at startup on drivers without working GBM/EGL),
-    // and with accelerated compositing off WebKitGTK has no WebGL at all. The
-    // previous code caught that failure and said nothing, so every Linux user
-    // silently fell all the way to DOM. Canvas is the rung in between and needs
-    // no GPU compositing, which is why it is worth carrying.
+    // Best renderer: WebGL > canvas > DOM. Linux runs with compositing off (no WebGL), so canvas matters there.
     let renderer: "webgl" | "canvas" | "dom" = "dom";
     try {
       term.loadAddon(new WebglAddon());
@@ -75,21 +58,16 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         term.loadAddon(new CanvasAddon());
         renderer = "canvas";
       } catch {
-        // Both unavailable — xterm uses its DOM renderer.
+        // Neither: DOM renderer.
       }
     }
-    // Logged because it is otherwise invisible: the addons fail by throwing at
-    // load time, so "is this accelerated?" was previously unanswerable without
-    // a debugger. If this ever reads `dom` on a machine that should manage
-    // better, that is the bug, not the terminal code.
+    // Logged: otherwise invisible whether it is accelerated.
     console.info(`[terminal] renderer: ${renderer}`);
 
     termRef.current = term;
     fitRef.current = fit;
 
-    // The renderer's dimensions aren't computed until the frame after
-    // open(); fitting (or letting the ResizeObserver fit) before that
-    // throws inside xterm. Gate everything on this.
+    // Fitting before the first frame after open() throws in xterm.
     let ready = false;
     const safeFit = () => {
       if (!ready) {
@@ -98,31 +76,10 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       try {
         fit.fit();
       } catch {
-        /* container momentarily zero-sized (hidden) — ignore */
+        /* hidden (zero-sized); ignore */
       }
     };
-    // Binary IPC: bytes arrive as an ArrayBuffer (InvokeResponseBody::Raw)
-    // with no JSON number-array bloat / parse. Hand the raw Uint8Array to
-    // xterm — its write() has an internal UTF-8 decoder that correctly
-    // holds partial multi-byte sequences split across chunks, so we must
-    // NOT TextDecode per-chunk. The write callback fires once the chunk is
-    // actually parsed/rendered: that's the true end-to-end backpressure
-    // signal we credit back to the aggregator via terminal_ack.
-    // Acks are COALESCED, not one per rendered chunk.
-    //
-    // The write path is binary, but this ack is JSON — and it used to fire from
-    // every single xterm write callback. While you type, the shell echoes each
-    // keystroke as its own chunk, so every character cost a JSON
-    // serialize/parse round trip on top of the keystroke's own invoke: two IPC
-    // hops per key, on WebKitGTK, which is the webview least able to afford
-    // them. That is a large part of why typing felt staggered on Linux and fine
-    // on macOS.
-    //
-    // Safe to batch because the aggregator needs EVENTUAL credit, not
-    // per-chunk precision: it only parks above HIGH_WATERMARK (1 MiB) and
-    // resumes below LOW_WATERMARK (256 KiB) — see commands/terminal_unix.rs.
-    // So we flush on a frame, and immediately once enough is outstanding that
-    // sitting on it could park a bulk producer mid-stream.
+    // Raw bytes to xterm (its decoder handles split UTF-8). Acks are coalesced per frame: the aggregator needs eventual credit only (watermarks in commands/terminal_unix.rs).
     let pendingAck = 0;
     let ackScheduled = false;
     let ackFrame = 0;
@@ -158,11 +115,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
 
     let disposed = false;
 
-    // Spawn the PTY only after the first fit, so the shell inherits the
-    // real COLUMNS/LINES. Opening it earlier with the unfitted xterm
-    // default (80x24) makes zsh compute its PROMPT_SP eol-mark padding for
-    // the wrong width — leaving a stray "%" line above every prompt that
-    // the next prompt never overwrites.
+    // Spawn after the first fit so zsh gets the real width (else a stray "%" line).
     const readyRaf = requestAnimationFrame(() => {
       ready = true;
       safeFit();
@@ -186,14 +139,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         });
     });
 
-    // Binary IPC input, symmetric with the output Channel above: hand the
-    // raw UTF-8 bytes straight to invoke() as the request body (Tauri 2
-    // accepts a Uint8Array as InvokeArgs and ships it as InvokeBody::Raw,
-    // bypassing JSON entirely). The terminal id rides in a header so the
-    // body stays a pure byte stream. The pre-binary path was
-    // `data: Array.from(encoder.encode(data))` which expanded every
-    // keystroke into a JSON number array — a per-key serialize/parse
-    // roundtrip noticeable as input lag on WebKitGTK/X11.
+    // Raw UTF-8 input as the invoke body; the terminal id rides in a header.
     const encoder = new TextEncoder();
     const onDataDisposable = term.onData((data) => {
       const id = terminalIdRef.current;
@@ -221,8 +167,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     });
     resizeObserver.observe(containerRef.current);
 
-    // Best-effort PTY teardown on window close so no zombie shell is
-    // left behind (Drop in Rust also covers process exit).
+    // Best-effort teardown on window close.
     const onBeforeUnload = () => {
       const id = terminalIdRef.current;
       if (id !== null) {
@@ -236,8 +181,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       cancelAnimationFrame(readyRaf);
       window.removeEventListener("beforeunload", onBeforeUnload);
       resizeObserver.disconnect();
-      // Drop any scheduled ack: the session is being closed, so the credit has
-      // nowhere to go and the callback would fire against a dead id.
+      // Drop any scheduled ack for the dead session.
       if (ackScheduled) {
         cancelAnimationFrame(ackFrame);
         ackScheduled = false;
@@ -249,14 +193,10 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       }
       term.dispose();
     };
-    // Deliberately empty: this effect owns the PTY for the app's lifetime.
-    // `t` is captured on purpose — the only copy it produces is a one-shot
-    // spawn failure written into the scrollback, and re-running on a language
-    // change would kill and respawn the user's shell.
+    // Empty on purpose: owns the PTY for the app's lifetime; re-running would respawn the shell.
   }, []);
 
-  // Becoming visible after a toggle: the container had zero size while
-  // hidden, so refit and hand focus back to the shell.
+  // Refit and refocus on becoming visible.
   useEffect(() => {
     if (!visible) {
       return;
@@ -301,7 +241,5 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
   );
 };
 
-// Default export so AppShell can `lazy(() => import("../TerminalView"))` —
-// this keeps the ~380 KiB xterm + WebGL addon out of the initial chunk and
-// defers its parse/eval until the terminal is first opened (#431).
+// Default export for AppShell's lazy import (#431).
 export default TerminalView;

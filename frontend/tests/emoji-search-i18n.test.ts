@@ -1,19 +1,4 @@
-/*
- * Localized emoji search (#901).
- *
- * The picker's search used to match the English Unicode name and nothing else,
- * so a Spanish user got a translated picker where `corazón` found nothing.
- * These tests drive the REAL generated tables — `emojiData.ts` plus the CLDR
- * annotation modules under `annotations/` — through the pure ranking, so a
- * regeneration that dropped a locale, an entry, or the English fallback fails
- * here rather than silently in the UI.
- *
- * Ukrainian is the locale asserted on because it is a four-form-plural
- * language (one / few / many / other), which is where a naive keying scheme
- * would have broken first.
- *
- *   node --test frontend/tests/
- */
+/* Localized emoji search (#901) over the real generated tables; Ukrainian for its four plural forms. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -45,8 +30,6 @@ function search(query: string, tables: EmojiAnnotations[]): string[] {
 }
 
 test("a Ukrainian query finds the emoji CLDR names in Ukrainian", () => {
-  // "серце" — heart. 🫀 is NAMED exactly that in Ukrainian, so it ranks first;
-  // ❤ ("червоне серце") and the other hearts follow by keyword.
   const hits = search("серце", [uk, en]);
   assert.equal(hits[0], "🫀");
   assert.ok(hits.includes("❤"));
@@ -85,9 +68,7 @@ test("a custom substring hit outranks every standard keyword hit", () => {
   const items = rankEmoji("heart", STANDARD_EMOJI, [custom], [en]);
   const ids = items.map((item) => (item.kind === "custom" ? "custom" : item.emoji.char));
   const customAt = ids.indexOf("custom");
-  // 💘 "heart with arrow" is NAMED with the word, so it may still lead; 💋
-  // "kiss mark" and 💌 "love letter" only carry "heart" as a keyword and must
-  // sit below the custom emoji.
+  // Keyword-only hits sit below the custom emoji.
   assert.ok(customAt >= 0);
   assert.ok(customAt < ids.indexOf("💋"));
   assert.ok(customAt < ids.indexOf("💌"));
@@ -102,8 +83,6 @@ test("without any table the Unicode name still ranks an exact match first", () =
 
 test("a name outranks a keyword, and a keyword outranks a substring", () => {
   const hits = search("cat", [en]);
-  // 🐈 is named "cat"; 🐱 "cat face" is a name prefix; the cat faces (😹 …)
-  // carry "cat" only as a keyword.
   assert.equal(hits[0], "🐈");
   assert.equal(hits[1], "🐱");
   assert.ok(hits.indexOf("😹") > 1);

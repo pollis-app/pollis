@@ -38,20 +38,13 @@ import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivat
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
-// Sidebar chrome is sized in rem (via Tailwind's rem-based scale + a few
-// rem arbitrary values) so it tracks the user's font-size preference
-// (`--font-size-base` on :root). px would freeze while the app scales.
-// Shared lucide sizing: `size` seeds the SVG attribute; the rem `size-[…]`
-// class scales it with the font preference (CSS wins over the attribute).
+// Sized in rem to track the font preference; the rem `size-[…]` class beats the SVG attribute.
 const iconProps = {
   size: 14,
   className: "size-[0.933rem] shrink-0",
 } as const;
 
-// Per-depth LEADING padding (10 + indent*16 px @ 15px base ⇒ rem, scalable).
-// Logical (`ps-`), not `pl-`: the indent scheme is the reading-order nesting
-// of the tree, so under `dir=rtl` it has to grow from the right edge.
-// indent is only ever 1 (group / dm / settings) or 2 (channel).
+// Logical `ps-` indent, so RTL nests from the right.
 const indentPadClass = (indent: number): string =>
   indent >= 2 ? "ps-[2.8rem]" : "ps-[1.733rem]";
 
@@ -67,29 +60,21 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const skin = useSkin();
-  // Dragging the inner edge past the minimum collapses through the SAME
-  // toggle `mod+b` uses, so there is one collapsed state and not a second
-  // drag-only one — and reopening restores the width that was dragged from.
+  // Collapsing via drag uses the same toggle as mod+b: one collapsed state.
   const { ref, widthClass, widthStyle, handleProps } = usePanelWidth(
     "sidebar",
     onToggle,
   );
 
-  // Closing the sidebar is free to undo (mod+b reopens it): pointer-down.
   const closePress = usePressActivation(onToggle, "press");
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: mutedChannels } = useMutedChannels();
   const { data: dmConversations = [] } = useDMConversations();
-  // peerUserId → { verified, key_changed }. Used to glance-render the
-  // shield-check (verified) / shield-alert (changed) icons next to each
-  // DM row without an N+1 round-trip.
+  // peerUserId → verification, without an N+1 round-trip.
   const verificationByPeer = usePeerVerificationMap();
   const unreadCounts = appStore.unreadCounts;
 
-  // Stable list of voice channel ids across all groups; powers the live
-  // "users connected" badge on voice channel rows. Realtime voice events
-  // invalidate the `voice-room-counts` query so counts refresh automatically.
   const voiceChannelIds = useMemo(
     () =>
       groupsWithChannels.flatMap((g) =>
@@ -166,17 +151,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     { id: "shortcuts", label: t("sidebar.keyBindings"), icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
     { id: "update", label: t("sidebar.softwareUpdate"), icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];
-  // Diagnostics is reached from the Settings hub, search, and undecryptable
-  // messages rather than its own sidebar row, but it is still a settings page.
+  // Diagnostics has no sidebar row but is a settings page.
   const isOnAnySettings = isOnSettingsHub || pathname === "/diagnostics" || settingsItems.some((s) => s.isActive);
 
   return (
     <aside
       ref={ref}
       data-testid="sidebar"
-      // `relative` anchors the resize handle to this edge; the width is either
-      // the `--side-w` token (no answer on this device) or a dragged pixel
-      // value, never both.
       className={`relative flex ${widthClass} shrink-0 flex-col border-e border-line bg-surface font-mono`}
       style={widthStyle}
     >
@@ -219,8 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                     const unread = unreadCounts[ch.id] ?? 0;
                     const voiceCount = isVoice ? voiceCounts[ch.id] ?? 0 : 0;
                     const isActive = isVoice ? activeVoiceId === ch.id : activeChannelId === ch.id;
-                    // A muted channel (#1431) is dimmed, with a quiet badge
-                    // and a bell-off mark so the state is not colour alone.
+                    // Muted (#1431): dimmed plus a bell-off mark, not colour alone.
                     const isMuted = mutedChannels?.has(ch.id) ?? false;
                     const badge = isVoice
                       ? voiceCount > 0
@@ -230,8 +210,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                         ? unread
                         : null;
                     return (
-                      // A voice channel can auto-join on arrival, which
-                      // others see, so it stays on click (#1529).
+                      // Voice can auto-join (others see it), so stays on click (#1529).
                       <Row
                         activateOn={isVoice ? "click" : "press"}
                         key={ch.id}
@@ -284,9 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         />
 
         <ul>
-          {/* The Vault (#107): a chat with yourself, so it lives where people
-              look for Note to Self — at the top of the conversation list, not
-              buried under Account. */}
+          {/* The Vault (#107): top of the conversation list, like Note to Self. */}
           <Row
             activateOn="press"
             indent={1}
@@ -299,10 +276,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           {dmConversations.map((c) => {
             const unread = unreadCounts[c.id] ?? 0;
             const verification = c.user2_id ? verificationByPeer.get(c.user2_id) : undefined;
-            // Verified badge wins; a `key_changed` mismatch overrides
-            // verified (the contact_verification row's `verified` is
-            // cleared by check_and_pin on mismatch, so this is mostly a
-            // belt-and-braces guard against a stale local cache).
+            // key_changed overrides verified.
             const trailing = verification?.key_changed ? (
               <span
                 data-testid={`dm-verification-changed-${c.id}`}
@@ -328,9 +302,6 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                 isActive={activeDmId === c.id}
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
                 leading={
-                  // Refined shows the peer's avatar (with the presence dot
-                  // anchored to it); terminal keeps the bare dot so rows stay
-                  // one text-line tall.
                   skin === "refined" ? (
                     <PresenceAvatar
                       userId={c.user2_id ?? null}
@@ -379,9 +350,6 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         ))}
       </div>
 
-      {/* Refined anchors the Discord-style identity + voice panel here; the
-          sidebar still collapses via the keyboard shortcut. Terminal keeps the
-          explicit Close affordance. */}
       {skin === "refined" ? (
         <SidebarProfilePanel />
       ) : (
@@ -409,19 +377,15 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 });
 
 interface SectionHeaderProps {
-  /** Stable id for the `data-testid`. Deliberately separate from `label`,
-      which is translated and must never move a test selector. */
+  /** For `data-testid`; never the translated `label`. */
   testId: string;
   label: string;
   icon: React.ReactNode;
   isActive: boolean;
   onClick: () => void;
   badge?: number | null;
-  /** Hairline rules above and below the header. */
   bordered?: boolean;
-  /** Hairline rule below the header only. */
   borderedBottom?: boolean;
-  /** `"press"`: act on a plain mouse pointer-down (#1529). */
   activateOn?: ActivateOn;
 }
 
@@ -462,25 +426,15 @@ interface RowProps {
   isActive: boolean;
   onClick: () => void;
   leading?: React.ReactNode;
-  /** When provided, renders an expand/collapse chevron as a sibling button outside the navigating button. */
   chevron?: RowChevron;
   label: string;
   badge?: number | null;
-  /** Optional trailing decoration (e.g. shield-check / shield-alert badges) rendered before the unread badge. */
   trailing?: React.ReactNode;
-  /** Stable id for the navigating button's `data-testid`, same
-      `sidebar-row-*` scheme as `SectionHeader` (#932). Deliberately separate
-      from `label`, which is translated: since #855 a locale change would
-      otherwise break every navigation test that located a row by its text,
-      and the failure reads as a routing bug rather than a selector one.
-      Omitted for group / channel / DM rows, whose labels are user-generated
-      and therefore already locale-independent. */
+  /** `data-testid` (`sidebar-row-*`, #932), separate from the translated label (#855). */
   testId?: string;
-  /** A muted channel (#1431): drawn in the muted text tier, with a muted
-      unread badge, unless it is the active row. */
+  /** A muted channel (#1431). */
   dimmed?: boolean;
-  /** `"press"`: the row and its chevron act on a plain mouse pointer-down
-      (#1529). */
+  /** `"press"`: pointer-down (#1529). */
   activateOn?: ActivateOn;
 }
 
@@ -529,9 +483,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
         }`}
       >
         {leading}
-        {/* Group / channel / DM names are user-generated: isolate them so a
-            Latin name in an Arabic sidebar (or the reverse) cannot drag the
-            trailing badge to the wrong end of the row. */}
+        {/* Isolated: user-generated names must not drag the badge in mixed-direction text. */}
         <bdi className="flex-1 truncate">{label}</bdi>
         {trailing}
         {badge != null && <UnreadBadge count={badge} muted={dimmed} />}

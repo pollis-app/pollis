@@ -12,36 +12,7 @@ import {
   serializeRichInput,
 } from "./richInputModel";
 
-/**
- * The composer's text field: a `contentEditable` that behaves like the
- * `<textarea>` it replaced, except that a custom emoji is an atomic inline
- * image rather than seventy characters of wire token.
- *
- * ## Why this shape
- *
- * The value stays ONE PLAIN STRING with integer offsets — see `richInputModel`.
- * Every consumer above it (mentions, `:shortcode:` completion, drafts, the send
- * path) still works on `(text, caret)` exactly as it did against a textarea, so
- * none of them had to learn a document model. The DOM here is a projection of
- * that string, read back with `serializeRichInput` after every edit.
- *
- * The children are built imperatively, not by React. That is not a shortcut: a
- * `contentEditable` whose children React reconciles loses the caret on every
- * keystroke that changes the tree, and there is no way to ask React to leave
- * the selection alone. So this component renders one empty `<div>` and owns
- * everything inside it. The rule that follows is that nothing else may render
- * children into this element — including the inline autosuggest, which is why
- * the old `InlineGhost` mirror is gone and the ghost is a node in here instead.
- *
- * ## Re-projection
- *
- * The DOM is rebuilt only when `value` differs from what was last serialized
- * out of it. Ordinary typing therefore never rebuilds anything (the value came
- * from the DOM, so the two agree), which is what keeps the caret and IME
- * composition intact. An external change — a picker insertion, a `:joy:`
- * substitution, a draft switch, a send that clears the box — does not agree,
- * and is rebuilt with the caret restored from a model offset.
- */
+/** Composer field: a `contentEditable` projecting one plain wire string (see `richInputModel`). Children are built imperatively, since React reconciling them loses the caret; re-projected only when `value` differs from the last serialized DOM. */
 
 /** A 1x1 transparent GIF: the emoji image's src until the real URL resolves. */
 const PENDING_SRC =
@@ -55,46 +26,20 @@ export interface RichTextInputHandle {
   blur: () => void;
   /** Put the collapsed caret at a model offset. */
   setSelection: (caret: number) => void;
-  /**
-   * Splice text in at the last known selection, and take focus.
-   *
-   * The emoji picker's insertion path. A `<textarea>` keeps `selectionStart`
-   * across a blur, so the old code could read it after the user had clicked
-   * into the picker; a `contentEditable` does not, so the last in-element
-   * selection is remembered here instead.
-   */
+  /** Splice text in at the last known selection (a contentEditable forgets it on blur). */
   insertText: (text: string) => void;
-  /**
-   * The selection right now, as model offsets.
-   *
-   * A key handler has to read this rather than the `onSelectionChange` state:
-   * `selectionchange` is asynchronous, so two arrow keys in quick succession
-   * would decide the second one against the first one's stale caret. A
-   * `<textarea>` had `selectionStart` to read synchronously; this is its
-   * replacement, and the ArrowUp history hand-off depends on it.
-   */
+  /** Live selection as model offsets; key handlers read this, as `selectionchange` is async. */
   selection: () => { start: number; end: number };
 }
 
 export interface RichTextInputProps {
-  /** The message, in wire form. The single source of truth. */
+  /** Wire form; the single source of truth. */
   value: string;
-  /** An edit happened: the new wire text, and where the caret ended up. */
   onChange: (value: string, caret: number) => void;
-  /** The selection moved — a click, an arrow key, or an edit. */
   onSelectionChange?: (caret: number, collapsed: boolean) => void;
-  /**
-   * Runs before this component's own key handling. Preventing default claims
-   * the key outright — that is how the caller keeps Enter for "send" and for
-   * accepting a completion.
-   */
+  /** Runs first; preventDefault claims the key. */
   onKeyDown?: (e: React.KeyboardEvent) => void;
-  /**
-   * First refusal on a paste. Return true when the paste was consumed (e.g. it
-   * was a file) and no text should be inserted. The event is always
-   * defaultPrevented before this runs: a `contentEditable` must never take the
-   * browser's own paste, which is HTML.
-   */
+  /** Return true when consumed (e.g. a file). Always runs defaultPrevented: the browser's paste is HTML. */
   onPaste?: (e: React.ClipboardEvent) => boolean;
   onFocus?: () => void;
   onBlur?: () => void;
@@ -105,36 +50,23 @@ export interface RichTextInputProps {
   style?: React.CSSProperties;
   ariaLabel?: string;
   testId?: string;
-  /** The terminal skin's inline completion, shown after the caret. */
   ghost?: string;
-  /** Which completion track the ghost belongs to — mentions, or shortcodes. */
   ghostTestId?: string;
-  /** Class applied to the ghost span; the composer inverts it when focused. */
   ghostClassName?: string;
 }
 
-/** True for the element that carries a rendered custom emoji. */
 function isEmojiNode(node: Node): node is HTMLElement {
   return node.nodeType === ELEMENT_NODE && (node as HTMLElement).hasAttribute(EMOJI_TOKEN_ATTR);
 }
 
-/** True for the autosuggest span, which is never part of the value. */
 function isGhostNode(node: Node): boolean {
   return node.nodeType === ELEMENT_NODE && (node as HTMLElement).hasAttribute(GHOST_ATTR);
 }
 
-/**
- * Build one custom emoji node.
- *
- * The token lives in an attribute, so serialization never depends on what the
- * node ended up rendering — a still-loading image, a resolved one, and the
- * `:shortcode:` fallback all produce the same wire text.
- */
+/** The token lives in an attribute, so serialization ignores what the node renders. */
 function buildEmojiNode(token: string, shortcode: string, contentHash: string): HTMLElement {
   const span = document.createElement("span");
   span.setAttribute(EMOJI_TOKEN_ATTR, token);
-  // The atom: the browser steps over it, selects it whole, and never places a
-  // caret inside it.
   span.setAttribute("contenteditable", "false");
   span.setAttribute("data-testid", "composer-emoji");
   span.setAttribute("data-shortcode", shortcode);
@@ -152,9 +84,7 @@ function buildEmojiNode(token: string, shortcode: string, contentHash: string): 
       img.src = url;
     })
     .catch(() => {
-      // Same degradation as `CustomEmojiImage`: a deleted or unreachable emoji
-      // shows its shortcode rather than vanishing. The token attribute is
-      // untouched, so the message still sends the emoji it was given.
+      // Like `CustomEmojiImage`: show the shortcode; the token still sends.
       span.textContent = `:${shortcode}:`;
       span.classList.add("rich-input-emoji-fallback");
     });
@@ -162,7 +92,6 @@ function buildEmojiNode(token: string, shortcode: string, contentHash: string): 
   return span;
 }
 
-/** Replace the host's children with the projection of `value`. */
 function project(host: HTMLElement, value: string): void {
   const fragment = document.createDocumentFragment();
   for (const run of richRuns(value)) {
@@ -172,21 +101,14 @@ function project(host: HTMLElement, value: string): void {
     }
     fragment.appendChild(buildEmojiNode(run.token, run.shortcode, run.contentHash));
   }
-  // `white-space: pre-wrap` preserves a trailing newline in the string but does
-  // not give it a line box, so Shift+Enter on the last line would look like
-  // nothing happened. This is the filler the serializer skips.
+  // pre-wrap gives a trailing newline no line box; this filler (skipped by the serializer) does.
   if (value === "" || value.endsWith("\n")) {
     fragment.appendChild(document.createElement("br"));
   }
   host.replaceChildren(fragment);
 }
 
-/**
- * The model offset of a DOM position.
- *
- * Measured by serializing everything before it, which means the mapping cannot
- * drift from the serializer: they are the same function.
- */
+/** Model offset of a DOM position, by serializing the prefix, so it cannot drift from the serializer. */
 function offsetOf(host: HTMLElement, node: Node | null, nodeOffset: number): number {
   if (!node || !host.contains(node)) {
     return serializeRichInput(host).length;
@@ -201,7 +123,6 @@ function offsetOf(host: HTMLElement, node: Node | null, nodeOffset: number): num
   return serializeRichInput(range.cloneContents()).length;
 }
 
-/** The DOM position of a model offset. The inverse of `offsetOf`. */
 function locate(host: HTMLElement, offset: number): { node: Node; offset: number } {
   let remaining = Math.max(0, offset);
 
@@ -229,9 +150,7 @@ function locate(host: HTMLElement, offset: number): { node: Node; offset: number
         }
         const token = child.getAttribute(EMOJI_TOKEN_ATTR) ?? "";
         remaining -= token.length;
-        // An offset landing inside a token snaps to just after it. Nothing in
-        // the model ever produces one — the caret is only ever before or after
-        // an emoji — so this is a floor, not a behaviour.
+        // Inside a token snaps to after it (never produced by the model).
         if (remaining <= 0) {
           return { node: parent, offset: index + 1 };
         }
@@ -241,7 +160,6 @@ function locate(host: HTMLElement, offset: number): { node: Node; offset: number
         if (remaining <= 0) {
           return { node: parent, offset: index };
         }
-        // Only a non-final `<br>` carries a newline; the filler carries none.
         if (index < children.length - 1) {
           remaining -= 1;
         }
@@ -285,18 +203,13 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
 ) => {
   probeRender("RichTextInput");
   const hostRef = useRef<HTMLDivElement>(null);
-  // What the DOM currently holds, as wire text. `null` before the first
-  // projection, so the mount always projects.
+  // null before the first projection, so the mount always projects.
   const lastSerializedRef = useRef<string | null>(null);
-  // Where to put the caret once the projection has been rebuilt.
   const pendingCaretRef = useRef<number | null>(null);
-  // The last selection that was actually inside this element, so an insertion
-  // fired from a control that stole focus still lands where the caret was.
+  // Last selection inside this element, for inserts from controls that steal focus.
   const lastSelectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
 
-  // The callbacks and the current value are read through refs so the native
-  // listeners below can be registered once instead of being torn down and
-  // re-attached on every keystroke.
+  // Read through refs so native listeners register once.
   const valueRef = useRef(value);
   valueRef.current = value;
   const onChangeRef = useRef(onChange);
@@ -323,15 +236,10 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
-    // Recorded here rather than left to the `selectionchange` this fires:
-    // that event is async, and a picker click that moves focus away before it
-    // lands would leave the remembered caret at its pre-insertion offset. That
-    // is exactly how a second pick from the still-open picker ended up BEFORE
-    // the first one instead of after it.
+    // Recorded here: the async `selectionchange` may land after focus leaves, misplacing a second pick.
     lastSelectionRef.current = { start: caret, end: caret };
   }, []);
 
-  /** Splice the model directly, bypassing whatever the browser would have done. */
   const replaceRange = useCallback((start: number, end: number, text: string) => {
     const current = valueRef.current;
     const next = current.slice(0, start) + text + current.slice(end);
@@ -341,7 +249,6 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     onChangeRef.current(next, caret);
   }, []);
 
-  /** The live selection as model offsets, or null when it is not in here. */
   const liveOffsets = useCallback((): { start: number; end: number } | null => {
     const host = hostRef.current;
     const selection = document.getSelection();
@@ -352,20 +259,12 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) {
       return null;
     }
-    // A `Range` is always start-before-end, so no ordering fix is needed here —
-    // the backwards-drag case is normalized by the DOM before we see it.
-    // Each `offsetOf` clones and serializes the prefix, so the collapsed case
-    // (every keystroke) measures once and reuses it.
+    // Collapsed case measures once.
     const start = offsetOf(host, range.startContainer, range.startOffset);
     const end = range.collapsed ? start : offsetOf(host, range.endContainer, range.endOffset);
     return { start, end };
   }, []);
 
-  /**
-   * The selection to edit at: the live one, or the last one that was in here,
-   * clamped to the current value. Never null, so no edit path has to invent a
-   * behaviour for "there is no caret".
-   */
   const selectionOffsets = useCallback((): { start: number; end: number } => {
     const live = liveOffsets();
     if (live) {
@@ -391,9 +290,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
         lastSelectionRef.current = { start: caret, end: caret };
       },
       insertText: (text: string) => {
-        // Read the offsets BEFORE taking focus: focusing can collapse the
-        // selection to the start of the element in some engines, and the point
-        // of this path is to insert where the caret was left.
+        // Read offsets before focusing: focusing can collapse the selection.
         const offsets = selectionOffsets();
         hostRef.current?.focus();
         replaceRange(offsets.start, offsets.end, text);
@@ -403,7 +300,6 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     [applySelection, replaceRange, selectionOffsets],
   );
 
-  // Re-project when — and only when — the DOM and the value disagree.
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) {
@@ -421,11 +317,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     }
   }, [value, applySelection]);
 
-  // The autosuggest, as a trailing non-editable node. Declared AFTER the
-  // projection effect so it re-appends itself once the children have been
-  // rebuilt. Appending at the end never moves a caret that is already placed,
-  // which is what lets this live inside the editable at all — and the caller
-  // only ever offers a ghost with the caret at end-of-value.
+  // Ghost as a trailing non-editable node; declared after projection so it re-appends.
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) {
@@ -456,8 +348,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
       return;
     }
     const next = serializeRichInput(host);
-    // Recorded BEFORE the parent is told, so the projection effect knows the
-    // DOM already says this and leaves the caret alone.
+    // Before telling the parent, so the projection effect leaves the caret alone.
     lastSerializedRef.current = next;
     const selection = document.getSelection();
     const caret =
@@ -468,11 +359,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     onChangeRef.current(next, caret);
   }, []);
 
-  // Deleting an emoji is decided against the model, not left to the engine.
-  // Chrome, WebKit and Gecko each do something slightly different with a
-  // Backspace next to a `contenteditable=false` element — delete it, select it
-  // first, or step into it — and removing the token's own byte range makes the
-  // keystroke identical everywhere.
+  // Backspace by an emoji is decided against the model: engines differ next to contenteditable=false.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) {
@@ -504,9 +391,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     return () => host.removeEventListener("beforeinput", handler);
   }, [replaceRange, selectionOffsets]);
 
-  // `selectionchange` is the only event a contentEditable has for "the caret
-  // moved"; there is no `onSelect`. It fires on the document, so the guard that
-  // the selection is actually in here is load-bearing.
+  // `selectionchange` fires on the document, so the in-here guard is load-bearing.
   useEffect(() => {
     const handler = () => {
       const host = hostRef.current;
@@ -522,8 +407,6 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
         return;
       }
       lastSelectionRef.current = live;
-      // The focus end of a collapsed selection is its only end; a drag
-      // selection is the one case that needs its own measurement.
       const caret = selection.isCollapsed
         ? live.start
         : offsetOf(host, selection.focusNode, selection.focusOffset);
@@ -545,8 +428,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
       if (e.defaultPrevented) {
         return;
       }
-      // Shift+Enter. Left to the browser this produces a `<div>` or a `<br>`
-      // depending on the engine; done here it is one character in the model.
+      // Shift+Enter: one model character, not an engine-specific `<div>`/`<br>`.
       if (e.key === "Enter") {
         const offsets = selectionOffsets();
         e.preventDefault();
@@ -558,7 +440,6 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
-      // Always: the browser's own paste into an editing host inserts HTML.
       e.preventDefault();
       if (onPaste?.(e)) {
         return;
@@ -573,10 +454,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     [onPaste, replaceRange, selectionOffsets],
   );
 
-  // Copy and cut have to be written too, or an emoji leaves the composer as
-  // whatever the image happened to serialize to. Serializing the selection with
-  // the same walker is what makes token -> node -> token lossless through the
-  // clipboard as well as through the editor.
+  // Copy/cut through the same walker, so tokens survive the clipboard.
   const writeSelection = useCallback((e: React.ClipboardEvent): boolean => {
     const host = hostRef.current;
     const selection = document.getSelection();

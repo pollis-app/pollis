@@ -2,8 +2,6 @@
  * The "new" member tag (#1506): a member's messages are tagged for seven days
  * after their server-side `joined_at`, in every channel of the group, and the
  * group's creator is never tagged.
- *
- *   node --test frontend/tests/
  */
 
 import test from "node:test";

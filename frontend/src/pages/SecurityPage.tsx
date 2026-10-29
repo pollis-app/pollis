@@ -40,13 +40,9 @@ import {
   saveDeviceAutoLockMinutes,
 } from "../utils/autoLock";
 
-// The plain-language explainer for everything on this page — what a root is,
-// what an inclusion tick means, and the difference between "couldn't check" and
-// "not in the log" (epic #589, topic 12).
+// Explainer for this page (epic #589, topic 12).
 const LEARN_DASHBOARDS_URL = "https://pollis.com/learn#reading-the-dashboards";
 
-// Map a PermissionState onto a human label + solid token color for the status
-// pill. No neon/glow — solid text colors only.
 function permissionPill(
   t: TFunction<"settings">,
   state: PermissionState | undefined,
@@ -73,11 +69,7 @@ function permissionPill(
 const sectionHeaderClass =
   "text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
 
-// The word the user must type to arm account deletion. Deliberately NOT part
-// of the translatable copy: the label and placeholder are interpolated from
-// this constant, so a locale cannot instruct the user to type a word the
-// comparison will never accept — which would make the button permanently dead
-// for everyone reading that language.
+// Not translated: the label interpolates it, so every locale types the word the check accepts.
 const DELETE_CONFIRM_WORD = "DELETE";
 
 export const SecurityPage: React.FC = observer(() => {
@@ -108,25 +100,17 @@ export const SecurityPage: React.FC = observer(() => {
   const [confirmInput, setConfirmInput] = useState("");
   const [revoking, setRevoking] = useState(false);
 
-  // OS media permissions (camera / mic / screen): live status + revoke-on-quit
-  // pref + manual revoke. This is an access-control concern, so it lives here
-  // next to Devices rather than in Preferences.
+  // OS media permissions live here, beside Devices.
   const { query: prefsQuery, save: savePrefs } = usePreferences();
   const mediaPermissions = useMediaPermissions();
   const revokeMedia = useRevokeMediaPermissions();
   const [revokeMediaOnExit, setRevokeMediaOnExit] = useState<boolean>(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState<boolean>(false);
 
-  // The in-app terminal (#282) spawns the user's login shell, so it is off
-  // until someone here turns it on. The authority is Rust's
-  // `device-settings.json`, not this state — `terminal_open` reads the file and
-  // refuses regardless of what the renderer believes. This is the switch, not
-  // the lock.
+  // The in-app terminal (#282) is off by default; Rust's `device-settings.json` is the authority.
   const [terminalEnabled, setTerminalEnabled] = useState<boolean>(false);
 
-  // Idle auto-lock (#851). Device-local, like font size and the call ringtone:
-  // it describes where this machine physically sits, so it deliberately does
-  // not sync. Seeded from localStorage once the active user is known.
+  // Auto-lock (#851) is device-local, not synced.
   const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
   const lockLabel = useShortcutLabel("app.lock");
 
@@ -136,15 +120,12 @@ export const SecurityPage: React.FC = observer(() => {
 
   useEffect(() => {
     void invoke<boolean>("get_terminal_enabled")
-      // Coerced, not trusted: a build without the command answers `null`, and
-      // anything that is not literally `true` means the shell stays off.
+      // Anything but literal `true` means off.
       .then((enabled) => setTerminalEnabled(enabled === true))
       .catch(() => setTerminalEnabled(false));
   }, []);
 
-  // `AUTO_LOCK_OPTIONS` lives in `utils/autoLock.ts` — module-level data, so
-  // its `label` can't be translated there without freezing the language at
-  // import time. Key off the stable `minutes` value and translate here instead.
+  // Translated here: the options are module-level data.
   const autoLockLabel = (minutes: number | null): string => {
     if (minutes === null) {
       return t("security.autoLockOff");
@@ -158,9 +139,7 @@ export const SecurityPage: React.FC = observer(() => {
   const handleAutoLock = (minutes: number | null) => {
     setAutoLockMinutes(minutes);
     saveDeviceAutoLockMinutes(currentUser?.id, minutes);
-    // Push straight away rather than waiting for the shell to remount — the
-    // backend owns the deadline, so until it hears about the change nothing
-    // has actually changed.
+    // Push now; the backend owns the deadline.
     void api.setAutoLockTimeout(minutes).catch((err) => {
       console.warn("[autolock] failed to apply timeout:", err);
     });
@@ -172,8 +151,7 @@ export const SecurityPage: React.FC = observer(() => {
     }
   }, [prefsQuery.data, currentUser?.id]);
 
-  // The running app version, shown in the "This build" section. Cheap and
-  // local — no transparency-log network call happens until the user clicks.
+  // Local only; nothing hits the log until the user clicks.
   useEffect(() => {
     let cancelled = false;
     getVersion()
@@ -183,7 +161,6 @@ export const SecurityPage: React.FC = observer(() => {
         }
       })
       .catch(() => {
-        // Non-fatal — the section still renders and the verify button works.
       });
     return () => {
       cancelled = true;
@@ -194,18 +171,16 @@ export const SecurityPage: React.FC = observer(() => {
     setTerminalEnabled(val);
     void invoke("set_terminal_enabled", { enabled: val }).catch((err) => {
       console.warn("[terminal] set_terminal_enabled failed:", err);
-      // Snap back: the file is the truth, and it did not change.
+      // Snap back: the file is the truth.
       setTerminalEnabled(!val);
     });
   };
 
   const handleRevokeMediaOnExit = (val: boolean) => {
     setRevokeMediaOnExit(val);
-    // Merge into the existing prefs blob (save replaces the whole blob), so we
-    // never clobber unrelated preferences edited on the Preferences page.
+    // save replaces the whole blob, so merge.
     savePrefs({ ...(prefsQuery.data ?? {}), revoke_media_on_exit: val });
-    // Push immediately so a quit right after toggling picks up the new value
-    // without waiting for the throttled prefs round-trip.
+    // Push now so a quit right after picks it up.
     void invoke("set_revoke_media_on_exit", { enabled: val }).catch((err) => {
       console.warn("[media-permissions] set_revoke_media_on_exit failed:", err);
     });
@@ -274,8 +249,7 @@ export const SecurityPage: React.FC = observer(() => {
     setDeleteError(null);
     try {
       await api.deleteAccount(currentUser.id);
-      // Clear local state immediately so the user is logged out even if the
-      // callback chain from the router context is broken.
+      // Clear local state even if the router callback chain is broken.
       appStore.logout();
       if (onDeleteAccount) {
         onDeleteAccount();
@@ -535,9 +509,7 @@ export const SecurityPage: React.FC = observer(() => {
             ) : (
               <NavigableList<api.DeviceInfo>
                 testId="devices-list"
-                // Keeps its keyboard navigation (rows have Revoke buttons), but
-                // must not claim focus on mount or on any re-render — same
-                // scroll-jump the events list had, just further up the page.
+                // Must not claim focus on mount or re-render (scroll jump).
                 autoFocus={false}
                 items={devices ?? []}
                 isLoading={devices === null}

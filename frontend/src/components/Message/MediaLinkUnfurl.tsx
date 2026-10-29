@@ -3,12 +3,6 @@ import { useTranslation } from "react-i18next";
 import { shellOpen } from "../../bridge";
 import { ensureProtocol, findUrls } from "../../utils/links";
 
-// Known limitation (low priority): inline previews only fire when the URL ends in
-// a recognised image/video extension. Sites like Giphy/Tenor/Imgur that serve media
-// behind extension-less share URLs (e.g. giphy.com/gifs/...) won't unfurl. Pasting
-// the direct .gif/.mp4 URL works, and copy-pasting the actual media into the input
-// also works, so we accept the gap rather than building an OG/oEmbed unfurl service.
-
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"];
 const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
 
@@ -64,31 +58,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   const { t } = useTranslation("chat");
   const links = useMemo(() => extractMediaLinks(text), [text]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
-  // Remote media loads only when the reader asks for it. EVERY host, with no
-  // first-party exception.
-  //
-  // Rendering `<img src>` straight from message text meant that merely OPENING
-  // a message made the app fetch from a host the sender chose — handing them
-  // the reader's IP address, user-agent and the moment they read it, from any
-  // message including an unaccepted DM request from a stranger. That is a
-  // read-receipt and a deanonymiser in one, and it defeats the relay overlay
-  // entirely: the overlay hides the client's address from OUR servers while
-  // this handed it to an arbitrary one.
-  //
-  // A click is the consent. It is deliberately per-URL and not remembered —
-  // the sender picks the URL, so a blanket "always load" would be a setting the
-  // attacker, not the user, gets to exploit.
-  //
-  // There used to be an allowlist holding exactly `cdn.pollis.com`, on the
-  // reasoning that our own CDN learns nothing new. That reasoning was wrong on
-  // two counts. The hostname comes out of MESSAGE TEXT, so the sender chooses
-  // it: anyone who can get a DNS name pointed at an address they watch, or who
-  // can see traffic to ours, gets the read receipt back — and the check was on
-  // the hostname alone, so the PATH was still the sender's to pick, making the
-  // URL itself a per-recipient beacon. And with the relay overlay on, an
-  // automatic fetch from the webview does not ride the shim (`img src` is the
-  // renderer's own request, not `http_client`'s), so the one host that "already
-  // knows" is precisely the one the overlay is hiding the address from.
+  // Remote media loads only on a per-URL click, every host: an automatic fetch leaks the reader's IP to a sender-chosen host.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
   const handleClick = useCallback((url: string) => {

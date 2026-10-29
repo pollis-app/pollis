@@ -2,30 +2,15 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 
 /**
- * Props for the LoadingSpinner component.
  * @interface LoadingSpinnerProps
  */
 interface LoadingSpinnerProps {
-  /** The size variant of the spinner - affects font size */
   size?: "sm" | "base" | "lg";
-  /** Additional CSS classes to apply to the spinner element */
   className?: string;
 }
 
 /**
  * An animated loading spinner component using classic CLI-style characters.
- *
- * The LoadingSpinner component provides a visually appealing loading indicator:
- * - Animated spinner using Unicode braille characters
- * - Smooth frame-by-frame animation driven entirely by CSS (no JS timer)
- * - Multiple size variants for different contexts
- * - Consistent styling with the design system
- * - Lightweight implementation with minimal dependencies
- * - Accessible text-based loading indicator
- *
- * This component is ideal for indicating loading states in buttons, forms,
- * or any interface element where a loading indicator is needed.
- *
  * @component
  * @param {LoadingSpinnerProps} props - The props for the LoadingSpinner component
  * @param {'sm' | 'base' | 'lg'} [props.size='base'] - The size variant affecting font size

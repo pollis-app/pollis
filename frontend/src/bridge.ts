@@ -1,36 +1,8 @@
-/**
- * Runtime bridge: re-exports every host-API symbol the React frontend uses,
- * routed to the Tauri runtime.
- *
- * Layout:
- *  - `bridge/runtime.ts`        — host detection (`hasTauri`)
- *  - `bridge/invoke.ts`         — invoke / Channel / listen
- *  - `bridge/window.ts`         — getCurrentWindow / availableMonitors /
- *                                 LogicalSize / LogicalPosition / hideWindow
- *  - `bridge/image.ts`          — Image.fromBytes (used by useBadge)
- *  - `bridge/dialog.ts`         — dialogOpen / dialogSave
- *  - `bridge/fs.ts`             — readFile / stat (reads only)
- *  - `bridge/shell.ts`          — shellOpen
- *  - `bridge/app.ts`            — getVersion / relaunch / exit
- *  - `bridge/notifications.ts`  — isPermissionGranted / requestPermission /
- *                                 sendNotification
- *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImage /
- *                                 writeClipboardText
- *  - `bridge/staging.ts`        — stageAttachment / discardStagedAttachment
- *  - `bridge/updater.ts`        — check
- *  - `bridge/tray.ts`           — tray / menu-bar
- *
- * Everything below funnels into `@tauri-apps/api/*` / `@tauri-apps/plugin-*`.
- * Under the real Tauri runtime this hits the webview's IPC; under Playwright
- * the vite alias swaps in `__mocks__/tauri-core.ts`.
- */
+/** Every host-API symbol the renderer uses, routed to Tauri (or the Playwright mocks). */
 
-// Re-export the runtime helper so any caller (and any new bridge module)
-// uses the canonical detection path.
 export { hasTauri } from "./bridge/runtime";
 export type { DragDropPayload } from "./bridge/runtime";
 
-// invoke / Channel / listen — the original three-symbol surface.
 export {
   invoke,
   Channel,
@@ -42,7 +14,6 @@ export {
   type InvokeOptions,
 } from "./bridge/invoke";
 
-// Window + monitor + DPI surrogates.
 export {
   getCurrentWindow,
   availableMonitors,
@@ -53,10 +24,8 @@ export {
   type PollisImage,
 } from "./bridge/window";
 
-// `Image.fromBytes` surrogate for `useBadge.ts`.
 export { Image } from "./bridge/image";
 
-// Dialogs.
 export {
   dialogOpen,
   dialogSave,
@@ -65,16 +34,12 @@ export {
   type DialogFilter,
 } from "./bridge/dialog";
 
-// Filesystem.
 export { readFile, stat, type FileInfo } from "./bridge/fs";
 
-// Shell.
 export { shellOpen } from "./bridge/shell";
 
-// App / path / process.
 export { getVersion, relaunch, exit } from "./bridge/app";
 
-// Notifications.
 export {
   isPermissionGranted,
   requestPermission,
@@ -82,24 +47,20 @@ export {
   type NotificationOptions,
 } from "./bridge/notifications";
 
-// Clipboard wrappers for the custom Tauri IPCs in src-tauri/src/lib.rs.
 export {
   readClipboardFiles,
   readClipboardImage,
   writeClipboardText,
 } from "./bridge/clipboard";
 
-// In-memory attachment staging (src-tauri/src/commands/staging.rs).
 export {
   stageAttachment,
   discardStagedAttachment,
   type StagedAttachment,
 } from "./bridge/staging";
 
-// Updater.
 export { check, type PollisUpdate, type DownloadEvent } from "./bridge/updater";
 
-// System tray / menu-bar.
 export {
   setTrayUnread,
   setTrayCloseToTray,

@@ -19,7 +19,6 @@ function load(id: PanelId): number | null {
   try {
     return parseStoredWidth(localStorage.getItem(STORAGE_KEY[id]));
   } catch {
-    // localStorage unavailable (private mode, disabled storage) — no answer.
     return null;
   }
 }
@@ -32,49 +31,19 @@ function save(id: PanelId, px: number | null): void {
     }
     localStorage.setItem(STORAGE_KEY[id], String(px));
   } catch {
-    // localStorage unavailable / quota exceeded — fall through silently.
   }
 }
 
-/**
- * Each panel's LAST MEASURED pixel width, or 0 while it is closed.
- *
- * Module-level and deliberately NOT observable. It is needed because a panel
- * still on its token default has no stored number to bound the other one
- * with — `--side-w` is a rem measure, so only the DOM knows what it currently
- * comes to — and the panels report it after every render (see
- * `usePanelWidth`), which is also how a closed panel gets back to 0. Making it
- * reactive would re-render both panels every time one of them reported its own
- * size back; it is read at drag start and on window resize, never during
- * render.
- */
+/** Last measured px width per panel (0 = closed); not observable, read only at drag start and resize. */
 const measured: Record<PanelId, number> = { sidebar: 0, rightPanel: 0 };
 
-/**
- * Dragged widths for the left sidebar and the right panel (#985).
- *
- * `null` means "this device has no answer", and the panel renders at the
- * `--side-w` design token via the `w-side` utility — a per-skin rem measure,
- * so the default keeps tracking the skin and the font-size preference exactly
- * as it did before this store existed. A number is a user-chosen pixel width
- * and wins as an inline style. Double-clicking a handle writes `null`, which
- * is what makes "reset to default" mean the token rather than a hardcoded
- * number.
- *
- * Widths are read from `localStorage` in the field initialisers — at module
- * eval, before first paint — so a restored layout never flashes the default
- * width. Why per device and not in the synced preferences blob or the
- * database: see `components/Layout/panelWidth.ts`.
- */
+/** Dragged panel widths (#985); `null` = the `--side-w` token default. Loaded before first paint. */
 class PanelWidthStore {
   sidebar: number | null = load("sidebar");
   rightPanel: number | null = load("rightPanel");
 
   constructor() {
-    // `widthOf` is excluded from auto-annotation for the same reason
-    // `presenceStore.isOnline` is: actions run untracked, so as an action its
-    // read of `sidebar` / `rightPanel` would be invisible to the observing
-    // panel and a committed drag would not repaint.
+    // `widthOf` stays tracked (not an action), as with `presenceStore.isOnline`.
     makeAutoObservable(this, { widthOf: false }, { autoBind: true });
   }
 
@@ -103,15 +72,7 @@ class PanelWidthStore {
     return maxPanelPx(windowPx, measured[other]);
   }
 
-  /**
-   * Pull both stored widths back inside the bounds after the window shrank.
-   *
-   * Sequential rather than parallel: the sidebar is clamped first and its new
-   * width is what bounds the right panel, so one pass cannot leave a pair that
-   * together overflow the window. Panels still on the token default are left
-   * alone — their width is a rem measure this store cannot rewrite, and it is
-   * the width the app shipped with.
-   */
+  /** Clamp stored widths after the window shrank: sidebar first, then the right panel against it. */
   clampToWindow(windowPx: number) {
     if (this.sidebar !== null) {
       const px = clampPanelPx(this.sidebar, maxPanelPx(windowPx, measured.rightPanel));
@@ -119,8 +80,7 @@ class PanelWidthStore {
         this.setWidth("sidebar", px);
       }
     }
-    // A closed sidebar takes no room whatever it remembers, so `measured` (0
-    // while it is closed) decides whether its stored width counts at all.
+    // A closed sidebar takes no room.
     const sidebarPx = measured.sidebar === 0 ? 0 : this.sidebar ?? measured.sidebar;
     if (this.rightPanel !== null) {
       const px = clampPanelPx(this.rightPanel, maxPanelPx(windowPx, sidebarPx));

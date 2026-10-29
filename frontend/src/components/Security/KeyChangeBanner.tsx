@@ -6,21 +6,12 @@ import { observer } from "mobx-react-lite";
 import { keyChangeStore } from "../../stores/keyChangeStore";
 
 interface KeyChangeBannerProps {
-  /// User id of the peer whose key has changed. Pass the DM's `user2_id`
-  /// for 1:1 DMs. Returns `null` when there is nothing to surface so the
-  /// caller can render this unconditionally and rely on the banner to
-  /// no-op when there's no pending warning.
+  /// For 1:1 DMs the `user2_id`; renders nothing when there is no warning.
   peerUserId: string | null | undefined;
   peerLabel?: string;
 }
 
-/// Inline "this contact's identity key changed" banner. Rendered at the
-/// top of an open conversation (DM page) the moment the backend emits a
-/// `key_changed` realtime event. Policy is ADVISORY-with-acknowledge —
-/// the banner is dismissable and sends are unaffected; users are nudged
-/// to re-verify out-of-band via the profile page.
-///
-/// Not a modal — this is an inline banner inside the conversation chrome.
+/// Inline, dismissable "identity key changed" banner; advisory, sends unaffected.
 export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
   peerUserId,
   peerLabel,

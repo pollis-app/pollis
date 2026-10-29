@@ -11,13 +11,7 @@ interface InviteLinkRowProps {
   isRevoking: boolean;
 }
 
-/**
- * One existing invite link.
- *
- * There is no copy button here, and that is structural rather than an
- * oversight: `InviteLinkSummary` carries no token because the server has no
- * token to give. Only [`CreatedInviteLinkCard`] can copy, and only once.
- */
+/** One existing invite link; no copy button, as the server holds no token. */
 export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
   link,
   onRevoke,
@@ -30,8 +24,6 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
       ? t("inviteLinks.rowUsesOfMax", { used: link.uses, count: link.max_uses })
       : t("inviteLinks.rowUses", { count: link.uses });
 
-  // `is_live` is computed server-side so this status cannot disagree with what
-  // redemption will actually do.
   let status: string;
   if (link.revoked_at) {
     status = t("inviteLinks.statusRevoked");

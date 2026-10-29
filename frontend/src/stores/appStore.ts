@@ -15,112 +15,71 @@ type OutgoingCall = { callId: string; calleeId: string };
 type StatusBarAlert = { senderUsername: string; roomId: string };
 
 class AppStore implements AppState {
-  // ── Core / user ────────────────────────────────────────────────────────
   currentUser: User | null = null;
-  // User profile data from Turso
   username: string | null = null;
   userAvatarUrl: string | null = null;
 
-  // ── Selected views ─────────────────────────────────────────────────────
   selectedGroupId: string | null = null;
   selectedChannelId: string | null = null;
   selectedConversationId: string | null = null;
 
-  // ── Data (messages managed by React Query, not here) ───────────────────
   groups: Group[] = [];
   channels: Record<string, Channel[]> = {};
   messageQueue: MessageQueueItem[] = [];
 
-  // ── UI state ───────────────────────────────────────────────────────────
   replyToMessageId: string | null = null;
   showThreadId: string | null = null;
   isLoading = false;
   error: string | null = null;
 
-  // Unread message counts keyed by conversation_id or channel_id
   unreadCounts: Record<string, number> = {};
 
-  // Voice room + local screenshare state. Single source of truth — see
-  // `frontend/src/types/voice-state.ts` for the union shape. Replaces the
-  // previous bag of flags (`voicePhase`, `screenShareMode`,
-  // `screenShareLocalActive`, `activeVoiceChannelId`,
-  // `voiceCounterpartyUserId`, `voiceIsMuted`, `screenShareSources`,
-  // `screenShareLocalDimensions`) that could contradict each other.
+  // Voice + local share state; the union is in `types/voice-state.ts`.
   voiceState: VoiceState = { kind: 'idle' };
 
-  // Status bar alert — shown in bottom bar when a message arrives for a
-  // channel/DM the user is not currently viewing. Cleared on navigation.
+  // Bottom-bar alert for a message elsewhere; cleared on navigation.
   statusBarAlert: StatusBarAlert | null = null;
 
-  // Voice join failure — surfaced in the bottom bar when join_voice_channel
-  // fails (e.g. the LiveKit server is unreachable). Cleared on dismiss or on
-  // the next join attempt.
   voiceError: string | null = null;
 
-  // Live voice channel participants — driven by LiveKit events.
-  // Collection data, kept separate from the lifecycle union. Each carries a
-  // `ParticipantAudio` DU; speaker state is DERIVED from it below (#385) so it
-  // can't drift from the participant's own mute/speaking state.
+  // Speaker state is derived from each participant's audio DU (#385).
   voiceParticipants: VoiceParticipant[] = [];
 
-  /** Active remote webcams keyed by participant identity. A participant's
-   *  screenshare lives on `participant.video` (#385); the camera stays a
-   *  separate map because the two coexist (#394) — the camera renders as that
-   *  participant's tile face, the screen share as a spotlight streamer. */
+  /** Remote webcams by identity; separate from `participant.video` since both coexist (#394). */
   cameraRemotes: Record<string, CameraRemote> = {};
 
   /** Track key currently being viewed in the inline stream pane, if any. */
   viewingScreenShareTrackKey: string | null = null;
 
-  // Pending enrollment approval prompt — set by `useLiveKitRealtime`
-  // when an `EnrollmentRequested` event arrives from the user's inbox
-  // room. Causes the UI to immediately take over with the approval
-  // prompt regardless of which page the user is on. Cleared when the
-  // user approves, rejects, or after the request expires.
+  // Enrollment approval takeover, set by `useLiveKitRealtime`.
   pendingEnrollmentApproval: EnrollmentApproval | null = null;
 
   updateRequired = false;
 
-  // Latest version detected by the in-app poller while the user is signed in.
-  // null = no update detected (or not yet checked); a string = the version
-  // returned by the updater bridge's `check()`. Drives the discrete "Update
-  // available" indicator in the bottom bar.
+  // Version the in-app poller found; null = none.
   availableUpdateVersion: string | null = null;
 
-  // Channel id pending admin delete confirmation. When non-null and equal to
-  // selectedChannelId, MainContent replaces the chat input with the
-  // delete-channel confirm bar.
+  // When equal to selectedChannelId, MainContent shows the delete-channel confirm bar.
   pendingDeleteChannelId: string | null = null;
 
-  // Incoming 1:1 call ringing this device. Set when a `call_invite` arrives
-  // on the personal inbox; cleared on accept, decline, cancel, or logout.
-  // Renders in the bottom status bar with priority over `statusBarAlert`.
+  // Incoming 1:1 call ringing this device.
   incomingCall: IncomingCall | null = null;
 
-  // Outgoing 1:1 call this device initiated and is waiting on. Set in
-  // `DM.tsx` when `start_call` returns, cleared once the callee actually
-  // joins the LiveKit room (call answered) or once the caller hangs up
-  // before pickup (in which case the Call page emits `cancel_call` to stop
-  // the callee's ring). Holds just enough to address the cancel signal.
+  // Outgoing 1:1 call awaiting pickup; held to address `cancel_call`.
   outgoingCall: OutgoingCall | null = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
   }
 
-  // ── Actions ────────────────────────────────────────────────────────────
   setCurrentUser(user: User | null) {
     this.currentUser = user;
-    // Presence is fed by realtime events about other participants only, so
-    // the store has to be told who "we" are or every surface reports the
-    // local user offline.
+    // Presence only covers others, so it must know who "we" are.
     presenceStore.setSelfUserId(user?.id ?? null);
   }
 
   setUsername(username: string | null) {
     this.username = username;
-    // Keep currentUser in sync so components reading currentUser.username
-    // see the updated value without a page reload.
     if (this.currentUser) {
       this.currentUser = {
         ...this.currentUser,
@@ -203,11 +162,7 @@ class AppStore implements AppState {
     this.error = error;
   }
 
-  // Replace the whole badge set from the persisted cursors (#844).
-  //
-  // Whole-set replacement, not a merge: the query returns every conversation
-  // with something unread, so a conversation absent from it has nothing —
-  // merging would strand a badge that another device already cleared.
+  // Whole-set replacement (#844): merging would strand a badge another device cleared.
   hydrateUnread(counts: { conversation_id: string; count: number }[]) {
     const next: Record<string, number> = {};
     for (const c of counts) {
@@ -216,7 +171,6 @@ class AppStore implements AppState {
     this.unreadCounts = next;
   }
 
-  // Clears the unread count for a conversation or channel
   markRead(id: string) {
     if (!(id in this.unreadCounts)) {
       return;
@@ -226,7 +180,6 @@ class AppStore implements AppState {
     this.unreadCounts = next;
   }
 
-  // Increments the unread count for a conversation or channel by 1
   incrementUnread(id: string) {
     this.unreadCounts = {
       ...this.unreadCounts,
@@ -234,24 +187,15 @@ class AppStore implements AppState {
     };
   }
 
-  // Sum of unread counts across a collection of channels or DM conversations,
-  // each looked up by id. Replaces the duplicated
-  // `reduce((s, x) => s + (unreadCounts[x.id] ?? 0), 0)` copies at the badge
-  // call sites.
   unreadFor(items: { id: string }[]): number {
     return items.reduce((sum, x) => sum + (this.unreadCounts[x.id] ?? 0), 0);
   }
 
-  // Total unread across every channel/conversation — drives the OS dock/tray
-  // badge.
   get totalUnread(): number {
     return Object.values(this.unreadCounts).reduce((sum, n) => sum + n, 0);
   }
 
-  // ── Voice + share transitions ──────────────────────────────────────────
-  // Each transition guards on the current `voiceState.kind`. Bad
-  // transitions are logged + dropped instead of mutating state — this is
-  // the whole point of the union: contradictory state is unrepresentable.
+  // Each transition guards on `voiceState.kind`; bad ones are logged and dropped.
   voiceStartJoining(channelId: string, counterpartyUserId: string | null) {
     if (this.voiceState.kind !== 'idle') {
       console.warn('[voiceState] voiceStartJoining ignored:', this.voiceState.kind);
@@ -290,8 +234,6 @@ class AppStore implements AppState {
   }
 
   voiceStartLeaving() {
-    // Tolerate from joining or joined; the user can hit "leave" while we
-    // were still connecting.
     if (this.voiceState.kind !== 'joining' && this.voiceState.kind !== 'joined') {
       console.warn('[voiceState] voiceStartLeaving ignored:', this.voiceState.kind);
       return;
@@ -300,8 +242,6 @@ class AppStore implements AppState {
   }
 
   voiceLeft() {
-    // Unconditional reset — clears share state along the way since the
-    // union guarantees share can't outlive the joined parent.
     this.voiceState = { kind: 'idle' };
   }
 
@@ -312,9 +252,7 @@ class AppStore implements AppState {
     this.voiceState = { ...this.voiceState, micMuted: muted };
   }
 
-  /** Mirror the Rust-owned push-to-talk / mute / deafen snapshot (#849).
-   *  `micMuted` is kept in step with the gate's explicit-mute field so the
-   *  two can never disagree. */
+  /** Mirror the Rust-owned gate snapshot (#849); `micMuted` follows it. */
   voiceSetGate(gate: VoiceGateState) {
     if (this.voiceState.kind !== 'joined') {
       return;
@@ -361,11 +299,7 @@ class AppStore implements AppState {
     };
   }
 
-  /** An audio lifecycle event that arrived while the share was still
-   *  `starting`. The backend's audio events can precede LocalStarted (a
-   *  Linux portal error before the video format, for one), and dropping
-   *  them would leave the indicator stuck on `pending` forever — so the
-   *  last one is held here and consumed by shareStarted. */
+  /** An audio event that arrived while `starting`, consumed by shareStarted. */
   private bufferedShareAudio: ShareAudioState | null = null;
 
   shareStarted(trackId: string, dimensions: { width: number; height: number } | null) {
@@ -373,10 +307,7 @@ class AppStore implements AppState {
       console.warn('[voiceState] shareStarted ignored:', this.voiceState.kind, this.voiceState.kind === 'joined' ? this.voiceState.share.kind : 'n/a');
       return;
     }
-    // A share that asked for sound starts `pending`, not `live`: the
-    // backend publishes the audio track only once a capture backend has
-    // actually announced a format, and says so with its own event —
-    // which may already have arrived and been buffered.
+    // Starts `pending`: the backend announces audio with its own event, maybe already buffered.
     const audio: ShareAudioState = this.voiceState.share.withAudio
       ? this.bufferedShareAudio ?? { kind: 'pending' }
       : { kind: 'off' };
@@ -400,10 +331,7 @@ class AppStore implements AppState {
     };
   }
 
-  /** Audio was requested and cannot be delivered — or stopped mid-share.
-   *  Deliberately does NOT touch the share itself: the video is still
-   *  going out, and tearing it down over a missing output device would
-   *  lose the thing the user actually came for. */
+  /** Audio unavailable or stopped; the video share continues. */
   shareAudioUnavailable(reason: string) {
     if (this.voiceState.kind !== 'joined' || this.voiceState.share.kind !== 'active') {
       if (this.voiceState.kind === 'joined' && this.voiceState.share.kind === 'starting') {
@@ -440,18 +368,12 @@ class AppStore implements AppState {
   }
 
   shareStopped() {
-    // Unconditional reset of share — safe to call from any share state
-    // (active, failed, starting, picking). The reset-on-leave path also
-    // calls voiceLeft which clears share via the union structure.
     if (this.voiceState.kind !== 'joined') {
       return;
     }
     this.bufferedShareAudio = null;
     this.voiceState = { ...this.voiceState, share: { kind: 'idle' } };
   }
-
-  // ── Camera lifecycle — mirrors the share transitions above. Camera and
-  // share are independent slots on `joined`, so a user can run both. ──────
 
   cameraStartPicking(cameras: CameraSource[]) {
     if (this.voiceState.kind !== 'joined' || this.voiceState.camera.kind !== 'idle') {
@@ -525,16 +447,13 @@ class AppStore implements AppState {
     this.voiceParticipants = participants;
   }
 
-  // Derived, not stored — a getter so makeAutoObservable treats it as a
-  // computed. Identities of participants whose audio DU says `speaking`; can't
-  // drift from the participant list the way a mirrored array could (#385).
+  // A computed, so it can't drift from the participants (#385).
   get voiceActiveSpeakerIds(): string[] {
     return this.voiceParticipants
       .filter((p) => isSpeaking(p.audio))
       .map((p) => p.identity);
   }
 
-  // Derived computed: true when the local participant is speaking.
   get isLocalSpeaking(): boolean {
     const local = this.voiceParticipants.find((p) => p.isLocal);
     return local ? isSpeaking(local.audio) : false;
@@ -548,10 +467,7 @@ class AppStore implements AppState {
     this.cameraRemotes = { ...this.cameraRemotes, [identity]: info };
   }
 
-  /** Remove a remote camera by its track key. Safe to call for a track key
-   *  that isn't a camera (the screenshare remove does the symmetric thing) —
-   *  the two maps are scanned independently, so a stop event can fan out to
-   *  both without knowing which kind the track was. */
+  /** Remove a remote camera; safe for non-camera track keys. */
   removeCameraRemote(trackKey: string) {
     const next: Record<string, CameraRemote> = {};
     for (const [id, info] of Object.entries(this.cameraRemotes)) {

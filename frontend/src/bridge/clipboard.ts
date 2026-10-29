@@ -1,9 +1,4 @@
-/**
- * Clipboard bridge — the custom `#[tauri::command]`s `read_clipboard_files`,
- * `read_clipboard_image` and `write_clipboard_text` (implemented in
- * `src-tauri/src/lib.rs`) get bridge wrappers so callers don't reach past the
- * bridge to `invoke` them directly.
- */
+/** Wrappers for the clipboard commands in `src-tauri/src/lib.rs`. */
 
 import { invoke } from "./invoke";
 
@@ -11,18 +6,9 @@ export async function readClipboardFiles(): Promise<string[]> {
   return invoke<string[]>("read_clipboard_files");
 }
 
-/**
- * Raster image on the OS clipboard, as PNG bytes — or null when there is none.
- *
- * Bytes, not a path. The command used to save the PNG into the OS temp
- * directory and hand back its location, and nothing ever deleted the file, so
- * every screenshot a user pasted stayed on disk in the clear. The caller turns
- * these bytes into a `File` and stages them with `stageAttachment`, which keeps
- * them in the backend's memory instead.
- */
+/** Clipboard image as PNG bytes, or null; bytes, never a temp file. */
 export async function readClipboardImage(): Promise<Uint8Array<ArrayBuffer> | null> {
-  // The Tauri command answers with an empty body when the clipboard holds no
-  // image; the raw response arrives as an ArrayBuffer.
+  // Empty body = no image.
   const bytes = await invoke<ArrayBuffer | Uint8Array | number[]>(
     "read_clipboard_image",
   );
@@ -33,12 +19,7 @@ export async function readClipboardImage(): Promise<Uint8Array<ArrayBuffer> | nu
   return array.byteLength > 0 ? array : null;
 }
 
-/**
- * Write plain text to the OS clipboard. Returns false if the write failed.
- *
- * Backed by a Rust command rather than `navigator.clipboard` because the
- * latter is unreliable on WebKitGTK (the Linux webview this app ships on).
- */
+/** Write text; false on failure. Rust-backed since `navigator.clipboard` is unreliable on WebKitGTK. */
 export async function writeClipboardText(text: string): Promise<boolean> {
   return invoke<boolean>("write_clipboard_text", { text });
 }

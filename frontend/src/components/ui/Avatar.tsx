@@ -10,9 +10,7 @@ interface AvatarProps {
   alt?: string;
   testId?: string;
   variant?: "list" | "profile";
-  // Optional presence dot rendered in the bottom-right corner. Pass undefined
-  // to omit (the default) — only the avatars that surface in DM-call paths
-  // should render it, per #132's framing.
+  // Optional corner presence dot (#132); omitted by default.
   presence?: PresenceStatus;
 }
 
@@ -31,8 +29,6 @@ export const Avatar: React.FC<AvatarProps> = ({
 }) => {
   const { t } = useTranslation("common");
   const { data: blobUrl } = useAvatarBlobUrl(avatarKey ?? null);
-  // Resolved at render, not as a default parameter, so the fallback follows
-  // a language change.
   const resolvedAlt = alt ?? t("a11y.avatar");
 
   const dim = `${size}px`;
@@ -51,9 +47,6 @@ export const Avatar: React.FC<AvatarProps> = ({
     flexShrink: 0,
   };
 
-  // Wrap the avatar in a positioned span so the dot can sit at the corner
-  // without disturbing the parent's layout. Sizing the dot relative to the
-  // avatar keeps it visible at every avatar size we use.
   const dotSize = Math.max(5, Math.round(size * 0.24));
   const wrapperStyle: React.CSSProperties = {
     position: "relative",

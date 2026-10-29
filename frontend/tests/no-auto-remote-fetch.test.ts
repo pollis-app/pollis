@@ -1,28 +1,4 @@
-/*
- * Nothing the renderer paints reaches a remote host on its own.
- *
- * Two distinct leaks, one property.
- *
- * 1. `MediaLinkUnfurl` gates remote media behind a click, but it carried an
- *    allowlist — `AUTO_LOAD_HOSTS = ["cdn.pollis.com"]` — whose members loaded
- *    the moment a message scrolled into view. The hostname comes out of MESSAGE
- *    TEXT, so the sender chooses it, and the check looked at the host alone:
- *    the path stayed the sender's, which makes the URL a per-recipient beacon
- *    that fires on read. And a webview `<img src>` is the renderer's own
- *    request, not `http_client`'s, so it cannot ride the relay overlay — the
- *    "first party" whose knowledge the exception waved away is precisely the
- *    party the overlay hides the address from.
- *
- * 2. The auto-updater is the other request the overlay cannot reach by itself
- *    (the plugin builds its own client in Rust). `bridge/updater.ts` must ask
- *    Rust what is allowed before every check rather than always going direct.
- *
- * Both are source-shape properties, invisible to a rendering test: the failure
- * is "somebody adds an auto-load host again" or "somebody drops the plan
- * lookup".
- *
- *   node --test frontend/tests/
- */
+/* Nothing painted reaches a remote host on its own: no auto-load hosts in `MediaLinkUnfurl` (sender-chosen beacons), and the updater asks Rust's plan. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -37,9 +13,7 @@ const UPDATER = fileURLToPath(new URL("../src/bridge/updater.ts", import.meta.ur
 test("no host loads remote media without a click", () => {
   const source = readFileSync(UNFURL, "utf8");
 
-  // The gate is the whole component: `show` decides between the placeholder
-  // button and the real <img>/<video>. It may depend on nothing but what the
-  // reader has revealed.
+  // `show` may depend only on what the reader revealed.
   const show = source.match(/const show = (.+);/);
   assert.ok(show, "MediaLinkUnfurl must still compute a `show` gate");
   assert.equal(
@@ -56,8 +30,6 @@ test("no host loads remote media without a click", () => {
     );
   }
 
-  // Belt and braces: no literal first-party host anywhere in the executable
-  // part of the file.
   const code = source
     .split("\n")
     .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))

@@ -21,41 +21,26 @@ export type CopyLinkState = "idle" | "copied" | "failed";
 
 interface MessageActionsProps {
   messageId: string;
-  /** Which skin's toolbar chrome to render — floating panel (refined) or
-   * inline row-end strip (terminal). The menu itself is identical. */
+  /** Toolbar chrome: floating panel (refined) or inline strip (terminal). */
   variant: "refined" | "terminal";
   isOwn: boolean;
   canModerate: boolean;
   isSaved: boolean;
-  /** Whether this message is pinned in its conversation (#99). */
   isPinned: boolean;
   copyLinkState: CopyLinkState;
   onReply?: (messageId: string) => void;
   onOpenThread?: (messageId: string) => void;
   onToggleSave?: (messageId: string) => void;
-  /** Pin/unpin for everyone (#99) — any member gets this. */
   onTogglePin?: (messageId: string) => void;
   onCopyLink?: (messageId: string) => void;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
-  /** Report this message's sender (#1213). Shown on other people's messages. */
   onReport?: (messageId: string) => void;
 }
 
-// Approximate rendered menu height plus margin — used to decide whether the
-// menu opens upward or downward from the trigger.
 const MENU_CLEARANCE_PX = 220;
 
-/**
- * Per-message hover actions, Discord-shaped: Reply, React, Edit (own
- * messages), and a "more" trigger; every other action lives in an anchored menu with icon +
- * explicit label per row, Delete last.
- *
- * The menu is `absolute` inside the toolbar's own `relative` wrapper — anchored
- * to the trigger, no portal, no fixed positioning, no backdrop (the same
- * non-modal shape as EmojiPickerButton). Outside clicks close it via a
- * `mousedown` listener; Escape closes it too.
- */
+/** Per-message hover actions plus an anchored "more" menu (no portal, no backdrop). */
 export const MessageActions: React.FC<MessageActionsProps> = ({
   messageId,
   variant,
@@ -75,12 +60,8 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
 }) => {
   const { t } = useTranslation("chat");
   const [menuOpen, setMenuOpen] = useState(false);
-  // The reaction picker is anchored in the bar too, so it holds the bar open
-  // the same way the menu does.
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Whether the menu opens above the trigger — chosen at open time from the
-  // trigger's viewport position, so the menu near the composer never renders
-  // below the fold of the scrolling message list.
+  // Opens up or down from the trigger's viewport position, chosen at open time.
   const [opensUp, setOpensUp] = useState(true);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
@@ -96,9 +77,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        // Claim the key: the window-level nav.back shortcut also binds
-        // Escape and would navigate the whole channel away while merely
-        // closing this menu.
+        // Claim the key: window-level nav.back also binds Escape.
         event.stopImmediatePropagation();
         setMenuOpen(false);
       }
@@ -140,20 +119,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   };
 
   const iconSize = variant === "refined" ? 16 : 18;
-  // Keyboard selection INVERTS the button (accent fill, background-colored
-  // glyph) rather than merely recoloring it. A tint alone was invisible in
-  // the terminal skin, where the icons are already small and un-chromed, so
-  // there was no way to tell which action arrow-key navigation had landed on.
-  //
-  // Plain `focus:`, not `focus-visible:` — the nav machine moves focus
-  // programmatically (MessageList projects nav state with `.focus()`), which
-  // WebKitGTK does not reliably treat as focus-visible; the message row's own
-  // `focus-within:bg-hover` is on plain focus for the same reason. Focus
-  // variants are emitted after hover ones, so the flip wins while hovered.
-  //
-  // The resting color is deliberately NOT baked in here: each button appends
-  // exactly one `text-*`, because two of them on one element resolve by
-  // stylesheet order rather than by the order they appear in the string.
+  // Plain `focus:` (not focus-visible): programmatic focus isn't focus-visible on WebKitGTK. One `text-*` per button.
   const barBtnFlipClass = "outline-none focus:bg-accent focus:text-bg";
   const barBtnBaseClass =
     variant === "refined"
@@ -161,15 +127,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
       : `p-0.5 ${barBtnFlipClass}`;
   const barBtnClass = `${barBtnBaseClass} text-muted hover:text-accent`;
 
-  // The container owns hover-reveal for both skins; while the menu is open it
-  // stays fully visible even if the pointer leaves the row — otherwise the
-  // open menu would turn invisible yet keep intercepting clicks.
-  // group-focus-within: the row root carries `group`, so keyboard focus on
-  // the ROW (arrow-key log navigation) reveals the bar exactly like hover.
-  //
-  // Hidden also means unclickable: an `opacity-0` bar still takes the pointer,
-  // and the refined bar sits half over the row above (`-translate-y-1/2`), so
-  // it silently swallowed clicks on that row's bottom edge — links included.
+  // Visible while a menu is open; hidden bars must not take the pointer (they overlap the row above).
   const visibilityClass = menuOpen || pickerOpen
     ? "opacity-100"
     : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto";
@@ -180,25 +138,10 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
 
   const menuRowClass =
     "flex w-full items-center gap-2 px-2.5 py-1.5 text-sm text-start whitespace-nowrap hover:bg-hover outline-none";
-  // Same inversion as the bar buttons, replacing the browser's default focus
-  // ring — which was the only thing marking the focused row while tabbing the
-  // menu, and reads as foreign chrome against either skin. Destructive rows
-  // invert to danger so Delete never borrows the affirmative accent.
-  //
-  // Kept off `menuRowClass` and appended per row on purpose: two competing
-  // `focus:bg-*` utilities on one element resolve by stylesheet order, which
-  // the class-string order does not control, so the row would win or lose the
-  // fight by accident.
+  // Appended per row: two `focus:bg-*` on one element resolve by stylesheet order.
   const menuRowFocusClass = "focus:bg-accent focus:text-bg";
   const menuRowFocusDangerClass = "focus:bg-danger focus:text-bg";
-  // The Copy link row keeps focus after the click (the menu stays open so the
-  // feedback lands where the pointer is), so the plain inversion would paint
-  // over its copied/failed tone and the colour half of the confirmation was
-  // never seen (#1059). Like a pressed button releasing, the copied row steps
-  // the focus fill down from the solid accent to the app's selected-row tint
-  // (`bg-active`, the sidebar selection) so the accent text can show; a failed
-  // copy inverts to danger exactly like Delete does. Focus never moves — a
-  // keyboard user would lose their place in the menu.
+  // Copied row keeps focus, so it steps down to `bg-active` to show its tone (#1059).
   const copyLinkFocusClass =
     copyLinkState === "copied"
       ? "focus:bg-active focus:text-accent"
@@ -252,10 +195,6 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
             aria-label={t("actions.more")}
             aria-expanded={menuOpen}
             aria-haspopup="menu"
-            // Three small dots carry far less ink than the reply arrow or the
-            // pencil, so at the shared `text-muted` the trigger read as
-            // disabled next to them. One step brighter evens the row up
-            // optically rather than nominally.
             className={`${barBtnBaseClass} ${
               menuOpen ? "text-accent" : "text-dim hover:text-accent"
             }`}
@@ -313,8 +252,6 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   role="menuitem"
                   data-testid="copy-link-button"
                   data-copy-state={copyLinkState}
-                  // Stays open so the copied/failed feedback is visible where
-                  // the click happened.
                   onClick={() => onCopyLink(messageId)}
                   className={`${menuRowClass} ${copyLinkFocusClass} ${copyLinkTone}`}
                 >

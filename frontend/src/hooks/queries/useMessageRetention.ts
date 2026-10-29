@@ -1,17 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 
-// Device-local message retention window, in days. 0 = Forever (no eviction).
-// Stored in the local SQLite `ui_state` table (not synced); the backend runs
-// an eviction sweep over the local message table whenever this is changed.
+// Device-local retention in days (0 = Forever); changing it sweeps immediately.
 export const RETENTION_FOREVER = 0;
 
-// Allowed retention windows, validated identically in the Rust core
-// (`set_message_retention` rejects anything not in this set).
-//
-// `days` only — the human label is derived from it by `retentionLabel` in
-// `pages/PreferencesPage.tsx`, so the copy lives in the translation catalogue
-// rather than in a hook (#855).
+// Rust accepts only these; labels come from `retentionLabel` (#855).
 export const MESSAGE_RETENTION_OPTIONS = [
   { days: RETENTION_FOREVER },
   { days: 365 },
@@ -21,7 +14,6 @@ export const MESSAGE_RETENTION_OPTIONS = [
 
 const messageRetentionKey = ["message_retention"] as const;
 
-// Query: the current device-local retention window in days (0 = Forever).
 export function useMessageRetention() {
   return useQuery({
     queryKey: messageRetentionKey,
@@ -32,8 +24,7 @@ export function useMessageRetention() {
   });
 }
 
-// Mutation: set the retention window. The backend triggers an immediate
-// eviction sweep, so we refetch the value on success to stay in sync.
+// Refetch after the immediate sweep.
 export function useSetMessageRetention() {
   const queryClient = useQueryClient();
 

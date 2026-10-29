@@ -9,22 +9,14 @@ import { TextInput } from "../ui/TextInput";
 import { logIgnored } from "../../utils/log";
 
 interface SaveSecretKeyScreenProps {
-  /// The freshly-generated Secret Key returned from `verify_otp`. Shown
-  /// to the user once. We never store it on disk; once they confirm we
-  /// pass control back to the parent.
+  /// Shown once; never stored on disk.
   secretKey: string;
-  /// Email address of the account this key belongs to — used as a
-  /// suffix on the downloaded emergency-kit filename so users with
-  /// multiple accounts can tell their kits apart. Optional; omitted →
-  /// unsuffixed filename.
+  /// Suffixes the emergency-kit filename.
   email?: string | null;
-  /// Called once the user has typed the key back to confirm they saved it.
   onConfirmed: () => void;
 }
 
-/// Normalize for comparison: strip whitespace, dashes, prefix, uppercase.
-/// Mirrors the backend `normalize_secret_key` so partial / re-typed user
-/// input round-trips against the original.
+/// Mirrors the backend `normalize_secret_key`.
 function normalize(input: string): string {
   return input
     .replace(/\s+/g, "")
@@ -33,22 +25,18 @@ function normalize(input: string): string {
     .toUpperCase();
 }
 
-// Restrict filename chars to a conservative alphanumeric/hyphen/
-// underscore set so any exotic input (emoji, slashes, whitespace)
-// can't produce an invalid filename on any OS.
+// Conservative character set, valid on any OS.
 function sanitizeForFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-// Compact YYYYMMDD-HHMMSS in local time.
 function compactTimestamp(d: Date): string {
   const p = (n: number) => n.toString().padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 function downloadEmergencyKit(secretKey: string, email?: string | null) {
-  // One-shot file contents, produced on click and never re-rendered, so the
-  // i18n singleton is the right lookup here rather than a `useTranslation` `t`.
+  // One-shot content, so the i18n singleton is fine.
   const text = i18n.t("auth:emergencyKit.document", {
     secretKey,
     generated: new Date().toISOString(),
@@ -102,7 +90,6 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
     onConfirmed();
   };
 
-  // Phase 1: warning screen
   if (phase === "warn") {
     return (
       <div
@@ -165,7 +152,6 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
     );
   }
 
-  // Phase 2: reveal key + copy/download actions
   if (phase === "show") {
     return (
       <div
@@ -255,7 +241,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
     );
   }
 
-  // Phase 3: confirm retrieval — key is NOT visible
+  // Phase 3: confirm; the key is NOT visible.
   return (
     <div
       data-testid="save-secret-key-confirm-screen"

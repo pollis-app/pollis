@@ -1,25 +1,4 @@
-/*
- * The webview's own privileges, pinned.
- *
- * Three of the shell's defences are single lines of configuration that nothing
- * else in the build would notice going missing:
- *
- *   1. `security.csp` was `null`, i.e. the renderer ran with NO content policy
- *      at all — any injected markup could load and execute a remote script and
- *      talk to any origin it liked.
- *   2. `assetProtocol.enable` was `true`, a second scheme that reads native
- *      files, scoped separately from (and unknown to) the path scope that gates
- *      the four path-taking commands.
- *   3. `dialog:default` let the renderer invoke `plugin:dialog|open` itself, so
- *      a picked path never passed through Rust and could not be recorded.
- *      `pick_open_paths` / `pick_save_path` replace it precisely so that it can
- *      be — see `src-tauri/src/pathscope.rs`.
- *
- * Each of these is a config key. A test is the only thing that can notice one
- * being loosened again, so this file asserts them directly.
- *
- *   node --test frontend/tests/
- */
+/* The webview's privileges, pinned: a real CSP, the asset protocol off, and no direct `plugin:dialog` (see `src-tauri/src/pathscope.rs`). */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -61,8 +40,7 @@ test("the webview runs under a real content security policy", () => {
     "app.security.csp must be a directive map, not null — null means no policy at all",
   );
 
-  // default-src has to be restrictive, because every directive not named below
-  // falls back to it.
+  // Every unnamed directive falls back to default-src.
   assert.equal(csp["default-src"], "'self'");
 
   // The two that decide whether injected markup can run code.
@@ -85,8 +63,7 @@ test("the webview runs under a real content security policy", () => {
     }
   }
 
-  // The renderer's real network surface: the IPC and the loopback media/frame
-  // servers. Anything else it needs goes through a Rust command.
+  // IPC and the loopback servers only; everything else goes through Rust.
   const connect = csp["connect-src"] ?? "";
   for (const source of ["ipc:", "http://ipc.localhost", "http://127.0.0.1:*", "ws://127.0.0.1:*"]) {
     assert.ok(connect.includes(source), `connect-src must allow ${source}`);

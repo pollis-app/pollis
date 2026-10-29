@@ -3,21 +3,12 @@ import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 
-/**
- * The Vault (#107): a personal encrypted space that syncs across the
- * account's devices like cloud storage.
- *
- * Every command round-trips through Rust, which seals/opens entries under a
- * key derived from the account identity key — the server stores ciphertext
- * only, and a brand-new device decrypts the whole vault at enrollment (the
- * deliberate inversion of "a new device starts empty").
- */
+/** The Vault (#107): sealed under the account key in Rust; a new device decrypts all of it. */
 
 /** Mirrors the Rust VaultMessage in pollis-core/src/commands/vault.rs. */
 export interface VaultMessage {
   id: string;
-  /** Same content-string shape as chat messages — plain text or the
-   * `{"_att":[...],"_txt":"..."}` envelope; parse with `parseContent`. */
+  /** Chat content-string shape; parse with `parseContent`. */
   content: string;
   pinned: boolean;
   created_at: string;
@@ -28,8 +19,7 @@ export const vaultQueryKeys = {
   all: ["vault"] as const,
 };
 
-/** Every vault entry, oldest first (chat order). Syncs from the DS when
- * reachable and serves the local cache offline — the Rust command decides. */
+/** Every entry, oldest first; Rust syncs or serves the cache. */
 export function useVaultMessages() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
@@ -61,8 +51,7 @@ function useVaultMutation<TVars>(
   });
 }
 
-/** Add one entry. `content` comes from `buildMessageContent`, so file drops
- * ride the same upload pipeline as chat attachments. */
+/** Add one entry built by `buildMessageContent`. */
 export function useSendVaultMessage() {
   return useVaultMutation<{ content: string }>((vars, userId) =>
     invoke("send_vault_message", { userId, content: vars.content }),
@@ -85,8 +74,7 @@ export function useDeleteVaultMessage() {
   );
 }
 
-/** Pin/unpin an entry — on the wire indistinguishable from an edit, so the
- * server never learns which entries matter most. */
+/** Pin/unpin; looks like an edit on the wire. */
 export function useSetVaultMessagePinned() {
   return useVaultMutation<{ id: string; pinned: boolean }>((vars, userId) =>
     invoke("set_vault_message_pinned", {

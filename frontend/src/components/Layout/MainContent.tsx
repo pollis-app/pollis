@@ -26,8 +26,7 @@ import { TypingIndicator } from "../TypingIndicator";
 import { EmptyState } from "../ui/EmptyState";
 import { probeRender } from "../../utils/renderProbe";
 
-// Passed from DM page when the current user has not yet accepted the DM.
-// Replaces the chat input with an accept/block bar.
+// DM not yet accepted: the chat input becomes an accept/block bar.
 export interface PendingDmRequest {
   senderUserId: string;
   senderName: string;
@@ -47,46 +46,21 @@ type MessagesQueryData = {
   nextCursor: PageCursor | null;
 };
 
-/**
- * The pages this component has fetched for one conversation beyond the live
- * newest page, and which of the two window modes the log is in (#1039).
- *
- * **Live** is the ordinary state: the React Query page is the tail of the
- * log, `messages` are the older pages fetched behind it, and the two are
- * contiguous — so their union, deduped and sorted, IS the log.
- *
- * **Anchored** is the state a jump to a message outside the loaded window
- * puts the log in. `messages` is a self-contained window around the anchor
- * that pages in both directions — older from `olderCursor` as usual, and
- * NEWER from `newerCursor` as the reader scrolls toward the present — and the
- * live page is NOT shown, because nothing says it is adjacent. Merging the
- * two anyway was the #1039 bug: the log rendered the anchor's page and the
- * live page as neighbours and the history between them silently vanished.
- * The window hands back to live mode the moment a forward page touches the
- * live page or runs out of history, at which point the two are contiguous
- * and the ordinary merge is correct again. This is what Slack and Discord do.
- *
- * Stamped with the log they belong to so the pages and the conversation on
- * screen can never disagree, not even for the one render an effect-based
- * reset leaves between them (#927).
- */
+/** Pages fetched beyond the live page (#1039). Live: older pages behind the live tail. Anchored: a window around a jump target, paged both ways, with the live page hidden until contiguous. Stamped with its log key (#927). */
 type MessageWindow =
   | {
       mode: "live";
       logKey: string;
       messages: Message[];
       cursor: PageCursor | null;
-      /** Whether a page has been fetched for this log yet — before the first
-       *  one, the cursor to continue from is the initial page's own. */
+      /** Before the first fetch, continue from the initial page's cursor. */
       fetched: boolean;
     }
   | {
       mode: "anchored";
       logKey: string;
       messages: Message[];
-      /** Continue backwards from here; null once the oldest message is held. */
       olderCursor: PageCursor | null;
-      /** Continue forwards from here — the newest row held. */
       newerCursor: PageCursor;
     };
 
@@ -100,12 +74,11 @@ const NO_WINDOW: MessageWindow = {
 
 const PAGE_SIZE = 50;
 
-/** Whether two pages share a message, i.e. are known to be contiguous. */
 function overlaps(a: Message[], ids: Set<string>): boolean {
   return a.some((m) => ids.has(m.id));
 }
 
-/** The log's order: `sent_at`, then `id` — the same tie-break the page reads use. */
+/** `sent_at`, then `id`: the page reads' tie-break. */
 function isOlder(a: PageCursor, b: PageCursor): boolean {
   return a.sent_at < b.sent_at || (a.sent_at === b.sent_at && a.id < b.id);
 }
@@ -138,7 +111,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const acceptDmRequestMutation = useAcceptDMRequest();
   const blockUserMutation = useBlockUser();
   const navigate = useNavigate();
-  // Root-route search params — `?message=` is the jump target (#850).
   const routeSearch = useSearch({ strict: false }) as { message?: string };
   const deleteChannelMutation = useDeleteChannel();
   const isDeletingThisChannel =
@@ -149,17 +121,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     () => new Set(groupMembers.filter((m) => m.role === "admin").map((m) => m.user_id)),
     [groupMembers],
   );
-  // Viewer is an admin in this channel's group — gates the moderator
-  // delete affordance on other members' messages.
   const viewerIsAdmin =
     !!selectedGroupId && !!currentUser && adminUserIds.has(currentUser.id);
 
   const chatInputRef = useRef<ChatInputHandle>(null);
 
-  // For channels the LiveKit room is the parent group's MLS group id; for
-  // DMs it's the conversation id directly. `useTypingPublisher` no-ops when
-  // the room id is null (e.g. nothing selected) so we don't need to gate
-  // the hook call.
+  // LiveKit room: the group's MLS id for channels, the conversation id for DMs.
   const typingRoomId = selectedChannelId
     ? selectedGroupId ?? null
     : selectedConversationId ?? null;
@@ -175,8 +142,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     selectedConversationId
   );
   const sendMessageMutation = useSendMessage();
-  // Threads (#825). `openThread` writes the panel search params; the summaries
-  // give each root message its "N replies" count without loading the thread.
   const { openThread } = useRightPanel();
   const { data: threadSummaries } = useThreadSummaries(
     selectedChannelId ?? selectedConversationId ?? null,
@@ -191,57 +156,37 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const deleteMessageMutation = useDeleteMessage();
   const editMessageMutation = useEditMessage();
 
-  // ID of message pending delete confirmation (null = no dialog).
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
-  // Message currently being edited (null = not editing).
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editDraftValue, setEditDraftValue] = useState('');
 
-  // Which conversation the log on screen belongs to. Channels and DMs share
-  // this component, so both ids go into the key.
   const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
 
   const [messageWindow, setMessageWindow] = useState<MessageWindow>(NO_WINDOW);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
-  // Bumped when an anchored window is dropped for the live tail wholesale (a
-  // send from inside it), so `MessageList` re-runs its open-at-newest anchor
-  // rather than keeping a scroll offset into a log that no longer exists. NOT
-  // bumped on the scroll-driven anchored→live hand-back, which must leave the
-  // reader exactly where they are, and not on a jump, whose pending target
-  // positions the log itself.
+  // Bumped when an anchored window is dropped wholesale (a send), so the log re-opens at newest.
   const [windowEpoch, setWindowEpoch] = useState(0);
 
-  // Pages belonging to another conversation are simply not this log's — no
-  // reset effect, so there is no window in which they could be read as if
-  // they were, and nothing to re-run.
+  // Another conversation's pages are simply not read.
   const window_ = messageWindow.logKey === logKey ? messageWindow : NO_WINDOW;
   const isAnchored = window_.mode === "anchored";
   const windowMessages = window_.messages;
-  // Where the next OLDER page continues from. Live: the initial page's cursor
-  // until a page has been fetched, then whatever that fetch handed back.
-  // Derived during render, because the effect that used to seed it read the
-  // PREVIOUS conversation's page list — so opening a conversation whose first
-  // page was already cached left it with no cursor at all, and no dependency
-  // would ever change to give it one. That conversation stayed capped at its
-  // newest 50 messages for as long as the cache held it (#927).
+  // Next OLDER cursor, derived during render: an effect read the previous conversation's pages (#927).
   const pageCursor =
     window_.mode === "anchored"
       ? window_.olderCursor
       : window_.fetched
         ? window_.cursor
         : nextCursor;
-  // Where the next NEWER page continues from — anchored mode only; in live
-  // mode the newest page IS the tail and new arrivals land on it directly.
   const newerCursor = window_.mode === "anchored" ? window_.newerCursor : null;
 
-  // Reset edit state when the selected channel/conversation changes.
   useEffect(() => {
     setEditingMessage(null);
   }, [selectedChannelId, selectedConversationId]);
 
-  // Escape cancels edit/delete/reply bar — capture phase so AppShell's navigation handler doesn't fire first.
+  // Capture phase so AppShell's navigation handler doesn't fire first.
   useEffect(() => {
     if (!editingMessage && !pendingDeleteId && !replyToMessageId && !isDeletingThisChannel) {
       return;
@@ -264,18 +209,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [editingMessage, pendingDeleteId, replyToMessageId, isDeletingThisChannel]);
 
-  // MessageItem dispatches this when an attachment lightbox closes so focus
-  // returns to the chat input — keeps the keyboard-driven flow intact.
   useEffect(() => {
     const handler = () => chatInputRef.current?.focus();
     window.addEventListener("pollis:focus-chat-input", handler);
     return () => window.removeEventListener("pollis:focus-chat-input", handler);
   }, []);
 
-  // The log: in live mode the older pages merged with the live page,
-  // deduplicated and sorted oldest-first (dedup keeps the first occurrence by
-  // message ID); in anchored mode the window alone, because the live page is
-  // not known to be adjacent to it (#1039).
+  // Live: older pages + live page, deduped and sorted. Anchored: the window alone (#1039).
   const allMessages = useMemo(() => {
     const combined = isAnchored ? windowMessages : [...windowMessages, ...messages];
     const seen = new Set<string>();
@@ -289,28 +229,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     return deduped.sort((a, b) => a.created_at - b.created_at);
   }, [isAnchored, windowMessages, messages]);
 
-  // What the CHANNEL shows: everything except thread replies (#825). A reply
-  // lives in its thread, and the root already advertises it with "N replies" —
-  // showing it in both places double-posts every reply into the channel, which
-  // is exactly what threads exist to avoid.
-  //
-  // Filtered here rather than in `allMessages` on purpose: that list still
-  // backs the two id lookups that must resolve a reply which is only rendered
-  // in the thread panel — the edit/delete confirmation (`allMessagesRef`) and
-  // the composer's `ReplyPreview` strip.
-  //
-  // The quote rendered INSIDE a row is not one of them: `MessageList` builds
-  // its own `replyTargets` index from the list it was handed, i.e. this
-  // filtered one. (The comment here used to claim otherwise — #874.)
+  // Thread replies stay out of the channel (#825); `allMessages` still resolves them for edit/delete and ReplyPreview.
   const channelMessages = useMemo(
     () => allMessages.filter((m) => !m.thread_id || m.thread_id === m.id),
     [allMessages],
   );
 
-  // The whole log by id, read from callbacks rather than closed over. Pinned in
-  // a ref because this component re-renders on every keystroke in the edit bar
-  // (`editDraftValue` is local state), and a fresh callback identity re-renders
-  // the entire message list (#874).
+  // Ref: a fresh callback re-renders the whole list on every edit keystroke (#874).
   const allMessagesRef = useRef(allMessages);
   allMessagesRef.current = allMessages;
 
@@ -319,8 +244,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       return;
     }
     setLoadingMore(true);
-    // Whether this call reached the prepend. Only the paths that did NOT get
-    // there clear the flag inline; see the `finally`.
     let prepended = false;
     try {
       let page: RawMessagePage;
@@ -342,13 +265,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
       const fetched = page.messages.map(transformChannelMessage);
       const continuation = page.next_cursor ?? null;
-      // The prepend below is what ends this load, and the effect keyed on
-      // `olderPages` is what clears the flag — see the `finally`.
       prepended = true;
 
-      // Written against the log this fetch was issued for. A conversation
-      // switch mid-flight therefore lands on a key nothing reads, rather than
-      // prepending one conversation's history onto another's.
+      // Keyed to the log it was issued for, so a mid-flight switch can't cross-prepend.
       setMessageWindow((prev) => {
         const base = prev.logKey === logKey ? prev : NO_WINDOW;
         const existingIds = new Set(base.messages.map((m) => m.id));
@@ -366,52 +285,25 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         };
       });
     } finally {
-      // Only the paths that never reached the prepend clear the flag here —
-      // an early return, a throw. A successful load is ended by the effect
-      // below instead (#934).
-      //
-      // Clearing here unconditionally is what used to happen, and it put the
-      // prepend and the flag clear in ONE commit: React batches every
-      // setState from a single async continuation, so there was no committed
-      // state in which the new rows existed and the log still said it was
-      // fetching. Nothing needed that seam yet, which is exactly why it went
-      // unnoticed — but it is the state anything reacting between "the page
-      // arrived" and "the load is over" (a scroll anchor, a spinner that must
-      // not flash, an analytics timing) has to be able to observe.
+      // Only paths that never prepended clear the flag here; a successful load clears it a commit later (#934).
       if (!prepended) {
         setLoadingMore(false);
       }
     }
   }, [pageCursor, loadingMore, currentUser, logKey, selectedChannelId, selectedConversationId]);
 
-  // The other half: a load that DID prepend ends one commit later, when the
-  // rows it fetched are already on screen. A passive effect is precisely that
-  // boundary — it runs after the commit carrying the new rows (and after the
-  // virtualiser's layout-effect re-anchor), so `loadingMore` is still true for
-  // the whole of that commit and drops in the next one.
+  // Passive effect: runs after the commit with the new rows, so `loadingMore` spans that commit.
   useEffect(() => {
     setLoadingMore(false);
     setLoadingNewer(false);
   }, [messageWindow]);
 
-  // The live page's ids and the current window, read from callbacks rather
-  // than closed over, for the "has the window reached the tail yet" checks.
   const liveMessagesRef = useRef(messages);
   liveMessagesRef.current = messages;
   const windowRef = useRef(window_);
   windowRef.current = window_;
 
-  // ── Anchored window: page forward toward the present (#1039) ────────────
-  //
-  // The other half of what makes a jump honest. Each call appends the next
-  // page after `newerCursor`; the window hands back to live mode as soon as a
-  // page shares a message with the live page (they are contiguous from here
-  // on) or comes back short (this device holds nothing newer, so the live
-  // page — the newest N on disk — is by definition what comes next). Until
-  // then the live page stays off screen, which is the whole point.
-  //
-  // A read failure also hands back, degrading to the pre-#1039 merge rather
-  // than leaving the reader in a window that can never reach the present.
+  // Anchored window: page toward the present (#1039); hand back to live on overlap, a short page, or a read failure.
   const loadNewer = useCallback(async () => {
     if (!newerCursor || loadingNewer) {
       return;
@@ -433,8 +325,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }
     const base = windowRef.current;
     if (base.logKey !== logKey || base.mode !== "anchored") {
-      // Already handed back (a send, a conversation switch) — nothing to
-      // append to, and no window change coming to clear the flag.
+      // Already handed back; nothing to append.
       setLoadingNewer(false);
       return;
     }
@@ -444,8 +335,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     const rejoin = !continuation || overlaps(fetched, liveIds);
     const existingIds = new Set(base.messages.map((m) => m.id));
     const merged = [...base.messages, ...fetched.filter((m) => !existingIds.has(m.id))];
-    // The append below is what ends this load; the effect keyed on the window
-    // clears the flag one commit later, exactly as for `loadMore` (#934).
+    // The window effect clears the flag a commit later (#934).
     setMessageWindow(
       rejoin
         ? { mode: "live", logKey, messages: merged, cursor: base.olderCursor, fetched: true }
@@ -453,11 +343,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     );
   }, [newerCursor, loadingNewer, logKey, selectedChannelId, selectedConversationId]);
 
-  // Sending from inside an anchored window returns the log to the present —
-  // the new message lands on the live page, which the window does not show,
-  // and Slack does exactly this. The window's pages are dropped rather than
-  // kept as "older" ones: they are not contiguous with the tail, and keeping
-  // them would re-create the gap this mode exists to prevent.
+  // A send from an anchored window returns to the present; its pages are dropped (not contiguous).
   const leaveAnchoredWindow = useCallback(() => {
     setMessageWindow((prev) => {
       if (prev.logKey !== logKey || prev.mode !== "anchored") {
@@ -468,20 +354,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     setWindowEpoch((n) => n + 1);
   }, [logKey]);
 
-  // ── Jump to a message that is not loaded (#850, #1039) ──────────────────
-  //
-  // A search hit or a reply quote almost by definition points at something
-  // older than the newest page. `MessageList.revealRow` can only reveal a row
-  // the query already holds, so a target outside the loaded window used to
-  // leave the jump pending forever — or, at best, waiting for the user to
-  // scroll back a page at a time.
-  //
-  // `read_messages_around` fetches N before and N after the anchor in one call
-  // (anchored on `sent_at`, the order the log renders in). If that page
-  // touches what is already loaded it is simply merged in, as contiguous
-  // history. If it does not, the log switches to an ANCHORED window around
-  // it (see `MessageWindow`), and `loadNewer` pages it forward until it
-  // rejoins the tail.
+  // Jump to an unloaded message (#850, #1039): merge if contiguous, else open an anchored window.
   const ensureMessageLoaded = useCallback(
     async (messageId: string) => {
       if (allMessagesRef.current.some((m) => m.id === messageId)) {
@@ -500,7 +373,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         return;
       }
       const fetched = page.messages.map(transformChannelMessage);
-      // Newest-first, so the head of the page is where a forward read continues.
       const newest = page.messages[0];
       const pageNewer: PageCursor = { sent_at: newest.sent_at, id: newest.id };
       const pageOlder = page.next_cursor ?? null;
@@ -513,9 +385,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
       if (base.mode === "live") {
         if (contiguousWithLive || touchesBase) {
-          // Everything loaded in live mode is contiguous with the tail, so a
-          // page touching any of it sits older than all of it: its
-          // continuation is where "load more" resumes from.
+          // A page touching the live log continues "load more" from its tail.
           setMessageWindow({
             mode: "live",
             logKey,
@@ -536,9 +406,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       }
 
       if (touchesBase) {
-        // A second jump landing inside or beside the current window: one
-        // window, bounded by the older and the newer of the two edges. A null
-        // older edge means the start of the log has been reached and stays.
+        // Overlapping jump: one window spanning both edges.
         const merged = [...newOnes, ...base.messages];
         const olderCursor =
           pageOlder && base.olderCursor
@@ -558,9 +426,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         return;
       }
 
-      // A jump clean out of the current window: that window is dropped, not
-      // kept — its pages are not contiguous with the new one, and keeping
-      // them would re-create exactly the gap this mode exists to prevent.
+      // A jump clean out of the window drops it (not contiguous).
       setMessageWindow(
         contiguousWithLive
           ? { mode: "live", logKey, messages: fetched, cursor: pageOlder, fetched: true }
@@ -570,13 +436,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     [logKey, selectedChannelId, selectedConversationId],
   );
 
-  // Fired by `MessageList` whenever something asks to scroll to a message —
-  // a reply quote, or a queued jump. Best-effort: a message this device does
-  // not hold simply never arrives, and the log stays where it is.
-  //
-  // The jump is queued on the store as well, so a target that has to be
-  // fetched — and, in anchored mode, re-seats the whole window — is scrolled
-  // to and flashed once its row exists, rather than merely loaded.
+  // Best-effort; also queued on the store so the row flashes once it exists.
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
       const conversationId = selectedChannelId ?? selectedConversationId ?? "";
@@ -588,20 +448,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     [ensureMessageLoaded, selectedChannelId, selectedConversationId],
   );
 
-  // A jump queued on the store — a permalink, a saved message — whose target
-  // this log does not hold. `MessageList` can only claim a jump once the row
-  // exists, so until now such a jump simply stayed pending for as long as the
-  // target sat one or more pages back (#1039). Fetch the page around it, the
-  // way the `?message=` door below always has. Once per request: the store
-  // keeps the same id pending until the row renders, and re-fetching on every
-  // window change would race the reveal.
+  // A queued jump this log doesn't hold (#1039): fetch around it, once per request.
   const pendingJumpMessageId = messageJumpStore.messageId;
   const pendingJumpConversationId = messageJumpStore.conversationId;
   const fetchedJumpRef = useRef<string | null>(null);
   useEffect(() => {
     const conversationId = selectedChannelId ?? selectedConversationId;
-    // Not before the live page is in hand: the around-page is compared with
-    // it to decide whether the jump needs a window at all.
+    // Wait for the live page: needed to decide whether a window is needed.
     if (
       !pendingJumpMessageId ||
       !conversationId ||
@@ -625,9 +478,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     ensureMessageLoaded,
   ]);
 
-  // `?message=` on the URL is the other door into the same jump: it survives a
-  // real navigation and a reload, where the MobX store cannot. Consumed once
-  // and then stripped from the URL, so a back-navigation does not re-flash.
+  // `?message=` survives reloads; consumed once, then stripped.
   const jumpMessageId = routeSearch.message;
   useEffect(() => {
     if (!jumpMessageId) {
@@ -674,10 +525,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }
   };
 
-  // The four callbacks below reach `MessageList` and, through it, every row.
-  // They are `useCallback`-pinned because this component re-renders on every
-  // keystroke in the edit bar (`editDraftValue` is local state) — with fresh
-  // identities that keystroke re-rendered the entire message log (#874).
+  // Pinned: this re-renders on every edit keystroke (#874).
   const handleEdit = useCallback((messageId: string) => {
     const message = allMessagesRef.current.find((m) => m.id === messageId);
     if (!message) {
@@ -710,7 +558,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     chatInputRef.current?.focus();
   }, []);
 
-  // Depends on `currentUser` only — the per-message branch reads its argument.
   const getAuthorUsername = useCallback(
     (authorId: string, message?: Message) =>
       message?.sender_username ||
@@ -774,8 +621,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     if (!currentUser) {
       return;
     }
-    // The optimistic insert below lands on the live page; make sure the log
-    // is showing it (#1039).
+    // The optimistic insert lands on the live page (#1039).
     if (isAnchored) {
       leaveAnchoredWindow();
     }
@@ -785,8 +631,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       ? messageQueryKeys.channel(selectedChannelId)
       : messageQueryKeys.conversation(selectedConversationId!);
 
-    // Build optimistic attachment stubs so the message renders immediately.
-    // Images use the local preview blob URL; videos/files show a pending indicator.
     const optimisticAttachments: MessageAttachment[] = attachments.map((att) => ({
       id: att.id,
       object_key: '',
@@ -820,7 +664,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       reply_to_message_id: replyToMessageId ?? undefined,
     };
 
-    // Render immediately — upload + encrypt happens in the background.
     queryClient.setQueryData<MessagesQueryData>(queryKey, (old) => {
       const prev = old ?? { messages: [], nextCursor: null };
       return { ...prev, messages: [...prev.messages, optimisticMessage] };
@@ -841,13 +684,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       });
     };
 
-    // The core names the message before anything else (#1335): the row it
-    // stores ahead of any network work carries this id, so a refetch that
-    // reads that row drops the stub instead of showing the message twice.
-    // Attachments go to the core un-uploaded — it stores their bytes with the
-    // row and the outbox uploads them, so a kill mid-upload loses nothing. A
-    // failure before `send_message` never reached the outbox: the stub is all
-    // there is, so it can only be discarded.
+    // Named first (#1335) so a refetch of the stored row drops the stub; the outbox uploads attachments.
     let messageId: string;
     let outgoing: OutgoingAttachment[];
     try {
@@ -872,11 +709,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         messageId,
       });
     } catch (error) {
-      // Bytes the core took are released already; ones it never took are
-      // released here.
       await releaseStaged(attachments);
-      // The core kept the message and marked it failed; the stub says so
-      // until the refetch swaps in the stored row, which offers Retry.
+      // The core marked it failed; the refetched row offers Retry.
       patchStub({ status: 'failed' });
       console.error("Failed to send message:", error);
     }
@@ -903,11 +737,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         ) : (
           <MessageList
             messages={channelMessages}
-            // MLS group id for the open conversation. Groups: selectedGroupId.
-            // DMs: selectedConversationId (the dm_channel_id IS the MLS group
-            // id for that DM).
+            // MLS group id (for DMs, the dm_channel_id).
             conversationId={selectedGroupId ?? selectedConversationId ?? null}
-            // The roster behind the "new" member tag (#1506). DMs have none.
             groupIdForNames={selectedGroupId ?? null}
             adminUserIds={selectedGroupId ? adminUserIds : undefined}
             viewerIsAdmin={viewerIsAdmin}
@@ -916,7 +747,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            // Pins (#99) key on the CHANNEL or DM id, not the MLS group id.
             pinsConversationId={selectedChannelId ?? selectedConversationId ?? null}
             onScrollToMessage={handleScrollToMessage}
             getAuthorUsername={getAuthorUsername}
@@ -1094,9 +924,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onSend={handleSend}
             onValueChange={typing.notify}
             autoFocus
-            // ArrowUp from an empty/first-line composer walks up the message
-            // log (bash-history style). Claimed only when the log actually
-            // has a message to focus.
             onHistoryUp={() => {
               messageNavStore.dispatch({ type: "enter" });
               return messageNavStore.active;
@@ -1105,10 +932,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             // so the live "@all notifies everyone" hint is gated on one.
             canNotifyAll={!!selectedChannelId}
             draftKey={
-              // Prefix with the room kind so the rare case of a channel id
-              // and a DM conversation id colliding still routes to separate
-              // draft slots. Falls back to null when nothing is selected —
-              // ChatInput then skips draft persistence entirely.
+              // Room-kind prefix keeps channel and DM draft slots apart.
               selectedChannelId
                 ? `channel:${selectedChannelId}`
                 : selectedConversationId

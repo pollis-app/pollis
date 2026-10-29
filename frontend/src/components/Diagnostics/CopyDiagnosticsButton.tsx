@@ -12,8 +12,7 @@ interface CopyDiagnosticsButtonProps {
   className?: string;
 }
 
-/// Puts the on-device diagnostics log (#1305) on the clipboard, for the user to
-/// paste to whoever is helping them. Nothing is sent anywhere by this button.
+/// Copies the on-device diagnostics log (#1305); nothing is sent.
 export const CopyDiagnosticsButton: React.FC<CopyDiagnosticsButtonProps> = ({
   size = "sm",
   variant = "secondary",

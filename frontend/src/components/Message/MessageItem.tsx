@@ -21,57 +21,35 @@ import { PressButton } from "../ui/PressButton";
 
 interface MessageItemProps {
   message: Message;
-  /** List-wide render inputs (skin, viewer, mention roster). One memoised
-   *  object from `MessageList` — see `messageRenderContext.ts`. */
+  /** List-wide render inputs; see `messageRenderContext.ts`. */
   ctx: MessageRenderContext;
-  /** The message this one replies to, already resolved by the list. Was a
-   *  `allMessages.find()` per row, i.e. O(N^2) over the whole log (#874).
-   *  `undefined` = no reply; `null` = replied to something not loaded. */
+  /** Resolved by the list (#874). `undefined` = no reply; `null` = not loaded. */
   replyToMessage?: Message | null;
   authorUsername?: string;
   isAuthorAdmin?: boolean;
-  /** The author joined the group within the last week of this message's
-   * timestamp (#1506) — draws the small "new" tag after their name. */
+  /** Author joined within a week (#1506): draws the "new" tag. */
   isAuthorNew?: boolean;
-  /** True when the viewer is an admin in this message's group — enables
-   * deleting other members' messages for moderation. */
+  /** Viewer is a group admin: may delete others' messages. */
   canModerate?: boolean;
-  /** Refined skin only: when true this row starts a new sender group and
-   * renders the avatar + name/timestamp header; when false it's a grouped
-   * follow-up (body only, hover-timestamp in the gutter). Computed by
-   * MessageList. Terminal ignores it. Defaults to true so non-grouping
-   * callers keep the full header. */
+  /** Refined skin: row starts a sender group (avatar + header). Defaults to true. */
   isGroupStart?: boolean;
   onReply?: (messageId: string) => void;
-  /** Open this message's thread in the right panel (#825). */
   onOpenThread?: (messageId: string) => void;
-  /** Replies this device holds for this message's thread, 0 if none. */
   threadReplyCount?: number;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
-  /** Bookmarks + permalinks (#854). All optional — when the parent doesn't
-   * pass them the affordances simply don't render. Wired from `MessageList`. */
+  /** Bookmarks + permalinks (#854); absent props hide the affordance. */
   onToggleSave?: (messageId: string) => void;
   onCopyLink?: (messageId: string) => void;
-  /** Report this message's sender (#1213). */
   onReport?: (messageId: string) => void;
-  /** Pin/unpin this message for every member (#99). Optional like the
-   * bookmark affordance — absent in surfaces without a conversation. */
   onTogglePin?: (messageId: string) => void;
-  /** Transient outcome of THIS message's last copy-link click (#889).
-   *  `idle` for every message but the one just acted on. */
+  /** Outcome of this message's last copy-link click (#889). */
   copyLinkState?: "idle" | "copied" | "failed";
   isSaved?: boolean;
   isPinned?: boolean;
   onScrollToReply?: (messageId: string) => void;
-  /** Delivery / read receipts for THIS message (#857). Optional — when the
-   * parent doesn't pass it no indicator renders. Wired from `MessageList`;
-   * receipts exist for DMs only, so `isDm` gates the whole affordance. Only
-   * the refined skin draws it; the terminal skin shows no receipts.
-   * #874: this used to be the list's whole `Map`, whose identity changes on
-   * any peer's receipt — which re-rendered every row in the log to update one. */
+  /** Receipts for this message only (#857); refined skin, DMs only. */
   receipt?: MessageReceipts;
-  /** DM members excluding the viewer — drives the "2/4" multi-reader summary. */
   peerCount?: number;
   isDm?: boolean;
 }
@@ -105,27 +83,16 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   probeRender("MessageItem");
   const { t } = useTranslation("chat");
   const { skin, isLightBg, currentUserId } = ctx;
-  // A lost message (#1312) has no author, no content and no actions — it
-  // only marks the place where something could not be read.
   if (message.undecryptable) {
     return <UndecryptableMessage message={message} skin={skin} />;
   }
   const isOwn = message.sender_id === currentUserId;
-  // Not delivered yet (#1335) — an optimistic stub or an outbox row. Nothing
-  // to reply to, react to, pin or edit until it is; a failed one shows Retry
-  // / Discard instead.
+  // Not delivered yet (#1335): no reply/react/pin/edit until it is.
   const isUnsent = !!message.outbox_id || message.id.startsWith("pending-");
-  // Falls back to the same placeholder the default prop used to supply, but
-  // resolved at render so it follows the active language.
   const displayName = authorUsername ?? t("message.unknownAuthor");
-  // Stable per-user color for non-own, non-admin authors. Key on username
-  // when available so the same person keeps the same color across groups
-  // even if their user id rotates; fall back to sender_id otherwise.
   const authorColorKey = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
-  // Admin name chip (#1488): your own keeps the theme accent; any other
-  // admin's is filled with their own stable colour under dark ink, so two
-  // admins are told apart the same way two members are.
+  // Admin chip (#1488): own keeps the accent, others their stable colour.
   const adminChipClass = isOwn ? "bg-accent text-bg" : "text-ink";
   const adminChipStyle: React.CSSProperties | undefined = isOwn
     ? undefined
@@ -133,9 +100,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
   const replyTo = replyToMessage ?? null;
 
-  // The "new" member tag (#1506): a filled pill after the name, never a
-  // border. Refined skin only: in the terminal skin's monospace lines a pill
-  // reads as out of place, so that skin draws no tag at all.
+  // The "new" tag (#1506): refined skin only.
   const newTag = isAuthorNew ? (
     <span
       data-testid="message-new-tag"
@@ -155,25 +120,17 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
   const isDeleted = !!message.deleted_at;
 
-  // content_decrypted is undefined when decryption failed (the server returned
-  // null). Show [encrypted] in that case rather than an empty row.
   const content = isDeleted
     ? t("message.deleted")
     : (message.content_decrypted ?? t("message.encrypted"));
 
-  // Split attachments into a visual media strip (images + videos rendered as
-  // uniform 96×96 thumbs) and everything else (audio, files) which render as
-  // text-aligned rows below the strip.
   const isVisualMedia = (ct: string) =>
     ct.startsWith("image/") || ct.startsWith("video/");
   const mediaThumbs = message.attachments?.filter((a) => isVisualMedia(a.content_type)) ?? [];
   const otherAttachments = message.attachments?.filter((a) => !isVisualMedia(a.content_type)) ?? [];
 
-  // Attachment blocks — identical markup for both skins (the media strip and
-  // the file/audio column). Rendered inside each skin's content region.
   const attachmentBlocks = (
     <>
-      {/* Visual media: horizontal strip of uniform 96×96 thumbs */}
       {mediaThumbs.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {mediaThumbs.map((a) => (
@@ -182,7 +139,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </div>
       )}
 
-      {/* Audio / files — each on its own row */}
       {otherAttachments.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {otherAttachments.map((a) => (
@@ -193,9 +149,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     </>
   );
 
-  // ── Refined skin: Slack-style avatar-gutter row ───────────────────────────
   if (skin === "refined") {
-    // Per-author name color; admins get the filled chip.
     const nameClass = isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : "";
     const nameStyle: React.CSSProperties | undefined = isAuthorAdmin
       ? adminChipStyle
@@ -205,14 +159,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       <div
         data-testid={`message-${message.id}`}
         aria-label={t("message.fromLabel", { name: displayName })}
-        // tabIndex -1: arrow-key log navigation (messageNavStore) focuses the
-        // row programmatically; focus-within mirrors the hover treatment so a
-        // keyboard-focused row (or its action bar) reads exactly like a
-        // hovered one, with zero per-keystroke re-render.
+        // Focused programmatically by arrow-key navigation; focus-within mirrors hover.
         tabIndex={-1}
         className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover outline-none`}
       >
-        {/* Left gutter: avatar on a group start, hover-only timestamp otherwise */}
         <div className="flex justify-center pt-0.5 select-none">
           {isGroupStart ? (
             <MessageAvatar userId={message.sender_id} username={displayName} size={36} />
@@ -227,9 +177,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           )}
         </div>
 
-        {/* Right column: reply ref, header, body, attachments */}
         <div className="min-w-0">
-          {/* Reply reference above the body */}
           {message.reply_to_message_id && (
             replyTo ? (
               <PressButton
@@ -261,7 +209,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             )
           )}
 
-          {/* Header: sender name + faint timestamp (group start only) */}
           {isGroupStart && (
             <div className="flex items-baseline gap-2 min-w-0">
               <bdi
@@ -283,7 +230,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             </div>
           )}
 
-          {/* Message body */}
           <div
             data-testid="message-content"
             dir="auto"
@@ -301,15 +247,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
-            {/* Only a FAILED send is labelled. An optimistic row already looks sent
-                — the `[sending]` tag made a fast send feel slow. Kept for reference:
-                {message.status && message.status !== "sent" && (…)} */}
+            {/* Only a failed send is labelled. */}
             {message.status === "failed" && (
               <span className="ms-1 text-xs font-machine text-muted">
                 [{t(`status.${message.status}`)}]
               </span>
             )}
-            {/* A failed send's way out (#1335): Retry / Discard. */}
             {message.status === "failed" && isOwn && (
               <UnsentMessageActions message={message} />
             )}
@@ -320,7 +263,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             />
           </div>
 
-          {/* Inline previews for media URLs typed in the message body */}
           {!isDeleted && <MediaLinkUnfurl text={content} />}
 
           {attachmentBlocks}
@@ -330,15 +272,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
           />
 
-          {/* Reaction pills. Inside the body column so they line up with the
-              text: as a third child of the two-column grid they landed in
-              the avatar gutter of the next row and stacked one per line. A
-              deleted message keeps no reactions: there is nothing left to
-              react to. */}
+          {/* Inside the body column so pills align with the text. */}
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-1" />}
         </div>
 
-        {/* Floating hover action toolbar */}
         {!isDeleted && !isUnsent && (
           <MessageActions
             messageId={message.id}
@@ -366,11 +303,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     <div
       data-testid={`message-${message.id}`}
       aria-label={t("message.fromLabel", { name: displayName })}
-      // tabIndex -1 + focus-within: see the refined row above.
       tabIndex={-1}
       className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover outline-none"
     >
-      {/* Reply thread indicator */}
       {message.reply_to_message_id && (
         replyTo ? (
           <PressButton
@@ -402,7 +337,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         )
       )}
 
-      {/* IRC-style inline row: HH:MM  username  message */}
       <div className="flex items-start gap-0 min-w-0">
         <bdi
           data-testid="message-timestamp"
@@ -431,10 +365,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {":"}
         </span>
 
-        {/* Body column (#1489): text, media and reactions share the column
-            that starts after `name :`, so a picture lines up with the
-            message it belongs to rather than with the timestamp — the
-            terminal counterpart of the refined skin's right column. */}
+        {/* Body column (#1489): media aligns with the text, not the timestamp. */}
         <div className="flex-1 min-w-0">
           <span
             data-testid="message-content"
@@ -453,34 +384,25 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
-            {/* Only a FAILED send is labelled. An optimistic row already looks sent
-                — the `[sending]` tag made a fast send feel slow. Kept for reference:
-                {message.status && message.status !== "sent" && (…)} */}
+            {/* Only a failed send is labelled. */}
             {message.status === "failed" && (
               <span className="ms-1 text-xs text-muted">
                 [{t(`status.${message.status}`)}]
               </span>
             )}
-            {/* A failed send's way out (#1335): Retry / Discard. */}
             {message.status === "failed" && isOwn && (
               <UnsentMessageActions message={message} />
             )}
-            {/* No delivery / read ticks in the terminal skin — a product call, not
-                a privacy one: receipts are still queried, and the refined skin
-                still shows them. */}
+            {/* No receipts in the terminal skin (product call). */}
           </span>
 
-          {/* Inline previews for media URLs typed in the message body */}
           {!isDeleted && <MediaLinkUnfurl text={content} />}
 
           {attachmentBlocks}
 
-          {/* Reaction pills. Adding one lives in the hover bar
-              (`ReactionAddButton`). */}
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-0.5" />}
         </div>
 
-        {/* Action buttons — only visible on hover */}
         {!isDeleted && !isUnsent && (
           <MessageActions
             messageId={message.id}

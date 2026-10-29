@@ -15,7 +15,6 @@ import {
 import type { EmojiCategoryId } from "./emojiData";
 import { PressButton } from "../ui/PressButton";
 
-/** A jump target in the rail. `custom-*` ids are per-group sections. */
 export interface RailEntry {
   id: string;
   label: string;
@@ -29,7 +28,6 @@ interface EmojiCategoryRailProps {
 
 const ICON_PROPS = { size: 14, className: "size-[0.933rem] shrink-0" } as const;
 
-/** Icon for a rail entry. Custom (per-group) sections all share the star. */
 function iconFor(id: string): React.ReactNode {
   const byCategory: Partial<Record<EmojiCategoryId | "recent", React.ReactNode>> = {
     recent: <Clock {...ICON_PROPS} />,
@@ -45,13 +43,7 @@ function iconFor(id: string): React.ReactNode {
   return byCategory[id as EmojiCategoryId | "recent"] ?? <Star {...ICON_PROPS} />;
 }
 
-/**
- * The left-hand jump rail, as Discord has it: one icon per section, the active
- * one marked, clicking scrolls the list.
- *
- * It is navigation, not filtering — every section stays in the scroll list, so
- * a user who prefers to scroll never has to touch this.
- */
+/** Discord-style jump rail; navigation, not filtering. */
 export const EmojiCategoryRail: React.FC<EmojiCategoryRailProps> = ({
   entries,
   activeId,

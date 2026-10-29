@@ -10,27 +10,19 @@ interface VoiceInputModeSelectProps {
   onChange: (mode: VoiceInputMode) => void;
 }
 
-// The mode values are wire values (persisted in preferences and sent to the
-// Rust gate) — only the labels are translated, keyed off the value.
+// Wire values; only labels are translated.
 const MODE_OPTIONS: { mode: VoiceInputMode; labelKey: string }[] = [
   { mode: "voice_activity", labelKey: "inputMode.voiceActivity" },
   { mode: "push_to_talk", labelKey: "inputMode.pushToTalk" },
 ];
 
-/**
- * Input-mode picker for voice settings (#849).
- *
- * Two options, so a button pair rather than a `<select>` — same treatment
- * the capture-framerate setting next door already uses, and it keeps both
- * choices (and which one is active) visible without a click.
- */
+/** Input-mode picker (#849). */
 export const VoiceInputModeSelect: React.FC<VoiceInputModeSelectProps> = ({
   value,
   onChange,
 }) => {
   const { t } = useTranslation("voice");
-  // Read through the same resolver the dispatcher uses, so a rebound key
-  // shows up here immediately instead of advertising a stale default.
+  // Same resolver as the dispatcher, so a rebound key shows.
   const pttCombo = useShortcutLabel("voice.pushToTalk");
 
   return (

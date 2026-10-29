@@ -1,19 +1,4 @@
-// Optimistic sends and the durable outbox (#1335) — the desktop half of
-// `mobile/hooks/queries/pendingMessages.ts`.
-//
-// A send renders a local stub (`pending-…` id) at once and swaps it for the
-// confirmed row when `send_message` resolves. Since #1335 the core stores the
-// message before any network work, under the id the stub carries as
-// `outbox_id`, so the stored row can reach the cache (any refetch) while the
-// stub is still there; the stub then steps aside rather than showing the
-// message twice. A stub the store never got — an attachment upload failed
-// before the send — is carried across refetches so a failed send stays on
-// screen, labelled, instead of vanishing with the next read.
-//
-// A stored row that is unsent reads back with a `send_state`: pending (being
-// delivered — drawn exactly like a sent row) or failed (Retry / Discard).
-//
-// Pure, so `tests/pending-messages.test.ts` pins it.
+// Optimistic stubs and the durable outbox (#1335); desktop half of `mobile/hooks/queries/pendingMessages.ts`.
 
 /** The fields these rules read. */
 export interface OutgoingLike {
@@ -31,11 +16,7 @@ export function isLocalStub(m: OutgoingLike): boolean {
   return m.id.startsWith("pending-");
 }
 
-/**
- * The fields a stored row's `send_state` maps to. Pending reads as `sending`
- * (rendered like a sent row — only failure is labelled); failed is labelled
- * and offers Retry / Discard.
- */
+/** `send_state` → row fields: pending reads as sending; failed offers Retry / Discard. */
 export function outboxFields(
   id: string,
   sendState: SendState | null | undefined,
@@ -43,23 +24,14 @@ export function outboxFields(
   if (sendState === "pending") {
     return { status: "sending", outbox_id: id, delivered: false };
   }
-  // `rejected` (a refusal no retry fixes — the outbox stops retrying it on its
-  // own) is shown exactly like `failed`: the user's Retry or Discard decides.
+  // `rejected` shows as `failed`.
   if (sendState === "failed" || sendState === "rejected") {
     return { status: "failed", outbox_id: id, delivered: false };
   }
   return { status: "sent", delivered: true };
 }
 
-/**
- * The rows a refetch read, with the stubs the cache held carried over at the
- * end (the log is oldest-first). A stub whose message the store now holds
- * (by `outbox_id`) is dropped: the stored row is that message. A FAILED stub the
- * store does not hold failed before the core stored anything (an attachment
- * over the size limit, a paste no longer staged): it comes back with
- * `retryable: false`, so it offers Discard only — a Retry would name a message
- * the core has never heard of.
- */
+/** Refetched rows plus carried stubs; a stored stub is dropped, an unstored failed one is discard-only. */
 export function carryStubs<M extends OutgoingLike>(
   fetched: M[],
   cached: ReadonlyArray<M> | undefined,
@@ -71,11 +43,7 @@ export function carryStubs<M extends OutgoingLike>(
   return stubs.length === 0 ? fetched : [...fetched, ...stubs];
 }
 
-/**
- * The rows once a send settled: the confirmed row replaces whichever copy is
- * there — the stored row a refetch brought in (dropping the stub), or the stub
- * — or is appended if neither is.
- */
+/** The confirmed row replaces the stored row or stub, else appends. */
 export function settleSend<M extends OutgoingLike>(
   rows: ReadonlyArray<M>,
   stubId: string | undefined,
@@ -92,11 +60,7 @@ export function settleSend<M extends OutgoingLike>(
   return [...rows, confirmed];
 }
 
-/**
- * The id Retry should hand `retry_message`, or null when there is nothing the
- * core could retry: the row is not failed, or the send failed before the core
- * stored it — Discard is the only way out of that one.
- */
+/** The id to retry, or null if not failed or never stored. */
 export function retryTarget(m: OutgoingLike): string | null {
   if (m.status !== "failed" || !m.outbox_id || m.retryable === false) {
     return null;

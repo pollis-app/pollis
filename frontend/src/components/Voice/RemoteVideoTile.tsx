@@ -1,8 +1,4 @@
-// Remote screen-share / camera renderer.
-//
-// All real-time media runs in Rust (WebKitGTK on Linux has no WebRTC): the
-// backend decodes frames and pushes I420 planes to the renderer over IPC, and
-// a WebGL shader does YUV→RGB on a `<canvas>`.
+// Remote video: Rust decodes frames and pushes I420 planes; WebGL converts on a canvas.
 
 import React, { useEffect, useRef } from "react";
 
@@ -12,25 +8,16 @@ import { LOCAL_CAMERA_PREVIEW_KEY } from "../../camera/cameraSession";
 interface Props {
   trackKey: string;
   className?: string;
-  /** Hint used for canvas backing-store size before the first frame arrives. */
   initialWidth?: number;
   initialHeight?: number;
-  /** Low-cost rendering for in-grid previews: cap repaints at ~15fps. The
-   *  fullscreen viewer omits this for source-quality rendering. */
+  /** In-grid previews: cap repaints at ~15fps. */
   preview?: boolean;
-  /** Horizontally flip the rendered image. Used for a self-view (your own
-   *  webcam) so it reads like a mirror — never for remote participants. */
+  /** Flip horizontally; self-view only. */
   mirror?: boolean;
 }
 
 const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
 
-// ── WebGL / I420 renderer ────────────────────────────────────────────────────
-
-/// 2× nearest-neighbour downsample of a single 8-bit plane. We sample
-/// every other pixel from every other row into a tightly-packed
-/// destination buffer. Allocated once and reused across frames (the
-/// caller owns the scratch) so the hot path stays allocation-free.
 const VERT_SRC = `
 attribute vec2 a_pos;
 varying vec2 v_uv;
@@ -40,7 +27,7 @@ void main() {
 }
 `;
 
-// BT.601 limited-range YUV→RGB. Same matrix libwebrtc uses.
+// BT.601 limited-range, as libwebrtc.
 const FRAG_SRC = `
 precision mediump float;
 varying vec2 v_uv;
@@ -77,10 +64,7 @@ interface GLBundle {
   texY: WebGLTexture;
   texU: WebGLTexture;
   texV: WebGLTexture;
-  // Currently-allocated texture sizes per plane. We keep these to call
-  // texImage2D (allocate) only when a plane size changes; otherwise we
-  // texSubImage2D (upload only) which avoids reallocating GPU memory each
-  // frame. Net effect: ~zero allocation per frame after warmup.
+  // Allocated sizes per plane: texImage2D only on change, else texSubImage2D.
   yW: number; yH: number;
   uW: number; uH: number;
   vW: number; vH: number;
@@ -104,7 +88,6 @@ function initGL(canvas: HTMLCanvasElement): GLBundle | null {
   }
   gl.useProgram(prog);
 
-  // Full-screen triangle pair.
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(
@@ -174,14 +157,9 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<GLBundle | null>(null);
-  // Decoupling: the frame callback fires off the message-port thread; we
-  // throttle to rAF so paint cost is bounded by display refresh and we
-  // drop intermediate frames cleanly.
+  // Throttle to rAF; intermediate frames are dropped.
   const pendingRef = useRef<DecodedFrame | null>(null);
   const rafRef = useRef<number | null>(null);
-  // Preview-mode 15fps gate. We compare against the last paint and
-  // skip scheduling the rAF when a frame arrives too soon — the
-  // upcoming frame will check again.
   const lastPaintAtRef = useRef<number>(0);
 
   useEffect(() => {
@@ -210,19 +188,11 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
       const { gl } = bundle;
       const cW = (frame.width + 1) >> 1;
       const cH = (frame.height + 1) >> 1;
-      // Strides may exceed width when the source row is padded; we'd need
-      // per-row uploads to handle that correctly. PipeWire BGRx + libyuv
-      // I420 typically returns tightly packed planes for our resolutions —
-      // assert and bail if not, rather than silently render garbage.
+      // Padded strides would need per-row uploads; bail rather than render garbage.
       if (frame.yStride !== frame.width || frame.uStride !== cW || frame.vStride !== cW) {
         return;
       }
-      // Upload the I420 planes at source resolution and let WebGL's LINEAR
-      // filter + the canvas's CSS box scale the thumbnail down. The earlier
-      // CPU 2× downsample (preview mode) is gone: it mis-positioned the tile
-      // image while fullscreen was correct, and the rustwebrtc PoC showed GPU
-      // paint is ~1ms p95 even at 1440p — there's no bandwidth win worth a
-      // separate, buggy code path. One path now renders both tile + fullscreen.
+      // Upload at source resolution; GPU scaling serves tile and fullscreen alike.
       const yPlane = frame.y;
       const uPlane = frame.u;
       const vPlane = frame.v;
@@ -230,9 +200,7 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
       const yH = frame.height;
       const uvW = cW;
       const uvH = cH;
-      // Resize backing store on dimension change. CSS sizing is
-      // independent — the canvas's intrinsic dimensions drive
-      // max-width:100%+max-height:100%+width:auto+height:auto sizing.
+      // Backing store follows the source; CSS sizing is independent.
       if (canvas.width !== yW || canvas.height !== yH) {
         canvas.width = yW;
         canvas.height = yH;
@@ -252,9 +220,7 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
 
     const unsubscribe = screenShareSession.onFrame(trackKey, (frame) => {
       pendingRef.current = frame;
-      // Preview-mode 15fps cap: if we painted recently, skip
-      // scheduling the rAF. The next frame arrival will check again
-      // and schedule once the interval has elapsed.
+      // Preview 15fps cap.
       if (preview) {
         const elapsed = performance.now() - lastPaintAtRef.current;
         if (elapsed < PREVIEW_MIN_PAINT_INTERVAL_MS) {
@@ -273,17 +239,10 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
         rafRef.current = null;
       }
       pendingRef.current = null;
-      // GL resources are tied to the canvas; dropping the canvas releases
-      // them when the WebGL context is garbage collected.
       glRef.current = null;
     };
   }, [trackKey, initialWidth, initialHeight, preview]);
 
-  // Parent's flex layout (justify/align center) does the centering;
-  // the canvas auto-sizes from its intrinsic dimensions (the width/
-  // height attributes we sync to the source resolution in render()),
-  // and max-width/max-height clamp it to fit the parent in both axes
-  // while the auto/auto width/height keeps the aspect ratio.
   return (
     <canvas
       ref={canvasRef}
@@ -302,12 +261,8 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
   );
 };
 
-// ── Dispatch ────────────────────────────────────────────────────────────────
-
 export const RemoteVideoTile: React.FC<Props> = (props) => {
-  // Auto-mirror the local camera self-view (your own webcam) so it reads like a
-  // mirror — both the in-call self-preview and the settings preview render
-  // through here under LOCAL_CAMERA_PREVIEW_KEY. Explicit `mirror` still wins.
+  // Auto-mirror the local camera self-view; explicit `mirror` wins.
   const mirror = props.mirror ?? props.trackKey === LOCAL_CAMERA_PREVIEW_KEY;
   return <RemoteVideoTileImpl {...props} mirror={mirror} />;
 };

@@ -12,35 +12,18 @@ import { SensitiveCover } from "./SensitiveCover";
 import { SensitiveHideButton } from "./SensitiveHideButton";
 
 interface MediaGalleryViewProps {
-  /** Every attachment in the surface, newest first — the caller orders. */
+  /** Newest first; the caller orders. */
   attachments: MessageAttachment[];
-  /** Rendered when there is nothing to show. */
   emptyLabel: string;
 }
 
-/**
- * A Google-Photos-style roll over a set of attachments (#107): images and
- * videos as a responsive tile grid with a keyboard-navigable viewer, other
- * files as a flat list below.
- *
- * Deliberately GENERIC — it takes a bare `MessageAttachment[]` and knows
- * nothing about vaults, channels or DMs — so the same component can later
- * back a media view for any conversation. Today the Vault is its only
- * caller.
- *
- * Bytes resolve through the loopback media server via `getMediaUrl`, sharing
- * its in-flight cache with every other attachment surface. The full-screen
- * viewer follows the exact overlay shape `AttachmentDisplay`'s lightbox
- * established (the codebase's one sanctioned full-bleed surface), plus
- * prev/next so the roll can be walked without closing it.
- */
+/** Photo roll over any attachment set (#107): tile grid + viewer, other files listed below. */
 export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
   attachments,
   emptyLabel,
 }) => {
   const { t } = useTranslation("vault");
   const isTerminal = useSkin() !== "refined";
-  // Viewer state: index into `media`, or null when closed.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const media = useMemo(
@@ -74,9 +57,7 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
     [media.length],
   );
 
-  // Viewer keyboard model: arrows walk the roll, Escape closes. Capture
-  // phase + stopImmediatePropagation for Escape, because the window-level
-  // nav.back shortcut also binds it and would navigate the page away.
+  // Capture phase + stopImmediatePropagation: nav.back also binds Escape.
   useEffect(() => {
     if (viewerIndex === null) {
       return;
@@ -151,16 +132,13 @@ interface GalleryTileProps {
   onOpen: () => void;
 }
 
-/** One square tile. Same resolution path as the right panel's `MediaTile`,
- * plus a click target and a play badge for videos. */
 const GalleryTile = observer(({
   attachment,
   isTerminal,
   onOpen,
 }: GalleryTileProps) => {
   const { t } = useTranslation("chat");
-  // Sensitive media (#1568): the tile is covered until revealed, and the
-  // reveal is the one the message log shares.
+  // Sensitive media (#1568): covered until revealed; reveal shared with the log.
   const sensitivity = useSensitiveReveal(attachment);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -192,7 +170,7 @@ const GalleryTile = observer(({
     isTerminal ? "" : "rounded"
   }`;
   if (sensitivity.hidden) {
-    // One click reveals, and does nothing else — a video does not open.
+    // One click only reveals; a video does not open.
     return (
       <PressButton
         type="button"
@@ -262,15 +240,12 @@ const GalleryTile = observer(({
 
 interface GalleryViewerProps {
   attachment: MessageAttachment;
-  /** "3 / 12" positional label, already translated. */
   position: string;
   hasMultiple: boolean;
   onStep: (delta: number) => void;
   onClose: () => void;
 }
 
-/** The full-screen roll viewer — the `AttachmentDisplay` lightbox shape with
- * walk controls. */
 const GalleryViewer = observer(({
   attachment,
   position,
@@ -280,8 +255,6 @@ const GalleryViewer = observer(({
 }: GalleryViewerProps) => {
   const { t } = useTranslation("vault");
   const { t: tChat } = useTranslation("chat");
-  // Walking the roll onto a sensitive item the user has not revealed shows
-  // its cover, never the media (#1568).
   const sensitivity = useSensitiveReveal(attachment);
   const [url, setUrl] = useState<string | null>(null);
   const isVideo = attachment.content_type.startsWith("video/");
@@ -296,7 +269,7 @@ const GalleryViewer = observer(({
         }
       })
       .catch(() => {
-        /* the empty frame + filename below is the failure state */
+        /* empty frame + filename is the failure state */
       });
     return () => {
       mounted = false;

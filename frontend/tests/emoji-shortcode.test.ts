@@ -1,17 +1,4 @@
-/*
- * Deriving a shortcode from a dropped file's name.
- *
- * The custom-emoji upload follows Discord's order — image first, name derived
- * — so the sanitiser is the step between "a file called `Party Parrot (1).GIF`"
- * and a shortcode the DS will accept. It is the only part of that flow a
- * browser spec cannot pin cheaply: the drop itself is a native OS event Tauri
- * intercepts, and what the field ends up containing is decided here.
- *
- * The rule it has to hold is `SHORTCODE_RE` — anything this function returns
- * non-empty must pass it, because the UI offers it as a ready-to-submit name.
- *
- *   node --test frontend/tests/
- */
+/* Shortcode from a dropped file's name; any non-empty result must pass `SHORTCODE_RE`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -46,8 +33,7 @@ test("everything it derives is a shortcode the DS would accept", () => {
 });
 
 test("truncation never leaves a trailing underscore", () => {
-  // 32 characters exactly, with the cut landing on a separator — the case that
-  // would otherwise produce `..._` and fail validation.
+  // A cut landing on a separator must not leave a trailing `_`.
   const code = shortcodeFromFileName("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b.png");
   assert.equal(code.length <= 32, true);
   assert.equal(code.endsWith("_"), false);
@@ -55,8 +41,6 @@ test("truncation never leaves a trailing underscore", () => {
 });
 
 test("a name with nothing usable in it comes back empty", () => {
-  // Better an empty field the inline validation asks the user to fill than an
-  // invented name they did not choose.
   assert.equal(shortcodeFromFileName("###.png"), "");
   assert.equal(sanitizeShortcode("___"), "");
 });

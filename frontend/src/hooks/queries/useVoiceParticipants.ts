@@ -19,11 +19,7 @@ export const voiceQueryKeys = {
   allRoomCounts: ['voice-room-counts'] as const,
 };
 
-/**
- * Invalidate the participant list + aggregate room counts for a single voice
- * room. Both queries move together whenever presence in a room changes, so
- * they're bundled here to keep the join/leave paths in sync.
- */
+/** Invalidate a room's participants and the room counts together. */
 export function invalidateVoiceRoom(queryClient: QueryClient, channelId: string) {
   queryClient.invalidateQueries({ queryKey: voiceQueryKeys.allRoomCounts });
   queryClient.invalidateQueries({ queryKey: voiceQueryKeys.participants(channelId) });

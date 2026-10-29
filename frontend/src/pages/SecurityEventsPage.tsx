@@ -17,11 +17,7 @@ const FILTER_LABEL_KEYS: Record<SecurityEventFilter, string> = {
   account: "security.eventsFilterAccount",
 };
 
-/**
- * The whole security-event log (#1548): keyset pages from the DS, more loaded
- * as the end of the list scrolls into view, narrowed by quick-filter chips.
- * The Security page shows only the newest three and links here.
- */
+/** The whole security-event log (#1548): keyset pages, infinite scroll, filter chips. */
 export const SecurityEventsPage: React.FC = () => {
   const { t } = useTranslation("settings");
   const [filter, setFilter] = useState<SecurityEventFilter>("all");
@@ -38,9 +34,7 @@ export const SecurityEventsPage: React.FC = () => {
 
   const events = useMemo(() => data?.pages.flatMap((p) => p.events) ?? [], [data]);
 
-  // Infinite scroll: the sentinel under the list asks for the next page as it
-  // nears the viewport. The button beside it is the same action for keyboard
-  // and assistive-tech users, and for a list too short to scroll.
+  // The sentinel loads the next page; the button is the same for keyboard and short lists.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = sentinelRef.current;
@@ -102,9 +96,7 @@ export const SecurityEventsPage: React.FC = () => {
               {filter === "all" ? t("security.eventsEmpty") : t("security.eventsEmptyFiltered")}
             </p>
           ) : (
-            // The previous filter's rows stay up, dimmed, until the new
-            // filter's first page lands — feedback on the same frame as the
-            // tap, and no flash of an empty list.
+            // Previous rows stay dimmed until the new filter's first page lands.
             <div
               data-testid="security-events-list"
               data-filter={filter}

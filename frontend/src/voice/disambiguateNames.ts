@@ -1,13 +1,4 @@
-/**
- * Disambiguate display names for a voice participant list. When two or more
- * participants share a display name — the multi-device case (#140), e.g. one
- * user present from two devices — the first keeps the bare name and each
- * subsequent one gets a ` (1)`, ` (2)`, … suffix in list (join) order.
- *
- * Purely presentational: the underlying participant `identity` is always the
- * stable internal `voice-{userId}:{device}` (see `./identity`) and is never
- * touched. Returns a map keyed by participant identity → the label to render.
- */
+/** Suffix duplicate display names ` (1)`, ` (2)`… in join order (#140); identity → label. */
 export function disambiguateVoiceNames(
   participants: ReadonlyArray<{ identity: string; name: string }>,
 ): Map<string, string> {

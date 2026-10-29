@@ -1,21 +1,4 @@
-/*
- * A `useMutation` result must not be an effect dependency (#1061).
- *
- * `useMutation` returns a fresh object on every render, and every mutation
- * state change (pending, success) re-renders the caller. An effect that lists
- * the result in its dependencies therefore re-runs on each of those renders,
- * and if the effect calls `mutate` it starts the next cycle itself. Channel
- * and DM pages did exactly this with `markConversationRead`: an unbounded
- * `mark_conversation_read` → invalidate → re-render → `mutate` loop that
- * pegged the renderer and grew the JS heap past 5 GB within minutes, while
- * showing nothing on screen. `mutate` itself is referentially stable, so the
- * shape that works is destructuring it: `const { mutate } = useX()`.
- *
- * A source scan, like `no-periodic-polling.test.ts`: the symptom is a loop
- * nobody can see, so the rule is enforced on the code's shape.
- *
- *   node --test frontend/tests/
- */
+/* A `useMutation` result must not be an effect dependency (#1061): it changes every render, so an effect calling `mutate` loops. Destructure `mutate`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

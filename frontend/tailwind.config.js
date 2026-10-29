@@ -6,11 +6,7 @@ export default {
   ],
   theme: {
     extend: {
-      // Design tokens live as CSS custom properties in index.css (single
-      // source of truth — themeable + font-scalable). Surface them as
-      // semantic Tailwind utilities so call sites write `text-muted` /
-      // `border-line` / `h-bar` instead of `[var(--c-text-muted)]` or an
-      // inline style. See CLAUDE.md → "Styling" for the convention.
+      // Semantic utilities over the CSS tokens in index.css; see CLAUDE.md → "Styling".
       colors: {
         bg: 'var(--c-bg)',
         surface: {
@@ -24,34 +20,22 @@ export default {
           dim:     'var(--c-accent-dim)',
           muted:   'var(--c-accent-muted)',
         },
-        // Foreground / text roles → `text-fg` `text-dim` `text-muted`.
         fg:    'var(--c-text)',
         dim:   'var(--c-text-dim)',
         muted: 'var(--c-text-muted)',
-        // Hairline borders / dividers → `border-line` `border-line-strong`,
-        // also `bg-line` for the rare hairline fill (e.g. tray separator).
         line: {
           DEFAULT: 'var(--c-border)',
           strong:  'var(--c-border-active)',
         },
-        // Hover overlay (accent @ low alpha) → `hover:bg-hover`.
         hover: 'var(--c-hover)',
-        // Active/selected overlay (accent-tinted) → `bg-active`.
         active: 'var(--c-active)',
-        // Error / destructive text and borders → `text-danger`, `border-danger`.
         danger: 'var(--c-danger)',
         // "In a voice room" green. Not re-skinned, like the accents.
         connected: 'var(--c-voice-connected)',
         // Fixed dark text for a bright runtime fill (admin name chip) → `text-ink`.
         ink: 'var(--c-ink)',
       },
-      // `--bar-h` is the shared chrome-bar height and `--side-w` the sidebar /
-      // right-panel measure (both rem ⇒ font-scalable). Exposed via spacing so
-      // `h-bar` / `min-h-bar` / `py-bar` / `w-side` all work.
-      //
-      // The message-log rhythm tokens sit here too: they are per-skin density
-      // knobs the log applies as padding and margin, and without a utility
-      // every row and divider had to spell them as an inline style.
+      // `--bar-h`, `--side-w` and the per-skin log rhythm tokens, as spacing utilities.
       spacing: {
         bar: 'var(--bar-h)',
         composer: 'var(--composer-h)',
@@ -67,13 +51,11 @@ export default {
         sans: ['"Atkinson Hyperlegible Next"', 'system-ui', 'sans-serif'],
       },
       lineHeight: {
-        // Per-skin body leading. `leading-msg` on the message body.
         msg: 'var(--lh)',
       },
       borderRadius: {
         panel: '10px',
-        // The two per-skin radii from index.css — terminal is nearly square
-        // (2px/4px), refined is rounded (6px/8px).
+        // Per-skin radii from index.css.
         chip: 'var(--radius-chip)',
         control: 'var(--radius-control)',
       },

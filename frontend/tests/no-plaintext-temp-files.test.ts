@@ -1,25 +1,4 @@
-/*
- * The renderer never writes a user's file to a temp directory.
- *
- * Paste and drag-and-drop arrive in the webview as `File` objects with no
- * filesystem path, and the upload path wanted one — so `ChatInput` wrote the
- * raw source bytes to `tempDir()` as `pollis-<timestamp>-<original filename>`
- * and passed `upload_media` that path. Nothing ever removed it: not the upload,
- * not `removeAttachment` (which revoked the preview blob URL and dropped the
- * array entry), not the send, not app exit. There was not one `removeFile` call
- * in the entire renderer. So the plaintext of every file a user had ever
- * pasted was still sitting in `/tmp` (or `%TEMP%`) under its own name — while
- * `r2.rs` deliberately strips filenames from R2 keys because a filename is
- * content.
- *
- * The fix was not to add deletions on each of the six exit paths. It was to
- * stop making the file: the bytes go to `stageAttachment`, which holds them in
- * the backend's memory, and the only handle the renderer ever sees is an opaque
- * id. A guard is the right shape for that, because the failure it prevents is
- * "somebody writes a temp file again", which no rendering test can see.
- *
- *   node --test frontend/tests/
- */
+/* The renderer never writes a user's file to a temp directory: pasted bytes go to `stageAttachment`, in backend memory. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -29,23 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
-/**
- * Files permitted to call `writeFile`, each with the reason it is not a
- * plaintext leak.
- *
- * The bar: the destination must be a location the USER chose in a save dialog
- * this turn. A path the code picked — anything derived from `tempDir()`, a
- * cache directory, a scratch name — is the shape that leaks, because nothing
- * owns the file afterwards.
- *
- * The list is now EMPTY, and that is the strongest form of the rule. "Save
- * attachment as…" was the renderer's one writer; it moved to Rust
- * (`save_media_to_path`) so the saved file gets this platform's provenance
- * marker — macOS quarantine, Windows mark-of-the-web — which a renderer
- * `writeFile` cannot apply. Nothing else ever wrote, so `bridge/fs.ts` dropped
- * the wrapper and `capabilities/default.json` dropped `fs:allow-temp-write`:
- * the webview can no longer put a file on the disk at all.
- */
+/** Files allowed to call `writeFile`; empty, since saving moved to Rust's `save_media_to_path`. */
 const WRITE_FILE_ALLOWED = new Map<string, string>([]);
 
 function walk(dir: string): string[] {
@@ -100,8 +63,6 @@ test("a queued attachment's bytes are either a user file or staged, never both a
   );
   assert.ok(chatInput, "ChatInput.tsx must exist");
 
-  // The discriminated union is what makes "a path we invented" unrepresentable:
-  // there is no field to put one in.
   assert.match(
     chatInput.text,
     /export type AttachmentSource =\s*\|\s*\{ kind: "path"; path: string \}\s*\|\s*\{ kind: "staged"; id: string \};/,
@@ -119,9 +80,7 @@ test("every exit path releases staged bytes", () => {
   const chatInput = FILES.find((f) => f.rel === "components/ui/ChatInput.tsx");
   assert.ok(chatInput);
 
-  // Removing a card, and unmounting while cards are still queued. Send is
-  // covered by the backend — a successful upload_media_staged releases its own
-  // entry — and lock/logout/wipe release everything.
+  // Card removal and unmount; sends and lock/logout/wipe are released by the backend.
   const releases = chatInput.text.match(/discardStagedAttachment\(/g) ?? [];
   assert.ok(
     releases.length >= 3,

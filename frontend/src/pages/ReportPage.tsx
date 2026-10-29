@@ -10,12 +10,7 @@ import { errorMessage } from "../utils/errorMessage";
 
 const REASONS: ReportReason[] = ["spam", "harassment", "illegal", "other"];
 
-/**
- * Report a user (#1213), from a message's menu or their profile. A page, not a
- * dialog (no modals). Signal-style: Pollis receives the account, the reason
- * and, when reporting a message, the conversation and message ids. Never the
- * message text: it is end-to-end encrypted and stays that way.
- */
+/** Report a user (#1213): account, reason and message ids; never the text. */
 export const ReportPage: React.FC = observer(() => {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
@@ -55,7 +50,6 @@ export const ReportPage: React.FC = observer(() => {
       });
       setDone({ blocked: alsoBlock });
     } catch {
-      // Shown below from report.error.
     }
   };
 

@@ -1,25 +1,10 @@
 import { useSyncExternalStore } from "react";
 
-/**
- * Stable per-user color for message authors.
- *
- * - Deterministic: same `key` → same hue on every device and every render.
- * - Accessible: lightness flips based on the current background — bright
- *   saturated colors on dark bg, darker muted colors on light bg.
- * - Fast: O(n) FNV-1a hash over the key string (short usernames / ids),
- *   then the result is memoised forever in a module-level cache keyed on
- *   (key, bg-variant). Rendering hundreds of messages is a series of
- *   Map.get() hits after the first pass.
- */
+/** Stable per-user author colour (FNV-1a hue, memoised), with lightness chosen against the background. */
 
-// ── bg-lightness store ────────────────────────────────────────────────────
-// We need to know whether the current background is light or dark so we
-// can pick contrasting colors. Exposed as a tiny external store so
-// components using `useBackgroundIsLight` re-render when the user
-// changes their background preference.
+// Background lightness as a tiny external store for `useBackgroundIsLight`.
 
-// Default from index.css (`--bg-l: 4%`). Overwritten once the DOM is
-// readable, and again on every `applyBackgroundColor` call.
+// Default from index.css (`--bg-l: 4%`).
 let currentBgL = 4;
 let initialized = false;
 const listeners = new Set<() => void>();
@@ -42,13 +27,7 @@ function initFromDom(): void {
   initialized = true;
 }
 
-/**
- * Called from `applyBackgroundColor` whenever the user's background-color
- * preference resolves or changes. Notifies `useBackgroundIsLight`
- * subscribers so message rows re-render against the new contrast target.
- * The cache holds both light and dark variants keyed separately, so no
- * invalidation is required.
- */
+/** Called by `applyBackgroundColor`; both variants are cached, so nothing to invalidate. */
 export function setBackgroundLightness(l: number): void {
   if (currentBgL === l && initialized) {
     return;
@@ -72,15 +51,10 @@ export function useBackgroundIsLight(): boolean {
       };
     },
     isBackgroundLight,
-    // SSR fallback — assume dark so initial paint matches the default theme.
     () => false,
   );
 }
 
-// ── hash + color derivation ───────────────────────────────────────────────
-
-// FNV-1a 32-bit. Tiny, allocation-free, good enough distribution for
-// bucketing into 360 hues.
 function hashString(str: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
@@ -92,11 +66,7 @@ function hashString(str: string): number {
 
 const cache = new Map<string, string>();
 
-/**
- * Return a stable HSL color for `key` that contrasts with the current
- * background. Pass `isLightBg` from `useBackgroundIsLight()` so the
- * caller re-renders when the user swaps themes.
- */
+/** Stable HSL colour for `key` against the current background. */
 export function getUsernameColor(key: string, isLightBg: boolean): string {
   const cacheKey = `${isLightBg ? "L" : "D"}:${key}`;
   const hit = cache.get(cacheKey);
@@ -104,9 +74,7 @@ export function getUsernameColor(key: string, isLightBg: boolean): string {
     return hit;
   }
   const hue = hashString(key) % 360;
-  // Saturation is kept moderate: too high reads as neon on either theme.
-  // Lightness flips: bright on dark bg, darker on light bg, both chosen
-  // to stay roughly at 4.5:1 contrast against typical theme bgs.
+  // Moderate saturation; lightness flips for ~4.5:1 contrast.
   const s = 65;
   const l = isLightBg ? 35 : 68;
   const color = `hsl(${hue} ${s}% ${l}%)`;
@@ -114,15 +82,7 @@ export function getUsernameColor(key: string, isLightBg: boolean): string {
   return color;
 }
 
-/**
- * Fill for another admin's name chip (#1488). The chip carries dark
- * `text-ink` on top, so the fill is always the user's bright (dark-theme)
- * variant: on a dark background it is exactly the colour their name gets
- * as text; on a light background it is the same hue, lighter. The
- * light-theme text variant (35% lightness) cannot carry dark text — a blue
- * hue gets under 1.7:1 — while the bright one keeps every hue at or above
- * 5:1 against `--c-ink` (pinned in `tests/username-color.test.ts`).
- */
+/** Admin name-chip fill (#1488): always the bright variant, which keeps dark `text-ink` ≥5:1. */
 export function getUsernameChipColor(key: string): string {
   return getUsernameColor(key, false);
 }

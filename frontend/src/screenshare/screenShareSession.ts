@@ -1,9 +1,4 @@
-// Screen-share session glue. Subscribes to backend event + frame Channels
-// once per process, mirrors lifecycle into the Zustand store, and exposes a
-// pub/sub dispatcher for raw I420 frame buffers keyed by trackKey.
-//
-// Publish goes through `invoke('start_screen_share', …)`; the Rust capture
-// helper decodes and feeds the I420 frame channel that drives the canvas tile.
+// Screen-share glue: backend event + frame streams, store mirror, and per-track I420 frame pub/sub.
 
 import { reaction } from "mobx";
 
@@ -21,14 +16,7 @@ import {
 import { isMac } from "../utils/platform";
 import { playSfx, SFX } from "../utils/sfx";
 
-/** Capturable display reported by `enumerate_screen_sources`.
- *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration).
- *
- *  `thumbnail_data_url` is a PNG data URL when the source path produces
- *  one — Electron via `desktopCapturer.getSources({ thumbnailSize })`,
- *  Windows via GDI BitBlt of the monitor rect. Undefined under the macOS
- *  capture helper, which doesn't ship preview frames. The picker tile
- *  falls back to the lucide icon when the field is undefined. */
+/** Mirrors `pollis_capture_proto::DisplaySource`; no thumbnail under the macOS helper. */
 export interface DisplaySource {
   id: number;
   width: number;
@@ -37,15 +25,7 @@ export interface DisplaySource {
   thumbnail_data_url?: string;
 }
 
-/** Capturable on-screen window reported by `enumerate_screen_sources`.
- *  Mirrors `pollis_capture_proto::WindowSource`.
- *
- *  Under Electron, `width`/`height` are 0 (desktopCapturer doesn't surface
- *  per-window dimensions without actually capturing), and
- *  `thumbnail_data_url` is populated. Under Tauri-Windows, dimensions are
- *  real and `thumbnail_data_url` is populated from a GDI PrintWindow
- *  render. Under the Tauri macOS helper, dimensions are real but
- *  `thumbnail_data_url` is undefined. */
+/** Mirrors `pollis_capture_proto::WindowSource`; no thumbnail under the macOS helper. */
 export interface WindowSource {
   id: number;
   width: number;
@@ -56,38 +36,21 @@ export interface WindowSource {
   thumbnail_data_url?: string;
 }
 
-/** What the helper offers when it enumerates. Empty on Linux —
- *  the system portal handles selection. macOS + Windows return real
- *  lists for the in-app picker. */
+/** Empty on Linux, where the system portal picks. */
 export interface SourceList {
   displays: DisplaySource[];
   windows: WindowSource[];
 }
 
-/** Mirrors `pollis_capture_proto::Selection` — the user's pick from our
- *  in-app picker, sent back to the helper to construct an
- *  `SCContentFilter`. */
+/** Mirrors `pollis_capture_proto::Selection`. */
 export type Selection =
   | { kind: "display"; id: number }
   | { kind: "window"; id: number };
 
-/** What "share the sound too" actually captures, which is not the same
- *  thing on every OS — the picker says so rather than implying a
- *  uniformity that doesn't exist.
- *
- *  - macOS: scoped to the same source as the video. Sharing a window
- *    shares that app's audio; sharing a display shares the system mix.
- *  - Linux / Windows: the whole system mix, whichever source is shared.
- *
- *  Pollis's own output is excluded on all three, so sharing sound during
- *  a call never sends participants their own voices back. */
+/** macOS shares the source's audio; Linux/Windows the system mix. Pollis's own output is always excluded. */
 export type SharedAudioScope = "source" | "system";
 
-/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`.
- *  There is intentionally no "paused" / "stalled" concept on either end:
- *  when capture is idle (static content) the streamer simply stops
- *  pushing frames and the viewer's canvas keeps showing the last paint —
- *  identical to a stream of unchanging frames, no UI signal needed. */
+/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`; no "paused" state by design. */
 export type ScreenShareEvent =
   | { type: "local_started"; width: number; height: number }
   | { type: "local_stopped" }
@@ -99,31 +62,15 @@ export type ScreenShareEvent =
       identity: string;
       width: number;
       height: number;
-      /** Screen share vs webcam. Both kinds of remote video ride this one
-       *  event + frame WebSocket; the tag (read from the LiveKit
-       *  publication's TrackSource on the backend) is what routes the
-       *  track_key to a screenshare tile vs a participant's camera tile.
-       *  Optional/defaulted for compatibility with older backends. */
+      /** Routes the track to a screenshare or camera tile; optional for older backends. */
       source?: "screen" | "camera";
     }
   | { type: "remote_stopped"; track_key: string }
-  /** The shared-audio track is publishing. */
   | { type: "local_audio_started" }
   /** Audio was requested and is not available; the video share continues. */
   | { type: "local_audio_unavailable"; message: string };
 
-/**
- * Collapse a raw backend screen-share error string into a single clear
- * sentence for the status bar. Known failure shapes (portal cancelled,
- * permission denied, missing helper binary, picker dismissed) get a fixed
- * friendly message; anything else passes through unchanged so we never hide
- * a novel error.
- *
- * Resolved through `i18n.t` rather than a component's `useTranslation`: the
- * result is a one-shot string that lands in the voice state union at the moment
- * capture fails and is never re-rendered from its source. The lookup happens per
- * call, so it is never a module-load snapshot of the language.
- */
+/** Collapse known screen-share errors into one sentence; others pass through. Resolved per call via `i18n.t`. */
 export function friendlyScreenShareError(raw: string): string {
   const r = raw.toLowerCase();
   if (
@@ -134,10 +81,7 @@ export function friendlyScreenShareError(raw: string): string {
   ) {
     return i18n.t("voice:shareError.cancelled");
   }
-  // Check "unsupported desktop" BEFORE the permission branch: this is
-  // not something the user can grant (the DE has no ScreenCast backend
-  // at all), so a "allow screen recording in settings" message would be
-  // actively misleading. Distinct from a denial.
+  // Before the permission branch: there is nothing to grant here.
   if (
     r.includes("unsupported") ||
     r.includes("no screen-sharing backend") ||
@@ -154,9 +98,6 @@ export function friendlyScreenShareError(raw: string): string {
     r.includes("not allowed") ||
     r.includes("not authorized")
   ) {
-    // Kept short so it fits the status bar on a single line. The
-    // dismiss "X" + the surrounding bar chrome eat ~80 px on a narrow
-    // window; ~50 chars is a safe ceiling.
     return i18n.t("voice:shareError.permission");
   }
   if (
@@ -191,9 +132,7 @@ export interface DecodedFrame {
 type FrameListener = (frame: DecodedFrame) => void;
 
 export interface FrameStats {
-  /** Frames received in the last sliding window. */
   fps: number;
-  /** Last observed frame dimensions, or null if no frame yet. */
   dimensions: { width: number; height: number } | null;
   /** Total bytes for the last frame's three planes (Y+U+V). */
   lastFrameBytes: number;
@@ -203,37 +142,24 @@ type StatsListener = (stats: FrameStats) => void;
 
 const FPS_WINDOW_MS = 1000;
 
-/** Reserved track key the backend mirrors the local outgoing capture under
- *  (matches LOCAL_PREVIEW_KEY in pollis-core/src/commands/screenshare.rs). */
+/** Track key of the local preview (LOCAL_PREVIEW_KEY in pollis-core/src/commands/screenshare.rs). */
 export const LOCAL_PREVIEW_KEY = "__local_preview__";
 
 class ScreenShareSession {
   private subscribed = false;
   private listeners = new Map<string, Set<FrameListener>>();
-  // Per-track frame arrival timestamps (ms) for sliding-window FPS.
   private fpsHistory = new Map<string, number[]>();
   private lastDims = new Map<string, { width: number; height: number }>();
   private lastBytes = new Map<string, number>();
   private statsListeners = new Map<string, Set<StatsListener>>();
-  // Tauri frame transport: a loopback WebSocket to the Rust media server's
-  // `/ws/screenshare/<token>` route, replacing the per-frame IPC Channel that
-  // stalled WebKitGTK on V8 GC at 1080p (#305 Phase 1). Held so teardown can
-  // close it and the close handler can distinguish intentional vs dropped.
+  // Loopback WebSocket for frames; the per-frame IPC Channel stalled WebKitGTK on GC (#305).
   private frameSocket: WebSocket | null = null;
   private frameSocketReconnect: ReturnType<typeof setTimeout> | null = null;
-  // The backend screenshare-event Channel (lifecycle events: remote
-  // started/stopped, local errors). Held so teardown can detach its handler
-  // on logout — otherwise a late event would mutate the just-reset store.
+  // Held so logout can detach it before a late event mutates the reset store.
   private eventsChannel: Channel<ScreenShareEvent> | null = null;
 
   constructor() {
-    // Tear down on logout. This singleton lives for the whole process, so
-    // its frame WebSocket + reconnect timer must not outlive a session: after
-    // logout the media-server token rotates, so a surviving socket 403s and
-    // the onclose→reconnect loop would spin forever. Non-React singletons
-    // react to store changes via a mobx reaction, per app convention. The
-    // reaction fires only on change (not initially), so the startup null →
-    // null is a no-op; login (user set) is ignored by the guard.
+    // Tear down on logout: the media token rotates, so a surviving socket would 403 and reconnect forever.
     reaction(
       () => appStore.currentUser,
       (user) => {
@@ -244,15 +170,10 @@ class ScreenShareSession {
     );
   }
 
-  /** Close the frame transport and reset subscription state. Idempotent;
-   *  safe to call when nothing is open. A subsequent `ensureSubscribed`
-   *  (after the next login) re-wires the event Channel + a fresh WebSocket. */
+  /** Close the frame transport and reset subscription state. Idempotent. */
   teardown(): void {
     this.subscribed = false;
-    // Detach the event Channel handler so a late screenshare event can't
-    // mutate the just-reset store. The Tauri Channel has no close(); dropping
-    // our handler + reference is the teardown, and the next ensureSubscribed
-    // re-subscribes a fresh Channel (the Rust sink is replaced on resubscribe).
+    // The Channel has no close(); dropping the handler is the teardown.
     if (this.eventsChannel) {
       this.eventsChannel.onmessage = () => {};
       this.eventsChannel = null;
@@ -262,17 +183,14 @@ class ScreenShareSession {
       this.frameSocketReconnect = null;
     }
     const ws = this.frameSocket;
-    // Null first so the socket's own onclose treats this as an intentional
-    // close and does NOT schedule a reconnect.
+    // Null first so onclose doesn't reconnect.
     this.frameSocket = null;
     if (ws) {
       try {
         ws.close();
       } catch {
-        // already closing/closed
       }
     }
-    // Drop per-track stats caches so a new session starts clean.
     this.fpsHistory.clear();
     this.lastDims.clear();
     this.lastBytes.clear();
@@ -290,28 +208,17 @@ class ScreenShareSession {
     this.eventsChannel = events;
     await invoke("subscribe_screen_share_events", { onEvent: events });
 
-    // Frame transport (spike/tauri-revival): a loopback WebSocket, not the
-    // per-frame IPC Channel. Same `pack_frame_bytes` wire format, so
-    // `handleFrame` is unchanged — only how the bytes arrive differs. The
-    // rustwebrtc PoC proved this path sustains 1080p60+ into the WebGL shader
-    // inside WebKitGTK, where Channel dispatch pegged a core on GC.
     await this.connectFrameSocket();
   }
 
-  /** Open (or reopen) the loopback frame WebSocket. The URL is `None` until
-   *  the media server is up and the session token is minted (post-unlock);
-   *  in that window we retry on the socket's own lifecycle events, never on a
-   *  timer poll. Binary messages are the packed-I420 frames `handleFrame`
-   *  already decodes. */
+  /** Open the loopback frame socket; until the URL exists, retry on socket events, never a poll. */
   private async connectFrameSocket(): Promise<void> {
     if (!this.subscribed) {
       return;
     }
     const url = await invoke<string | null>("screenshare_ws_url");
     if (!url) {
-      // Server/token not ready yet — try again shortly. One-shot, cleared on
-      // teardown; this is recovery keyed off a known-not-ready state, not a
-      // standing poll loop.
+      // One-shot retry while the server isn't ready, cleared on teardown.
       this.scheduleFrameSocketReconnect(500);
       return;
     }
@@ -324,19 +231,15 @@ class ScreenShareSession {
       }
     };
     ws.onclose = () => {
-      // Only reconnect if this is still the live socket and we're subscribed
-      // (i.e. not an intentional teardown that nulled frameSocket first).
       if (this.frameSocket === ws && this.subscribed) {
         this.frameSocket = null;
         this.scheduleFrameSocketReconnect(1000);
       }
     };
     ws.onerror = () => {
-      // onclose follows onerror; let it drive the reconnect.
       try {
         ws.close();
       } catch {
-        // already closing
       }
     };
   }
@@ -367,10 +270,7 @@ class ScreenShareSession {
     };
   }
 
-  /** Subscribe to FPS / dimensions / bytes stats for a track. Fired
-   *  whenever a new frame arrives — at most one update per actual frame,
-   *  no internal timer. Cheap to consume; stats are computed once per
-   *  frame regardless of how many listeners. */
+  /** Per-frame stats for a track; no internal timer. */
   onStats(trackKey: string, fn: StatsListener): () => void {
     let set = this.statsListeners.get(trackKey);
     if (!set) {
@@ -378,9 +278,6 @@ class ScreenShareSession {
       this.statsListeners.set(trackKey, set);
     }
     set.add(fn);
-    // Replay the last known stats immediately so fresh consumers don't
-    // wait for the next frame just to render their first non-empty
-    // value.
     const dims = this.lastDims.get(trackKey) ?? null;
     const bytes = this.lastBytes.get(trackKey) ?? 0;
     const fps = this.computeFps(trackKey);
@@ -405,34 +302,16 @@ class ScreenShareSession {
     return Math.round(((hist.length - 1) / span) * 1000);
   }
 
-  /** Enumerate capturable displays + windows.
-   *  - macOS (Tauri): spawns the helper, parks it waiting for our
-   *    selection, returns the list to render in the in-app picker.
-   *  - Windows (Tauri): enumerates monitors + windows via the windows-rs
-   *    Monitor/Window APIs and captures GDI thumbnails (BitBlt for
-   *    monitors, PrintWindow for windows). Returns a real list — the
-   *    in-app picker renders consistently with macOS/Electron.
-   *  - Linux (Tauri): the xdg-desktop-portal dialog IS the picker, so
-   *    the backend returns an empty list as a signal to skip the in-app
-   *    picker and go straight to `start()`. */
+  /** Enumerate displays + windows; Linux returns empty (the portal is the picker). */
   async enumerate(): Promise<SourceList> {
     return await invoke<SourceList>("enumerate_screen_sources");
   }
 
-  /** Discard a parked picker session — user clicked back/cancel before
-   *  picking a source. */
   async cancelPicker(): Promise<void> {
     await invoke("cancel_screen_share_picker");
   }
 
-  /** Start the share. Delegated to the Rust capture helper: on macOS the
-   *  `selection` is the picker result; on Linux/Windows it must be undefined
-   *  so the system portal / WGC picker can show.
-   *
-   *  `withAudio` also captures the source's sound. It is passed separately
-   *  rather than folded into `selection` because Linux has no selection to
-   *  fold it into — the portal dialog is its picker — and the backend
-   *  needs one unambiguous answer for both platforms. */
+  /** Start the share. `selection` only on macOS/Windows; `withAudio` is separate because Linux has no selection. */
   async start(selection?: Selection, withAudio = false): Promise<void> {
     const maxFramerate = await this.resolveMaxFramerate();
     this.pendingWithAudio = withAudio;
@@ -443,25 +322,14 @@ class ScreenShareSession {
     });
   }
 
-  /** What the in-flight `start()` asked for, so `local_started` can record
-   *  it. Needed because that event carries only dimensions, and on Linux
-   *  nothing else on the renderer side has seen the choice — there is no
-   *  picker there to have set it. */
+  /** The in-flight `start()`'s audio choice, for Linux which has no picker. */
   private pendingWithAudio = false;
 
-  /** What sharing sound captures on this platform. Drives the picker's
-   *  one-line explanation of the toggle. */
   audioScope(): SharedAudioScope {
-    // macOS scopes audio to the ScreenCaptureKit content filter, so it
-    // follows the chosen window or display. The other two capture the
-    // system mix regardless.
     return isMac ? "source" : "system";
   }
 
-  /** Read the user's "share sound" preference. Consulted on the Linux
-   *  path, which has no in-app picker to carry the choice, and used as
-   *  the picker's remembered default everywhere else. Falls back to off
-   *  on any error or when signed out. */
+  /** The "share sound" preference (Linux path and picker default); off on error. */
   async resolveWithAudio(): Promise<boolean> {
     const userId = appStore.currentUser?.id;
     if (!userId) {
@@ -479,10 +347,7 @@ class ScreenShareSession {
     }
   }
 
-  /** Read the user's Screen Share framerate preference (fps). This is a
-   *  non-React singleton, so it can't use the `usePreferences` hook — it reads
-   *  the same backend blob directly. Falls back to the default on any error or
-   *  when signed out. */
+  /** The framerate preference, read directly (non-React); default on error. */
   private async resolveMaxFramerate(): Promise<number> {
     const userId = appStore.currentUser?.id;
     if (!userId) {
@@ -506,12 +371,7 @@ class ScreenShareSession {
     const store = appStore;
     switch (ev.type) {
       case "local_started":
-        // Backend signals the start after its capture helper has published.
-        // Synthesize the renderer-side state transitions (starting → active).
-        // On the macOS/Windows picker path this is a no-op — the picker
-        // already moved to `starting`, carrying its own audio choice — so
-        // `pendingWithAudio` is what makes the Linux path, which has no
-        // picker, record the choice too.
+        // `pendingWithAudio` records the Linux path's choice; on the picker path this is a no-op.
         store.shareStartStarting(this.pendingWithAudio);
         store.shareStarted(
           "tauri-local",
@@ -527,19 +387,11 @@ class ScreenShareSession {
         store.shareFailed(friendlyScreenShareError(ev.message));
         break;
       case "local_unsupported":
-        // Distinct from a permission denial: the desktop environment
-        // has no screen-sharing backend at all (e.g. Linux
-        // Cinnamon/MATE/XFCE on Wayland — no xdg-desktop-portal
-        // ScreenCast). Telling the user to "grant permission" would be
-        // wrong; there is nothing to grant. Pass the backend's precise
-        // message straight through.
+        // No screen-sharing backend at all (e.g. no portal ScreenCast); pass the message through.
         store.shareFailed(ev.message);
         break;
       case "remote_started":
-        // One event stream, two destinations: a webcam track becomes the
-        // publisher's tile face (cameraRemotes), a screen share folds onto the
-        // publishing participant's `video` (#385). Default to screen for an
-        // untagged event from an older backend.
+        // Webcam → cameraRemotes; screen → participant `video` (#385). Untagged = screen.
         if (ev.source === "camera") {
           store.upsertCameraRemote(ev.identity, {
             trackKey: ev.track_key,
@@ -559,16 +411,11 @@ class ScreenShareSession {
         store.shareAudioStarted();
         break;
       case "local_audio_unavailable":
-        // Explicitly NOT `shareFailed`: the video share is unaffected and
-        // must keep running. The sharer sees a muted-speaker indicator
-        // with the reason; viewers just get a silent share.
+        // Not `shareFailed`: the video share keeps running.
         store.shareAudioUnavailable(ev.message);
         break;
       case "remote_stopped":
-        // The stop event carries only the track_key, not its source, so fan
-        // out to both sinks — each ignores a track_key it doesn't hold. The
-        // screenshare side clears whichever participant's `video` holds it; the
-        // pinned-viewer cleanup rides the participant change in the store mirror.
+        // The stop event lacks the source, so clear both sinks.
         voiceSession.clearScreenShare(ev.track_key);
         store.removeCameraRemote(ev.track_key);
         playSfx(SFX.ping);
@@ -613,8 +460,6 @@ class ScreenShareSession {
     const u = new Uint8Array(buf, off, uLen); off += uLen;
     const v = new Uint8Array(buf, off, vLen);
 
-    // Update stats — done before tile dispatch so the stats listener
-    // sees the same frame the tile is about to render.
     const now = performance.now();
     let hist = this.fpsHistory.get(trackKey);
     if (!hist) {

@@ -1,15 +1,4 @@
-// The "new" tag next to a fresh member's name (#1506).
-//
-// Group channels carry no membership lines at all — no "X joined", no "X
-// left". Instead a member's messages carry a small "new" tag for a week after
-// they joined. The window is anchored on the server's `group_member.joined_at`,
-// which the DS stamps when the invite is ACCEPTED (or the join request / invite
-// link is approved), never when someone is merely invited. Every input is
-// server data the member list already carries, so every device — including one
-// added later — tags exactly the same messages.
-//
-// `mobile/lib/newMember.ts` is the same rule, byte for byte from the window
-// constant down (`frontend/tests/new-member.test.ts` checks).
+// The "new" tag for a week after `group_member.joined_at` (#1506). Byte-identical to `mobile/lib/newMember.ts` from the constant down.
 
 /** How long after joining a member's messages carry the tag. */
 export const NEW_MEMBER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;

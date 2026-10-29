@@ -1,13 +1,4 @@
-/**
- * Tray bridge — the system-tray / menu-bar surface.
- *
- * Routes to the `tray_set_*` commands + the `tray:requestToggleMute` event
- * emitted by `src-tauri/src/tray.rs`:
- *
- *   - Linux/Windows: tray always present; unread swaps the icon; close
- *     hides to tray when `setTrayCloseToTray(true)`.
- *   - macOS: tray opt-in via `setTrayEnabled`; unread rides the dock badge.
- */
+/** Tray / menu-bar bridge over `src-tauri/src/tray.rs`; macOS is opt-in. */
 
 import { invoke, listen } from "./invoke";
 
@@ -34,11 +25,7 @@ export async function setTrayVoiceState(
   await invoke("tray_set_voice_state", { inCall, muted });
 }
 
-/**
- * Subscribe to "user clicked Mute mic in the tray menu". Returns an
- * unsubscribe fn. Tauri resolves the listener asynchronously, so we guard
- * against an unsubscribe that races the pending `listen()`.
- */
+/** Subscribe to the tray's "Mute mic"; guards an unsubscribe racing `listen()`. */
 export function onTrayRequestToggleMute(cb: () => void): () => void {
   let unlisten: (() => void) | null = null;
   let cancelled = false;

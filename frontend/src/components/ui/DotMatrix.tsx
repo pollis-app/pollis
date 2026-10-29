@@ -1,12 +1,7 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { hslToHex } from "../../utils/colorUtils";
 
-// ─── Algorithm tokens ─────────────────────────────────────────────────────────
-//
-// Algorithms are opaque tagged objects rather than functions. The renderer
-// dispatches on `kind` and runs a typed-array implementation so the hot loop
-// never allocates. This trades a little flexibility for ~10–50x throughput
-// (no per-frame `.map().map()` + boxed `{opacity, data}` objects).
+// Algorithms are tagged objects run over typed arrays, so the hot loop never allocates.
 
 export type DotMatrixAlgorithm =
   | { kind: "pulsingWave" }
@@ -23,8 +18,6 @@ export const ALL_ALGORITHMS: DotMatrixAlgorithm[] = [
   flowingWaveAlgorithm,
 ];
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
 interface DotMatrixProps {
   algorithm?: DotMatrixAlgorithm;
   dotSize?: number;
@@ -34,20 +27,11 @@ interface DotMatrixProps {
   style?: React.CSSProperties;
 }
 
-// Rendering model: the visible canvas holds ONE PIXEL PER CELL (cols x rows).
-// Each frame writes the cell intensities into a Uint32 view of an ImageData
-// and does a single small putImageData. The browser compositor scales the
-// canvas up to the container with nearest-neighbour sampling, and a CSS mask
-// of repeating squares cuts the scaled cells into dots. The per-frame cost is
-// O(cells) typed-array writes with no per-dot canvas calls and no full-size
-// rasterization on the main thread; the previous version issued one fillRect
-// per lit dot every frame, which is what stalled the renderer.
+// One canvas pixel per cell, scaled up by the compositor and masked into dots: O(cells) writes per frame.
 
-// Below this intensity a cell is drawn fully transparent.
 const MIN_VISIBLE_OPACITY = 0.02;
 
-// Every this many generations a few random cells are revived so the board
-// never settles into a static field of still lifes.
+// Periodic revival so the board never settles into still lifes.
 const GOL_RESEED_EVERY = 30;
 const GOL_RESEED_CHANCE = 0.03;
 
@@ -55,7 +39,6 @@ const parseAccentRgb = (): number => {
   const cs = getComputedStyle(document.documentElement);
   const rawH = parseFloat(cs.getPropertyValue("--accent-h"));
   const rawS = parseFloat(cs.getPropertyValue("--accent-s"));
-  // A hue or saturation of 0 is valid, so only fall back when unparseable.
   const h = Number.isNaN(rawH) ? 38 : rawH;
   const s = Number.isNaN(rawS) ? 90 : rawS;
   const hex = hslToHex(h, s, 62);
@@ -99,9 +82,7 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     const step = dotSize + spacing;
     const kind = resolvedAlgorithm.kind;
 
-    // The mask tile puts the dot at the tile origin; the canvas is shifted
-    // back by half the gap so cell edges fall inside the gaps, where any
-    // uneven nearest-neighbour rounding at fractional DPR is masked away.
+    // Canvas shifted by half the gap so DPR rounding falls inside the gaps.
     const mask = dotMaskUrl(dotSize, step);
     const half = spacing / 2;
     const cs = canvas.style;
@@ -112,16 +93,12 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     cs.setProperty("-webkit-mask-position", `${half}px ${half}px`);
     cs.setProperty("mask-position", `${half}px ${half}px`);
 
-    // ── Typed-array state. Reallocated only when the grid size changes. ────
     let cols = 0;
     let rows = 0;
 
-    // opacity: 0..1 per cell, row-major
     let opacity = new Float32Array(0);
-    // GoL state: alive/dead, double-buffered
     let aliveA = new Uint8Array(0);
     let aliveB = new Uint8Array(0);
-    // pulsingWave per-cell phase
     let phase = new Float32Array(0);
     let image: ImageData | null = null;
     let pixels = new Uint32Array(0);
@@ -134,8 +111,7 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     let rafId = 0;
     let rgb = parseAccentRgb();
 
-    // The accent is applied as inline custom properties on <html>, so watch
-    // that attribute instead of polling getComputedStyle.
+    // Accent lives in inline custom properties on <html>; watch that.
     const colorObserver = new MutationObserver(() => {
       rgb = parseAccentRgb();
       dirty = true;
@@ -149,7 +125,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       const newAliveB = new Uint8Array(total);
       const newPhase = new Float32Array(total);
 
-      // Copy overlapping region so resizes don't blank the animation.
       if (cols > 0 && rows > 0) {
         const copyCols = Math.min(cols, nextCols);
         const copyRows = Math.min(rows, nextRows);
@@ -163,7 +138,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
           }
         }
       } else {
-        // First init: seed per-cell phases for pulsingWave and a random GoL.
         for (let i = 0; i < total; i++) {
           newPhase[i] = Math.random() * Math.PI * 2;
           newAliveA[i] = Math.random() > 0.7 ? 1 : 0;
@@ -178,7 +152,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       cols = nextCols;
       rows = nextRows;
 
-      // Resizing a canvas clears it, so only touch it when the grid changes.
       canvas.width = Math.max(1, cols);
       canvas.height = Math.max(1, rows);
       image = total > 0 ? ctx.createImageData(cols, rows) : null;
@@ -203,8 +176,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       }
     };
 
-    // ── Algorithm steps (in-place on typed arrays, zero allocation) ─────────
-
     const stepPulsingWave = (dt: number) => {
       const len = cols * rows;
       const TAU = Math.PI * 2;
@@ -220,7 +191,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     let rowWave = new Float32Array(0);
 
     const stepFlowingWave = (t: number) => {
-      // Precompute per-column and per-row sinusoids — O(cols + rows) instead of O(cols*rows) trig.
       if (colWave.length !== cols) { colWave = new Float32Array(cols); }
       if (rowWave.length !== rows) { rowWave = new Float32Array(rows); }
       const cPi3 = Math.PI * 3;
@@ -240,9 +210,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     };
 
     const stepGameOfLife = () => {
-      // Single pass with toroidal wrap-around using precomputed neighbor
-      // row/column offsets. Reads from aliveA, writes to aliveB, then swaps.
-      // Opacity is written in the same loop.
       generation++;
       const reseed = generation % GOL_RESEED_EVERY === 0;
       for (let y = 0; y < rows; y++) {
@@ -270,8 +237,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       aliveB = swap;
     };
 
-    // ── Draw: one ImageData write, one putImageData ─────────────────────────
-
     const draw = () => {
       if (!image) { return; }
       const len = cols * rows;
@@ -288,13 +253,10 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       ctx.putImageData(image, 0, 0);
     };
 
-    // ── Animation loop ──────────────────────────────────────────────────────
-
     const animate = (ts: number) => {
       rafId = requestAnimationFrame(animate);
 
       if (cols === 0 || rows === 0) {
-        // Container not laid out yet — try again next frame.
         resize();
         return;
       }
@@ -320,9 +282,7 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
           dirty = true;
           break;
         case "gameOfLife": {
-          // Update GoL on a fixed cadence regardless of frame rate so it
-          // doesn't run away at 120fps. 120ms ≈ 8 generations/s. Frames in
-          // between have nothing new to draw.
+          // Fixed cadence (~8 gen/s) regardless of frame rate.
           if (ts - lastGolUpdate > 120) {
             stepGameOfLife();
             lastGolUpdate = ts;
@@ -340,7 +300,6 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
 
     const ro = new ResizeObserver(() => {
       resize();
-      // Don't reset startTime — algorithms keep their continuity through resize.
     });
     ro.observe(container);
 

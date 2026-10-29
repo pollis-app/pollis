@@ -15,22 +15,13 @@ interface InviteLinkManagerProps {
   groupId: string;
 }
 
-/**
- * A preset carries the catalogue key plus the number the key pluralizes on, so
- * the labels are resolved by the component rather than snapshotted here at
- * import time.
- */
+/** Labels resolve at render, not at import. */
 interface PresetOption {
   id: string;
   labelKey: string;
   count: number | null;
 }
 
-/**
- * Expiry presets. A fixed list rather than a date picker, because the point of
- * the feature is that it is not complicated to use — and because every preset
- * here is one a person actually asks for.
- */
 const EXPIRY_OPTIONS: (PresetOption & { hours: number | null })[] = [
   { id: "24h", labelKey: "inviteLinks.expiryHours", count: 24, hours: 24 },
   { id: "7d", labelKey: "inviteLinks.expiryDays", count: 7, hours: 24 * 7 },
@@ -44,13 +35,7 @@ const USES_OPTIONS: (PresetOption & { uses: number | null })[] = [
   { id: "unlimited", labelKey: "inviteLinks.usesUnlimited", count: null, uses: null },
 ];
 
-/**
- * #847 — create, review and revoke a group's shareable invite links.
- *
- * Three controls only: expiry, max uses, revoke. Resisting a fourth is
- * deliberate — each extra knob is another way to misconfigure an admission
- * boundary, and neither Slack nor Discord ships more than this.
- */
+/** Create, review and revoke a group's invite links (#847). */
 export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId }) => {
   const { t } = useTranslation("channels");
   const [expiryHours, setExpiryHours] = useState<number | null>(24 * 7);
@@ -80,8 +65,7 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
     setError(null);
     try {
       await revokeMutation.mutateAsync({ linkId, groupId });
-      // A revoked link may be the one on screen. Clearing it keeps the card
-      // from offering a copy button for a link that no longer works.
+      // Don't keep offering a copy for a link just revoked.
       if (created && created.id === linkId) {
         setCreated(null);
       }
@@ -90,7 +74,6 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
     }
   };
 
-  // A preset with no number ("Never", "Unlimited") has no plural form to pick.
   const presetLabel = (opt: PresetOption): string => {
     if (opt.count == null) {
       return t(opt.labelKey);

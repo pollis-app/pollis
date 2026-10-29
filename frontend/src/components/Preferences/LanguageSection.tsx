@@ -5,25 +5,11 @@ import { supportedLanguages } from "../../i18n/languages";
 import { setLanguage } from "../../i18n";
 
 interface LanguageSectionProps {
-  /**
-   * The signed-in user, or null. Scopes the stored choice so two Pollis users
-   * sharing one OS account keep separate languages.
-   */
+  /** Scopes the stored choice per user. */
   userId: string | null;
 }
 
-/**
- * Language picker.
- *
- * A radiogroup of `Button`s rather than a dropdown: dropdowns are overlays and
- * this repo forbids them outright, and the same shape is already the house
- * pattern for the skin and retention pickers — so it needs no per-skin
- * treatment to look right in `terminal` and `refined` alike.
- *
- * Each option is labelled with the language's own name for itself, not its
- * English name, because the person who needs this control is by definition the
- * person who cannot read the English one.
- */
+/** Language picker; each option uses the language's own name. */
 export const LanguageSection: React.FC<LanguageSectionProps> = ({ userId }) => {
   const { t, i18n } = useTranslation("settings");
   const active = i18n.language;

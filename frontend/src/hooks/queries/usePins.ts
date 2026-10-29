@@ -4,14 +4,7 @@ import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 
-/**
- * Pinned messages (#99).
- *
- * Pins are per-CONVERSATION shared state — every member sees the same list —
- * so unlike bookmarks (deliberately device-local, see `useBookmarks`) these
- * hooks are backed by the DS: the Rust commands seal/open pin content under
- * the conversation's pin master key and the server stores only ciphertext.
- */
+/** Pinned messages (#99): shared per conversation, sealed under its pin key; the DS holds ciphertext only. */
 
 /** Mirrors the Rust PinnedMessage in pollis-core/src/commands/pinned_messages.rs. */
 export interface PinnedMessage {
@@ -32,14 +25,7 @@ export const pinQueryKeys = {
     ["pins", conversationId] as const,
 };
 
-/**
- * One conversation's pins, newest first, decrypted in Rust.
- *
- * `conversationId` is the channel or DM id. The list can legitimately error
- * while the device is still waiting for the conversation's pin key (a fresh
- * external join); React Query surfaces that as `error` and retries on the
- * next mount, which matches the "heals on the next pass" design.
- */
+/** One conversation's pins, newest first; may error until the pin key arrives. */
 export function usePinnedMessages(conversationId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({

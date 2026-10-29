@@ -7,9 +7,7 @@ interface EditMessageBarProps {
   hint: string;
   value: string;
   onChange: (value: string) => void;
-  /** Enter (without Shift) saves. Escape is the caller's: it is handled at
-   * the page level in capture phase, ahead of the window navigation
-   * handler. */
+  /** Enter (without Shift) saves; Escape is the caller's. */
   onSave: () => void;
   onCancel: () => void;
   isSaving: boolean;
@@ -18,14 +16,7 @@ interface EditMessageBarProps {
   cancelTestId: string;
 }
 
-/**
- * The bar that replaces the composer while a message is being edited — the
- * channel/DM log and the Vault share it, so editing looks and behaves the
- * same in both (heading row, focus-inverted textarea, one-line key hint).
- *
- * Mounting focuses the textarea with the caret at the end; give it a `key`
- * of the edited message id so switching to another message remounts it.
- */
+/** Replaces the composer while editing; key it by message id. */
 export const EditMessageBar: React.FC<EditMessageBarProps> = ({
   heading,
   cancelLabel,

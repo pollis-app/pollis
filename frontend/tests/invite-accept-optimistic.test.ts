@@ -1,19 +1,4 @@
-/*
- * Accepting a group invite is optimistic (#1560).
- *
- * The accept used to end its busy state and then leave the screen unchanged
- * until unawaited refetches came back. Now the invite leaves the pending list
- * and the group joins the group lists on the same frame, a failure restores
- * both, and the mutation stays pending until the refetches land. The rule
- * that matters is that the UI never shows NEITHER the invite nor the group.
- *
- * The cache rules are pure (src/hooks/queries/inviteAcceptOptimistic.ts) and run
- * against an in-memory cache; the hook's wiring is checked in its source,
- * since this runner has no React renderer. The mobile half is
- * mobile/tests/invite-accept-optimistic.test.ts.
- *
- *   node --test frontend/tests/
- */
+/* Optimistic invite accept (#1560): pure cache rules plus a source check of the hook. Mobile half in mobile/tests. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

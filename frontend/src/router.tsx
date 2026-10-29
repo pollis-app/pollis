@@ -39,23 +39,13 @@ import { RenameGroupPage } from "./pages/RenameGroupPage";
 import { GroupEmojiPage } from "./pages/GroupEmojiPage";
 import { SavedPage } from "./pages/SavedPage";
 
-// Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
 
-// ─── Root route ─────────────────────────────────────────────────────────────
-// AppShell renders the chrome (TitleBar, VoiceBar, breadcrumb) + <Outlet />
-// for the matched child route's content area.
-
-// Search params are declared on the ROOT route because the right-hand panel
-// (#824) is chrome owned by AppShell, not by any one page — every route needs
-// to carry `panel` for the slot to survive navigation. Validating here once
-// also means a new panel kind is a change to `validatePanelSearch` alone.
+// Search params live on the ROOT route: the right panel (#824) is AppShell chrome.
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: AppShell,
   validateSearch: validatePanelSearch,
 });
-
-// ─── Route definitions ─────────────────────────────────────────────────────────
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -69,7 +59,7 @@ const groupsRoute = createRoute({
   component: GroupsPage,
 });
 
-// /groups/new and /groups/search must come before /groups/$groupId so they take priority
+// /groups/new and /groups/search before /groups/$groupId.
 const createGroupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/new",
@@ -112,8 +102,7 @@ const renameGroupRoute = createRoute({
   component: RenameGroupPage,
 });
 
-// Custom per-group emoji (#848). A parameterized route, so it is exempt from
-// the PAGE_RESULTS registration the static pages need.
+// Custom emoji (#848); parameterized, so not a registered static page.
 const groupEmojiRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/emoji",
@@ -162,7 +151,7 @@ const dmsRoute = createRoute({
   component: DMsPage,
 });
 
-// /dms/new, /dms/requests, /dms/blocked must come before /dms/$conversationId
+// /dms/new, /dms/requests, /dms/blocked before /dms/$conversationId.
 const startDMRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dms/new",
@@ -242,8 +231,7 @@ const changePinRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/ChangePinPage"), "ChangePinPage"),
 });
 
-// Report a user (#1213), or one of their messages. Parameterized, so not a
-// static page (no search entry, no sidebar row).
+// Report a user (#1213) or message; parameterized.
 const reportUserRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/report/$userId",
@@ -335,16 +323,12 @@ const arcadeRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/ArcadePage"), "ArcadePage"),
 });
 
-// The terminal pane is a persistent component owned by AppShell (so the
-// PTY + scrollback survive navigation). This route only flips the URL so
-// links / Cmd+K / back navigation move off it like any other view.
+// The terminal pane is AppShell's (PTY survives navigation); this only sets the URL.
 const terminalRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/terminal",
   component: () => null,
 });
-
-// ─── Route tree ────────────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -395,8 +379,6 @@ const routeTree = rootRoute.addChildren([
   terminalRoute,
 ]);
 
-// ─── Router factory ────────────────────────────────────────────────────────────
-
 export function createAppRouter(context: RouterContext) {
   const memoryHistory = createMemoryHistory({ initialEntries: ["/"] });
   return createRouter({
@@ -408,9 +390,7 @@ export function createAppRouter(context: RouterContext) {
 
 export type AppRouter = ReturnType<typeof createAppRouter>;
 
-// ─── Router type registration ──────────────────────────────────────────────────
-// This enables full type-safety for useParams, useNavigate, etc. throughout
-// the app without needing the TanStack Router Vite plugin / codegen.
+// Router type registration, without the Vite plugin.
 
 declare module "@tanstack/react-router" {
   interface Register {

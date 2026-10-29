@@ -5,26 +5,12 @@ import type { SavedMessage } from "../../hooks/queries/useBookmarks";
 
 interface SavedMessageRowProps {
   item: SavedMessage;
-  /** Human label for the conversation ("#general", "alice"), or null when this
-   *  device cannot name it. */
+  /** "#general", "alice", or null when this device cannot name it. */
   conversationLabel: string | null;
-  /** Display name for the sender, when known. */
   senderLabel: string | null;
 }
 
-/**
- * One entry in the saved-items list.
- *
- * Two states, and the unavailable one matters as much as the normal one: a
- * bookmark deliberately outlives its message (retention eviction, soft delete),
- * and when the body is gone this row says so plainly rather than rendering an
- * empty bubble or quietly dropping out of the list.
- *
- * Both skins render the same structure and differ only in type treatment —
- * terminal keeps everything monospace and one line tall, refined uses the sans
- * stack with a little more air. The saved-items surface has no terminal-only or
- * refined-only affordances.
- */
+/** One saved item; says plainly when the bookmark outlived its message. */
 export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
   item,
   conversationLabel,
@@ -56,9 +42,7 @@ export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
           {item.content && item.content.length > 0 ? item.content : t("row.noText")}
         </span>
       ) : (
-        // Honest placeholder. It says only that THIS DEVICE no longer holds the
-        // message — it does not claim the message was deleted for everyone, and
-        // it shows no sender, timestamp or content.
+        // Claims only that this device no longer holds it; no sender, time or content.
         <span
           data-testid={`saved-unavailable-${item.message_id}`}
           className={`${bodyClass} italic text-dim`}

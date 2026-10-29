@@ -2,12 +2,7 @@ import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 
-// Saved messages (#854).
-//
-// Every command behind these hooks is DEVICE-LOCAL — the `bookmark` table in
-// the encrypted local SQLite DB. Nothing is sent to the Delivery Service or to
-// Turso, because which messages a user saved is exactly the per-message
-// interest metadata the threat model says an untrusted server must not learn.
+// Saved messages (#854): device-local only, since saves are interest metadata.
 
 /** Mirrors the Rust `SavedMessage` in `pollis-core/src/commands/bookmarks.rs`. */
 export type SavedMessage = {
@@ -15,8 +10,7 @@ export type SavedMessage = {
   conversation_id: string;
   /** When the user saved it — not when the message was sent. */
   saved_at: string;
-  /** False once the local message body is gone (retention eviction, soft
-   *  delete). The row still lists, as an honest placeholder. */
+  /** False once the local body is gone; the row still lists. */
   available: boolean;
   content: string | null;
   sender_id: string | null;
@@ -45,21 +39,13 @@ export function useSavedMessages() {
   });
 }
 
-/**
- * The set of saved message ids, for rendering the per-message save affordance.
- *
- * Derived from the one saved-messages query rather than asking the backend per
- * message — a message list would otherwise fire one `invoke` per row.
- */
+/** Saved ids, derived from the one query. */
 export function useSavedMessageIds(): Set<string> {
   const { data: saved = [] } = useSavedMessages();
   return useMemo(() => new Set(saved.map((s) => s.message_id)), [saved]);
 }
 
-/**
- * Toggle a message's saved state. Resolves to the state AFTER the toggle, so
- * callers can render the result without a re-read.
- */
+/** Toggle saved; resolves to the new state. */
 export function useToggleSavedMessage() {
   const queryClient = useQueryClient();
 
@@ -87,20 +73,7 @@ export function useUnsaveMessage() {
   });
 }
 
-/**
- * Resolve a permalink against THIS DEVICE'S local database.
- *
- * Imperative rather than a query because it runs in response to a paste/click,
- * and because caching a "not found" answer would be actively wrong once the
- * conversation's history finishes syncing.
- *
- * There is no server round-trip here and there must never be one: a
- * "fetch message by id" endpoint would turn a permalink from an inert pointer
- * into a way to pull content the device was never entitled to. A device that
- * was not in the MLS group when the message was sent never received the key
- * material, so the message is simply absent locally — the miss is cryptographic,
- * not a permission check.
- */
+/** Resolve a permalink against the local DB only; never a server round-trip. Not cached. */
 export function useResolvePermalink() {
   return useCallback(
     async (
@@ -113,8 +86,7 @@ export function useResolvePermalink() {
           messageId,
         });
       } catch {
-        // A failed lookup is indistinguishable from a miss on purpose — the
-        // caller must not be able to tell "error" from "you don't have this".
+        // Errors look like misses on purpose.
         return { found: false, conversation_id: null, message_id: null };
       }
     },

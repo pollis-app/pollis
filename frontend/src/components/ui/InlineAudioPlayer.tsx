@@ -10,8 +10,7 @@ interface InlineAudioPlayerProps {
   className?: string;
   autoPlay?: boolean;
   onClick?: () => void;
-  /** `"press"`: a plain mouse press on the card (not on its play button or
-      seek bar) runs `onClick` on pointer-down (#1529). */
+  /** `"press"`: a mouse press on the card runs `onClick` on pointer-down (#1529). */
   activateOn?: ActivateOn;
 }
 
@@ -89,9 +88,6 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         cursor: onClick ? "pointer" : "default",
       }}
       onClick={press.onClick}
-      // The play button and the seek bar are their own controls: a press on
-      // them never opens the viewer (usePressActivation leaves nested
-      // controls alone).
       onPointerDown={press.onPointerDown}
       onMouseDown={press.onMouseDown}
     >

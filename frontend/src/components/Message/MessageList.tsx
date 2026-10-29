@@ -51,12 +51,8 @@ const startOfLocalDay = (d: Date): number =>
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
-// Memoised for the same reason the rows are: there is one of these per day in
-// the log and their inputs are two primitives that almost never change.
 const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ label, refined }) => {
   if (refined) {
-    // Centered mono label between two hairline rules, with density-driven
-    // breathing room above and below.
     return (
       <div
         data-testid="day-divider"
@@ -91,21 +87,15 @@ DayDivider.displayName = "DayDivider";
 
 interface MessageListProps {
   messages: Message[];
-  /** MLS group / DM conversation id. A change resets keyboard log
-   *  navigation. Omit on surfaces with no conversation (search results,
-   *  threads). */
+  /** MLS group / DM conversation id; a change resets keyboard log navigation. */
   conversationId?: string | null;
-  /** The group whose roster drives the "new" member tag (#1506). Null for
-   *  DMs, which have no tag. */
+  /** Drives the "new" member tag (#1506). Null for DMs. */
   groupIdForNames?: string | null;
   adminUserIds?: Set<string>;
-  /** True when the viewer is an admin in this list's group — enables
-   * deleting other members' messages for moderation. */
+  /** Viewer is a group admin: may delete others' messages. */
   viewerIsAdmin?: boolean;
   onReply?: (messageId: string) => void;
-  /** Open a message's thread in the right panel (#825). */
   onOpenThread?: (messageId: string) => void;
-  /** messageId -> replies this device holds, for the "N replies" affordance. */
   threadReplyCounts?: Map<string, number>;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
@@ -114,24 +104,15 @@ interface MessageListProps {
   hasMore?: boolean;
   isFetchingMore?: boolean;
   onLoadMore?: () => void;
-  /** The log is an anchored window (#1039): there are messages newer than
-   * its last row that are not the live tail. Scrolling near the bottom asks
-   * for them via `onLoadNewer`, and arriving messages do not pull the
-   * viewport down until the window has rejoined the tail. */
+  /** The log is an anchored window (#1039): newer messages exist beyond its last row. */
   hasNewer?: boolean;
   isFetchingNewer?: boolean;
   onLoadNewer?: () => void;
-  /** Bumped by the parent whenever it replaces the log wholesale with the
-   * live tail (leaving an anchored window), so the log re-opens at its newest
-   * row exactly as it does on a conversation switch. */
+  /** Bumped when the log is replaced with the live tail; re-opens at the newest row. */
   windowEpoch?: number;
-  /** Opting into arrow-key log navigation: return focus to this surface's
-   * composer. Only the surface that owns the app's main composer passes it —
-   * exactly one mounted list may lend the nav store its context. */
+  /** Opts into arrow-key log navigation; only the main composer's list passes it. */
   focusComposer?: () => void;
-  /** The channel or DM id pins are recorded against (#99) — NOT the MLS
-   * group id `conversationId` carries. Omit on surfaces without pinning
-   * (search results, threads) and the affordance doesn't render. */
+  /** Channel or DM id pins are recorded against (#99), not the MLS group id. */
   pinsConversationId?: string | null;
 }
 
@@ -170,31 +151,20 @@ export const MessageList: React.FC<MessageListProps> = observer(({
 
   const sortedMessages = useMemo(
     () =>
-      // A run of lost messages (#1312) reads as one row, not a column of
-      // identical ones.
       collapseUndecryptable([...messages]
-        // Filter out blank messages — but keep any message with attachments even
-        // if the text caption is empty.
         .filter((m) => {
           const hasText = m.content_decrypted != null && m.content_decrypted !== "";
           const hasAttachments = (m.attachments?.length ?? 0) > 0;
-          // content_decrypted === undefined means decryption failed — keep the
-          // message so it renders as [encrypted] instead of vanishing silently.
+          // undefined = decryption failed; keep it so it renders as [encrypted].
           const decryptionFailed = m.content_decrypted === undefined;
-          // Soft-deleted messages have no content but should remain visible as "[deleted]".
           const isSoftDeleted = !!m.deleted_at;
-          // A lost message's placeholder (#1312) has no content by definition;
-          // dropping it here would make the loss silent again.
           return hasText || hasAttachments || decryptionFailed || isSoftDeleted || !!m.undecryptable;
         })
         .sort((a, b) => a.created_at - b.created_at)),
     [messages]
   );
 
-  // The "new" member tag (#1506): a member's messages are tagged for a week
-  // after their server-side `joined_at`. Group channels carry no membership
-  // lines, so this is the only sign someone just arrived. The roster read is
-  // the same cached query the member list and the header use.
+  // The "new" member tag (#1506): tagged for a week after `joined_at`.
   const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const groupCreatorId = groupIdForNames
@@ -205,18 +175,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [groupMembers, groupCreatorId],
   );
 
-  // Delivery / read receipts (#857). Queried ONCE here for the whole list and
-  // passed down by message id — a per-row query would be one IPC call per
-  // rendered message. Receipts are a DM-only product decision, so a group
-  // channel (which always has a selected channel id) never runs this query and
-  // never renders an indicator.
+  // Receipts (#857): one query for the whole list, DM-only.
   const selectedChannelId = appStore.selectedChannelId;
   const selectedConversationId = appStore.selectedConversationId;
   const isDm = !selectedChannelId && !!selectedConversationId;
   const { receipts } = useConversationReceipts(isDm ? selectedConversationId : null);
   const { data: dmConversations = [] } = useDMConversations();
-  // Other members only — the viewer never acknowledges their own message, so a
-  // 3-person DM reads "2/2" when both peers have read it, never "2/3".
   const peerCount = useMemo(() => {
     if (!isDm) {
       return 0;
@@ -225,13 +189,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return Math.max((conv?.member_count ?? 2) - 1, 1);
   }, [isDm, dmConversations, selectedConversationId]);
 
-  // ── List-wide render inputs, subscribed ONCE (#874) ─────────────────────
-  // Every one of these used to be resolved per row: `useSkin()` and
-  // `useMentionCandidates()` inside each `MessageItem`/`MessageBody` meant a
-  // React Query observer and up to five MobX reactions PER MESSAGE, all
-  // answering the same list-wide question. Subscribing here and passing one
-  // memoised object down is not just cheaper — it is what makes the row memo
-  // meaningful, because a fresh object per render would defeat it.
+  // List-wide render inputs, subscribed once so the row memo holds (#874).
   const isLightBg = useBackgroundIsLight();
   const currentUser = appStore.currentUser;
   const mentionCandidates = useMentionCandidates();
@@ -257,9 +215,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [skin, isLightBg, currentUser?.id, mentionNames, selfName],
   );
 
-  // Reply targets resolved in ONE pass. Each row used to run
-  // `allMessages.find()`, which is O(N^2) across the log (#874). Only messages
-  // that are actually replied to are indexed, so this stays small.
+  // Reply targets in one pass, not a per-row find() (#874).
   const replyTargets = useMemo(() => {
     const wanted = new Set<string>();
     for (const m of sortedMessages) {
@@ -279,8 +235,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return map;
   }, [sortedMessages]);
 
-  // One row per message, keyed and timestamped for the window. Messages use
-  // `created_at` (Rust unix seconds or ms — `toMs` normalizes).
   type TimelineItem = { kind: "message"; key: string; ts: number; message: Message };
   const timeline: TimelineItem[] = useMemo(
     () =>
@@ -293,25 +247,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [sortedMessages],
   );
 
-  // ── Windowing (#874) ────────────────────────────────────────────────────
-  // Only the visible slice of the timeline is in the DOM, so layout and paint
-  // stop scaling with history length the way render cost already stopped.
-  //
-  // The list keeps its OWN scroll container and its own markup — the library
-  // is headless, which is what lets day dividers, sender
-  // grouping and both skins' row shapes carry on unchanged inside the window.
-  //
-  // Timeline keys, not indexes, identify rows (`getItemKey`). That is what
-  // makes prepending a page of older messages cheap: every row already
-  // measured keeps its real height even though its index just shifted by 50.
+  // Windowing (#874). Rows are keyed, so a prepend keeps measured heights.
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const getItemKey = useCallback(
     (index: number) => timelineRef.current[index]?.key ?? index,
     [],
   );
-  // Recomputed per render (one style read) rather than memoised, so it follows
-  // a font-size change; the estimate only governs rows never yet on screen.
   const rowEstimatePx = estimateRowPx(skin);
   const rowEstimateRef = useRef(rowEstimatePx);
   rowEstimateRef.current = rowEstimatePx;
@@ -323,28 +265,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     estimateSize,
     getItemKey,
     overscan: ROW_OVERSCAN,
-    // A chat log is anchored at its END, not its start. This is what replaces
-    // the hand-rolled scroll-restore that used to bracket a load-more: the
-    // library re-pins the row the user is looking at across any count change,
-    // whether 50 older messages were prepended or a row above the fold turned
-    // out taller than its estimate.
+    // Re-pins the visible row across any count change (older page prepended, etc.).
     anchorTo: "end",
-    // Follow new messages down — but only from the bottom. Scrolled back
-    // through history, an arriving message no longer yanks the viewport away,
-    // which is how Slack and Discord both behave.
-    //
-    // Off entirely while the log is an anchored window (#1039): the "bottom"
-    // of such a window is not the present, and a forward page appending
-    // below it is history the reader has not seen yet, not a new arrival to
-    // follow. Held off one commit past the last append too (`isFetchingNewer`
-    // clears then), so the rejoining page is not followed either.
+    // Follow new messages only from the bottom; never while an anchored window (#1039).
     followOnAppend: hasNewer || isFetchingNewer ? false : "smooth",
-    // "At the bottom" with one row of slack, rather than the 1px default.
     scrollEndThreshold: rowEstimatePx,
   });
 
-  // Message id → timeline index, for the three subsystems that have to ask for
-  // a row before they can look at it (see `messageWindow.ts`).
   const indexByMessageId = useMemo(() => {
     const map = new Map<string, number>();
     timeline.forEach((item, index) => {
@@ -357,8 +284,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const indexByMessageIdRef = useRef(indexByMessageId);
   indexByMessageIdRef.current = indexByMessageId;
 
-  // Stable across renders and ref-backed, so a reveal that is still in flight
-  // reads the live timeline rather than the one that existed when it started.
   const rowWindow = useMemo<MessageRowWindow>(
     () => ({
       container: () => containerRef.current,
@@ -367,25 +292,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }),
     [virtualizer],
   );
-  // Held in a ref as well so the row callbacks below keep the empty dependency
-  // array that #874 made load-bearing — a fresh `onScrollToReply` identity
-  // re-renders every row in the log.
+  // Ref so the row callbacks keep empty deps (#874).
   const rowWindowRef = useRef(rowWindow);
   rowWindowRef.current = rowWindow;
 
-  // Open at the newest message.
-  //
-  // `followOnAppend` keeps the log pinned to the bottom from then on, but it
-  // only reacts to the message COUNT changing while a scroll container exists
-  // — and a conversation whose first page is already in hand renders its whole
-  // log in one go, with nothing for it to react to. Without this, opening a
-  // channel with any real history lands the reader at its very first message.
-  //
-  // Deliberately re-runs rather than latching on a ref: React re-attaches the
-  // scroll element on its dev-mode double mount, and the virtualizer rewinds
-  // to the offset it still believes in when that happens. An anchor that fires
-  // once, first, loses that race — and losing it silently is exactly the shape
-  // of bug that ships.
+  // Open at the newest message; re-runs because the dev double mount rewinds the scroll.
   const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
   const hasRows = timeline.length > 0;
   useEffect(() => {
@@ -395,15 +306,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     virtualizer.scrollToIndex(timelineRef.current.length - 1, { align: "end" });
   }, [logKey, windowEpoch, hasRows, virtualizer]);
 
-  // Ask for another page while the reader is at the top of the log — or while
-  // there is no top to reach, because the log does not fill its own viewport.
   const maybeLoadMore = useCallback(() => {
     const container = containerRef.current;
     if (!container || !hasMore || isFetchingMore) {
       return;
     }
-    // Recomputed here, not captured: the threshold is in rem, so it follows a
-    // font-size change under a mounted log (#934).
+    // Read at call time: rem-based, follows font size (#934).
     const threshold = loadMoreThresholdPx();
     const scrollable = container.scrollHeight - container.clientHeight > threshold;
     if (!scrollable || container.scrollTop < threshold) {
@@ -411,7 +319,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }
   }, [hasMore, isFetchingMore, onLoadMore]);
 
-  // Trigger load-more when the user scrolls near the top.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
@@ -421,39 +328,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => container.removeEventListener("scroll", maybeLoadMore);
   }, [maybeLoadMore]);
 
-  // …and again whenever the log's contents change.
-  //
-  // Scrolling is the only thing that ever asks for history, and a viewport
-  // already at offset 0 — or one the whole first page fits inside — has no
-  // scrolling left to give: the browser emits no event for a wheel that
-  // cannot move anything. A prepend that lands the reader back at the top
-  // therefore used to dead-end the log on the page it had, with the rest of
-  // the conversation sitting decryptable on disk and unreachable (#927).
-  //
-  // The conditions inside `maybeLoadMore` are what keep this from running
-  // away: the reader has to still be at the top, so the ordinary prepend —
-  // which re-anchors them onto the row they were reading, well below it —
-  // stops after one page. The anchoring runs in a layout effect, i.e. before
-  // this one, so `scrollTop` here is already the post-prepend truth. Opening
-  // a conversation is safe for the same reason: the log has scrolled itself
-  // to its newest message by the time this runs.
+  // Also on content change: a viewport at the top or not full gets no scroll event (#927).
   useEffect(() => {
     maybeLoadMore();
   }, [maybeLoadMore, timeline.length]);
 
-  // The mirror image, for an anchored window (#1039): ask for the next page
-  // toward the present while the reader is at the BOTTOM of the window — or
-  // while the window does not fill its viewport, for the same reason as above.
-  // `hasNewer` is false in live mode, so this is inert on the ordinary log.
-  //
-  // Runaway is bounded the same way: the append re-pins the reader onto the
-  // row they were reading (`followOnAppend` is off while `hasNewer`), which
-  // is no longer near the bottom once a page sits below it.
-  //
-  // Not while a jump is still pending: the window has just been re-seated
-  // and the viewport is wherever the previous log left it (typically its
-  // bottom, i.e. this window's bottom) until the jump effect below centres
-  // the target. Asking then would fetch a page nobody has scrolled toward.
+  // Mirror for an anchored window (#1039); not while a jump is pending.
   const pendingJumpMessageId = messageJumpStore.messageId;
   const maybeLoadNewer = useCallback(() => {
     const container = containerRef.current;
@@ -481,14 +361,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     maybeLoadNewer();
   }, [maybeLoadNewer, timeline.length]);
 
-  // `useCallback` is load-bearing, not tidiness: this is handed to every row as
-  // `onScrollToReply`, so a fresh identity per render re-rendered the entire log
-  // on any parent state change — one keystroke in the edit bar was N row
-  // renders (#874). Reads the DOM and a ref only, so it has no dependencies.
-  //
-  // #874: the quoted parent is very often OFF the window — that is the whole
-  // point of quoting it — so this can no longer be a bare `querySelector`. It
-  // asks the window for the row first and only then scrolls.
+  // Stable identity (#874); the target is often off-window, so reveal it first.
   const onScrollToMessageRef = useRef(onScrollToMessage);
   onScrollToMessageRef.current = onScrollToMessage;
   const replyRevealRef = useRef(0);
@@ -507,23 +380,16 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     onScrollToMessageRef.current?.(messageId);
   }, []);
 
-  // ── Saved messages + permalinks (#854) ──────────────────────────────────
   const savedMessageIds = useSavedMessageIds();
   const toggleSavedMutation = useToggleSavedMessage();
-  // ── Pinned messages (#99): one query + one id-set for the whole list. ────
   const pinnedMessageIds = usePinnedMessageIds(pinsConversationId);
   const togglePinMutation = useTogglePinnedMessage();
   const { copyPermalink } = useMessagePermalink();
-  // Which message's copy-link button is currently showing an outcome, and
-  // which outcome (#889). One at a time: the affordance is per-message but the
-  // feedback is about the click that just happened.
   const [copyLinkState, setCopyLinkState] = useState<{
     messageId: string;
     state: "copied" | "failed";
   } | null>(null);
 
-  // Clear the badge a couple of seconds after it appears, and never leave a
-  // timer behind that would set state on an unmounted list.
   useEffect(() => {
     if (!copyLinkState) {
       return;
@@ -532,19 +398,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => window.clearTimeout(timer);
   }, [copyLinkState]);
 
-  // Both row callbacks below are pinned to a stable identity via refs rather
-  // than dependency arrays (#874). `useMutation` returns a NEW result object
-  // every render, and `sortedMessages` changes whenever any message arrives —
-  // either as a dependency would hand all N rows a new prop and re-render the
-  // whole log. Refs are read at call time, so the behaviour is identical while
-  // the identity never changes.
+  // Row callbacks pinned via refs so rows never get new props (#874).
   const toggleSavedRef = useRef(toggleSavedMutation);
   toggleSavedRef.current = toggleSavedMutation;
   const handleToggleSave = useCallback((messageId: string) => {
     toggleSavedRef.current.mutate(messageId);
   }, []);
 
-  // Same ref-pinning as the bookmark toggle, same reason (#874).
   const togglePinRef = useRef(togglePinMutation);
   togglePinRef.current = togglePinMutation;
   const pinnedIdsRef = useRef(pinnedMessageIds);
@@ -571,13 +431,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const handleCopyLink = useCallback(
     async (messageId: string) => {
       const message = sortedMessagesRef.current.find((m) => m.id === messageId);
-      // The message's OWN conversation, never the list's `conversationId` prop
-      // — that prop is the MLS group id for channels, which would produce a
-      // permalink that resolves nowhere.
+      // The message's own conversation: `conversationId` is the MLS group id for channels.
       const targetConversationId = message?.conversation_id;
       if (!targetConversationId) {
-        // No conversation to link to is itself a failure the user should see,
-        // rather than a click that does nothing at all (#889).
         setCopyLinkState({ messageId, state: "failed" });
         return;
       }
@@ -587,8 +443,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [],
   );
 
-  // Report the message's sender (#1213). Like Copy link, it names the
-  // message's OWN conversation, never the list's MLS group id.
   const navigate = useNavigate();
   const handleReport = useCallback(
     (messageId: string) => {
@@ -608,15 +462,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [navigate],
   );
 
-  // Read the pending jump during RENDER, not only inside the effect below.
-  // `MessageList` is an `observer`, and observers only subscribe to what they
-  // touch while rendering — claiming solely inside an effect would mean a jump
-  // requested while this conversation is already open never re-renders the
-  // component, so the effect would never re-run and the jump would be dropped.
-  //
-  // The match is on the message this list RENDERS rather than on the
-  // `conversationId` prop, which for channels is the MLS *group* id and so
-  // would never equal a channel permalink's target.
+  // Read during render so this observer subscribes to the jump store.
   const requestedJumpMessageId = messageJumpStore.messageId;
   const jumpTargetMessageId =
     requestedJumpMessageId &&
@@ -624,17 +470,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       ? requestedJumpMessageId
       : null;
 
-  // Consume a pending permalink jump: scroll the target into view and flash it.
-  // The class is applied imperatively to the row that is already in the DOM, so
-  // this needs no change to `MessageItem` and adds no wrapper to the timeline.
-  //
-  // A jump requested before its target has loaded simply is not claimed yet —
-  // it stays pending and this effect re-runs when the message arrives.
-  //
-  // #874: a permalink almost by definition points at something old, so the
-  // target is usually outside the window. `revealRow` moves the window there
-  // and waits for the commit; the jump is only claimed once a real row exists,
-  // which keeps the "not loaded yet, stay pending" behaviour intact.
+  // Consume a pending jump once its row exists; reveal it first if off-window (#874).
   useEffect(() => {
     if (!jumpTargetMessageId) {
       return;
@@ -668,16 +504,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     };
   }, [jumpTargetMessageId, timeline.length]);
 
-  // ── Arrow-key log navigation (bash-history style) ───────────────────────
-  // The machine lives in `utils/messageNav.ts`, the live state in
-  // `stores/messageNavStore.ts`; this component lends the store its context
-  // (rendered order + per-row action bars), projects the logical focus onto
-  // real DOM focus, and translates key events. Rows style themselves purely
-  // via CSS `focus-within`, so keystrokes re-render nothing.
+  // Arrow-key log navigation; machine in utils/messageNav.ts.
 
-  // Blocked-author rows render as inert stubs with no hover actions — skip
-  // them when walking the log, like tombstones they are not actionable, but
-  // unlike tombstones there is nothing to read either.
   const navigableIds = useMemo(
     () => sortedMessages.filter((m) => !blockedIds.has(m.sender_id)).map((m) => m.id),
     [sortedMessages, blockedIds],
@@ -688,19 +516,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   focusComposerRef.current = focusComposer;
 
   useEffect(() => {
-    // Presence of `focusComposer` is the opt-in — surfaces without it (search
-    // results, future thread lists) never touch the nav store.
     if (!focusComposer) {
       return;
     }
     const ctx = {
       orderedIds: () => navigableIdsRef.current,
-      // The RENDERED action bar is the source of truth for what this row
-      // offers — reading the DOM here means the nav machine can never select
-      // a button that isn't on screen (deleted rows have no bar at all).
-      // Only ever asked about the row the projection above just focused, which
-      // is on screen by construction — so this stays a plain synchronous read
-      // even though the log is windowed.
+      // The rendered action bar is the source of truth for this row's buttons.
       actionsFor: (messageId: string) => {
         const row = findRow(rowWindowRef.current, messageId);
         if (!row) {
@@ -714,13 +535,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     };
     messageNavStore.registerContext(ctx);
     return () => messageNavStore.unregisterContext(ctx);
-    // Register once per mount; the callbacks read refs, so they always see
-    // the latest list without re-registering (which would reset nav state).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!focusComposer]);
 
-  // Switching conversations swaps the entire log out from under an in-flight
-  // navigation — reset rather than leaving state pointing into the old list.
   useEffect(() => {
     if (messageNavStore.active) {
       messageNavStore.dispatch({ type: "cancel" });
@@ -728,14 +545,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // Project the logical focus onto real DOM focus: the row in `message` mode,
-  // the specific bar button in `action` mode. Real focus keeps Enter/Space
-  // activation and screen-reader tracking native.
-  //
-  // #874: walking off the top edge of the window lands on a row that is not in
-  // the document. The synchronous path is kept for the overwhelmingly common
-  // case (the next row is already rendered, thanks to the overscan) and only
-  // falls back to an awaited reveal when it genuinely is not.
+  // Project logical focus onto DOM focus; reveal off-window rows (#874).
   const navState = messageNavStore.state;
   useEffect(() => {
     if (navState.mode === "composer") {
@@ -774,14 +584,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     if (!messageNavStore.active) {
       return;
     }
-    // While a row's more-menu is open it owns the keyboard (its own Escape
-    // closes it); swallowing nothing here keeps that self-contained.
     if (containerRef.current?.querySelector('[data-testid="message-actions-menu"]')) {
       return;
     }
-    // stopPropagation on every claimed key: the global shortcut registry
-    // listens at window bubble (Escape = nav.back, which would navigate the
-    // whole channel away), and a claimed key must never double-fire there.
+    // stopPropagation: the global registry maps Escape to nav.back.
     if (e.key === "ArrowUp") {
       e.preventDefault();
       e.stopPropagation();
@@ -810,16 +616,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     if (next && containerRef.current?.contains(next)) {
       return;
     }
-    // Focus left the log for somewhere else (a click, an activated action
-    // that opened the reply/edit bar) — the session is over, and wherever
-    // focus went now legitimately owns it.
     messageNavStore.dispatch({ type: "cancel" });
   };
 
-  // One timeline entry, dividers and grouping included. Both are computed from
-  // the FULL timeline by index rather than from the rendered slice, so a day
-  // divider or a grouped follow-up looks the same whether or not its neighbour
-  // happens to be inside the window.
+  // Computed from the full timeline so dividers/grouping ignore the window.
   const renderTimelineItem = (idx: number) => {
     const item = timeline[idx];
     const prev = idx > 0 ? timeline[idx - 1] : null;
@@ -828,10 +628,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     const showDivider =
       item.kind === "message" && (prevDay === null || prevDay !== currentDay);
 
-    // A message starts a new sender group (refined skin) when it's the
-    // first item, when a day-divider separates it from the previous item,
-    // when the previous rendered item is a different author, or when the
-    // same author's gap exceeds GROUP_GAP_MS.
     const isGroupStart =
       item.kind === "message" &&
       (prev === null ||
@@ -935,24 +731,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           {t("common:states.loading")}
         </p>
       )}
-      {/* The full height of the whole history, holding the scrollbar steady,
-          with only the visible slice of rows actually inside it. */}
       <div
         data-testid="message-window"
         className="relative"
         style={{ height: `${virtualizer.getTotalSize()}px` }}
       >
         {virtualItems.map((virtualRow) => (
-          // Absolute placement is what makes the row's position independent of
-          // its neighbours, and it establishes a block formatting context, so
-          // the refined day divider's margins are measured INSIDE the row
-          // rather than escaping it and leaving every measurement short.
-          //
-          // It does NOT change how the row's own overflowing chrome paints:
-          // the hover action bar and its `z-40` menu are positioned against
-          // the row's existing `relative` box, exactly as before, and nothing
-          // here clips (which is what ruled out `content-visibility` in
-          // phase 2 — see `.codesight/wiki/ui.md`).
+          // Absolute placement gives each row a BFC, so divider margins measure inside it.
           <div
             key={virtualRow.key}
             data-index={virtualRow.index}

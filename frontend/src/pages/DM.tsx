@@ -40,26 +40,15 @@ export const DMPage: React.FC = observer(() => {
 
   useEffect(() => {
     setSelectedConversationId(conversationId);
-    // Same fix as ChannelPage: clear the unread badge on any nav path,
-    // not just the DMs list click handler.
-    // Optimistic badge clear AND a durable cursor, so this DM stays read
-    // across a restart (#844).
+    // Clear on any nav path, with a durable cursor (#844).
     markConversationRead(conversationId);
     return () => { setSelectedConversationId(null); };
   }, [conversationId, setSelectedConversationId, markConversationRead]);
 
-  // Read receipts (#857) — DMs only, which is why this is mounted here and not
-  // in the shared MainContent. Deliberately NOT tied to the `markRead` call
-  // above: clearing an unread badge means "you navigated here", while a read
-  // receipt claims a human actually saw a specific message, so the hook does
-  // its own viewport + window-focus tracking. The `send_read_receipts`
-  // preference is enforced in Rust at the emit chokepoint; passing it here just
-  // avoids the pointless work of observing rows we would never report.
+  // Receipts (#857) are DM-only and track their own viewport + focus; Rust enforces the preference.
   useReadReceipts(conversationId, currentUser?.id ?? null, sendReadReceipts);
 
-  // Fetch member list for the conversation so we can target the right
-  // user_id when blocking or calling, and discover whether the other party
-  // has accepted this DM (gates the call button).
+  // Members, for block/call targets and whether the peer accepted.
   useEffect(() => {
     let cancelled = false;
     if (!currentUser) {
@@ -86,9 +75,7 @@ export const DMPage: React.FC = observer(() => {
   const { data: conversations = [] } = useDMConversations();
   const { data: dmRequests = [] } = useDMRequests();
   const conv = conversations.find((c) => c.id === conversationId);
-  // The DM is pending for the current user when it appears in the
-  // requests list (their own `accepted_at` is NULL). Until they accept
-  // (or block), the chat input is replaced with an accept/block bar.
+  // Pending for us until accepted (or blocked).
   const pendingRequest = dmRequests.find((r) => r.id === conversationId) ?? null;
   const pendingSender = pendingRequest
     ? pendingRequest.members.find((m) => m.user_id !== currentUser?.id)
@@ -98,33 +85,22 @@ export const DMPage: React.FC = observer(() => {
     ?? pendingSender?.user_id
     ?? "";
   const isOneOnOne = memberCount === 2 && otherUserId != null;
-  // Profile breadcrumb is enabled for 1:1 DMs only — group DMs (3+ members)
-  // would need a picker.
+  // 1:1 only; group DMs would need a picker.
   const canShowProfile = isOneOnOne;
-  // Calling is only offered once the other party has accepted the DM, so an
-  // unwanted DM request can never be escalated to a phone call.
+  // Only after the peer accepted, so a request can't escalate to a call.
   const otherPresence = usePresenceStatus(otherUserId);
   const isOtherOnline = otherPresence === "online";
-  // Calls to an offline user fail at the LiveKit handshake (nobody to
-  // create/answer the room), so only offer the call button when the peer
-  // is online.
+  // Offline peers fail at the handshake.
   const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
   const { togglePins } = useRightPanel();
 
-  // Pre-warm DNS / TLS / connection pool to LiveKit as soon as a callable
-  // DM is open. The token cache won't apply (the real `call-<id>` room
-  // name isn't known until `start_call` returns) but the network plumbing
-  // does, which is the dominant cost on a cold join.
+  // Pre-warm the LiveKit connection for a callable DM.
   useEffect(() => {
     if (canCall && otherUserId) {
       warmVoiceChannel(`call-prewarm-${otherUserId}`);
     }
   }, [canCall, otherUserId]);
 
-  // When the current user has not yet accepted this DM, the conversation
-  // surfaces in `dmRequests` (filtered server-side by accepted_at IS NULL).
-  // We hand the sender's identity to MainContent so it can render an
-  // accept/block bar in place of the chat input.
   const pendingDmRequest: PendingDmRequest | null = useMemo(() => {
     if (!pendingRequest || !pendingSender) {
       return null;
@@ -150,9 +126,7 @@ export const DMPage: React.FC = observer(() => {
         callerId: currentUser.id,
         callerUsername: currentUser.username ?? currentUser.id,
       });
-      // Record the outgoing call so the Call page can emit `cancel_call`
-      // if the caller hangs up before the callee answers. Cleared once
-      // the callee joins the LiveKit room or once cancel is sent.
+      // So the Call page can `cancel_call` if we hang up before pickup.
       setOutgoingCall({ callId: result.call_id, calleeId: otherUserId });
       voiceSession.setIntent({
         channelId: result.room_name,
@@ -202,10 +176,7 @@ export const DMPage: React.FC = observer(() => {
           <Pin size={14} aria-hidden="true" />
         </PressButton>
         {canCall && (() => {
-          // If there's a live outgoing 1:1 call to this exact user, the
-          // button returns the user to the call room instead of starting
-          // a new one. Visual + label both flip so it's obvious this is
-          // a "rejoin" action, not "initiate".
+          // A live call to this user turns the button into "rejoin".
           const inCallWithThisUser =
             outgoingCall != null && outgoingCall.calleeId === otherUserId;
           return (

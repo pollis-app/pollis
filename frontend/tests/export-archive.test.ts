@@ -1,15 +1,4 @@
-/*
- * The on-device export (#856) is an exit, not a backup channel.
- *
- * The constraint on the ticket is that the archive must never grow a re-import
- * path: a reader for the file is exactly the history-sync mechanism the
- * project refuses to build. `pollis-core` guards its own half in
- * `commands/export.rs`; this is the renderer's half — no `invoke()` anywhere
- * in `frontend/src` may name an import/restore command, and the only caller of
- * `export_archive` is the typed wrapper in `services/api.ts`.
- *
- *   node --test frontend/tests/
- */
+/* The export (#856) never grows a re-import path; only `services/api.ts` invokes `export_archive`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

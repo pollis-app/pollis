@@ -12,12 +12,7 @@ interface PresenceAvatarProps {
   variant?: "list" | "profile";
 }
 
-/**
- * Avatar that overlays the live online/offline dot for a known user. Use
- * this in DM-call surfaces (DM list, search panel, profile page) and let
- * the dot sit silent when `userId` is null — the underlying Avatar handles
- * the no-presence case.
- */
+/** Avatar with the live presence dot; silent when `userId` is null. */
 export const PresenceAvatar: React.FC<PresenceAvatarProps> = observer(({
   userId,
   avatarKey,

@@ -1,13 +1,4 @@
-/*
- * Permalink format + conversation routing (#854).
- *
- * Runs on Node's built-in test runner with native TypeScript type stripping —
- * no test framework dependency, and deliberately OUTSIDE `src/` so the
- * production `tsc --noEmit` (which the build runs) does not try to typecheck a
- * file importing `node:test`.
- *
- *   node --test frontend/tests/
- */
+/* Permalink format + conversation routing (#854). Lives outside `src/` so `tsc --noEmit` skips `node:test`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -19,8 +10,7 @@ import {
   type GroupChannelIndex,
 } from "../src/utils/urlRouting.ts";
 
-// Opaque, ULID-shaped fixtures. Deliberately free of readable words so the
-// "leaks nothing" assertion below tests the FORMAT rather than the fixture.
+// Wordless ULID fixtures, so "leaks nothing" tests the format.
 const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";
 const DM_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0DMX";
@@ -49,8 +39,6 @@ test("permalink round-trips", () => {
 test("permalink carries the two ids and nothing else", () => {
   const link = formatMessagePermalink(CHANNEL_ID, MESSAGE_ID);
 
-  // Whatever else changes, the link must never grow a name, a body, or a
-  // marker distinguishing a channel from a DM.
   const withoutIds = link
     .replace(CHANNEL_ID, "")
     .replace(MESSAGE_ID, "")
@@ -97,8 +85,7 @@ test("surrounding whitespace from a paste is tolerated", () => {
   assert.deepEqual(parsed, { conversationId: DM_ID, messageId: MESSAGE_ID });
 });
 
-// The bug this feature must not inherit: `pages/Search.tsx` sends every hit to
-// `/dms/$conversationId`, which silently breaks channel results.
+// Channel hits must not route to `/dms/$conversationId`.
 test("a CHANNEL conversation routes to the channel route, not the DM route", () => {
   const route = routeForConversation(CHANNEL_ID, GROUPS);
   assert.deepEqual(route, {
@@ -139,8 +126,7 @@ test("a permalink round-trips through parse into the right route for both kinds"
     "channel",
   );
 
-  // DM. Same link format — the format itself does not encode which it is, so
-  // nothing about the target's kind leaks into the string.
+  // Same format for a DM: the kind isn't encoded.
   const dmLink = formatMessagePermalink(DM_ID, MESSAGE_ID);
   const dmParsed = parseMessagePermalink(dmLink);
   assert.ok(dmParsed);

@@ -10,22 +10,9 @@ import { useRedeemGroupInviteLink } from "../hooks/queries/useGroups";
 interface JoinByInviteProps {
   /** Prefilled when arriving from an /invite/$token deep link. */
   initialToken?: string;
-  /** Auto-submit on mount — only for the deep-link landing. */
 }
 
-/**
- * #847 — redeem an invite link.
- *
- * Serves two surfaces with one component: the `/join` page (paste a code) and
- * the `/invite/$token` landing (arrive from a shared link). They differ only in
- * whether the field starts filled, so they share the code rather than drifting.
- *
- * On failure this renders ONE message for every cause. The Delivery Service
- * deliberately cannot tell us whether a token was wrong, expired, revoked or
- * used up — distinguishing them would confirm to an attacker that a token was
- * real but stale. Rendering a friendlier, more specific error here would undo
- * that on the client.
- */
+/** Redeem an invite link (#847) for `/join` and `/invite/$token`. One message for every failure, as the DS can't distinguish them. */
 export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   initialToken = "",
 }) => {
@@ -53,11 +40,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
     [navigate, redeemMutation]
   );
 
-  // #1094: a deep link must NOT redeem on arrival. Joining a group discloses
-  // your username and identity to everyone in it, so it takes a deliberate
-  // press — the token is pre-filled and the button is one click away, but the
-  // click is the point. (Slack and Discord both confirm before joining.)
-  //
+  // #1094: a deep link never redeems on arrival; joining discloses your identity, so it takes a press.
   const isRefined = skin === "refined";
 
   const body = (

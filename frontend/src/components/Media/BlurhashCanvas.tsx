@@ -1,12 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { decode } from "blurhash";
 
-/**
- * A blurhash drawn to fill whatever box it is put in. Every caller is a thumb
- * that crops the real image with `object-fit: cover`, so the placeholder
- * crops the same way. An invalid hash leaves the canvas blank rather than
- * throwing.
- */
+/** A blurhash filling its box, cropped like `object-fit: cover`. */
 export const BlurhashCanvas: React.FC<{ hash: string }> = ({ hash }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -25,7 +20,7 @@ export const BlurhashCanvas: React.FC<{ hash: string }> = ({ hash }) => {
       imageData.data.set(pixels);
       ctx.putImageData(imageData, 0, 0);
     } catch {
-      // Invalid or unsupported blurhash — canvas stays blank, no crash.
+      // Invalid blurhash: canvas stays blank.
     }
   }, [hash]);
 

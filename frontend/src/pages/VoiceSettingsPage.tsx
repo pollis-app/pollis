@@ -76,8 +76,7 @@ interface NoiseSuppressionSelectProps {
   onChange: (level: NoiseSuppressionLevel) => void;
 }
 
-// The option values are wire values (persisted in preferences and passed to the
-// Rust APM) — only the labels are translated, keyed off the value.
+// Wire values; only labels are translated.
 const NOISE_SUPPRESSION_LABEL_KEY: Record<NoiseSuppressionLevel, string> = {
   off: "settings.noiseSuppressionOff",
   low: "settings.noiseSuppressionLow",
@@ -166,11 +165,7 @@ const PERMISSION_LABEL_KEY: Record<PermissionState, string> = {
   unsupported: "settings.permissionUnsupported",
 };
 
-/** One camera/mic permission row: status + a deep-link to System Settings.
- *  An app can't grant/revoke its own OS grant — only the user can — so the
- *  action is always "take me there", never an in-app toggle (issue #434). The
- *  deep-link only exists where the OS has a per-app privacy model (macOS /
- *  Windows); on Linux (`perSession`) there's nothing to link to. */
+/** Permission status + System Settings deep-link (#434); apps can't change their own grant. */
 const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage: () => void }> = ({
   label,
   state,
@@ -195,16 +190,13 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
   );
 };
 
-// The token-backed half of the `<select>` skin — surface fill, foreground text
-// and the 2px hairline — as utilities. Paired with `selectStyle` below, which
-// keeps only what has no utility equivalent.
+// Token-backed `<select>` skin; `selectStyle` holds the rest.
 const selectClass = "bg-surface text-fg border-2 border-line";
 
 const selectStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
-  // Logical padding: the trailing 28px reserves room for the caret, which
-  // sits on the inline-END edge and therefore swaps sides under `dir=rtl`.
+  // Trailing padding for the caret, which flips under `dir=rtl`.
   paddingBlock: "6px",
   paddingInlineStart: "8px",
   paddingInlineEnd: "28px",
@@ -216,17 +208,12 @@ const selectStyle: React.CSSProperties = {
   width: "100%",
 };
 
-/**
- * Push the live APM config to the backend if the user is currently in a
- * voice channel. No-op otherwise (the backend command is itself a no-op
- * when no session is active).
- */
+/** Push the live APM config; a no-op outside a call. */
 async function pushApmConfig(config: ApmConfig): Promise<void> {
   try {
     await invoke("set_voice_audio_processing", { config });
   } catch (e) {
-    // Best-effort — the next join_voice_channel will pass the full config
-    // anyway, so a transient IPC failure here is harmless.
+    // Best-effort; the next join passes the full config.
     console.warn("[VoiceSettings] set_voice_audio_processing failed:", e);
   }
 }
@@ -251,9 +238,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
       const outs = devices.filter((d) => d.kind === "output");
       setInputs(ins);
       setOutputs(outs);
-      // Reset stale prefs: a saved id that's no longer enumerated would make
-      // the <select> silently fall back to its first option, so the dropdown
-      // shows one device while voice tries to open another. Clear it instead.
+      // Clear a saved device id that is no longer enumerated.
       if (selectedInput !== "default" && !ins.some((d) => d.id === selectedInput)) {
         setSelectedInputState("default");
         void voiceSession.setInputDevice("default");
@@ -284,19 +269,12 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     }
   };
 
-  // ── Camera picker + preview (issue #434) ──────────────────────────────────
-  // All state lives in `cameraPreviewStore` — a discriminated union so invalid
-  // combos (error beside a live preview, a preview with no device, live while
-  // enumerating) are unrepresentable. Preview is OFF by default; the user opts
-  // in with the toggle (a settings page must not silently light the camera).
+  // Camera preview (#434) is a union in `cameraPreviewStore`; off by default.
   const cam = cameraPreviewStore.state;
 
-  // OS camera/mic permission status (issue #434) — refetches on window focus, so
-  // returning from System Settings reflects the change without a manual refresh.
+  // Refetches on focus, so System Settings changes show up.
   const permissions = useMediaPermissions();
 
-  // The invoke resolves once capture has started; drive the union off it — no
-  // separate "started" event needed.
   const runPreview = (id: string) => {
     cameraSession
       .startPreview(id)
@@ -320,7 +298,6 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     try { localStorage.setItem(CAMERA_DEVICE_KEY, id); } catch { /* ignore */ }
     const wasPreviewing = cameraPreviewStore.isPreviewing;
     cameraPreviewStore.select(id);
-    // `select` kept us in `starting` when previewing — actually restart capture.
     if (wasPreviewing) { runPreview(id); }
   };
 
@@ -341,10 +318,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * Persist a partial preference change and push the resulting APM config to
-   * the backend so mid-call changes take effect immediately.
-   */
+  /** Persist a pref change and push the APM config for mid-call effect. */
   const savePrefsAndPushApm = (patch: Partial<PreferencesData>) => {
     const next: PreferencesData = { ...preferences.query.data, ...patch };
     preferences.save(next);
@@ -365,8 +339,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
   const inputMode: VoiceInputMode =
     preferences.query.data?.voice_input_mode ?? VOICE_INPUT_MODE_DEFAULT;
-  // Persist, then push to the Rust gate so a mid-call change takes effect
-  // immediately rather than at the next join.
+  // Persist, then push to the Rust gate for mid-call effect.
   const handleInputMode = (mode: VoiceInputMode) => {
     preferences.save({ ...preferences.query.data, voice_input_mode: mode });
     void voiceSession.setInputMode(mode);

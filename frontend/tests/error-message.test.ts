@@ -1,12 +1,4 @@
-/*
- * `errorMessage` (#1305). A Tauri command rejects with the Rust error's text
- * as a plain string, never an `Error`. When this helper only understood
- * `Error`, every string rejection fell through to the caller's fallback — which
- * on the sign-in screen was "Invalid code", shown for a network failure, a 5xx
- * and a keystore error after the code had already been accepted.
- *
- *   node --test frontend/tests/
- */
+/* `errorMessage` (#1305): a Tauri rejection is a plain string, not an `Error`. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

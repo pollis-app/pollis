@@ -18,9 +18,7 @@ import { screenShareSession } from "../../screenshare/screenShareSession";
 import { cameraSession } from "../../camera/cameraSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
-// Lazy so the ~380 KiB xterm.js + WebGL addon are split into their own chunk
-// and never parsed at cold launch — only when the terminal is first opened
-// (gated by `terminalActivated` below). Deferred bundle work, see #431.
+// Lazy: keeps ~380 KiB of xterm.js out of cold launch (#431).
 const TerminalView = lazy(() => import("../TerminalView"));
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
@@ -44,35 +42,19 @@ import { useGlobalShortcut } from "../../keyboard";
 import type { RouterContext } from "../../types/router";
 import { PressButton } from "../ui/PressButton";
 
-/**
- * AppShell is the root route component rendered by RouterProvider.
- * It owns the terminal chrome (TitleBar, BreadcrumbNav, VoiceBar, bottom status bar)
- * and renders the matched child route via <Outlet />.
- */
 const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
 export const AppShell: React.FC = observer(() => {
-  // Unread badges come from the persisted read cursor (#844), not from a
-  // counter that a restart would silently zero.
+  // Unread badges from the persisted read cursor (#844).
   useHydrateUnread(appStore.currentUser?.id ?? null);
-  // Converge with what the account's other devices have read — once, at
-  // startup. What this device reads from here on pushes itself (#844).
+  // Converge with other devices' reads once, at startup (#844).
   useSyncReadCursors(appStore.currentUser?.id ?? null);
   const { t } = useTranslation("nav");
   probeRender("AppShell");
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  // Sidebar visibility — initial value read synchronously from
-  // localStorage so there's no flash of the wrong state at mount. The
-  // preference query (async, below) re-mirrors into localStorage when
-  // it lands, so a change made on this device (or pulled from the
-  // backend after sign-in on another device) is reflected on next open.
-  //
-  // Cmd/Ctrl+B and clicking the sidebar collapse handle only mutate
-  // this session state — they don't write back to the preference, so a
-  // user who keeps it closed by default can still pop it open ad-hoc
-  // without losing their default.
+  // Read synchronously from localStorage (no flash); Cmd+B toggles only this session, not the preference.
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     if (typeof window === "undefined") {
       return true;
@@ -98,13 +80,7 @@ export const AppShell: React.FC = observer(() => {
     setStatusBarAlert,
     voiceError,
     setVoiceError,
-    // NOTE: do not destructure `isLocalSpeaking` here. It was read but never
-    // used, and because this component is an `observer()` the read alone
-    // subscribed the ENTIRE app shell to it — a field that flips on every
-    // speech onset and release during a call. Every utterance re-rendered the
-    // shell and everything under `<Outlet />` to display nothing new (#874).
-    // The speaking indicator belongs to the components that draw it
-    // (`VoiceBar`, `SidebarProfilePanel`), which read it themselves.
+    // Don't destructure `isLocalSpeaking`: observer() would re-render the shell on every speech onset (#874).
     incomingCall,
     setIncomingCall,
     viewingScreenShareTrackKey,
@@ -112,12 +88,8 @@ export const AppShell: React.FC = observer(() => {
     shareStopped,
     availableUpdateVersion,
   } = appStore;
-  // Channel id derives from the union. Replaces the standalone
-  // activeVoiceChannelId field that used to be stored separately.
   const activeVoiceChannelId =
     voiceState.kind === 'idle' ? null : voiceState.channelId;
-  // Screenshare errors live in the union as `share: { kind: 'failed' }`
-  // instead of a top-level field. Dismissing clears via shareStopped().
   const screenShareError =
     voiceState.kind === 'joined' && voiceState.share.kind === 'failed'
       ? voiceState.share.error
@@ -126,9 +98,7 @@ export const AppShell: React.FC = observer(() => {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();
 
-  // Mirror the preference into localStorage so next app open reads the
-  // current value at useState init. Never touches live state — this is
-  // strictly a write to disk.
+  // Mirror the preference into localStorage for the next launch.
   const sidebarDefault = prefsQuery.data?.sidebar_open_by_default;
   useEffect(() => {
     if (sidebarDefault !== undefined && typeof window !== "undefined") {
@@ -141,16 +111,10 @@ export const AppShell: React.FC = observer(() => {
 
   const currentUser = appStore.currentUser;
   const skin = useSkin();
-  // Panel open/closed lives in device-local, user-scoped storage rather than
-  // in AppShell state or the URL — see `useRightPanel`. AppShell only needs
-  // the toggle for the shortcut.
+  // Panel state lives in `useRightPanel`; only the toggle is needed here.
   const { toggle: toggleRightPanel } = useRightPanel();
 
-  // Drive the looping ringtone off the incomingCall slot. Rust owns the
-  // playback thread (`start_ring` / `stop_ring`) so the loop survives any
-  // re-render churn here. Both the device-local ringtone toggle and the
-  // account-level allow_sound_effects must be on for the ring to play; OS
-  // notification (a single ping on arrival) is still fired from notify.ts.
+  // Ringtone loop runs in Rust; needs both the ringtone toggle and allow_sound_effects.
   useEffect(() => {
     if (!incomingCall) {
       invoke("stop_ring").catch(logIgnored);
@@ -166,14 +130,9 @@ export const AppShell: React.FC = observer(() => {
     };
   }, [incomingCall, currentUser?.id, prefsQuery.data?.allow_sound_effects]);
 
-  // ─── Current route pathname — needed by keyboard handlers below ─────────────
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  // The terminal is a persistent component (mounted lazily on first
-  // visit, then kept mounted and display-toggled) so the PTY session +
-  // scrollback survive navigation. The URL only governs visibility:
-  // clicking a status-bar link / Cmd+K result / Back moves off
-  // /terminal like any other view, with zero terminal-specific wiring.
+  // The terminal stays mounted once opened (PTY + scrollback survive); the URL only governs visibility.
   const isTerminal = pathname === "/terminal";
   const [terminalActivated, setTerminalActivated] = useState(false);
   useEffect(() => {
@@ -182,27 +141,20 @@ export const AppShell: React.FC = observer(() => {
     }
   }, [isTerminal]);
 
-  // Global file drop. The bridge's onDragDropEvent surfaces Tauri's native
-  // drag-drop payload; we show the overlay and rebroadcast dropped paths to
-  // the mounted ChatInput via `pollis:pathdrop`.
+  // Native file drop: show the overlay and rebroadcast paths as `pollis:pathdrop`.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
     getCurrentWindow().onDragDropEvent((event) => {
-      // Only react when a ChatInput is mounted to receive the file. Otherwise
-      // (e.g. a voice/stream view) the drop has nowhere to go, so suppress the
-      // overlay. The bridge still preventDefaults the drop, so the window
-      // never navigates to the dropped file regardless of view.
+      // No ChatInput mounted: no overlay (the bridge still preventDefaults the drop).
       if (!isDropTargetActive()) {
         setIsDragOver(false);
         return;
       }
       const dragging =
         event.payload.type === "enter" || event.payload.type === "over";
-      // Pages that draw their own drop area (the emoji upload zone) listen for
-      // this instead of the app-wide overlay, which would cover the affordance
-      // they are trying to light up.
+      // For pages with their own drop area (emoji upload).
       window.dispatchEvent(
         new CustomEvent("pollis:pathdragstate", { detail: { dragging } }),
       );
@@ -218,7 +170,7 @@ export const AppShell: React.FC = observer(() => {
         setIsDragOver(false);
       }
     }).then((fn) => {
-      // If cleanup already ran (React StrictMode double-invoke), unlisten immediately.
+      // StrictMode: cleanup may already have run.
       if (cancelled) { fn(); } else { unlisten = fn; }
     });
 
@@ -228,18 +180,7 @@ export const AppShell: React.FC = observer(() => {
     };
   }, []);
 
-  // Cold-launch MLS sweep: poll Welcomes that arrived while offline AND
-  // process pending commits for every group + DM the user is in, so the
-  // first MLS-powered action after launch (send_message, edit_message,
-  // voice/screen-share join) runs against caught-up state. Closes the
-  // cold-launch window flagged in issue #371 scenario 5 — previously this
-  // hook only polled Welcomes and didn't process commits.
-  //
-  // `isSyncing` is set to true during the sweep so the bottom status bar
-  // shows the same "Syncing…" indicator the manual sync shortcut uses;
-  // stateful actions (send/edit/voice) can read it to defer until the
-  // sweep finishes. Cancelled flag handles unmount mid-sweep so the next
-  // user doesn't see a stale syncing state after sign-out.
+  // Cold-launch MLS sweep (#371): poll Welcomes and process commits for every group, with `isSyncing` set.
   useEffect(() => {
     if (!currentUser) {
       return;
@@ -253,9 +194,7 @@ export const AppShell: React.FC = observer(() => {
       .finally(() => {
         if (!cancelled) {
           setIsSyncing(false);
-          // Caught up: deliver what the durable outbox holds — a message a
-          // killed process left unsent (#1335). The core began this drain at
-          // unlock; this call waits for it and refreshes the rows it settled.
+          // Then drain the durable outbox (#1335).
           void flushOutbox(queryClient);
         }
       });
@@ -264,8 +203,7 @@ export const AppShell: React.FC = observer(() => {
     };
   }, [currentUser?.id]);
 
-  // The network came back: whatever failed while it was gone can go now
-  // (#1335). An event, not a timer — a realtime reconnect drains too.
+  // Network back: drain the outbox (#1335). An event, not a timer.
   useEffect(() => {
     if (!currentUser) {
       return;
@@ -279,8 +217,7 @@ export const AppShell: React.FC = observer(() => {
     };
   }, [currentUser?.id, queryClient]);
 
-  // Once authenticated, hook up the screen-share event + frame Channels.
-  // Idempotent — only the first call actually invokes the backend.
+  // Screen-share event + frame Channels; idempotent.
   useEffect(() => {
     if (!currentUser) {
       return;
@@ -293,10 +230,7 @@ export const AppShell: React.FC = observer(() => {
     });
   }, [currentUser?.id]);
 
-  // A stable signature of the (group, first-channel) membership. `groupsWithChannels`
-  // is a fresh array ref on every refetch, so keying the commit effect on it fired an
-  // invoke per group on every unrelated invalidation. This signature only changes when
-  // the actual membership shape does.
+  // Changes only when membership shape does; `groupsWithChannels` is a fresh array per refetch.
   const membershipSignature = useMemo(() => {
     if (!groupsWithChannels) {
       return "";
@@ -307,8 +241,6 @@ export const AppShell: React.FC = observer(() => {
       .join(",");
   }, [groupsWithChannels]);
 
-  // When group membership changes (someone joins/leaves while we're online),
-  // process any pending MLS commits so our epoch stays current.
   useEffect(() => {
     if (!currentUser || !groupsWithChannels) {
       return;
@@ -324,20 +256,9 @@ export const AppShell: React.FC = observer(() => {
     }
   }, [membershipSignature, currentUser?.id]);
 
-  // Maintain a LiveKit room connection for the active channel/conversation
   useLiveKitRealtime();
 
-  // Warm the lazily-chunked call surfaces once the app is idle (#874).
-  //
-  // `/call/$callId` is reached PROGRAMMATICALLY — answering an incoming call
-  // navigates there (see the incoming-call handler below), so a cold chunk
-  // would put a module fetch between "user hits answer" and the call UI. That
-  // is the one navigation in the app where a spinner is unacceptable.
-  //
-  // Splitting them still pays: the bytes leave the startup parse/eval path,
-  // which is what the initial-load cost actually is. This only moves the fetch
-  // to a moment when nothing is waiting on it. Fire-and-forget by design — if
-  // it fails the route's own lazy import retries on navigation.
+  // Warm the lazy call chunks when idle (#874): answering a call navigates programmatically, so no spinner there.
   useEffect(() => {
     const warm = () => {
       void import("../../pages/Call").catch(logIgnored);
@@ -351,12 +272,7 @@ export const AppShell: React.FC = observer(() => {
     return () => clearTimeout(handle);
   }, []);
 
-  // Poll for app updates every 15 minutes once the user reaches the main
-  // app. The startup gate in App.tsx already covers the launch-time check;
-  // this picks up releases published while the user is signed in. The
-  // poller is a module-level singleton so StrictMode double-mount or
-  // AppShell remount can't duplicate the timer. Skip in dev — the updater
-  // bridge already returns null there, but no point burning a timer.
+  // Update poller (module singleton); the launch check is in App.tsx.
   useEffect(() => {
     if (import.meta.env.DEV) {
       return;
@@ -367,15 +283,11 @@ export const AppShell: React.FC = observer(() => {
     };
   }, []);
 
-  // Sync unread count to OS dock/taskbar badge
   useBadge();
 
-  // Idle auto-lock (#851). Armed for exactly as long as this shell — the only
-  // thing that renders decrypted content — is mounted. The deadline lives in
-  // Rust; this only pushes the device-local window and throttled activity.
+  // Idle auto-lock (#851): armed while this shell is mounted; the deadline lives in Rust.
   useAutoLock(currentUser?.id ?? null);
 
-  // Sync groups+channels into the store once loaded
   useEffect(() => {
     if (!groupsWithChannels) {
       return;
@@ -387,43 +299,28 @@ export const AppShell: React.FC = observer(() => {
   }, [groupsWithChannels, setGroups, setChannels]);
 
   const closeSearch = useCallback(() => setIsSearchOpen(false), []);
-  // Pinned identity, like `closeSearch` above. `Sidebar` is an `observer()` and
-  // therefore memoised, but an inline arrow here handed it a new `onToggle` on
-  // every AppShell render — so the sidebar (group tree, DM list, unread badges)
-  // re-rendered for every unrelated shell state change (#874).
+  // Pinned so the memoised Sidebar doesn't re-render on every shell change (#874).
   const toggleSidebar = useCallback(() => setIsSidebarOpen((v) => !v), []);
 
-  // Dragged panel widths are pixels, and a window that shrinks under them
-  // would leave a sidebar owning the whole app (#985). Event-driven, never
-  // polled: `resize` fires continuously while a window is dragged, and each
-  // pass only writes when a width actually moved.
+  // Clamp dragged px widths when the window shrinks (#985); event-driven.
   useEffect(() => {
     const clamp = () => panelWidthStore.clampToWindow(window.innerWidth);
-    // Once on mount too — the window may have been resized (or the app moved
-    // to a smaller display) while it was closed.
+    // Once on mount too: the display may have changed while closed.
     clamp();
     window.addEventListener("resize", clamp);
     return () => window.removeEventListener("resize", clamp);
   }, []);
 
-  // The search button in BreadcrumbNav fires this custom event so it can
-  // open the panel without lifting AppShell's local state into a store.
   useEffect(() => {
     const handle = () => setIsSearchOpen(true);
     window.addEventListener("pollis:open-search", handle);
     return () => window.removeEventListener("pollis:open-search", handle);
   }, []);
 
-  // Routes through the router context's onLock so App.tsx can flip the
-  // top-level appState to "pin-entry" (AppShell unmounts in the process).
+  // Via the router context so App.tsx can flip appState to "pin-entry".
   const { onLock } = router.options.context as RouterContext;
 
-  // ─── Global keyboard commands ───────────────────────────────────────────────
-  // Bound by stable command id; the key combo lives in keyboard/commands.ts
-  // (and, in future, a user-override map) — never named here. One shared
-  // dispatcher replaces the former per-shortcut window listeners. Scoped
-  // element onKeyDown handlers (chat input, grids, OTP, …) are intentionally
-  // left as-is.
+  // Global keyboard commands, by command id (combos in keyboard/commands.ts).
 
   useGlobalShortcut("app.toggleSidebar", () => {
     setIsSidebarOpen((v) => !v);
@@ -433,8 +330,7 @@ export const AppShell: React.FC = observer(() => {
     toggleRightPanel();
   });
 
-  // Leaving uses history.back() so the prior chat view (and its selected
-  // channel) is restored exactly.
+  // history.back() restores the prior chat view exactly.
   useGlobalShortcut("app.toggleTerminal", () => {
     if (pathname === "/terminal") {
       router.history.back();
@@ -451,13 +347,10 @@ export const AppShell: React.FC = observer(() => {
     onLock();
   });
 
-  // Hide the window on macOS, close it on Windows/Linux.
   useGlobalShortcut("app.closeWindow", () => {
     hideWindow().catch(console.error);
   });
 
-  // Discord users reach for the keyboard for mute/leave (not tile
-  // traversal), so these work from any page — active only while in a call.
   useGlobalShortcut(
     "voice.toggleMute",
     () => {
@@ -477,11 +370,7 @@ export const AppShell: React.FC = observer(() => {
     { enabled: !!activeVoiceChannelId },
   );
 
-  // Push-to-talk is a HOLD command: transmit while down, silent on release.
-  // `onRelease` is what makes it one, and the registry also fires it when
-  // the window loses focus or this unmounts mid-hold — the mic must never
-  // be left open because a keyup went to another window. `releasePushToTalk`
-  // asks Rust for the same guarantee from its side.
+  // Hold command: `onRelease` also fires on blur/unmount, so the mic is never left open.
   useGlobalShortcut(
     "voice.pushToTalk",
     () => {
@@ -507,21 +396,10 @@ export const AppShell: React.FC = observer(() => {
     { enabled: !!activeVoiceChannelId },
   );
 
-  // Escape goes one entry back in history (disabled while the search panel is
-  // open) — the same step the breadcrumb's back chevron takes, through the
-  // same guard, so the key and the button can never disagree about where
-  // "back" lands. It used to special-case a channel into a jump up to its
-  // group page, which was hierarchical navigation wearing a history label:
-  // the chevrons no longer do that, and a shortcut that quietly did something
-  // else than the control next to it is worse than the "create channel" entry
-  // it was dodging (which a real back step walks through, exactly as a browser
-  // would). preventDefault stays off to stay out of the way of the
-  // capture-phase cancel-Esc handlers.
+  // Escape = one history step, same guard as the breadcrumb back chevron. No preventDefault (capture-phase cancel handlers).
   useGlobalShortcut(
     "nav.back",
     () => {
-      // Exit fullscreen screen-share viewer first if active, so escape
-      // backs out of the viewer before navigating history.
       if (viewingScreenShareTrackKey !== null) {
         setViewingScreenShareTrackKey(null);
         return;
@@ -531,7 +409,6 @@ export const AppShell: React.FC = observer(() => {
     { enabled: !isSearchOpen, preventDefault: false },
   );
 
-  // Refetch all queries without a page reload, also sync MLS state.
   useGlobalShortcut("app.sync", () => {
     setIsSyncing(true);
     const mlsPromises: Promise<unknown>[] = [];
@@ -565,7 +442,6 @@ export const AppShell: React.FC = observer(() => {
     );
   });
 
-  // Auto-focus when the window gains focus (e.g. switching back from another app)
   useEffect(() => {
     const handleWindowFocus = () => {
       if (!document.activeElement || document.activeElement === document.body) {
@@ -584,15 +460,12 @@ export const AppShell: React.FC = observer(() => {
     return () => window.removeEventListener("focus", handleWindowFocus);
   }, []);
 
-  // Clear the status bar alert when the user navigates to the room that
-  // triggered it.
   useEffect(() => {
     if (statusBarAlert && pathname.includes(statusBarAlert.roomId)) {
       setStatusBarAlert(null);
     }
   }, [pathname, statusBarAlert, setStatusBarAlert]);
 
-  // Chat screens: channel view or DM conversation (not /new)
   const isChatScreen = useMemo(() => {
     const channelMatch = pathname.match(/^\/groups\/[^/]+\/channels\/([^/]+)/);
     if (channelMatch && channelMatch[1] !== "new") {
@@ -605,9 +478,7 @@ export const AppShell: React.FC = observer(() => {
     return false;
   }, [pathname]);
 
-  // Refined keeps the bottom bar quiet and neutral; terminal fills it with the
-  // accent (inverting to dark-on-accent off chat screens). `barInk` is the text
-  // color for everything sitting on the bar, derived to stay legible on `barBg`.
+  // Refined bar is neutral; terminal fills it with the accent. `barInk` stays legible on `barBg`.
   const refined = skin === "refined";
   const barBg = refined
     ? "var(--c-surface)"
@@ -616,13 +487,11 @@ export const AppShell: React.FC = observer(() => {
     ? "var(--c-text-dim)"
     : isChatScreen ? "var(--c-accent)" : "var(--c-surface)";
 
-  // Find the voice channel name for the VoiceBar
   const voiceChannelName = useMemo(() => {
     if (!activeVoiceChannelId) {
       return t("shell.voiceChannelFallback");
     }
     if (activeVoiceChannelId.startsWith("call-")) {
-      // 1:1 DM call — show the other person's name, not a generic "call".
       const peerId =
         voiceState.kind === "joined" || voiceState.kind === "joining"
           ? voiceState.counterpartyUserId
@@ -634,8 +503,6 @@ export const AppShell: React.FC = observer(() => {
         if (peer?.name) {
           return peer.name;
         }
-        // Peer hasn't joined the room yet (outgoing ring) — fall back to the
-        // caller name from the incoming-call slot when it's the same person.
         if (incomingCall && incomingCall.callerId === peerId) {
           return incomingCall.callerUsername;
         }
@@ -664,22 +531,15 @@ export const AppShell: React.FC = observer(() => {
         position: "relative",
       }}
     >
-      {/* Frameless-window resize handles (Linux only — see component) */}
       <WindowResizeEdges />
 
-      {/* Cmd/Ctrl+K search panel */}
       <SearchPanel isOpen={isSearchOpen} onClose={closeSearch} />
 
-      {/* Title bar */}
       <TitleBar />
 
-      {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
 
-      {/* Main content — sidebar + matched child route. The screen-share
-          viewer mounts INSIDE this region so the TitleBar (drag handle),
-          BreadcrumbNav, VoiceBar, and bottom status bar all stay visible
-          and interactive while a stream is being viewed. */}
+      {/* The screen-share viewer mounts inside, so the chrome stays interactive. */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
         <div
@@ -695,9 +555,7 @@ export const AppShell: React.FC = observer(() => {
           <Outlet />
           <ScreenShareViewer />
         </div>
-        {/* Right-hand context panel (#824) — a flex sibling of the outlet, so
-            opening it reflows the message list instead of covering it. Hidden
-            while the terminal view owns the region. */}
+        {/* Right panel (#824): a flex sibling, so it reflows the log. */}
         {!isTerminal && <RightPanel />}
         {terminalActivated && (
           <div
@@ -716,9 +574,7 @@ export const AppShell: React.FC = observer(() => {
         )}
       </div>
 
-      {/* VoiceBar — only after the join completes, not during the
-          'joining' phase. Mute/share/leave controls only make sense once
-          the LiveKit room is actually connected. */}
+      {/* Only once joined: controls need a connected room. */}
       {voiceState.kind === 'joined' && skin === 'terminal' && (
         <VoiceBar
           channelId={voiceState.channelId}
@@ -726,7 +582,6 @@ export const AppShell: React.FC = observer(() => {
         />
       )}
 
-      {/* Drag-over overlay */}
       {isDragOver && (
         <div
           className="absolute inset-0 flex items-center justify-center pointer-events-none"
@@ -747,8 +602,6 @@ export const AppShell: React.FC = observer(() => {
         </div>
       )}
 
-      {/* Bottom bar — unread summary on the left, status alert on the right */}
-      {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
         className="border-t border-line"
         style={{
@@ -780,8 +633,7 @@ export const AppShell: React.FC = observer(() => {
             <span>{t("statusBar.updateAvailable")}</span>
           </PressButton>
         )}
-        {/* Fixed-height, always-rendered slot so the bar doesn't reflow as
-            the status (incoming call / alert / syncing) appears and clears. */}
+        {/* Fixed-height slot so the bar doesn't reflow. */}
         <div className="flex items-center justify-end h-4 leading-none">
         {incomingCall ? (
           <div
@@ -794,10 +646,7 @@ export const AppShell: React.FC = observer(() => {
               className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
               style={{ color: "inherit", background: "none", padding: 0 }}
               onClick={() => {
-                // Order matters: route first (so the old voice page unmounts
-                // before activeVoiceChannelId flips and any in-flight Call
-                // page useEffect tries to bounce off a transient mismatch),
-                // then swap the voice room, then clear the alert.
+                // Route first so the old voice page unmounts before the room swaps.
                 const callId = incomingCall.callId;
                 router.navigate({ to: "/call/$callId", params: { callId } });
                 voiceSession.setIntent({
@@ -806,11 +655,7 @@ export const AppShell: React.FC = observer(() => {
                   counterpartyUserId: incomingCall.callerId,
                 });
                 setIncomingCall(null);
-                // Stop ringing on this user's other devices. The renderer's
-                // own `call_canceled` handler is idempotent (no-ops when the
-                // local incomingCall is null) so re-receiving our own
-                // dismissal here is safe; every other device clears within
-                // the data-packet RTT.
+                // Stop ringing on other devices; `call_canceled` is idempotent.
                 if (currentUser) {
                   invoke("dismiss_call_on_my_devices", {
                     userId: currentUser.id,
@@ -831,8 +676,6 @@ export const AppShell: React.FC = observer(() => {
                 const callId = incomingCall.callId;
                 setIncomingCall(null);
                 invoke("cancel_call", { otherUserId: callerId, callId }).catch((e) => console.warn("cancel_call failed", e));
-                // Stop ringing on this user's other devices — same idempotent
-                // path the answer button uses; see comment there.
                 if (currentUser) {
                   invoke("dismiss_call_on_my_devices", {
                     userId: currentUser.id,

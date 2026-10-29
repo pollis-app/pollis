@@ -17,13 +17,7 @@ import { ScrambleText } from "../components/ui/ScrambleText";
 import { timeAgo } from "../utils/timeAgo";
 import type { DmChannel, Message } from "../types";
 
-// Renders the first/latest decrypted message body of a DM request. The
-// sender's name is shown separately on the row, so no prefix is needed
-// here. The MLS envelope is decrypted during the normal polling flow —
-// acceptance is a UI-only flag, not a decryption gate.
-//
-// The message arrives as a prop: the page fetches every request's preview in
-// one batched call (#874) rather than one per row.
+// A DM request's latest body, batch-fetched by the page (#874); acceptance doesn't gate decryption.
 const RequestPreview: React.FC<{ message?: Message; isLoading: boolean }> = ({
   message,
   isLoading,

@@ -18,28 +18,15 @@ interface BridgeHandle {
   dispose: () => void;
 }
 
-/**
- * Wires voice session lifecycle events to the surrounding app: SFX cues,
- * React Query cache invalidation, and `publish_voice_presence` broadcasts.
- *
- * Designed to be installed once at app boot from a top-level component that
- * has access to the query client. The manager itself stays free of these
- * concerns.
- */
+/** Wire voice lifecycle events to SFX, cache invalidation and presence broadcasts; install once at boot. */
 export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
   const { queryClient } = opts;
 
-  // Allow the manager to read preferences (APM config + user volumes) at
-  // join time without taking a React-Query dep itself.
   voiceSession.configure({
     preferencesProvider: opts.preferencesProvider as () => never,
   });
 
-  // ── SFX coordination ────────────────────────────────────────────────────
-  // When the user switches from one voice room straight into another, both
-  // a `left` and a `joined` event fire back-to-back. The user perceives
-  // this as a single transition, not two events — so defer the leave cue by
-  // a macrotask, and if a join lands first, cancel both cues.
+  // Room-to-room switches fire left + joined back-to-back; defer the leave cue so a join cancels both.
   let pendingLeaveSfx: ReturnType<typeof setTimeout> | null = null;
   let suppressNextJoinSfx = false;
 
@@ -66,9 +53,7 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       }).catch(logIgnored);
     }
 
-    // LiveKit doesn't echo our own broadcast back, so the observers in
-    // other clients refetch but we don't. Invalidate locally so the
-    // sidebar "N in call" label updates for the joining user too.
+    // LiveKit doesn't echo our own broadcast, so invalidate locally.
     invalidateVoiceRoom(queryClient, event.channelId);
   });
 
@@ -81,9 +66,7 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       pendingLeaveSfx = null;
     }, 0);
 
-    // If this client initiated a 1:1 call and the callee never picked up
-    // (outgoingCall still set when we leave the matching room), notify the
-    // callee to stop ringing. Mirrors the decline path in AppShell.
+    // Unanswered outgoing 1:1 call: tell the callee to stop ringing.
     const outgoing = appStore.outgoingCall;
     if (outgoing && event.channelId === `call-${outgoing.callId}`) {
       const { callId, calleeId } = outgoing;
@@ -91,23 +74,14 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       invoke('cancel_call', { otherUserId: calleeId, callId }).catch((e) => console.warn('cancel_call failed', e));
     }
 
-    // Optimistically remove ourselves from the cached observer list so the UI
-    // drops us immediately instead of waiting for the LiveKit RoomService
-    // refetch to round-trip. event.identity is our full per-device identity, so
-    // a sibling device of ours still in the room is left in place.
+    // Drop our own device from the cached observers now.
     queryClient.setQueryData<Array<{ identity: string; name: string }>>(
       voiceQueryKeys.participants(event.channelId),
       (prev) => (prev ? prev.filter((p) => p.identity !== event.identity) : prev),
     );
 
     if (event.groupId) {
-      // Order matters: the voice disconnect must already be observable on
-      // LiveKit before we broadcast voice_left and invalidate. Otherwise
-      // observers refetch while LiveKit still counts us as present, and the
-      // "N in call" label stays stuck at the old value.
-      //
-      // The manager has already finished `leave_voice_channel` by the time
-      // this event fires, so there's no extra wait needed here.
+      // The manager already left, so observers refetching now won't still see us.
       invoke('publish_voice_presence', {
         groupId: event.groupId,
         channelId: event.channelId,

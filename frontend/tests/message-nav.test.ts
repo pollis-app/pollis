@@ -1,16 +1,4 @@
-/*
- * Arrow-key chat-log navigation — the pure state machine.
- *
- * The DOM half (focus projection, key translation) lives in `MessageList` and
- * needs a browser; every focus-position invariant lives HERE, in
- * `transitionMessageNav`, which is exactly why it is a pure function. These
- * tests pin the whole contract: entry lands on the newest message, the ends
- * clamp, walking rows drops any action selection, the action bar is entered
- * from its start and left past its start, vanished messages re-anchor, and an
- * empty log refuses entry.
- *
- *   node --test frontend/tests/
- */
+/* Chat-log keyboard nav, the pure `transitionMessageNav` contract; the DOM half is `MessageList`'s. */
 
 import test from "node:test";
 import assert from "node:assert/strict";

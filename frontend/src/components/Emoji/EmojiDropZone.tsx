@@ -6,30 +6,13 @@ import { dropTargetStore } from "../../stores/dropTargetStore";
 import { EMOJI_IMAGE_EXTENSIONS, isSupportedEmojiFile } from "./emojiShortcode";
 
 interface EmojiDropZoneProps {
-  /** Called with the native path of an accepted image. */
   onPick: (path: string) => void;
-  /** Called with the path of a drop this zone will not take (wrong type). */
   onReject: (path: string) => void;
   disabled?: boolean;
-  /** Preview of the file already chosen; the prompt shows when absent. */
   children?: React.ReactNode;
 }
 
-/**
- * The image-first half of the custom-emoji upload (Discord's model): drop a
- * file anywhere on the window, or click to open the OS picker. The shortcode is
- * derived from whatever lands here, so this is the step that comes first.
- *
- * A native drag never reaches the DOM — Tauri intercepts the OS drop and hands
- * the window a payload of PATHS, which is exactly what the upload wants (the
- * Rust side reads and re-encodes the file, so bytes never cross the IPC). The
- * consequence is that "drag-over" is a window-level fact, not a hover: the zone
- * lights up while a drag is anywhere over the app, because it is the only place
- * on the page that can receive one.
- *
- * Registered as an INLINE drop target, so `AppShell`'s full-window drop overlay
- * stays out of the way — it would otherwise cover the affordance being lit up.
- */
+/** Image-first emoji upload: drop anywhere or click. Tauri hands paths, so drag-over is window-wide; an inline drop target keeps AppShell's overlay away. */
 export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
   onPick,
   onReject,
@@ -81,8 +64,7 @@ export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
     if (disabled) {
       return;
     }
-    // A file PATH, never bytes: the Rust side reads, re-encodes and uploads it,
-    // so a multi-megabyte source never crosses the JSON IPC.
+    // A path, never bytes: Rust reads and re-encodes.
     const picked = await dialogOpen({
       multiple: false,
       title: t("manage.filePickerTitle"),
