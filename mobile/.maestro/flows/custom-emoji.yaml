@@ -1,0 +1,130 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# CUSTOM EMOJI (#1562) — a static and an animated custom emoji render as
+# images, never as their `:shortcode:` fallback text, for the account that
+# added them: in the group's emoji list, in the composer's suggestions, in a
+# sent message, and after a cold restart (so the timeline image comes from
+# `get_emoji_path`, not from anything held in memory). Self-contained; the
+# recipient side is `scripts/maestro-custom-emoji.sh` (two devices).
+#
+# `CustomEmojiImage` carries `emoji-image-<shortcode>` once the image has
+# DRAWN (onLoad), `emoji-loading-<shortcode>` before that and
+# `emoji-fallback-<shortcode>` when it gave up and shows the text. The static
+# fixture is a PNG (stored as lossless WebP), the animated one a GIF (stored as
+# GIF) — the two formats pollis-core emits.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Emoji Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Emoji Group, .*"
+    timeout: 15000
+
+# Group settings → Custom emoji.
+- tapOn:
+    id: "btn-group-menu"
+- tapOn:
+    id: "btn-menu-group-settings"
+- tapOn:
+    id: "row-group-emoji"
+- assertVisible:
+    id: "screen-group-emoji"
+- addMedia:
+    - "../fixtures/media-viewer.png"
+- runFlow:
+    file: ../subflows/add-custom-emoji.yaml
+    env:
+      EMOJI_SHORTCODE: "e2e_static"
+- addMedia:
+    - "../fixtures/custom-emoji-animated.gif"
+- runFlow:
+    file: ../subflows/add-custom-emoji.yaml
+    env:
+      EMOJI_SHORTCODE: "e2e_anim"
+- takeScreenshot: custom-emoji-01-group-list
+
+# Back to the group, into #General.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+
+# A complete `:shortcode:` is swapped for the emoji as it is typed (#989); the
+# suggestion list draws the same image component first.
+- tapOn:
+    id: "input-composer"
+- inputText: "emoji :e2e_sta"
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_static"
+    timeout: 30000
+- takeScreenshot: custom-emoji-02-suggestion
+- inputText: "tic: :e2e_anim: done"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*emoji.*done.*"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_static"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_anim"
+    timeout: 30000
+- assertNotVisible:
+    id: "emoji-fallback-.*"
+- takeScreenshot: custom-emoji-03-sent
+
+# Cold restart: the timeline re-resolves both hashes through the bridge.
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_static"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_anim"
+    timeout: 30000
+- assertNotVisible:
+    id: "emoji-fallback-.*"
+- takeScreenshot: custom-emoji-04-after-restart

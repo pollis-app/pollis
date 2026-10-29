@@ -1105,7 +1105,7 @@ Current state:
   `scripts/generate-emoji-data.py`, which writes frontend + mobile together);
   custom group emoji (`list_usable_emoji` / `list_group_emoji` /
   `upload_group_emoji` / `remove_group_emoji`; rendering via `get_emoji_path`
-  → cached `file://`, see `lib/emojiCache.ts`; management at
+  → cached `file://`, see `lib/emojiCache.ts`; `CustomEmojiImage` never mounts a source-less `<Image>` (iOS fires `onError` for one, which showed every custom emoji as `:shortcode:` text on iOS, #1562) and retries a failure (`lib/emojiRetry.ts`); Maestro reads what it drew from `EmojiProbe` (`flows/custom-emoji.yaml`, `scripts/maestro-custom-emoji.sh`); management at
   `app/group/emoji.tsx` — every member sees Add, only admins see Remove; the DS enforces it, #1280); DM receipts (`get_conversation_receipts` +
   `mark_messages_read` via FlatList viewability 60%/600ms + AppState gate;
   synced top-level `send_read_receipts` key, default true); threads

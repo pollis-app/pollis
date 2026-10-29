@@ -1,0 +1,39 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Sender (#1562), after the recipient joined: post both custom emoji in
+# #General. A complete `:shortcode:` is swapped for the emoji token as it is
+# typed (#989), so the message carries `<:e2e_static:hash>` / `<:e2e_anim:hash>`.
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "(?i).*${GROUP_NAME}.*"
+    index: 0
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "emoji :e2e_static: :e2e_anim: done"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*emoji.*done.*"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "emoji-image-e2e_anim"
+    timeout: 30000
+- takeScreenshot: custom-emoji-02-sender-sent

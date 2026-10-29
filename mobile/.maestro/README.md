@@ -108,6 +108,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
 | `dms` | start a DM with the seeded peer (initiator side) | yes |
+| `custom-emoji` | #1562 add a static and an animated custom emoji, see both as images (never the `:shortcode:` text) in the group's list, the composer's suggestions, a sent message and again after a cold restart | no |
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | switch language (copy re-renders), persists across relaunch, Arabic mirrors the layout after relaunch (#1074) | no |
 | `enrollment-approval` | #1096 the approver TYPES the code off the new device — the card shows none, approve is gated on eight characters | yes |
@@ -183,6 +184,15 @@ admin's own settings are still the editable form.
 peer then adds a custom emoji (system photo picker, seeded by `addMedia`) and
 must see no remove control for it, not even as its creator; the admin then sees
 the remove control and removes it.
+
+**Custom emoji render (automated, #1562):** `mobile/scripts/maestro-custom-emoji.sh <sender-device> <recipient-device>`
+— the sender creates a group with #General and adds a static (PNG → WebP) and
+an animated (GIF) custom emoji, the recipient joins through the join-request
+steps, the sender posts both, and the recipient must see both as images
+(`emoji-image-<shortcode>`) with no `emoji-fallback-*`. Run it iOS → Android
+and Android → iOS. Those ids come from `EmojiProbe`, drawn by `<Screen>`: an
+emoji sits inside a row that is one accessible element, so its own view is
+not in the hierarchy Maestro reads.
 
 **Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
 — a fresh peer signs up, its handle is read off the screen, and the reporter

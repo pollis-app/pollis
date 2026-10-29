@@ -49,30 +49,79 @@ export interface EmojiImageState {
   failed: boolean;
 }
 
-/** Load one custom emoji's image URL. */
+/**
+ * How long after each failed resolve the next attempt runs (#1562). A failure
+ * is not final: one offline moment or a cold DS used to leave the
+ * `:shortcode:` text in place until the row remounted. The schedule is short
+ * and finite (no polling); past it, the window coming back into view or the
+ * network coming back tries again.
+ */
+export const EMOJI_RETRY_DELAYS_MS = [2_000, 10_000, 30_000] as const;
+
+/** Load one custom emoji's image URL, retrying a failed resolve. */
 export function useEmojiImage(contentHash: string): EmojiImageState {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let resolving = false;
+    let lastFailed = false;
     setUrl(null);
     setFailed(false);
 
-    resolveEmojiUrl(contentHash)
-      .then((resolved) => {
-        if (mounted) {
-          setUrl(resolved);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
+    const resolve = () => {
+      resolving = true;
+      resolveEmojiUrl(contentHash)
+        .then((resolved) => {
+          if (mounted) {
+            lastFailed = false;
+            setUrl(resolved);
+            setFailed(false);
+          }
+        })
+        .catch((e: unknown) => {
+          if (!mounted) {
+            return;
+          }
+          console.warn(`[emoji] resolving ${contentHash} failed:`, e);
+          lastFailed = true;
           setFailed(true);
-        }
-      });
+          const delay = EMOJI_RETRY_DELAYS_MS[attempt];
+          attempt += 1;
+          if (delay !== undefined) {
+            timer = setTimeout(() => {
+              timer = null;
+              resolve();
+            }, delay);
+          }
+        })
+        .finally(() => {
+          resolving = false;
+        });
+    };
 
+    const onBack = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      if (mounted && lastFailed && timer === null && !resolving) {
+        resolve();
+      }
+    };
+
+    resolve();
+    window.addEventListener("online", onBack);
+    document.addEventListener("visibilitychange", onBack);
     return () => {
       mounted = false;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      window.removeEventListener("online", onBack);
+      document.removeEventListener("visibilitychange", onBack);
     };
   }, [contentHash]);
 
