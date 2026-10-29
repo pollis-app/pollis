@@ -37,7 +37,7 @@ use verifiable_log_builder::{
 
 use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
-use crate::remote::{build_agent, fetch_json, fetch_text, gate_leaf_format_version};
+use crate::remote::{build_agent, fetch_json, fetch_text, fetch_text_opt, gate_leaf_format_version};
 
 /// One commit in a group's chain, as reported to a caller. Mirrors the
 /// structural fields of a [`CommitLeaf`] plus whether its inclusion proof
@@ -148,12 +148,29 @@ fn verify_group_with(
     // the manifest's `format_version` up front and refuse a log newer than we
     // understand with VersionSkew ("upgrade your verifier") rather than a
     // misleading empty result.
-    let index_body = fetch_text(agent, &format!("{base}/v1/index.json"))?;
+    //
+    // #1579: a log that serves `commit-log-2` has retired its first commit-log
+    // tree, so a conversation is verified against the successor, under its own
+    // context. Only a log without one (self-hosted, or published before the
+    // reset) is read from `/v1/...`. Hiding the successor gains an attacker
+    // nothing here: the first tree is frozen, its heads are signed under the
+    // retired context, and `remote` fails a log that names a successor it does
+    // not serve.
+    let successor = format!("{base}/{}", crate::layout::COMMIT_LOG_2_API_PREFIX);
+    let (prefix, context, index_body) =
+        match fetch_text_opt(agent, &format!("{successor}/index.json"))? {
+            Some(body) => (successor, verifiable_log::STH_CONTEXT_COMMIT_LOG_2, body),
+            None => (
+                format!("{base}/v1"),
+                verifiable_log::STH_CONTEXT_COMMIT_LOG,
+                fetch_text(agent, &format!("{base}/v1/index.json"))?,
+            ),
+        };
     gate_leaf_format_version(&index_body)?;
 
     // Prerequisites: the published key, the latest signed head, and the full
     // ordered entry list. Without these there is nothing to verify.
-    let pk_doc: PublicKeyDoc = fetch_json(agent, &format!("{base}/v1/public_key.json"))?;
+    let pk_doc: PublicKeyDoc = fetch_json(agent, &format!("{prefix}/public_key.json"))?;
     // H-1: the pin belongs HERE, at the fetch boundary — this document came off
     // an untrusted server. The `*_in_bundle` core below is deliberately NOT
     // gated: it also verifies a bundle the caller already holds (the publisher
@@ -163,8 +180,8 @@ fn verify_group_with(
     // here on is a pinned one, never a key the server merely listed beside it.
     let pk_doc = crate::pinned::require_pinned_with(&pk_doc, now_ms(), trust)
         .map_err(crate::error::ServeError::BadBundle)?;
-    let sth: Sth = fetch_json(agent, &format!("{base}/v1/sth/latest.json"))?;
-    let entries: Vec<Entry> = fetch_json(agent, &format!("{base}/v1/entries.json"))?;
+    let sth: Sth = fetch_json(agent, &format!("{prefix}/sth/latest.json"))?;
+    let entries: Vec<Entry> = fetch_json(agent, &format!("{prefix}/entries.json"))?;
 
     // Plan which proofs to fetch: only this group's entries. Since #701 the leaf
     // carries a windowed pseudonym, not the raw id, so we match by re-deriving the
@@ -189,7 +206,7 @@ fn verify_group_with(
     // not-included, exactly as the old fetch-per-entry path did.
     let mut inclusion: Vec<InclusionCheck> = Vec::with_capacity(group_indices.len());
     for i in &group_indices {
-        let url = format!("{base}/v1/proof/inclusion/{}/{}.json", sth.tree_size, i);
+        let url = format!("{prefix}/proof/inclusion/{}/{}.json", sth.tree_size, i);
         if let Ok(proof) = fetch_json::<InclusionProof>(agent, &url) {
             if let Some(entry) = entries.get(*i) {
                 inclusion.push(InclusionCheck {
@@ -218,7 +235,7 @@ fn verify_group_with(
         consistency: Vec::new(),
     };
 
-    let mut report = verify_group_in_bundle(&bundle, conversation_id);
+    let mut report = verify_group_in_bundle_with_context(&bundle, conversation_id, now_ms(), context);
     // A served key set we cannot attribute to the root is an alarm even when the
     // tree verifies under the compiled pin: never a silent accept.
     if let Some(v) = trust.alarm_violation() {
@@ -273,6 +290,24 @@ pub fn verify_group_in_bundle_at(
     conversation_id: &str,
     now_ms: u64,
 ) -> GroupReport {
+    verify_group_in_bundle_with_context(
+        bundle,
+        conversation_id,
+        now_ms,
+        verifiable_log::STH_CONTEXT_COMMIT_LOG,
+    )
+}
+
+/// [`verify_group_in_bundle_at`] for a commit-log tree whose heads are signed
+/// under `context`: [`verifiable_log::STH_CONTEXT_COMMIT_LOG`] for the first
+/// tree, [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`] for its successor (#1579).
+/// A head of one tree never anchors a report about the other.
+pub fn verify_group_in_bundle_with_context(
+    bundle: &Bundle,
+    conversation_id: &str,
+    now_ms: u64,
+    context: &[u8],
+) -> GroupReport {
     let mut violations: Vec<String> = Vec::new();
 
     // 1. Trust anchor: the newest published head, verified under ANY key the log
@@ -287,7 +322,7 @@ pub fn verify_group_in_bundle_at(
         Some(sth) => (
             sth.tree_size,
             sth.root_hash.clone(),
-            sth.verify_any(&candidates).is_some(),
+            sth.verify_any_with_context(&candidates, context).is_some(),
         ),
         None => (0, String::new(), false),
     };

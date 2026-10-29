@@ -37,9 +37,20 @@ struct Cli {
 enum Command {
     /// Generate the immutable static artifact tree from a signed bundle.
     Generate {
-        /// Path to the commit-log bundle JSON (output of `builder build`).
+        /// Path to a bundle for the FIRST commit-log tree, written directly under
+        /// `/v1/...`. That tree is retired in production (#1579) and CI no longer
+        /// passes this; it remains for local and self-hosted logs.
+        #[arg(long, required_unless_present = "commit_log_2_bundle")]
+        bundle: Option<PathBuf>,
+        /// Path to the commit-log-2 bundle JSON (`builder build --commit-tree
+        /// commit-log-2`), emitted under `/v1/commit-log-2/...`.
         #[arg(long)]
-        bundle: PathBuf,
+        commit_log_2_bundle: Option<PathBuf>,
+        /// Optional signed reset statement (`builder commit-log-reset`), published
+        /// at `/v1/commit-log-reset.json` after it verifies under the
+        /// commit-log-2 bundle's key.
+        #[arg(long, requires = "commit_log_2_bundle")]
+        reset_statement: Option<PathBuf>,
         /// Optional path to the account-key bundle JSON (output of
         /// `builder build --account-out`). When given, the account-key tree is
         /// emitted under `/v1/account-keys/...` alongside the commit-log tree.
@@ -130,13 +141,17 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Generate {
             bundle,
+            commit_log_2_bundle,
+            reset_statement,
             account_bundle,
             binaries_bundle,
             key_set,
             root_key,
             out,
         } => match run_generate(
-            &bundle,
+            bundle.as_deref(),
+            commit_log_2_bundle.as_deref(),
+            reset_statement.as_deref(),
             account_bundle.as_deref(),
             binaries_bundle.as_deref(),
             key_set.as_deref(),
@@ -181,16 +196,65 @@ fn main() -> ExitCode {
     }
 }
 
+// One parameter per CLI flag `generate` accepts.
+#[allow(clippy::too_many_arguments)]
 fn run_generate(
-    bundle_path: &std::path::Path,
+    bundle_path: Option<&std::path::Path>,
+    commit_log_2_bundle_path: Option<&std::path::Path>,
+    reset_statement_path: Option<&std::path::Path>,
     account_bundle_path: Option<&std::path::Path>,
     binaries_bundle_path: Option<&std::path::Path>,
     key_set_path: Option<&std::path::Path>,
     root_key_hex: Option<&str>,
     out: &std::path::Path,
 ) -> Result<()> {
-    let bundle = layout::load_bundle(bundle_path)?;
-    let manifest = layout::generate(&bundle, out)?;
+    // The first commit-log tree, directly under /v1. Retired in production
+    // (#1579): CI omits --bundle so none of its frozen files is rewritten.
+    if let Some(bundle_path) = bundle_path {
+        let bundle = layout::load_bundle(bundle_path)?;
+        let manifest = layout::generate(&bundle, out)?;
+        println!(
+            "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
+            manifest.entry_count,
+            manifest.sth_sizes.len(),
+            manifest.inclusion.len(),
+            manifest.consistency.len(),
+            out.join(layout::API_VERSION).display()
+        );
+        println!("public_key: {}", manifest.public_key);
+    }
+
+    if let Some(path) = commit_log_2_bundle_path {
+        let bundle = layout::load_bundle(path)?;
+        let manifest = layout::generate_commit_log_2(&bundle, out)?;
+        println!(
+            "generated commit-log-2 tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
+            manifest.entry_count,
+            manifest.sth_sizes.len(),
+            manifest.inclusion.len(),
+            manifest.consistency.len(),
+            out.join(layout::COMMIT_LOG_2_API_PREFIX).display()
+        );
+        if let Some(reset_path) = reset_statement_path {
+            let raw = std::fs::read_to_string(reset_path)?;
+            let statement: verifiable_log::ResetStatement = serde_json::from_str(&raw)
+                .map_err(|e| ServeError::BadBundle(format!("reset statement is not readable: {e}")))?;
+            let mut one = std::collections::BTreeMap::new();
+            layout::insert_reset_statement(
+                &mut one,
+                &statement,
+                &bundle.key_candidates(verifiable_log_serve::bundle::now_ms()),
+            )?;
+            for (rel, bytes) in one {
+                let dest = out.join(&rel);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&dest, bytes)?;
+                println!("published reset statement -> {}", dest.display());
+            }
+        }
+    }
 
     // Publish the root-signed key set alongside the trees (#754). Verified against
     // the pinned root FIRST: a statement that does not verify is not a degraded
@@ -215,15 +279,6 @@ fn run_generate(
             );
         }
     }
-    println!(
-        "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
-        manifest.entry_count,
-        manifest.sth_sizes.len(),
-        manifest.inclusion.len(),
-        manifest.consistency.len(),
-        out.join(layout::API_VERSION).display()
-    );
-
     // Account-key tree (separate tree, domain-separated STH) — only when asked.
     if let Some(account_path) = account_bundle_path {
         let account_bundle = layout::load_bundle(account_path)?;
@@ -255,7 +310,6 @@ fn run_generate(
         );
     }
 
-    println!("public_key: {}", manifest.public_key);
     Ok(())
 }
 

@@ -73,6 +73,16 @@
 //! [`binaries::STH_CONTEXT`]: verifiable_log_builder::binaries::STH_CONTEXT
 //! [`ReleaseReport`]: crate::release::ReleaseReport
 //!
+//! ### The second commit-log tree (`/v1/commit-log-2/...`, #1579)
+//!
+//! The commit-log tree served directly under `/v1/...` is **retired**: after the
+//! DS began pruning `mls_commit_log`, heads were signed that do not extend its
+//! earlier history. Its files stay served exactly where they are, frozen; the
+//! publisher no longer writes any of them. Its successor uses the same layout as
+//! the table above under [`COMMIT_LOG_2_API_PREFIX`], with heads signed under
+//! `STH_CONTEXT_COMMIT_LOG_2`. The signed reset statement that ties the two
+//! together is served at [`RESET_STATEMENT_PATH`] (`/v1/commit-log-reset.json`).
+//!
 //! The file path under the output root mirrors the URL exactly (drop the
 //! leading `/`), so serving is a literal static-file mapping.
 //!
@@ -159,19 +169,71 @@ fn write_artifacts(root: &Path, artifacts: &BTreeMap<String, Vec<u8>>) -> Result
 /// up with the same `path.trim_start_matches('/')` it uses for the static host,
 /// so on-disk and in-memory serving cannot diverge.
 pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
+    commit_tree_artifacts(bundle, API_VERSION)
+}
+
+/// Path prefix of the **second** commit-log tree (#1579). The first commit-log
+/// tree, served directly under `/v1/...`, is retired and frozen: the publisher no
+/// longer writes any of its files. Its successor gets its own subtree, a sibling
+/// of `account-keys/` and `binaries/`, so it shares the API version, the manifest
+/// shape and the format gate, and so no URL of the retired tree is ever reused.
+/// The path segment is the tree's name (`commit-log-2`), the same string as its
+/// STH context suffix and its `STH_CONTEXTS` entry, so the three cannot drift.
+pub const COMMIT_LOG_2_API_PREFIX: &str = "v1/commit-log-2";
+
+/// Where the signed reset statement retiring the first commit-log tree is served
+/// (#1579). A stable, immutable URL beside `key-set.json`.
+pub const RESET_STATEMENT_PATH: &str = "v1/commit-log-reset.json";
+
+/// The read API for the **second** commit-log tree, under
+/// [`COMMIT_LOG_2_API_PREFIX`]. Same artifact set and manifest as the first tree,
+/// one level down; the heads in `bundle` are signed under
+/// [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`] by the builder.
+pub fn generate_commit_log_2_artifacts(
+    bundle: &Bundle,
+) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
+    commit_tree_artifacts(bundle, COMMIT_LOG_2_API_PREFIX)
+}
+
+/// Write the second commit-log tree under `root`.
+pub fn generate_commit_log_2(bundle: &Bundle, root: &Path) -> Result<Manifest> {
+    let (manifest, artifacts) = generate_commit_log_2_artifacts(bundle)?;
+    write_artifacts(root, &artifacts)?;
+    Ok(manifest)
+}
+
+/// Emit a reset statement at [`RESET_STATEMENT_PATH`], refusing one that does not
+/// verify under `candidates`.
+pub fn insert_reset_statement(
+    map: &mut BTreeMap<String, Vec<u8>>,
+    statement: &verifiable_log::ResetStatement,
+    candidates: &[(String, verifiable_log::VerifyingKey)],
+) -> Result<()> {
+    statement.verify_any(candidates).map_err(|e| {
+        ServeError::BadBundle(format!("refusing to publish an unverifiable reset statement: {e}"))
+    })?;
+    insert_json(map, RESET_STATEMENT_PATH.to_string(), statement)
+}
+
+/// The commit-log artifact set under `prefix` (`v1` for the first tree,
+/// [`COMMIT_LOG_2_API_PREFIX`] for its successor).
+fn commit_tree_artifacts(
+    bundle: &Bundle,
+    prefix: &str,
+) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
     // /v1/public_key.json
     insert_json(
         &mut map,
-        format!("{API_VERSION}/public_key.json"),
+        format!("{prefix}/public_key.json"),
         &bundle.public_key_doc(),
     )?;
 
     // /v1/sth/<size>.json for every head, plus latest.json for the largest.
     let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
     for sth in &bundle.sths {
-        insert_json(&mut map, format!("{API_VERSION}/sth/{}.json", sth.tree_size), sth)?;
+        insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
         sth_sizes.push(sth.tree_size);
     }
     sth_sizes.sort_unstable();
@@ -179,13 +241,13 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
 
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     if let Some(latest) = latest {
-        insert_json(&mut map, format!("{API_VERSION}/sth/latest.json"), latest)?;
+        insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
     }
 
     // /v1/entries.json and /v1/entries/<index>.json
-    insert_json(&mut map, format!("{API_VERSION}/entries.json"), &bundle.entries)?;
+    insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
     for (i, entry) in bundle.entries.iter().enumerate() {
-        insert_json(&mut map, format!("{API_VERSION}/entries/{i}.json"), entry)?;
+        insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
     }
 
     // /v1/proof/inclusion/<tree_size>/<leaf_index>.json
@@ -195,7 +257,7 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         let li = check.proof.leaf_index;
         insert_json(
             &mut map,
-            format!("{API_VERSION}/proof/inclusion/{ts}/{li}.json"),
+            format!("{prefix}/proof/inclusion/{ts}/{li}.json"),
             &check.proof,
         )?;
         inclusion_refs.push(InclusionRef {
@@ -211,7 +273,7 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         let s = check.proof.second_size;
         insert_json(
             &mut map,
-            format!("{API_VERSION}/proof/consistency/{f}-{s}.json"),
+            format!("{prefix}/proof/consistency/{f}-{s}.json"),
             &check.proof,
         )?;
         consistency_refs.push(ConsistencyRef {
@@ -250,7 +312,7 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         consistency: consistency_refs,
         enforce_unique: bundle.enforce_unique.clone(),
     };
-    insert_json(&mut map, format!("{API_VERSION}/index.json"), &manifest)?;
+    insert_json(&mut map, format!("{prefix}/index.json"), &manifest)?;
 
     Ok((manifest, map))
 }
@@ -613,6 +675,20 @@ mod key_set_artifact_tests {
         let err = insert_key_set(&mut map, &st, &hex::encode(root().verifying_key().encode()));
         assert!(err.is_err());
         assert!(map.is_empty(), "nothing may be written when verification fails");
+    }
+
+    /// The builder names the successor's path inside the signed reset statement;
+    /// the layout serves the tree there. They must be the same string.
+    #[test]
+    fn the_successor_path_matches_the_one_the_reset_statement_names() {
+        assert_eq!(
+            COMMIT_LOG_2_API_PREFIX,
+            verifiable_log_builder::commit_log_reset::SUCCESSOR_PATH
+        );
+        assert_eq!(
+            COMMIT_LOG_2_API_PREFIX.rsplit('/').next(),
+            Some(verifiable_log_builder::commit_log_reset::SUCCESSOR_TREE)
+        );
     }
 
     #[test]

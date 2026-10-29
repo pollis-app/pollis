@@ -37,7 +37,18 @@ name = "verifiable-log-serve"
 # compiles the log key in and refuses any served key that is not it (matched on
 # the id recomputed from the served key bytes, never the id the server supplies).
 # Auditors on 0.7.0 or earlier should upgrade. Cut `pollis-verify-v0.8.0`.
-version = "0.9.0"
+#
+# 0.10.0 (#1579): a FEATURE release. The first commit-log tree (`/v1/...`) is
+# retired and frozen; its successor is served at `/v1/commit-log-2/...` under
+# its own STH context, and a signed reset statement at
+# `/v1/commit-log-reset.json` lists the retired tree's consistent chain and its
+# known forks. `remote` verifies the successor in full, verifies the statement,
+# and reports the retired tree as RETIRED, still failing on anything the
+# statement does not list. `group` reads the successor. `bundle::FORMAT_VERSION`
+# is untouched (a new subtree is additive); older binaries keep failing on the
+# retired tree as they do today, so auditors should upgrade. Cut
+# `pollis-verify-v0.10.0`.
+version = "0.10.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Serve layer for the verifiable log (Key Transparency #330): turns a signed monitor bundle into an immutable static artifact tree, a dev HTTP server, and a fetch-over-HTTP remote verifier. Slice 3."

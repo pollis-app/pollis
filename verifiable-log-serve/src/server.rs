@@ -69,7 +69,11 @@ impl DevServer {
         // serve, so `cargo run serve` against a local dev log (and the crate's
         // own tests) verify without the production pin. Safe in every profile: only a process
         // serving a log can reach this, and the auditor CLI serves nothing.
-        for rel in ["v1/public_key.json", "v1/account-keys/public_key.json"] {
+        for rel in [
+            "v1/public_key.json",
+            "v1/commit-log-2/public_key.json",
+            "v1/account-keys/public_key.json",
+        ] {
             if let Ok(txt) = std::fs::read_to_string(root.join(rel)) {
                 if let Ok(doc) = serde_json::from_str::<crate::bundle::PublicKeyDoc>(&txt) {
                     crate::pinned::trust_hex_for_dev(&doc.public_key);
