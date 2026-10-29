@@ -1,56 +1,20 @@
-//! Content-free push fan-out, server-side (#987).
+//! Content-free push fan-out, server-side (#987), so no client ever reads
+//! another user's `push_token`.
 //!
-//! # Why this moved
+//! A push carries only an opaque per-notification handle `h` (#1122/#1157),
+//! never plaintext, sender, conversation or content. On Android the handle is
+//! also the notification `tag` (#1508). A read sends the user's devices one
+//! silent push `{ d: [handles] }` naming the notifications to clear; see
+//! [`dismiss_push`].
 //!
-//! The client used to do this: read the conversation's members, read their
-//! `push_token` rows, and POST to Expo itself. Three consequences, all bad:
+//! Best-effort throughout: a failed push must never fail a send that already
+//! landed.
 //!
-//!   1. It needed a whole-database read credential to see other people's push
-//!      tokens — the single most identifying row a client had any reason to
-//!      read about someone else.
-//!   2. It put two more dependent round trips on the hot send path, after the
-//!      send had already landed.
-//!   3. Every desktop and mobile client talked to `exp.host` directly, which is
-//!      a non-first-party host outside the overlay's allowlist — so the relay
-//!      could not carry it, and the module's own comment said the DS should
-//!      proxy it "longer term".
-//!
-//! The DS already knows the conversation, the sender and the mention list from
-//! `POST /v1/messages/send`. Doing the fan-out here removes all three at once,
-//! and takes `push_token` out of client visibility entirely.
-//!
-//! # What a push carries
-//!
-//! An opaque per-notification handle `h` (#1122/#1157) and nothing else —
-//! enough for the client to route and re-ingest the (still-encrypted) message
-//! after resolving it over its own channel, never the plaintext, the sender, the
-//! conversation, or any content. On Android the handle is also the
-//! notification's `tag` (#1508), so the app can find and clear it in the tray.
-//!
-//! When the user reads a conversation on any client, `POST /v1/push/dismiss`
-//! sends their devices one silent, data-only push `{ d: [handles] }` naming the
-//! notifications to clear (#1508) — the same random handles, so again no
-//! conversation and no content. See [`dismiss_push`].
-//!
-//! Best-effort throughout: a push that fails to send must never fail a send that
-//! already landed.
-//!
-//! # What Expo said back (#1423)
-//!
-//! Expo answers 200 with one TICKET per message, and an error there
-//! (`DeviceNotRegistered`, `MessageRateExceeded`, `InvalidCredentials`, ...) is
-//! not an HTTP error. What APNs/FCM later made of an accepted message arrives
-//! only as a RECEIPT, fetched by ticket id. So:
-//!
-//!   * every ticket is read ([`parse_tickets`]); an error is counted and logged
-//!     by CLASS only, never the token, the user, the conversation or Expo's
-//!     free-text message (which quotes the token);
-//!   * `DeviceNotRegistered` deletes that `push_token` row on the spot;
-//!   * an accepted ticket's id is kept in `push_ticket` (migration 000037) and
-//!     the GC sweep asks Expo for its receipt ([`check_push_receipts`]), with
-//!     the same handling; a ticket is dropped once answered or after 24 hours;
-//!   * the counts are served to the operator on `GET /v1/ops/push`
-//!     ([`ops_push`]). They are in memory, counted since the last start.
+//! Expo errors arrive in per-message tickets on a 200 and later in receipts
+//! (#1423). Both are logged and counted by class only, never the token, user,
+//! conversation or Expo's free text (which quotes the token);
+//! `DeviceNotRegistered` deletes the `push_token` row. Counts are served on
+//! `GET /v1/ops/push` ([`ops_push`]).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -74,10 +38,10 @@ use crate::writes::RawRequest;
 use crate::AppState;
 use crate::util::{BIND_CHUNK, placeholders};
 
-/// Expo's push service endpoint. Accepts a JSON array of up to 100 messages.
+/// Expo's push service endpoint.
 const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 
-/// Expo's receipts endpoint. Accepts up to 1000 ticket ids per request.
+/// Expo's receipts endpoint.
 const EXPO_RECEIPTS_URL: &str = "https://exp.host/--/api/v2/push/getReceipts";
 
 /// Expo accepts up to 100 messages per request.
@@ -86,26 +50,19 @@ const EXPO_BATCH: usize = 100;
 /// Expo accepts up to 1000 ticket ids per receipts request.
 const RECEIPT_BATCH: usize = 1000;
 
-/// Tickets asked about per sweep, at most. Anything beyond waits for the next
-/// sweep or ages out, which only delays a prune.
+/// Tickets asked about per sweep, at most. The rest wait or age out.
 const RECEIPTS_PER_SWEEP: usize = 10 * RECEIPT_BATCH;
 
-/// How long a ticket is worth keeping. Expo discards receipts after 24 hours,
-/// so an older ticket can never be answered. Migration 000037's trigger
-/// enforces the same bound.
+/// Expo discards receipts after 24 hours, so an older ticket can never be
+/// answered. Migration 000037's trigger enforces the same bound.
 pub const PUSH_TICKET_MAX_AGE_SECS: i64 = 24 * 60 * 60;
 
-/// The Expo access token the fan-out authenticates with (`EXPO_TOKEN`).
+/// The Expo access token (`EXPO_TOKEN`), read once.
 ///
-/// Optional while the Expo account leaves push sends unauthenticated, and
-/// REQUIRED the moment "Enhanced Security for Push Notifications" is switched on
-/// there: with it on, Expo rejects any send that does not carry the token, which
-/// is what stops someone who has scraped an `ExponentPushToken[...]` off a device
-/// from pushing to our users themselves. Set it BEFORE enabling enforcement —
-/// the other order silently drops every push in between.
-///
-/// Read once, like every other DS env value; the DS never reloads its
-/// environment.
+/// Required once "Enhanced Security for Push Notifications" is on in Expo,
+/// which stops anyone holding a scraped `ExponentPushToken[...]` from pushing
+/// to our users. Set it before enabling enforcement, or every push in between
+/// is dropped.
 fn expo_token() -> Option<&'static str> {
     static TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     TOKEN
@@ -113,14 +70,9 @@ fn expo_token() -> Option<&'static str> {
         .as_deref()
 }
 
-/// The POST for one batch, bearing the access token when one is configured.
-///
-/// Split out from the send loop so the "token set => `Authorization` present,
-/// token unset => absent" invariant is testable without touching the process
-/// environment, which no parallel test can do safely.
-///
-/// Also builds the receipts request: with enhanced security on, Expo wants the
-/// token there too.
+/// The POST for one send or receipts batch, bearing the access token when one
+/// is configured. Split out so the header invariant is testable without
+/// touching the process environment.
 fn expo_request<B: serde::Serialize + ?Sized>(
     url: &str,
     token: Option<&str>,
@@ -133,27 +85,22 @@ fn expo_request<B: serde::Serialize + ?Sized>(
     }
 }
 
-/// Who a send asked the DS to wake (#987, #843, #1431), decoded from the
-/// `push_to` / `push_mentions` pair on `POST /v1/messages/send`.
+/// Who a send asked the DS to wake (#987, #843, #1431), decoded from
+/// `push_to` / `push_mentions` on `POST /v1/messages/send`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushAudience {
-    /// `None` = every other member (a DM, any current channel message, an old
-    /// client's `@all`). `Some(ids)` = only these — an old client's
-    /// `@username`. Always INTERSECTED with real membership, never trusted.
+    /// `None` = every other member. `Some(ids)` = only these (an old client's
+    /// `@username`). Always intersected with real membership, never trusted.
     pub only: Option<Vec<String>>,
-    /// Members named directly by `@username`. They are woken even if they muted
-    /// the channel; everyone else who muted it is skipped.
+    /// Members named by `@username`; they are woken even through a channel mute.
     pub mentioned: Vec<String>,
 }
 
 impl PushAudience {
-    /// Decode the wire pair. `None` when the send asked for no push at all
-    /// (`push_to` absent — an old client's ordinary channel chatter, or an
-    /// edit/delete/receipt envelope).
+    /// Decode the wire pair; `None` when the send asked for no push.
     ///
-    /// `push_mentions` absent means a client from before #1431, which only ever
-    /// sent a non-empty `push_to` for direct `@username` mentions — so that list
-    /// IS its mention list, and its named members still get through a mute.
+    /// `push_mentions` absent means a pre-#1431 client, whose non-empty `push_to`
+    /// was only ever direct mentions, so it doubles as the mention list.
     pub fn from_send(
         push_to: Option<Vec<String>>,
         push_mentions: Option<Vec<String>>,
@@ -166,14 +113,9 @@ impl PushAudience {
 }
 
 /// Wake the members of a conversation a send asked for with a content-free
-/// notification.
-///
-/// `audience.only` narrows the recipients to a subset; it is INTERSECTED with
-/// real membership rather than trusted, so it can only ever REMOVE recipients:
-/// it cannot be used to push to someone outside the conversation. Then every
-/// recipient who muted the channel (`channel_mute`, #1431) is dropped unless
-/// the message names them directly — Slack's rule, so a muted channel still
-/// reaches you on `@you` but not on `@all` or chatter.
+/// notification. `audience.only` is intersected with membership, so it can
+/// only remove recipients. Members who muted the channel (#1431) are skipped
+/// unless named directly (Slack's rule).
 pub async fn notify_new_message(
     conn: &Connection,
     conversation_id: &str,
@@ -183,8 +125,7 @@ pub async fn notify_new_message(
     notify_new_message_at(conn, EXPO_PUSH_URL, conversation_id, sender_id, audience).await
 }
 
-/// [`notify_new_message`] against an explicit Expo URL, so a test can stand a
-/// fake Expo up and see exactly which tokens a send would wake.
+/// [`notify_new_message`] against an explicit Expo URL, for tests.
 pub async fn notify_new_message_at(
     conn: &Connection,
     expo_url: &str,
@@ -202,8 +143,8 @@ pub async fn notify_new_message_at(
         return Ok(());
     }
 
-    // `kind` mirrors the values the mobile push router understands
-    // (mobile/hooks/usePushNotifications.ts): "channel" | "dm".
+    // Values the mobile push router understands
+    // (mobile/hooks/usePushNotifications.ts).
     let kind = if is_dm(conn, conversation_id).await? {
         "dm"
     } else {
@@ -230,18 +171,16 @@ pub async fn notify_new_message_at(
     Ok(())
 }
 
-/// The users a send wakes: every member but the sender, narrowed to
-/// `audience.only`, minus whoever muted the channel and is not named in
-/// `audience.mentioned`.
+/// Every member but the sender, narrowed to `audience.only`, minus whoever
+/// muted the channel and is not in `audience.mentioned`.
 pub async fn push_recipients(
     conn: &Connection,
     conversation_id: &str,
     sender_id: &str,
     audience: &PushAudience,
 ) -> anyhow::Result<Vec<String>> {
-    // Recipients = conversation members other than the sender. `is_member`'s
-    // three-legged id namespace applies here too: the id may be a DM, a group or
-    // a channel, and a channel's members live on its group.
+    // The id may be a DM, a group or a channel; a channel's members live on its
+    // group.
     let mut user_ids = conversation_recipients(conn, conversation_id, sender_id).await?;
     if let Some(allowed) = &audience.only {
         user_ids.retain(|u| allowed.contains(u));
@@ -254,9 +193,8 @@ pub async fn push_recipients(
     Ok(user_ids)
 }
 
-/// Every user who muted `channel_id` (#1431). A failed read — a DS running
-/// before migration 000038 is applied — counts as nobody: an unwanted push is
-/// recoverable, a dropped one is not.
+/// Every user who muted `channel_id` (#1431). A failed read counts as nobody:
+/// an unwanted push is recoverable, a dropped one is not.
 async fn muted_by(conn: &Connection, channel_id: &str) -> Vec<String> {
     let mut out = Vec::new();
     let rows = conn
@@ -280,13 +218,9 @@ async fn muted_by(conn: &Connection, channel_id: &str) -> Vec<String> {
     out
 }
 
-// ── Tickets, receipts and outcome counts (#1423) ────────────────────────────
-
 /// What Expo said went wrong with one message, as a fixed set of names.
-///
-/// Logged and counted INSTEAD of Expo's own text: the `message` Expo sends with
-/// an error quotes the push token, and the `details` may too. An unknown or
-/// missing class is `Other`, so nothing Expo sends can reach a log line.
+/// Logged instead of Expo's own text, which quotes the push token; anything
+/// unknown is `Other`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PushErrorClass {
     DeviceNotRegistered,
@@ -331,9 +265,7 @@ pub enum PushOutcome {
     Error(PushErrorClass),
 }
 
-/// Read one ticket or receipt object: `{"status":"ok","id":…}` or
-/// `{"status":"error","details":{"error":…}}`. Anything else is an `Other`
-/// error, since a ticket we cannot read is one we cannot follow up.
+/// Read one ticket or receipt object. Anything unreadable is an `Other` error.
 fn parse_outcome(v: &serde_json::Value) -> PushOutcome {
     match v.get("status").and_then(|s| s.as_str()) {
         Some("ok") => PushOutcome::Ok {
@@ -353,8 +285,7 @@ fn parse_outcome(v: &serde_json::Value) -> PushOutcome {
 pub fn parse_tickets(body: &serde_json::Value) -> Option<Vec<PushOutcome>> {
     match body.get("data")? {
         serde_json::Value::Array(items) => Some(items.iter().map(parse_outcome).collect()),
-        // Expo answers a single-message request with a bare object. We always
-        // send an array, but reading both costs nothing.
+        // Expo answers a single-message request with a bare object.
         obj @ serde_json::Value::Object(_) => Some(vec![parse_outcome(obj)]),
         _ => None,
     }
@@ -371,9 +302,8 @@ pub fn parse_receipts(body: &serde_json::Value) -> Option<Vec<(String, PushOutco
     )
 }
 
-/// Expo's request-level error codes (`errors[].code`), kept only when they have
-/// the shape Expo uses (upper-case words and underscores), so a code cannot
-/// carry a token or anything else into a log line or the counts.
+/// Expo's request-level error codes, kept only when shaped like Expo's
+/// (upper-case and underscores), so a code cannot carry a token into a log.
 fn request_error_codes(body: &serde_json::Value) -> Vec<String> {
     body.get("errors")
         .and_then(|e| e.as_array())
@@ -393,7 +323,6 @@ fn request_error_codes(body: &serde_json::Value) -> Vec<String> {
 }
 
 /// Push outcome counts since the process started, for `GET /v1/ops/push`.
-///
 /// Counts only: no token, user, conversation, or time of any single push.
 #[derive(Default)]
 pub struct PushStats {
@@ -405,8 +334,7 @@ struct PushCounts {
     since: u64,
     /// Messages in send requests Expo answered with tickets.
     messages_sent: u64,
-    /// Send requests that failed outright: a transport error, a non-2xx, or a
-    /// body with no tickets. Every message in such a request was lost.
+    /// Send requests that failed outright; every message in them was lost.
     send_request_failures: u64,
     /// Request-level error codes Expo named, by code.
     send_request_errors: BTreeMap<String, u64>,
@@ -439,19 +367,15 @@ impl PushStats {
     }
 }
 
-/// The process-wide counts. A static rather than an `AppState` field because
-/// the fan-out runs detached from its request with only a connection, and the
-/// GC sweep runs outside the router altogether.
+/// The process-wide counts. A static because the fan-out runs detached with
+/// only a connection, and the GC sweep runs outside the router.
 pub fn stats() -> &'static PushStats {
     static STATS: std::sync::OnceLock<PushStats> = std::sync::OnceLock::new();
     STATS.get_or_init(PushStats::default)
 }
 
-/// POST one batch to Expo and act on every ticket. Never fails: whatever goes
-/// wrong is counted and logged, and the send that triggered it has already
-/// been answered.
-///
-/// `tokens[i]` is the token `messages[i]` is addressed to; Expo returns the
+/// POST one batch to Expo and act on every ticket. Never fails: errors are
+/// counted and logged. `tokens[i]` is the token of `messages[i]`; Expo returns
 /// tickets in message order.
 async fn send_batch(
     conn: &Connection,
@@ -461,8 +385,7 @@ async fn send_batch(
     tokens: &[String],
     stats: &PushStats,
 ) {
-    // Through `util::http_post`, which forces a deadline (#913). A push nobody
-    // is waiting on must never be the thing that pins a handler open.
+    // `util::http_post` forces a deadline (#913).
     let response = match expo_request(url, auth, messages).send().await {
         Ok(r) => r,
         Err(e) => {
@@ -486,7 +409,7 @@ async fn send_batch(
                 *c.send_request_errors.entry(code.clone()).or_default() += 1;
             }
         });
-        // The status and Expo's error codes only: the body can quote tokens.
+        // Status and codes only: the body can quote tokens.
         tracing::warn!("expo push request failed: status {status}, codes {codes:?}");
         return;
     };
@@ -506,8 +429,7 @@ async fn send_batch(
                 let Some(id) = id else {
                     continue;
                 };
-                // Best-effort, like everything here: a DS running before
-                // migration 000037 fails this and simply checks no receipt.
+                // A DS running before migration 000037 fails this and checks no receipt.
                 let stored = conn
                     .execute(
                         "INSERT OR IGNORE INTO push_ticket (ticket_id, token, created_at) \
@@ -530,9 +452,8 @@ async fn send_batch(
     }
 }
 
-/// Delete a token Expo says no longer reaches a device, and any tickets still
-/// waiting on it. A device that is in fact still there re-registers on its next
-/// launch or foreground.
+/// Delete a token Expo says no longer reaches a device, and its pending
+/// tickets. A live device re-registers on its next launch or foreground.
 async fn prune_token(conn: &Connection, token: &str, stats: &PushStats) {
     let deleted = conn
         .execute(
@@ -571,7 +492,7 @@ pub struct ReceiptSweep {
 }
 
 /// Ask Expo for the receipts of every outstanding ticket and act on them.
-/// Called from the GC sweep in `main`.
+/// Called from the GC sweep.
 pub async fn check_push_receipts(conn: &Connection) -> anyhow::Result<ReceiptSweep> {
     check_receipts_at(conn, EXPO_RECEIPTS_URL, expo_token(), stats()).await
 }
@@ -630,8 +551,7 @@ async fn check_receipts_at(
             continue;
         };
         for (id, outcome) in receipts {
-            // Only ids we asked about: a receipt for anything else is ignored
-            // rather than trusted to name a row.
+            // Only ids we asked about; any other receipt is not trusted to name a row.
             let Some(token) = pending.get(&id) else {
                 continue;
             };
@@ -657,10 +577,8 @@ async fn check_receipts_at(
     Ok(sweep)
 }
 
-/// `GET /v1/ops/push` — push outcome counts since the DS started, plus how many
-/// tickets are still waiting on a receipt. Behind the operator token: 404 when
-/// none is configured, 401 without the right bearer token (like
-/// `/v1/ops/errors`).
+/// `GET /v1/ops/push`: outcome counts plus tickets awaiting a receipt. 404
+/// without an operator token configured, 401 without the right bearer.
 pub async fn ops_push(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(expected) = state.metrics_token.as_deref() else {
         return StatusCode::NOT_FOUND.into_response();
@@ -691,10 +609,8 @@ async fn pending_tickets(conn: &Connection) -> anyhow::Result<i64> {
     }
 }
 
-/// Every member of `conversation_id` except `sender_id`.
-///
-/// ORs across the same three membership shapes `writes::is_member` does, so a
-/// channel id resolves through its group and a DM through its own table.
+/// Every member of `conversation_id` except `sender_id`, across the same three
+/// membership shapes as `writes::is_member`.
 async fn conversation_recipients(
     conn: &Connection,
     conversation_id: &str,
@@ -721,12 +637,8 @@ async fn conversation_recipients(
     Ok(out)
 }
 
-/// `(token, platform, user_id)` per registered device.
-///
-/// The `user_id` rides along because the notification handle is minted per
-/// RECIPIENT USER (#1122): every token belonging to one user carries that
-/// user's handle, so the payload names no conversation and a provider cannot
-/// correlate a handle across users.
+/// `(token, platform, user_id)` per registered device. `user_id` is carried
+/// because the handle is minted per recipient user (#1122).
 async fn push_tokens(
     conn: &Connection,
     user_ids: &[String],
@@ -746,19 +658,13 @@ async fn push_tokens(
     Ok(out)
 }
 
-/// One Expo message, built from nothing but the token, the platform and the
-/// handle — so what leaves this process can be asserted on directly.
+/// One Expo message, built only from token, platform and handle so the output
+/// can be asserted on directly.
 ///
-/// **The `data` blob is the whole privacy surface.** Expo, APNs and FCM all see
-/// it, and all three sit outside the overlay by design. It therefore carries the
-/// opaque handle and NOTHING else: no conversation id (#1157), no `kind`, no
-/// sender, no preview, no plaintext. The title and body are fixed strings.
-///
-/// A `None` handle means minting failed for that recipient (best-effort by
-/// design — a push nobody is waiting on must not fail a send). The notification
-/// still goes out, because "you have a new message" is true and useful, but it
-/// carries no routing and the tap opens the app. That is strictly better than
-/// naming the conversation to three third parties in order to route a tap.
+/// `data` is the whole privacy surface: Expo, APNs and FCM all see it. It
+/// carries the opaque handle and nothing else (#1157). A `None` handle (mint
+/// failed) still sends the buzz with no routing, rather than naming the
+/// conversation.
 fn expo_message(
     token: &str,
     platform: Option<&str>,
@@ -771,15 +677,11 @@ fn expo_message(
         "priority": "high",
         "data": { "h": handle },
     });
-    // Android posts to the channel the client created at startup.
     if platform == Some("android") {
         msg["channelId"] = serde_json::Value::String("default".into());
-        // #1508: the system posts a backgrounded app's notification itself,
-        // and none of `data` is readable from the tray afterwards — only its
-        // tag. Tagging it with the handle (already in the payload, random per
-        // notification) is what lets the app find it again to clear it once
-        // read. A per-conversation tag would have been simpler and is exactly
-        // what #1122 removed: a stable value the providers could count.
+        // #1508: the tray exposes only the tag, so tagging with the handle lets the
+        // app clear it once read. A per-conversation tag is the stable value #1122
+        // removed.
         if let Some(h) = handle {
             msg["tag"] = serde_json::Value::String(h.clone());
         }
@@ -790,13 +692,9 @@ fn expo_message(
 /// Mint one opaque handle per recipient user and record what it resolves to
 /// (#1122). Returns `user_id -> handle`.
 ///
-/// 128 bits from the OS CSPRNG, fresh every notification: an HMAC of the
-/// conversation id would be a stable pseudonym the providers could COUNT even
-/// without naming it, which is most of what the metadata was worth.
-///
-/// Best-effort by design — a push nobody is waiting on must not be the thing
-/// that fails a send. A user with no handle simply gets no `h`, and the client
-/// falls back to `conversationId` exactly as an older client does.
+/// Fresh CSPRNG bytes per notification: an HMAC of the conversation id would
+/// be a stable pseudonym the providers could count. Best-effort; a user with no
+/// handle gets no `h`.
 pub async fn mint_push_handles(
     conn: &Connection,
     user_ids: &[String],
@@ -842,31 +740,16 @@ async fn is_dm(conn: &Connection, conversation_id: &str) -> anyhow::Result<bool>
     Ok(rows.next().await?.is_some())
 }
 
-// ── POST /v1/push/resolve ────────────────────────────────────────────────────
-
-/// How long a minted handle stays resolvable (#1122).
-///
-/// A notification is worth resolving for days, not months: the tap may come
-/// long after the buzz, and `onDataReceived` may re-ingest in the background
-/// before any tap at all. Past this the handle is swept and the client degrades
-/// to opening the app.
-///
-/// The TTL is the whole mitigation for the one cost this design has — the DS
-/// holding a durable "a notification for conversation X went to user Y" record
-/// it previously only held for the instant it built the payload.
+/// How long a minted handle stays resolvable (#1122). The TTL bounds the one
+/// cost of this design: the DS holding a record that a notification for
+/// conversation X went to user Y.
 pub const PUSH_HANDLE_TTL_DAYS: i64 = 7;
 
-/// POST `/v1/push/resolve` — trade an opaque handle for its routing target.
+/// POST `/v1/push/resolve`: trade an opaque handle for its routing target.
 ///
-/// Scoped to the authenticated user, and a handle that is not theirs answers
-/// exactly like one that does not exist: `conversation_id: None`. A distinct
-/// error would confirm the handle is real, which is the one thing the opaque
-/// handle exists to avoid leaking.
-///
-/// **Deliberately not single-use.** `onDataReceived` resolves it for a
-/// background re-ingest and a later tap resolves it again to navigate; burning
-/// it on first use would break tap-to-conversation for every notification the
-/// client had already ingested.
+/// Scoped to the caller; another user's handle answers exactly like a missing
+/// one, so possession confirms nothing. Not single-use: a background re-ingest
+/// and a later tap both resolve it.
 pub async fn resolve_push_handle(
     State(state): State<AppState>,
     req: RawRequest,
@@ -890,11 +773,8 @@ pub async fn resolve_push_handle(
     ))
 }
 
-/// The scoped lookup: handle AND owner, inside the TTL.
-///
-/// `user_id` is part of the predicate rather than checked afterwards, so a
-/// handle belonging to someone else is indistinguishable from an absent one at
-/// the SQL level — there is no branch that could later be made to differ.
+/// The scoped lookup: handle and owner, inside the TTL. `user_id` is in the
+/// predicate so "not yours" and "absent" are one SQL path.
 pub async fn lookup_push_handle(
     conn: &Connection,
     user_id: &str,
@@ -930,46 +810,27 @@ pub async fn sweep_push_handles(conn: &Connection) -> anyhow::Result<u64> {
     Ok(n)
 }
 
-// ── POST /v1/push/dismiss + /v1/push/dismissed (#1508) ───────────────────────
-//
-// A notification used to stay in the tray after its message was read, unless
-// it was the very notification the user tapped. The reading client — any of
-// them: desktop, the TUI, the same phone, another phone — now reports the
-// conversations whose read cursor moved, and the DS clears that user's
-// notifications for them on every device:
-//
-//   1. stamp `dismissed_at` on the user's handles for those conversations that
-//      were minted BEFORE the read (an age, so the clocks never have to agree:
-//      a message that lands after the read keeps its notification);
-//   2. send each of the user's devices one silent, data-only push carrying the
-//      handles — the same random values the notifications already carried, so
-//      the providers learn which notifications were read, never a conversation;
-//   3. keep the stamped rows until the TTL sweep, so a device that missed the
-//      silent push asks `/v1/push/dismissed` on its next foreground.
-//
-// Rate: nothing is sent when nothing is outstanding (re-reading a conversation
-// is free), the client debounces its reports, and the DS coalesces one user's
-// dismissals into at most one push per device per [`DISMISS_COALESCE`].
+// Read dismissal (#1508). The reader reports conversations whose read cursor
+// moved; the DS stamps `dismissed_at` on that user's handles minted before the
+// read (an age, so clocks need not agree), sends each of their devices one
+// silent push carrying the handles, and keeps the rows until the TTL sweep so
+// a device that missed it can ask `/v1/push/dismissed`. Coalesced per user by
+// [`DISMISS_COALESCE`].
 
 /// How long one user's dismissals are gathered before the silent push goes.
-/// Reading three conversations in a row is one push, not three. Short, because
-/// the point is that the tray clears while the user is still looking.
 pub const DISMISS_COALESCE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Handles per silent push. 100 × 22 characters stays far below the 4 KiB
-/// APNs/FCM payload cap; more than that is split across pushes.
+/// Handles per silent push; 100 × 22 characters stays well below the 4 KiB
+/// APNs/FCM payload cap.
 const DISMISS_HANDLES_PER_PUSH: usize = 100;
 
-/// How long a silent dismissal may wait at the provider for an offline device.
-/// Past the handle TTL the notification can no longer be matched anyway.
+/// How long a silent dismissal may wait at the provider. Past the handle TTL
+/// it can no longer match anyway.
 const DISMISS_TTL_SECS: i64 = PUSH_HANDLE_TTL_DAYS * 24 * 60 * 60;
 
-/// The silent push that clears notifications. Built from the token, the
-/// platform and the handles only, so what leaves the process can be asserted on
-/// directly: no title, no body (so no OS ever shows it, and an app that does
-/// not understand `d` ignores it — expo-notifications drops a data-only
-/// message it has no task for, on every version we have shipped), and `data`
-/// is `{ d }` and nothing else.
+/// The silent push that clears notifications: `data` is `{ d }` only, with no
+/// title or body, so no OS shows it and an app that does not understand `d`
+/// drops it.
 fn expo_dismiss_message(
     token: &str,
     platform: Option<&str>,
@@ -978,35 +839,28 @@ fn expo_dismiss_message(
     let mut msg = serde_json::json!({
         "to": token,
         "data": { "d": handles },
-        // Normal: a dismissal is not worth waking a dozing phone for, and iOS
-        // requires priority 5 for a background (content-available) push.
+        // iOS requires priority 5 for a background (content-available) push.
         "priority": "normal",
         "ttl": DISMISS_TTL_SECS,
     });
     if platform == Some("ios") {
-        // Wakes the app in the background to run the dismissal task. Both
-        // spellings: `contentAvailable` is the current field, `_contentAvailable`
-        // the older one; Expo prefers the former when both are set.
+        // Both spellings: `contentAvailable` is current, `_contentAvailable` older.
         msg["contentAvailable"] = serde_json::Value::Bool(true);
         msg["_contentAvailable"] = serde_json::Value::Bool(true);
     }
     msg
 }
 
-/// Stamp the user's outstanding handles for `entries` dismissed and return
-/// them. Only handles minted at or before each read (`now - read_secs_ago`),
-/// within the TTL, and not already dismissed.
-///
-/// Best-effort like the rest of push: a database that predates migration
-/// 000040 has no `dismissed_at` column, and that reads as "nothing to dismiss".
+/// Stamp and return the user's outstanding handles for `entries`: minted at or
+/// before each read, within the TTL, not already dismissed. A database before
+/// migration 000040 reads as "nothing to dismiss".
 pub async fn mark_dismissed(
     conn: &Connection,
     user_id: &str,
     entries: &[DismissEntry],
     now_unix: i64,
 ) -> Vec<String> {
-    // One cutoff per conversation: the LATEST read wins if a conversation is
-    // named twice.
+    // The latest read wins if a conversation is named twice.
     let mut cutoffs: BTreeMap<&str, i64> = BTreeMap::new();
     for e in entries {
         if e.conversation_id.is_empty() || e.conversation_id.len() > 128 {
@@ -1141,8 +995,7 @@ fn pending_dismissals() -> &'static Mutex<HashMap<String, Vec<String>>> {
 }
 
 /// Queue `handles` for `user_id`'s next dismissal push, scheduling it if none
-/// is pending. Returns whether this call scheduled the send (the first in a
-/// window), so a test can see the coalescing.
+/// is pending. Returns whether this call scheduled it.
 pub fn queue_dismissals(
     db: std::sync::Arc<crate::db::Db>,
     expo_url: String,
@@ -1190,11 +1043,9 @@ pub fn queue_dismissals(
     schedule
 }
 
-/// POST `/v1/push/dismiss` — the caller read these conversations; clear their
-/// notifications on every device of theirs (#1508).
-///
-/// Answers how many notifications were newly dismissed. The push itself goes
-/// out after the response, coalesced per user ([`queue_dismissals`]).
+/// POST `/v1/push/dismiss`: clear the caller's notifications for these
+/// conversations on every device (#1508). Answers how many were newly
+/// dismissed; the push goes out later ([`queue_dismissals`]).
 pub async fn dismiss_push(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1226,10 +1077,8 @@ pub async fn dismiss_push(
     ))
 }
 
-/// POST `/v1/push/dismissed` — which of these tray notifications were read
-/// since (#1508)? The foreground catch-up for a device that missed the silent
-/// push. Another user's handle is simply absent from the answer, exactly like
-/// one that was never minted.
+/// POST `/v1/push/dismissed`: which of these handles were read since (#1508)?
+/// The foreground catch-up for a device that missed the silent push.
 pub async fn read_dismissed_push_handles(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1275,20 +1124,14 @@ mod tests {
         );
     }
 
-    /// Without a token the header must be ABSENT rather than empty — an empty
-    /// bearer is a credential Expo would reject once enforcement is on, and it
-    /// would read as "authenticated" to anyone auditing the call.
+    /// Without a token the header must be absent, not an empty bearer.
     #[test]
     fn no_authorization_header_without_a_token() {
         assert_eq!(authorization(None), None);
     }
 
-    /// #1157: the payload carries the handle and nothing else.
-    ///
-    /// Asserted on the SERIALIZED `data` blob rather than on fields, because
-    /// that string is exactly what Expo, APNs and FCM receive. A test that
-    /// checked named keys would pass while some future field quietly reappeared
-    /// beside them.
+    /// #1157: the payload carries the handle and nothing else. Asserted on the
+    /// serialized blob, which is exactly what the providers receive.
     #[test]
     fn the_payload_data_carries_only_the_handle() {
         let handle = "Zm9vYmFyMTIzNDU2Nzg5".to_string();
@@ -1303,7 +1146,6 @@ mod tests {
         );
         assert_eq!(obj.get("h").unwrap().as_str(), Some(handle.as_str()));
 
-        // And nothing anywhere in the message names a conversation or a kind.
         let wire = serde_json::to_string(&msg).unwrap();
         for forbidden in ["conversationId", "conversation_id", "kind", "senderId"] {
             assert!(
@@ -1313,8 +1155,7 @@ mod tests {
         }
     }
 
-    /// A recipient whose handle could not be minted still gets the buzz, with
-    /// no routing — never a conversation id as a consolation prize.
+    /// A recipient without a handle still gets the buzz, with no routing.
     #[test]
     fn a_missing_handle_degrades_to_no_routing() {
         let msg = expo_message("ExponentPushToken[abc]", None, None);
@@ -1359,10 +1200,6 @@ mod tests {
     }
 
     /// Someone else's handle is indistinguishable from one that never existed.
-    ///
-    /// The point of the opaque handle is that possessing it proves nothing, so
-    /// the resolve must not confirm it is real to a caller it does not belong
-    /// to — same answer for "not yours" and "not a handle".
     #[tokio::test]
     async fn another_users_handle_is_indistinguishable_from_a_missing_one() {
         let c = conn().await;
@@ -1381,12 +1218,8 @@ mod tests {
         );
     }
 
-    /// Every notification gets a fresh handle.
-    ///
-    /// This is the whole reason the design is a random handle rather than an
-    /// HMAC of the conversation id: a stable per-conversation pseudonym would
-    /// let Expo/APNs/FCM COUNT a conversation without naming it, which is most
-    /// of what the metadata was worth.
+    /// Every notification gets a fresh handle, so providers cannot count a
+    /// conversation.
     #[tokio::test]
     async fn handles_are_never_reused_across_notifications() {
         let c = conn().await;
@@ -1419,7 +1252,6 @@ mod tests {
         let a = handles.get("alice").unwrap();
         let b = handles.get("bob").unwrap();
         assert_ne!(a, b, "two recipients must not share a handle");
-        // Each resolves for its owner and for nobody else.
         assert!(lookup_push_handle(&c, "alice", a).await.unwrap().is_some());
         assert!(lookup_push_handle(&c, "bob", b).await.unwrap().is_some());
         assert_eq!(lookup_push_handle(&c, "alice", b).await.unwrap(), None);
@@ -1427,10 +1259,6 @@ mod tests {
     }
 
     /// Past the TTL a handle stops resolving, and the sweep removes it.
-    ///
-    /// The TTL is the mitigation for this table's one cost — a durable record
-    /// that a notification for conversation X went to user Y — so "it expires"
-    /// has to be a property, not a comment.
     #[tokio::test]
     async fn an_expired_handle_stops_resolving_and_is_swept() {
         let c = conn().await;
@@ -1438,7 +1266,6 @@ mod tests {
             mint_push_handles(&c, &["alice".to_string()], "conv-1", "dm").await;
         let h = handles.get("alice").unwrap().clone();
 
-        // Age the row past the TTL.
         c.execute(
             "UPDATE push_handle SET created_at = datetime('now', ?1)",
             libsql::params![format!("-{} days", PUSH_HANDLE_TTL_DAYS + 1)],
@@ -1453,7 +1280,6 @@ mod tests {
         );
         assert_eq!(sweep_push_handles(&c).await.unwrap(), 1);
 
-        // And a fresh one survives the sweep, so it is not deleting everything.
         let fresh = mint_push_handles(&c, &["alice".to_string()], "conv-2", "dm").await;
         assert_eq!(sweep_push_handles(&c).await.unwrap(), 0);
         assert!(lookup_push_handle(&c, "alice", fresh.get("alice").unwrap())
@@ -1462,11 +1288,8 @@ mod tests {
             .is_some());
     }
 
-    // ── #1423: tickets, receipts, pruning ────────────────────────────────────
-
-    /// A stand-in for Expo: answers every POST with `status` and `body`, and
-    /// keeps what it was sent. A real socket and the real client, so the
-    /// request the DS builds is the one that goes out.
+    /// A stand-in for Expo on a real socket: answers every POST with `status` and
+    /// `body`, and keeps what it was sent.
     async fn fake_expo(
         status: u16,
         body: serde_json::Value,
@@ -1553,7 +1376,6 @@ mod tests {
                 PushOutcome::Error(PushErrorClass::Other),
             ]
         );
-        // A request-level error has no tickets to read.
         assert_eq!(parse_tickets(&serde_json::json!({ "errors": [] })), None);
     }
 
@@ -1568,9 +1390,8 @@ mod tests {
         assert_eq!(request_error_codes(&body), vec!["PUSH_TOO_MANY_EXPERIENCE_IDS"]);
     }
 
-    /// The bug: a 200 with error tickets used to be read as success. Now each
-    /// ticket is acted on: `DeviceNotRegistered` prunes its token, an accepted
-    /// ticket is kept for its receipt, other errors are only counted.
+    /// A 200 with error tickets: `DeviceNotRegistered` prunes, an accepted ticket
+    /// is kept for its receipt, other errors are only counted.
     #[tokio::test]
     async fn tickets_prune_dead_tokens_and_keep_ids_for_receipts() {
         let c = conn().await;
@@ -1615,7 +1436,6 @@ mod tests {
         assert_eq!(snap["ticket_errors"]["DeviceNotRegistered"], 1);
         assert_eq!(snap["ticket_errors"]["MessageRateExceeded"], 1);
         assert_eq!(snap["tokens_pruned"], 1);
-        // The counts name no token and no user.
         let wire = snap.to_string();
         assert!(!wire.contains("ExponentPushToken"), "{wire}");
         assert!(!wire.contains("alice") && !wire.contains("bob"), "{wire}");
@@ -1645,8 +1465,7 @@ mod tests {
         assert_eq!(snap["messages_sent"], 0);
     }
 
-    /// An unreachable Expo is a counted failure, not an error or a panic: the
-    /// send that triggered it has already been answered.
+    /// An unreachable Expo is a counted failure, not an error or a panic.
     #[tokio::test]
     async fn an_unreachable_expo_is_counted_not_raised() {
         let c = conn().await;
@@ -1662,9 +1481,8 @@ mod tests {
         assert_eq!(counts(&stats)["send_request_failures"], 1);
     }
 
-    /// Receipts: a `DeviceNotRegistered` receipt prunes the token, an answered
-    /// ticket is deleted either way, an unanswered one waits, and one past 24
-    /// hours is dropped without being asked about.
+    /// Receipts: `DeviceNotRegistered` prunes, answered tickets are deleted,
+    /// unanswered ones wait, and expired ones are dropped unasked.
     #[tokio::test]
     async fn receipts_prune_dead_tokens_and_purge_answered_and_expired_tickets() {
         let c = conn().await;
@@ -1742,8 +1560,7 @@ mod tests {
         assert_eq!(counts(&stats)["receipt_request_failures"], 1);
     }
 
-    /// The table bounds itself: a ticket older than a day cannot outlive the
-    /// next insert, even if the sweep never runs.
+    /// A day-old ticket cannot outlive the next insert, even without a sweep.
     #[tokio::test]
     async fn the_ticket_table_drops_day_old_rows_on_insert() {
         let c = conn().await;
@@ -1765,8 +1582,6 @@ mod tests {
             vec![("new".to_string(), "t".to_string())]
         );
     }
-
-    // ── #1431: channel pushes by default, per-channel mute ────────────────────
 
     /// A group with one channel: alice (the sender), bob (who muted the
     /// channel) and carol, each with one push token.
@@ -1790,8 +1605,7 @@ mod tests {
         c
     }
 
-    /// Which tokens one send woke, by running the real fan-out against a fake
-    /// Expo and reading back what it was sent.
+    /// Which tokens one send woke, via the real fan-out against a fake Expo.
     async fn woken(c: &Connection, audience: &PushAudience) -> Vec<String> {
         let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
         notify_new_message_at(c, &url, "ch1", "alice", audience)
@@ -1808,9 +1622,8 @@ mod tests {
         out
     }
 
-    /// The issue's acceptance test: a user who muted a channel gets no push
-    /// for ordinary chatter or for `@all`, but does for a direct `@username`.
-    /// Everyone else in the channel is pushed for all three.
+    /// A muted member gets no push for chatter or `@all`, but does for a direct
+    /// `@username`; everyone else gets all three.
     #[tokio::test]
     async fn a_muted_member_is_pushed_only_when_mentioned_by_name() {
         let c = muted_channel_fixture().await;
@@ -1820,25 +1633,19 @@ mod tests {
             "ExponentPushToken[carol]".to_string(),
         ];
 
-        // Chatter and `@all` look the same on the wire from a current client:
-        // everyone, nobody named.
+        // Chatter and `@all` are identical on the wire from a current client.
         let chatter = PushAudience::from_send(Some(vec![]), Some(vec![])).unwrap();
         assert_eq!(woken(&c, &chatter).await, carol_only, "chatter skips the muted member");
         assert_eq!(woken(&c, &chatter).await, carol_only, "@all skips the muted member");
 
-        // `@bob`: everyone is still woken, and bob gets through his mute.
         let at_bob =
             PushAudience::from_send(Some(vec![]), Some(vec!["bob".to_string()])).unwrap();
         assert_eq!(woken(&c, &at_bob).await, both, "a direct mention reaches a muted member");
 
-        // The sender is never pushed their own message.
         assert!(!woken(&c, &at_bob).await.contains(&"ExponentPushToken[alice]".to_string()));
     }
 
-    /// The oldest store build keeps working against a mute-aware DS: its
-    /// chatter (`push_to` absent) still pushes nobody, its `@all` respects the
-    /// mute, and its `@username` (a non-empty `push_to`, no `push_mentions`)
-    /// still reaches exactly the members named, through a mute.
+    /// The oldest store build keeps its meaning against a mute-aware DS.
     #[tokio::test]
     async fn an_old_client_send_keeps_its_meaning() {
         let c = muted_channel_fixture().await;
@@ -1863,8 +1670,6 @@ mod tests {
         assert_eq!(woken(&c, &audience).await, vec!["ExponentPushToken[carol]".to_string()]);
     }
 
-    // ── #1508: a read clears its notifications on every device ───────────────
-
     fn entry(conversation_id: &str, read_secs_ago: u32) -> DismissEntry {
         DismissEntry {
             conversation_id: conversation_id.to_string(),
@@ -1876,21 +1681,18 @@ mod tests {
         crate::util::now_unix() as i64
     }
 
-    /// Android tags the notification with its handle, so the app can find a
-    /// system-posted notification in the tray again; iOS needs no tag (the
-    /// handle is readable from a delivered notification's payload there).
+    /// Android tags the notification with its handle; iOS reads the handle from the
+    /// delivered payload and needs no tag.
     #[test]
     fn an_android_notification_is_tagged_with_its_handle() {
         let h = "aGFuZGxlLXRhZw".to_string();
         let android = expo_message("t", Some("android"), Some(&h));
         assert_eq!(android["tag"].as_str(), Some(h.as_str()));
         assert!(expo_message("t", Some("ios"), Some(&h)).get("tag").is_none());
-        // No handle, no tag — never a conversation-derived stand-in.
         assert!(expo_message("t", Some("android"), None).get("tag").is_none());
     }
 
-    /// The silent push: `data` is `{ d }` and nothing else, no title or body
-    /// (so no OS shows it and an older app ignores it), and iOS asks to be
+    /// The silent push carries only `{ d }`, no title or body, and iOS asks to be
     /// woken in the background.
     #[test]
     fn the_dismissal_push_is_silent_and_carries_only_handles() {
@@ -1913,8 +1715,8 @@ mod tests {
         assert!(android.get("contentAvailable").is_none());
     }
 
-    /// The core rule: only the reader's own handles, only for the conversations
-    /// read, only ones minted before the read — and only once.
+    /// Only the reader's own handles, for the conversations read, minted before the
+    /// read, and only once.
     #[tokio::test]
     async fn a_read_dismisses_only_the_readers_earlier_notifications_once() {
         let c = conn().await;
@@ -1924,30 +1726,24 @@ mod tests {
         let other_conv = mint_push_handles(&c, &alice, "conv-2", "dm").await["alice"].clone();
         let bob = mint_push_handles(&c, &["bob".to_string()], "conv-1", "dm").await["bob"].clone();
 
-        // A read that happened a minute before these were minted clears none
-        // of them: those messages arrived after it.
+        // A read a minute before the mint clears nothing.
         assert!(mark_dismissed(&c, "alice", &[entry("conv-1", 60)], now()).await.is_empty());
 
-        // A read now (one second of margin past the mint) clears alice's two
-        // conv-1 notifications and nothing else.
+        // A read now (one second past the mint) clears alice's two conv-1 handles.
         let mut got = mark_dismissed(&c, "alice", &[entry("conv-1", 0)], now() + 1).await;
         got.sort();
         let mut want = vec![a1.clone(), a2.clone()];
         want.sort();
         assert_eq!(got, want);
 
-        // Re-reading is free: nothing outstanding, nothing to push.
         assert!(mark_dismissed(&c, "alice", &[entry("conv-1", 0)], now() + 1).await.is_empty());
 
-        // The catch-up query answers for alice's dismissed handles only.
         let asked = vec![a1.clone(), a2.clone(), other_conv.clone(), bob.clone(), "nope".into()];
         let mut dismissed = dismissed_handles(&c, "alice", &asked).await;
         dismissed.sort();
         assert_eq!(dismissed, want);
-        // Bob's own handle is not dismissed, and alice's are not his to see.
         assert!(dismissed_handles(&c, "bob", &asked).await.is_empty());
 
-        // Naming someone else's conversation does not reach their handles.
         assert!(mark_dismissed(&c, "mallory", &[entry("conv-1", 0)], now() + 1).await.is_empty());
         assert!(dismissed_handles(&c, "bob", &[bob]).await.is_empty());
     }
@@ -1968,12 +1764,10 @@ mod tests {
         assert!(mark_dismissed(&c, "alice", &[entry("", 0), entry(&long, 0)], now()).await.is_empty());
     }
 
-    /// A database from before migration 000040 has no `dismissed_at`: the
-    /// endpoints answer "nothing" rather than failing.
+    /// Before migration 000040 there is no `dismissed_at`: answer "nothing".
     #[tokio::test]
     async fn a_database_without_the_column_dismisses_nothing() {
         let c = conn().await;
-        // The real schema, minus what 000040 added.
         c.execute("ALTER TABLE push_handle DROP COLUMN dismissed_at", ())
             .await
             .unwrap();
@@ -1988,8 +1782,8 @@ mod tests {
         assert!(dismissed_handles(&c, "alice", &["h1".to_string()]).await.is_empty());
     }
 
-    /// The silent push reaches every device of the reader and nobody else's,
-    /// and splits a long list rather than overflowing the payload.
+    /// The silent push reaches every device of the reader and nobody else's, and
+    /// splits a long list.
     #[tokio::test]
     async fn dismissals_reach_every_device_of_the_reader_only() {
         let c = conn().await;
@@ -2052,7 +1846,6 @@ mod tests {
         assert_eq!(batches.len(), 1, "one request: {batches:?}");
         assert_eq!(batches[0][0]["data"]["d"], serde_json::json!(["h1", "h2"]));
 
-        // The window closed, so the next read schedules a fresh push.
         assert!(queue_dismissals(db.clone(), url, window, "carol-1508", vec!["h3".into()]));
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         assert_eq!(seen.lock().unwrap().len(), 2);

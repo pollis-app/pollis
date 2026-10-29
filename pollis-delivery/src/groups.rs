@@ -1,41 +1,13 @@
-//! Domain B — groups / channels / membership / invites / join-requests.
+//! Groups, channels, membership, invites and join requests (#419).
 //!
-//! The second write-domain in Goal B (#419). It copies the convention domain A
-//! ([`crate::messages`]) established verbatim:
+//! Same shape as [`crate::messages`]: each `apply_*(conn, authed, body)` holds
+//! both the authorization decision and the write, and is shared by the axum
+//! handler and the test harness. All writes land on the main DB.
 //!
-//!   - **Bodies** — one `#[derive(Deserialize)] *Body` per endpoint, plain JSON.
-//!   - **Pure conn-level fns** — `apply_*(conn, authed, body)` embed BOTH the
-//!     authorization decision AND the write, returning [`WriteOutcome`]. The real
-//!     axum handler and the in-process test harness both call the *same*
-//!     `apply_*`, so server-side authz is exercised with zero duplication.
-//!   - **axum handlers** — `(State, RawRequest) -> Response`:
-//!     `gate_and_parse` → `apply_*` → map outcome to 200 / 403 / 400 / 500.
-//!
-//! ## Where the writes land
-//!
-//! Every domain-B table (`groups`, `channels`, `group_member`, `group_invite`,
-//! `group_join_request`, plus the `conversation_watermark` / `message_envelope`
-//! rows a channel-delete cleans up) lives in the **MAIN DB** (`state.db`). So all
-//! `apply_*` fns run on the main connection.
-//!
-//! ## Authorization (the security core)
-//!
-//! `gate` proves *which user* signed; each `apply_*` then proves they're allowed:
-//!   - create group: the actor is the creator (`owner_id` bound to the signer).
-//!   - create channel: the actor is a current member of the group.
-//!   - update/delete channel, update/delete group, role change, member remove,
-//!     invite create, join-request approve/reject: the actor's role is
-//!     **re-derived server-side** from `group_member` and must be `admin` (member
-//!     remove additionally allows self-removal).
-//!   - invite accept/decline: the actor is the invitee (writes are scoped
-//!     `invitee_id = :actor`).
-//!   - leave group: the actor is a current member (removes only their own row).
-//!   - join-request create: the actor is the requester, the group exists, and
-//!     the actor is not already a member (#917).
-//!
-//! On the no-auth path (`authed == None`, only when `POLLIS_DS_REQUIRE_AUTH` is
-//! off) the role/identity checks are skipped and the actor comes from the body,
-//! mirroring `commit::submit`, `writes.rs`, and `messages.rs`.
+//! Admin-gated writes re-derive the actor's role from `group_member` and never
+//! trust a client-supplied one. On the no-auth path (`authed == None`, only
+//! when `POLLIS_DS_REQUIRE_AUTH` is off) role checks are skipped and the actor
+//! comes from the body.
 
 use axum::{
     extract::State,
@@ -56,26 +28,13 @@ use crate::writes::{
 };
 use crate::AppState;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::groups::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api` so client and server share one
+// declaration.
 pub use pollis_api::groups::*;
 
-// ── Shared authz helpers ─────────────────────────────────────────────────────
-
-/// The actor's role in `group_id`, re-derived server-side from `group_member`.
-/// `None` when the actor is not a member. Every admin-gated domain-B write
-/// re-derives this rather than trusting any client-supplied role.
-///
-/// The statement itself is [`pollis_schema::authz::GROUP_ROLE_SQL`], shared with
-/// the client's preflight so the two cannot drift (#942).
-///
-/// `pub(crate)` because it is the ONLY group-role read in the DS: `emoji.rs`
-/// used to carry its own copy whose `row.get::<String>(0).ok()` swallowed a
-/// decode error into "not an admin", so a corrupt `role` column silently denied
-/// instead of erroring (#875). One reader, one behaviour.
+/// The actor's role in `group_id`, re-derived server-side; `None` when not a
+/// member. The SQL is shared with the client preflight (#942), and this is the
+/// DS's only group-role read (#875).
 pub(crate) async fn group_role(
     conn: &Connection,
     group_id: &str,
@@ -107,12 +66,8 @@ pub(crate) async fn is_admin(conn: &Connection, group_id: &str, user_id: &str) -
     Ok(group_role(conn, group_id, user_id).await?.as_deref() == Some("admin"))
 }
 
-/// True when `group_id` names a real group.
-///
-/// #917: needed because this crate's connections run with `foreign_keys=OFF`
-/// (see `db.rs`), so a `REFERENCES groups(id)` column does NOT reject a write
-/// naming a group that was never created. Any `apply_*` that inserts a row
-/// keyed by a client-supplied group id has to say so itself.
+/// True when `group_id` names a real group. Needed because connections run
+/// with `foreign_keys=OFF`, so `REFERENCES groups(id)` rejects nothing (#917).
 pub(crate) async fn group_exists(conn: &Connection, group_id: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
@@ -138,32 +93,19 @@ async fn channel_group_id(conn: &Connection, channel_id: &str) -> anyhow::Result
 }
 
 /// Add `user_id` to `group_id` as a plain member and seed their per-(channel,
-/// device) watermarks.
-///
-/// This is the **only** implementation. It used to be documented as mirroring a
-/// `pollis_core::add_member_to_group` byte-for-byte; that function no longer
-/// exists (group membership is a DS-owned write — the client never INSERTs into
-/// `group_member`), and the only `add_member_to_group` left in pollis-core is an
-/// unrelated MLS test helper. Shape: idempotent `INSERT OR IGNORE` plus a
-/// best-effort watermark seed, so accepting an invite and approving a join
-/// request land identical rows.
-///
-/// Takes a bare [`Connection`] so it composes inside a caller's transaction
-/// (`&Transaction` derefs to `&Connection`).
+/// device) watermarks. The one member-add shared by invite accept,
+/// join-request approve and link redemption, so all three land identical rows. Takes a bare [`Connection`] so it composes inside a
+/// transaction.
 async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> anyhow::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO group_member (group_id, user_id, role) VALUES (?1, ?2, 'member')",
         libsql::params![group_id.to_string(), user_id.to_string()],
     )
     .await?;
-    // Seed watermark rows for every (channel, device) pair so pre-join messages
-    // don't block envelope cleanup. Best-effort — mirrors the core helper, which
-    // logs and continues on failure. Revoked devices are excluded (#685) — they
-    // never rejoin, so they are not part of the GC roster.
-    // `reported_at = datetime('now')` marks each seeded device LIVE as of the join
-    // (#720): it pins for the staleness window, then stops if it never reports.
-    // The cursor is bound from `seeded_watermark_cursor` and the two columns are
-    // deliberately in different formats — see that function (#908).
+    // Seed watermarks so pre-join messages don't block envelope cleanup.
+    // Best-effort. Revoked devices are excluded (#685); `reported_at` marks the
+    // seeded device live as of the join (#720). See `seeded_watermark_cursor` for
+    // why the two columns differ in format (#908).
     let _ = conn
         .execute(
             "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at)
@@ -183,8 +125,6 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
     Ok(())
 }
 
-// ── POST /v1/groups/create ───────────────────────────────────────────────────
-
 pub async fn create_group(
     State(state): State<AppState>,
     req: RawRequest,
@@ -197,9 +137,8 @@ pub async fn create_group(
     outcome_response::<CreateGroupBody>(apply_create_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// INSERT the group, its creator's admin `group_member`, and any default
-/// channels — all in one transaction. Authz: a signed request may only create a
-/// group it owns (`owner_id` bound to the signer).
+/// Create the group, its creator's admin membership and any default channels
+/// in one transaction. A signed request may only create a group it owns.
 pub async fn apply_create_group(
     conn: &Connection,
     authed: Option<&str>,
@@ -209,11 +148,8 @@ pub async fn apply_create_group(
         Ok(o) => o,
         Err(o) => return Ok(o),
     };
-    // Every id this one request would register: the group, plus whichever
-    // default channels it asks for. All three are taken straight from the
-    // request body, so all three are attacker-chosen — #879 checked `body.id`
-    // alone, which left the two default-channel ids as an unguarded route to the
-    // same attack (#880).
+    // Every id in the body is attacker-chosen, the default-channel ids included
+    // (#880).
     let mut claims: Vec<(&str, ConversationKind)> =
         vec![(body.id.as_str(), ConversationKind::Group)];
     for channel_id in [
@@ -226,32 +162,25 @@ pub async fn apply_create_group(
         claims.push((channel_id, ConversationKind::Channel));
     }
     for (i, (id, _)) in claims.iter().enumerate() {
-        // Refuse an id already in use as any other kind of conversation. See
-        // `conversation_id_taken` — `is_member` ORs across dm/group/channel on
-        // one id, so reusing another conversation's id grants membership of it.
+        // An id already used by another conversation kind would grant membership of
+        // it, since `is_member` ORs across dm/group/channel on one id.
         if conversation_id_taken(conn, id).await? {
             return Ok(WriteOutcome::Forbidden);
         }
-        // And refuse one request that names the same id twice (a group that is
-        // also its own channel, or two default channels sharing an id). Nothing
-        // exists yet, so no lookup of existing rows can see this one; the
-        // registry's primary key would catch it below, but a 403 is the honest
-        // answer to a malformed request.
+        // A request naming the same id twice is malformed; answer 403 rather than
+        // let the registry's primary key fail.
         if claims[..i].iter().any(|(seen, _)| seen == id) {
             return Ok(WriteOutcome::Forbidden);
         }
     }
 
-    // #1095: a group name reaches every member's notification banner. A 403 is
-    // the answer this function already gives a malformed request (see the
-    // duplicate-claim branch above).
+    // #1095: a group name reaches every member's notification banner.
     if !crate::profile::is_valid_display_name(&body.name) {
         return Ok(WriteOutcome::Forbidden);
     }
 
     let tx = conn.transaction().await?;
-    // Claim the ids in the SAME transaction as the rows they name, so a claim
-    // the registry refuses takes the whole creation with it.
+    // Claim in the same transaction so a refused claim aborts the creation.
     for (id, kind) in &claims {
         claim_conversation_id(&tx, id, *kind).await?;
     }
@@ -291,8 +220,6 @@ pub async fn apply_create_group(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/groups/update ───────────────────────────────────────────────────
-
 pub async fn update_group(
     State(state): State<AppState>,
     req: RawRequest,
@@ -302,10 +229,8 @@ pub async fn update_group(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    // The updated ROW, not `{"status":"ok"}` (#987): the client used to SELECT
-    // the group straight back, which was a second round trip AND a read that
-    // could observe a later concurrent update and report it as the result of
-    // this one.
+    // Answer with the updated row (#987), so the client needs no read-back that
+    // could observe a later concurrent update.
     match apply_update_group(&conn, authed.as_deref(), &parsed).await? {
         WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
         WriteOutcome::EpochBehind {
@@ -372,8 +297,6 @@ pub async fn apply_update_group(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/groups/delete ───────────────────────────────────────────────────
-
 pub async fn delete_group(
     State(state): State<AppState>,
     req: RawRequest,
@@ -393,16 +316,10 @@ pub async fn delete_group(
 }
 
 /// Delete a group and everything belonging to it, in one transaction. Authz:
-/// admin.
+/// admin. Teardown is explicit because Turso has `foreign_keys=OFF`, so no
+/// cascade fires; see [`crate::teardown::purge_group`].
 ///
-/// This used to be `DELETE FROM groups` alone, trusting `ON DELETE CASCADE` for
-/// members, channels and invites. Production Turso has `foreign_keys=OFF`, so
-/// that cascade has never fired and the group's entire membership roster,
-/// channel list, message envelopes and invites survived the delete. Teardown is
-/// now explicit — see [`crate::teardown::purge_group`].
-///
-/// Returns the destroyed conversation ids for the caller's post-commit
-/// commit-log purge.
+/// Returns the destroyed conversation ids for the post-commit commit-log purge.
 pub async fn apply_delete_group(
     conn: &Connection,
     authed: Option<&str>,
@@ -422,8 +339,6 @@ pub async fn apply_delete_group(
     Ok((WriteOutcome::Ok, dead))
 }
 
-// ── POST /v1/groups/leave ────────────────────────────────────────────────────
-
 pub async fn leave_group(
     State(state): State<AppState>,
     req: RawRequest,
@@ -433,9 +348,8 @@ pub async fn leave_group(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    // Read the rooms BEFORE the leave: an empty group is torn down by the call
-    // below, taking its `channels` rows — and with them the only record of which
-    // voice rooms the leaver has to be evicted from — with it.
+    // Read the rooms first: tearing down an empty group deletes the `channels`
+    // rows that say which voice rooms to evict the leaver from.
     let rooms = crate::broker::group_rooms(&conn, &parsed.group_id).await?;
     let (outcome, dead_conversations) =
         apply_leave_group(&conn, authed.as_deref(), &parsed).await?;
@@ -443,8 +357,7 @@ pub async fn leave_group(
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
     }
-    // Same reason as `remove_member`: leaving deletes the membership row, not
-    // the LiveKit session that row authorized.
+    // Leaving deletes the membership row, not the LiveKit session it authorized.
     if matches!(outcome, WriteOutcome::Ok) {
         if let Some(user) = authed.clone().or_else(|| parsed.user_id.clone()) {
             crate::broker::evict_user_from_rooms(&state, &rooms, &user).await;
@@ -454,11 +367,7 @@ pub async fn leave_group(
 }
 
 /// Remove the actor's own membership; if the group is now empty, tear it down.
-/// Authz: the actor is a current member (a signed request may only remove its
-/// OWN row — `user_id` is bound to the signer).
-///
-/// The teardown is explicit for the same reason as [`apply_delete_group`]: the
-/// cascade it used to rely on does not fire on Turso.
+/// A signed request may only remove its own row.
 pub async fn apply_leave_group(
     conn: &Connection,
     authed: Option<&str>,
@@ -477,11 +386,8 @@ pub async fn apply_leave_group(
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
-    // The leaver's channel mutes (#1431) go with the membership they hung on.
+    // The leaver's channel mutes (#1431) go with the membership.
     crate::teardown::purge_member_channel_mutes(&tx, &body.group_id, &user).await?;
-    // Existence, not a tally: the only question is whether the group is now
-    // empty, and `LIMIT 1` stops at the first surviving member instead of
-    // counting every one of them inside the transaction.
     let mut survivors = tx
         .query(
             "SELECT 1 FROM group_member WHERE group_id = ?1 LIMIT 1",
@@ -498,8 +404,6 @@ pub async fn apply_leave_group(
     tx.commit().await?;
     Ok((WriteOutcome::Ok, dead))
 }
-
-// ── POST /v1/channels/create ─────────────────────────────────────────────────
 
 pub async fn create_channel(
     State(state): State<AppState>,
@@ -526,14 +430,12 @@ pub async fn apply_create_channel(
     if authed.is_some() && group_role(conn, &body.group_id, &creator).await?.is_none() {
         return Ok(WriteOutcome::Forbidden);
     }
-    // Refuse an id already in use as any other kind of conversation. See
-    // `conversation_id_taken` — `is_member` ORs across dm/group/channel on one
-    // id, so reusing another conversation's id grants membership of it.
+    // An id already used by another conversation kind would grant membership of
+    // it (see `conversation_id_taken`).
     if conversation_id_taken(conn, &body.id).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    // One transaction, so the registry claim and the channel it names commit
-    // together or not at all (#880).
+    // Claim and insert commit together or not at all (#880).
     let tx = conn.transaction().await?;
     claim_conversation_id(&tx, &body.id, ConversationKind::Channel).await?;
     tx.execute(
@@ -550,8 +452,6 @@ pub async fn apply_create_channel(
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
-
-// ── POST /v1/channels/update ─────────────────────────────────────────────────
 
 pub async fn update_channel(
     State(state): State<AppState>,
@@ -638,8 +538,6 @@ pub async fn apply_update_channel(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/channels/delete ─────────────────────────────────────────────────
-
 pub async fn delete_channel(
     State(state): State<AppState>,
     req: RawRequest,
@@ -662,12 +560,8 @@ pub async fn delete_channel(
 }
 
 /// Delete a channel and its whole message history in one transaction. Authz:
-/// admin of the owning group (a destructive op).
-///
-/// Envelopes and watermarks were already explicit here; the reactions and
-/// attachment references hanging off those envelopes were not, and outlived
-/// them (nothing cascades on Turso, and neither table has a foreign key in the
-/// first place). [`crate::teardown::purge_conversation_rows`] covers the set.
+/// admin of the owning group. Nothing cascades on Turso, so
+/// [`crate::teardown::purge_conversation_rows`] removes the dependent rows.
 pub async fn apply_delete_channel(
     conn: &Connection,
     authed: Option<&str>,
@@ -695,8 +589,6 @@ pub async fn apply_delete_channel(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/members/remove ──────────────────────────────────────────────────
-
 pub async fn remove_member(
     State(state): State<AppState>,
     req: RawRequest,
@@ -707,9 +599,8 @@ pub async fn remove_member(
     };
     let conn = state.db.conn().await?;
     let outcome = apply_remove_member(&conn, authed.as_deref(), &parsed).await?;
-    // The removal only takes effect on the SFU if someone tells it (#18): a
-    // LiveKit token is checked at JOIN, so an ex-member's open realtime/voice
-    // connection survives the row deletion until they happen to disconnect.
+    // A LiveKit token is checked only at join, so an ex-member's open connection
+    // must be evicted explicitly (#18).
     if matches!(outcome, WriteOutcome::Ok) {
         let rooms = crate::broker::group_rooms(&conn, &parsed.group_id).await?;
         crate::broker::evict_user_from_rooms(&state, &rooms, &parsed.user_id).await;
@@ -746,8 +637,6 @@ pub async fn apply_remove_member(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/members/role ────────────────────────────────────────────────────
-
 pub async fn set_member_role(
     State(state): State<AppState>,
     req: RawRequest,
@@ -777,7 +666,6 @@ pub async fn apply_set_member_role(
     if authed.is_some() && !is_admin(conn, &body.group_id, &requester).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    // Target must be a current member.
     if group_role(conn, &body.group_id, &body.user_id)
         .await?
         .is_none()
@@ -791,8 +679,6 @@ pub async fn apply_set_member_role(
     .await?;
     Ok(WriteOutcome::Ok)
 }
-
-// ── POST /v1/invites/create ──────────────────────────────────────────────────
 
 pub async fn create_invite(
     State(state): State<AppState>,
@@ -823,15 +709,10 @@ pub async fn create_invite(
     Ok(crate::writes::ok_response::<CreateInviteBody>(answer))
 }
 
-/// Resolve an invitee by username-or-email, check every precondition, and INSERT
-/// the pending invite.
-///
-/// Authz: the inviter is a re-derived admin. Since #987 the invitee RESOLUTION,
-/// the block check and the duplicate detection are here too — they used to be
-/// five client reads that this write re-derived anyway, so the reads bought
-/// nothing but a specific error message. Naming the outcomes keeps every message
-/// and deletes the round trips, and it closes the window where a block was added
-/// between the client's check and this insert.
+/// Resolve an invitee by username or email, check every precondition, and
+/// insert the pending invite. Authz: the inviter is a re-derived admin. The
+/// checks live here rather than in client reads so none can go stale before
+/// the insert (#987).
 pub async fn apply_create_invite(
     conn: &Connection,
     authed: Option<&str>,
@@ -845,10 +726,8 @@ pub async fn apply_create_invite(
         return Ok(InviteOutcome::Forbidden);
     }
 
-    // Resolve the identifier through the ONE lookup the directory endpoint also
-    // uses: exact match on `email` when it contains an `@`, on `username`
-    // otherwise — never `username OR email`, whose first row a squatted
-    // username won (see `directory::user_by_identifier`).
+    // Exact match on email if it contains `@`, else on username; never `username
+    // OR email` (see `directory::user_by_identifier`).
     let Some(invitee) = crate::directory::user_by_identifier(conn, &body.invitee_identifier).await?
     else {
         return Ok(InviteOutcome::NoSuchUser);
@@ -858,13 +737,9 @@ pub async fn apply_create_invite(
     if invitee_id == inviter {
         return Ok(InviteOutcome::SelfInvite);
     }
-    // A block answers exactly as a missing user does (L3). `Blocked` used to be
-    // its own outcome, which told the inviter that THIS SPECIFIC account had
-    // blocked them — the one fact a block is supposed to withhold, and one the
-    // blocked party could re-probe at will. Discord and Slack both answer a
-    // blocked invite as an ordinary failure for the same reason. The
-    // `InviteCreated::Blocked` wire variant stays (a shipped client decodes it)
-    // but the DS no longer produces it.
+    // A block answers exactly as a missing user does (L3), so the inviter cannot
+    // learn that this account blocked them. `InviteCreated::Blocked` stays on the
+    // wire for shipped clients but is never produced.
     if crate::profile::is_blocked_either_way(conn, &inviter, &invitee_id).await? {
         return Ok(InviteOutcome::NoSuchUser);
     }
@@ -872,15 +747,10 @@ pub async fn apply_create_invite(
         return Ok(InviteOutcome::AlreadyMember);
     }
 
-    // The duplicate check is the INSERT's own row count rather than a separate
-    // read: one conditional statement, so a concurrent invite from another admin
-    // cannot slip between a check and a write. Zero rows IS "already invited".
-    //
-    // A guard rather than `ON CONFLICT`, because there is no UNIQUE index on
-    // `(group_id, invitee_id)` — adding one would be a TIGHTENING migration
-    // (it fails outright if the live table already holds a duplicate), which
-    // needs the multi-release dance and is out of scope here. The conditional
-    // INSERT gives the same atomicity for this write without one.
+    // The duplicate check is the INSERT's own row count, so a concurrent invite
+    // cannot slip between check and write. A guard rather than `ON CONFLICT`
+    // because adding a UNIQUE index on `(group_id, invitee_id)` would be a
+    // tightening migration.
     let inserted = conn
         .execute(
             "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) \
@@ -900,8 +770,6 @@ pub async fn apply_create_invite(
         return Ok(InviteOutcome::AlreadyInvited);
     }
 
-    // The alert names, read here because the caller would otherwise need a
-    // sixth round trip for two public strings the DS has in hand.
     let (inviter_username, group_name) = invite_alert_names(conn, &body.group_id, &inviter).await?;
     Ok(InviteOutcome::Created {
         invitee_id,
@@ -910,8 +778,8 @@ pub async fn apply_create_invite(
     })
 }
 
-/// What `apply_create_invite` decided. Five refusals rather than one, because
-/// the client's five reads existed to tell them apart for the user.
+/// What `apply_create_invite` decided; the refusals are distinct so the client
+/// can tell the user which one applies.
 #[derive(Debug)]
 pub enum InviteOutcome {
     Created {
@@ -927,9 +795,7 @@ pub enum InviteOutcome {
     Forbidden,
 }
 
-/// The inviter's username and the group's name, for the invitee's status-bar
-/// alert (#396). Public directory metadata; `None` for either that does not
-/// resolve.
+/// The inviter's username and the group's name for the invitee's alert (#396).
 async fn invite_alert_names(
     conn: &Connection,
     group_id: &str,
@@ -947,8 +813,6 @@ async fn invite_alert_names(
     }
 }
 
-// ── POST /v1/invites/accept ──────────────────────────────────────────────────
-
 pub async fn accept_invite(
     State(state): State<AppState>,
     req: RawRequest,
@@ -958,10 +822,8 @@ pub async fn accept_invite(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    // Name the group the accept admitted the caller to (#987). The client used
-    // to read `group_invite` BEFORE posting, which was both a round trip and a
-    // TOCTOU: the invite it read could be revoked before the write landed.
-    // Read here, before `apply_accept_invite` consumes the row.
+    // Name the admitted group (#987). Read before `apply_accept_invite` consumes
+    // the row.
     let group_id = accepted_invite_group(&conn, authed.as_deref(), &parsed).await?;
     match apply_accept_invite(&conn, authed.as_deref(), &parsed).await? {
         WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
@@ -974,9 +836,8 @@ pub async fn accept_invite(
             Some(group_id) => Ok(crate::writes::ok_response::<AcceptInviteBody>(
                 AcceptedInvite::Ok { group_id },
             )),
-            // `apply_accept_invite` re-resolves the same row and answers
-            // Forbidden when it is gone, so reaching here means the row
-            // disappeared between the two reads. An error, never an invented id.
+            // `apply_accept_invite` answers Forbidden when the row is gone, so reaching
+            // here means it vanished between the two reads.
             None => Err(AppError(anyhow::anyhow!(
                 "invite {} resolved to no group",
                 parsed.invite_id
@@ -1008,9 +869,7 @@ async fn accepted_invite_group(
 }
 
 /// Accept an invite: add the actor as a member and delete the invite, in one
-/// transaction. Authz: the invite is addressed to the actor (`invitee_id` is
-/// re-derived server-side and must equal the signer) — a signer cannot accept
-/// someone else's invite.
+/// transaction. The invite must be addressed to the signer.
 pub async fn apply_accept_invite(
     conn: &Connection,
     authed: Option<&str>,
@@ -1020,8 +879,6 @@ pub async fn apply_accept_invite(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
-    // Resolve the group from an invite addressed to THIS actor; missing → the
-    // invite doesn't exist or isn't theirs.
     let mut rows = conn
         .query(
             "SELECT group_id FROM group_invite WHERE id = ?1 AND invitee_id = ?2",
@@ -1044,8 +901,6 @@ pub async fn apply_accept_invite(
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
-
-// ── POST /v1/invites/decline ─────────────────────────────────────────────────
 
 pub async fn decline_invite(
     State(state): State<AppState>,
@@ -1078,8 +933,6 @@ pub async fn apply_decline_invite(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/invites/revoke ──────────────────────────────────────────────────
-
 pub async fn revoke_invite(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1089,16 +942,13 @@ pub async fn revoke_invite(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    // Who to tell, read before the revoke consumes the row.
     let target = revoked_invite_target(&conn, &parsed.invite_id).await?;
     let outcome = apply_revoke_invite(&conn, authed.as_deref(), &parsed).await?;
     if let (WriteOutcome::Ok, Some((invitee, group_id))) = (&outcome, target) {
-        // Drop the invite from the invitee's pending list. The DS sends it: once
-        // the row is gone the revoker no longer shares a roster with the invitee,
-        // so the broker would refuse the revoker's own publish to their inbox.
-        // A bare wake-up, the same one an accept or a removal sends.
-        // Best-effort: the invitee's list re-reads on its next fetch anyway, and
-        // accepting a revoked invite is refused.
+        // The DS sends this because once the row is gone the revoker shares no roster
+        // with the invitee, so the broker would refuse the revoker's own publish.
+        // Best-effort: the invitee re-reads on its next fetch, and accepting a revoked
+        // invite is refused.
         let inbox = format!("inbox-{invitee}");
         let event = serde_json::json!({ "type": "membership_changed", "group_id": group_id });
         if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
@@ -1125,17 +975,13 @@ async fn revoked_invite_target(
     }
 }
 
-/// Withdraw a pending invite (#1506). Authz: the actor is still a member of the
-/// invite's group AND either sent this invite or is an admin of that group. The
-/// group and the inviter are both read from the invite row, never from the
-/// request, so an admin of group A cannot revoke group B's invite.
+/// Withdraw a pending invite (#1506). Authz: the actor is a member of the
+/// invite's group and either sent the invite or is an admin; group and inviter
+/// come from the row, never the request.
 ///
-/// The row is deleted, exactly as a decline deletes it. That is what takes the
-/// invitee out of the group's desired MLS roster ([`crate::directory::desired_roster`]
-/// counts pending invitees as present), so the revoker's next reconcile commits
-/// their leaves out of the tree. An invite that is already gone (accepted,
-/// declined, revoked twice) answers Forbidden, the same refusal as one that is
-/// not the actor's to revoke.
+/// Deleting the row removes the invitee from the desired MLS roster
+/// ([`crate::directory::desired_roster`]), so the revoker's next reconcile
+/// removes their leaves. An already-gone invite answers Forbidden.
 pub async fn apply_revoke_invite(
     conn: &Connection,
     authed: Option<&str>,
@@ -1174,8 +1020,6 @@ pub async fn apply_revoke_invite(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/join-requests/create ────────────────────────────────────────────
-
 pub async fn create_join_request(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1195,30 +1039,10 @@ pub async fn create_join_request(
     Ok(crate::writes::ok_response::<CreateJoinRequestBody>(answer))
 }
 
-/// UPSERT a pending join request (or reset a prior rejected/approved row back to
-/// pending). Authz: the actor requests for THEMSELVES (`requester_id` bound to
-/// the signer), for a group that EXISTS, and only while they are NOT already in
-/// it.
-///
-/// #917: those last two used to be documented here as "checks [that] stay
-/// client-side", which is another way of saying they were not checks. The
-/// client half lives in `pollis_core::commands::groups::request_group_access`
-/// and is a helpful preflight, but the DS is the only authoritative writer, so
-/// anything it does not re-derive is unenforced. A client that simply skipped
-/// the preflight could:
-///
-///   * insert `group_join_request` rows for arbitrary — including nonexistent —
-///     group ids, since `foreign_keys` is OFF on this connection
-///     (`db.rs`), so the schema's `REFERENCES groups(id)` does not catch it; and
-///   * spray a row into every admin's pending-request list, group by group,
-///     using ids harvested by slug enumeration.
-///
-/// Both are now refused here. This mirrors the rest of domain B, where the
-/// admin role is re-derived server-side rather than trusted from the body.
-///
-/// Note the check is `is_member` **negated** — a join request is by definition
-/// from a non-member, so "no membership check" was never the fix; the invariant
-/// is that a member cannot ask to join what they are already in.
+/// Upsert a pending join request (resetting a prior rejected/approved row).
+/// Authz: the actor requests for themselves, for a group that exists, while
+/// not already a member. The DS must re-derive the last two itself; the client
+/// preflight is not a check (#917).
 pub async fn apply_create_join_request(
     conn: &Connection,
     authed: Option<&str>,
@@ -1229,25 +1053,18 @@ pub async fn apply_create_join_request(
         Err(_) => return Ok(JoinRequestOutcome::Forbidden),
     };
 
-    // The group must exist. Checked explicitly rather than left to the FK,
-    // because this connection runs with `foreign_keys=OFF`.
+    // Checked explicitly because `foreign_keys=OFF`.
     if !group_exists(conn, &body.group_id).await? {
         return Ok(JoinRequestOutcome::NoSuchGroup);
     }
 
-    // A current member has nothing to request. Letting this through would make
-    // an approvable request for someone already in the group representable —
-    // and approving it would re-run `add_member_rows` for an existing member.
+    // Approving a request from an existing member would re-run `add_member_rows`.
     if is_member(conn, &body.group_id, &requester).await? {
         return Ok(JoinRequestOutcome::AlreadyMember);
     }
 
-    // Re-asking while a request is already pending is reported, not silently
-    // treated as success (#987). The client used to check this itself, which was
-    // a read AND a TOCTOU — a request created between its check and its write
-    // was quietly reset to pending. The guarded upsert below decides it instead:
-    // the `WHERE status <> 'pending'` clause means a live request is never
-    // touched, and a zero row count IS the "already pending" answer.
+    // The `WHERE status <> 'pending'` guard leaves a live request untouched, and a
+    // zero row count is the "already pending" answer (#987).
     let touched = conn
         .execute(
             "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
@@ -1266,12 +1083,8 @@ pub async fn apply_create_join_request(
     Ok(JoinRequestOutcome::Ok)
 }
 
-/// What `apply_create_join_request` decided.
-///
-/// Four outcomes rather than [`WriteOutcome`]'s two, because the client's
-/// three-read preflight existed purely to tell them apart and #987 deletes the
-/// reads. `Forbidden` remains for the one case that IS an authorization
-/// failure: no resolvable actor.
+/// What `apply_create_join_request` decided. `Forbidden` is only for an
+/// unresolvable actor.
 #[derive(Debug)]
 pub enum JoinRequestOutcome {
     Ok,
@@ -1280,8 +1093,6 @@ pub enum JoinRequestOutcome {
     AlreadyPending,
     Forbidden,
 }
-
-// ── POST /v1/join-requests/approve ───────────────────────────────────────────
 
 pub async fn approve_join_request(
     State(state): State<AppState>,
@@ -1332,21 +1143,16 @@ pub async fn apply_approve_join_request(
     )
     .await?;
     tx.commit().await?;
-    // Report what the write RESOLVED (#987): the caller needs the group for its
-    // reconcile and its realtime nudge, and reading it separately was both a
-    // round trip and a chance to resolve a different row than the write did.
+    // Report the resolved group so the caller needs no separate read (#987).
     Ok(ReviewOutcome::Reviewed {
         group_id,
         requester_id: Some(requester_id),
     })
 }
 
-/// What a join-request review resolved and did.
-///
-/// Carries the resolved ids so the client needs no read of its own; `Forbidden`
-/// covers both "no such pending request" and "not an admin of its group",
-/// unchanged — telling them apart would make a request id a probe for other
-/// people's groups.
+/// What a join-request review resolved. `Forbidden` covers both "no such
+/// pending request" and "not an admin": telling them apart would make a
+/// request id a probe for other people's groups.
 #[derive(Debug)]
 pub enum ReviewOutcome {
     Reviewed {
@@ -1355,8 +1161,6 @@ pub enum ReviewOutcome {
     },
     Forbidden,
 }
-
-// ── POST /v1/join-requests/reject ────────────────────────────────────────────
 
 pub async fn reject_join_request(
     State(state): State<AppState>,
@@ -1372,9 +1176,8 @@ pub async fn reject_join_request(
     )
 }
 
-/// Map a [`ReviewOutcome`] to the HTTP response. Generic over the request type
-/// so both review endpoints share one mapping and neither can answer the other's
-/// body.
+/// Map a [`ReviewOutcome`] to the HTTP response, generic over the request type
+/// so neither review endpoint can answer the other's body.
 fn review_response<B>(outcome: ReviewOutcome) -> Result<Response, AppError>
 where
     B: pollis_api::DsRequest<Response = ReviewedJoinRequest>,
@@ -1427,60 +1230,27 @@ pub async fn apply_reject_join_request(
     })
 }
 
-// ── #847 shareable invite links ──────────────────────────────────────────────
+// Shareable invite links (#847).
 //
-// ## Why redemption is not a second membership path
+// Redemption is not a second membership path: it adds the member through
+// `add_member_rows`, like invite accept and join-request approve. Since
+// `group_member` is the sole capability nothing downstream re-validates, the
+// token check and the member-add must be one transaction.
 //
-// The security crux of #847 is that a link must NOT become another way into a
-// group. `apply_redeem_invite_link` therefore performs the member-add by calling
-// `add_member_rows` — the exact function `apply_accept_invite` and
-// `apply_approve_join_request` call, and the only function in this module that
-// writes `group_member`. A redeemer lands as an ordinary `role = 'member'` row
-// with seeded watermarks, indistinguishable from someone an admin invited by
-// name.
-//
-// That matters more here than it first appears. `group_member` is the SOLE
-// capability in this system: `desired_roster_user_ids`
-// (`pollis-core/src/commands/mls/reconcile.rs`) derives the MLS roster from it,
-// and `writes::is_member` derives commit-submission rights from it. Nothing
-// downstream re-validates how the row got there. So this handler is the entire
-// trust boundary, and the token check and the member-add must be — and are — one
-// transaction. Redemption itself never touches MLS state, never stages a commit,
-// and cannot put a device in the tree; it can only make the roster say "this
-// user is a member", which is precisely the authority the admin delegated when
-// they created the link.
-//
-// ## Why every failure looks identical
-//
-// Wrong token, malformed token, revoked link, expired link, exhausted link — all
-// five return `RedeemOutcome::Rejected`, which maps to one 403 with one body.
-// Telling an attacker "that token was right but expired" confirms a valid token
-// and turns a search over 2^256 into a hunt for a fresher link. The predicates
-// are therefore evaluated into booleans and combined ONCE, with no early return
-// between the secret compare and the verdict.
-//
-// Rate limiting is the one distinguishable response (429), deliberately: it is a
-// statement about the CALLER, not about the token, so it confirms nothing about
-// whether any particular token is valid.
+// Every token failure (wrong, malformed, revoked, expired, exhausted) returns
+// the same `Rejected`, so a valid-but-expired token is not confirmed. Rate
+// limiting (429) is distinguishable because it describes the caller, not the
+// token.
 
 /// How far back the durable redemption rate limit counts failed attempts.
 const REDEEM_FAILURE_WINDOW_SECS: i64 = 600;
 
 /// Failed redemptions allowed per user within [`REDEEM_FAILURE_WINDOW_SECS`].
 ///
-/// Sized for humans, not for search. A legitimate user redeems once; ten
-/// failures in ten minutes already means they are pasting the wrong thing
-/// repeatedly.
-///
-/// This is the durable half of the bound and the half that actually binds. The
-/// per-IP middleware tier (`ratelimit::classify`) sheds floods but an attacker
-/// rotates IPs; this one is keyed on the authenticated user and read from the
-/// database, so it survives a DS restart and is shared across instances. Against
-/// the 256-bit secret both are belt-and-braces — but they are what stops
-/// redemption being a free oracle for a selector whose secret is being ground.
+/// Keyed on the authenticated user and counted from the database, so it
+/// survives restarts, is shared across instances, and binds even when an
+/// attacker rotates IPs past the per-IP tier.
 const REDEEM_FAILURE_MAX: i64 = 10;
-
-// ── POST /v1/invite-links/create ─────────────────────────────────────────────
 
 pub async fn create_invite_link(
     State(state): State<AppState>,
@@ -1494,9 +1264,8 @@ pub async fn create_invite_link(
     outcome_response::<CreateInviteLinkBody>(apply_create_invite_link(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// INSERT an invite link. Authz: the creator is a re-derived admin — the same bar
-/// as `apply_create_invite`, because a link IS an invite with the addressee left
-/// open.
+/// Insert an invite link. Authz: re-derived admin, the same bar as
+/// `apply_create_invite`.
 pub async fn apply_create_invite_link(
     conn: &Connection,
     authed: Option<&str>,
@@ -1509,16 +1278,12 @@ pub async fn apply_create_invite_link(
     if authed.is_some() && !is_admin(conn, &body.group_id, &creator).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    // Refuse anything that is not a sha256 hex digest. The column would accept
-    // any TEXT, and a short or low-entropy value is how a buggy — or hostile —
-    // client could plant a hash it can cheaply preimage. Checked on BOTH the
-    // auth-on and auth-off paths: this is a well-formedness invariant on the
-    // stored secret, not an identity check.
+    // Only a sha256 hex digest, on both auth paths: a short or low-entropy value
+    // would let a client plant a hash it can cheaply preimage.
     if body.secret_hash.len() != 64 || !body.secret_hash.chars().all(|c| c.is_ascii_hexdigit()) {
         return Ok(WriteOutcome::Forbidden);
     }
-    // `max_uses = 0` is rejected by the table CHECK; refuse it here too so the
-    // caller gets a 403 rather than a 500 from a constraint violation.
+    // The table CHECK rejects `max_uses = 0`; refuse it here for a 403, not a 500.
     if body.max_uses.is_some_and(|m| m <= 0) {
         return Ok(WriteOutcome::Forbidden);
     }
@@ -1540,8 +1305,6 @@ pub async fn apply_create_invite_link(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/invite-links/revoke ─────────────────────────────────────────────
-
 pub async fn revoke_invite_link(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1554,14 +1317,9 @@ pub async fn revoke_invite_link(
     outcome_response::<RevokeInviteLinkBody>(apply_revoke_invite_link(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Revoke a link. Authz: the actor is a re-derived admin OF THE LINK'S OWN GROUP
-/// — resolved from the link row, never from the request, so an admin of group A
-/// cannot revoke group B's link. Same ordering as
-/// `apply_approve_join_request`: resolve the row first, then check the role.
-///
-/// Revocation is a one-way stamp, not a delete: the row stays so the redemption
-/// audit trail keeps pointing at something, and `revoked_at IS NULL` remains the
-/// single expression of "live".
+/// Revoke a link. Authz: admin of the link's own group, resolved from the link
+/// row, never the request. A one-way stamp, not a delete, so the redemption
+/// audit trail keeps its target.
 pub async fn apply_revoke_invite_link(
     conn: &Connection,
     authed: Option<&str>,
@@ -1586,8 +1344,7 @@ pub async fn apply_revoke_invite_link(
     if authed.is_some() && !is_admin(conn, &group_id, &actor).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    // `revoked_at IS NULL` keeps the first revocation's timestamp — re-revoking
-    // must not rewrite when the link actually died.
+    // Keep the first revocation's timestamp.
     conn.execute(
         "UPDATE group_invite_link SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL",
         libsql::params![body.revoked_at.clone(), body.link_id.clone()],
@@ -1596,20 +1353,11 @@ pub async fn apply_revoke_invite_link(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/invite-links/redeem ─────────────────────────────────────────────
-
-/// The result of a redemption attempt.
-///
-/// Three variants on purpose. Collapsing every way a token can fail into one
-/// `Rejected` is a security property, not an oversight — an `Expired` or
-/// `Revoked` variant would leak exactly what #847 says must not leak.
+/// The result of a redemption attempt. Every token failure is one `Rejected`
+/// by design (#847).
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedeemOutcome {
     /// The actor is now a member of this group.
-    ///
-    /// `group_name` rides along (#987) because the confirmation UI needs it and
-    /// the DS has just read the row to authorize the redemption — the client
-    /// asking again was a second round trip for a string already in hand.
     Joined {
         group_id: String,
         group_name: Option<String>,
@@ -1646,8 +1394,7 @@ pub async fn redeem_invite_link(
     )
 }
 
-/// The single rejection response: one status, one body, for every way a token
-/// can fail to be live.
+/// The single rejection response for every way a token can fail.
 fn redeem_rejected() -> Response {
     (
         axum::http::StatusCode::FORBIDDEN,
@@ -1664,26 +1411,12 @@ fn redeem_rate_limited() -> Response {
         .into_response()
 }
 
-/// Redeem an invite link.
+/// Redeem an invite link. Authz: the authenticated caller; a link removes the
+/// need for an admin to know your username, not the need for an identity.
 ///
-/// Authz: the actor is whoever `gate` authenticated. That is the admission floor
-/// — a link is not a bypass around holding a Pollis identity, it only removes the
-/// need for an admin to know your username in advance. An anonymous caller
-/// cannot reach this at all. "Authenticated but not yet a member" is already a
-/// first-class case on this service (`/v1/join-requests/create`,
-/// `/v1/invites/accept`), so no new auth machinery is involved.
-///
-/// ## The clock is the SERVER's (H3)
-///
-/// Every time comparison here — the expiry check, the guarded UPDATE's
-/// in-transaction re-check, the failed-attempt rate-limit window, and the audit
-/// stamp — used to be evaluated against `body.now`, an ordinary field of the
-/// request. So `{"now": "2020-01-01T00:00:00Z"}` redeemed any expired (but not
-/// revoked) link, and a `now` set far in the FUTURE pushed every past failure
-/// out of the rate-limit window, handing the caller an unlimited budget for
-/// guessing selectors. Both are now `datetime('now')`, which is what the rest of
-/// this service already used. `body.now` is still accepted on the wire so a
-/// shipped client keeps working, and is read by nothing.
+/// Every time comparison uses the server clock (`datetime('now')`), never
+/// `body.now` (H3): a caller-chosen clock redeems expired links and empties
+/// the rate-limit window. `body.now` stays on the wire for shipped clients.
 pub async fn apply_redeem_invite_link(
     conn: &Connection,
     authed: Option<&str>,
@@ -1694,9 +1427,8 @@ pub async fn apply_redeem_invite_link(
         Err(_) => return Ok(RedeemOutcome::Rejected),
     };
 
-    // Durable rate limit: recent FAILED attempts by this actor, counted from the
-    // audit table rather than memory, so a rolling restart does not hand an
-    // attacker a fresh budget and every DS instance sees the same count.
+    // Durable rate limit counted from the audit table, so a restart grants no
+    // fresh budget.
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM group_invite_link_redemption \
@@ -1758,9 +1490,8 @@ pub async fn apply_redeem_invite_link(
     };
     drop(rows);
 
-    // Every predicate is evaluated, THEN combined. No early return sits between
-    // the secret compare and the verdict, so the four failure modes are not
-    // separable by response and not separable by control flow either.
+    // Evaluate every predicate, then combine: no early return between the secret
+    // compare and the verdict.
     let secret_ok = crate::invite_token::hash_eq(
         &crate::invite_token::hash_secret(&secret),
         &secret_hash,
@@ -1776,16 +1507,14 @@ pub async fn apply_redeem_invite_link(
     };
 
     if !(secret_ok && not_revoked && not_expired && uses_left) {
-        // Record the link id only when the SECRET matched, so an admin can see a
-        // specific live link being probed. The attacker never reads this table,
-        // so it leaks nothing back to them.
+        // Record the link id only when the secret matched, so an admin can see a live
+        // link being probed.
         let probed = if secret_ok { Some(link_id.as_str()) } else { None };
         record_redemption(conn, &body.attempt_id, probed, &user, false).await?;
         return Ok(RedeemOutcome::Rejected);
     }
 
-    // Already a member → idempotent success. Re-opening the same link must not
-    // burn a use or fail; it just says "you're in".
+    // Already a member: idempotent success that burns no use.
     if is_member(conn, &group_id, &user).await? {
         let group_name = group_name(conn, &group_id).await?;
         return Ok(RedeemOutcome::Joined {
@@ -1795,14 +1524,10 @@ pub async fn apply_redeem_invite_link(
     }
 
     let tx = conn.transaction().await?;
-    // THE shared membership primitive — the same call `apply_accept_invite` and
-    // `apply_approve_join_request` make. This is what keeps a link from being a
-    // second admission path.
     add_member_rows(&tx, &group_id, &user).await?;
-    // Re-check every bound INSIDE the transaction and let the row count decide.
-    // Two people redeeming the last use concurrently both pass the checks above;
-    // only one can pass this guarded UPDATE. The table's `uses <= max_uses`
-    // CHECK is the backstop beneath even this.
+    // Re-check inside the transaction and let the row count decide: of two
+    // concurrent redeemers of the last use only one passes. The table's
+    // `uses <= max_uses` CHECK is the backstop.
     let updated = tx
         .execute(
             "UPDATE group_invite_link SET uses = uses + 1 \
@@ -1834,8 +1559,7 @@ pub async fn apply_redeem_invite_link(
     })
 }
 
-/// A group's display name, for the redeem confirmation. `None` if the row is
-/// gone — best-effort, and never a reason to fail a completed join.
+/// A group's display name; `None` if the row is gone, never a failure.
 async fn group_name(conn: &Connection, group_id: &str) -> anyhow::Result<Option<String>> {
     let mut rows = conn
         .query(
@@ -1849,13 +1573,9 @@ async fn group_name(conn: &Connection, group_id: &str) -> anyhow::Result<Option<
     }
 }
 
-/// Whether `expires_at` is at or before the SERVER's clock, compared BY SQLITE
-/// via `datetime()` so the stored RFC3339 string normalises the same way the
-/// guarded UPDATE normalises it. Comparing in Rust with string ordering would
-/// disagree with SQL for offsets like `+00:00` versus `Z`.
-///
-/// The clock is `datetime('now')` and never a caller-supplied one (H3): an
-/// expiry a caller can choose the comparison point for is not an expiry.
+/// Whether `expires_at` is at or before the server clock (H3). Compared by
+/// SQLite's `datetime()` so it normalises like the guarded UPDATE does; Rust
+/// string ordering would disagree for `+00:00` versus `Z`.
 async fn expiry_passed(conn: &Connection, expires_at: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
@@ -1863,21 +1583,16 @@ async fn expiry_passed(conn: &Connection, expires_at: &str) -> anyhow::Result<bo
             libsql::params![expires_at.to_string()],
         )
         .await?;
-    // An unparseable timestamp yields NULL, not 0/1. Treat anything that is not
-    // a definite "not yet expired" as EXPIRED — fail closed.
+    // An unparseable timestamp yields NULL: fail closed as expired.
     Ok(match rows.next().await? {
         Some(row) => row.get::<Option<i64>>(0)?.unwrap_or(1) == 1,
         None => true,
     })
 }
 
-/// Append one row to the redemption audit trail, stamped with the SERVER's
-/// clock — this table is also the durable rate-limit counter, and a caller that
-/// chooses its own `attempted_at` chooses which of its failures are still inside
-/// the window (H3).
-///
-/// `OR IGNORE` so a replayed `attempt_id` cannot error the request — the point
-/// is the count, not the individual row.
+/// Append a redemption audit row, stamped with the server clock because this
+/// table is also the rate-limit counter (H3). `OR IGNORE` so a replayed
+/// `attempt_id` cannot error the request.
 async fn record_redemption(
     conn: &Connection,
     attempt_id: &str,
