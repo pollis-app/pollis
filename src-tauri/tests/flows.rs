@@ -23,6 +23,8 @@ mod cross_channel_ingest;
 mod cross_signing;
 #[path = "flows/device_link.rs"]
 mod device_link;
+#[path = "flows/device_outside_tree.rs"]
+mod device_outside_tree;
 #[path = "flows/dms.rs"]
 mod dms;
 #[path = "flows/ds_surface.rs"]
@@ -65,6 +67,8 @@ mod sealed_sender;
 mod security;
 #[path = "flows/vault.rs"]
 mod vault;
+#[path = "flows/zero_loss.rs"]
+mod zero_loss;
 // voice.rs compile-depends on the media command surface (voice_e2ee helpers +
 // the media-gated state.voice field), so it only builds with `media` on. Every
 // other flow module — MLS/adversarial/model/messaging/etc. — stays in the

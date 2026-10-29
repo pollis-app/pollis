@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
+import { securityEventQueryKeys } from "./useSecurityEvents";
 
 export interface DeviceRow {
   device_id: string;
@@ -51,6 +52,8 @@ export function useRevokeDevice() {
       queryClient.invalidateQueries({
         queryKey: deviceQueryKeys.list(currentUser?.id ?? null),
       });
+      // The revoke wrote a `device_revoked` security event; show it.
+      queryClient.invalidateQueries({ queryKey: securityEventQueryKeys.all });
     },
   });
 }

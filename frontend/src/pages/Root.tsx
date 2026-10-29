@@ -30,6 +30,7 @@ export const RootPage: React.FC = observer(() => {
       description: t("home.groupsDescription"),
       action: () => navigate({ to: "/groups" }),
       testId: "menu-item-groups",
+      activateOn: "press" as const,
     },
     {
       id: "dms",
@@ -39,6 +40,7 @@ export const RootPage: React.FC = observer(() => {
       action: () => navigate({ to: "/dms" }),
       badge: totalDMUnread > 0 ? totalDMUnread : undefined,
       testId: "menu-item-dms",
+      activateOn: "press" as const,
     },
     {
       id: "invites",
@@ -50,6 +52,7 @@ export const RootPage: React.FC = observer(() => {
       action: () => navigate({ to: "/invites" }),
       type: "system" as const,
       testId: "menu-item-invites",
+      activateOn: "press" as const,
     },
     {
       id: "join",
@@ -59,6 +62,7 @@ export const RootPage: React.FC = observer(() => {
       action: () => navigate({ to: "/join" }),
       type: "system" as const,
       testId: "menu-item-join",
+      activateOn: "press" as const,
     },
     ...(pendingJoinRequests.length > 0 ? [{
       id: "join-requests",
@@ -68,6 +72,7 @@ export const RootPage: React.FC = observer(() => {
       action: () => navigate({ to: "/join-requests" }),
       type: "system" as const,
       testId: "menu-item-join-requests",
+      activateOn: "press" as const,
     }] : []),
     { id: "__sep1__", label: "", type: "separator" },
     {

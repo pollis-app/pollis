@@ -27,6 +27,7 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.preferencesDescription"),
       action: () => navigate({ to: "/preferences" }),
       testId: "menu-item-preferences",
+      activateOn: "press",
     },
     {
       id: "user",
@@ -35,6 +36,7 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.userDescription"),
       action: () => navigate({ to: "/user" }),
       testId: "menu-item-user",
+      activateOn: "press",
     },
     {
       id: "voice",
@@ -43,6 +45,7 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.voiceDescription"),
       action: () => navigate({ to: "/voice-settings" }),
       testId: "menu-item-voice-settings",
+      activateOn: "press",
     },
     {
       id: "security",
@@ -51,6 +54,7 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.securityDescription"),
       action: () => navigate({ to: "/security" }),
       testId: "menu-item-security",
+      activateOn: "press",
     },
     {
       id: "shortcuts",
@@ -59,6 +63,7 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.shortcutsDescription"),
       action: () => navigate({ to: "/shortcuts" }),
       testId: "menu-item-shortcuts",
+      activateOn: "press",
     },
     {
       id: "diagnostics",
@@ -67,6 +72,7 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.diagnosticsDescription"),
       action: () => navigate({ to: "/diagnostics" }),
       testId: "menu-item-diagnostics",
+      activateOn: "press",
     },
   ];
 

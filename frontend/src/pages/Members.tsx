@@ -41,6 +41,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
         testId="members-list"
         getKey={(m) => m.user_id}
         rowTestId={(m) => `member-row-${m.user_id}`}
+        activateRowOn="press"
         onClickRow={(m) => {
           const isSelf = m.user_id === currentUser?.id;
           if (isSelf) {

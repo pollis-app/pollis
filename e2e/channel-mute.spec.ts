@@ -15,7 +15,7 @@
  * the mobile half is `mobile/.maestro/flows/channel-mute.yaml`.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };

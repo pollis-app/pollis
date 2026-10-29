@@ -2,16 +2,10 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, MessageCircle, Ban, Flag } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
-import {
-  useOtherUserProfile,
-  useSafetyNumber,
-  useSetContactVerified,
-} from "../hooks/queries/useUserProfile";
-import { Button } from "../components/ui/Button";
+import { useOtherUserProfile } from "../hooks/queries/useUserProfile";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { useBlockUser, usePeerAuditAccountKey } from "../hooks/queries";
 import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
@@ -25,9 +19,7 @@ export const UserProfilePage: React.FC = observer(() => {
   const currentUser = appStore.currentUser;
 
   const { data: profile, isLoading } = useOtherUserProfile(userId);
-  const { data: safety } = useSafetyNumber(userId);
   const { data: peerAudit } = usePeerAuditAccountKey(userId);
-  const setVerified = useSetContactVerified(userId);
   const blockMutation = useBlockUser();
   const dmMutation = useCreateOrGetDMConversation();
 
@@ -70,6 +62,7 @@ export const UserProfilePage: React.FC = observer(() => {
           action: () => navigate({ to: "/dms" }),
           type: "system",
           testId: "user-profile-back",
+          activateOn: "press",
         },
       ]
     : [
@@ -106,6 +99,7 @@ export const UserProfilePage: React.FC = observer(() => {
           action: () => navigate({ to: "/dms" }),
           type: "system",
           testId: "user-profile-back",
+          activateOn: "press",
         },
       ];
 
@@ -123,7 +117,10 @@ export const UserProfilePage: React.FC = observer(() => {
             </span>
           ) : (
             <>
-              {/* preferred_name headlines when set; @username always shows. */}
+              {/* Header: name on the left, avatar inline on the right.
+                  preferred_name takes the headline when set; @username is
+                  always shown (as headline if no preferred_name, otherwise
+                  as the secondary handle). */}
               <div className="flex items-center justify-between gap-4">
                 <div className="flex flex-col min-w-0">
                   <div
@@ -151,74 +148,8 @@ export const UserProfilePage: React.FC = observer(() => {
                 />
               </div>
 
-              {!isSelf && safety && (
-                <div
-                  data-testid="safety-number"
-                  className="flex flex-col gap-3 pt-4 border-t border-line"
-                >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className="font-mono text-xs uppercase tracking-wide text-muted"
-                    >
-                      {t("profile.safetyNumber")}
-                    </span>
-                    <span
-                      data-testid="safety-status"
-                      className={`font-mono text-xs ${
-                        safety.status === "verified"
-                          ? "text-accent"
-                          : safety.status === "changed"
-                            ? "text-danger"
-                            : "text-muted"
-                      }`}
-                    >
-                      {safety.status === "verified"
-                        ? t("profile.statusVerified")
-                        : safety.status === "changed"
-                          ? t("profile.statusChanged")
-                          : t("profile.statusUnverified")}
-                    </span>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <code
-                      dir="ltr"
-                      data-testid="safety-number-digits"
-                      className="font-mono text-sm leading-relaxed break-all flex-1 text-fg"
-                    >
-                      {safety.safety_number}
-                    </code>
-                    {/* No safety-number QR until there is an in-app scanner. */}
-                  </div>
-                  {safety.status === "changed" && (
-                    <span
-                      className="font-mono text-xs text-danger"
-                    >
-                      {t("profile.keyChangedWarning")}
-                    </span>
-                  )}
-                  <p
-                    className="font-mono text-xs text-muted"
-                  >
-                    {t("profile.compareHint", { name: headlineName })}
-                  </p>
-                  <div>
-                    <Button
-                      variant={safety.status === "verified" ? "secondary" : "primary"}
-                      disabled={setVerified.isPending}
-                      onClick={() =>
-                        setVerified.mutate(safety.status !== "verified")
-                      }
-                      data-testid="safety-verify-toggle"
-                    >
-                      {safety.status === "verified"
-                        ? t("profile.removeVerification")
-                        : t("profile.markVerified")}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Advisory audit of this peer's identity key against the log (#330). */}
+              {/* Account-key transparency: advisory audit of this peer's
+                  published identity key against the public log (#330). */}
               {!isSelf && peerAudit && (
                 <AccountKeyAuditLine
                   status={peerAudit.status}

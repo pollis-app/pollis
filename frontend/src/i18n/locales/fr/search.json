@@ -21,6 +21,8 @@
     "voiceKeywords": "microphone micro haut-parleur audio suppression du bruit annulation d'écho agc rejoindre automatiquement caméra webcam vidéo aperçu autorisations",
     "securityName": "Sécurité",
     "securityKeywords": "journal d'audit appareils clé d'identité rotation caméra microphone écran autorisation autorisations révoquer confidentialité accès",
+    "securityEventsName": "Événements de sécurité",
+    "securityEventsKeywords": "événements de sécurité journal audit historique appareils inscrits révoqués refusés identité clé secrète récupération e-mail modifié",
     "shortcutsName": "Raccourcis clavier",
     "shortcutsKeywords": "raccourcis clavier touches combinaisons cmd ctrl",
     "updateName": "Mise à jour du logiciel",

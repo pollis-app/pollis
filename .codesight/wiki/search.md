@@ -6,8 +6,7 @@ On-device full-text search over this device's decrypted message history (#850).
 proposed.** Message bodies are E2EE; the only plaintext that exists anywhere is
 the `content` column of the device's own SQLCipher database. A search box that
 worked on the server would be a search box proving the encryption did not. The
-rationale is also written up for users at `website/learn.html#on-device-search`,
-and the older engineering note is `frontend/docs/turso-search.md`.
+rationale is also written up for users at `website/learn.html#on-device-search`.
 
 ## What it replaced
 
@@ -233,6 +232,18 @@ Registered in `pollis-core/src/bridge.rs`, `src-tauri/src/commands/messages.rs`,
   back opens an **anchored window** rather than being merged into the live one
   (#1039) — see [UI → The windowed log](./ui.md#the-windowed-log-874).
 
+**Mobile** runs the same `search_messages` (`mobile/hooks/queries/useSearch.ts`)
+from the top of the **Self** tab, not a tab of its own (#1550): a field under
+Self's large title, iOS / Android Settings style. Focusing it or typing swaps
+the Self menu for `mobile/components/search/GlobalSearchResults.tsx` in place —
+filter pills, page quick-jumps, groups, channels, the return-only exact-match
+account lookup (#1216), message hits with the sort toggle, "About N results",
+the corpus footer and the "why no results" list. Cancel, the clear button, a
+second tap on the Self tab or Android back bring the menu back. The bar's old
+Search cell is now a shield that pushes Scan to sign in a device
+(`mobile/app/self/link-device.tsx`), which is why desktop's `auth:link.qrIntro`
+names the shield. Maestro: `flows/search.yaml`, `flows/sign-in-device.yaml`.
+
 ## Honesty (§6 of the ticket)
 
 Search covers what THIS device holds, which is narrower than users assume. The
@@ -274,6 +285,7 @@ separate, larger ticket.
 | Option | Why not |
 |---|---|
 | Server-side / Turso FTS | Bodies are E2EE; the server has ciphertext. Non-starter by design. |
+| FTS over remote metadata (`users.username`, group/channel names) | Not rejected, deferred: those columns are plaintext on Turso, but at Pollis's scale a `LIKE` is adequate and FTS5 shadow tables need manual sync. If it is ever done it is a Delivery Service endpoint — the client holds no database handle (#987). Turso's newer Tantivy-based `USING fts` lives in the in-process `turso` crate, not in hosted libSQL. |
 | Keep `LIKE`, fix only the UI | 40–57 ms full scan at 100k and growing, no ranking, and it matches R2 keys and content hashes. |
 | `trigram` tokenizer | Two-character CJK queries return nothing — fatal for Mandarin. |
 | ICU tokenizer | `SQLITE_ENABLE_ICU` is not compiled in; linking ICU on five platforms costs MB for what bigrams get free. |

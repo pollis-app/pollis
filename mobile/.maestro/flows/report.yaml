@@ -13,7 +13,7 @@ tags:
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
-    id: "tab-search"
+    id: "tab-self"
 - tapOn:
     id: "input-search"
 - inputText: "${MAESTRO_PEER_HANDLE}"
@@ -25,32 +25,16 @@ tags:
     timeout: 20000
 - tapOn:
     id: "row-user-.*"
-# SAFETY NUMBER (#1278) — the card shows the 60 digits in 5-digit blocks, and
-# Mark verified flips to Verified (and back). Both were silently broken when
-# the hook's field names drifted from pollis-core's SafetyNumberInfo.
+# The safety number moved into the DM (#1563, flows/dm-safety.yaml): the
+# profile shows report and block, and no number.
 - extendedWaitUntil:
     visible:
-      id: "text-safety-number"
-      text: "[0-9]{5}( [0-9]{5}){11}"
+      id: "screen-user"
     timeout: 20000
-- tapOn:
+- assertNotVisible:
+    id: "text-safety-number"
+- assertNotVisible:
     id: "btn-verify"
-    text: "Mark verified"
-# Once verified the chip reads "Verified" and its spoken label becomes
-# "Remove verification" (iOS matches the label, Android the text).
-- extendedWaitUntil:
-    visible:
-      id: "btn-verify"
-      text: "Verified|Remove verification"
-    timeout: 15000
-- takeScreenshot: report-00-verified
-- tapOn:
-    id: "btn-verify"
-- extendedWaitUntil:
-    visible:
-      id: "btn-verify"
-      text: "Mark verified"
-    timeout: 15000
 - scrollUntilVisible:
     element:
       id: "btn-report-user"

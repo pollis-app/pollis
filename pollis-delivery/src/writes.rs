@@ -1,7 +1,19 @@
-//! The MLS control-plane write endpoints beyond `POST /v1/commits` (W4–W8 in
-//! `docs/goal-a-commit-log-sole-writer.md`), plus the auth gates and write-result
-//! helpers every domain module shares. Writes land on `state.log_db`; membership
-//! and auth read `state.db`.
+//! The MLS control-plane write endpoints beyond `POST /v1/commits`.
+//!
+//! These cover the non-`direct_submit` client writes (W4–W8 in the #420
+//! design) that must move behind the DS once
+//! the client holds only a read-only token on the log DB:
+//!
+//!   - `POST /v1/group-info`     — republish GroupInfo (W4), epoch-monotone.
+//!   - `POST /v1/welcomes/ack`   — mark Welcomes delivered (W5).
+//!   - `POST /v1/welcomes/reset` — re-arm Welcomes for redelivery (W6/W7).
+//!   - `POST /v1/welcomes/purge` — delete all of a user's Welcomes (W8).
+//!
+//! Every endpoint is gated by `require_auth` exactly like `/v1/commits`: when
+//! enforced, the request is device-signature-verified and the authenticated
+//! user must equal the actor/owner the write targets. All writes land on
+//! `state.log_db`; membership/auth lookups read `state.db` (the main DB, where
+//! `user_device` and group/DM membership live).
 
 use axum::{
     body::Bytes,
@@ -17,13 +29,29 @@ use crate::error::{AppError, AuthRejection};
 use crate::AppState;
 use crate::util::b64_decode;
 
-// Re-exported so `pollis_delivery::writes::*Body` resolves for handlers and tests.
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::writes::*Body`
+// keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::writes::*;
 
-/// Method, path, headers and the **raw** body bytes: exactly what a device
-/// signature covers. The body cannot be deserialized before it is verified, so
-/// `Json<T>` is not available to these routes. `Bytes` is extracted last because
-/// it consumes the body.
+// ── The request the signature covers ─────────────────────────────────────────
+
+/// Method, path, headers and the **raw** body bytes — exactly the material a
+/// device signature is computed over, in one extractor.
+///
+/// Every `POST /v1/...` handler in this crate needs all four and nothing else,
+/// because the signature binds `sha256(body)` and the canonical signing message
+/// covers the method and path: the body cannot be deserialized before it is
+/// verified, so `Json<T>` is not available to these routes and the parts have to
+/// arrive raw. Ninety-odd handlers therefore declared the same four extractors
+/// positionally, which is four chances each to reorder them into a different
+/// meaning and no place to say what they are *for*.
+///
+/// `Bytes` is extracted last, as it must be (it consumes the body), so this
+/// rejects exactly what the four separate extractors rejected — the same
+/// `DefaultBodyLimit` and the same 400 on a body that cannot be read.
 pub struct RawRequest {
     pub method: Method,
     pub uri: Uri,
@@ -37,7 +65,9 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for RawRequest {
 
     async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
         let (parts, body) = req.into_parts();
-        // Cloned, not moved, so `Bytes::from_request` gets the request back intact.
+        // Cloned, not moved out of `parts`: `Bytes::from_request` is handed the
+        // request back intact, exactly as it was when the four separate
+        // extractors ran in this order.
         let (method, uri, headers) = (parts.method.clone(), parts.uri.clone(), parts.headers.clone());
         let body =
             Bytes::from_request(axum::extract::Request::from_parts(parts, body), state).await?;
@@ -50,13 +80,25 @@ impl<S: Send + Sync> axum::extract::FromRequest<S> for RawRequest {
     }
 }
 
-/// The shared auth gate's outcome: the authenticated user, or `None` on the
-/// no-auth path.
+// ── Shared auth gate ─────────────────────────────────────────────────────────
+
+/// The outcome of the shared auth gate: either an authenticated user (auth
+/// enforced + verified), or `None` (auth disabled — the no-auth path).
+///
+/// `pub(crate)` so sibling write-domain modules (e.g. [`crate::messages`]) reuse
+/// the exact same gate type instead of re-declaring the no-auth contract.
 pub(crate) type Authed = Option<String>;
 
-/// The one auth gate every write-domain module shares: when `require_auth` is on,
-/// verify the device signature over the raw body and return the `user_id`; when
-/// off, `None`. `Ok(Err(response))` is a rejection the caller forwards unchanged.
+/// Run the same auth gate as `submit`: when `require_auth` is on, verify the
+/// device signature over the raw body and return the authenticated `user_id`;
+/// when off, return `None` (the no-auth test/pre-cutover path).
+///
+/// Returns `Ok(Err(response))` when auth is enforced but the request is
+/// rejected — the caller forwards that response unchanged.
+///
+/// `pub(crate)` so every write-domain module (commits, welcomes, messages, …)
+/// shares ONE auth gate. Adding a new domain must not re-implement
+/// `auth::verify_request` plumbing — it calls this.
 pub(crate) async fn gate(
     state: &AppState,
     req: &RawRequest,
@@ -64,8 +106,10 @@ pub(crate) async fn gate(
     if !state.require_auth {
         return Ok(Ok(None));
     }
-    // Cached pubkey lookup (#658): this is the chokepoint every device-signed
-    // endpoint goes through. A connection is checked out only on a miss (#1500).
+    // Cached pubkey lookup (#658): this gate is the single chokepoint every
+    // device-signed endpoint funnels through, so caching here is what removes
+    // the per-request Turso round trip fleet-wide. Signature verification is
+    // unchanged. A connection is checked out only on a cache miss (#1500).
     match auth::verify_request_cached(
         &state.device_keys,
         &state.db,
@@ -82,12 +126,19 @@ pub(crate) async fn gate(
     }
 }
 
-/// [`gate`], also accepting a verified OTP session (`X-Pollis-Session`), for the
-/// account-lifecycle writes a PRE-ENROLLMENT device can reach (it has no key to
-/// sign with). `user_id` binds from the session, never the body.
+/// [`gate`], extended to ALSO accept a verified OTP session (`X-Pollis-Session`)
+/// as the authenticating credential — for the account-lifecycle writes reachable
+/// from a PRE-ENROLLMENT device (the soft reset offered on the login gate). Such
+/// a device by definition has no registered `mls_signature_pub` to sign with:
+/// its proof of authorization is the verified-OTP session, exactly like the
+/// bootstrap endpoints (`crate::bootstrap`), and `user_id` binds from the
+/// session record, never the body. The soft reset was always email-OTP
+/// authorized by design — this enforces that server-side instead of trusting
+/// the client's direct write.
 ///
-/// A request carrying the signature header always takes the signature gate, so a
-/// bad signature is never rescued by a session token.
+/// A request carrying the signature header goes through the signature gate
+/// unconditionally, so an enrolled caller keeps the stronger credential and a
+/// bad signature is never "rescued" by a session token.
 pub(crate) async fn gate_or_session(
     state: &AppState,
     req: &RawRequest,
@@ -95,10 +146,16 @@ pub(crate) async fn gate_or_session(
     Ok(gate_or_session_kind(state, req).await?.map(|(authed, _)| authed))
 }
 
-/// WHICH credential [`gate_or_session`] accepted. `/v1/account/rotate-identity`
-/// is a plain key rotation under a signature but the pre-enrollment soft reset
-/// under a session (see `account::apply_rotate_identity`), so the gate must say.
-/// Both `device_id`s are server-verified.
+/// WHICH credential [`gate_or_session`] accepted — for the one endpoint whose
+/// semantics depend on it. `/v1/account/rotate-identity` under a device
+/// signature is a plain key rotation; under a bare OTP session it is the
+/// pre-enrollment soft reset, and the DS then performs the membership/device
+/// wipe in the same transaction (see `account::apply_rotate_identity`). The
+/// two must be distinguishable at the gate, not inferred from the body.
+///
+/// The `device_id` in both authenticated variants is server-verified: for a
+/// signature it is the `X-Pollis-Device` the pubkey lookup was keyed on, for a
+/// session it is the device the OTP session was minted for.
 pub enum GateCredential {
     /// `require_auth = false` — no credential exists on this deployment.
     None,
@@ -142,10 +199,19 @@ pub(crate) async fn gate_or_session_kind(
     }
 }
 
-/// [`gate`] followed by parsing the body. The order is the point: the signature
-/// is verified over the raw bytes before the body is deserialized, so a forged
-/// body never reaches `serde`, let alone the DB. `Ok(Err(response))` is a
-/// rejection (401/403, or 400 for an unparseable body).
+/// [`gate`] followed by parsing the body — the preamble every device-signed
+/// endpoint in this crate runs, in one call.
+///
+/// The ORDER is the point, not the line count: the signature is verified over
+/// the RAW bytes and the body is deserialized only afterwards, so a forged body
+/// can never reach a `serde` impl, let alone the DB. Sixty-odd handlers used to
+/// spell that ordering out by hand, which meant sixty-odd chances to write it
+/// the other way round; there is now one place where it is written, and a
+/// handler that wants the wrong order has to visibly stop using this.
+///
+/// Returns `Ok(Err(response))` when the request is rejected (401/403 from the
+/// gate, or 400 for a body that will not parse) — the caller forwards it
+/// unchanged.
 pub(crate) async fn gate_and_parse<B>(
     state: &AppState,
     req: &RawRequest,
@@ -177,7 +243,8 @@ where
         .map(|(authed, _, parsed)| (authed, parsed)))
 }
 
-/// [`gate_or_session_and_parse`] over [`gate_or_session_kind`], also reporting
+/// [`gate_or_session_and_parse`] over [`gate_or_session_kind`] — same ordering
+/// guarantee (verify the raw bytes first, deserialize second), also reporting
 /// which credential authenticated the request.
 pub(crate) async fn gate_or_session_kind_and_parse<B>(
     state: &AppState,
@@ -201,9 +268,12 @@ where
 /// DEVICE half kept.
 pub(crate) type AuthedIdentity = Option<(String, String)>;
 
-/// [`gate`] returning the verified `device_id` too, for writes keyed on the
-/// device (e.g. `/v1/watermarks/advance`), so the handler binds the body's
-/// `device_id` to the signer.
+/// [`gate`] for the writes that key a row on the specific DEVICE, not just the
+/// user — the per-device delivery cursor (`/v1/watermarks/advance`). Same
+/// verification, same rejections; the only difference is that the verified
+/// `device_id` is returned instead of dropped, so the handler can bind the
+/// body's `device_id` to the signer the way `report_commit_since` does, rather
+/// than trusting an unauthenticated field.
 pub(crate) async fn gate_identity(
     state: &AppState,
     req: &RawRequest,
@@ -227,7 +297,9 @@ pub(crate) async fn gate_identity(
     }
 }
 
-/// [`gate_and_parse`] over [`gate_identity`].
+/// [`gate_and_parse`] over [`gate_identity`] — same ordering guarantee
+/// (signature over the raw bytes first, deserialize second), for the endpoints
+/// that need the device half of the identity.
 pub(crate) async fn gate_identity_and_parse<B>(
     state: &AppState,
     req: &RawRequest,
@@ -280,10 +352,20 @@ pub(crate) fn bad_request(msg: &str) -> Response {
 
 /// 200 + the ONE success body `B`'s endpoint is declared to answer with (#922).
 ///
-/// Taking `B::Response` (not `impl Serialize`) means the two ends cannot name
-/// different shapes: the client decodes the same associated type through
-/// `ds_post_json::<B>`. `pub` so the compile-fail doctest below (an external
-/// crate) can prove it.
+/// The response half of what `pollis-api` already did for requests. Until #922
+/// every handler built its answer as a `json!{}` literal and `pollis-core`
+/// declared a private `#[derive(Deserialize)]` mirror of it, which is the same
+/// two-hand-maintained-lists bug that produced the actor-field outage — only
+/// quieter, because a response field the server renames does not fail on the
+/// client, it just arrives absent and defaults.
+///
+/// Taking `B::Response` (not `impl Serialize`) is the whole point: the client
+/// decodes that same associated type through `ds_post_json::<B>`, so the two
+/// ends cannot name different shapes. Answering with another endpoint's body is
+/// `E0308` here, and reading a field the server does not send is `E0609` there.
+///
+/// `pub` rather than `pub(crate)` so the compile-fail doctest below — which is
+/// an external crate, as every doctest is — can prove that.
 ///
 /// ```compile_fail,E0308
 /// use pollis_delivery::writes::ok_response;
@@ -304,15 +386,26 @@ pub fn ok_response<B: pollis_api::DsRequest>(body: B::Response) -> Response {
     (StatusCode::OK, Json(body)).into_response()
 }
 
-/// 200 with NO body, for the endpoints declared [`pollis_api::Empty`]; bounded on
-/// `Response = Empty` so a handler cannot use it for an endpoint that owes a body.
+/// 200 with NO body, for the endpoints declared [`pollis_api::Empty`].
+///
+/// Separate from [`ok_response`] and bounded on `Response = Empty`, so "this
+/// endpoint answers a bare 200" is a checked fact rather than a convention. A
+/// handler cannot use this for an endpoint that owes a body, and cannot
+/// accidentally start sending `null` for one that does not.
 pub fn ok_empty<B: pollis_api::DsRequest<Response = pollis_api::Empty>>() -> Response {
     StatusCode::OK.into_response()
 }
 
-/// The result of an authorized write: applied, or not allowed (→ 403). A genuine
-/// failure is an `Err` on the enclosing `anyhow::Result`. `pub` so the external
-/// test harness can match on it.
+// ── Shared write-result helpers (every domain reuses these) ──────────────────
+
+/// The result of an authorized write: either it was applied, or the
+/// authenticated user was not allowed to make it (→ 403). A genuine failure (DB
+/// error, etc.) is an `Err` on the enclosing `anyhow::Result`, mapped to 500 by
+/// the handler. Shared across every write-domain module so the handler ⇆ harness
+/// pair stays uniform.
+///
+/// `pub` (not `pub(crate)`) so the integration-test harness — an external crate —
+/// can match on it when driving the `apply_*` fns directly.
 #[derive(Debug)]
 pub enum WriteOutcome {
     Ok,
@@ -325,9 +418,11 @@ pub enum WriteOutcome {
         head_generation: i64,
         head_epoch: i64,
     },
-    /// Well-formed but inadmissible value (→ 400), e.g. a `sent_at` that is not a
-    /// canonical UTC RFC 3339 stamp or sits past the clock-skew allowance
-    /// (`messages::check_cursor_stamp`).
+    /// The body is well-formed JSON but carries a value the DS refuses to store
+    /// (→ 400). Distinct from `Forbidden`: the caller is allowed to make the
+    /// write, the VALUE is not admissible — a `sent_at` or `last_fetched_at`
+    /// that is not a canonical UTC RFC 3339 stamp, or sits past the DS clock's
+    /// skew allowance (see `messages::check_cursor_stamp`).
     Invalid(&'static str),
 }
 
@@ -344,10 +439,16 @@ pub(crate) fn epoch_behind_response(head_generation: i64, head_epoch: i64) -> Re
         .into_response()
 }
 
-/// Map a [`WriteOutcome`] to the HTTP response (200 / 403 / 409 / 400). Generic
-/// over the request type (#922): `B::Response` must be [`pollis_api::StatusOk`],
-/// so an endpoint that declares a richer body cannot answer a bare
-/// `{"status":"ok"}` through here.
+/// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden / 409
+/// epoch-behind / 400 invalid).
+///
+/// Generic over the endpoint's request type since #922, which is what ties this
+/// shared success body to a specific route: `B::Response` must be
+/// [`pollis_api::StatusOk`] for `outcome_response::<B>` to typecheck, so an
+/// endpoint whose table row declares a richer body cannot silently answer a bare
+/// `{"status":"ok"}` through the shared helper. One turbofish per call site, and
+/// it is the only thing that makes the ~50 endpoints sharing this path as
+/// strongly typed as the handful that build their own body.
 pub(crate) fn outcome_response<B>(outcome: WriteOutcome) -> Result<Response, AppError>
 where
     B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
@@ -370,7 +471,9 @@ where
 ///   - auth OFF → the body's actor id (no signed identity on the no-auth path).
 ///     Missing/empty → `Forbidden`.
 ///
-/// Returns [`WriteOutcome::Forbidden`] so `apply_*` fns can bail uniformly.
+/// Returns the actor or [`WriteOutcome::Forbidden`] so `apply_*` fns can `?`-bail
+/// uniformly. (Distinct from [`resolve_recipient`], which returns an HTTP
+/// response for the welcome endpoints' 400-on-missing contract.)
 pub(crate) fn resolve_actor(
     authed: Option<&str>,
     body_actor: Option<&str>,
@@ -397,6 +500,10 @@ pub(crate) fn resolve_actor(
 ///   - a **DM channel id** (membership via `dm_channel_member`);
 ///   - a **channel id** — e.g. a voice channel's own MLS group (membership via
 ///     the channel's owning group).
+///
+/// Takes a bare [`Connection`] (the main DB) so the same gate is reusable from
+/// the integration harness, which drives a single shared connection rather than
+/// the DS's `AppState`.
 pub async fn is_member(
     conn: &Connection,
     conversation_id: &str,
@@ -419,15 +526,37 @@ pub async fn is_member(
     Ok(rows.next().await?.is_some())
 }
 
-/// Is `user_id` in this conversation's DESIRED roster
-/// ([`crate::directory::desired_roster`]): `group_member` plus pending
-/// `group_invite` invitees?
+/// Is `user_id` someone this conversation's MLS tree is SUPPOSED to hold a leaf
+/// for — i.e. in [`crate::directory::desired_roster`]?
 ///
-/// The right gate for a Welcome, not [`is_member`]: an invitee's devices are
-/// Welcomed at INVITE time so accepting does not need the inviter online. This
-/// only stops a Welcome addressed to someone the conversation is not admitting;
-/// the forged-Welcome half (C1) is the client's `GroupId` check in
-/// `join_from_welcome`.
+/// [`is_member`] is the narrower question, and it is the wrong one for a
+/// Welcome. The tree is reconciled against the DESIRED roster, which is
+/// `group_member` **plus pending `group_invite` invitees** — an invitee's
+/// devices are added and Welcomed at INVITE time, deliberately, so that
+/// accepting does not depend on the inviter being online at that moment. Gating
+/// a Welcome on `is_member` therefore refuses the staged Welcome that the
+/// shipped invite flow exists to produce.
+///
+/// Same three id shapes [`is_member`] accepts, so a channel id resolves through
+/// its owning group. Kept as an EXISTS predicate rather than a call to
+/// `desired_roster` because the question is about ONE user, not the whole set.
+///
+/// ## What this costs, and why it is still the right gate (C1)
+///
+/// Anyone may invite anyone they have not blocked, so an attacker CAN put a
+/// victim into their own group's desired roster and then write a Welcome for
+/// them. The Delivery Service cannot tell that apart from an honest invite —
+/// that is what an invite IS — so the server-side half of C1 is: a Welcome may
+/// only be addressed to somebody this conversation is actually trying to admit,
+/// never to an arbitrary user/device pair chosen in the request body.
+///
+/// The half that refuses the forged Welcome itself is the CLIENT's, and it is
+/// cryptographic rather than relational: `pollis-core`'s `join_from_welcome`
+/// checks the `GroupId` embedded in the Welcome blob against the
+/// `conversation_id` the row arrived on, so a Welcome that claims to admit you
+/// to the attacker's group while actually carrying your real conversation's
+/// `GroupId` is refused. That check needs `conversation_id` on the fetched row,
+/// which `reads::pending_welcomes` now returns.
 pub async fn in_desired_roster(
     conn: &Connection,
     conversation_id: &str,
@@ -455,6 +584,8 @@ pub async fn in_desired_roster(
     Ok(rows.next().await?.is_some())
 }
 
+// ── the conversation-id namespace (#880) ─────────────────────────────────────
+
 /// The kinds of conversation that share one id namespace — exactly the three
 /// legs [`is_member`] ORs over, which is precisely why they cannot be allowed to
 /// disagree about what an id means.
@@ -478,14 +609,25 @@ impl ConversationKind {
     }
 }
 
-/// Claim `id` for `kind` in the `conversation` registry (#880), which owns the
-/// conversation-id namespace.
+/// Claim `id` for `kind` in the `conversation` registry (#880), the table that
+/// owns the conversation-id namespace.
 ///
-/// **Call this inside the transaction that inserts the row the id names**, so a
-/// refused claim also refuses the row. The registry is append-only: a claimed id
-/// stays claimed after its conversation is deleted, since with `foreign_keys=OFF`
-/// the deleted group's rows would otherwise pass to the next claimant.
-/// [`conversation_id_taken`] runs first so the ordinary case is a 403, not a 500.
+/// **Call this inside the transaction that inserts the row the id names, never
+/// beside it.** The registry's primary key is what refuses a second claim, so
+/// the claim and the row it describes have to succeed or fail together —
+/// otherwise a rejected claim leaves the conversation created anyway, which is
+/// the whole hole.
+///
+/// Returns `Err` when the id is already registered, as any kind, *including one
+/// whose conversation has since been deleted*: the registry is append-only, so a
+/// claimed id is claimed forever. Releasing it would re-open the reuse window,
+/// and with `foreign_keys=OFF` in production a deleted group leaves its
+/// `group_member` and `channels` rows behind for the next claimant to inherit.
+///
+/// [`conversation_id_taken`] still runs first on every create path, so the
+/// ordinary case is a clean 403 rather than a 500. This is what holds when it is
+/// not consulted — a create path that forgets it, or a body carrying two ids
+/// that are equal to each other, which no lookup of existing rows can catch.
 pub async fn claim_conversation_id(
     conn: &Connection,
     id: &str,
@@ -499,14 +641,26 @@ pub async fn claim_conversation_id(
     Ok(())
 }
 
-/// True when `id` is already in use as ANY kind of conversation, or claimed in
-/// the registry.
+/// True when `id` is already in use as ANY kind of conversation — a DM channel,
+/// a group, or a channel, or a registry claim outliving the conversation that
+/// made it.
 ///
-/// Every create endpoint takes the id from the request body, and [`is_member`]
-/// ORs across the three tables on one id, so a DM named with a victim group's id
-/// would grant membership of that group (#880). The registry remembers retired
-/// ids; the three tables cover rows that predate it. See
-/// `.codesight/wiki/database.md` → `conversation`.
+/// The three tables have separate primary keys, so SQLite happily accepts the
+/// same id in all three. That is not a ULID collision (they do not collide by
+/// chance); every creation endpoint takes the id straight from the request body,
+/// so an attacker simply *names* an existing conversation. [`is_member`] then
+/// ORs across all three tables on one id, so creating a DM whose id is a victim
+/// group's id and adding yourself to it makes `is_member(victim_group, you)`
+/// true — membership of a group you were never in, and with it commit injection,
+/// GroupInfo/Welcome overwrite, and a LiveKit token for their room.
+///
+/// Every `create_*` path calls this before inserting, and it is no longer the
+/// only thing standing between an attacker and a shared id: since #880 the
+/// `conversation` registry claims the id in the same transaction, so this is the
+/// chokepoint that turns the refusal into a 403 instead of a constraint error.
+/// It queries the registry as well as the three tables because the two answer
+/// slightly different questions — the registry remembers retired ids, and the
+/// three tables cover any row that predates the registry.
 pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
@@ -522,8 +676,16 @@ pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Resul
     Ok(rows.next().await?.is_some())
 }
 
-/// Hard ceiling on one published GroupInfo blob: far above any real ratchet tree,
-/// far below parking storage in a single mutable slot per conversation.
+// ── The commit-log head as a CEILING on control-plane writes ─────────────────
+
+/// Hard ceiling on one published GroupInfo blob.
+///
+/// A GroupInfo carries the whole ratchet tree — KBs for a small roster,
+/// hundreds of KBs for a very large one — so a megabyte is far above anything
+/// the protocol produces and far below "park arbitrary storage on the DS". The
+/// row is a single mutable slot per conversation, which is exactly what makes
+/// an unbounded blob attractive: one authenticated member could hold a
+/// permanent multi-megabyte allocation per conversation it belongs to.
 pub const GROUP_INFO_MAX_BYTES: usize = 1024 * 1024;
 
 /// The verdict of a control-plane write that names a `(generation, epoch)`.
@@ -549,13 +711,27 @@ pub enum HeadBoundedOutcome {
 /// The ceiling a `(generation, epoch)` control-plane write may not exceed:
 /// `(head_generation, head_epoch_in(generation))`.
 ///
-/// `mls_group_info` and `pin_keystate` CAS on strictly-greater `(generation,
-/// epoch)`, which is monotone but unbounded: one write of `generation = 2^62`
-/// would freeze the row forever. The commit log alone decides which epochs exist,
-/// so its head is the ceiling. See `.codesight/wiki/mls.md`.
+/// WHY THERE MUST BE A CEILING. `mls_group_info` and `pin_keystate` are single
+/// mutable rows guarded by a lexicographic `(generation, epoch)` compare-and-set
+/// — strictly greater wins. That guard alone is monotone but UNBOUNDED: a
+/// current member could publish `generation = 2^62`, which nothing later can
+/// ever exceed, and the row is frozen for the life of the conversation. Every
+/// device that external-joins afterwards reads a GroupInfo for a lineage that
+/// does not exist, and every pin re-wrap is refused, so the conversation's join
+/// and pin paths are permanently wedged by one write.
 ///
-/// Read from the LOG DB, inside the write's transaction where the write lands
-/// there too; a stale head read can only make the check stricter.
+/// The commit log is the only thing that decides what epochs exist, and it does
+/// so under the head+1 CAS in [`crate::commit::submit_commit`]. So the ceiling
+/// is the log's own head: `generation` must be a lineage that has been opened,
+/// and `epoch` must be at or below that lineage's head — `MAX(epoch) + 1`, the
+/// epoch the group is in once the head commit is merged, which is exactly the
+/// epoch an honest publisher stamps. An empty log heads at generation 0 epoch 0,
+/// which is the epoch a freshly created group publishes from.
+///
+/// Read this from the LOG DB, and — where the write lands there too — inside the
+/// write's own transaction. The head only ever advances, so a head read that is
+/// already stale can only make this check stricter, never laxer: a value at or
+/// below a head observed earlier is still at or below the head now.
 pub async fn head_bound(
     log_conn: &Connection,
     conversation_id: &str,
@@ -618,6 +794,8 @@ where
     }
 }
 
+// ── W4 — POST /v1/group-info ─────────────────────────────────────────────────
+
 /// POST /v1/group-info — republish GroupInfo for a conversation, epoch-monotone
 /// (an older epoch can never clobber a newer one). When auth is enforced, the
 /// authenticated user must be a current member of `conversation_id`.
@@ -658,8 +836,11 @@ pub async fn group_info(
     Ok(head_bounded_response::<GroupInfoBody>(outcome))
 }
 
-/// Decode a [`GroupInfoBody`]'s base64 GroupInfo and UPSERT it (W4 minus
-/// auth/authz), for the integration harness. A decode failure is an `Err` here.
+/// Decode a parsed [`GroupInfoBody`]'s base64 GroupInfo and UPSERT it (the W4
+/// write minus auth/authz). Exposed so the integration harness reuses the exact
+/// decode + write without re-implementing base64 handling. A decode failure is
+/// an `Err` here (the axum handler maps the same case to 400 itself, before
+/// calling [`upsert_group_info`], so its 400-vs-500 behavior is unchanged).
 pub async fn apply_group_info(
     log_conn: &Connection,
     body: &GroupInfoBody,
@@ -677,11 +858,19 @@ pub async fn apply_group_info(
 }
 
 /// `(generation, epoch)`-monotone UPSERT of a conversation's GroupInfo (W4),
-/// compared lexicographically. The generation term matters at a suite migration
-/// (#454 P4): the successor lineage restarts at epoch 0, below the retired one's.
+/// compared lexicographically: older GroupInfo can never clobber newer. The
+/// generation term is load-bearing at a suite migration (#454 P4) — the successor
+/// lineage restarts at epoch 0, NUMERICALLY BELOW the retired lineage's last
+/// epoch, so an epoch-only guard would reject the successor's GroupInfo and
+/// strand every externally-joining device on the retired suite. Pure conn-level
+/// write so the integration harness can reuse it against its shared log
+/// connection.
 ///
-/// Also ceilinged at the commit log's head ([`refuse_above_head`]), read in the
-/// same transaction, and bounded by [`GROUP_INFO_MAX_BYTES`].
+/// Monotone is not enough on its own: the CAS is also CEILINGED at the commit
+/// log's head ([`refuse_above_head`]), read inside this write's own transaction,
+/// so a member cannot publish an unreachable future epoch and freeze the row
+/// forever. The blob is bounded by [`GROUP_INFO_MAX_BYTES`] for the same reason
+/// — one mutable slot per conversation is not somewhere to park storage.
 pub async fn upsert_group_info(
     log_conn: &Connection,
     conversation_id: &str,
@@ -732,6 +921,8 @@ pub async fn upsert_group_info(
     Ok(HeadBoundedOutcome::Ok { affected })
 }
 
+// ── W5 — POST /v1/welcomes/ack ───────────────────────────────────────────────
+
 /// POST /v1/welcomes/ack — mark the given Welcomes delivered, scoped to the
 /// authenticated recipient so a user can only ack their own Welcomes.
 pub async fn welcomes_ack(
@@ -765,9 +956,15 @@ pub async fn ack_welcomes(
         return Ok(0);
     }
 
-    // Recipient bound first so the filter never touches another user's Welcomes.
-    // Chunked (#916) with one slot reserved for it: the id list comes off the wire,
-    // and exceeding SQLite's parameter limit fails the whole statement.
+    // `id IN (?2, ?3, …)` with the recipient bound first so the filter can never
+    // touch another user's Welcomes.
+    //
+    // Chunked (#916) with ONE slot reserved for `recipient`. This list comes off
+    // the wire — a device acking a long backlog, or a caller sending an
+    // arbitrarily long one — so it is the batched query in the workspace most
+    // able to exceed SQLite's parameter limit, and going over does not degrade:
+    // the statement fails to prepare and the Welcomes never get marked
+    // delivered.
     let mut updated: u64 = 0;
     for chunk in crate::util::bind_chunks(welcome_ids, 1) {
         let sql = format!(
@@ -785,6 +982,8 @@ pub async fn ack_welcomes(
 
     Ok(updated)
 }
+
+// ── W6/W7 — POST /v1/welcomes/reset ──────────────────────────────────────────
 
 /// POST /v1/welcomes/reset — re-arm Welcomes for redelivery (set `delivered=0`),
 /// scoped to the authenticated recipient.
@@ -825,6 +1024,8 @@ pub async fn reset_welcomes(
         )
         .await?)
 }
+
+// ── W8 — POST /v1/welcomes/purge ─────────────────────────────────────────────
 
 /// POST /v1/welcomes/purge — delete all of the authenticated user's Welcomes
 /// (identity-reset cleanup). Recipient is derived from auth; the body carries an
@@ -869,6 +1070,8 @@ pub async fn purge_welcomes(log_conn: &Connection, recipient: &str) -> anyhow::R
         )
         .await?)
 }
+
+// ── POST /v1/welcomes/resubmit (issue #430 P2) ───────────────────────────────
 
 /// Hard ceiling on one Welcome blob. A Welcome carries the group's ratchet tree
 /// plus the joiner's secrets, so it is bounded by the same reasoning (and the
@@ -972,11 +1175,27 @@ pub async fn welcomes_resubmit(
     })
 }
 
-/// The resubmit decision and the write. Gates: the actor is a current member
-/// (skipped on the no-auth path); the recipient is in the desired roster; the
-/// lineage exists ([`refuse_above_head`]); and a pending Welcome someone else
-/// published may be replaced only by the head commit's author or a group admin.
-/// See `.codesight/wiki/mls.md`.
+/// The resubmit decision and the write, with the four gates a member could
+/// previously walk straight past:
+///
+///   1. **The actor is a current member** of the conversation (unchanged; skipped
+///      on the no-auth path, mirroring submit / group_info).
+///   2. **The RECIPIENT is a current member** too. Without this, any member
+///      could park a Welcome addressed to an arbitrary user/device pair — a row
+///      `/v1/welcomes/fetch` then hands that device, inviting it to join a group
+///      nobody added it to. Checked on both paths, because it is a property of
+///      the ROW being written rather than of the caller's credential.
+///   3. **The lineage exists.** `generation` may not exceed the commit log's head
+///      generation ([`refuse_above_head`]); a Welcome into a lineage that was
+///      never opened admits nobody and only occupies the tuple.
+///   4. **One member may not overwrite another's undelivered Welcome.** The
+///      tuple is UNIQUE, so a resubmit IS an overwrite; before `submitted_by`
+///      existed the DS could not tell an honest resend from a hijack of the
+///      Welcome the real adder had just written. A resubmit may always refresh a
+///      Welcome the actor itself published (or an unattributed pre-migration
+///      one, or one already delivered); replacing somebody else's PENDING
+///      Welcome takes the head commit's author — the party that actually
+///      performed the Add — or an admin of the conversation's group.
 pub async fn apply_welcomes_resubmit(
     main_conn: &Connection,
     log_conn: &Connection,
@@ -995,9 +1214,13 @@ pub async fn apply_welcomes_resubmit(
             return Ok(ResubmitOutcome::Forbidden);
         }
     }
-    // The DESIRED roster, not `is_member`: the same predicate `/v1/commits` applies
-    // to a bundle's Welcomes, and an invitee's Welcome must be re-drivable before
-    // the invite is accepted.
+    // The DESIRED roster, not `is_member` — the same predicate `/v1/commits` now
+    // applies to the Welcomes in a bundle, so the two writers of `mls_welcome`
+    // cannot disagree about who may receive one. It also fixes a liveness bug
+    // this check had on its own: an invitee's Welcome is staged at INVITE time
+    // (that is what makes accepting independent of the inviter being online), and
+    // `is_member` refused to re-drive one until after the invite was accepted —
+    // exactly the window in which a lost Welcome needs re-driving.
     if !in_desired_roster(main_conn, &body.conversation_id, &body.recipient_id).await? {
         return Ok(ResubmitOutcome::Forbidden);
     }
@@ -1048,13 +1271,19 @@ pub async fn apply_welcomes_resubmit(
     }
 }
 
-/// Idempotent (re)insert of a Welcome on the UNIQUE
-/// `(conversation_id, recipient_id, recipient_device_id)` tuple: a resend
-/// refreshes the blob and re-arms delivery. Mirrors the commit bundle's insert.
+/// Idempotent (re)insert of a Welcome, keyed on the UNIQUE
+/// `(conversation_id, recipient_id, recipient_device_id)` tuple added in
+/// migration 000002 (commit-log DB): a resend for the same tuple refreshes the blob and re-arms
+/// delivery (`delivered = 0`) rather than duplicating or erroring. Mirrors the
+/// inline Welcome insert in the commit bundle so both writers of `mls_welcome`
+/// obey one rule. Pure conn-level write reused by the harness.
 ///
-/// When `may_override` is false, a pending row another actor published
-/// (`submitted_by`) is refused; the read and write share one IMMEDIATE
-/// transaction so two racing resubmits cannot both pass.
+/// `submitted_by` records the actor (migration `migrations-log/000006`) so the
+/// next writer of the same tuple can be told apart from this one. When
+/// `may_override` is false, an existing UNDELIVERED row published by a different
+/// actor is refused rather than replaced — the read and the write share one
+/// IMMEDIATE transaction, so two racing resubmits cannot both see "no
+/// conflicting row".
 #[allow(clippy::too_many_arguments)]
 pub async fn upsert_welcome(
     log_conn: &Connection,
@@ -1125,22 +1354,38 @@ pub async fn upsert_welcome(
     Ok(WelcomeUpsertOutcome::Ok)
 }
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod conversation_namespace_tests {
-    //! One id must never name two kinds of conversation (#880).
+    //! One id must never name two kinds of conversation.
+    //!
+    //! Not a ULID-collision concern — ULIDs do not collide by chance. Every
+    //! `create_*` endpoint takes the id straight from the request body, so an
+    //! attacker *names* an existing conversation rather than colliding with it.
+    //! Because `dm_channel`, `groups` and `channels` are separate tables with
+    //! separate primary keys, SQLite accepts the same id in all three, and
+    //! `is_member` ORs across all three on one id — so a DM whose id is a
+    //! victim group's id grants membership of that group.
 
     use super::*;
     use libsql::Connection;
 
-    /// 000017's guard triggers (#948) refuse unregistered rows going forward, but
-    /// these tests pin rows that PREDATE the registry, so the fixture stops one
-    /// migration short.
+    /// 000017's guard triggers (#948) make an unregistered row in the three
+    /// tables unrepresentable going FORWARD — but the three-table legs of
+    /// `conversation_id_taken` exist for rows that PREDATE the registry, and
+    /// these tests pin exactly that state. So the fixture stops one migration
+    /// short of the triggers; seeding a bare table row on the full schema
+    /// would simply be refused by the database now (which is pinned by
+    /// tests/conversation_namespace.rs, not here).
     const GUARD_TRIGGERS_VERSION: u32 = 17;
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let c = db.connect().unwrap();
-        // Foreign keys off, as in production (`Db::connect_local` does the same).
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
         c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         c.execute_batch(pollis_schema::BASELINE_SQL).await.expect("baseline");
         for (_, _, sql) in pollis_schema::POST_BASELINE_MIGRATIONS

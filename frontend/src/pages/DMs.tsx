@@ -33,6 +33,7 @@ export const DMsPage: React.FC = observer(() => {
     action: () => navigate({ to: "/dms/new" }),
     type: "system" as const,
     testId: "menu-item-new-dm",
+    activateOn: "press",
   });
 
   if (requests.length > 0) {
@@ -44,6 +45,7 @@ export const DMsPage: React.FC = observer(() => {
       type: "system" as const,
       badge: requests.length,
       testId: "menu-item-dm-requests",
+      activateOn: "press",
     });
   }
 
@@ -54,6 +56,7 @@ export const DMsPage: React.FC = observer(() => {
     action: () => navigate({ to: "/dms/blocked" }),
     type: "system" as const,
     testId: "menu-item-dm-blocked",
+    activateOn: "press",
   });
 
   if (conversations.length) {
@@ -99,6 +102,7 @@ export const DMsPage: React.FC = observer(() => {
           badge: unreadCounts[c.id] ?? 0,
           trailingIndicator,
           testId: `dm-option-${c.id}`,
+          activateOn: "press",
           secondaryAction: () => navigate({ to: "/dms/$conversationId/settings", params: { conversationId: c.id } }),
           secondaryActionLabel: t("list.settingsFor", { name: c.user2_identifier }),
         };
@@ -108,6 +112,7 @@ export const DMsPage: React.FC = observer(() => {
 
   items.push({
     id: "__back__",
+    activateOn: "press",
     label: t("common:actions.goBack"),
     icon: <ArrowLeft size={14} className="rtl-mirror" />,
     action: () => navigate({ to: "/" }),

@@ -17,6 +17,7 @@ import { UnsentMessageActions } from "./UnsentMessageActions";
 import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
+import { PressButton } from "../ui/PressButton";
 
 interface MessageItemProps {
   message: Message;
@@ -190,7 +191,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         <div className="min-w-0">
           {message.reply_to_message_id && (
             replyTo ? (
-              <button
+              <PressButton
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
                 onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
                 className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
@@ -207,7 +208,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 <span className="truncate max-w-xs" dir="auto">
                   {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
                 </span>
-              </button>
+              </PressButton>
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
@@ -250,8 +251,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           >
             <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
-              <span className="ms-1 text-xs text-muted">
-                {t("message.edited")}
+              <span
+                className="ms-1 text-xs text-muted"
+                data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
+              >
+                {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
             {/* Only a FAILED send is labelled; a `[sending]` tag made fast sends feel slow. */}
@@ -315,7 +319,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     >
       {message.reply_to_message_id && (
         replyTo ? (
-          <button
+          <PressButton
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
             className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
@@ -332,7 +336,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <span className="truncate max-w-xs" dir="auto">
               {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
             </span>
-          </button>
+          </PressButton>
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
@@ -384,8 +388,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           >
             <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
-              <span className="ms-1 text-xs text-muted">
-                {t("message.edited")}
+              <span
+                className="ms-1 text-xs text-muted"
+                data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
+              >
+                {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
             {/* Only a FAILED send is labelled. */}

@@ -17,6 +17,7 @@ import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
 import { useReadReceipts } from "../hooks/useReadReceipts";
 import { useSendReadReceipts } from "../hooks/queries/usePreferences";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
+import { PressButton } from "../components/ui/PressButton";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -149,7 +150,7 @@ export const DMPage: React.FC = observer(() => {
       >
         <span style={{ flex: 1 }}>
           {canShowProfile && username ? (
-            <button
+            <PressButton
               data-testid="dm-header-username"
               onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
               className="font-mono transition-colors text-inherit hover:text-accent border-0"
@@ -162,14 +163,14 @@ export const DMPage: React.FC = observer(() => {
               aria-label={t("conversation.viewProfile", { name: username })}
             >
               <bdi>@{username}</bdi>
-            </button>
+            </PressButton>
           ) : conv || pendingRequest ? (
             `@${username}`
           ) : (
             t("conversation.fallbackTitle")
           )}
         </span>
-        <button
+        <PressButton
           data-testid="dm-pins-trigger"
           onClick={togglePins}
           aria-label={t("conversation.pinsLabel")}
@@ -177,7 +178,7 @@ export const DMPage: React.FC = observer(() => {
           className="icon-btn-sm flex-shrink-0 padding-0 me-2"
         >
           <Pin size={14} aria-hidden="true" />
-        </button>
+        </PressButton>
         {canCall && (() => {
           // An outgoing call to this user turns the button into "rejoin".
           const inCallWithThisUser =

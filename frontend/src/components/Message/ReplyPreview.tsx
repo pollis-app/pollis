@@ -3,6 +3,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import type { Message } from '../../types';
 import { getUsernameColor, useBackgroundIsLight } from '../../utils/usernameColor';
+import { PressButton } from "../ui/PressButton";
 
 interface ReplyPreviewProps {
   messageId: string;
@@ -46,14 +47,14 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
             }}
           />
         </span>
-        <button
+        <PressButton
           data-testid="reply-preview-scroll-button"
           onClick={() => onScrollToMessage?.(messageId)}
           aria-label={t('replyBar.scrollToMessage')}
           className="block w-full text-start"
         >
           <p className="text-xs font-mono truncate text-accent-dim">{snippet}</p>
-        </button>
+        </PressButton>
       </div>
       <button
         data-testid="dismiss-reply-button"

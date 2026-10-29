@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, ArrowUp, ArrowDown, Settings } from "lucide-react";
 import { Button } from "./Button";
+import { usePressActivator, type ActivateOn } from "../../hooks/usePressActivation";
 
 export interface TerminalMenuItem {
   id: string;
@@ -22,6 +23,10 @@ export interface TerminalMenuItem {
   // Fires when the row becomes selected (hover or keys), for intent warmups
   // such as preparing a voice connection.
   onSelect?: () => void;
+  // `"press"`: a plain mouse press acts on pointer-down (#1529) — only for an
+  // item whose accidental press is free to undo (navigation). Logout, exit,
+  // block, joining a voice channel and the like stay on click.
+  activateOn?: ActivateOn;
 }
 
 interface TerminalMenuProps {
@@ -124,6 +129,8 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex, itemIds]);
 
+  const press = usePressActivator();
+
   const handleItemClick = useCallback((item: TerminalMenuItem, index: number) => {
     setSelectedIndex(index);
     if (!item.disabled) {
@@ -192,7 +199,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                 opacity: item.disabled ? 0.4 : 1,
                 cursor: item.disabled ? "not-allowed" : "pointer",
               }}
-              onClick={() => handleItemClick(item, index)}
+              {...press<HTMLDivElement>(() => handleItemClick(item, index), item.activateOn, item.disabled)}
               onMouseEnter={() => { if (!item.disabled) { setSelectedIndex(index); } }}
               role="menuitem"
               aria-disabled={item.disabled}

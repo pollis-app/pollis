@@ -1,14 +1,20 @@
-// Custom-emoji images via `get_emoji_path`, which verifies the hash and writes
-// a `file://` in the sandbox cache. Unlike message media these stay cached:
-// public group assets, verified by hash, tiny and heavily reused.
+// Custom-emoji image resolution. `get_emoji_path` (bridge PR #967) verifies
+// the object hash and materialises the image to the sandbox cache dir,
+// returning a `file://` URI — the emoji analogue of `get_media_path`
+// (mobile can't run desktop's loopback media server).
+//
+// Unlike message media (plaintext unlinked on last release), emoji files are
+// tiny, unencrypted-at-rest by design (they're public group assets verified
+// by hash) and heavily reused across messages, so they stay cached.
 
 import * as FileSystem from "expo-file-system/legacy";
 import { invoke } from "./native";
 
 export const EMOJI_DIR = `${FileSystem.cacheDirectory ?? ""}pollis-emoji/`;
 
-// One in-flight promise per hash, so a burst of one emoji doesn't fan out N
-// downloads. Failures are not cached, so a later mount can retry.
+// Module-level so every component shares one in-flight promise per hash —
+// a burst of the same emoji in one message must not fan out N downloads.
+// Failures are not cached: delete the entry so a later mount can retry.
 const inFlight = new Map<string, Promise<string>>();
 
 export function resolveEmojiUri(contentHash: string): Promise<string> {
@@ -32,6 +38,16 @@ export function resolveEmojiUri(contentHash: string): Promise<string> {
   return promise;
 }
 
+/**
+ * Drop a resolved hash so the next `resolveEmojiUri` asks the bridge again,
+ * which re-downloads and rewrites the file. For an image that failed to draw
+ * from the path it was given (the OS may have purged the cache dir).
+ */
+export function forgetEmojiUri(contentHash: string): void {
+  inFlight.delete(contentHash);
+}
+
+/** Wipe the emoji cache (sign-out hygiene). */
 export async function clearEmojiCache(): Promise<void> {
   inFlight.clear();
   try {

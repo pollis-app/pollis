@@ -94,6 +94,48 @@
       "version": "1.0.19",
       "commit": "caceb3b36945ad5344cd4cf3e7f070d74692ffa7",
       "runtimeVersion": "e73591e714512327da0a1b3a33a15eb810db5686"
+    },
+    {
+      "platform": "android",
+      "channel": "play",
+      "version": "1.0.20",
+      "commit": "545da9d9872335cf113cba6e8b979620320f8ecf",
+      "runtimeVersion": "cb93b904a36444e88a30d8e2e88810b84b509c29"
+    },
+    {
+      "platform": "android",
+      "channel": "sideload",
+      "version": "1.0.20",
+      "commit": "545da9d9872335cf113cba6e8b979620320f8ecf",
+      "runtimeVersion": "cb93b904a36444e88a30d8e2e88810b84b509c29"
+    },
+    {
+      "platform": "ios",
+      "channel": "app-store",
+      "version": "1.0.20",
+      "commit": "545da9d9872335cf113cba6e8b979620320f8ecf",
+      "runtimeVersion": "0b80d4ea55137c7b4fd65e95da76b5d4a132950e"
+    },
+    {
+      "platform": "android",
+      "channel": "play",
+      "version": "1.0.21",
+      "commit": "e0a723e696e41863277bf57b2600658108e26fc4",
+      "runtimeVersion": "f59282b725bcfcd9216d7e1d34926635d93deea1"
+    },
+    {
+      "platform": "android",
+      "channel": "sideload",
+      "version": "1.0.21",
+      "commit": "e0a723e696e41863277bf57b2600658108e26fc4",
+      "runtimeVersion": "f59282b725bcfcd9216d7e1d34926635d93deea1"
+    },
+    {
+      "platform": "ios",
+      "channel": "app-store",
+      "version": "1.0.21",
+      "commit": "e0a723e696e41863277bf57b2600658108e26fc4",
+      "runtimeVersion": "d175f333101ffb0501395adea0e0e5cec43f8263"
     }
   ]
 }

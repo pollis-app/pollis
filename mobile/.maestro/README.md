@@ -90,7 +90,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 
 | Flow | What it proves | Peer? |
 | --- | --- | --- |
-| `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch and PIN unlock whose fourth digit must show `pin-busy` at once (no frozen pad) | no |
+| `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch and PIN unlock whose fourth digit must, within a second, show `pin-busy` or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |
@@ -101,12 +101,14 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `theme-startup` | #1447 pick lilac, then a cold restart: the first screen (PIN unlock or tabs) carries `theme-boot-accent-bda3e0` and no amber probe before any tap, and the tabs stay lilac after unlock; a fresh account settles on amber even with lilac left in the device store | no |
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |
 | `security` | device list + blocked-list entry | no |
+| `security-events` | #1548 Security shows the newest three events + "View all"; the Security events screen loads its next keyset page on scroll and the All / Devices / Identity & keys / Account chips narrow it (`recovery_blob_fetched` has its own copy); #1547 no Recovery card, `?section=data` lands on "Your data". The paging half needs a log longer than a page: against a local DS set `MAESTRO_SQLD_URL` (its sqld) and `scripts/seed-security-events.js` writes 40 rows; without it those steps are skipped | no |
 | `app-update` | #1443 Self → App shows the native version + build number and the Update row with its destination (a Maestro build is the `dev` channel, so it names pollis.com) | no |
 | `media-viewer` | #1248 send an image through the SYSTEM photo picker (seeded by `addMedia` from `fixtures/`, cell picked by its accessibility label), cold-restart, and require the image to render from R2 (`media-image-rendered`, never `media-unavailable`); then the full-screen viewer: double-tap zoom, Save to photos with feedback, Share reachable, Close. Every step is mandatory | no |
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
 | `dms` | start a DM with the seeded peer (initiator side) | yes |
+| `custom-emoji` | #1562 add a static and an animated custom emoji, see both as images (never the `:shortcode:` text) in the group's list, the composer's suggestions, a sent message and again after a cold restart | no |
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | switch language (copy re-renders), persists across relaunch, Arabic mirrors the layout after relaunch (#1074) | no |
 | `enrollment-approval` | #1096 the approver TYPES the code off the new device — the card shows none, approve is gated on eight characters | yes |
@@ -183,6 +185,15 @@ peer then adds a custom emoji (system photo picker, seeded by `addMedia`) and
 must see no remove control for it, not even as its creator; the admin then sees
 the remove control and removes it.
 
+**Custom emoji render (automated, #1562):** `mobile/scripts/maestro-custom-emoji.sh <sender-device> <recipient-device>`
+— the sender creates a group with #General and adds a static (PNG → WebP) and
+an animated (GIF) custom emoji, the recipient joins through the join-request
+steps, the sender posts both, and the recipient must see both as images
+(`emoji-image-<shortcode>`) with no `emoji-fallback-*`. Run it iOS → Android
+and Android → iOS. Those ids come from `EmojiProbe`, drawn by `<Screen>`: an
+emoji sits inside a row that is one accessible element, so its own view is
+not in the hierarchy Maestro reads.
+
 **Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
 — a fresh peer signs up, its handle is read off the screen, and the reporter
 reports it with "Report and block", then unblocks.
@@ -192,6 +203,17 @@ reports it with "Report and block", then unblocks.
 draft with the keyboard up; the peer then sends into the open channel, twice.
 The composer must still be above the keyboard: the draft is sent by tapping
 Send where it is. Each arrival is screenshotted straight off the device.
+
+**Device outside the tree (automated, #1571):** `mobile/scripts/maestro-device-outside-tree.sh <device>`
+— one device plus two dev-DS peers (`pollis-tui`'s `outside_tree_peer`, roles
+`owner` and `creator`). The owner signs up as the account's first device; the
+device enrolls into it with the recovery key and closes the app
+(`two-client/device-outside-tree/1-enroll.yaml`). With the app closed, the
+creator spends the device's regular KeyPackage pool (five group invites to the
+account), opens a DM with the account, and exchanges three messages with the
+owner device. The device then opens the app for the first time since and must
+show all three in the DM with no placeholder (`2-open-dm.yaml`) — its
+last-resort KeyPackage is what added it. The DS must carry #1571.
 
 **Lost message (automated, #1312):** `mobile/scripts/maestro-lost-message.sh <device>`
 — one device plus a dev-DS peer client, not a second device: the script runs
@@ -267,6 +289,16 @@ start and the PIN the count must read 3, opening the DM clears it, and it stays
 cleared after another relaunch (`3-cold-start.yaml`). Reading on one device
 clearing the count on another is pinned by the core's cursor-merge tests, not
 here: it needs a second device of the same account.
+
+**Tab badges for pending requests and invites (automated, #1561):** `mobile/scripts/maestro-pending-badges.sh <device>`
+— `pollis-tui`'s `pending_badge_peer` example, run as three fresh accounts.
+The device signs up with no badge on either tab
+(`two-client/pending-badges/1-signup.yaml`); two strangers then open DMs with
+it and a third creates two groups and invites it to both. Without opening
+Direct or Groups, `badge-direct` and `badge-groups` must each read 2; accepting
+one request drops Direct to 1 and blocking the other sender clears it
+(`2-requests.yaml`); declining one invite drops Groups to 1 and accepting the
+other clears it (`3-invites.yaml`).
 
 **Store-listing screenshots:** `mobile/scripts/maestro-store-shots.sh <device> [out-dir]`
 — `pollis-tui`'s `store_shots_peer` example plays the second person (dev DS

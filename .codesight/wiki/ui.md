@@ -31,6 +31,65 @@
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
 
+### Act on press where an accidental press is free to undo (#1529)
+
+The owner's rule: if undoing an accidental press costs nothing (going back,
+closing a sheet, switching a tab or view, opening a panel, a page, a menu or
+the media viewer, expanding a section), act on **press start**. Anything that
+sends, persists, notifies others, destroys or confirms keeps acting on
+**release**, so the user can still drag off. It is **opt-in, never a default**.
+
+**Desktop.** `activateOn="press"` on `ui/Button`, the Sidebar `Row` /
+`SectionHeader` (row and chevron), `TerminalMenu` items (per item),
+`NavigableList` (`activateRowOn`, for `onClickRow`) and `InlineAudioPlayer`;
+`ui/PressButton` is the unstyled `<button>` for bare chrome buttons, and
+`usePressActivation` / `usePressActivator` (`hooks/usePressActivation.ts`, one
+guard shared by a list's rows) for anything else. The rule is pure in
+`utils/pressActivation.ts`:
+
+- `pointerdown` acts only for a plain primary mouse press — `pointerType ===
+  "mouse"`, `button === 0`, no Ctrl/Meta/Shift/Alt — and arms a guard; the
+  `click` that ends the same press is swallowed, so a mouse press runs the
+  action once. A release elsewhere disarms it a tick after `pointerup`.
+- `onClick` stays the path for the keyboard and assistive tech (Enter / Space /
+  VoiceOver click with `detail === 0`, always acted on), touch, pen and
+  modified clicks.
+- Once a press has acted, its own `mousedown` default is prevented, so the
+  pressed element never takes focus back from what the action focused (search
+  opens with its field focused; Reply focuses the composer a frame later).
+- A press that starts on a control nested inside a pressable row (a terminal
+  menu row's settings button, the audio card's play button) is left to that
+  control.
+- Outside-click listeners (`MessageActions`, `EmojiPickerButton`) listen on
+  `mousedown` and test their own wrapper, which contains the trigger, so the
+  press that opened a panel cannot close it; a viewer backdrop that opens
+  over its trigger does not get the release's click either (the click's
+  target is the common ancestor of the press and the release).
+
+Converted: Sidebar rows and headers (not voice channels — arriving can
+auto-join, which others see), the chevrons and Close; the breadcrumb bar
+(back, forward, crumbs, search, settings); conversation headers (pins, rename,
+the DM name); message Reply, Edit, More and Reply in thread; reply-quote
+jumps; the thread count; the emoji picker trigger and category rail; opening
+the media viewer (attachment cards, the audio card, gallery tiles, composer
+previews); Cmd+K results (not voice) and the search view's sort, results and
+Load more; the Vault view switch and clear search; navigation-only page
+buttons; navigation items of the terminal-skin menus (`Root`, `Groups`,
+`Group` text channels, `DMs`, `SettingsHub`, the profile's Back) and the
+Members / Saved list rows. **Never**: send, remove attachment, save, pin,
+copy link, report, delete, reactions and emoji cells, every confirm bar,
+request / invite / member actions, logout / exit / block, voice join, calls,
+`VoiceBar` / `PillButton`, mute, theme and preference buttons, PIN entry,
+settings saves, `Switch` / `Checkbox`, window buttons, and nothing that owns
+`mousedown` (title bar, resize edges, `ResizeHandle`, `NavigableGrid`).
+`e2e/press-activation.spec.ts` proves a converted control fires once per mouse
+press and still fires on Enter and Space, and that an excluded one still waits
+for the release.
+
+**Mobile** (`mobile/CLAUDE.md` → "Press-in"): a `pressIn` prop on the
+`components/ui.tsx` primitives, fixed chrome only — never a row inside a
+`ScrollView` / `FlatList`, and on Android never inside a `SheetOverlay`.
+
 ### Design tokens: utilities, not `var()` (#874)
 
 Tokens are CSS custom properties in `frontend/src/index.css` and are surfaced as
@@ -621,7 +680,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**166 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**170 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -657,7 +716,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 ### `components/Emoji` (9)
 
-- **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`
+- **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`. A failed resolve shows `:shortcode:` and is not final (#1562): `useEmojiImage` retries after 2 s, 10 s and 30 s, then on the window becoming visible or the network coming back. Mobile's `mobile/components/emoji/CustomEmojiImage.tsx` does the same (then on return to the foreground) and holds a plain View until resolved — a source-less RN `<Image>` fires `onError` on iOS, which used to latch every custom emoji into its text fallback there.
 - **EmojiCategoryRail** — props: entries, activeId, onJump — `frontend/src/components/Emoji/EmojiCategoryRail.tsx`
 - **EmojiCell** — props: item, toneIndex, annotations, index, onSelect, onPreview — `frontend/src/components/Emoji/EmojiCell.tsx`
 - **EmojiDropZone** — props: onPick, onReject, disabled, children — `frontend/src/components/Emoji/EmojiDropZone.tsx`. The image-first half of the custom-emoji upload (Discord's model): drop a gif/image anywhere on the window or click to browse, and the file's PATH — never its bytes — goes to the caller. Registers as an *inline* drop target so `AppShell`'s full-window drop overlay stays out of the way and this zone lights up instead; a native drag never reaches the DOM, so "drag-over" is a window-level fact rather than a hover.
@@ -686,13 +745,14 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
 
-### `components/Layout/RightPanel` (7)
+### `components/Layout/RightPanel` (8)
 
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
 - **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
 - **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`. Mobile counterpart (#1315): `mobile/app/conversation/pins.tsx`, a pushed page (iPad: a detail-pane page) behind the chat header's pin button — same rows (author, time, snapshot text + attachments, Unpin), plus a row tap that returns to the conversation scrolled to the message via `resolve_message_permalink` + `mobile/stores/messageJumpStore.ts`.
 - **RightPanel** — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`. The generic slot.
+- **SafetyNumberPanel** — props: peerUserId, peerLabel, onBack — `frontend/src/components/Layout/RightPanel/SafetyNumberPanel.tsx`
 - **ThreadMessageRow** — props: message, isRoot — `frontend/src/components/Layout/RightPanel/ThreadMessageRow.tsx`
 - **ThreadPanel** — props: threadId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/ThreadPanel.tsx`
 
@@ -734,18 +794,19 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ResultThumbnails** — `frontend/src/components/Search/ResultThumbnails.tsx`
 - **SearchView** — props: onOpenResult, onOpenRetentionSettings, initialQuery — `frontend/src/components/Search/SearchView.tsx`
 
-### `components/Security` (4)
+### `components/Security` (5)
 
 - **AccountKeyAuditLine** — props: status, detail, testId — `frontend/src/components/Security/AccountKeyAuditLine.tsx`
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **ExportArchiveButton** — `frontend/src/components/Security/ExportArchiveButton.tsx`
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
+- **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 
-### `components/ui` (29)
+### `components/ui` (30)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
-- **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, autoFocus — `frontend/src/components/ui/Button.tsx`. Mobile's `Button` (`mobile/components/ui.tsx`) takes `loading`: disabled, spinner in place of its icons (`<testID>-busy`), announced busy. Slow submits pair it with `mobile/hooks/useSubmitLock.ts`, which claims the action synchronously so a double tap cannot submit twice (pinned by `mobile/tests/busy-feedback.test.ts`).
+- **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, autoFocus, activateOn — `frontend/src/components/ui/Button.tsx`. Mobile's `Button` (`mobile/components/ui.tsx`) takes `loading`: disabled, spinner in place of its icons (`<testID>-busy`), announced busy. Slow submits pair it with `mobile/hooks/useSubmitLock.ts`, which claims the action synchronously so a double tap cannot submit twice (pinned by `mobile/tests/busy-feedback.test.ts`).
 - **Card** — props: children, className, style, padding — `frontend/src/components/ui/Card.tsx`
 - **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp — `frontend/src/components/ui/ChatInput.tsx`
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
@@ -754,17 +815,18 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **EditMessageBar** — props: heading, cancelLabel, hint, value, onChange, onSave, onCancel, isSaving, testId, inputTestId, cancelTestId — `frontend/src/components/ui/EditMessageBar.tsx`. The bar that replaces the composer while a message is being edited: heading row with a cancel `X`, a textarea that inverts to accent-on-focus like the composer (`is-focused`), and the Enter/Shift+Enter/Esc hint. The channel/DM log (`MainContent`) and the Vault both render it — they used to carry two divergent inline copies (the Vault's had a Save button and no focus inversion). Enter saves; Escape is the caller's, handled at page level in capture phase. Mounting focuses with the caret at the end, so callers `key` it by the edited message id.
 - **EmojiSuggestList** — props: entries, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/EmojiSuggestList.tsx`
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
-- **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick — `frontend/src/components/ui/InlineAudioPlayer.tsx`
+- **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick, activateOn — `frontend/src/components/ui/InlineAudioPlayer.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
 - **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
 - **MentionSuggestList** — props: candidates, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/MentionSuggestList.tsx`
 - **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`
-- **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus, cursorOnlyWhenFocused — `frontend/src/components/ui/NavigableList.tsx`
+- **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, activateRowOn, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus, cursorOnlyWhenFocused — `frontend/src/components/ui/NavigableList.tsx`
 - **PillButton** — props: accent, onClick, title, square, children — `frontend/src/components/ui/PillButton.tsx`
 - **PollisLogo** — props: size, color — `frontend/src/components/ui/PollisLogo.tsx`
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
 - **PresenceDot** — props: userId, testId — `frontend/src/components/ui/PresenceDot.tsx`. Bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members).
+- **PressButton** — props: activateOn — `frontend/src/components/ui/PressButton.tsx`. An unstyled `<button>` that acts on a plain mouse pointer-down and keeps `onClick` for the keyboard and assistive tech (#1529; see [Act on press](#act-on-press-where-an-accidental-press-is-free-to-undo-1529)). Only for chrome whose accidental press is free to undo.
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
@@ -789,7 +851,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (52)
+### `pages` (53)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -833,7 +895,8 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SavedPage** — `frontend/src/pages/SavedPage.tsx`
 - **SearchGroupPage** — `frontend/src/pages/SearchGroupPage.tsx`
 - **SearchPage** — `frontend/src/pages/Search.tsx`
-- **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`. Also carries the **Terminal** switch: the in-app terminal pane spawns the user's login shell, so it ships OFF and this is where it is turned on. The switch only writes the preference — the authority is Rust's device-local `device-settings.json` (`pollis-core/src/commands/terminal_gate.rs`), which `terminal_open` reads on every call, so a renderer that never touched this page still cannot start a shell. Absent or unparseable file reads as off. Desktop only — mobile has no terminal pane.
+- **SecurityEventsPage** — `frontend/src/pages/SecurityEventsPage.tsx`, route `/security/events` (#1548). The whole security-event log: keyset pages via `useSecurityEventPages` (`hooks/queries/useSecurityEvents.ts`), the next one fetched when the sentinel under the list nears the viewport (or its "Load older events" button), and All / Devices / Identity & keys / Account filter buttons (`aria-pressed`); while a new filter's first page is in flight the old rows stay, dimmed, `data-stale="true"`. Rows are `components/Security/SecurityEventRow`. Mobile twin: `mobile/app/self/security-events.tsx` (a `FlatList` with `onEndReached`, `Chip` filters).
+- **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`. Shows only the newest three security events (`useSecurityEventsPreview`, asks the DS for three) and a "View all" button to **SecurityEventsPage** (#1548); mobile's `self/security` does the same with a `row-security-events-all` row. Also carries the **Terminal** switch: the in-app terminal pane spawns the user's login shell, so it ships OFF and this is where it is turned on. The switch only writes the preference — the authority is Rust's device-local `device-settings.json` (`pollis-core/src/commands/terminal_gate.rs`), which `terminal_open` reads on every call, so a renderer that never touched this page still cannot start a shell. Absent or unparseable file reads as off. Desktop only — mobile has no terminal pane.
 - **SettingsHubPage** — `frontend/src/pages/SettingsHub.tsx`
 - **SettingsPage** — `frontend/src/pages/SettingsPage.tsx`
 - **StartDM** — props: onSuccess — `frontend/src/pages/StartDM.tsx`

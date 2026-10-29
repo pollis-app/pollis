@@ -48,6 +48,8 @@ interface MockMessage {
   thread_id?: string;
   /** The durable outbox (#1335): our own message not delivered yet. */
   send_state?: 'pending' | 'failed';
+  /** The edit outbox (#1555): our edit, not confirmed yet; `content` holds it. */
+  edit_state?: 'pending' | 'failed';
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -149,6 +151,20 @@ interface MockGroupInvite {
   created_at: string;
 }
 
+/**
+ * An invite waiting on the signed-in user (#1560). Mirrors `PendingInvite` in
+ * `hooks/queries/useGroups`; `channels` is what the group holds once joined.
+ */
+interface MockPendingInvite {
+  id: string;
+  group_id: string;
+  group_name: string;
+  inviter_id: string;
+  inviter_username?: string;
+  created_at: string;
+  channels?: MockChannel[];
+}
+
 /** Mirrors `VoiceInputMode` in `pollis-core/src/commands/voice/gate.rs`. */
 type MockVoiceInputMode = 'voice_activity' | 'push_to_talk';
 
@@ -230,6 +246,8 @@ interface MockStore {
   // row, as it is server-side.
   inviteLinks: MockInviteLink[];
   groupInvites: MockGroupInvite[];
+  /** Invites waiting on the signed-in user (#1560). */
+  pendingInvites: MockPendingInvite[];
   /** Open device-enrollment requests the approval takeover renders (#1096). */
   pendingEnrollments: MockPendingEnrollment[];
   /** What the UI actually submitted to `approve_device_enrollment`. */
@@ -293,6 +311,11 @@ interface MockStore {
    * preload seeds `mutedChannels`, and `set_channel_muted` writes it here.
    */
   mutedChannels: string[];
+  /**
+   * The account's security-event log (#1548), any order — `list_security_events`
+   * sorts it `(created_at DESC, id DESC)` and serves keyset pages from it.
+   */
+  securityEvents: MockSecurityEvent[];
   /**
    * What `plugin:notification|is_permission_granted` answers. Off by default,
    * as a fresh install is; a spec that counts OS notifications preloads
@@ -390,6 +413,7 @@ const store: MockStore = {
   customEmoji: preload.customEmoji ?? [],
   inviteLinks: preload.inviteLinks ?? [],
   groupInvites: preload.groupInvites ?? [],
+  pendingInvites: preload.pendingInvites ?? [],
   pendingEnrollments: preload.pendingEnrollments ?? [],
   enrollmentApprovals: [],
   deviceLinkPin: (preload.deviceLinkPin as string | undefined) ?? '1234',
@@ -421,6 +445,7 @@ const store: MockStore = {
       : preload.exportSavePath,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  securityEvents: (preload.securityEvents as MockSecurityEvent[] | undefined) ?? [],
   notificationPermission: preload.notificationPermission === true,
 };
 
@@ -537,6 +562,48 @@ function nowIso(): string {
 interface MessageCursor {
   sent_at: string;
   id: string;
+}
+
+interface MockSecurityEvent {
+  id: string;
+  kind: string;
+  device_id: string | null;
+  created_at: string;
+  metadata: string | null;
+}
+
+interface SecurityEventCursor {
+  created_at: string;
+  id: string;
+}
+
+/**
+ * One keyset page of the security-event log, the way the DS answers
+ * `/v1/read/security-events` (#1548): newest first with `id` as the tiebreak,
+ * optionally narrowed to `kinds`, strictly older than `before`, and a
+ * `next_cursor` only when a row exists past the page.
+ */
+function securityEventsPage(
+  limit: number | null | undefined,
+  before: SecurityEventCursor | null | undefined,
+  kinds: string[] | null | undefined,
+): { events: MockSecurityEvent[]; next_cursor: SecurityEventCursor | null } {
+  const size = Math.min(Math.max(limit ?? 100, 1), 500);
+  const cmp = (a: SecurityEventCursor, b: SecurityEventCursor) =>
+    a.created_at === b.created_at
+      ? a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      : a.created_at < b.created_at ? -1 : 1;
+  const matching = [...store.securityEvents]
+    .filter((e) => !kinds || kinds.length === 0 || kinds.includes(e.kind))
+    .filter((e) => !before || cmp(e, before) < 0)
+    .sort((a, b) => cmp(b, a));
+  const events = matching.slice(0, size);
+  const last = events[events.length - 1];
+  return {
+    events,
+    next_cursor:
+      matching.length > size && last ? { created_at: last.created_at, id: last.id } : null,
+  };
 }
 
 /**
@@ -1051,7 +1118,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // `= []` destructuring defaults only cover `undefined`, not `null`.
     case 'list_peer_verifications':
     case 'list_pending_invites':
-    case 'get_pending_invites':
     case 'list_dm_requests':
     case 'list_join_requests':
     case 'get_join_requests':
@@ -1059,13 +1125,19 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_devices':
     case 'list_user_devices':
     case 'list_blocked_users':
-    case 'list_security_events':
     case 'get_pinned_messages':
       return [];
 
     // The approving device's view of open enrollment requests. Note what is
     // NOT here: a verification code (#1096). The approver types the code shown
     // on the new device, so there is nothing for this list to pre-fill with.
+    case 'list_security_events':
+      return securityEventsPage(
+        args.limit as number | null | undefined,
+        args.before as SecurityEventCursor | null | undefined,
+        args.kinds as string[] | null | undefined,
+      );
+
     case 'list_pending_enrollment_requests':
       return store.pendingEnrollments.map((e) => ({
         request_id: e.request_id,
@@ -1507,6 +1579,35 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_dm_channels':
       return store.dmChannels;
 
+    // Safety number of a pair (#1563): deterministic digits per peer, so a
+    // spec can tell two peers' numbers apart, and a local verified mark.
+    case 'get_safety_number': {
+      const { peerUserId } = args as { peerUserId: string };
+      let seed = 0;
+      for (const ch of peerUserId) {
+        seed = (seed * 31 + ch.charCodeAt(0)) % 100000;
+      }
+      const blocks = Array.from({ length: 12 }, (_, i) =>
+        String((seed * (i + 7) + i * 1013) % 100000).padStart(5, '0'),
+      );
+      return {
+        safety_number: blocks.join(' '),
+        status: verifiedPeers.has(peerUserId) ? 'verified' : 'unverified',
+        peer_identity_version: 1,
+        qr_payload: `pollis-key:v1:mock:${peerUserId}`,
+      };
+    }
+
+    case 'set_contact_verified': {
+      const { peerUserId, verified } = args as { peerUserId: string; verified: boolean };
+      if (verified) {
+        verifiedPeers.add(peerUserId);
+      } else {
+        verifiedPeers.delete(peerUserId);
+      }
+      return null;
+    }
+
     case 'get_preferences':
       return JSON.stringify(store.preferences);
 
@@ -1605,13 +1706,31 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'flush_outbox': {
-      const report = { delivered: [] as string[], failed: [] as string[] };
+      const report = {
+        delivered: [] as string[],
+        failed: [] as string[],
+        edits_delivered: [] as string[],
+        edits_failed: [] as string[],
+      };
       for (const message of unsentMessages()) {
         try {
           deliverMock(message);
           report.delivered.push(message.id);
         } catch {
           report.failed.push(message.id);
+        }
+      }
+      // Then the edit outbox (#1555).
+      const edited = Object.values(store.messages)
+        .flat()
+        .filter((m) => m.edit_state !== undefined);
+      for (const message of edited) {
+        if (store.failSends) {
+          message.edit_state = 'failed';
+          report.edits_failed.push(message.id);
+        } else {
+          delete message.edit_state;
+          report.edits_delivered.push(message.id);
         }
       }
       return report;
@@ -1630,6 +1749,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+        // The core stores the edit before posting it (#1555): a failed post
+        // keeps it, read back with `edit_state`, for the drain to deliver.
+        if (store.failSends) {
+          message.edit_state = 'failed';
+          throw new Error('network unreachable');
+        }
+        delete message.edit_state;
       }
       return null;
     }
@@ -1852,6 +1978,14 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'get_emoji_url': {
       const { contentHash } = args as { contentHash: string };
+      // #1562: hashes listed here fail their FIRST resolve (a transient
+      // outage), so a spec can prove the image recovers without a remount.
+      const failFirst = (window as unknown as Record<string, unknown>)
+        .__POLLIS_EMOJI_FAIL_FIRST__ as string[] | undefined;
+      if (failFirst?.includes(contentHash)) {
+        failFirst.splice(failFirst.indexOf(contentHash), 1);
+        throw new Error('transient: emoji resolve failed once');
+      }
       const emoji = store.customEmoji.find((e) => e.content_hash === contentHash);
       if (!emoji) {
         // An emoji this device cannot resolve — deleted, or never stored.
@@ -1926,6 +2060,36 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
             (l.expires_at == null || Date.parse(l.expires_at) > Date.now()) &&
             (l.max_uses == null || l.uses < l.max_uses),
         }));
+    }
+
+    // Invites waiting on the signed-in user (#1560).
+    case 'get_pending_invites':
+      return store.pendingInvites.map(({ channels: _c, ...rest }) => rest);
+
+    // Accepting makes the user a member: the group and its channels appear in
+    // `list_user_groups_with_channels`, as the DS reports after the accept.
+    case 'accept_group_invite': {
+      const { inviteId } = args as { inviteId: string };
+      const invite = store.pendingInvites.find((i) => i.id === inviteId);
+      if (!invite) {
+        throw new Error('invite not found');
+      }
+      store.pendingInvites = store.pendingInvites.filter((i) => i.id !== inviteId);
+      store.groups.push({
+        id: invite.group_id,
+        name: invite.group_name,
+        owner_id: invite.inviter_id,
+        created_at: invite.created_at,
+        current_user_role: 'member',
+      });
+      store.channels[invite.group_id] = invite.channels ?? [];
+      return null;
+    }
+
+    case 'decline_group_invite': {
+      const { inviteId } = args as { inviteId: string };
+      store.pendingInvites = store.pendingInvites.filter((i) => i.id !== inviteId);
+      return null;
     }
 
     // The member page's pending invites (#1506). Members only, as in Rust.
@@ -2172,6 +2336,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 }
 
 let stagedAttachmentCount = 0;
+
+/** Peers marked verified via `set_contact_verified`, for `get_safety_number`. */
+const verifiedPeers = new Set<string>();
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (primaryInvoke) {

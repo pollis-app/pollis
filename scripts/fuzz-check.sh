@@ -2,11 +2,14 @@
 # Track-B fuzz smoke gate (#481, machine-checked-correctness §5.1). Builds and
 # briefly runs each cargo-fuzz target over the load-bearing pure functions on
 # NIGHTLY, out of band from the pinned-stable release build. A crash = a property
-# violation (P1/P2/P3 no-skip, no-gap-apply, no-foreign-adopt, recovery-gate).
+# violation (P1/P2/P3 no-skip, no-gap-apply, no-foreign-adopt, recovery-gate,
+# and since #1537 zero message loss over real MLS state, the untrusted-input
+# parsers, the decrypt order and the outbox transitions).
 #
 #   ./scripts/fuzz-check.sh                # smoke: build + short-run all targets
 #   FUZZ_MUTANT=1 ./scripts/fuzz-check.sh  # teeth: build each target's mutant and
 #                                          # confirm the fuzzer trips it fast
+#   FUZZ_TARGETS="framing outbox" ./scripts/fuzz-check.sh   # a subset
 #
 # The `fuzz/` crate is DETACHED from the workspace (its own [workspace] table +
 # root `exclude`) because it needs nightly while the repo pins Rust 1.96.0 stable
@@ -16,7 +19,10 @@ set -euo pipefail
 
 # Nightly toolchain to use. Overridable; defaults to the rustup `nightly` channel.
 NIGHTLY="${NIGHTLY:-nightly}"
-TARGETS=(next_watermark classify resolve may_rejoin prune_floor)
+TARGETS=(next_watermark classify resolve may_rejoin prune_floor framing sealing_order ds_bodies outbox decrypt_untrusted mls_delivery)
+if [[ -n "${FUZZ_TARGETS:-}" ]]; then
+  read -ra TARGETS <<< "$FUZZ_TARGETS"
+fi
 # Short per-target budget for a smoke run; override for a deeper local soak.
 RUNS="${FUZZ_RUNS:-200000}"
 MAX_TIME="${FUZZ_MAX_TOTAL_TIME:-20}"

@@ -264,7 +264,7 @@ async fn inbound_replay_flags_and_evicts_a_leaf_not_cross_signed_by_its_account(
             serde_json::json!({ "userId": carol_profile.id, "limit": 50 }),
         )
         .await;
-    let events = events.as_array().cloned().unwrap_or_default();
+    let events = events["events"].as_array().cloned().unwrap_or_default();
     assert!(
         events.iter().any(|e| {
             e["kind"] == "uncertified_mls_leaf" && e["device_id"] == bob_device.as_str()

@@ -248,8 +248,6 @@
     "eventsDescription": "Cada vez que se añade un dispositivo a tu cuenta, se rechaza un registro o se restablece tu identidad, aparece aquí. Consúltalo si alguna vez sospechas que alguien ha accedido a tu cuenta.",
     "eventsLoadFailed": "No se pudieron cargar los eventos de seguridad",
     "eventsEmpty": "Todavía no hay eventos de seguridad registrados.",
-    "eventsShowOlder_one": "Ver eventos anteriores ({{count}} más)",
-    "eventsShowOlder_other": "Ver eventos anteriores ({{count}} más)",
     "mediaHeading": "Permisos multimedia",
     "mediaCamera": "Cámara",
     "mediaMicrophone": "Micrófono",
@@ -294,7 +292,17 @@
     "deleteConfirmLabel": "Escribe {{word}} para confirmar",
     "deleteAccountButton": "Eliminar mi cuenta",
     "deletingAccount": "Eliminando la cuenta…",
-    "deleteAccountFailed": "No se pudo eliminar la cuenta"
+    "deleteAccountFailed": "No se pudo eliminar la cuenta",
+    "eventRecoveryBlobFetchedHeading": "Recuperación de cuenta iniciada",
+    "eventRecoveryBlobFetchedDetail": "Un dispositivo inició sesión con tu código de correo y descargó la copia cifrada de tu cuenta para recuperarla con tu Clave secreta. La copia no se puede abrir sin esa clave.",
+    "eventsViewAll": "Ver todo",
+    "eventsFilterAria": "Filtrar eventos de seguridad",
+    "eventsFilterAll": "Todos",
+    "eventsFilterDevices": "Dispositivos",
+    "eventsFilterIdentity": "Identidad y claves",
+    "eventsFilterAccount": "Cuenta",
+    "eventsEmptyFiltered": "Todavía no hay eventos de este tipo.",
+    "eventsLoadMore": "Cargar eventos anteriores"
   },
   "keyChange": {
     "heading": "El número de seguridad ha cambiado",

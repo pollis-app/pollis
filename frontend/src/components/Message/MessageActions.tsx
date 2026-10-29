@@ -15,6 +15,7 @@ import {
   Flag,
 } from "lucide-react";
 import { ReactionAddButton } from "./ReactionAddButton";
+import { PressButton } from "../ui/PressButton";
 
 export type CopyLinkState = "idle" | "copied" | "failed";
 
@@ -172,7 +173,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
 
   return (
     <div data-testid="message-actions" className={containerClass}>
-      <button
+      <PressButton
         data-testid="reply-button"
         data-nav-action="reply"
         onClick={() => onReply?.(messageId)}
@@ -180,7 +181,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
         className={barBtnClass}
       >
         <Reply size={iconSize} className="rtl-mirror" />
-      </button>
+      </PressButton>
 
       <ReactionAddButton
         messageId={messageId}
@@ -190,7 +191,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
       />
 
       {isOwn && onEdit && (
-        <button
+        <PressButton
           data-testid="edit-button"
           data-nav-action="edit"
           onClick={() => onEdit(messageId)}
@@ -198,12 +199,12 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
           className={barBtnClass}
         >
           <Edit2 size={iconSize} />
-        </button>
+        </PressButton>
       )}
 
       {hasMenu && (
         <div ref={wrapperRef} className="relative flex items-center">
-          <button
+          <PressButton
             ref={moreBtnRef}
             data-testid="message-actions-more"
             data-nav-action="more"
@@ -218,7 +219,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
             }`}
           >
             <MoreHorizontal size={iconSize} />
-          </button>
+          </PressButton>
 
           {menuOpen && (
             <div
@@ -229,7 +230,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
               }`}
             >
               {onOpenThread && (
-                <button
+                <PressButton
                   role="menuitem"
                   data-testid="thread-button"
                   onClick={closeAnd(() => onOpenThread(messageId))}
@@ -237,7 +238,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   <MessagesSquare size={16} className="shrink-0" />
                   {t("actions.replyInThread")}
-                </button>
+                </PressButton>
               )}
               {onToggleSave && (
                 <button

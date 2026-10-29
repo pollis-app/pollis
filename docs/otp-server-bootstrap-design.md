@@ -3,7 +3,8 @@
 **The last piece of Goal B (#419):** move the OTP (generation, validation, email)
 and the credential-establishing "bootstrap" writes off the client and behind the
 Delivery Service, gated by a **server-validated OTP session** instead of a device
-signature. This is what lets the client hold a **read-only Turso token** and drop
+signature. This is what let the client hold a **read-only Turso token** (since #987, no
+Turso token at all) and drop
 the baked-in **Resend key** — both block mobile app review.
 
 ## Why these can't use the device-signature gate

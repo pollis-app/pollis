@@ -13,6 +13,7 @@ import {
   Star,
 } from "lucide-react";
 import type { EmojiCategoryId } from "./emojiData";
+import { PressButton } from "../ui/PressButton";
 
 /** A jump target in the rail. `custom-*` ids are per-group sections. */
 export interface RailEntry {
@@ -63,7 +64,7 @@ export const EmojiCategoryRail: React.FC<EmojiCategoryRailProps> = ({
       {entries.map((entry) => {
         const isActive = entry.id === activeId;
         return (
-          <button
+          <PressButton
             key={entry.id}
             type="button"
             data-testid={`emoji-category-${entry.id}`}
@@ -78,7 +79,7 @@ export const EmojiCategoryRail: React.FC<EmojiCategoryRailProps> = ({
             }}
           >
             {iconFor(entry.id)}
-          </button>
+          </PressButton>
         );
       })}
     </nav>

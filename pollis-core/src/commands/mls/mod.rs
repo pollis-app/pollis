@@ -14,6 +14,8 @@ mod migrate;
 // `pub(crate)` because the media-only voice key export builds its own provider
 // outside this module.
 pub(crate) mod provider;
+#[cfg(feature = "fuzzing")]
+pub mod fuzz_surface;
 mod reconcile;
 mod self_update;
 mod sweep;
@@ -26,7 +28,9 @@ pub use provider::{
 // a call site.
 #[cfg(feature = "media")]
 pub(crate) use provider::MlsProvider;
-pub(crate) use join_branch::{first_join, record_first_join};
+pub(crate) use join_branch::{
+    entitled_since, first_join, parse_ds_instant, record_first_join, Entitlement,
+};
 // The one seam the flows harness needs to exercise suite migration now that
 // production ships a single suite (#669) — see `provider::current_suite`.
 #[cfg(feature = "test-harness")]
@@ -73,6 +77,7 @@ pub use group_state::{
 pub use group_state::rendezvous;
 
 pub use sweep::catch_up_all_mls_groups;
+pub use sweep::{backstop_before_seal, reconcile_backstop_all, reconcile_backstop_one, BackstopReport};
 pub use sweep::apply_membership_wake;
 
 pub use self_update::{self_update_group, self_update_if_due};

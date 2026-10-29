@@ -1,54 +1,92 @@
-//! The MLS control plane's read half (#987), designed around three rules (see
-//! `.codesight/wiki/commands.md`):
+//! The MLS control plane's READ half (#987): one signed POST that answers every
+//! question the client used to ask its own Turso connection.
 //!
-//! - **One snapshot.** GroupInfo, the pending-Welcome flag, the heads and the
-//!   commit batch come from one server-side read transaction
-//!   ([`ConversationState`]). Across two requests a device can see a GroupInfo
-//!   without its atomically written Welcome, external-join into its own inbound
-//!   Welcome and be stranded.
-//! - **One batch.** `head`, `head_generation` and `commits` share that
-//!   transaction, so a reported [`hole`] is a fact about the log, and
-//!   [`pruned_below`] separates a retention prune (#539) from damage.
-//! - **POST, not GET**: the signature covers the path without its query string
-//!   (#681).
+//! # Why one endpoint, and why POST
 //!
-//! [`hole`]: ConversationState::hole
+//! Two constraints shape this module, and both are correctness constraints
+//! rather than style:
+//!
+//! **One snapshot.** `external_join_attempt` reads the published GroupInfo and
+//! then, eight lines later, checks whether a Welcome for this device is pending.
+//! The correctness argument for that pair is written into `pollis_delivery::
+//! commit::submit_commit`: the commit, its GroupInfo and its Welcomes land in ONE
+//! `IMMEDIATE` transaction, so a reader that observes the GroupInfo necessarily
+//! observes the Welcome. That holds across two reads of one libsql connection.
+//! It does NOT hold across two HTTP requests, which may reach different replicas
+//! or different moments — and a device that external-joins while its own Welcome
+//! is inbound clobbers the freshly-joined group and is stranded permanently on
+//! `no GroupInfo stored — cannot external-join`. The Kani property
+//! `ExternalJoin ⟹ !welcome_pending` is proved over a *pure* function, so feeding
+//! it inputs from two snapshots does not fail the proof — it makes it vacuous.
+//! Hence [`ConversationState`]: GroupInfo, the pending-Welcome flag, the head and
+//! the commit batch all come from ONE read transaction, server-side.
+//!
+//! **One batch.** A non-contiguous commit batch is read by the client as a
+//! permanent gap, and its response is destructive — `forget_local_mls_group_at`
+//! drops the device's MLS crypto state. So `head`, `head_generation` and
+//! `commits` come from the same transaction as each other (which the retired
+//! `GET /v1/commits/:id` handler did NOT do — three separate queries on a bare
+//! connection), and the handler additionally *verifies* contiguity before
+//! answering, refusing rather than serving a torn batch. [`pruned_below`] is what
+//! keeps a genuine retention prune (#539) distinguishable from a torn read.
+//!
+//! **POST, not GET.** The canonical signing message covers the request path
+//! *without its query string*, so a signed `GET …?since=N` carries
+//! unauthenticated parameters — precisely the shape of #681, where an
+//! unauthenticated `GET /v1/commits?user_id&device_id` was a remote commit-log
+//! wipe. Every read here is a POST whose parameters live in the signed body.
+//!
 //! [`pruned_below`]: ConversationState::pruned_below
 
 use serde::{Deserialize, Serialize};
 
 use crate::commit::CommitWire;
 
+// ── POST /v1/mls/conversation-state ──────────────────────────────────────────
+
 /// Everything the MLS replay/join path needs, for one or more conversations, in
-/// one signed round trip; batched so a cold-launch sweep is not one trip per
-/// conversation.
+/// one signed round trip.
+///
+/// Batched (`queries`) because the cold-launch sweep runs the catch-up chain per
+/// conversation, serially: a 20-group launch would otherwise be 20+ sequential
+/// signed round trips, which moves the latency problem rather than fixing it
+/// (#987 §5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationStateBody {
     pub queries: Vec<ConversationStateQuery>,
-    /// No-auth (dev/test) path only; ignored when the DS enforces auth.
+    /// No-auth (dev/test) path only. When the DS enforces auth both halves come
+    /// from the verified signature and these are ignored — though still
+    /// signature-bound, since the signature covers the whole body.
     #[serde(default)]
     pub user_id: Option<String>,
     #[serde(default)]
     pub device_id: Option<String>,
 }
 
-/// One conversation's question; every field beyond `conversation_id` is opt-in.
+/// One conversation's worth of question. Every field beyond `conversation_id` is
+/// opt-in, so a caller that only wants the GroupInfo head does not pay for a
+/// commit scan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationStateQuery {
     pub conversation_id: String,
-    /// The lineage for `head` / `commits` / `commit_at_epoch`; `None` → the head
-    /// generation.
+    /// The lineage to answer `head`/`commits`/`commit_at_epoch` for. `None` →
+    /// the conversation's head generation.
     #[serde(default)]
     pub generation: Option<i64>,
-    /// Fetch commits with `epoch >= since` in `generation`; `None` → no scan.
+    /// Fetch commits with `epoch >= since` in `generation`. `None` → no commit
+    /// scan at all (the caller only wants heads/flags).
     #[serde(default)]
     pub since: Option<i64>,
-    /// Include the GroupInfo blob (the whole ratchet tree), not just its head.
-    /// Only `external_join_attempt` needs it.
+    /// Include the GroupInfo *blob*, not just its `(generation, epoch)` head.
+    /// Only `external_join_attempt` needs the bytes; the durability backstop
+    /// (`ensure_group_info_published`) needs the head alone, and the blob carries
+    /// the whole ratchet tree.
     #[serde(default)]
     pub want_group_info_blob: bool,
-    /// Fetch the commit bytes stored at this epoch: the input to `reconcile`'s
-    /// ambiguous-failure resolution, which stays client-side.
+    /// Fetch the canonical commit bytes stored at this epoch in `generation` —
+    /// the input to `reconcile`'s ambiguous-failure resolution. The DECISION
+    /// stays client-side (`invariants::resolve`, Kani-proved); this is the input
+    /// it consumes.
     #[serde(default)]
     pub commit_at_epoch: Option<i64>,
 }
@@ -71,75 +109,129 @@ pub struct GroupInfoState {
 
 /// One conversation's snapshot.
 ///
-/// One conversation's snapshot, every log-DB field read in one transaction.
-///
-/// The main-DB gates are `Option<bool>` so `None` ("couldn't determine") keeps
-/// each call site's own bias: `local_user_is_member` fails closed,
-/// `has_pending_welcome` fails open. They must not collapse into one error path.
+/// Every log-DB field below is read inside ONE transaction, so the pairs the
+/// client evaluates together — `group_info` with `welcome_pending`,
+/// `head`/`head_generation` with `commits` — cannot be torn. The two main-DB
+/// gates are `Option<bool>` rather than `bool` precisely so they keep their
+/// OPPOSITE failure biases: `None` means "the server could not determine this",
+/// and the client applies each gate's own bias at its own call site
+/// (`local_user_is_member` fails CLOSED, `has_pending_welcome` fails OPEN — they
+/// are seven lines apart and must not collapse into one error path).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationState {
     pub conversation_id: String,
-    /// `false` → not a member; every field below is empty. Per entry, so one
-    /// stale id in a sweep cannot blind the rest of the batch.
+    /// `false` → the authenticated user is not a member of this conversation and
+    /// every field below is empty. A per-entry flag rather than a 403 for the
+    /// whole batch, so one stale conversation id in a sweep cannot blind the
+    /// client to the other nineteen.
     pub authorized: bool,
     #[serde(default)]
     pub group_info: Option<GroupInfoState>,
-    /// An undelivered `mls_welcome` for this user+device exists, read in the same
-    /// transaction as `group_info`.
+    /// An undelivered `mls_welcome` targeting this user+device exists for this
+    /// conversation. Read in the SAME transaction as `group_info` — that pairing
+    /// is the whole reason this endpoint exists.
     pub welcome_pending: bool,
     /// Head epoch WITHIN `generation` (`MAX(epoch) + 1`, 0 for an empty lineage).
     pub head: i64,
     /// The conversation's newest lineage.
     pub head_generation: i64,
-    /// The lineage `head`, `commits` and `commit_at_epoch` are scoped to.
+    /// The lineage `head`, `commits` and `commit_at_epoch` are scoped to — the
+    /// requested one, or the head generation when the query left it `None`.
     pub generation: i64,
-    /// `epoch >= since` in `generation`, ascending, from the same transaction as
-    /// `head`, `head_generation` and `pruned_below`.
+    /// `epoch >= since` in `generation`, ascending. Read in the SAME transaction
+    /// as `head`, `head_generation` and `pruned_below`, so what the client sees
+    /// here cannot disagree with them.
     #[serde(default)]
     pub commits: Vec<CommitWire>,
-    /// A discontinuity inside `commits`; `None` normally. Computed by
-    /// [`check_contiguous`] in the snapshot transaction.
+    /// A genuine discontinuity INSIDE `commits`: an epoch missing between two
+    /// epochs that are present. `None` is the normal case.
+    ///
+    /// Computed by [`check_contiguous`] in the snapshot transaction, so it is a
+    /// fact about the log rather than an artifact of reading `commits` and
+    /// `head` at two different instants — which is what could previously
+    /// manufacture a phantom gap and send a client into a destructive recovery
+    /// for nothing. The client's response to a REAL hole (drop the local group,
+    /// external-join onto the head) is correct and is what
+    /// `epoch_gap_recovers_via_external_join` pins; see [`check_contiguous`] for
+    /// why this is reported rather than refused.
     #[serde(default)]
     pub hole: Option<CommitHole>,
-    /// The lowest epoch retained in `generation`. `pruned_below > since` marks a
-    /// retention prune (#539), where re-joining is correct, not a torn read.
+    /// The lowest epoch still retained in `generation`, or `None` for an empty
+    /// lineage. `pruned_below > since` is how a client tells a genuine retention
+    /// prune (#539) — where dropping the local group and re-joining is the
+    /// CORRECT response — from a torn read, where it would be data loss.
     #[serde(default)]
     pub pruned_below: Option<i64>,
-    /// base64 commit bytes at `commit_at_epoch`, when asked and present.
+    /// base64 commit bytes at `commit_at_epoch`, when the query asked and a row
+    /// exists.
     #[serde(default)]
     pub commit_at_epoch: Option<String>,
-    /// Is the authenticated user a current member? `None` = undetermined; the
-    /// client fails closed.
+    /// Is the authenticated user a CURRENT member? `None` = undetermined (the
+    /// server's main-DB read failed). Client fails CLOSED on both `None` and a
+    /// transport error — a membership leak is worse than a delayed recovery.
     #[serde(default)]
     pub is_member: Option<bool>,
-    /// Is the authenticated device still registered? `None` = undetermined; the
-    /// client fails closed.
+    /// Is the authenticated device still registered (not revoked)? `None` =
+    /// undetermined. Client fails CLOSED.
     #[serde(default)]
     pub device_registered: Option<bool>,
-    /// Cross-signing inputs for every `added_user_id` in `commits`, so replay
-    /// verifies added devices without a round trip per add.
+    /// When the authenticated device was registered (`user_device.created_at`),
+    /// verbatim (#1571). `None` = not reported (a server that predates it, or a
+    /// failed read).
+    ///
+    /// With [`Self::member_since`] it answers one question the client cannot
+    /// answer alone: was this device already registered when its user became a
+    /// member here? If it was, the device was entitled to every message since,
+    /// and a late join at the head of the log is a visible loss (a
+    /// placeholder), not the silent "sent before you joined" pass a NEW device
+    /// gets. Metadata the authenticated device already knows about itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_registered_at: Option<String>,
+    /// When the authenticated USER became a member of this conversation, verbatim:
+    /// `dm_channel_member.added_at` for a DM, `group_member.joined_at` for a
+    /// group or one of its channels (#1571). `None` = not reported. Never earlier
+    /// than the conversation itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_since: Option<String>,
+    /// Cross-signing inputs for every distinct `added_user_id` named by
+    /// `commits`, so replay verifies added devices without a round trip per
+    /// add-carrying commit. Empty when the batch adds nobody.
     #[serde(default)]
     pub added_identities: Vec<AddedIdentity>,
 }
 
-/// A user's cross-signing root plus the device rows a commit's
-/// `added_device_ids` name: inputs to `IdentityDirectory::leaf_verdict`, never
-/// its verdict. Verification stays on the client; the DS is not trusted with it.
+/// A user's cross-signing root plus the device rows a commit's `added_device_ids`
+/// name — the INPUTS to `IdentityDirectory::leaf_verdict`, never its verdict.
+///
+/// Folded into the commit batch rather than fetched per commit (#987 §5): cert
+/// verification runs once per add-carrying commit during replay, so a cold
+/// catch-up over K adds was K sequential round trips interleaved with MLS work.
+/// The verification LOOP is unchanged and still lives on the client, because it
+/// is cryptography over a signature chain the DS is not trusted to evaluate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddedIdentity {
     pub user_id: String,
-    /// base64. `None` when the row or key is absent, which the client reads as
-    /// "retry", never "verified".
+    /// base64. `None` when the `users` row is absent or its `account_id_pub` is
+    /// NULL — which the client reads as "not replicated yet, retry", never as
+    /// "verified". Absence must stay distinguishable from a present-but-empty
+    /// key, hence `Option` rather than an empty string.
     #[serde(default)]
     pub account_id_pub: Option<String>,
-    /// One entry per device row that exists. A missing device is the client's
-    /// `AbsentRetry` case; the DS never manufactures a placeholder.
+    /// One entry per device row that EXISTS. A requested device with no row is
+    /// simply missing here, which is the client's `AbsentRetry` case — the DS
+    /// does not manufacture a placeholder, because "absent" and "present with
+    /// null columns" are different states with different (both non-fatal, both
+    /// distinct) client handling.
     pub devices: Vec<DeviceCertRow>,
 }
 
-/// One `user_device` row's cross-signing columns, blobs base64. Each is
-/// genuinely nullable mid-enrollment: a NULL cert means "retry", a non-NULL
-/// `revoked_at` is a verdict.
+/// One `user_device` row's cross-signing columns, blobs base64.
+///
+/// Every column is `Option` because every one of them is genuinely nullable
+/// mid-enrollment, and the client distinguishes the cases: a NULL cert column on
+/// a live row is "cert publish has not landed yet" (retry), while a non-NULL
+/// `revoked_at` is "revoked" (a verdict). Flattening them into non-optional
+/// fields would erase exactly the distinction the replay depends on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceCertRow {
     pub device_id: String,
@@ -160,19 +252,31 @@ pub struct DeviceCertRow {
     pub mls_signature_pub_pq: Option<String>,
 }
 
-/// Drain this device's undelivered Welcomes (the read half of
-/// `POST /v1/welcomes/ack`).
+// ── POST /v1/welcomes/fetch ──────────────────────────────────────────────────
+
+/// Drain this device's undelivered Welcomes. The write half
+/// (`POST /v1/welcomes/ack`) already exists; this is its read counterpart, and
+/// the last direct log-DB read on the welcome path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchWelcomesBody {
-    /// No-auth path only; with auth on, a mismatch with the signer is a 403.
+    /// No-auth path only; when auth is on the recipient is the signed user and
+    /// a mismatch is a 403 (`resolve_recipient`).
     #[serde(default)]
     pub user_id: Option<String>,
     #[serde(default)]
     pub device_id: Option<String>,
-    /// Also report the signing device's unclaimed KeyPackages in this suite
-    /// (#1412), riding the drain every wake-up already makes. Packages drain
-    /// without Welcomes too (lost epoch races, refused leaves), so a Welcome was
-    /// never a sufficient refill trigger. Additive; `None` asks for no count.
+    /// Also report how many unclaimed KeyPackages the SIGNING device still has
+    /// in this suite (#1412), on [`FetchWelcomesResponse::unclaimed_key_packages`].
+    ///
+    /// Rides on the Welcome drain because that is the call every wake-up,
+    /// foreground and sweep already makes: the device learns its pool is low
+    /// with no extra round trip, and refills it before a peer's claim finds it
+    /// empty. Packages are drained WITHOUT a Welcome too — a claim whose commit
+    /// lost its epoch race, or a leaf the committer refused — so "I processed
+    /// a Welcome" was never a sufficient refill trigger.
+    ///
+    /// ADDITIVE in both directions: a Delivery Service that predates it ignores
+    /// the field and answers without a count; `None` asks for no count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count_key_packages_in_suite: Option<i64>,
 }
@@ -180,11 +284,20 @@ pub struct FetchWelcomesBody {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchWelcomesResponse {
     pub welcomes: Vec<PendingWelcome>,
-    /// The count asked for in `count_key_packages_in_suite`. `None` when not
-    /// asked, unreadable, or from an older DS; the client then refills only
-    /// after processing a Welcome.
+    /// The signing device's unclaimed KeyPackages in the suite the request
+    /// named in `count_key_packages_in_suite`. `None` when the request did not
+    /// ask, when the count could not be read (the drain itself never fails on
+    /// it), or when the server predates the field — the client then falls back
+    /// to refilling only after it processes a Welcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unclaimed_key_packages: Option<i64>,
+    /// Whether the signing device holds a last-resort KeyPackage in the same
+    /// suite (#1571). Reported with `unclaimed_key_packages` and on the same
+    /// terms: `None` when not asked, not readable, or from a server that
+    /// predates last-resort packages. `Some(false)` is the drain's cue to
+    /// publish one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_last_resort_key_package: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,18 +305,34 @@ pub struct PendingWelcome {
     pub id: String,
     /// TLS-serialized MLS Welcome, base64.
     pub welcome: String,
-    /// The conversation the Welcome row was filed under.
+    /// The conversation the Welcome row was FILED UNDER — `mls_welcome.
+    /// conversation_id`, i.e. the conversation whose commit bundle wrote it.
     ///
-    /// The client refuses the join if this disagrees with the `GroupId` inside
-    /// the signed Welcome: the DS can only check the recipient is in the
-    /// conversation's desired roster, which an attacker can satisfy for their
-    /// own group. `None` (an older DS) means the legacy path, not a mismatch.
+    /// The client compares this against the `GroupId` embedded in the (signed,
+    /// server-opaque) Welcome blob and refuses the join if they disagree. That
+    /// is the half of C1 the Delivery Service cannot do: the DS may only check
+    /// that the recipient is somebody the conversation is trying to admit
+    /// (`writes::in_desired_roster`), and since anyone may invite anyone, an
+    /// attacker can satisfy that for their OWN group. What they cannot do is
+    /// make a Welcome whose `GroupId` is the victim's real conversation arrive
+    /// on a row filed under their own — so the blob and the row disagree, and
+    /// the client drops it instead of destroying the real group.
+    ///
+    /// `Option` + `#[serde(default)]` on purpose: the field is ADDITIVE, so a
+    /// Delivery Service that predates it decodes as `None` and a client that
+    /// predates it ignores it. `None` means "this server does not say", which
+    /// the client treats as the legacy path rather than as a mismatch.
     #[serde(default)]
     pub conversation_id: Option<String>,
 }
 
-/// A discontinuity in a served commit batch: an epoch missing between two that
-/// are present.
+// ── Contiguity, as a pure function ───────────────────────────────────────────
+
+/// A discontinuity in a served commit batch: the log is missing an epoch that
+/// sits between two it does have.
+///
+/// Reported on [`ConversationState::hole`], computed by [`check_contiguous`]
+/// INSIDE the snapshot transaction, so both ends compile the same rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitHole {
     /// The epoch that should have come next.
@@ -212,12 +341,35 @@ pub struct CommitHole {
     pub found: i64,
 }
 
-/// A commit batch is contiguous iff its epochs are consecutive. Pure and total.
+/// A commit batch is contiguous iff its epochs are consecutive from first to
+/// last.
 ///
-/// A hole is reported, not refused: the client's response (drop the local group
-/// and external-join onto the head) is the recovery, and refusing would leave a
-/// damaged conversation unreadable forever. A batch starting above `since` is a
-/// prune ([`ConversationState::pruned_below`]), not a hole.
+/// Pure, so the invariant is testable without a database, and total, so "we did
+/// not check" is not representable.
+///
+/// # Report, do not refuse
+///
+/// A hole is REPORTED to the client, not turned into an error. The distinction
+/// matters and is easy to get backwards, because the client's response to a hole
+/// — `forget_local_mls_group_at`, which deletes its MLS crypto state for that
+/// group — reads like something to be prevented. It is not: it is the RECOVERY.
+/// The device cannot advance a local group across an epoch that does not exist,
+/// so it drops it and external-joins onto the head, which is exactly what
+/// `epoch_gap_recovers_via_external_join` and `corrupt_commit_recovers_instead_of_wedging`
+/// pin. Refusing to serve the batch would make a genuinely damaged conversation
+/// permanently unreadable instead — every read erroring, forever, with no path
+/// back. "Messages must work" points the other way.
+///
+/// What #987 actually fixed is the PHANTOM hole. The reads used to come off
+/// separate statements, so a batch fetched at one instant could disagree with a
+/// `head` fetched at another and manufacture a gap that was never in the log —
+/// and the client would destroy real state recovering from nothing. Computing
+/// this inside the same transaction as `head`, `head_generation` and
+/// `pruned_below` means a reported hole is a fact about the log.
+///
+/// Whether the batch *starts* where the caller asked is a different question,
+/// answered by [`ConversationState::pruned_below`]: a prune moves the floor and
+/// is legitimate; a hole is damage.
 pub fn check_contiguous(commits: &[CommitWire]) -> Result<(), CommitHole> {
     for pair in commits.windows(2) {
         let expected = pair[0].epoch + 1;
@@ -260,7 +412,8 @@ mod tests {
         assert_eq!(check_contiguous(&batch), Ok(()));
     }
 
-    /// A missing middle epoch is reported with both epochs.
+    /// One missing epoch in the middle of a batch — reported with BOTH epochs so
+    /// an operator reading a log line can find the gap without a query.
     #[test]
     fn a_hole_is_reported_with_both_epochs() {
         let batch = vec![wire(3), wire(4), wire(6)];
@@ -273,7 +426,8 @@ mod tests {
         );
     }
 
-    /// Repeats and regressions are holes too.
+    /// Duplicate or out-of-order epochs are holes too — `epoch + 1` is the only
+    /// accepted step, so neither a repeat nor a regression sneaks past.
     #[test]
     fn repeats_and_regressions_are_holes() {
         assert!(check_contiguous(&[wire(3), wire(3)]).is_err());

@@ -70,10 +70,14 @@ history:
   "Mobile OTA updates in the binaries tree" below).
 
 One key signs all three, under different domain-separation contexts
-(`pollis-verifiable-log:sth:v2`, `…:sth:v2:account-keys`, `…:sth:v2:binaries`). A head
-signed for one tree does not verify as a head for another. The commit log is served
-under `/v1/...`, the account keys under `/v1/account-keys/...`, and the binaries
-under `/v1/binaries/...`.
+(`pollis-verifiable-log:sth:v2:commit-log-2`, `…:sth:v2:account-keys`,
+`…:sth:v2:binaries`). A head signed for one tree does not verify as a head for
+another. The commit log is served under `/v1/commit-log-2/...`, the account keys
+under `/v1/account-keys/...`, and the binaries under `/v1/binaries/...`.
+
+The commit log's first tree, served directly under `/v1/...` and signed under
+`pollis-verifiable-log:sth:v2`, is retired and frozen. See
+[Commit-log reset (#1579)](#commit-log-reset-1579).
 
 ## Components
 
@@ -82,7 +86,7 @@ Each crate has a README with the details.
 | Component | Crate / path | Role |
 |---|---|---|
 | **monitor** | [`verifiable-log`](../verifiable-log/README.md) | Merkle-log core, and an offline CLI that verifies a downloaded bundle with no network or database. |
-| **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Reads `mls_commit_log` (and the account-key and binaries sources) and writes signed bundles. Hashes each commit blob and discards the bytes. |
+| **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Appends new `mls_commit_log` rows to the commit log's persisted leaves (`append-commit-log`), reads the account-key and binaries sources, and writes signed bundles. Hashes each commit blob and discards the bytes. |
 | **serve** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | Turns signed bundles into the static `/v1/...` read API. Also a dev server and a `live` server, both with the dynamic `/verify/group/<id>` endpoint. |
 | **pollis-verify** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | The auditor CLI: `remote` (all three trees), `group`, `account`, `release`. |
 | **website explorer** | [`website/transparency.html`](../website/transparency.html) | Runs `pollis-verify group`'s checks in the browser (`website/transparency.js`, a JS port of `group.rs`) against the static `/v1/` files, trusting only the pinned key. A convenience, not a trust anchor. |
@@ -125,6 +129,187 @@ unchanged.
 
 A fork or regression in the source data aborts the build, and the verifiers check
 again on replay.
+
+### The commit log of record: persisted leaves, not the DS table (#1579)
+
+The published tree, not the Delivery Service's `mls_commit_log` table, is the
+commit log of record. The DS prunes that table below a retention floor (#539,
+`pollis-delivery/src/commit.rs`), so the table only ever holds a recent window of
+the log. Rebuilding the tree from it on each publish put different leaves at
+already-signed positions the first time a published row was pruned, and every
+earlier head stopped being reproducible.
+
+So the commit log works like the binaries tree, whose records live in
+`internal/binary-records.json`:
+
+- The leaves the publisher has published are kept in the transparency bucket at
+  `internal/commit-log-2-leaves.json`, a JSON array of entries in exactly the shape of
+  `/v1/commit-log-2/entries.json`. Each publish also keeps a copy at
+  `internal/commit-log-2-leaves/<size>.json`, because R2 has no object versioning.
+- Each publish runs `builder append-commit-log`. It appends only the rows whose `seq`
+  is above the last persisted leaf, writes the file back to R2 before any head that
+  covers it is published, and then `builder build --commit-leaves` signs heads over
+  the whole file under the `commit-log-2` context (`--commit-tree commit-log-2`). A
+  pruned row is simply not read again, and its leaf stays where it was published.
+- It fails closed. The persisted leaves must reproduce the served `latest.json`
+  (its size and root). A missing, shrunk or rewritten file, a live row below the
+  head that was never logged or that has changed, or a served per-size head with a
+  different root stops the commit-log publish. The account-key and binaries trees
+  still publish, and the job fails.
+- Both invariant passes run on the whole appended stream: the public,
+  within-window check on the pseudonymous leaves, and the full-strength check on
+  real ids. For the full-strength check, a persisted leaf is matched back to its
+  real conversation whenever a live row's conversation derives that leaf's
+  pseudonym for its window, so a new commit is still checked against history whose
+  rows have been pruned.
+- Seeding is a one-shot, explicit act (`append-commit-log --seed-from-live` or
+  `--seed-from <entries.json>`, or the workflow's `seed_commit_log` input). It is
+  refused when the file already exists, and when a head has already been served it
+  still has to reproduce that head. `commit-log-2` was seeded once, from the live
+  table, when it started.
+
+The persisted file holds only the published, pseudonymous leaves, never a real
+`conversation_id` or `sender_id`, so keeping it longer than the DS keeps its rows
+discloses nothing the public log does not.
+
+Heads published before this change were rebuilt from the live table. After the DS
+started pruning, that produced heads inconsistent with the earlier history, and the
+first tree was retired. The next section is the full account.
+
+## Commit-log reset (#1579)
+
+### What happened
+
+Until #1580, every publish rebuilt the commit-log tree from the Delivery Service's
+`mls_commit_log` table. The DS prunes that table below a retention floor (#539), and
+on 28 October 2026 it began removing rows that already had leaves in published,
+signed heads. From then on a rebuild put different leaves at positions that were
+already signed.
+
+- The last head consistent with all earlier history is **size 137**, signed
+  2026-10-28 16:43 UTC. Every earlier head still served (52 of them, sizes 1 to 137)
+  extends to it.
+- Pruning began between that publish and the next one. Three heads were then signed
+  and served that do not extend the size-137 chain. All three diverge from it at
+  leaf 0:
+
+  | size | signed (UTC) | what it is |
+  |---|---|---|
+  | 56 | 2026-10-28 20:24 | midpoint head of the size-113 publish |
+  | 113 | 2026-10-28 20:24 | rebuilt from the pruned table |
+  | 129 | 2026-10-29 05:34 | rebuilt again; shares only a 52-leaf prefix with 113 |
+
+  `/v1/sth/latest.json` went 137, then 113, then 129, and still points at 129.
+- The post-publish self-audit caught it: no head after 137 passed it, and the
+  size-129 run reported `FAIL consistency: size 64 -> size 129`. From #1580 on, the
+  commit-log publish refused to run rather than rebuild from the table, so no
+  further commit-log head was signed until the reset.
+- The leaf hashes of all 137 leaves on the consistent chain were recovered from the
+  inclusion proofs still served, and they reproduce every signed root on the chain.
+  The leaf **data** (the pseudonymous entry each hash commits to) survives for 91 of
+  them. For the other **46**, the rows were pruned and no copy of the published
+  entries exists: R2 has no object versioning and there was no bundle backup. Those
+  46 leaves can still be checked by hash, but their contents cannot be shown.
+- Six older heads (sizes 28, 34, 58, 67, 69 and 71) are also still served under
+  `/v1/sth/`. They are left over from an earlier generation of the tree, replaced
+  when the log was republished in August 2026 (five carry Ed25519 signatures), and
+  no manifest has advertised them since. They are not part of this incident, but
+  the reset statement lists them so that every served head is accounted for.
+
+### Why no user-facing check was affected
+
+No Pollis app checks the commit-log tree. The desktop and mobile apps audit the
+account-key tree (`self_audit_account_key`, `audit_peer_account_key`) and the
+binaries tree (`verify_own_build`), and both stayed consistent throughout. So no
+user saw an alarm, and no message, key or verdict in any app depended on the forked
+heads. The commit log never contains message content: a leaf holds pseudonyms, an
+epoch, a `seq` and `sha256(commit_data)`. What broke was the public, append-only
+promise to auditors: anyone running `pollis-verify remote` got a failure, which was
+the correct result.
+
+### What changed so it cannot recur
+
+- **The log of record is the persisted leaves** (#1580, previous section). The tree
+  is only ever appended to and is never rebuilt from the DS table, and a missing,
+  shrunk or rewritten leaves file stops the commit-log publish.
+- **A new tree with its own identity.** The commit log continues as `commit-log-2`:
+  its own URL namespace (`/v1/commit-log-2/...`), its own STH context
+  (`pollis-verifiable-log:sth:v2:commit-log-2`), and its own leaves file. A head of
+  one tree can never verify as a head of the other, even at the same size and root,
+  so the retired per-size heads cannot block it or be confused with it. It was
+  seeded once from the live table and has only been appended to since.
+- **The first tree is retired, not deleted.** Every file under `/v1/sth/`,
+  `/v1/entries/`, `/v1/proof/`, and `/v1/index.json`, `/v1/entries.json`,
+  `/v1/public_key.json` stays served exactly as it was. The publisher no longer
+  writes any of them, and the workflow refuses to run if one appears in its output.
+- **A signed reset statement** at `/v1/commit-log-reset.json` records the retirement
+  (format below). It is signed with the log's signing key under its own domain,
+  `pollis-verifiable-log:reset:v1`, so it cannot be mistaken for a tree head or a key
+  set. The root key (#754) is offline and did not sign it; none was needed, because a
+  signer the root authorises for the commit-log tenant also counts for its successor
+  tree (`key_set_authority_for` in `verifiable-log/src/sth.rs`). The binaries and
+  account-key trees still need their own authorisation.
+- **The equivocation tripwire was retired against the statement, not dropped.** Its
+  old commit-log baseline (size 137) had to still be served unchanged and be on the
+  chain the statement lists. It was then replaced by a pin on the statement and the
+  frozen `latest.json`, by hash: if either ever changes, the publish fails. The
+  tripwire tracks `commit-log-2` from then on.
+
+### The reset statement
+
+`/v1/commit-log-reset.json` is `{statement, signature, key_id}`. The signature is
+ML-DSA-44 over `pollis-verifiable-log:reset:v1 || len(u64 BE) || statement`, where
+`statement` is the compact JSON of the body below (`verifiable-log/src/reset.rs`,
+`ResetBody`; unknown fields are refused). The body records:
+
+- `retired`: the tree (`commit-log`), its STH context and path (`v1`); the full
+  signed head `last_consistent` (size 137); the 137 `leaf_hashes` that head commits
+  to; `chain_sizes`, every served head on that chain; `forks` (56, 113, 129), each
+  with its root, timestamp and a note; and `superseded`, the six older heads;
+- `reason`, in plain language;
+- `successor`: the tree (`commit-log-2`), its STH context, its path
+  (`v1/commit-log-2`), and its genesis, `genesis_root_hash`, the hash of its first
+  leaf, which every later head of the tree commits to.
+
+The facts about the retired tree are committed to the repository as
+`commit-log-retirement.json`, so they were reviewed like code. The publisher signs
+the statement from that file, once, and only after checking that every head it
+lists is served with that root and, for chain and fork heads, a valid signature
+(`builder commit-log-reset`). Once served, the statement is immutable.
+
+### How to verify
+
+`pollis-verify` from `v0.10.0` checks all of it:
+
+```bash
+pollis-verify remote https://verify.pollis.com
+```
+
+For the commit log it prints:
+
+- `PASS commit-log reset statement: signature (reset context) and self-consistency`;
+- `PASS commit-log (retired): all 52 served heads on the consistent chain are signed
+  and extend each other, up to size 137`, after fetching each one and checking its
+  root against the listed leaf hashes;
+- `PASS commit-log (retired): every head index.json and latest.json advertise is one
+  the reset statement describes`;
+- `RETIRED commit-log (/v1): retired by the reset statement issued ...`, and a
+  `KNOWN` line for each listed fork. These are information, not failures;
+- the full set of checks for `commit-log-2`, prefixed `commit-log-2:` (every head's
+  signature, equivocation, entries and replay, inclusion and consistency proofs),
+  and `PASS commit-log-2: its first leaf is the genesis the reset statement names`.
+
+A head of the retired tree that the statement does not list (an unlisted size, or a
+listed size with another root), a changed statement, or any inconsistency in
+`commit-log-2` is still a `FAIL`. An older `pollis-verify` does not know about the
+reset and keeps failing on the retired tree.
+
+To check the retired chain by hand, without `pollis-verify`: fetch the statement,
+compute the RFC 6962 Merkle root of the first `n` entries of `leaf_hashes` for each
+`n` in `chain_sizes`, and compare it with `root_hash` in `/v1/sth/<n>.json`. Each
+listed fork's `/v1/sth/<size>.json` has the listed root, which differs from the
+chain's root at that size. The offline monitor verifies a downloaded `commit-log-2`
+bundle with `monitor verify --tree commit-log-2 <bundle.json>`.
 
 ## Windowed pseudonyms in the commit log (#701)
 
@@ -314,8 +499,12 @@ precomputed JSON files served as static assets, with URL paths matching file pat
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json` | inclusion proof | immutable |
 | `/v1/proof/consistency/<first>-<second>.json` | consistency proof | immutable |
 
-The account-key and binaries trees use the same layout under `/v1/account-keys/...`
-and `/v1/binaries/...`. The publisher also writes precomputed reports at
+The table is the layout of the retired first commit-log tree, which stays served,
+frozen, exactly at those paths. The live commit log, `commit-log-2`, uses the same
+layout under `/v1/commit-log-2/...`, and the account-key and binaries trees use it
+under `/v1/account-keys/...` and `/v1/binaries/...`. The reset statement is at
+`/v1/commit-log-reset.json` and the root-signed key set at `/v1/key-set.json`, both
+immutable. The publisher also writes precomputed reports at
 `/verify/account/<user_id>` and `/verify/release/<tag>`. In production, "short"
 means `Cache-Control: public, max-age=300`, and it applies to `latest.json`,
 `index.json`, `entries.json` and those reports; everything else is cached as immutable.
@@ -370,3 +559,10 @@ retiring key can be published in `retired_keys` with a `not_after`, and verifier
 accept heads from it until then. Only one key is pinned today, so no window is in
 force, and the window length for the next rotation is not decided yet (custody doc
 §5 and §9).
+
+**The retired commit-log tree after a rotation (#1579).** The retired tree is frozen,
+so `full_resync` never re-signs it, and its heads and the reset statement stay
+signed by the current key. `pollis-verify` checks them against its pinned keys, so
+the next rotation has to keep today's key available for verifying the retired tree
+(as a pinned key that signs nothing new); dropping it would turn the RETIRED report
+into a signature failure.

@@ -40,6 +40,7 @@ import { voiceSession } from "../../voice";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { useGlobalShortcut } from "../../keyboard";
 import type { RouterContext } from "../../types/router";
+import { PressButton } from "../ui/PressButton";
 
 const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
@@ -641,7 +642,7 @@ export const AppShell: React.FC = observer(() => {
         <StatusBarSummary color={barInk} />
         <div className="flex items-center gap-3">
         {availableUpdateVersion && (
-          <button
+          <PressButton
             data-testid="status-bar-update-available"
             className="text-xs font-mono flex items-center gap-1 cursor-pointer border-0"
             style={{
@@ -656,7 +657,7 @@ export const AppShell: React.FC = observer(() => {
           >
             <Download className="w-4 h-4" />
             <span>{t("statusBar.updateAvailable")}</span>
-          </button>
+          </PressButton>
         )}
         {/* Always rendered at fixed height so the bar doesn't reflow. */}
         <div className="flex items-center justify-end h-4 leading-none">

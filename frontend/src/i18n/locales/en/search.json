@@ -22,6 +22,8 @@
     "voiceKeywords": "microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "Security",
     "securityKeywords": "audit log devices identity key rotation camera microphone screen permission permissions revoke privacy access",
+    "securityEventsName": "Security Events",
+    "securityEventsKeywords": "security events audit log history devices enrolled revoked rejected identity secret key recovery email changed",
     "shortcutsName": "Key Bindings",
     "shortcutsKeywords": "key bindings keyboard shortcuts hotkeys keybindings cmd ctrl",
     "updateName": "Software Update",

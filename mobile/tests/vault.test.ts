@@ -139,9 +139,9 @@ test("hundreds of vault items page in grid order around the tapped one", () => {
   assert.equal(items[index].id, "media/150");
 });
 
-test("the screen is reachable from Direct and from Search, and registered on the root stack", () => {
+test("the screen is reachable from Direct and from search, and registered on the root stack", () => {
   assert.match(src("app/(tabs)/direct.tsx"), /<VaultRow onPress=\{\(\) => router\.push\("\/vault"\)\}/);
-  assert.match(src("app/(tabs)/search.tsx"), /to: "\/vault" as const/);
+  assert.match(src("components/search/GlobalSearchResults.tsx"), /to: "\/vault" as const/);
   assert.match(src("app/_layout.tsx"), /<Stack\.Screen name="vault" \/>/);
 });
 

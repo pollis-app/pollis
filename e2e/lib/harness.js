@@ -160,11 +160,21 @@ async function setTestIdValue(browser, testId, value) {
 // only works on inputs and textareas, so this clicks in and types, then waits
 // for the composer's own `data-value` mirror to catch up — which is also the
 // honest signal that the component (not just the DOM) saw the text.
+//
+// Each character is pressed AND released before the next one. `browser.keys`
+// can't do that: it presses every key of the sequence down first and only then
+// releases them all (it is built for chords), so a repeated letter is a second
+// keyDown of a key that is still held and WebKit drops it, along with the
+// spaces — "hello from A" arrived as "helo fromA" (#1298).
 async function setComposerText(browser, text) {
   await waitTestId(browser, "message-input");
   const el = await browser.$('[data-testid="message-input"]');
   await el.click();
-  await browser.keys([...text]);
+  const typing = browser.action("key");
+  for (const ch of text) {
+    typing.down(ch).up(ch);
+  }
+  await typing.perform();
   await browser.waitUntil(
     async () => (await el.getAttribute("data-value")) === text,
     { timeout: 15000, timeoutMsg: `composer never reached ${JSON.stringify(text)}` },

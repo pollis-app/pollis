@@ -1,5 +1,8 @@
-//! Inbound MLS `Welcome` handling: invitees materialise group state from the
-//! Welcome a committer generated for their KeyPackage.
+//! Inbound MLS `Welcome` handling.
+//!
+//! Welcomes are how new members are added to an existing MLS group. The
+//! committer generates a Welcome blob targeting each invitee's KeyPackage;
+//! invitees process it locally to materialise the group state.
 
 use openmls::prelude::*;
 use openmls_traits::OpenMlsProvider;
@@ -13,13 +16,23 @@ use crate::state::AppState;
 use super::key_packages::replenish_key_packages;
 use super::provider::{welcome_ciphersuite, MlsProvider, PollisProvider};
 
-/// Deserialise a TLS-encoded `MlsMessageOut` Welcome and persist the resulting
-/// MLS group state locally.
+/// Internal: deserialise a TLS-encoded `MlsMessageOut` (welcome wire format)
+/// and persist the resulting MLS group state locally.
 ///
-/// Returns the `(conversation_id, generation)` joined, with the generation
-/// decoded from the GroupId (a Welcome into a migrated group, #454 P4, admits us
-/// to the successor lineage), so callers address the conversation, not the
-/// lineage.
+/// The bytes stored in `mls_welcome.welcome_data` are TLS-serialised
+/// `MlsMessageOut`.  We deserialise to `MlsMessageIn`, extract the inner
+/// `Welcome` via `MlsMessageIn::extract()`, then call
+/// `StagedWelcome::new_from_welcome`.
+///
+/// Returns the `(conversation_id, generation)` we just joined, so the caller can
+/// follow up on the join — notably with the post-join self-update that merges
+/// this brand-new (and therefore unmerged) leaf into the tree (issue #666).
+///
+/// The generation is decoded from the GroupId rather than assumed to be the
+/// conversation's current one: a Welcome into a migrated group (#454 P4) admits
+/// us to the *successor* lineage, whose GroupId carries a `#gN` suffix. Returning
+/// the bare conversation id keeps every caller — catch-up, self-update, the
+/// dedupe below — addressing the conversation, not the lineage.
 pub async fn apply_welcome(
     state: &Arc<AppState>,
     welcome_bytes: &[u8],
@@ -41,9 +54,10 @@ pub async fn apply_welcome(
         ))),
     };
 
-    // The joiner has no local group yet, so the suite comes off the Welcome. An
-    // unknown code point is a hard failure: joining under the wrong suite yields
-    // a group this device can never read.
+    // The joiner has no local group yet, so the suite comes off the Welcome
+    // itself. An unreadable or unknown code point is a hard failure, never a
+    // classic fallback — joining under the wrong suite is not a downgrade, it
+    // is a group this device can never read.
     welcome_ciphersuite(&welcome).ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!(
             "welcome names a ciphersuite this build does not implement"
@@ -55,20 +69,35 @@ pub async fn apply_welcome(
     Ok(super::generation::split_mls_group_id(&raw_group_id))
 }
 
-/// Materialise group state from a `Welcome`, returning the joined group's RAW
-/// GroupId string (see [`super::generation`]).
+/// Materialise group state from an already-suite-matched `Welcome`, returning
+/// the joined group's RAW GroupId string — the conversation id for generation 0,
+/// `"{conversation_id}#g{generation}"` for a successor lineage (see
+/// [`super::generation`]).
 ///
-/// openmls refuses duplicate GroupIds in `into_staged_welcome`, so an existing
-/// group must be deleted first. The delete is scoped to the incoming GroupId, so
-/// a successor-lineage Welcome leaves the predecessor intact until it is drained.
+/// Split into ProcessedWelcome → delete stale group → stage → into_group:
+/// openmls checks for duplicate GroupIds inside `into_staged_welcome`, so any
+/// existing group must be deleted *before* that call. Note the delete is scoped
+/// to the *incoming* GroupId, so a Welcome into a successor lineage leaves the
+/// predecessor group intact — under `max_past_epochs = 0` that group holds the
+/// only keys that can still decrypt envelopes sealed before the migration, and
+/// it is dropped only once the predecessor has been drained
+/// (`adopt_generation_locked`).
 ///
-/// That delete is the dangerous half (#1161 C1): the GroupId is
-/// attacker-supplied. Two guards:
+/// That delete is the dangerous half (#1161 C1). The GroupId comes out of the
+/// Welcome blob — attacker-supplied, since a Welcome is just a row anyone who can
+/// write one can address at us — so it names which of THIS device's groups is
+/// destroyed. Two guards, in order:
 ///
-/// * `expected`, when known, must match the GroupId's conversation.
-/// * A local group is replaced only per [`super::join_branch::welcome_may_replace`]:
-///   a genuine re-admission comes from a LATER commit, so one at or below our
-///   epoch is a replay or a fabrication.
+/// * `expected`, when the caller knows which conversation the Welcome was filed
+///   under, must match the GroupId's conversation. A Welcome that disagrees with
+///   its own row is refused before anything is touched.
+/// * A local group at an epoch **at or above** the incoming Welcome's is never
+///   replaced. A Welcome that genuinely re-admits us is produced by a commit
+///   LATER than anything we hold, so it always arrives above our epoch; one at or
+///   below is a replay of an old Welcome, or a fabrication, and adopting it would
+///   trade a working group for an older (or foreign) one. Refusing costs nothing:
+///   the group we keep is the one the commit log corroborates, and the next
+///   catch-up advances it.
 pub(super) fn join_from_welcome<C>(
     provider: &MlsProvider<'_, C>,
     welcome: Welcome,
@@ -100,7 +129,10 @@ where
     if let Ok(Some(mut old_group)) = MlsGroup::load(provider.storage(), &new_group_id) {
         let local_epoch = old_group.epoch().as_u64();
         // An unconfirmed external-join branch at the Welcome's own epoch is
-        // doomed, so the Welcome replaces it (#1220).
+        // doomed — the commit behind this Welcome holds the epoch the branch is
+        // trying to claim — so the Welcome replaces it (#1220). Refusing here
+        // (and acknowledging the Welcome, which `poll_mls_welcomes_inner` does
+        // for every outcome) left the device with neither.
         let unconfirmed = super::join_branch::is_unconfirmed(
             provider.raw_conn(),
             &conversation_id,
@@ -126,8 +158,9 @@ where
 
     staged.into_group(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
-        // Added to the tree here: nothing sealed before this epoch was sent to
-        // this device (#1312).
+    // Added to the tree here: nothing sealed before this epoch was sent to
+    // this device (#1312).
+    super::join_branch::mark_fresh_if_first(provider.raw_conn(), &conversation_id, generation);
     super::join_branch::record_added(
         provider.raw_conn(),
         &conversation_id,
@@ -138,26 +171,50 @@ where
     Ok(raw_group_id)
 }
 
-/// Drain this device's undelivered Welcomes, apply each locally, then ack them
-/// so they are not processed again.
+/// Poll the remote `mls_welcome` table for undelivered Welcome messages
+/// addressed to `user_id`.  Each one is applied locally and then marked
+/// `delivered = 1` so it is not processed again.
+///
+/// Called on startup and from `poll_pending_messages`.
 pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, device_id: &str) -> Result<()> {
-    // The DS scopes the drain to the verified signing device, including the
-    // legacy device-agnostic rows from before multi-device.
+    // The drain is a DS read since #987 (`POST /v1/welcomes/fetch`) — the read
+    // counterpart of the `delivered = 1` ack below, which has routed through the
+    // DS since the W5 seam. The DS scopes it to the VERIFIED signing device and
+    // includes the legacy device-agnostic rows (`recipient_device_id IS NULL`)
+    // from before multi-device, so the selection is unchanged; what is gone is
+    // the client-side credential that used to run it.
     let super::ds_reads::FetchedWelcomes {
         items,
         unclaimed_key_packages,
+        has_last_resort_key_package,
     } = super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
 
     let had_welcomes = !items.is_empty();
-    // We ack even apply failures: a failed Welcome's private key was likely
-    // orphaned by a DB wipe, and the repair mechanism generates a fresh Welcome.
+    // IDs to mark delivered. We ack even apply failures — the private key for a
+    // failed Welcome was likely orphaned by a DB wipe and will never succeed, so
+    // retrying it would loop forever. But an ack alone is not a recovery (#1571):
+    // nothing else re-adds this device, and the next ingest would find no group,
+    // join at the head, and pass every earlier envelope in silence. So each
+    // failure also names its conversation in `failed`, and after the ack this
+    // pass re-joins it at once ([`rejoin_after_failed_welcomes`]).
     let mut processed_ids: Vec<String> = Vec::new();
-    // Conversations this pass joined, with the lineage each Welcome admitted us
-    // to; deduplicated per conversation, highest generation wins.
+    let mut failed: Vec<String> = Vec::new();
+    // Conversations this pass actually joined, with the LINEAGE each Welcome
+    // admitted us to — the post-join self-update targets (issue #666) and the
+    // generation-adoption input (#454 P4). Deduplicated on the conversation
+    // because a repaired join can arrive as two Welcomes for the same group, and
+    // rotating twice buys nothing; the highest generation wins, since a Welcome
+    // into a newer lineage supersedes one into an older.
     let mut joined: Vec<(String, i64)> = Vec::new();
-    for (id, bytes) in items {
-        // `None`: the drain does not report the conversation the row was filed
-        // under yet (the DS half of #1161 C1); `welcome_is_corroborated` stands in.
+    for super::ds_reads::FetchedWelcome {
+        id,
+        bytes,
+        conversation_id: filed_under,
+    } in items
+    {
+        // `None`: the blob's own GroupId is not held against the row it was
+        // filed under here; the corroboration below is what stands in for that
+        // check. `filed_under` is used only to recover from a failed apply.
         match apply_welcome(state, &bytes, None).await {
             Ok((conversation_id, generation)) => {
                 crate::diag!("[mls] poll_mls_welcomes: applied welcome {id}");
@@ -169,16 +226,30 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
                 }
             }
             Err(e) => {
-                crate::diag!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
+                crate::diag!(
+                    "[mls] poll_mls_welcomes: failed to apply welcome {id} (filed under \
+                     {filed_under:?}): {e} — acknowledging it and re-joining that \
+                     conversation now (#1571)"
+                );
+                if let Some(conversation_id) = filed_under {
+                    if !failed.contains(&conversation_id) {
+                        failed.push(conversation_id);
+                    }
+                }
             }
         }
         processed_ids.push(id);
     }
 
+    // W5 seam: mark delivered=1 through the Delivery Service (sole writer).
     if !processed_ids.is_empty() {
         let body = pollis_api::writes::AckBody {
             welcome_ids: processed_ids,
-            // The DS's no-auth fallback for the acting user (`resolve_actor`).
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
             user_id: Some(user_id.to_string()),
         };
         match super::ds_client::ds_post(state, &body).await {
@@ -194,8 +265,16 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         }
     }
 
-    // Top the pool back up when it is low (#1412); see `drain_wants_refill`.
-    if super::key_packages::drain_wants_refill(had_welcomes, unclaimed_key_packages) {
+    // Top the pool back up when it is low (#1412). Every wake-up, foreground
+    // pass, unlock sweep and conversation open drains Welcomes, and the drain
+    // carries the pool size, so this is the refill trigger on all of them at no
+    // extra round trip. See `drain_wants_refill` for why "processed a Welcome"
+    // alone was not enough.
+    if super::key_packages::drain_wants_refill(
+        had_welcomes,
+        unclaimed_key_packages,
+        has_last_resort_key_package,
+    ) {
         if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
             crate::diag!("[mls] KP replenishment failed (non-fatal): {e}");
         }
@@ -204,8 +283,12 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     adopt_undrainable_joins(state, &joined).await;
 
     // Adopt each joined conversation's pin key (#99) BEFORE the post-join
-    // self-update advances the epoch: right now this device sits at exactly the
-    // epoch the adder's re-wrap targeted.
+    // self-update below advances the epoch. Right now this device sits at
+    // exactly the epoch the adder's re-wrap targeted, so the unwrap succeeds;
+    // one commit later the window is gone and the device would have to wait
+    // for another member's re-wrap. Once adopted, this device's own epoch
+    // hooks keep the server wrap current — including for the self-update it
+    // is about to make.
     for (conversation_id, _) in &joined {
         crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
         crate::commands::file_keys::try_adopt_file_keys(state, conversation_id).await;
@@ -213,22 +296,105 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
 
     self_update_joined_groups(state, user_id, &joined).await;
 
+    rejoin_after_failed_welcomes(state, user_id, &failed, &joined).await;
+
     Ok(())
 }
 
-/// Does the conversation a just-applied Welcome claims actually list us as a
-/// member, with a log head at or above the epoch it landed us at? If not, drop
-/// the group it materialised (#1161 C1).
+/// Re-join each conversation whose Welcome this pass could not apply (#1571).
 ///
-/// A genuine Welcome's commit is written in the same DS transaction, so a head
-/// below its epoch means the blob was fabricated. This must run after the join:
-/// the GroupId is inside the encrypted GroupInfo. Fails OPEN on anything short
-/// of a definite "no", so a network blip cannot spend a legitimate join.
+/// The Welcome was acknowledged above, so it is no longer pending, and the I6
+/// gate (`invariants::join_recovery`, Kani-proved: external join only when no
+/// Welcome is pending) now admits an external join — the device's own re-add,
+/// which replaces its unusable leaf in the tree. Running it here rather than
+/// leaving it to the next ingest is the difference between losing what arrives
+/// before that ingest and not: every envelope sealed after this join is
+/// readable, and what was sealed between the failed add and now is shown as a
+/// loss (the entitlement marker the join records), not passed in silence.
+///
+/// No loop: a Welcome is acknowledged once and comes back only if the ack
+/// itself failed, and the catch-up is one attempt per failed Welcome. Skipped
+/// when this pass also applied a Welcome for the same conversation, or when a
+/// group is already held — a refused REPLAY of an old Welcome fails exactly like
+/// this and needs nothing.
+async fn rejoin_after_failed_welcomes(
+    state: &Arc<AppState>,
+    user_id: &str,
+    failed: &[String],
+    joined: &[(String, i64)],
+) {
+    for conversation_id in failed {
+        if joined.iter().any(|(c, _)| c == conversation_id) {
+            continue;
+        }
+        let held = {
+            let guard = state.local_db.lock().await;
+            guard
+                .as_ref()
+                .is_some_and(|db| super::group_state::has_local_group(db.conn(), conversation_id))
+        };
+        if held {
+            continue;
+        }
+        crate::diag!(
+            "[mls] poll_mls_welcomes: {conversation_id}: Welcome unusable and no group held — \
+             re-joining now"
+        );
+        // Boxed: the catch-up can poll Welcomes again (its no-GroupInfo branch),
+        // which makes this future recursive.
+        if let Err(e) = Box::pin(crate::commands::messages::catch_up_mls_group_interleaved(
+            state,
+            conversation_id,
+            user_id,
+        ))
+        .await
+        {
+            crate::diag!(
+                "[mls] poll_mls_welcomes: re-join of {conversation_id} after a failed Welcome \
+                 failed: {e}"
+            );
+        }
+    }
+}
+
+/// Does the conversation a just-applied Welcome claims actually list us as a
+/// member? If not, drop the group it materialised (#1161 C1).
+///
+/// A Welcome is a row, and the GroupId inside it is chosen by whoever wrote that
+/// row — so absent the DS-side authorization half, anyone able to write one can
+/// point this device at a conversation of their choosing and have it stand up a
+/// group under that conversation's name, which every later send then seals for.
+/// `join_from_welcome` refuses to *replace* a group we already hold; this is the
+/// other case, where we held nothing and would simply have adopted the blob.
+///
+/// The second check is on the LINEAGE. `join_from_welcome` refuses a Welcome at
+/// or below our current epoch, so the only blob that can still displace a real
+/// group is one claiming an epoch ABOVE it — and that claim is checkable: the
+/// commit that produced a genuine Welcome is written to the log in the same DS
+/// transaction as the Welcome itself, so the log head for that lineage is never
+/// behind the epoch the Welcome lands us at. A head below it means the commit
+/// does not exist and the blob was fabricated. (The check has to run after the
+/// join rather than before: the GroupId lives inside the encrypted GroupInfo, so
+/// nothing about the blob is readable until the KeyPackage has opened it.)
+///
+/// Fails OPEN on anything short of a definite "no" — an unreachable DS, or a
+/// snapshot that does not answer the membership question, leaves the join alone.
+/// A false negative would be self-healing anyway (the no-group recovery path
+/// external-joins behind the same membership gate), but a legitimate join must
+/// not be spent on a network blip.
 async fn welcome_is_corroborated(
     state: &Arc<AppState>,
     conversation_id: &str,
     generation: i64,
 ) -> bool {
+    // Consumed up front, whatever the verdict, so a marker can never outlive
+    // the join that wrote it (#1571).
+    let fresh = {
+        let guard = state.local_db.lock().await;
+        guard
+            .as_ref()
+            .is_some_and(|db| super::join_branch::take_fresh(db.conn(), conversation_id, generation))
+    };
     let snap = match super::ds_reads::conversation_snapshot(
         state,
         super::ds_reads::state_query(conversation_id, Some(generation)),
@@ -253,9 +419,24 @@ async fn welcome_is_corroborated(
     };
     let epoch_is_in_the_log = match joined_epoch {
         Some(epoch) => u64::try_from(snap.head).is_ok_and(|head| head >= epoch),
+        // Nothing stored — nothing to corroborate or discard.
         None => true,
     };
     if snap.authorized && snap.is_member != Some(false) && epoch_is_in_the_log {
+        // #1571: a Welcome can also arrive LATE — the device was registered
+        // before its user joined, and was re-added only after messages had
+        // been exchanged. Same marker as an external join records.
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            super::join_branch::record_entitlement(
+                db.conn(),
+                conversation_id,
+                generation,
+                fresh,
+                snap.device_registered_at.as_deref(),
+                snap.member_since.as_deref(),
+            );
+        }
         return true;
     }
     crate::diag!(
@@ -275,12 +456,25 @@ async fn welcome_is_corroborated(
     false
 }
 
-/// Adopt a newly-joined lineage when we hold **no group at all** on our recorded
-/// generation (#454 P4): a member added to an already-migrated conversation.
+/// Adopt a newly-joined lineage in the one case the catch-up backstop cannot
+/// reach: we hold **no group at all** on our recorded generation (#454 P4).
 ///
-/// `process_pending_commits` finds no group there and so never hops, and with
-/// nothing to drain nothing can be lost by adopting now. Deliberately NOT capped:
-/// a deferred adoption leaves the device unable to read the conversation.
+/// The normal path is the backstop in `process_pending_commits`: drain the
+/// predecessor to its head, then hop to the successor. That ordering is
+/// mandatory whenever a predecessor group exists, because adoption deletes its
+/// key material and under `max_past_epochs = 0` those are the only keys that can
+/// still open envelopes sealed before the migration.
+///
+/// But a member added to an ALREADY-migrated conversation never had the
+/// predecessor. Its recorded generation is 0, `process_pending_commits` finds no
+/// group there and stops before it can ever hop, and the device would sit
+/// permanently pointed at a lineage it does not have. Nothing can be lost by
+/// adopting immediately — there is no group to drain — so it adopts here.
+///
+/// Deliberately NOT capped like the self-update burst below: a rotation deferred
+/// to the next sweep costs efficiency, whereas a deferred adoption leaves the
+/// device unable to read the conversation at all, and no later sweep would fix
+/// it for exactly the reason above.
 async fn adopt_undrainable_joins(state: &Arc<AppState>, joined: &[(String, i64)]) {
     for (conversation_id, generation) in joined {
         let predecessor = {
@@ -316,16 +510,28 @@ async fn adopt_undrainable_joins(state: &Arc<AppState>, joined: &[(String, i64)]
     }
 }
 
-/// Post-join self-update (#666): rotate our own leaf in each group we just
-/// joined, so it stops being an unmerged leaf.
+/// Post-join self-update (issue #666): rotate our own leaf in each group we just
+/// joined, so it stops being an *unmerged* leaf.
 ///
-/// Best-effort and strictly after the DS ack + KP replenish: a failure costs
-/// efficiency, never correctness.
+/// A member added by someone else sits unmerged in every ancestor node on the
+/// adder's direct path until it commits for itself. Each unmerged leaf costs one
+/// extra HPKE ciphertext in every subsequent commit's copath resolution — which
+/// is how a group whose commits should grow with log(N) ends up growing with N.
+/// On #454's post-quantum suite each of those ciphertexts is ~1,270 B, so this
+/// one commit per join is what keeps large hybrid groups viable at all.
+///
+/// Best-effort and strictly after the DS ack + KP replenish: a failure here
+/// costs efficiency (and delays PCS to the next periodic rotation), never
+/// correctness, so it must not be able to strand a Welcome as undelivered.
 async fn self_update_joined_groups(state: &Arc<AppState>, user_id: &str, joined: &[(String, i64)]) {
-    // A device recovering from a wipe re-processes every Welcome, so cap the burst.
+    // A device recovering from a wipe re-processes every Welcome it ever
+    // received, so cap the burst for the same reason the sweep does: rotation is
+    // a deadline, not a heartbeat, and the rest are picked up by the next sweep.
     for (conversation_id, _) in joined.iter().take(super::self_update::MAX_SELF_UPDATES_PER_SWEEP) {
-        // Catch up first (interleaved), or the commit loses the CAS from a stale
-        // epoch.
+        // Catch up first. Our Welcome names the epoch we were added at, but the
+        // group may already have moved past it; committing from a stale epoch
+        // would just lose the compare-and-swap. Interleaved, never a bare commit
+        // replay, so messages sealed at the epochs we skip are still ingested.
         if let Err(e) =
             crate::commands::messages::catch_up_mls_group_interleaved(state, conversation_id, user_id)
                 .await
@@ -352,12 +558,19 @@ async fn self_update_joined_groups(state: &Arc<AppState>, user_id: &str, joined:
     }
 }
 
-/// Re-arm welcome delivery so a freshly-created or wiped local DB recovers all
-/// MLS group memberships.
+/// Re-arm welcome delivery so `poll_mls_welcomes` re-processes Welcomes and a
+/// freshly-created/wiped local DB recovers all MLS group memberships.
 ///
-/// Must run AFTER `ensure_device_cert` has published this device's
-/// `mls_signature_pub`, so the signed reset authenticates. Scoped to THIS device
-/// when one exists, so siblings do not re-process and clobber their MLS state.
+/// Called by `set_pin` / `unlock` when `load_user_db_with_key` reports an empty
+/// `mls_kv`, and crucially AFTER `ensure_device_cert` has (re)published this
+/// device's `mls_signature_pub` — so the signed DS reset authenticates against
+/// the registered device key. Routes through the Delivery Service (sole writer
+/// of the log DB).
+///
+/// Scoped to THIS device when a `device_id` exists: resetting a user's entire
+/// welcome set would make sibling devices re-process and clobber their working
+/// MLS state. On first-ever login no device row exists yet, so an all-devices
+/// reset is safe — there is no sibling to disturb.
 pub async fn reset_welcome_delivery(state: &Arc<AppState>, user_id: &str) -> Result<()> {
     let maybe_device_id = state
         .keystore
@@ -367,10 +580,15 @@ pub async fn reset_welcome_delivery(state: &Arc<AppState>, user_id: &str) -> Res
         .flatten()
         .and_then(|b| String::from_utf8(b).ok());
 
-    // The DS derives the recipient from the authenticated user; `None` resets all.
+    // The DS derives the recipient from the authenticated user; the body
+    // only carries the device scope (null ⇒ all of this user's welcomes).
     let body = pollis_api::writes::ResetBody {
         device_id: maybe_device_id,
-        // The DS's no-auth fallback for the acting user (`resolve_actor`).
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
         user_id: Some(user_id.to_string()),
     };
     match super::ds_client::ds_post(state, &body).await {

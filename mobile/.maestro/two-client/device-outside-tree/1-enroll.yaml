@@ -1,0 +1,52 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DEVICE OUTSIDE THE TREE (#1571), part 1 of 2 — driven by
+# scripts/maestro-device-outside-tree.sh. The owner peer (this account's FIRST
+# device) signed up ${MAESTRO_EMAIL} and printed its recovery key. Join that
+# account as a second device, reach the tabs, and close the app. From here on
+# this phone runs NOTHING while a peer spends its KeyPackage pool, opens a DM
+# with the account, and the two exchange messages through the owner device.
+
+- clearState
+- launchApp
+- assertVisible:
+    id: "screen-auth-email"
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 20000
+- inputText: "${MAESTRO_OTP}"
+- tapOn:
+    id: "btn-submit-otp"
+
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-enrollment"
+    timeout: 20000
+- tapOn:
+    id: "btn-enroll-recovery"
+- tapOn:
+    id: "input-recovery-key"
+- inputText: "${MAESTRO_RECOVERY_KEY}"
+- tapOn:
+    id: "btn-submit-recovery"
+
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 30000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 60000
+- takeScreenshot: device-outside-tree-01-enrolled
+- stopApp

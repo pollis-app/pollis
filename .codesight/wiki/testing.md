@@ -3,7 +3,7 @@
 Pollis has four tiers of automated tests:
 
 1. **Unit tests** (in-crate `#[cfg(test)]` modules) — pure logic, in-memory rusqlite schemas, no I/O.
-2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. Most of this document covers the harness.
+2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end through an in-process Delivery Service backed by process-local libsql files (no Turso, no configuration — see below). Most of this document covers the harness.
 3. **WebDriver E2E tests** (`e2e/*.js`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
 4. **Playwright UI specs** (`e2e/*.spec.js`) — front-end interaction only, against the browser build with `VITE_PLAYWRIGHT=true` (Tauri IPC mocked in `frontend/src/__mocks__/`). No backend, seconds to run. See [Playwright UI specs](#playwright-ui-specs-e2especjs) below.
 5. **Renderer unit tests** (`frontend/tests/*.test.ts`, `pnpm --filter frontend test`) — plain `node --test` over the renderer's pure functions, plus the source-scan guards. Milliseconds, no browser, no build step; Node's type stripping runs the TypeScript directly, so imports need the `.ts` extension.
@@ -44,7 +44,7 @@ Design constraints:
 
 - **Real command paths.** Tests go through `tauri::test::get_ipc_response` against a `MockRuntime` app, exactly as the React frontend does in production — no `_inner` shims, no mocked DB layer.
 - **Per-client isolation.** Each `TestClient` owns its own `App<MockRuntime>`, its own `InMemoryKeystore`, and its own `AppState`. Two clients in one test cannot share keys or local state.
-- **Shared remote.** All clients in a test round-trip through the same disposable Turso database, so read-after-write between clients exercises the same pipeline as two real users.
+- **Shared remote.** All clients in a test round-trip through the same in-process DS and its process-local libsql databases, so read-after-write between clients exercises the same pipeline as two real users.
 - **No timing, no websockets.** Tests drive the pipeline by explicit calls (`poll_mls_welcomes`, `process_pending_commits`) rather than waiting for LiveKit events.
 
 ## Running
@@ -54,7 +54,7 @@ cargo test --features test-harness --test flows
 ```
 
 The `test-harness` feature:
-- Exposes `Config::for_test()` (loads `.env.test`, stubs R2/LiveKit/Resend).
+- Exposes `Config::for_test()` (reads nothing from the environment; stubs R2/LiveKit/Resend).
 - Exposes `InMemoryKeystore` + the `test_harness` module.
 - Pulls in `tauri/test` so `MockRuntime` is available.
 
@@ -515,6 +515,48 @@ uses the same hook against the dev DS for the Maestro flow
 (`mobile/scripts/maestro-lost-message.sh`). Desktop rendering in both skins is
 `e2e/lost-messages.spec.ts`.
 
+## Zero message loss (#1524)
+
+A placeholder proves a loss is *visible*; the suites also prove there is none.
+
+- **Every flow.** `TestClient`'s `Drop` (`harness::assert_no_unexpected_loss`)
+  fails the test if the device's local DB holds any `undecryptable` row or the
+  process logged any `[loss]` line since `wipe()` — the line catches a lost edit,
+  which leaves no row. The pre-join pass (accepted loss 1) is not counted
+  (`pollis_core::diag::loss_tap`, `test-harness` only). A test that loses a
+  message on purpose calls `harness::expect_losses()` (the two forced losses in
+  `lost_messages.rs`, and the Tier-2 prune in `adversarial.rs`);
+  `zero_loss::an_unexpected_loss_fails_the_test` proves the check bites.
+- **One local DB per device.** Each `TestClient` gets its own data directory
+  (`AppState::local_dir`, `test-harness` only). Before #1524 two devices of one
+  account opened the same `pollis_{user_id}.db`, so a sibling device shared its
+  twin's history and MLS store and could never lose a message on its own.
+- **Message-path faults** (`DsFault`, below) and two more kill points:
+  `Crash::AfterSeal` (sealed, not posted — the sender's ratchet already past it)
+  and `Crash::AfterDecrypt` (a receiver's `process_message` spent the key, the row
+  is not written). The latter sits in the replay's epoch hook, which has no error
+  path, so it unwinds (`test_hooks::die`); tests run that ingest in a
+  `tokio::spawn` and expect a panic. It found a real loss: the spent key was
+  persisted while the row was not, and the next pass hit `SecretReuse`. Each
+  envelope's decrypt and row now share one savepoint (`ingest::OneEnvelope`).
+- **`flows/zero_loss.rs`**: each fault and kill point, then
+  `zero_loss_soak_multi_device_multi_channel` — two users, three devices (one
+  account on a desktop and a phone that is away for long stretches and catches up
+  in bursts), three channels in one group, sends / edits / reactions /
+  self-updates / drains with the faults and sender kills armed at random; every
+  device must end with every message once, at its final text, every reaction,
+  and no placeholder. 240 ops by default (~8 s);
+  `POLLIS_ZERO_LOSS_SOAK_OPS` lengthens it, `POLLIS_ZERO_LOSS_SOAK_SEED` replays
+  the printed seed. `cross_channel_ingest::the_senders_own_phone_catches_up_through_a_faulty_resume`
+  is the 2026-10-27 shape on the sender's own sibling device through a faulty resume.
+- **Desktop UI** (`e2e/lib/zero-loss.ts`): every Playwright spec imports `test`
+  from there; an automatic fixture fails a test whose page ends showing a
+  `[data-undecryptable]` row unless it called `expectLosses()`. The mock IPC runs
+  no MLS, so this only stops a spec rendering a loss it did not mean to.
+- **Mobile** (`mobile/.maestro/subflows/assert-no-loss.yaml`): no
+  `text-undecryptable-*` row on screen, at the end of `messaging`, `dms` and
+  `long-history`.
+
 ## Killing a send part-way (#1335)
 
 `test_hooks::crash_next_send(Crash::AfterEnqueue | Crash::AfterPost)` (only in a
@@ -552,6 +594,23 @@ renderer halves are `frontend/tests/pending-messages.test.ts` and
 and `mobile/.maestro/flows/outbox.yaml` (mobile: a real `stopApp` mid-send, and
 on Android an airplane-mode send that fails and is retried).
 
+### Killing an edit part-way (#1555)
+
+`Crash::EditAfterEnqueue` ends an edit with it stored in the edit outbox and
+nothing posted — where, before #1555, the sender's row had already changed —
+and `Crash::EditAfterPost` ends it after the DS took the envelope and before the
+device recorded that. `flows/zero_loss.rs`
+(`an_editor_killed_between_storing_and_posting_converges`,
+`an_editor_killed_after_the_post_converges_without_a_fork`,
+`an_edit_that_times_out_unlanded_is_delivered_by_the_drain`) asserts that the
+other members keep the original until the post lands, the editor's read shows
+the edit with `edit_state`, and after `lock` + `unlock` and a drain every
+member's copy matches with nothing left pending. The soak arms all three kill
+points at random and requires, at the end, the final text and no `edit_state`
+on every device. Unit coverage: `commands::messages::edit_outbox::tests`; the
+desktop UI: `e2e/outbox.spec.ts` (an edit that cannot go is labelled, then
+delivered by the `online` drain).
+
 ## The `DsFault` seam — injecting DS-side faults
 
 `/v1/commits` is the ONE path the harness serves itself, mounted on an outer
@@ -576,6 +635,14 @@ shares the single in-process DS. Assert it fired with `!ds_fault_armed()`.
 | `Fail500PostWrite` | same as above — persists, then 500s | adopt (generalized #411, e.g. on a *removal* commit) |
 | `Fail500PreWrite` | returns 500 **without persisting** — the clean, retryable failure | roll the staged commit back cleanly; never adopt a phantom epoch |
 | `DropWelcome` | commit + GroupInfo land, but the add's Welcomes are **never persisted** (cleared off the body before `submit_commit`) | recover the new member via external-join |
+| `SendLandsThenTimesOut` | a message send or edit **lands**, then the client gets a 504 | mark it failed; the drain's re-post is a replay; everyone holds it once |
+| `SendTimesOutUnlanded` | a send or edit gets a 504 and nothing is stored | the drain delivers it, re-sealed if the epoch moved |
+| `CatchUpTimesOutMidway` | the commit fetch after a catch-up's envelope list gets a 504 | keep what it decrypted; the next pass finishes |
+| `WatermarkTimesOut` | the cursor report after a catch-up gets a 504 and is not stored | re-fetched envelopes are never counted as losses |
+
+The four message-path faults are applied by the `inject_message_fault` middleware
+in front of the real handlers (a 504 stands in for a timeout: the client sets no
+request timeout of its own). `DsFault::MESSAGE_PATH` lists them for random drivers.
 
 The gap-creating fault is **not** a `DsFault` variant. A live submit-path deletion
 of the *head* commit row only lowers the head (the next committer refills it), so
@@ -964,6 +1031,15 @@ asserting the SAME property its Kani harness proves (P1/P2/P3
 no-skip·monotone·liveness; no-gap-apply; no-foreign-adopt / no-own-rollback; the
 recovery-gate biconditional; the retention floor's non-negative · no-loss ·
 unreported-disables-Tier-1) — a violation is a fuzzer crash.
+
+Since #1537 six stateful and untrusted-input targets sit beside them
+(`mls_delivery`, `decrypt_untrusted`, `framing`, `ds_bodies`, `sealing_order`,
+`outbox`; table in `fuzz/README.md`). They reach pollis-core through the
+`fuzzing` feature's `commands::{messages,mls}::fuzz_surface`, which wraps the
+production functions without copying them. `mls_delivery` is the model-based one: real openmls
+groups on pollis-core's provider and decryptor, a model DS with the epoch gate,
+fuzzed sends / commits / adds / removes / absences / kills, and #1524's
+zero-loss invariant as the property.
 
 **Detached on purpose.** `cargo-fuzz` needs nightly, but this repo pins Rust
 1.96.0 stable for reproducible release builds, so `fuzz/` has its own

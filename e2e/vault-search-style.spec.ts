@@ -11,7 +11,7 @@
  * `@tauri-apps/api/core` resolves to `frontend/src/__mocks__/tauri-core.ts`.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_style";

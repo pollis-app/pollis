@@ -4,7 +4,7 @@
  * the reason only: the message text never appears in what is sent.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";

@@ -12,6 +12,7 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
 import type { MessageAttachment } from "../../types";
+import { PressButton } from "../ui/PressButton";
 
 // Fills its box; callers crop with `object-fit: cover`, as the real image does.
 const BlurhashCanvas: React.FC<{ hash: string }> = ({ hash }) => {
@@ -332,7 +333,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
   if (isImage) {
     return (
       <>
-        <button
+        <PressButton
           data-testid={cardTestId}
           onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
           disabled={!downloadUrl}
@@ -376,7 +377,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
               {error ? t("attachment.error") : "…"}
             </span>
           )}
-        </button>
+        </PressButton>
 
         {viewerOpen && downloadUrl && (
           <div
@@ -430,6 +431,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
             <InlineAudioPlayer
               src={downloadUrl}
               title={attachment.filename}
+              activateOn="press"
               onClick={() => setViewerOpen(true)}
             />
           ) : (
@@ -484,7 +486,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
   if (isVideo) {
     return (
       <>
-        <button
+        <PressButton
           data-testid={cardTestId}
           onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
           disabled={isPending || isLoading}
@@ -555,7 +557,7 @@ export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
               {formatDuration(duration)}
             </span>
           )}
-        </button>
+        </PressButton>
 
         {viewerOpen && downloadUrl && (
           <div

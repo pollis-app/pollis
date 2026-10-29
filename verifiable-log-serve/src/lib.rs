@@ -41,13 +41,22 @@ pub use bundle::{
 pub use verifiable_log::{key_id_for, verifying_key_from_hex, KEY_ID_HEX_LEN, STH_PUB_LEN, STH_SIG_LEN};
 // Root-signed key sets (#754).
 pub use verifiable_log::{root_key_from_hex, KeySetStatement, SignerEntry};
+pub use pinned::{key_set_trust_via, KeySetOutcome, KeySetTrust, PINNED_LOG_ROOT_KEYS};
+// The per-tree STH contexts a key set authorises signers for.
+pub use verifiable_log::{
+    STH_CONTEXT_ACCOUNT_KEYS, STH_CONTEXT_BINARIES, STH_CONTEXT_COMMIT_LOG,
+    STH_CONTEXT_COMMIT_LOG_2,
+};
 pub use error::{Result, ServeError};
 pub use group::{
-    verify_group, verify_group_in_bundle, verify_group_in_bundle_at, GroupCommit, GroupReport,
+    verify_group, verify_group_in_bundle, verify_group_in_bundle_at,
+    verify_group_in_bundle_with_context, GroupCommit, GroupReport,
 };
 pub use layout::{
     generate, generate_account, generate_account_artifacts, generate_artifacts, generate_binaries,
-    generate_binaries_artifacts, load_bundle, ACCOUNT_API_PREFIX, API_VERSION, BINARIES_API_PREFIX,
+    generate_binaries_artifacts, generate_commit_log_2, generate_commit_log_2_artifacts,
+    load_bundle, ACCOUNT_API_PREFIX, API_VERSION, BINARIES_API_PREFIX, COMMIT_LOG_2_API_PREFIX,
+    RESET_STATEMENT_PATH,
 };
 #[cfg(feature = "live")]
 pub use live::LiveServer;

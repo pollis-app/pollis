@@ -29,7 +29,8 @@ export const GroupPage: React.FC = observer(() => {
   const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
   const { data: joinRequests = [] } = useGroupJoinRequests(isAdmin ? groupId : null);
 
-  // One batched preview fetch (#874), above the early returns because it's a hook.
+  // One batched preview fetch for the whole channel list (#874) instead of one
+  // IPC call per row. Computed above the early returns because hooks must be.
   const previewChannelIds = useMemo(
     () => (group?.channels ?? []).filter((ch) => ch.channel_type !== "voice").map((ch) => ch.id),
     [group]
@@ -52,6 +53,7 @@ export const GroupPage: React.FC = observer(() => {
           { id: "__not-found__", label: t("group.notFound"), disabled: true },
           {
             id: "__back__",
+            activateOn: "press" as const,
             label: t("common:actions.goBack"),
             icon: <ArrowLeft size={14} className="rtl-mirror" />,
             action: () => navigate({ to: "/groups" }),
@@ -79,7 +81,11 @@ export const GroupPage: React.FC = observer(() => {
     },
     badge: unreadCounts[ch.id] ?? 0,
     testId: `channel-option-${ch.id}`,
-    // Muted (#1431): dimmed plus a bell-off mark, not colour alone.
+    // Opening a text channel is free to undo: pointer-down (#1529). Voice
+    // rows below can auto-join, which others see, so they stay on click.
+    activateOn: "press" as const,
+    // A muted channel (#1431) is drawn in the dimmed tier, with a bell-off
+    // mark so the state is not carried by colour alone.
     ...(mutedChannels?.has(ch.id)
       ? {
         type: "system" as const,
@@ -105,13 +111,15 @@ export const GroupPage: React.FC = observer(() => {
       action: () => {
         navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
       },
-      // Selecting a voice row pre-warms LiveKit.
+      // Selecting (hover or keyboard) a voice row signals intent to maybe
+      // join — pre-warm DNS/TLS to LiveKit so the actual Join is fast.
       onSelect: () => warmVoiceChannel(ch.id),
       badge: count > 0 ? count : 0,
       testId: `channel-option-${ch.id}`,
     };
   });
 
+  // Insert a separator before voice channels only when both sections are non-empty
   const voiceSeparator: TerminalMenuItem[] =
     textChannels.length > 0 && voiceChannels.length > 0
       ? [{ id: "__voice-sep__", label: "", type: "separator" as const }]
@@ -129,8 +137,10 @@ export const GroupPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/$groupId/members", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-members",
+      activateOn: "press" as const,
     },
-    // Any MEMBER can add emoji (#848), so outside the admin block.
+    // Any MEMBER can add a custom emoji (#848) — the cost is bounded per
+    // person rather than gatekept — so this sits outside the admin block.
     {
       id: "group-emoji",
       label: t("group.customEmoji"),
@@ -138,6 +148,7 @@ export const GroupPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/$groupId/emoji", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-group-emoji",
+      activateOn: "press" as const,
     },
     ...(isAdmin ? [
       {
@@ -147,6 +158,7 @@ export const GroupPage: React.FC = observer(() => {
         action: () => navigate({ to: "/groups/$groupId/rename", params: { groupId } }),
         type: "system" as const,
         testId: "menu-item-rename-group",
+        activateOn: "press" as const,
       },
       {
         id: "create-channel",
@@ -158,6 +170,7 @@ export const GroupPage: React.FC = observer(() => {
         },
         type: "system" as const,
         testId: "menu-item-create-channel",
+        activateOn: "press" as const,
       },
       {
         id: "invite-member",
@@ -166,6 +179,7 @@ export const GroupPage: React.FC = observer(() => {
         action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
         type: "system" as const,
         testId: "menu-item-invite-member",
+        activateOn: "press" as const,
       },
       {
         id: "join-requests",
@@ -175,6 +189,7 @@ export const GroupPage: React.FC = observer(() => {
         badge: joinRequests.length > 0 ? joinRequests.length : undefined,
         type: "system" as const,
         testId: "menu-item-join-requests",
+        activateOn: "press" as const,
       },
     ] : []),
     {
@@ -187,6 +202,7 @@ export const GroupPage: React.FC = observer(() => {
     },
     {
       id: "__back__",
+      activateOn: "press" as const,
       label: t("common:actions.goBack"),
       icon: <ArrowLeft size={14} className="rtl-mirror" />,
       action: () => navigate({ to: "/groups" }),

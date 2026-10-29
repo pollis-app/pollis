@@ -59,10 +59,17 @@
     "statusChanged": "Modifié — à revérifier",
     "statusUnverified": "Non vérifié",
     "keyChangedWarning": "La clé d'identité de ce contact a changé depuis votre dernière vérification. Comparez à nouveau le numéro par un autre moyen avant de lui faire confiance.",
-    "compareHint": "Comparez ces chiffres avec {{name}} via un canal de confiance (en personne, ou un appel dont vous reconnaissez la voix). S'ils correspondent, marquez ce contact comme vérifié.",
     "removeVerification": "Retirer la vérification",
     "markVerified": "Marquer comme vérifié",
     "report": "Signaler"
+  },
+  "safety": {
+    "title": "Vous et {{name}}",
+    "verify": "Vérifier le numéro de sécurité",
+    "headingMany": "Numéros de sécurité",
+    "shared": "Vous et {{name}} voyez le même numéro. Comparez-le en personne ou lors d'un appel pour vous assurer que personne ne s'interpose.",
+    "qrLabel": "Code QR du numéro de sécurité que vous partagez avec {{name}}",
+    "failed": "Impossible de charger le numéro de sécurité."
   },
   "notify": {
     "requestTitle": "Nouvelle conversation",

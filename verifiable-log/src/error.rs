@@ -52,6 +52,11 @@ pub enum Error {
     /// The message is operator-facing: it names which key and why.
     #[error("invalid key-set statement: {0}")]
     KeySet(String),
+
+    /// A reset statement (#1579) that is malformed, contradicts itself, or does
+    /// not verify.
+    #[error("invalid reset statement: {0}")]
+    Reset(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

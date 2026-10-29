@@ -112,6 +112,32 @@ CREATE TABLE IF NOT EXISTS outbox_attachment (
     PRIMARY KEY (message_id, position)
 );
 
+-- An edit of one of this device's own messages that the DS has not confirmed
+-- yet (#1555) — the outbox for edits. `edit_message` stores it here BEFORE any
+-- network work and leaves the `message` row alone; only once the DS holds the
+-- edit envelope does one transaction write the new text to the row and delete
+-- this one. So a process killed in between never leaves the sender's copy
+-- showing text no other member has: the row still holds what everyone holds,
+-- and the drain (after unlock, on reconnect, on resume) posts the edit again.
+-- The read paths show the pending text, with `edit_state`, over the row.
+--
+-- One per target: a newer edit replaces an unconfirmed older one, as the DS
+-- replaces a target's pending edit envelope. `envelope_id` is kept across
+-- every attempt at the same edit, so a retry after a post that landed unseen
+-- replaces that envelope with one carrying the same text. Same states as
+-- `message.send_state`; the drain retries pending and failed, never rejected.
+-- Kept across a keep-data sign-out like the rest of the outbox.
+CREATE TABLE IF NOT EXISTS outbox_edit (
+    target_message_id TEXT PRIMARY KEY,
+    envelope_id       TEXT NOT NULL UNIQUE,
+    conversation_id   TEXT NOT NULL,
+    sender_id         TEXT NOT NULL,
+    content           TEXT NOT NULL,
+    send_state        TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (send_state IN ('pending', 'failed', 'rejected')),
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 -- The outbox drain's scan (#1335): only unsent rows, which are few.
 CREATE INDEX IF NOT EXISTS idx_message_send_state ON message(sent_at) WHERE send_state IS NOT NULL;
 
@@ -369,7 +395,7 @@ END;
 -- is a channel or a DM. Without this table every search result page would need
 -- an N+1 network round trip to render a name, and search would be broken
 -- offline — so the two places that already list channels and DMs write what
--- they learned here, exactly as `attach_sender_usernames_local` writes
+-- they learned here, exactly as `hydrate_rows` writes
 -- `user_cache`.
 --
 -- Best-effort and disposable: a miss renders the id, which is what search did

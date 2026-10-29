@@ -33,6 +33,16 @@ export const InvitesPage: React.FC = () => {
         data-testid="invites-page"
         className="flex-1 flex flex-col overflow-auto bg-bg"
       >
+        {/* A failed accept puts the invite back (#1560); say why it is there. */}
+        {acceptMutation.isError && (
+          <p
+            data-testid="accept-invite-error"
+            role="status"
+            className="px-4 py-2 text-xs font-mono text-fg"
+          >
+            {t("invites.acceptFailed")}
+          </p>
+        )}
         <NavigableList
           items={invites}
           isLoading={isLoading}

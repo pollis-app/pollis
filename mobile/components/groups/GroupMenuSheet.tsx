@@ -56,9 +56,12 @@ export function GroupMenuSheet({
 
   return (
     <SheetOverlay title={groupName} onClose={onClose} testID="sheet-group-menu">
+      {/* Navigation rows in a sheet that does not scroll: touch-down (#1529).
+          Leave, below, stays on release. */}
       <Group surface="high">
         <ListRow
           testID="btn-menu-members"
+          pressIn
           glyph={<Icon.users size={22} color={semantic.dim} />}
           name={t("group.panel.members")}
           value={memberCount !== undefined ? String(memberCount) : undefined}
@@ -66,12 +69,14 @@ export function GroupMenuSheet({
         />
         <ListRow
           testID="btn-menu-invite"
+          pressIn
           glyph={<Icon.userPlus size={22} color={semantic.dim} />}
           name={t("group.panel.invite")}
           onPress={() => go("/group/invite")}
         />
         <ListRow
           testID="btn-menu-group-settings"
+          pressIn
           glyph={<Icon.sliders size={22} color={semantic.dim} />}
           name={t("group.panel.settings")}
           onPress={() => go("/group/settings")}
@@ -79,6 +84,7 @@ export function GroupMenuSheet({
         {pendingRequests > 0 ? (
           <ListRow
             testID="btn-menu-requests"
+            pressIn
             glyph={<Icon.inbox size={22} color={semantic.dim} />}
             name={t("group.panel.joinRequests")}
             badge={pendingRequests}

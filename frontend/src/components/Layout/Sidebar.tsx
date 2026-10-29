@@ -13,6 +13,7 @@ import {
   Palette,
   User as UserIcon,
   ShieldCheck,
+  ScrollText,
   ShieldAlert,
   Keyboard,
   Download,
@@ -33,6 +34,7 @@ import { PresenceAvatar } from "../ui/PresenceAvatar";
 import { SidebarProfilePanel } from "./SidebarProfilePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { usePanelWidth } from "./usePanelWidth";
+import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
@@ -65,6 +67,9 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     "sidebar",
     onToggle,
   );
+
+  // Closing the sidebar is free to undo (mod+b reopens it): pointer-down.
+  const closePress = usePressActivation(onToggle, "press");
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: mutedChannels } = useMutedChannels();
@@ -145,7 +150,8 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
     { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
     { id: "voice-settings", label: t("sidebar.voiceAndVideo"), icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
-    { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
+    { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || (pathname.startsWith("/security/") && pathname !== "/security/events") },
+    { id: "security-events", label: t("sidebar.securityEvents"), icon: <ScrollText {...iconProps} />, to: "/security/events" as const, isActive: pathname === "/security/events" },
     { id: "shortcuts", label: t("sidebar.keyBindings"), icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
     { id: "update", label: t("sidebar.softwareUpdate"), icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];
@@ -162,6 +168,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     >
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <SectionHeader
+          activateOn="press"
           testId="groups"
           label={t("sidebar.groups")}
           icon={<Users {...iconProps} />}
@@ -178,6 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             return (
               <li key={group.id}>
                 <Row
+                  activateOn="press"
                   indent={1}
                   isActive={isGroupActive && !activeChannelId && !activeVoiceId}
                   onClick={() => router.navigate({ to: "/groups/$groupId", params: { groupId: group.id } })}
@@ -207,7 +215,10 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                         ? unread
                         : null;
                     return (
+                      // A voice channel can auto-join on arrival, which
+                      // others see, so it stays on click (#1529).
                       <Row
+                        activateOn={isVoice ? "click" : "press"}
                         key={ch.id}
                         indent={2}
                         isActive={isActive}
@@ -247,6 +258,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         </ul>
 
         <SectionHeader
+          activateOn="press"
           testId="dms"
           label={t("sidebar.dms")}
           icon={<MessageCircle {...iconProps} />}
@@ -259,6 +271,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         <ul>
           {/* The Vault (#107) sits where people look for Note to Self. */}
           <Row
+            activateOn="press"
             indent={1}
             isActive={pathname === "/vault"}
             leading={<VaultIcon {...iconProps} />}
@@ -290,6 +303,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             ) : null;
             return (
               <Row
+                activateOn="press"
                 key={c.id}
                 indent={1}
                 isActive={activeDmId === c.id}
@@ -321,6 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         </ul>
 
         <SectionHeader
+          activateOn="press"
           testId="account"
           label={t("sidebar.account")}
           icon={<SettingsIcon {...iconProps} />}
@@ -330,6 +345,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         />
         {settingsItems.map((s) => (
           <Row
+            activateOn="press"
             key={s.id}
             indent={1}
             isActive={s.isActive}
@@ -347,7 +363,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         <button
           type="button"
           data-testid="sidebar-close"
-          onClick={onToggle}
+          {...closePress}
           aria-label={t("sidebar.close", { shortcut: toggleSidebarLabel })}
           title={t("sidebar.close", { shortcut: toggleSidebarLabel })}
           className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer-flush border-t border-line text-xs text-start cursor-pointer transition-colors text-muted hover:text-fg"
@@ -377,9 +393,12 @@ interface SectionHeaderProps {
   badge?: number | null;
   bordered?: boolean;
   borderedBottom?: boolean;
+  /** `"press"`: act on a plain mouse pointer-down (#1529). */
+  activateOn?: ActivateOn;
 }
 
-const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isActive, onClick, badge, bordered, borderedBottom }) => {
+const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isActive, onClick, badge, bordered, borderedBottom, activateOn }) => {
+  const press = usePressActivation(onClick, activateOn);
   const cls = [
     "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
     "uppercase tracking-[0.08em] text-start cursor-pointer",
@@ -393,7 +412,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
   return (
     <button
       type="button"
-      onClick={onClick}
+      {...press}
       className={cls}
       data-testid={`sidebar-row-${testId}`}
     >
@@ -426,9 +445,22 @@ interface RowProps {
   testId?: string;
   /** A muted channel (#1431), dimmed unless active. */
   dimmed?: boolean;
+  /** `"press"`: the row and its chevron act on a plain mouse pointer-down
+      (#1529). */
+  activateOn?: ActivateOn;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed }) => {
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn }) => {
+  const press = usePressActivation(onClick, activateOn);
+  const chevronPress = usePressActivation(
+    chevron
+      ? (e: React.MouseEvent<HTMLButtonElement>) => {
+          e.stopPropagation();
+          chevron.onToggle();
+        }
+      : undefined,
+    activateOn,
+  );
   return (
     <div
       data-active={isActive ? "true" : "false"}
@@ -443,10 +475,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
         <button
           type="button"
           tabIndex={-1}
-          onClick={(e) => {
-            e.stopPropagation();
-            chevron.onToggle();
-          }}
+          {...chevronPress}
           aria-label={chevron.ariaLabel}
           className={`inline-flex items-center pe-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
         >
@@ -459,7 +488,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
       )}
       <button
         type="button"
-        onClick={onClick}
+        {...press}
         data-testid={testId ? `sidebar-row-${testId}` : undefined}
         className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-base text-start cursor-pointer text-inherit ${
           chevron ? "ps-[0.4rem]" : indentPadClass(indent)

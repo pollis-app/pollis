@@ -115,7 +115,7 @@ test("every ingest re-reads the counts unless the caller bumps them itself", () 
 test("every place that cleared a badge also advances the persisted cursor", () => {
   for (const p of [
     "app/group/[id].tsx",
-    "app/(tabs)/search.tsx",
+    "components/search/GlobalSearchResults.tsx",
     "app/(tabs)/direct.tsx",
     "app/(tabs)/groups.tsx",
     "hooks/useOpenConversation.ts",
@@ -137,7 +137,7 @@ test("landing in the app catches up every listed conversation once", () => {
   const realtime = read("hooks/useInboxRealtime.ts");
   assert.match(
     realtime,
-    /landedRef\.current = true;\s*for \(const target of catchUpTargets\(groupsRef\.current, dmsRef\.current\)\)/,
+    /landedRef\.current = true;[\s\S]{0,400}?catchUpThenBackstop\(\s*catchUpTargets\(groupsRef\.current, dmsRef\.current\)/,
   );
   assert.match(realtime, /if \(!inApp\) \{\s*landedRef\.current = false;/);
 });

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Divider, IconButton } from "../ui";
+import { Divider, IconButton, PressInPressable } from "../ui";
 import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
 import {
@@ -20,13 +21,17 @@ import { GroupMenuSheet } from "./GroupMenuSheet";
 import { CreateChannelSheet } from "./CreateChannelSheet";
 import { useThemeRerender } from "../theme";
 
-// A just-created group's roster read can lag the create: retry an empty one a
-// few times, then show no count.
+// Re-reads of an empty roster (a just-created group's read can lag the
+// create): a few, spaced out, then give up and show no count.
 const ROSTER_RETRIES = 3;
 const ROSTER_RETRY_MS = 1500;
 
-// One group's channel panel, shared by the Groups tab and the /group/[id]
-// route so both entry points render the same thing.
+// One group's channel sheet (Main.dc.html, the panel under the group strip):
+// group header (name + chevron → group menu, member count) with Invite, a
+// "Search <group>" button, then "Text channels" (+ create, for admins) and
+// "This group" (Members, Group settings, Join requests). Shared by the Groups
+// tab (under the pill strip) and the /group/[id] route (under a back bar), so
+// both entry points render the same thing.
 function GroupPanelImpl({
   groupId,
   selectedChannelId,
@@ -49,17 +54,23 @@ function GroupPanelImpl({
 }) {
   useThemeRerender();
   const { t } = useTranslation("mobile");
+  // iPad two-pane: group pages open in the detail pane (useNav).
   const router = useNav();
+  // Search is a tab-level destination (the top of Self), never a pane page.
+  const rootRouter = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
+  // Reuse the cached groups list for the group's metadata; the per-group
+  // channel query is the fresher source once it has loaded.
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === groupId);
   const channelsQuery = useGroupChannels(groupId);
   const channels = channelsQuery.data ?? group?.channels ?? [];
   const membersQuery = useGroupMembers(groupId);
-  // A member is always in their own roster, so an empty one has not loaded
-  // yet: show no count rather than a wrong "0 members".
+  // A member is always in their own group's roster, so an empty or missing
+  // roster means it has not loaded yet (or the read lagged a just-created
+  // group): show no count rather than a wrong "0 members".
   const members = membersQuery.data ?? [];
   const membersKnown = members.length > 0;
   const refetchMembers = membersQuery.refetch;
@@ -89,7 +100,8 @@ function GroupPanelImpl({
     refetchMembers,
   ]);
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
-  // Muted channels (#1431): the testID gains `-muted` so Maestro can see it.
+  // Muted channels (#1431) are dimmed and marked; the testID gains `-muted`
+  // so the device tier can see the state (Maestro reads ids, not colours).
   const { data: mutedChannels } = useMutedChannels();
   const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id;
@@ -113,6 +125,7 @@ function GroupPanelImpl({
         overflow: "hidden",
       }}
     >
+      {/* Group header: the name opens the group menu. */}
       <View
         style={{
           flexDirection: "row",
@@ -124,7 +137,11 @@ function GroupPanelImpl({
           paddingEnd: space.sm,
         }}
       >
-        <Pressable
+        {/* The header above the channel list is fixed: its menu, invite and
+            search only open a sheet or page, so they act on touch-down
+            (#1529). The channel rows scroll and stay on release. */}
+        <PressInPressable
+          pressIn
           testID="btn-group-menu"
           onPress={() => setMenuOpen(true)}
           accessibilityRole="button"
@@ -148,9 +165,10 @@ function GroupPanelImpl({
           {memberCountLabel ? (
             <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel}</Text>
           ) : null}
-        </Pressable>
+        </PressInPressable>
         <IconButton
           testID="row-group-invite"
+          pressIn
           filled
           accessibilityLabel={t("group.panel.invite")}
           icon={<Icon.userPlus size={20} color={semantic.text} />}
@@ -158,12 +176,14 @@ function GroupPanelImpl({
         />
       </View>
 
+      {/* Looks like a field; opens search, at the top of Self (#1550). */}
       <View style={{ paddingHorizontal: space.xxl, paddingBottom: space.lg }}>
-        <Pressable
+        <PressInPressable
+          pressIn
           testID="btn-search-group"
           accessibilityRole="button"
           accessibilityLabel={t("group.panel.search", { name: groupName })}
-          onPress={() => router.push("/(tabs)/search")}
+          onPress={() => rootRouter.navigate({ pathname: "/(tabs)/self", params: { search: "1" } })}
           style={{
             minHeight: layout.touchMin,
             borderRadius: r.sm,
@@ -178,7 +198,7 @@ function GroupPanelImpl({
           <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.regular, fontSize: 15, color: semantic.muted }}>
             {t("group.panel.search", { name: groupName })}
           </Text>
-        </Pressable>
+        </PressInPressable>
       </View>
       <Divider />
 

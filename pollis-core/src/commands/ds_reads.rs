@@ -1,9 +1,17 @@
-//! Client half of the DS directory and account read endpoints (#987). The MLS
-//! control-plane reads live in `commands::mls::ds_reads`, which carry
-//! constraints these don't.
+//! The client half of the Delivery Service's directory and account READ
+//! endpoints (#987).
 //!
-//! Thin typed wrappers with no defaults and no error swallowing: each caller
-//! keeps its own failure bias.
+//! Sibling of `commands::mls::ds_reads`, which owns the MLS control-plane reads.
+//! Split by domain rather than merged, because the MLS ones carry correctness
+//! constraints (one snapshot, contiguous batch, opposite failure biases) that
+//! nothing here does — putting them in one module would invite a helper that
+//! quietly applies one module's rules to the other's callers.
+//!
+//! Everything here is a thin typed wrapper: build the body, `ds_post_json`,
+//! hand back the response. Deliberately no defaults and no error swallowing —
+//! each caller keeps whatever bias it had when the read was a `SELECT`, because
+//! those biases were chosen per call site and HTTP makes failures common where
+//! libsql failures were rare.
 
 use std::sync::Arc;
 
@@ -17,11 +25,21 @@ use super::mls::ds_client::{current_user_id, ds_post_json};
 
 /// Does this account exist, and does it have an identity yet?
 ///
-/// Unauthenticated by necessity (#987 §6.5): it runs at launch before PIN entry,
-/// when no signer, device id or OTP session exists, and it gates the pre-unlock
-/// UI. It discloses less than `verify-otp` already does: `user_id` is an
-/// unguessable ULID from the caller's own `accounts.json`. Rate-limited on the
-/// DS's tightest tier.
+/// # The one read with no credential (#987 §6.5)
+///
+/// UNAUTHENTICATED, and it has to be. This runs at every app launch, BEFORE PIN
+/// entry: the local SQLCipher database is closed, so `ds_post` cannot load the
+/// ML-DSA-44 device signer and errors with *"not signed in for DS request
+/// signing"*; `device_id` is not set either; and no OTP has run, so there is no
+/// session bearer. There is no credential in existence at that moment — and the
+/// answer gates the PRE-UNLOCK UI, because a device that needs enrollment has no
+/// PIN to unlock with, so it cannot be deferred until one exists.
+///
+/// The disclosure is strictly smaller than one already shipped: `user_id` is a
+/// 128-bit ULID the caller read out of its OWN `accounts.json`, not guessable
+/// and not an enumeration surface, while `verify-otp` already answers
+/// `has_identity` for an EMAIL ADDRESS, which is guessable. The DS rate-limits
+/// it on its tightest tier.
 pub(crate) async fn account_probe(
     state: &Arc<AppState>,
     user_id: &str,
@@ -48,9 +66,14 @@ pub(crate) fn decode_b64(what: &str, s: &str) -> Result<Vec<u8>> {
         .map_err(|e| Error::Other(anyhow::anyhow!("{what}: invalid base64 from DS: {e}")))
 }
 
-/// Resolve a conversation to its MLS group and what that group backs, in one
-/// round trip. `want_envelopes` is opt-in so resolution-only callers skip the
-/// scan.
+// ── Conversations ────────────────────────────────────────────────────────────
+
+/// Resolve a conversation to its MLS group and enumerate what that group backs.
+///
+/// The chain this replaces was five DEPENDENT round trips — resolve, membership,
+/// is-DM, channel enumerate, envelope fetch — each needing the previous answer,
+/// so none of them could be pipelined. `want_envelopes` is opt-in because the
+/// several callers that need only the resolution should not pay for the scan.
 pub(crate) async fn catch_up(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -60,7 +83,11 @@ pub(crate) async fn catch_up(
     catch_up_full(state, conversation_id, want_envelopes, want_dm, false).await
 }
 
-/// [`catch_up`] plus the MLS roster, for reconcile and migrate.
+/// [`catch_up`], with the MLS roster as well.
+///
+/// Separate entry point rather than a fifth positional `bool` at every call
+/// site: only reconcile and migrate want the roster, and they want it WITH the
+/// resolution rather than after it.
 pub(crate) async fn catch_up_full(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -79,8 +106,11 @@ pub(crate) async fn catch_up_full(
     ds_post_json(state, &body).await
 }
 
-/// Which conversation an envelope belongs to. `None` covers both "no such
-/// envelope" and "not a member", so this is no existence oracle.
+/// Which conversation an envelope belongs to, or `None`.
+///
+/// `None` covers both "no such envelope" and "not a member of its conversation",
+/// deliberately: distinguishing them would make this an existence oracle for
+/// message ids, and the caller cannot act on either answer.
 pub(crate) async fn message_conversation(
     state: &Arc<AppState>,
     message_id: &str,
@@ -94,6 +124,9 @@ pub(crate) async fn message_conversation(
 }
 
 /// Reactions on a batch of messages, keyed by message id.
+///
+/// Batched because every caller has a page of messages, not one: the per-message
+/// read this replaces meant one round trip per row on screen.
 pub(crate) async fn message_reactions(
     state: &Arc<AppState>,
     message_ids: Vec<String>,
@@ -109,6 +142,8 @@ pub(crate) async fn message_reactions(
     Ok(ds_post_json(state, &body).await?.reactions)
 }
 
+// ── Directory ────────────────────────────────────────────────────────────────
+
 pub(crate) async fn bootstrap(
     state: &Arc<AppState>,
     user_id: &str,
@@ -119,8 +154,8 @@ pub(crate) async fn bootstrap(
     ds_post_json(state, &body).await
 }
 
-/// One group's detail, gated per section server-side. `group_id` may name a
-/// channel, resolved to its owning group.
+/// One group's detail, gated per section server-side. `group_id` may also name
+/// a CHANNEL, which the DS resolves to its owning group.
 pub(crate) async fn group(
     state: &Arc<AppState>,
     group_id: &str,
@@ -137,7 +172,7 @@ pub(crate) async fn group(
     ds_post_json(state, &body).await
 }
 
-/// One group's detail with its pending invites (#1506).
+/// One group's detail with its pending invites (#1506) — the member page's read.
 pub(crate) async fn group_with_invites(
     state: &Arc<AppState>,
     group_id: &str,
@@ -153,8 +188,11 @@ pub(crate) async fn group_with_invites(
     ds_post_json(state, &body).await
 }
 
-/// Existence and the caller's role only, for authorization preflights.
-/// `group_id` may name a channel.
+/// Existence and the caller's role, and nothing else — the authorization
+/// preflights' read.
+///
+/// A roster is not free, and the preflights want one string. `group_id` may name
+/// a channel, in which case the answer is about its owning group.
 pub(crate) async fn group_role(
     state: &Arc<AppState>,
     group_id: &str,
@@ -187,7 +225,12 @@ pub(crate) async fn users(
 }
 
 /// Which of `candidates` are in a block relationship with the caller, in either
-/// direction. Direction-blind; see [`crate::commands::blocks::any_blocked_either_way`].
+/// direction.
+///
+/// Direction-blind, because every caller halts delivery on either side's block
+/// and reports the same generic refusal — so neither party can infer which of
+/// them blocked whom. Learning the direction here would put that inference one
+/// debug log away from leaking.
 pub(crate) async fn blocked_among(
     state: &Arc<AppState>,
     candidates: &[String],
@@ -214,9 +257,14 @@ pub(crate) async fn conversations(
     ds_post_json(state, &body).await
 }
 
-/// The 1:1 DM the caller shares with `other_user_id`, whose MLS group backs a
-/// `call-*` room. The DS only searches the caller's own DMs. Media-gated with the
-/// voice stack.
+/// The 1:1 DM channel the caller shares with `other_user_id`, if any.
+///
+/// Used by the voice path for `call-*` rooms, which are ephemeral and have no
+/// row of their own — their MLS group is the DM's. The DS scopes the search to
+/// the caller's own DMs, so this cannot ask whether two other people have one.
+///
+/// `media`-gated because the voice stack is: the headless/mobile build drives
+/// LiveKit through the native SDK and never derives a call's MLS group here.
 #[cfg(feature = "media")]
 pub(crate) async fn one_to_one_dm(
     state: &Arc<AppState>,
@@ -230,8 +278,13 @@ pub(crate) async fn one_to_one_dm(
     Ok(ds_post_json(state, &body).await?.dm_with)
 }
 
-/// Cross-signing roots for a batch of users. A user absent from the result is
-/// "not provisioned yet", which callers read as "do not pin".
+// ── Accounts, devices, key packages ──────────────────────────────────────────
+
+/// Cross-signing roots for a batch of users, keyed by user id.
+///
+/// A user absent from the result has no row or a NULL `account_id_pub` — "not
+/// provisioned yet", which every caller reads as "do not pin" rather than as an
+/// error.
 pub(crate) async fn account_keys(
     state: &Arc<AppState>,
     user_ids: &[String],
@@ -252,7 +305,8 @@ pub(crate) async fn account_keys(
         .collect()
 }
 
-/// One user's `account_id_pub` and identity version, or an error when none.
+/// One user's `account_id_pub` and identity version, or an error when they have
+/// none — the shape the safety-number path expects.
 pub(crate) async fn account_key(
     state: &Arc<AppState>,
     user_id: &str,
@@ -292,21 +346,29 @@ pub(crate) async fn account_status(
     Ok(ds_post_json(state, &body).await?.account)
 }
 
-/// This device's remaining unclaimed key packages in one suite.
+/// This device's remaining unclaimed (regular) key packages in one suite, and
+/// whether it holds a last-resort package there (#1571; `None` from a Delivery
+/// Service that predates them).
 pub(crate) async fn unclaimed_key_packages(
     state: &Arc<AppState>,
     ciphersuite: i64,
-) -> Result<i64> {
+) -> Result<(i64, Option<bool>)> {
     let body = ar::KeyPackagesBody {
         count_for_ciphersuite: Some(ciphersuite),
         pairs_for_user_ids: Vec::new(),
         pairs_ciphersuite: None,
     };
-    Ok(ds_post_json(state, &body).await?.unclaimed.unwrap_or(0))
+    let resp = ds_post_json(state, &body).await?;
+    Ok((resp.unclaimed.unwrap_or(0), resp.has_last_resort))
 }
 
-/// `(user_id, device_id)` pairs among `user_ids` with a claimable package.
-/// Errors propagate: a short list would silently keep a device out of a group.
+/// `(user_id, device_id)` pairs among `user_ids` with a claimable package —
+/// an unclaimed regular one, or (#1571) a last-resort one, which is never
+/// claimed and so keeps a device with an empty pool on this list.
+///
+/// A short list here is indistinguishable from "no package", which is how a
+/// device silently stays out of a group — so this propagates the error rather
+/// than degrading, exactly as the direct read's `with_retry` did.
 pub(crate) async fn claimable_devices(
     state: &Arc<AppState>,
     user_ids: &[String],
@@ -347,9 +409,13 @@ pub(crate) async fn registered_devices(
         .collect())
 }
 
-/// Every roster user's `account_id_pub` and all their `user_device` rows (revoked
-/// included), for the leaf cross-signing check. Errors rather than a short list,
-/// since a truncated answer would refuse or evict live devices silently.
+/// Every roster user's `account_id_pub` and ALL of their `user_device` rows
+/// (revoked included) — the inputs to the committer-side leaf cross-signing
+/// check (`mls::device::IdentityDirectory`).
+///
+/// An ERROR rather than a short list on failure: this read decides which leaves
+/// a reconcile may add and which it evicts, and a truncated answer would refuse
+/// (or drop) live devices without failing loudly.
 pub(crate) async fn roster_identities(
     state: &Arc<AppState>,
     user_ids: &[String],
@@ -363,14 +429,22 @@ pub(crate) async fn roster_identities(
     Ok(ds_post_json(state, &body).await?.identities)
 }
 
-/// One device-enrollment request, by id.
+// ── Device enrollment, recovery, audit ───────────────────────────────────────
+
+/// One device-enrollment request, addressed by its id.
 ///
-/// Unsigned without `want_approval_fields`: the polling device has no signing key
-/// and its OTP session (same 600s TTL, minted earlier) has expired. The 128-bit
-/// `request_id` is the gate, sound because `wrapped_account_key` is sealed to an
-/// ephemeral key that never leaves the requester's memory. With
-/// `want_approval_fields` it is device-signed, since those fields authorize the
-/// enrollment and are served only to an enrolled sibling.
+/// UNSIGNED (`ds_post_plain`) when `want_approval_fields` is false, because the
+/// polling device has no credential at all and cannot acquire one: it has no
+/// signing key (that is what it is enrolling to get), and its OTP session is
+/// guaranteed to have expired first — the DS session TTL and the enrollment TTL
+/// are both 600s, and the session is minted at `verify-otp`, STRICTLY BEFORE the
+/// request is created. Possession of the 128-bit `request_id` is the gate, which
+/// is sound because `wrapped_account_key` is sealed to an ephemeral X25519 key
+/// whose private half never leaves the requesting process's memory.
+///
+/// With `want_approval_fields` it is DEVICE-SIGNED instead: the approval columns
+/// (`verification_code`, `new_device_ephemeral_pub`) authorize the enrollment,
+/// so the DS serves them only to an enrolled sibling that owns the account.
 pub(crate) async fn enrollment_request(
     state: &Arc<AppState>,
     request_id: &str,
@@ -407,8 +481,11 @@ pub(crate) async fn pending_enrollments(
 }
 
 /// The Secret-Key-wrapped account identity: `(salt, nonce, wrapped_key)`.
-/// OTP-session credential: a recovering device has nothing else. The DS logs a
-/// security event per fetch.
+///
+/// OTP-SESSION credential. The caller is recovering an account on a device that
+/// has nothing — no signing key, no local DB — so the only thing it can present
+/// is the email OTP it just verified, which is the authorization this flow has
+/// always actually rested on. The DS records a security event per fetch.
 pub(crate) async fn recovery_blob(
     state: &Arc<AppState>,
     user_id: &str,
@@ -437,22 +514,34 @@ pub(crate) async fn recovery_blob(
     }
 }
 
-/// The account's own security-event log, most recent first.
+/// One keyset page of the account's own security-event log, most recent first
+/// (#1548). `before`/`kinds` unset = the pre-#1548 body, byte for byte.
 pub(crate) async fn security_events(
     state: &Arc<AppState>,
     user_id: &str,
     limit: i64,
-) -> Result<Vec<ar::SecurityEventRow>> {
+    before: Option<ar::SecurityEventCursor>,
+    kinds: Option<Vec<String>>,
+) -> Result<ar::SecurityEventsResponse> {
     let body = ar::SecurityEventsBody {
         user_id: Some(user_id.to_string()),
         limit: Some(limit),
+        before,
+        kinds,
     };
-    Ok(ds_post_json(state, &body).await?.events)
+    ds_post_json(state, &body).await
 }
 
-/// This account's synced read-cursor blob, or `None` if never pushed. Opaque
-/// until `messages::read_state` decrypts it. A decode failure must surface, not
-/// read as "no cursors", or everything read elsewhere re-badges.
+// ── Read cursors (#844) ──────────────────────────────────────────────────────
+
+/// This account's synced read-cursor blob, or `None` when nothing has ever been
+/// pushed.
+///
+/// The bytes come back opaque and stay opaque until
+/// `commands::messages::read_state` decrypts them under the account identity
+/// key. Deliberately no defaulting here: a decode failure must surface rather
+/// than read as "no cursors", which would silently re-badge everything the human
+/// has already read on another device.
 pub(crate) async fn read_cursors(
     state: &Arc<AppState>,
     user_id: &str,
@@ -463,8 +552,8 @@ pub(crate) async fn read_cursors(
     ds_post_json(state, &body).await
 }
 
-/// The channels this account muted (#1431). A failure surfaces rather than
-/// reading as "nothing muted".
+/// The channels this account muted (#1431). No defaulting: a failure surfaces,
+/// so a caller never mistakes "could not ask" for "nothing is muted".
 pub(crate) async fn channel_mutes(
     state: &Arc<AppState>,
     user_id: &str,
@@ -475,8 +564,11 @@ pub(crate) async fn channel_mutes(
     ds_post_json(state, &body).await
 }
 
-/// The conversation's wrapped pin key, or `None` if never minted. A decode
-/// failure surfaces rather than reading as "no pins".
+// ── Pinned messages (#99) ────────────────────────────────────────────────────
+
+/// The conversation's current wrapped pin key, or `None` when nobody has
+/// minted one. Deliberately no defaulting: a decode failure surfaces rather
+/// than reading as "no pins here".
 pub(crate) async fn read_pin_keystate(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -502,6 +594,8 @@ pub(crate) async fn read_pins(
     ds_post_json(state, &body).await
 }
 
+// ── Attachment key ring (#1382) ──────────────────────────────────────────────
+
 /// The conversation's current wrapped file key ring, or `None` when nobody has
 /// minted one.
 pub(crate) async fn read_file_keystate(
@@ -516,8 +610,10 @@ pub(crate) async fn read_file_keystate(
     ds_post_json(state, &body).await
 }
 
-/// Every vault entry this account holds, opaque until `commands::vault` opens
-/// them.
+// ── Vault (#107) ─────────────────────────────────────────────────────────────
+
+/// Every vault entry this account holds, as the DS stores them — opaque until
+/// `commands::vault` opens them under the account identity key.
 pub(crate) async fn read_vault(
     state: &Arc<AppState>,
     user_id: &str,
@@ -527,6 +623,8 @@ pub(crate) async fn read_vault(
     };
     ds_post_json(state, &body).await
 }
+
+// ── Objects ──────────────────────────────────────────────────────────────────
 
 pub(crate) async fn object_exists(
     state: &Arc<AppState>,

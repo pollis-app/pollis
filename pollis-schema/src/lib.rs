@@ -265,6 +265,16 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "push_handle_dismissed",
         include_str!("../migrations/000040_push_handle_dismissed.sql"),
     ),
+    (
+        41,
+        "security_event_keyset",
+        include_str!("../migrations/000041_security_event_keyset.sql"),
+    ),
+    (
+        42,
+        "key_package_last_resort",
+        include_str!("../migrations/000042_key_package_last_resort.sql"),
+    ),
 ];
 
 /// Every main-DB script, baseline first. Hand each to a batch executor whole:

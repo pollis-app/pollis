@@ -1,22 +1,62 @@
-//! Builds signed monitor bundles from Pollis data (#330), one tree per tenant:
-//! [`commit_log`], [`account_key`] and [`binaries`]. Tenant modules are pure;
-//! [`source`] reads the rows, hashing each `commit_data` blob and never
-//! returning, logging or persisting the raw bytes.
+//! # verifiable-log-builder
+//!
+//! Slice 2 of the Key Transparency work (issue #330): reads real MLS commit
+//! data from a Turso/libSQL database and turns it into the signed "monitor
+//! bundle" that slice 1's [`verifiable_log`] `monitor` CLI already verifies.
+//!
+//! Slice 1 (the Merkle/STH/proof core) is depended on, never reimplemented.
+//! This crate adds exactly three things on top:
+//!
+//! * [`source`] — a libSQL reader for `mls_commit_log` and `account_key_log`
+//!   (remote Turso or a local SQLite file). It hashes each `commit_data` blob and
+//!   drops the raw bytes — they are never returned, logged, or persisted; the
+//!   account public key, public by design, is read out verbatim (hex).
+//! * [`commit_log`] — the **mls-commit-log** tenant: a frozen canonical leaf
+//!   encoding and [`commit_log::CommitLogInvariant`], the globally-auditable
+//!   form of #357 (no fork; no regression of the per-conversation
+//!   `(generation, epoch)` key; a suite lineage opens at epoch 0). Pure, no IO.
+//! * [`account_key`] — the **account-key** tenant: the canonical leaf encoding
+//!   and [`account_key::AccountKeyInvariant`] (no duplicate or regressing
+//!   `identity_version` per user). Its own tree, signed under the
+//!   domain-separated [`account_key::STH_CONTEXT`]. Pure, no IO.
+//! * [`binaries`] — the **binaries** tenant (binary transparency, Phase 1): the
+//!   canonical [`binaries::BinaryRecord`] leaf encoding and
+//!   [`binaries::BinaryInvariant`] (no fork, monotonic release tags,
+//!   payload/signed pairing). Its own tree, signed under the domain-separated
+//!   [`binaries::STH_CONTEXT`]. Pure, no IO — records are read from JSON.
+//! * [`commit_leaves`] — the commit log's persisted leaves, its log of record
+//!   (#1579): each publish appends the rows above the last persisted `seq`, so
+//!   a DS prune never changes a published leaf. Pure, no IO beyond a file read.
+//! * [`commit_log_reset`] — mints the signed statement that retires the first
+//!   commit-log tree and names its successor, `commit-log-2` (#1579).
+//! * [`builder`] — appends every row to a [`verifiable_log::VerifiableLog`],
+//!   signs Signed Tree Heads, and emits the [`builder::Bundle`] — one per tenant.
+//!
+//! Out of scope (later slices): real key custody, deep MLS authorization of
+//! committers, the WASM explorer.
 
 pub mod account_key;
 pub mod binaries;
 pub mod builder;
+pub mod commit_leaves;
 pub mod commit_log;
+pub mod commit_log_reset;
 pub mod error;
 pub mod keys;
-/// Row types and guards, plus (behind `db-source`) the Turso reader. The reader
-/// is gated so verification-only consumers don't link `libsql` (#987).
+/// The log's row types, their hashing/emptiness guards, and — behind
+/// `db-source` — the reader that fetches them from Turso.
+///
+/// The DATABASE half is gated so a verification-only consumer (`pollis-core`,
+/// via `verifiable-log-serve`) does not link `libsql`; the row types and guards
+/// are pure and stay available either way, because `builder` needs them to shape
+/// a bundle no matter where the rows came from. See #987.
 pub mod source;
 
 pub use account_key::{AccountKeyInvariant, AccountKeyLeaf};
 pub use binaries::{BinaryInvariant, BinaryRecord, Layer, Toolchain};
 pub use builder::{
-    build_account_bundle, build_binaries_bundle, build_bundle, Bundle, RetiredKey,
+    build_account_bundle, build_binaries_bundle, build_bundle, build_bundle_from_leaves,
+    build_commit_log_2_bundle, Bundle, RetiredKey,
 };
 pub use commit_log::{
     derive_conversation_pseudonym, derive_sender_pseudonym, window_for_seq, CommitLeaf,

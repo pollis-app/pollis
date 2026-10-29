@@ -3,12 +3,28 @@ appId: ${MAESTRO_APP_ID}
 # Attach the newest photo in the device library (the one `addMedia` just
 # seeded) through the SYSTEM picker, by accessibility label, never by
 # coordinate — "Photo, <date>" on iOS, "Photo taken on <date>" on Android 13+.
+# The first `Photo` cell is the newest one on both platforms, but on iOS only
+# while the picker is sorted by date ADDED. Its other sort, by date captured,
+# is persistent per simulator, and `addMedia` gives a PNG with no EXIF the
+# fixture file's mtime (its checkout time) as its capture date. So any photo
+# with a later mtime (another checkout's fixtures, for example) sorts above
+# every fresh seed, and each round attached that same photo (#1530). The iOS
+# branch therefore picks "Added" from the picker's own Sort and Filter menu
+# first. Re-selecting it when it's already on is a no-op.
 # With multiple selection on, iOS needs "Add"; Android's picker may return on
 # the tap itself or wait for "Done", so that confirm is optional.
 - tapOn:
     id: "btn-attach"
 - waitForAnimationToEnd:
     timeout: 5000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Sort and Filter"
+      - tapOn: "Added"
+      - waitForAnimationToEnd:
+          timeout: 3000
 - tapOn:
     text: "Photo(,| taken on) .*"
     index: 0

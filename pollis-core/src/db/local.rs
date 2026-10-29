@@ -50,11 +50,16 @@ pub struct LocalDb {
 impl LocalDb {
     /// Open the per-user database at `pollis_{user_id}.db`.
     pub fn open_for_user(user_id: &str, key: &[u8]) -> Result<Self> {
-        let data_dir = dirs_path();
-        crate::private_fs::create_dir_all(&data_dir)
+        Self::open_for_user_in(&dirs_path(), user_id, key)
+    }
+
+    /// [`LocalDb::open_for_user`] under an explicit data directory
+    /// ([`crate::state::AppState::local_data_dir`]).
+    pub fn open_for_user_in(data_dir: &std::path::Path, user_id: &str, key: &[u8]) -> Result<Self> {
+        crate::private_fs::create_dir_all(data_dir)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create data dir: {e}")))?;
 
-        let db_path = user_db_path(&data_dir, user_id)?;
+        let db_path = user_db_path(data_dir, user_id)?;
         Self::open_at(&db_path, key)
     }
 

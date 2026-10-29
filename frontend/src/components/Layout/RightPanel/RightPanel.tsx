@@ -6,21 +6,38 @@ import { useShortcutLabel } from "../../../keyboard";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
 import { PinnedPanel } from "./PinnedPanel";
+import { SafetyNumberPanel } from "./SafetyNumberPanel";
+import { useDMConversations } from "../../../hooks/queries/useMessages";
 import { ThreadPanel } from "./ThreadPanel";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
 
 /**
- * The right-hand context panel slot (#824): switches on the panel kind.
- * Open/closed is device-local and navigation must not disturb it (#904); see
- * `useRightPanel` and `.codesight/wiki/ui.md` → "The right panel".
+ * The right-hand context panel slot (#824).
+ *
+ * Deliberately a generic slot rather than a members-only sidebar: it switches
+ * on the panel kind, so the thread panel (#825) lands as another branch here
+ * instead of a second competing sidebar.
+ *
+ * Whether this renders at all is device-local state that navigation must not
+ * disturb (#904); everything below the `isOpen` guard is the part that IS
+ * route-reactive. See `useRightPanel`.
+ *
+ * Rendered as a flex sibling of `<Outlet />`, never a fixed overlay — the
+ * project bans modals and backdrops, and a real column also means the message
+ * list reflows instead of being covered.
  */
 export const RightPanel: React.FC = observer(() => {
   const { t } = useTranslation("nav");
-  const { kind, isOpen, threadId, setPanel } = useRightPanel();
+  const { kind, isOpen, threadId, safetyPeerId, setPanel, setSafety } =
+    useRightPanel();
+  const { data: dmConversations = [] } = useDMConversations();
+  // Live label for the same command AppShell binds — rebinding the shortcut
+  // in Preferences relabels this footer with no extra wiring.
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
-  // Drag-collapse uses the same writer as the footer and `mod+shift+b`, so
-  // reopening restores the dragged width.
+  // Collapsing by drag goes through `setPanel("none")` — the same writer the
+  // footer button and `mod+shift+b` use, so the panel has exactly one closed
+  // state and reopening restores the width it was dragged from.
   const closePanel = useCallback(() => setPanel("none"), [setPanel]);
   const { ref, widthClass, widthStyle, handleProps } = usePanelWidth(
     "rightPanel",
@@ -30,12 +47,27 @@ export const RightPanel: React.FC = observer(() => {
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
   const conversationId = appStore.selectedConversationId;
-  // Routes without a conversation keep the column; `MembersPanel` degrades.
+  // Routes like Preferences, Search and the root page have no conversation.
+  // The panel used to collapse entirely there; now only its CONTENT is
+  // contextual — `MembersPanel` degrades to the plain online roster and drops
+  // the media grid, because "who is online" is useful on every route while
+  // "media shared in this conversation" is not.
   const hasContext = Boolean(channelId || conversationId || groupId);
-  // A thread or pins need a conversation; a stale `?thread=` shows the roster.
+  // A thread is meaningless without the conversation it hangs off, so a
+  // stale `?thread=` on a context-free route falls back to the roster
+  // rather than rendering an empty thread. Pins (#99) are conversation-scoped
+  // for the same reason.
   const shownThreadId = kind === "thread" && hasContext ? threadId : null;
   const showPins =
     kind === "pins" && hasContext && Boolean(channelId || conversationId);
+  // "You & <name>" (#1563) only means something inside a DM with that person;
+  // a stale `?safety=` anywhere else falls back to the roster.
+  const safetyPeer =
+    kind === "safety" && conversationId && safetyPeerId
+      ? dmConversations
+          .find((c) => c.id === conversationId)
+          ?.peers?.find((p) => p.user_id === safetyPeerId) ?? null
+      : null;
 
   if (!isOpen) {
     return null;
@@ -46,7 +78,8 @@ export const RightPanel: React.FC = observer(() => {
     : showPins
       ? t("pins.heading")
       : t("panel.details");
-  // Two keys, not a lowercased `label`: casing rules aren't universal.
+  // Two explicit keys rather than lowercasing `label` — casing rules are not
+  // universal, and a translator needs the whole sentence either way.
   const closeLabel = shownThreadId
     ? t("panel.closeThread", { shortcut: toggleRightPanelLabel })
     : t("panel.closeDetails", { shortcut: toggleRightPanelLabel });
@@ -54,8 +87,12 @@ export const RightPanel: React.FC = observer(() => {
   return (
     <aside
       ref={ref}
-      // `font-mono` is the skin switch. Width is `--side-w` until dragged, then
-      // px, never both. `relative` anchors the resize handle.
+      // `font-mono` is the whole skin switch: terminal renders it as DM Mono,
+      // refined re-points `.font-mono:not(.font-machine)` at the sans face.
+      // Width tracks `--side-w` so the panel mirrors the left sidebar's
+      // per-skin measure instead of a fixed 18rem, until the user drags it —
+      // then it is a dragged pixel value instead, never both. `relative`
+      // anchors the resize handle to this edge.
       className={`relative flex ${widthClass} shrink-0 flex-col border-s border-line bg-surface font-mono`}
       style={widthStyle}
       data-testid="right-panel"
@@ -70,6 +107,12 @@ export const RightPanel: React.FC = observer(() => {
           />
         ) : showPins ? (
           <PinnedPanel channelId={channelId} conversationId={conversationId} />
+        ) : safetyPeer ? (
+          <SafetyNumberPanel
+            peerUserId={safetyPeer.user_id}
+            peerLabel={`@${safetyPeer.username ?? safetyPeer.user_id}`}
+            onBack={() => setSafety(undefined)}
+          />
         ) : (
           <MembersPanel
             groupId={groupId}
@@ -79,7 +122,9 @@ export const RightPanel: React.FC = observer(() => {
         )}
       </div>
 
-      {/* Footer, mirroring the left sidebar's bottom-edge toggle. */}
+      {/* Footer, not a header: the same affordance the left sidebar puts at
+          its bottom edge, mirrored to this one. Label on the left, live key
+          combo on the right, whole strip is the toggle. */}
       <button
         type="button"
         data-testid="right-panel-close"

@@ -16,6 +16,9 @@ tags:
 # failed state: a send made offline is kept and labelled with Retry / Discard;
 # back online, Retry delivers it.
 #
+# Part 3 (Android only) is the edit outbox (#1555): an edit made offline is
+# kept and labelled "(edit not sent)", and the resume drain delivers it.
+#
 # Self-contained, like messaging.yaml: creates its own group.
 
 - runFlow: ../subflows/sign-in.yaml
@@ -122,3 +125,41 @@ tags:
           timeout: 60000
       - assertVisible: ".*ob1335 offline.*"
       - takeScreenshot: outbox-03-retried
+
+# ── Part 3: offline edit → kept, labelled → delivered on resume (Android) ───
+# The edit outbox (#1555): an edit that cannot reach the DS stays stored, the
+# author sees it marked "(edit not sent)", and the drain on returning to the
+# foreground delivers it — no Retry needed.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - setAirplaneMode: enabled
+      - runFlow: ../subflows/long-press-message.yaml
+      - tapOn:
+          id: "btn-edit"
+      - assertVisible:
+          id: "input-edit-composer"
+      - inputText: " ob1555"
+      - tapOn:
+          id: "btn-edit-save"
+      - extendedWaitUntil:
+          visible: ".*ob1555.*\\(edit not sent\\).*"
+          timeout: 60000
+      - takeScreenshot: outbox-04-edit-not-sent
+      - setAirplaneMode: disabled
+      # Background and resume: the resume drain delivers the stored edit.
+      - pressKey: Home
+      - launchApp:
+          stopApp: false
+      - runFlow:
+          when:
+            visible:
+              id: "screen-auth-pin"
+          commands:
+            - runFlow: ../subflows/enter-pin.yaml
+      - extendedWaitUntil:
+          notVisible: ".*\\(edit not sent\\).*"
+          timeout: 60000
+      - assertVisible: ".*ob1555.*"
+      - takeScreenshot: outbox-05-edit-delivered

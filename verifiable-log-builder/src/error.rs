@@ -18,6 +18,17 @@ pub enum BuilderError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// The persisted commit-log leaves (#1579) are missing, shrunk, rewritten,
+    /// or disagree with the live rows below their head. Always fails closed.
+    #[error("commit-log leaves refused: {0}")]
+    PersistedLeaves(String),
+
+    /// The commit-log reset statement (#1579) could not be minted: the committed
+    /// retirement facts disagree with what is served, or the successor has no
+    /// genesis yet.
+    #[error("commit-log reset refused: {0}")]
+    Reset(String),
+
     #[error("invalid signing key: {0}")]
     SigningKey(String),
 

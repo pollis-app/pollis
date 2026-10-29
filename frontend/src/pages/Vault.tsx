@@ -30,6 +30,7 @@ import { buildMessageContent } from "../utils/attachmentEnvelope";
 import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailure";
 import { formatClockTime, formatDayDivider } from "../utils/format";
 import type { MessageAttachment } from "../types";
+import { PressButton } from "../components/ui/PressButton";
 
 type VaultView = "chat" | "media";
 
@@ -194,7 +195,7 @@ export const VaultPage: React.FC = observer(() => {
 
   const viewToggle = (
     <div className="flex items-center gap-1" role="tablist" aria-label={t("viewToggle")}>
-      <button
+      <PressButton
         type="button"
         role="tab"
         aria-selected={view === "chat"}
@@ -206,8 +207,8 @@ export const VaultPage: React.FC = observer(() => {
       >
         <MessageSquare size={12} aria-hidden />
         {t("viewChat")}
-      </button>
-      <button
+      </PressButton>
+      <PressButton
         type="button"
         role="tab"
         aria-selected={view === "media"}
@@ -219,7 +220,7 @@ export const VaultPage: React.FC = observer(() => {
       >
         <ImageIcon size={12} aria-hidden />
         {t("viewMedia")}
-      </button>
+      </PressButton>
     </div>
   );
 
@@ -256,14 +257,14 @@ export const VaultPage: React.FC = observer(() => {
               className="flex-1 border-0 bg-transparent font-mono text-sm text-fg outline-none placeholder:text-muted"
             />
             {searchQuery && (
-              <button
+              <PressButton
                 type="button"
                 onClick={() => setSearchQuery("")}
                 aria-label={t("clearSearch")}
                 className="icon-btn-sm flex-shrink-0"
               >
                 <X size={16} aria-hidden />
-              </button>
+              </PressButton>
             )}
           </div>
 

@@ -15,7 +15,7 @@ audio, you — now the operator — would be able to, and you can confirm you ca
 
 > This builds the **Tauri** desktop app — the only desktop shell. (An Electron
 > shell existed briefly and was reverted by #386/#389; there is no `electron/`
-> directory. See [electron-migration.md](electron-migration.md) for that history.)
+> directory. `.codesight/wiki/overview.md` → "Media stays in Rust" has the why.)
 
 ---
 
@@ -121,9 +121,10 @@ well-known dev key/secret, but TURN/TLS won't be set up.
 
 ## 4. Run the Delivery Service (DS)
 
-The DS (`pollis-delivery/`) is the **sole writer to Turso**: clients hold
-read-only Turso tokens and POST every write (MLS commits, welcomes, membership)
-to the DS, which serializes them so the commit log stays append-only. It's a
+The DS (`pollis-delivery/`) is the **only party that touches Turso**: clients
+hold no database credential (#987) and POST every read and write (MLS commits,
+welcomes, membership) to the DS, which serializes writes so the commit log stays
+append-only. It's a
 plain Rust HTTP server in a Docker image that reads plain env vars — no
 Cloudflare (or any cloud) SDK is baked in. Build and run it from the repo root:
 

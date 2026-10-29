@@ -1011,7 +1011,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
             let _ = state.keystore.delete_for_user("pin_meta", uid).await;
             let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
             let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, uid).await;
-            let data_dir = crate::db::local::dirs_path();
+            let data_dir = state.local_data_dir();
             if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, uid) {
                 let _ = std::fs::remove_file(&db_path);
                 let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
@@ -1080,7 +1080,7 @@ pub async fn delete_account(
 
     state.unload_user_db().await;
     {
-        let data_dir = crate::db::local::dirs_path();
+        let data_dir = state.local_data_dir();
         if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, &user_id) {
             let _ = std::fs::remove_file(&db_path);
             let _ = std::fs::remove_file(db_path.with_extension("db-wal"));

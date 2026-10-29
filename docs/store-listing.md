@@ -46,51 +46,42 @@ Exactly 30 characters.
 
 ### Full description (both stores; App Store limit 4000, Play limit 4000)
 
-> Pollis is a private messenger for groups and direct messages, built on MLS (Messaging Layer
-> Security, RFC 9420) — the IETF standard for end-to-end encrypted group messaging.
+> Pollis is a private messenger for teams, friends and communities: group channels and direct
+> messages, encrypted on your device with MLS, the IETF standard for secure group messaging
+> (RFC 9420).
 >
-> Messages, attachments, and reactions are encrypted on your device before anything is
-> sent. The servers store and forward only ciphertext they can never read. That is a property of
-> the protocol, not a promise in a policy.
+> Your messages, files and reactions are encrypted before they leave your device. Our servers
+> only ever relay data they can't read, and that's guaranteed by the protocol, not by a policy.
 >
 > WHAT YOU GET
-> • Slack-style groups with channels, plus direct messages
-> • End-to-end encryption for every message, file, and reaction — no opt-in "secret chat" mode;
->   there is only the encrypted mode
-> • Post-quantum-hybrid key agreement and signatures (ML-KEM, ML-DSA) on top of the MLS suite
-> • Multi-device: link your phone to your desktop by scanning a QR code
-> • Content-free push notifications — the notification never contains your message or its sender
-> • Safety numbers to verify who you are talking to, and a public transparency log that makes
->   silent key substitution detectable
+> • Groups with channels, plus direct messages
+> • Encryption on every message, file and reaction, always on, with no special mode to switch on
+> • Post-quantum protection (ML-KEM and ML-DSA) on top of MLS
+> • Your phone and your computer together: add a device by scanning a QR code
+> • Notifications that never include your message or who sent it
+> • Safety numbers to confirm who you're talking to, backed by a public transparency log
 >
 > WHAT YOU DON'T GET
-> • No ads, no tracking, no analytics SDKs — verifiable in the source code, which is public
-> • No phone number required — sign in with an email address and a one-time code
-> • No server-side message history mining: the operator cannot read message content, full stop
+> • Ads, tracking or analytics. The source code is public, so you can check
+> • A phone number requirement. Sign in with your email and a one-time code
+> • Anyone reading your messages, including us
 >
-> HONEST LIMITS
-> Pollis is an open preview of a proof-of-concept, run by Pollis Inc. Expect rough
-> edges in the interface. Message delivery is the part treated as non-negotiable. Messages sent
-> before you joined a conversation are cryptographically unreadable to you, and a brand-new
-> device starts with no history — that is what end-to-end encryption without key escrow means.
->
-> The full privacy policy, the security whitepaper, the subprocessor list, and the source code
-> are all public: https://pollis.com
+> Our privacy policy, security whitepaper, subprocessor list and source code are all public at
+> https://pollis.com
 
 (Play allows the same text; drop the bullets' `•` for `-` if the console complains about
-formatting. No emoji, no "#1", no store-badge language — both stores reject those.)
+formatting. No emoji, no em dashes, no "#1", no store-badge language.)
 
 ### App Store keywords (100 chars max, comma-separated)
 
 > `encrypted,messenger,private,secure,chat,e2ee,mls,privacy,group,team,dm,message,channels`
 
-87 characters. Do not add competitor trademarks (signal/telegram/whatsapp) — grounds for
+87 characters. Do not add competitor trademarks (signal/telegram/whatsapp): grounds for
 rejection under 2.3.7.
 
 ### App Store promotional text (170 chars max, editable without review)
 
-> `Open-preview build. End-to-end encrypted groups and DMs — the server only ever sees
-> ciphertext. No ads, no tracking, no phone number.`
+> `End-to-end encrypted groups and DMs. No ads, no tracking, no phone number.`
 
 ### Category
 

@@ -252,6 +252,13 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
             .collect()
     };
     let edited = m.edited_at.is_some();
+    // An edit of ours the DS has not confirmed (#1555): a pending one reads as
+    // an ordinary edit, a failed one says it did not go out.
+    let edited_label = if matches!(m.edit_state.as_deref(), Some("failed") | Some("rejected")) {
+        " (edit not sent)"
+    } else {
+        " (edited)"
+    };
 
     // Attachments-only message: the first attachment rides the header line.
     let mut attachments = content.attachments.iter();
@@ -259,7 +266,7 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
         let first = attachments.next().map(attachment_label).unwrap_or_default();
         head.push((first, attachment_style()));
         if edited && content.attachments.len() <= 1 {
-            head.push((" (edited)".to_string(), dim));
+            head.push((edited_label.to_string(), dim));
         }
         lines.extend(wrap(head, width, INDENT));
     } else {
@@ -268,14 +275,14 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
         let mut segments = head;
         segments.extend(highlight_mentions(first_text, ctx.me_name));
         if edited && last == 0 && content.attachments.is_empty() {
-            segments.push((" (edited)".to_string(), dim));
+            segments.push((edited_label.to_string(), dim));
         }
         lines.extend(wrap(segments, width, INDENT));
         for (n, text) in text_lines.iter().enumerate() {
             let mut segments = vec![(" ".repeat(INDENT), Style::default())];
             segments.extend(highlight_mentions(text, ctx.me_name));
             if edited && n + 1 == last && content.attachments.is_empty() {
-                segments.push((" (edited)".to_string(), dim));
+                segments.push((edited_label.to_string(), dim));
             }
             lines.extend(wrap(segments, width, INDENT));
         }
@@ -288,7 +295,7 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
             (attachment_label(a), attachment_style()),
         ];
         if edited && n + 1 == rest_len {
-            segments.push((" (edited)".to_string(), dim));
+            segments.push((edited_label.to_string(), dim));
         }
         lines.extend(wrap(segments, width, INDENT));
     }
@@ -501,6 +508,7 @@ mod tests {
             deleted_at: None,
             undecryptable: false,
             send_state: None,
+            edit_state: None,
         }
     }
 
@@ -728,6 +736,22 @@ mod tests {
             lines[2].ends_with("(deleted)") && !lines[2].contains("gone"),
             "{lines:?}"
         );
+    }
+
+    /// An edit the outbox could not deliver says so (#1555); a pending one
+    /// reads as an ordinary edit.
+    #[test]
+    fn an_unsent_edit_is_marked() {
+        let f = Fixture::new();
+        let mut failed = msg("1", "alice", "fixed");
+        failed.edited_at = Some("t".into());
+        failed.edit_state = Some("failed".into());
+        let mut pending = msg("2", "alice", "fixing");
+        pending.edited_at = Some("t".into());
+        pending.edit_state = Some("pending".into());
+        let lines = all_text(&f.layout(&[&failed, &pending], None, 60));
+        assert!(lines[1].ends_with("fixed (edit not sent)"), "{lines:?}");
+        assert!(lines[2].ends_with("fixing (edited)"), "{lines:?}");
     }
 
     #[test]

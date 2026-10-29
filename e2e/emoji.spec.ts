@@ -23,7 +23,7 @@
  *     standard, and both skins' acceptance idiom.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
@@ -392,6 +392,23 @@ for (const skin of SKINS) {
       await expect(second.getByTestId("custom-emoji-fallback")).toHaveText(":ghost:");
 
       await page.screenshot({ path: `artifacts/emoji-message-${skin}.png` });
+    });
+
+    // #1562: a failed resolve is not final. The first resolve of the parrot
+    // fails, so the row shows its shortcode; the retry then swaps in the image
+    // without the row remounting or the page reloading.
+    test("a failed resolve recovers to the image without a remount", async ({ page }) => {
+      await page.addInitScript((hash) => {
+        (window as unknown as Record<string, unknown>).__POLLIS_EMOJI_FAIL_FIRST__ = [hash];
+      }, PARROT_HASH);
+      await openChannel(page, skin);
+
+      const body = page.getByTestId("message-content").first();
+      await expect(body.getByTestId("custom-emoji-fallback")).toHaveText(":partyparrot:");
+      const image = body.getByTestId("custom-emoji");
+      await expect(image).toBeVisible({ timeout: 10_000 });
+      await expect(image).toHaveAttribute("data-shortcode", "partyparrot");
+      await expect(body.getByTestId("custom-emoji-fallback")).toHaveCount(0);
     });
   });
 

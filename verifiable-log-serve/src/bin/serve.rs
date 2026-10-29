@@ -1,4 +1,17 @@
-//! `serve` — the operator CLI for the verifiable log's serve layer.
+//! `serve` — the serve-layer CLI for the verifiable log.
+//!
+//! Subcommands:
+//! * `generate` — turn a signed bundle into the immutable `/v1/...` static tree.
+//! * `serve` — run a local dev HTTP server over a generated tree (testing/demo
+//!   only; the real deployment is to drop the directory on a static host).
+//! * `live` — serve a live, lazily-refreshed view read straight from Turso: the
+//!   same `/v1` surface and per-group endpoint as `serve`, but rebuilt in memory
+//!   on demand so new commits appear within the TTL with no idle DB load.
+//! * `verify-remote` — fetch the static API over HTTP and verify the log,
+//!   trusting only the published public key.
+//! * `verify-group` — fetch the static API and verify ONE conversation's commit
+//!   chain. This calls the exact same `verify_group` the backend HTTP endpoint
+//!   does, so the CLI and the server can never report different verdicts.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -24,9 +37,20 @@ struct Cli {
 enum Command {
     /// Generate the immutable static artifact tree from a signed bundle.
     Generate {
-        /// Path to the commit-log bundle JSON (output of `builder build`).
+        /// Path to a bundle for the FIRST commit-log tree, written directly under
+        /// `/v1/...`. That tree is retired in production (#1579) and CI no longer
+        /// passes this; it remains for local and self-hosted logs.
+        #[arg(long, required_unless_present = "commit_log_2_bundle")]
+        bundle: Option<PathBuf>,
+        /// Path to the commit-log-2 bundle JSON (`builder build --commit-tree
+        /// commit-log-2`), emitted under `/v1/commit-log-2/...`.
         #[arg(long)]
-        bundle: PathBuf,
+        commit_log_2_bundle: Option<PathBuf>,
+        /// Optional signed reset statement (`builder commit-log-reset`), published
+        /// at `/v1/commit-log-reset.json` after it verifies under the
+        /// commit-log-2 bundle's key.
+        #[arg(long, requires = "commit_log_2_bundle")]
+        reset_statement: Option<PathBuf>,
         /// Optional path to the account-key bundle JSON (output of
         /// `builder build --account-out`). When given, the account-key tree is
         /// emitted under `/v1/account-keys/...` alongside the commit-log tree.
@@ -84,7 +108,7 @@ enum Command {
         /// rebuild on every request (useful for tests).
         #[arg(long, default_value_t = 60)]
         ttl_secs: u64,
-        /// Env var holding the 32-byte hex ML-DSA-44 signing-key seed.
+        /// Env var holding the 32-byte hex Ed25519 signing key.
         #[arg(long, default_value = "VLOG_SIGNING_KEY")]
         signing_key_env: String,
         /// Optional file holding the 32-byte hex signing key (used if the env
@@ -117,13 +141,17 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Generate {
             bundle,
+            commit_log_2_bundle,
+            reset_statement,
             account_bundle,
             binaries_bundle,
             key_set,
             root_key,
             out,
         } => match run_generate(
-            &bundle,
+            bundle.as_deref(),
+            commit_log_2_bundle.as_deref(),
+            reset_statement.as_deref(),
             account_bundle.as_deref(),
             binaries_bundle.as_deref(),
             key_set.as_deref(),
@@ -168,18 +196,70 @@ fn main() -> ExitCode {
     }
 }
 
+// One parameter per CLI flag `generate` accepts.
+#[allow(clippy::too_many_arguments)]
 fn run_generate(
-    bundle_path: &std::path::Path,
+    bundle_path: Option<&std::path::Path>,
+    commit_log_2_bundle_path: Option<&std::path::Path>,
+    reset_statement_path: Option<&std::path::Path>,
     account_bundle_path: Option<&std::path::Path>,
     binaries_bundle_path: Option<&std::path::Path>,
     key_set_path: Option<&std::path::Path>,
     root_key_hex: Option<&str>,
     out: &std::path::Path,
 ) -> Result<()> {
-    let bundle = layout::load_bundle(bundle_path)?;
-    let manifest = layout::generate(&bundle, out)?;
+    // The first commit-log tree, directly under /v1. Retired in production
+    // (#1579): CI omits --bundle so none of its frozen files is rewritten.
+    if let Some(bundle_path) = bundle_path {
+        let bundle = layout::load_bundle(bundle_path)?;
+        let manifest = layout::generate(&bundle, out)?;
+        println!(
+            "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
+            manifest.entry_count,
+            manifest.sth_sizes.len(),
+            manifest.inclusion.len(),
+            manifest.consistency.len(),
+            out.join(layout::API_VERSION).display()
+        );
+        println!("public_key: {}", manifest.public_key);
+    }
 
-    // Root-signed key set (#754); `insert_key_set` refuses an unverifiable one.
+    if let Some(path) = commit_log_2_bundle_path {
+        let bundle = layout::load_bundle(path)?;
+        let manifest = layout::generate_commit_log_2(&bundle, out)?;
+        println!(
+            "generated commit-log-2 tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
+            manifest.entry_count,
+            manifest.sth_sizes.len(),
+            manifest.inclusion.len(),
+            manifest.consistency.len(),
+            out.join(layout::COMMIT_LOG_2_API_PREFIX).display()
+        );
+        if let Some(reset_path) = reset_statement_path {
+            let raw = std::fs::read_to_string(reset_path)?;
+            let statement: verifiable_log::ResetStatement = serde_json::from_str(&raw)
+                .map_err(|e| ServeError::BadBundle(format!("reset statement is not readable: {e}")))?;
+            let mut one = std::collections::BTreeMap::new();
+            layout::insert_reset_statement(
+                &mut one,
+                &statement,
+                &bundle.key_candidates(verifiable_log_serve::bundle::now_ms()),
+            )?;
+            for (rel, bytes) in one {
+                let dest = out.join(&rel);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&dest, bytes)?;
+                println!("published reset statement -> {}", dest.display());
+            }
+        }
+    }
+
+    // Publish the root-signed key set alongside the trees (#754). Verified against
+    // the pinned root FIRST: a statement that does not verify is not a degraded
+    // artifact, it is one that takes the whole log down for every client, because a
+    // client that cannot validate the key set trusts no signer at all.
     if let (Some(path), Some(root_hex)) = (key_set_path, root_key_hex) {
         let raw = std::fs::read_to_string(path)?;
         let statement: verifiable_log_serve::KeySetStatement = serde_json::from_str(&raw)
@@ -199,15 +279,7 @@ fn run_generate(
             );
         }
     }
-    println!(
-        "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
-        manifest.entry_count,
-        manifest.sth_sizes.len(),
-        manifest.inclusion.len(),
-        manifest.consistency.len(),
-        out.join(layout::API_VERSION).display()
-    );
-
+    // Account-key tree (separate tree, domain-separated STH) — only when asked.
     if let Some(account_path) = account_bundle_path {
         let account_bundle = layout::load_bundle(account_path)?;
         let account_manifest = layout::generate_account(&account_bundle, out)?;
@@ -222,6 +294,8 @@ fn run_generate(
         );
     }
 
+    // Binaries tree (binary transparency — a third separate tree, domain-
+    // separated STH) — only when asked.
     if let Some(binaries_path) = binaries_bundle_path {
         let binaries_bundle = layout::load_bundle(binaries_path)?;
         let binaries_manifest = layout::generate_binaries(&binaries_bundle, out)?;
@@ -236,7 +310,6 @@ fn run_generate(
         );
     }
 
-    println!("public_key: {}", manifest.public_key);
     Ok(())
 }
 
@@ -259,7 +332,9 @@ fn run_live(
 ) -> Result<()> {
     let db = db.or_else(|| std::env::var("TURSO_DATABASE_URL").ok());
 
-    // The live server reads only `mls_commit_log`, from the log DB.
+    // The live server reads ONLY `mls_commit_log`, so it must read from the log
+    // DB. Resolve it from (1) --log-db, (2) LOG_DB_URL, (3) the main --db /
+    // TURSO_DATABASE_URL (single-DB / pre-cutover behaviour).
     let log_db = log_db
         .or_else(|| std::env::var("LOG_DB_URL").ok())
         .or_else(|| db.clone())
@@ -269,12 +344,15 @@ fn run_live(
                     .into(),
             )
         })?;
-    // A local file path ignores the token.
+    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
+    // tests, and pre-cutover all behave exactly as before. A local file path
+    // ignores the token entirely.
     let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
         .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
         .unwrap_or_default();
 
-    // Before binding, so a missing key fails fast.
+    // Resolve the signing key BEFORE binding so a missing key fails fast — the
+    // live server refuses to start without one (same loader as the builder).
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
     let server = LiveServer::spawn(

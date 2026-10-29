@@ -1,0 +1,46 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Sender (#1562): sign up, create ${GROUP_NAME} with #General, and add a static
+# (PNG → lossless WebP) and an animated (GIF) custom emoji. The subflow waits
+# for each emoji's image to draw on THIS device too.
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "${GROUP_NAME}"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 15000
+- tapOn:
+    id: "btn-group-menu"
+- tapOn:
+    id: "btn-menu-group-settings"
+- tapOn:
+    id: "row-group-emoji"
+- assertVisible:
+    id: "screen-group-emoji"
+- addMedia:
+    - "../../fixtures/media-viewer.png"
+- runFlow:
+    file: ../../subflows/add-custom-emoji.yaml
+    env:
+      EMOJI_SHORTCODE: "e2e_static"
+- addMedia:
+    - "../../fixtures/custom-emoji-animated.gif"
+- runFlow:
+    file: ../../subflows/add-custom-emoji.yaml
+    env:
+      EMOJI_SHORTCODE: "e2e_anim"
+- takeScreenshot: custom-emoji-01-sender-added

@@ -520,7 +520,11 @@
           <a class="art-inline"
             href="https://github.com/pollis-app/pollis/blob/main/.github/workflows/transparency-publish.yml"
             target="_blank" rel="noopener noreferrer">transparency-publish workflow / run logs</a> show how to check
-          it yourself.
+          it yourself. The commit log shown here is its second tree, <code>commit-log-2</code>: the first tree
+          signed three inconsistent heads in October 2026 and was retired and frozen
+          (<a class="art-inline"
+            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md#commit-log-reset-1579"
+            target="_blank" rel="noopener noreferrer">what happened</a>).
         </p>
         <div class="art-card" id="art-trees">
           <p class="art-loading">Loading signed tree heads…</p>
@@ -571,7 +575,7 @@
             <p class="art-key-label" style="margin-top: 1.5rem;">VERIFICATION API</p>
             <p class="art-note">
               Base: <code>https://verify.pollis.com</code>. Example read endpoints anyone can fetch:
-              <code>/v1/sth/latest.json</code>, <code>/v1/binaries/sth/latest.json</code>, and
+              <code>/v1/commit-log-2/sth/latest.json</code>, <code>/v1/binaries/sth/latest.json</code>, and
               <code>/verify/release/&lt;tag&gt;</code>.
             </p>
           </div>

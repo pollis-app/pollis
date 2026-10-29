@@ -128,3 +128,83 @@ async fn a_device_catching_up_reads_a_sender_who_interleaved_channels() {
     assert_reads_all(&bob, "bob", &x, &want_x).await;
     assert_reads_all(&bob, "bob", &y, &want_y).await;
 }
+
+/// The field report again, on the shape it actually had (#1524): the device
+/// that was away is the SENDER's own phone — a sibling leaf, so the desktop's
+/// messages are someone else's ratchet to it — and its catch-up does not run
+/// clean. The commit fetch times out part-way through the first pass, and the
+/// second dies between opening an envelope and storing it. A commit lands in
+/// the middle of the conversation, so the catch-up has to cross an epoch too.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_senders_own_phone_catches_up_through_a_faulty_resume() {
+    use crate::harness::{arm_ds_fault, enroll_second_device, DsFault};
+    use pollis_core::commands::messages::test_hooks::{self, Crash};
+
+    wipe().await;
+    let mut desk = TestClient::new().await;
+    desk.sign_up("alice@test.local").await;
+    let phone = enroll_second_device(&desk, "alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group = desk.create_group("Interleave").await;
+    let x = desk.general_channel_id(&group).await;
+    let y = desk.create_channel(&group, "other").await;
+    desk.invite(&group, &bob_p.username).await;
+    let invite = bob.first_pending_invite().await.expect("invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite).await;
+    bob.poll().await;
+    desk.process_commits_for(&x).await;
+    phone.poll().await;
+    for c in [&desk, &phone, &bob] {
+        ingest(c, &x).await;
+    }
+
+    let mut want_x: Vec<String> = Vec::new();
+    let mut want_y: Vec<String> = Vec::new();
+    for i in 1..=7 {
+        let t = format!("y{i}");
+        desk.send_channel_message(&y, &t).await;
+        want_y.push(t);
+    }
+    bob.send_channel_message(&x, "bob 1").await;
+    want_x.push("bob 1".into());
+    let first = desk.send_channel_message_id(&x, "x1").await;
+    desk.edit_message(&x, &first, "x1 edited").await;
+    want_x.push("x1 edited".into());
+    // The epoch moves under the conversation; the phone has not seen it.
+    assert!(bob.self_update(&group).await);
+    for i in 2..=7 {
+        let t = format!("x{i}");
+        desk.send_channel_message(&x, &t).await;
+        want_x.push(t);
+        let t = format!("y after {i}");
+        desk.send_channel_message(&y, &t).await;
+        want_y.push(t);
+    }
+
+    // First resume: the commit fetch times out part-way.
+    arm_ds_fault(DsFault::CatchUpTimesOutMidway);
+    ingest(&phone, &y).await;
+    // Second: the process dies with a key spent and its row unwritten.
+    test_hooks::crash_next_send(Crash::AfterDecrypt);
+    phone.activate();
+    let (state, uid, ch) = (phone.state.clone(), phone.user_id().to_string(), x.clone());
+    let died = tokio::spawn(async move {
+        pollis_core::commands::messages::ingest_channel_envelopes_inner(&state, &uid, &ch).await
+    })
+    .await;
+    assert!(matches!(&died, Err(e) if e.is_panic()), "the simulated kill unwound the catch-up: {died:?}");
+    // Third: it comes back for real, every channel at once.
+    let p = &phone;
+    tokio::join!(ingest(p, &x), ingest(p, &y), ingest(p, &x));
+    assert_reads_all(&phone, "alice's phone", &x, &want_x).await;
+    assert_reads_all(&phone, "alice's phone", &y, &want_y).await;
+    ingest(&bob, &y).await;
+    assert_reads_all(&bob, "bob", &x, &want_x).await;
+    assert_reads_all(&bob, "bob", &y, &want_y).await;
+}

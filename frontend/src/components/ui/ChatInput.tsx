@@ -39,6 +39,7 @@ import { RichTextInput, type RichTextInputHandle } from "./RichTextInput";
 import { MentionSuggestList } from "./MentionSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
 import { probeRender } from "../../utils/renderProbe";
+import { usePressActivation } from "../../hooks/usePressActivation";
 
 /**
  * Where a queued attachment's bytes are. `path`: a file the USER already has
@@ -112,6 +113,12 @@ const AttachmentPreview: React.FC<{
   const { t } = useTranslation("common");
   const hasVisualPreview = attachment.type === "image" || attachment.type === "video";
   const canExpand = hasVisualPreview && !!attachment.preview && !attachment.loading;
+  // Opening the preview is free to undo: a mouse press acts on pointer-down
+  // (#1529). Remove, beside it, stays on click.
+  const expandPress = usePressActivation<HTMLDivElement>(
+    canExpand ? () => onExpand(attachment.preview!, attachment.type as "image" | "video") : undefined,
+    "press",
+  );
 
   return (
     <div className="relative flex-shrink-0" style={{ width: PREVIEW_SIZE }}>
@@ -123,11 +130,7 @@ const AttachmentPreview: React.FC<{
           borderRadius: 8,
           cursor: canExpand ? "zoom-in" : "default",
         }}
-        onClick={() => {
-          if (canExpand) {
-            onExpand(attachment.preview!, attachment.type as "image" | "video");
-          }
-        }}
+        {...expandPress}
       >
         {attachment.loading ? (
           <span className="text-sm font-mono text-muted" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>…</span>

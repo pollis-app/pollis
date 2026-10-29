@@ -1001,21 +1001,22 @@ app/
   _layout.tsx          root Stack (every route registered), fonts, splash gate
   index.tsx            redirect → /(auth)/email
   (auth)/              email → otp → pin → initializing (gestureEnabled: false)
-  (tabs)/              groups · direct · search · self (custom <TabBar>)
+  (tabs)/              groups · direct · self (custom <TabBar>; its 3rd cell is the shield shortcut, not a tab)
   group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
   group/*              new, invite, invite-links, members, settings, emoji, requests, discover
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
-  dm/{new,info,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
+  dm/{new,info,safety,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
   media.tsx            full-screen attachment viewer (#1248, #1492): zoom, swipe pager, swipe-down dismiss, video, audio, save/share
   vault.tsx            the Vault (#1316): chat-with-yourself + media grid, opened from the top of Direct
-  self/*               preferences, user-settings, security, blocked, saved, …
+  self/*               preferences, user-settings, security, link-device, blocked, saved, …
 components/
   ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
                        ListRow, ActionRow, Group, Card, Field, Avatar, Chip/Pill,
                        Badge, Button, Toggle, Dot, Divider, BottomAction, Body
   chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
   icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
-  TabBar.tsx           custom bottom tab bar (accent active, unread badges)
+  TabBar.tsx           custom bottom tab bar (accent active, unread badges, shield → self/link-device)
+  search/GlobalSearchResults.tsx  the global search results Self shows under its field
   auth|chat|direct|groups|search|self/   per-area pieces (rows, sheets, pads)
 theme/tokens.ts        semantic / type / fonts / r / space / layout (derive.ts: colour math)
 ```
@@ -1031,10 +1032,24 @@ There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
 screens disable the edge swipe, so their top-left back is the only way out.
 Sub-screens are stack pushes outside `(tabs)`.
 
+Tabs and search (#1550): the bar is Groups · Direct · shield · Self. The
+shield (`tab-link-device`, labelled "Link") is a shortcut, not a tab: it
+pushes `self/link-device` (Scan to sign in a device, the same page and PIN
+confirm as Self → Security) onto the root stack, so back returns to the tab
+it was tapped from, and it is never the selected cell. `TabBar` matches cells
+to routes by name, never by index, and a second tap on the focused tab calls
+`emitTabReselect` (`lib/tabReselect.ts`; Self ends a search on it). Global
+search is not a tab: it sits at the top of Self
+under the large title, Settings-style — focusing the field or typing swaps
+the Self menu for `GlobalSearchResults` in place (no navigation); Cancel, the
+clear button, a second tap on the Self tab or Android back restore the menu.
+The state survives opening a hit and coming back. A group's "Search <group>"
+field navigates to `/(tabs)/self?search=1`, which focuses it.
+
 iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
 two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
 bar visible. Conversation pages (info, pins, members, group settings/invite/emoji/
-requests, thread, profile — `PANE_PATHS` in `components/pane/paneContext.ts`)
+requests, thread, profile, a DM's "You & <name>" safety number — `PANE_PATHS` in `components/pane/paneContext.ts`)
 push INSIDE the right pane: the tab owns a small entry stack and `DetailPane`
 renders the route's own component. Those screens read params with
 `useRouteParams` and navigate with `useNav` (both fall back to
@@ -1074,7 +1089,8 @@ Current state:
   restore via `get_session`); every tab/group/DM/chat/self screen consumes real
   React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
   reactions / edit / delete; profile, devices, blocking, safety numbers,
-  preferences. Self → Security additionally carries: in-app **account deletion**
+  preferences. Safety numbers live in the DM, not on a profile (#1563): DM info
+  → `dm/safety` ("You & <name>", one per other member in a group DM). Self → Security additionally carries: in-app **account deletion**
   (typed-DELETE full-screen confirm → `delete_account` + best-effort
   `wipe_local_data` → sign-out; App Store 5.1.1(v)); **auto-lock** (#899,
   `lib/autolock.tsx` — RN-layer deadline against the plain `lock` arm, since
@@ -1092,7 +1108,7 @@ Current state:
   `scripts/generate-emoji-data.py`, which writes frontend + mobile together);
   custom group emoji (`list_usable_emoji` / `list_group_emoji` /
   `upload_group_emoji` / `remove_group_emoji`; rendering via `get_emoji_path`
-  → cached `file://`, see `lib/emojiCache.ts`; management at
+  → cached `file://`, see `lib/emojiCache.ts`; `CustomEmojiImage` never mounts a source-less `<Image>` (iOS fires `onError` for one, which showed every custom emoji as `:shortcode:` text on iOS, #1562) and retries a failure (`lib/emojiRetry.ts`); Maestro reads what it drew from `EmojiProbe` (`flows/custom-emoji.yaml`, `scripts/maestro-custom-emoji.sh`); management at
   `app/group/emoji.tsx` — every member sees Add, only admins see Remove; the DS enforces it, #1280); DM receipts (`get_conversation_receipts` +
   `mark_messages_read` via FlatList viewability 60%/600ms + AppState gate;
   synced top-level `send_read_receipts` key, default true); threads
@@ -1152,7 +1168,7 @@ Current state:
   peer `pollis-tui/examples/pins_peer.rs`).
 - **Vault (#1316, desktop parity for #107):** `app/vault.tsx`, reached from a row
   at the top of the Direct tab (desktop puts it first in the DM list) and from the
-  Search tab's page quick-jumps. Same core commands as desktop
+  page quick-jumps of the search at the top of Self. Same core commands as desktop
   (`get_vault_messages` / `send_vault_message` / `edit_vault_message` /
   `set_vault_message_pinned` / `delete_vault_message` — `bridge.rs` already had the
   arms, so no native change), hooks in `hooks/queries/useVault.ts`, pure rules in
@@ -1241,7 +1257,10 @@ Current state:
   sealed first withdraws it from everyone. Pure
   rules + tests: `pendingMessages.ts`, `tests/pending-messages.test.ts`;
   device tier: `.maestro/flows/outbox.yaml`. A core change, so phones get it
-  with the next store build.
+  with the next store build. **Edits too (#1555):** `edit_message` stores the
+  edit in the core's edit outbox before posting and the row reads back with
+  `edit_state` until the DS confirms; `MessageRow` labels a failed one
+  "(edit not sent)" (`editUnsent`), and the same drain delivers it.
 - **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a
@@ -1294,6 +1313,13 @@ Current state:
   `sync_read_cursors` runs on unlock and resume, so reading on one device
   clears the others. The `useInboxRealtime` bump stays as the instant path.
   Maestro: `scripts/maestro-unread.sh` (dev-DS peer `unread_peer`).
+  The tab badges also count what is waiting on the user (#1561,
+  `lib/tabBadges.ts`): Direct adds pending message requests
+  (`useDMRequests`), Groups pending group invites (`usePendingGroupInvites`),
+  Slack/Discord style, and the spoken label names each part. Both queries are
+  refreshed by the inbox realtime (`dm_created`, `membership_changed`); accept
+  and block drop the request from the cache on the tap. Maestro:
+  `scripts/maestro-pending-badges.sh` (dev-DS peer `pending_badge_peer`).
 - **Voice — libraries installed, NOT activated (#343).** Mobile will take the
   **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
   rather than desktop's Rust media pipeline — see the architectural note in epic
@@ -1537,6 +1563,37 @@ never the raw vibrator). Fire-and-forget, never throws into the interaction.
   (`keyTap`, digits and delete), and clipboard copies (success, or error if
   the copy failed).
 - Never add one to plain navigation (opening a screen, back, tabs).
+
+**Press-in (#1529).** Where an accidental press is free to undo — back,
+closing a sheet, switching a tab or view, opening a menu, a sheet, a page or
+the picker — the control acts on **touch-down**: an opt-in `pressIn` prop on
+`IconButton`, `Chip`, `ListRow` and `Button`, `PressInPressable` for a bare
+Pressable, and `usePressIn` underneath (rules pure in `lib/pressIn.ts`,
+pinned by `tests/press-in.test.ts`). `onPress` stays wired as the
+screen-reader path (TalkBack's double tap is a click with no touch-down;
+VoiceOver's is a synthesised touch), and a guard swallows the release of a
+touch that already acted, so the action runs once either way. On by default
+in `Header` (back, and the title when it is a button), `TabBar` and
+`SheetOverlay` (Close and the backdrop); opted in on the chat header's pins /
+info / more, the composer's attach and emoji buttons (never send), the reply
+quote, `GroupPanel`'s header (menu, invite, search), Direct's new message,
+the Vault view chips, the media viewer's prev / next / open-settings, the
+menu rows of `ChannelMenuSheet` / `GroupMenuSheet` (not Leave) /
+`AddGroupSheet`, and `AudioPage`'s play / pause / skip (not the seek bar).
+**On Android nothing inside a `SheetOverlay` acts on touch-down** (Close,
+the backdrop and the sheet's rows fall back to release through
+`InSheetContext` / `pressInSupported`): dismissing the Modal while its
+touch is still down left that touch unfinished in JS, and the next tap on
+the screen underneath was swallowed (the tour's first Back after
+`btn-menu-info` did nothing). iOS ends the touch, so sheets keep touch-down
+there.
+Rules: **never on a row inside a `ScrollView` / `FlatList` / `Body`** —
+touch-down lands before the scroll takes the touch, so the row would open on
+every scroll that starts on it (those rows keep `onPress`; a
+`unstable_pressDelay` variant is a possible follow-up, untested); never with
+`onLongPress` (the `ListRow` types refuse the pair and it falls back to
+release at runtime); never on anything that sends, persists, notifies
+others, confirms or toggles; no haptic (it is navigation).
 
 UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
 rgba in `app/` or `components/` (QrCode's black/white is the one deliberate

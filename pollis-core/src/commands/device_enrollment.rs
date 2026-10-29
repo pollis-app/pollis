@@ -1,21 +1,68 @@
-//! Device enrollment: transferring `account_id_key` from an enrolled device to a
-//! new one over an ephemeral X25519 channel.
+//! Device enrollment — approval path.
 //!
-//! 1. The new device (`start_device_enrollment`) generates an ephemeral keypair,
-//!    derives an 8-character SAS from its public half (salted per request), and
-//!    files a request via the session-gated DS endpoint; the DS sends the inbox
-//!    nudge. The SAS is shown on the new device.
-//! 2. An enrolled sibling sees the request and asks the human to type the SAS
-//!    (#1096); `approve_device_enrollment` re-derives it from the key it fetched,
-//!    refuses a non-contributory ECDH, wraps the seed under ECDH + HKDF, and marks
-//!    the request approved.
-//! 3. The new device unwraps, checks the seed against the account's published
-//!    identity key, and later runs `finalize_enrollment`.
+//! When a user signs in on a new device, this module manages the flow for
+//! transferring their `account_id_key` from an existing device over an
+//! ephemeral, authenticated channel. Flow:
 //!
-//! Requests expire after 10 minutes. Every tier can request and approve. This is
-//! device linking, not a login second factor: it runs once per device because
-//! it is the only way the account key reaches it. See
-//! `.codesight/wiki/commands.md` and `pin-design.md`.
+//!   1. New device calls `start_device_enrollment` → generates an
+//!      ephemeral X25519 keypair, DERIVES an 8-character short authentication
+//!      string from that keypair's public half (`derive_verification_code`:
+//!      HKDF over the public key, SALTED with the request's own id, account and
+//!      creation time, Crockford base32), and writes a
+//!      `device_enrollment_request` row via the session-gated DS endpoint (the
+//!      new device is pre-enrollment, so it can't device-sign). The DS then
+//!      emits the `enrollment_requested` inbox nudge SERVER-SIDE — the new
+//!      device can't, since a client-side send-data needs a signing credential
+//!      it doesn't have yet. The private X25519 key stays in memory on the new
+//!      device, and the SAS is **displayed on the new device**.
+//!
+//!   2. Any of the user's already-enrolled devices receives the inbox
+//!      event (or, if it was offline at request time, picks the request up
+//!      via its login-time `list_pending_enrollment_requests` poll) and shows
+//!      an approval UI with an EMPTY INPUT — it does not display the code.
+//!
+//!   3. The human reads the SAS off the new device's screen and types it into
+//!      the approver. The approving device calls `approve_device_enrollment`:
+//!      a. Re-derives the SAS from the ephemeral public key it fetched
+//!      itself and compares the typed value against that (#1096 — see
+//!      `derive_verification_code` for why comparing against the DS's
+//!      stored copy was the bug, not the check).
+//!      b. Generates its own ephemeral X25519 keypair.
+//!      c. ECDH(approver_priv, requester_pub), REFUSED if non-contributory
+//!      (a low-order peer key would make the output computable by the
+//!      server) → HKDF → wrap key.
+//!      d. AES-256-GCM wraps `account_id_key.private` and writes
+//!      `approver_pub || nonce || ciphertext` into the request row.
+//!      e. Signs a `device_cert` for the new device.
+//!      f. Adds the new device to every group/DM the user is in.
+//!      g. Marks the request `status = 'approved'`.
+//!
+//!   4. New device polls `poll_enrollment_status`. When it sees
+//!      `approved`, it unwraps the blob with its stored ephemeral private
+//!      key, CHECKS that the unwrapped seed's public half is the account's
+//!      published `account_id_pub` (a successful AEAD open says only that the
+//!      blob was sealed to this device — not which seed is inside it), stores
+//!      `account_id_key` in its OS keystore, and calls `finalize_enrollment`
+//!      which publishes the new device's cert and processes any welcomes.
+//!
+//! Rejection and expiry: `reject_device_enrollment` flips status and
+//! records a security event. Requests that time out (10-minute TTL) are
+//! treated as `expired` by the poller without special cleanup.
+//!
+//! # Symmetric, and not a login second factor
+//!
+//! Every tier both requests and approves: desktop and mobile each call
+//! `start_device_enrollment` when they are the new device and
+//! `approve_device_enrollment` / `list_pending_enrollment_requests` /
+//! `reject_device_enrollment` when they are the existing one. A phone can
+//! authorise a desktop sign-in and a desktop can authorise a phone's.
+//!
+//! This is **device linking**, in the shape Signal and WhatsApp use — not a
+//! Steam-Guard-style second factor. It does not gate authentication (the
+//! email OTP does that, and it establishes a session) and it does not run on
+//! every login. It runs ONCE per new device, because it is the only way the
+//! account identity private key reaches that device at all: no server ever
+//! holds it, so an existing device has to hand it over.
 
 use std::sync::Arc;
 
@@ -34,40 +81,68 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// How long a pending request is valid.
+// ── Constants ────────────────────────────────────────────────────────────────
+
+/// How long a pending enrollment request is valid. 10 minutes is the
+/// budget: long enough to walk to the other device, short enough to bound
+/// the attack surface if a code is observed.
 const ENROLLMENT_TTL_SECS: i64 = 10 * 60;
 
-/// HKDF info binding the wrap key to this protocol.
+/// HKDF info string — binds the derived wrap key to this specific protocol
+/// so an attacker with access to the ECDH output cannot reuse it for any
+/// other KDF-based scheme in the system.
 const ENROLL_HKDF_INFO: &[u8] = b"pollis-enrollment-wrap-v1";
 
-/// HKDF info for the human-compared code (#793), separate from the wrap key's.
+/// HKDF info for the human-compared verification code (#793). Domain-separated
+/// from the wrap-key derivation so the two can never collide.
 const ENROLL_SAS_INFO: &[u8] = b"pollis-enrollment-sas-v1";
 
-/// Domain tag opening the per-request SAS salt; both ends must agree byte for
-/// byte.
+/// Domain tag opening the per-request SAS salt. Versioned separately from
+/// [`ENROLL_SAS_INFO`] because the salt's *shape* is what a future change would
+/// alter, and both ends must agree on it byte for byte.
 const ENROLL_SAS_SALT_DOMAIN: &[u8] = b"pollis-enrollment-sas-salt-v1";
 
-/// The Secret Key's alphabet (`0-9A-Z` minus I, L, O, U): 5 bits per character.
+/// Alphabet for the verification code — the same 32 characters the Secret Key
+/// uses (`0-9A-Z` minus I, L, O, U, which are easy to misread). Exactly 5 bits
+/// per character.
 const SAS_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/// Code length. Eight characters (40 bits), not six digits: a hostile server can
-/// grind ephemeral keypairs until one derives the victim's code, so the bound
-/// code is only as strong as it is wide.
+/// Length of the verification code, in characters.
+///
+/// EIGHT, not six digits, and the width is load-bearing rather than cosmetic.
+/// The code is now a deterministic function of the new device's ephemeral public
+/// key, so a hostile server that swaps that key changes the code the approving
+/// device shows and the mismatch is visible. But a *bound* code is only as strong
+/// as it is *wide*: the server can grind ephemeral keypairs until one happens to
+/// derive the victim's code. Six digits is 2^20 — about a million X25519 keygens,
+/// which is seconds of work and no protection at all. Eight characters over a
+/// 32-symbol alphabet is 40 bits, so the same attack costs ~10^12 keygens.
 const SAS_LEN: usize = 8;
 
-/// Code length for the UIs that gate on it.
+/// Length of the verification code, for the UIs that ask the approver to type
+/// it. Re-exported rather than re-stated so a change to [`SAS_LEN`] reaches the
+/// input fields that gate on it.
 pub const ENROLLMENT_SAS_LEN: usize = SAS_LEN;
 
-/// The code alphabet as a `&str`, for UIs that filter typed characters.
+/// The 32 characters a verification code can contain, as a `&str` — for a UI
+/// that has to decide whether a typed character belongs in a code.
 pub const ENROLLMENT_SAS_ALPHABET: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/// Normalize typed input to the canonical code form: forgiving about form (case,
-/// spaces, dashes), strict about content. A character outside the alphabet is
-/// dropped, never mapped to a lookalike, which would let a mis-read code compare
-/// equal. Truncates at [`ENROLLMENT_SAS_LEN`].
+/// Normalize what a human typed into the canonical verification-code form.
 ///
-/// Source of truth for the twins in `frontend/src/utils/enrollmentSas.ts` and
-/// `mobile/lib/enrollmentSas.ts`, whose tests quote the two constants above.
+/// The approver reads the code off the NEW device's screen and types it here
+/// (#1096), so this has to be forgiving about FORM — upper-case it, drop the
+/// spaces and dashes people add while reading a code aloud — and unforgiving
+/// about CONTENT. A character outside the alphabet is DROPPED, never mapped to a
+/// lookalike: turning `O` into `0` or `I` into `1` would let a mis-read code
+/// compare equal to the derived one, which is precisely the substitution the
+/// typed comparison exists to catch. Truncates at [`ENROLLMENT_SAS_LEN`].
+///
+/// The shipped UIs each have a twin of this — `frontend/src/utils/enrollmentSas.ts`
+/// and `mobile/lib/enrollmentSas.ts`, because the two apps share `pollis-core`
+/// but no TypeScript. This is the source of truth; each twin's unit test quotes
+/// the two constants above and fails if they drift. `pollis-tui` calls this
+/// function directly.
 pub fn normalize_enrollment_sas(raw: &str) -> String {
     let mut out = String::with_capacity(SAS_LEN);
     for ch in raw.chars().flat_map(|c| c.to_uppercase()) {
@@ -84,8 +159,10 @@ pub fn normalize_enrollment_sas(raw: &str) -> String {
 const X25519_PUB_LEN: usize = 32;
 const AES_NONCE_LEN: usize = 12;
 const ACCOUNT_ID_PRIVATE_LEN: usize = 32;
-// approver_pub (32) || nonce (12) || ciphertext+tag (32 + 16) = 92.
+// approver_pub (32) || nonce (12) || ciphertext+tag (32 + 16) = 92
 const WRAPPED_ACCOUNT_KEY_LEN: usize = X25519_PUB_LEN + AES_NONCE_LEN + ACCOUNT_ID_PRIVATE_LEN + 16;
+
+// ── DTOs ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnrollmentHandle {
@@ -97,17 +174,31 @@ pub struct EnrollmentHandle {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum EnrollmentStatus {
+    /// Still waiting for an existing device to approve.
     Pending,
-    /// Approved: `account_id_key` is installed locally.
+    /// Approved — the new device has installed `account_id_key` locally
+    /// and is now enrolled. The frontend should proceed to the main app.
     Approved,
+    /// An existing device rejected the request.
     Rejected,
+    /// TTL elapsed.
     Expired,
 }
 
-/// One open enrollment request, as the approving device sees it. Carries no
-/// verification code (#1096): with the DS's copy here the UI pre-filled it and
-/// nobody compared anything. The approver types the code from the new device's
-/// screen instead.
+/// One open enrollment request, as the APPROVING device sees it.
+///
+/// Deliberately carries **no verification code** (#1096). The DS's stored copy
+/// used to be here, and the approval UI displayed it and submitted it back
+/// verbatim — so approving was one click and the SAS comparison was performed by
+/// nobody. A DS that swapped the ephemeral key and its stored code to match
+/// passed every programmatic check, because both sides of the comparison came
+/// from the server.
+///
+/// The approver types the code shown on the NEW device instead, and
+/// [`approve_device_enrollment`] checks it against the value derived from the
+/// ephemeral key it fetched. Leaving the field out is what makes the pre-fill
+/// unrepresentable rather than merely discouraged: there is nothing for the UI
+/// to pre-fill with.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingEnrollmentRequest {
     pub request_id: String,
@@ -125,13 +216,59 @@ pub struct SecurityEvent {
     pub metadata: Option<String>,
 }
 
-/// The human-compared code, derived from the new device's ephemeral public key
-/// (#793), so a swapped key changes the code the approver derives. Not a secret:
-/// its job is binding.
+/// A keyset position in the security-event log (#1548): the `(created_at, id)`
+/// of the last row a page returned. Opaque to the UI — it hands back the
+/// previous page's `next_cursor` verbatim.
+pub use pollis_api::account_reads::SecurityEventCursor;
+
+/// One page of the security-event log, newest first (#1548).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecurityEventsPage {
+    pub events: Vec<SecurityEvent>,
+    /// Pass back as `before` for the next page; `None` = this page reached the
+    /// oldest matching row.
+    pub next_cursor: Option<SecurityEventCursor>,
+}
+
+// ── Crypto helpers ───────────────────────────────────────────────────────────
+
+/// The verification code the human compares, derived from the new device's
+/// ephemeral public key (#793).
 ///
-/// Salted with [`sas_salt`] (request id, account, creation time), so a
-/// precomputed key-to-code table is valid for one request only and the 2^40 grind
-/// must be redone inside each TTL. Both sides hold all three fields.
+/// It used to be a random number the new device generated and POSTed to the
+/// server, which the approving device then read back — so the server both knew
+/// the code and could swap the ephemeral key underneath it while leaving the code
+/// alone. Both screens still matched, the user approved, and the account identity
+/// key was wrapped to the attacker's key. The digits proved the two screens were
+/// discussing the same request; they proved nothing about *which key* was being
+/// wrapped to.
+///
+/// Deriving it from the key fixes exactly that: substitute the key and the code
+/// the approver displays changes. The code is NOT a secret — it is a function of
+/// a public value, and the server can compute it too. Its job is binding, not
+/// confidentiality.
+///
+/// # Why the request context is mixed in
+///
+/// This used to be `Hkdf::new(None, ephemeral_pub)` — no salt, and a fixed info
+/// string — which made the code a PURE GLOBAL FUNCTION of one X25519 public key.
+/// The [`SAS_LEN`] comment prices the grinding attack at ~2^40 keygens per
+/// attempt, and that pricing was wrong: with nothing per-request in the
+/// derivation, 2^40 is a ONE-TIME precomputation. An attacker builds a table of
+/// ephemeral keypairs indexed by the code they derive, ONCE, and then reuses it
+/// against every user, every enrollment, forever — no work at all inside the
+/// ten-minute TTL. Swap in a keypair whose code collides with the one the human
+/// is reading off the new device's screen, and the approver derives the very
+/// code being read aloud, the human approves, and the account identity key is
+/// wrapped to the attacker.
+///
+/// Salting with [`sas_salt`] — the request id, the account, and the creation
+/// timestamp — makes the table worthless: a precomputation is valid for exactly
+/// one request, so the 2^40 is work the attacker must redo, from scratch, inside
+/// each TTL. Every field is one the Delivery Service cannot reuse across
+/// requests (`request_id` is the row's primary key) and every field is available
+/// to BOTH sides — the requester holds them because it minted them, the approver
+/// reads them off the same row.
 fn derive_verification_code(
     ephemeral_pub: &[u8],
     request_id: &str,
@@ -148,8 +285,13 @@ fn derive_verification_code(
         .collect()
 }
 
-/// Per-request salt for [`derive_verification_code`]. Each field is u32-BE
-/// length-prefixed so the encoding is injective: no two triples share a salt.
+/// The per-request salt for [`derive_verification_code`].
+///
+/// Length-prefixed rather than concatenated or delimiter-joined: the three
+/// fields are free-form strings, and a joiner byte is a joiner byte until
+/// someone puts one in a `user_id`. With a 4-byte big-endian length in front of
+/// each field the encoding is injective, so two different triples cannot produce
+/// the same salt and therefore cannot be made to derive the same code.
 fn sas_salt(request_id: &str, user_id: &str, created_at: &str) -> Vec<u8> {
     let mut salt = Vec::new();
     salt.extend_from_slice(ENROLL_SAS_SALT_DOMAIN);
@@ -160,7 +302,11 @@ fn sas_salt(request_id: &str, user_id: &str, created_at: &str) -> Vec<u8> {
     salt
 }
 
-/// Wrap key for the transfer, bound to both ephemeral public keys.
+/// Wrap key for the account-identity transfer, bound to the full transcript.
+///
+/// Both ephemeral public keys are mixed in, so the derived key commits to the
+/// exact pair of parties that ran the exchange rather than to the ECDH output
+/// alone.
 fn derive_wrap_key(shared_secret: &[u8], requester_pub: &[u8], approver_pub: &[u8]) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(None, shared_secret);
     let mut info = Vec::with_capacity(ENROLL_HKDF_INFO.len() + requester_pub.len() + approver_pub.len());
@@ -187,12 +333,22 @@ fn aead_decrypt(key: &[u8; 32], nonce: &[u8; AES_NONCE_LEN], ct: &[u8]) -> Resul
         .map_err(|e| Error::Crypto(format!("enrollment aes-gcm decrypt: {e}")))
 }
 
-/// Reject an X25519 exchange the peer didn't contribute to.
+/// Reject an X25519 exchange whose output the peer did not contribute to.
 ///
-/// `x25519-dalek` 2.x returns the all-zero secret for a low-order peer key
-/// instead of failing, which would make the wrap key a function of public values:
-/// the DS could compute it and forge an approval carrying an attacker-chosen
-/// seed. Checked on both sides, since both peer keys pass through the DS.
+/// `x25519-dalek` 2.x deliberately does NOT reject low-order points on its own —
+/// it hands back the all-zero shared secret and leaves the decision to the
+/// caller, and this caller was not making it. A peer public key of 32 zero bytes
+/// (or any other small-order point) drives the ECDH output to zero for EVERY
+/// private key, so `derive_wrap_key` becomes a function of public values alone
+/// and the Delivery Service — which chooses the `approver_pub` bytes in the blob
+/// it serves — can compute the wrap key itself. It could then forge an approval
+/// carrying an ATTACKER-CHOSEN account identity seed that the new device would
+/// decrypt without complaint.
+///
+/// Checked on both sides. The approver's peer key is the requester's ephemeral
+/// pub as the DS stored it; the requester's peer key is the `approver_pub`
+/// prefix of the DS-written blob. Either one is server-influenced, so neither is
+/// the "safe" side.
 fn require_contributory(shared: &x25519_dalek::SharedSecret, whose: &str) -> Result<()> {
     if !shared.was_contributory() {
         return Err(Error::Crypto(format!(
@@ -227,8 +383,11 @@ fn x25519_public_from_bytes(bytes: &[u8]) -> Result<PublicKey> {
     Ok(PublicKey::from(arr))
 }
 
-/// New-device side: file a pending request and return the handle the frontend
-/// waits on.
+// ── Tauri commands ───────────────────────────────────────────────────────────
+
+/// New-device side. Insert a pending enrollment request, publish an inbox
+/// event so other devices see it immediately, and return the handle the
+/// frontend needs to poll status.
 pub async fn start_device_enrollment(
     state: &Arc<AppState>,
     user_id: String,
@@ -240,8 +399,10 @@ pub async fn start_device_enrollment(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    // A fresh ephemeral key, unless this device was signed in by showing a QR
-    // (#1361): then the key the QR carried, the only one the scanner will wrap to.
+    // Generate ephemeral X25519 keypair for this request — unless this device
+    // was signed in by SHOWING a QR (#1361): then the key is the one whose
+    // public half that QR carried, because the device that scanned it wraps
+    // the account key only to that exact key.
     let offered_secret = match state.device_link_pending.lock().await.as_ref().map(|l| &l.kind) {
         Some(crate::commands::device_link::PendingLinkKind::Offered { ephemeral_secret }) => {
             Some(**ephemeral_secret)
@@ -260,10 +421,15 @@ pub async fn start_device_enrollment(
     let now = chrono::Utc::now();
     let expires_at = now + chrono::Duration::seconds(ENROLLMENT_TTL_SECS);
     let expires_at_str = expires_at.to_rfc3339();
-    // The exact spelling the approver re-derives from.
+    // Derived once, sent verbatim, and re-derived by the approver from the same
+    // three strings — so this is the exact spelling that has to travel.
     let created_at_str = now.to_rfc3339();
 
-    // Derived from the ephemeral key (#793) and salted per request; see
+    // The verification code is DERIVED from this device's ephemeral public key
+    // (#793), not chosen at random. Both screens compute it from the same public
+    // value, so if anything substitutes that key in flight the two codes diverge
+    // and the user sees it. It is also SALTED with this request's own identity,
+    // so a precomputed key→code table cannot be aimed at it. See
     // `derive_verification_code`.
     let verification_code: String = derive_verification_code(
         ephemeral_public.as_bytes(),
@@ -272,16 +438,27 @@ pub async fn start_device_enrollment(
         &created_at_str,
     );
 
-    // The server gets only the public key and the code. Session-gated (the
-    // `enrollment_session` from `verify_otp`): this pre-enrollment device can't
-    // device-sign. The DS binds `user_id` and `new_device_id` from the session.
+    // Insert the request row. Server stores only the public ephemeral key
+    // and the verification code — the private key stays in memory on this
+    // device.
+    //
+    // This runs on the NEW device, which is pre-enrollment: it has registered
+    // (`register_device`) but never ran `ensure_device_cert`, so its
+    // `user_device.mls_signature_pub` is still NULL and it cannot produce a
+    // signature the DS would accept. So the write is SESSION-gated (the
+    // `enrollment_session` minted by re-login `verify_otp`). The DS binds `user_id`
+    // and `new_device_id` from the session — never the body. The enrollment
+    // APPROVAL / REJECTION (run on an already-enrolled sibling) route via device
+    // signature.
     let enrollment_session = state.enrollment_session.lock().await.clone();
     match enrollment_session {
         Some(token) => {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD;
-            // A QR-claimed sign-in (#1207) tags the request with the QR-keyed MAC; a v2
-            // offer (#1361) and an email-OTP sign-in carry none.
+            // QR device link (#1207): a device signed in by a claimed link tags
+            // its request with the QR-secret-keyed MAC the approver verifies in
+            // place of a typed code. Absent for an email-OTP sign-in.
+            // A v2 offer (#1361) carries no tag: its approver compares the key.
             let link_tag = state.device_link_pending.lock().await.as_ref().and_then(|link| match &link.kind {
                 crate::commands::device_link::PendingLinkKind::Claimed { mac_key } => {
                     Some(b64.encode(crate::commands::device_link::link_tag(
@@ -310,24 +487,33 @@ pub async fn start_device_enrollment(
             .await?;
         }
         None => {
-            // The session is gone (e.g. restart mid-enrollment) and this device can't
-            // device-sign: fail recoverably so the user signs in again.
+            // Bucket-C C6: the in-memory `enrollment_session` is gone (e.g. the app
+            // restarted between re-login and enrollment). The session-gated write
+            // above is the only authable path here — the requesting device is still
+            // pre-credential (`mls_signature_pub` NULL), so it cannot device-sign.
+            // Fail LOUD + recoverable: the user re-requests the OTP, which re-mints
+            // the enrollment session.
             return Err(Error::Other(anyhow::anyhow!(
                 "Your sign-in session expired. Please sign in again to enroll this device."
             )));
         }
     }
 
-    // Kept in memory for `poll_enrollment_status`.
+    // Stash the private key in memory for poll_enrollment_status.
     state
         .enrollment_ephemeral_keys
         .lock()
         .await
         .insert(request_id.clone(), private_bytes.to_vec());
 
-    // The DS sends the inbox nudge to sibling devices; this device has no signing
-    // credential. An offline sibling catches it via
-    // `list_pending_enrollment_requests` at login.
+    // The inbox nudge to the user's already-enrolled devices is emitted
+    // SERVER-SIDE by the DS `/v1/auth/enrollment-request` handler. This device
+    // is pre-enrollment (no signing credential, local DB closed), so a
+    // client-side device-signed send-data here would ALWAYS fail with "not
+    // signed in for DS request signing" — the DS, which holds the LiveKit admin
+    // secret, sends it instead. A sibling that was offline at request time
+    // still catches it via its login-time `list_pending_enrollment_requests`
+    // poll.
     crate::diag!(
         "[enrollment] requested enrollment for user {user_id} device {device_id} (request {request_id})"
     );
@@ -339,14 +525,19 @@ pub async fn start_device_enrollment(
     })
 }
 
-/// New-device side: the request's status. On `Approved`, unwrap and install the
-/// account key.
+/// New-device side. Poll the current status of an enrollment request. On
+/// `Approved`, unwrap `wrapped_account_key`, install `account_id_key` in
+/// the OS keystore, and run `finalize_enrollment` so the device picks up
+/// welcomes and publishes its own cert.
 pub async fn poll_enrollment_status(
     state: &Arc<AppState>,
     request_id: String,
 ) -> Result<EnrollmentStatus> {
-    // Gated on possession of `request_id` (#987 §6.5): this device has no
-    // credential; see `ds_reads::enrollment_request`.
+    // Read over the DS, gated on possession of `request_id` (#987 §6.5). This
+    // device has NO credential and cannot get one: no signing key (that is what
+    // it is enrolling to obtain), and its OTP session is already expired — both
+    // TTLs are 600s and the session was minted at `verify-otp`, strictly before
+    // this request existed. See `ds_reads::enrollment_request`.
     let row = crate::commands::ds_reads::enrollment_request(state, &request_id, false)
         .await?
         .ok_or_else(|| {
@@ -363,8 +554,10 @@ pub async fn poll_enrollment_status(
         None => None,
     };
 
+    // TTL check — if expired, short-circuit without touching the status column.
     if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&expires_at_str) {
         if chrono::Utc::now() > expires_at.with_timezone(&chrono::Utc) {
+            // Also drop the in-memory private key.
             state
                 .enrollment_ephemeral_keys
                 .lock()
@@ -393,6 +586,8 @@ pub async fn poll_enrollment_status(
             Ok(EnrollmentStatus::Expired)
         }
         "approved" => {
+            // Approver has written the wrapped account key back. Unwrap,
+            // install, and finalize.
             let wrapped = wrapped.ok_or_else(|| {
                 Error::Other(anyhow::anyhow!(
                     "enrollment request {request_id} is approved but wrapped_account_key is NULL"
@@ -411,11 +606,18 @@ pub async fn poll_enrollment_status(
             let account_id_private =
                 unwrap_account_key(&wrapped, &priv_bytes)?;
 
-            // Into `AppState.unlock` with a fresh `db_key`; `set_pin` and
-            // `finalize_device_enrollment` follow. Through
-            // `adopt_recovered_account_identity`, which refuses a seed that isn't the
-            // account's published key: a successful AEAD open says nothing about which seed
-            // is inside.
+            // Hand off to AppState.unlock with a freshly generated db_key.
+            // The frontend's next step is pin-create; set_pin wraps these
+            // bytes under the user's PIN and opens the local DB.
+            // finalize_device_enrollment runs after that to publish the
+            // device cert, key packages, and external-join existing groups.
+            //
+            // Via `adopt_recovered_account_identity`, which REFUSES a seed whose
+            // public half is not the account's published identity key. A
+            // successful AEAD open only proves the blob was sealed under a key
+            // derived from this device's ephemeral secret — it says nothing
+            // about WHICH seed is inside, which is precisely what a forged
+            // approval gets to choose.
             crate::commands::account_identity::adopt_recovered_account_identity(
                 state,
                 &user_id,
@@ -431,19 +633,33 @@ pub async fn poll_enrollment_status(
     }
 }
 
+/// First delay after a `Pending` answer in [`await_enrollment_approval`].
 const AWAIT_BACKOFF_START_MS: u64 = 1_000;
-/// Backoff ceiling: approval is a human on another device, so seconds of latency
-/// are invisible, and a ten-minute wait costs a handful of reads.
+/// Ceiling the backoff climbs to. Approval is a human tapping a button on
+/// another device, so a few seconds of latency is invisible; what matters is
+/// that a request left open for its full ten minutes costs a handful of reads
+/// instead of three hundred.
 const AWAIT_BACKOFF_MAX_MS: u64 = 8_000;
 
-/// Wait for an enrollment request to reach a terminal state. One awaited call
-/// (#874), not a renderer poll: the pre-enrollment device can't be pushed to, so
-/// the backend waits with exponential backoff, stopping at the request's TTL.
+/// Wait for an enrollment request to reach a terminal state, then return it.
+///
+/// ONE call, not a poll loop in the renderer (#874). The new device is
+/// pre-enrollment: it has no device key, so it cannot sign a realtime
+/// subscription and cannot be pushed to — the answer genuinely has to be
+/// fetched. But `setInterval` in the frontend is banned outright by CLAUDE.md,
+/// and for good reason: it fired every two seconds regardless of how long the
+/// wait had already run, kept firing through transient failures, and outlived
+/// the component whenever a cleanup path was missed.
+///
+/// Here the waiting is the backend's, with exponential backoff between reads
+/// and a hard stop at the request's own TTL — so it cannot outlive the thing it
+/// is waiting on. The renderer awaits a promise.
 pub async fn await_enrollment_approval(
     state: &Arc<AppState>,
     request_id: String,
 ) -> Result<EnrollmentStatus> {
-    // Slightly past the TTL, so expiry is reported by the usual status check.
+    // A little past the TTL so the expiry is reported by the same status check
+    // every other path uses, rather than being inferred from a timeout here.
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_secs(ENROLLMENT_TTL_SECS as u64 + 5);
     let mut delay = std::time::Duration::from_millis(AWAIT_BACKOFF_START_MS);
@@ -481,7 +697,7 @@ fn unwrap_account_key(wrapped: &[u8], requester_private: &[u8]) -> Result<Vec<u8
     let approver_pub = x25519_public_from_bytes(approver_pub_bytes)?;
     let shared = requester_priv.diffie_hellman(&approver_pub);
     require_contributory(&shared, "the approver_pub in the wrapped blob")?;
-    // Same transcript the approver bound: our public key, then theirs.
+    // Same transcript the approver bound in: our own public key, then theirs.
     let wrap_key = derive_wrap_key(
         shared.as_bytes(),
         requester_pub.as_bytes(),
@@ -501,13 +717,15 @@ fn unwrap_account_key(wrapped: &[u8], requester_private: &[u8]) -> Result<Vec<u8
     Ok(pt)
 }
 
-/// Existing-device side: list open requests (the login-time fallback for a
-/// missed inbox push).
+/// Existing-device side. Any device of the same user lists open requests
+/// (called on login as a fallback in case the inbox push was missed).
 pub async fn list_pending_enrollment_requests(
     state: &Arc<AppState>,
     user_id: String,
 ) -> Result<Vec<PendingEnrollmentRequest>> {
-    // The DS filters to pending, unexpired requests for the signer's own account.
+    // The DS keeps the `status = 'pending'`, not-yet-expired filter and the
+    // newest-first ordering; it also scopes the enumeration to the signer, so a
+    // device can only ever list requests against its OWN account.
     let rows = crate::commands::ds_reads::pending_enrollments(state, &user_id).await?;
     Ok(rows
         .into_iter()
@@ -520,8 +738,10 @@ pub async fn list_pending_enrollment_requests(
         .collect())
 }
 
-/// Existing-device side: check the typed code, wrap the account key to the
-/// requester's ephemeral key and mark the request approved.
+/// Existing-device side. Wrap `account_id_key.private` under the
+/// requester's ephemeral pub, publish a device cert for the new device,
+/// add the new device to every group/DM the approver is in, and mark the
+/// request approved.
 pub async fn approve_device_enrollment(
     state: &Arc<AppState>,
     request_id: String,
@@ -534,8 +754,12 @@ pub async fn approve_device_enrollment(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    // Device-signed with `want_approval_fields` (#987): the DS serves the ephemeral
-    // key and code only to a signed caller owning the account.
+    // 1. Fetch the request row and validate. DEVICE-SIGNED with
+    //    `want_approval_fields` (#987): the approving device is a fully enrolled
+    //    sibling, and the DS serves `new_device_ephemeral_pub` /
+    //    `verification_code` only to a signed caller who owns the request's
+    //    account — a bare `request_id` holder never receives them, because
+    //    reading the code aloud is what authorizes the enrollment.
     let row = crate::commands::ds_reads::enrollment_request(state, &request_id, true)
         .await?
         .ok_or_else(|| {
@@ -571,9 +795,16 @@ pub async fn approve_device_enrollment(
         }
     }
 
-    // #793: check the typed code against one derived from the key we fetched, never
-    // against `stored_code`, which is server-controlled. The salt fields come off
-    // the served row, so altering any of them also diverges the code.
+    // #793: derive the expected code from the ephemeral key WE fetched, and check
+    // the user's input against that — never against `stored_code`. The stored value
+    // is server-controlled; the derived one is a function of the key this device is
+    // about to wrap the account identity key to. Checking the server's copy would
+    // re-introduce exactly the substitution this fix exists to stop.
+    //
+    // Salted with this request's own id, account and creation time, exactly as
+    // the requester salted it. The three strings come off the row the DS served,
+    // so a DS that alters any of them derives a code that does not match the one
+    // on the new device's screen — the mismatch is visible and the human stops.
     let expected_code = derive_verification_code(
         &ephemeral_pub,
         &request_id,
@@ -581,15 +812,17 @@ pub async fn approve_device_enrollment(
         &created_at_str,
     );
 
+    // Constant-time comparison to avoid leaking prefix-match timing.
     if !constant_time_eq(expected_code.as_bytes(), verification_code.as_bytes()) {
         return Err(Error::Other(anyhow::anyhow!(
             "verification code does not match"
         )));
     }
 
-    // A stored code that disagrees with the derived one means the key was altered
-    // after publication. The check above already protected the user; this reports
-    // the tampering.
+    // The server's stored copy disagreeing with the derived value means the
+    // ephemeral key was altered after the new device published it. The check above
+    // has already protected the user; this reports the tampering rather than
+    // letting it pass silently.
     if !constant_time_eq(stored_code.as_bytes(), expected_code.as_bytes()) {
         return Err(Error::Other(anyhow::anyhow!(
             "enrollment request {request_id}: the stored verification code does not match \
@@ -597,6 +830,8 @@ pub async fn approve_device_enrollment(
         )));
     }
 
+    // 2. Load the approver's account_id_key and wrap it to the requester's
+    //    ephemeral pub via ECDH + HKDF + AES-256-GCM.
     wrap_and_approve(
         state,
         &approver_device_id,
@@ -610,10 +845,12 @@ pub async fn approve_device_enrollment(
 
 }
 
-/// Wrap `account_id_key` to a new device's ephemeral key and post the approval.
-/// Callers must have authenticated `ephemeral_pub` (by typed SAS, or by
-/// `device_link::approve_device_link`'s link tag, #1207). `via` lands in the
-/// security event.
+/// Wrap `account_id_key` to a new device's ephemeral key and post the approval
+/// — the half of approving that is the same however the new device's key was
+/// authenticated. [`approve_device_enrollment`] authenticates it with the SAS
+/// the human typed; `device_link::approve_device_link` (#1207) with the link
+/// tag the QR's secret keyed. Callers MUST have authenticated `ephemeral_pub`
+/// before calling; this function trusts it. `via` lands in the security event.
 pub(crate) async fn wrap_and_approve(
     state: &Arc<AppState>,
     approver_device_id: &str,
@@ -628,7 +865,8 @@ pub(crate) async fn wrap_and_approve(
     let new_device_id = new_device_id.to_string();
     let signing_key =
         crate::commands::account_identity::load_account_id_key(state, &user_id).await?;
-    // An ML-DSA-44 private key is its 32-byte seed.
+    // The ML-DSA-44 private key IS its 32-byte seed, so the enrollment transfer
+    // envelope is byte-identical in size to the Ed25519 one it replaced.
     let account_id_private = signing_key.to_seed().to_vec();
 
     let wrapped = {
@@ -659,11 +897,21 @@ pub(crate) async fn wrap_and_approve(
         out
     };
 
-    // The new device generates and publishes its own MLS key and cert in
-    // `finalize_enrollment`.
+    // 3. The new device's MLS signing pub is generated by the NEW device when it
+    //    runs `finalize_enrollment`, and its cert is signed and published there.
+    //    Nothing to do on this side.
+    //
+    //    #987 deleted a `SELECT identity_version FROM users` that used to sit
+    //    here. It read the version to stamp a cert this function has never
+    //    actually signed — the value went straight into a `let _ = (…)` two
+    //    lines below it. Removing it costs nothing and is one fewer read that
+    //    would otherwise have needed an endpoint.
 
-    // The DS binds the request to the signer, so a device can only approve its own
-    // account's enrollments.
+    // 4. Write the wrapped account key and flip status to 'approved'. Routed
+    //    through the DS (#419 domains E+G) — the approver is a fully-enrolled
+    //    sibling device, so it can sign. The DS binds the request to the signer
+    //    (`WHERE id = ? AND user_id = actor`), so a device can only approve
+    //    enrollments for its OWN account.
     let metadata = format!("via={via},approver={approver_device_id}");
     {
         use base64::Engine as _;
@@ -672,17 +920,25 @@ pub(crate) async fn wrap_and_approve(
             request_id: request_id.clone(),
             wrapped_account_key: b64.encode(&wrapped),
             approved_by_device_id: approver_device_id.to_string(),
-            // The DS's no-auth fallback actor (`resolve_actor`); when signed it must equal
-            // the signed user.
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
             user_id: Some(user_id.clone()),
         };
         crate::commands::mls::ds_post_ok(state, &body).await?;
 
+        // 5. Record a security event (best-effort).
         let ev = pollis_api::account::SecurityEventBody {
             kind: "device_enrolled".to_string(),
             device_id: Some(new_device_id.clone()),
             metadata: Some(metadata),
-            // Same no-auth fallback actor.
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
             user_id: Some(user_id.clone()),
         };
         if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
@@ -690,8 +946,11 @@ pub(crate) async fn wrap_and_approve(
         }
     }
 
-    // MLS addition is deferred: the new device publishes key packages in
-    // `finalize_enrollment`, and a sibling reconciles on `enrollment_finalized`.
+    // 6. MLS group addition is deferred — the new device hasn't published
+    //    KPs yet so reconcile can't add it. Instead, finalize_enrollment on
+    //    the new device publishes KPs and sends an `enrollment_finalized`
+    //    event. The approver (or any sibling) picks that up, reconciles all
+    //    groups, and the new device receives Welcomes.
 
     crate::diag!(
         "[enrollment] approved request {request_id} for new device {new_device_id} of user {user_id}"
@@ -701,14 +960,21 @@ pub(crate) async fn wrap_and_approve(
 }
 
 
-/// New-device side: recover `account_id_key` from the server's recovery blob with
-/// the user's Secret Key and install it locally; `finalize_enrollment` follows.
+/// New-device side. Recover `account_id_key` from the server-stored
+/// recovery blob using the user's Secret Key, install it locally, then
+/// run the same finalization path as the approval flow so the device
+/// publishes its cert, its KPs, and joins every existing group via
+/// external commits.
 pub async fn recover_with_secret_key(
     state: &Arc<AppState>,
     user_id: String,
     secret_key: String,
 ) -> Result<()> {
-    // OTP-session credential (#987); the DS logs a security event per fetch.
+    // 1. Fetch the wrapped account identity blob (#987). The credential is the
+    //    OTP session the user just proved on the login gate — this device has no
+    //    signing key, which is the situation it is recovering from — and the DS
+    //    records a security event for every fetch, because a fetch is exactly
+    //    the signal an account owner wants to see if it was not them.
     let (salt, nonce, wrapped_key) =
         crate::commands::ds_reads::recovery_blob(state, &user_id)
             .await?
@@ -716,6 +982,8 @@ pub async fn recover_with_secret_key(
                 Error::Other(anyhow::anyhow!("No recovery blob found for user {user_id}"))
             })?;
 
+    // 2. Unwrap with the user-provided Secret Key. The helper normalizes
+    //    the input (whitespace, case, dashes) before derivation.
     let account_id_private = crate::commands::account_identity::unwrap_recovery_blob(
         &secret_key,
         &salt,
@@ -723,9 +991,17 @@ pub async fn recover_with_secret_key(
         &wrapped_key,
     )?;
 
-    // Through the same chokepoint as approval: a superseded `account_recovery` row
-    // still unwraps under its Secret Key, and only the published-key check tells a
-    // current blob from a replayed one.
+    // 3. Hand the unwrapped key to AppState.unlock with a freshly
+    //    generated db_key. Frontend proceeds to pin-create; set_pin
+    //    wraps both, and finalize_device_enrollment finishes the
+    //    cert / KP / external-join work.
+    //
+    //    Through the same chokepoint the approval path uses, and for the same
+    //    reason plus one of its own: the blob is served by the DS, and an
+    //    `account_recovery` row that the account has since SUPERSEDED still
+    //    unwraps cleanly under the Secret Key that sealed it. Only the check
+    //    against the account's published identity key tells a current blob from
+    //    a replayed one.
     crate::commands::account_identity::adopt_recovered_account_identity(
         state,
         &user_id,
@@ -733,23 +1009,42 @@ pub async fn recover_with_secret_key(
     )
     .await?;
 
-    // No audit row here: the device can't device-sign until `finalize_enrollment`
-    // publishes its cert, and `/v1/security-events` requires that.
+    // 4. A security-event audit row would go here, but this runs PRE-FINALIZE —
+    // the account key was just unwrapped into `AppState.unlock`, yet this device
+    // has NOT published its cross-signing cert (`finalize_enrollment` →
+    // `ensure_device_cert` runs after `set_pin`), so its
+    // `user_device.mls_signature_pub` is still NULL and it cannot device-sign a
+    // request the DS gate would accept. The only DS audit endpoint
+    // (`/v1/security-events`) is device-signed, so there is no authable path for
+    // this NON-load-bearing audit row here — it is skipped.
 
     Ok(())
 }
 
-/// Soft recovery for a user with no Secret Key and no sibling device, confirmed
-/// by typing their email: rotate to a new account identity (orphaning other
-/// devices), drop all memberships and the local DB, and return the new Secret
-/// Key. Destructive; the frontend must warn clearly first.
+/// Soft recovery path. The user has no Secret Key, no sibling device,
+/// and no way to approve. They confirm by typing their email, and we:
+///   1. Verify the email matches `users.email` for this user_id.
+///   2. Generate a brand-new `account_id_key` and bump
+///      `users.identity_version`, orphaning every other device.
+///   3. Remove the user from all groups and DMs (including ownership
+///      handoff), delete stale key packages/welcomes/device rows,
+///      and wipe the local DB.
+///   4. Re-open a fresh local DB and run `finalize_enrollment` so
+///      this device publishes a fresh cert and KPs. The user ends
+///      up in a clean "no groups" state — admins must re-add them.
+///   5. Return the new Secret Key for the user to save.
+///
+/// This is a destructive operation. The frontend must display a very
+/// clear warning before calling it.
 pub async fn reset_identity_and_recover(
     state: &Arc<AppState>,
     user_id: String,
     confirm_email: String,
 ) -> Result<String> {
-    // The DS answers `account-status` for the authenticated caller only (#987), so
-    // this is no "is X's email Y?" oracle.
+    // 1. Verify the confirmation email matches what we have on file. The DS
+    //    answers `account-status` for the AUTHENTICATED caller only (#987) — the
+    //    id in the body is the no-auth path's input and a mismatch is a 403 —
+    //    so this cannot be turned into an "is X's email Y?" oracle.
     let stored_email: String = crate::commands::ds_reads::account_status(state, &user_id)
         .await?
         .and_then(|a| a.email)
@@ -764,30 +1059,53 @@ pub async fn reset_identity_and_recover(
         )));
     }
 
+    // 2. Rotate the account identity and install the new key locally.
     let new_secret_key =
         crate::commands::account_identity::reset_identity(state, &user_id).await?;
 
-    // Leave all groups and DMs. No MLS remove commits (the old identity is already
-    // invalid) and sent messages are kept.
+    // 3. Remove the user from all groups and DMs in Turso so they start
+    //    fresh. Unlike delete_account we do NOT issue MLS remove commits
+    //    (the old identity is already invalidated) and do NOT delete the
+    //    user's sent messages (other members can still read them).
     {
         let current_device_id = state.device_id.lock().await.clone();
 
-        // One DS transaction for ownership handoff, membership and key-package deletes
-        // and orphaning other devices: a half-cleaned account is corrupt. For an
-        // OTP-session caller the DS already ran this inside `rotate-identity`, so this
-        // is an idempotent no-op there.
+        // Main-DB membership + device cleanup. Route through the DS (#419
+        // domains E+G) as ONE transaction when configured: the group-ownership
+        // handoff, the group/DM membership + key-package deletes, and the
+        // other-device orphaning all commit together or not at all — a
+        // half-cleaned account is a corrupt state. Credential: an enrolled
+        // caller (reset from a signed-in session) device-signs, and for it this
+        // call IS the wipe. The primary caller — a PRE-ENROLLMENT device on the
+        // login gate, which has no signing key and no open local DB —
+        // authenticates with the verified-OTP session instead, and for it the
+        // DS has ALREADY run this exact wipe inside the `rotate-identity`
+        // transaction above (a session-authenticated rotation is the reset, by
+        // construction — `pollis_delivery::account::apply_rotate_identity`);
+        // this call is then an idempotent no-op that keeps the two paths
+        // symmetric rather than something the reset depends on.
         let body = pollis_api::account::ResetRecoverBody {
             current_device_id,
-            // Same no-auth fallback actor.
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
             user_id: Some(user_id.clone()),
         };
         crate::commands::mls::ds_post_signed_or_session_ok(state, &body)
             .await?;
 
-        // Purge pending MLS welcomes, with the same signed-or-session credential.
+        // Delete pending MLS welcomes (W8 seam). Route through the Delivery
+        // Service (sole writer of the log DB), with the same signed-or-session
+        // credential as the reset-recover write above.
         {
             let body = pollis_api::writes::PurgeBody {
-                // Same no-auth fallback actor.
+                // The DS's no-auth fallback for the acting user
+                // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+                // user and this must EQUAL it; auth off → this IS the actor, and a
+                // body without it is refused outright. Sending it never widens what
+                // the caller may do.
                 user_id: Some(user_id.clone()),
             };
             match crate::commands::mls::ds_post_signed_or_session(state, &body).await {
@@ -803,10 +1121,13 @@ pub async fn reset_identity_and_recover(
             }
         }
 
-        // The local DB's MLS state and cached messages are all invalid now.
+        // (Other devices are orphaned as part of the membership/device cleanup
+        // above — via the DS reset-recover transaction.)
+
+        // Wipe local DB (MLS group state, cached messages — all invalid now)
         state.unload_user_db().await;
         {
-            let data_dir = crate::db::local::dirs_path();
+            let data_dir = state.local_data_dir();
             let db_path = data_dir.join(format!("pollis_{user_id}.db"));
             if db_path.exists() {
                 let _ = std::fs::remove_file(&db_path);
@@ -815,8 +1136,11 @@ pub async fn reset_identity_and_recover(
             let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-shm")));
         }
 
-        // `reset_identity` already populated `AppState.unlock`; `set_pin` opens the new
-        // DB.
+        // Don't reopen the DB here — reset_identity (above) already
+        // populated AppState.unlock with the new account_id_key and a
+        // fresh db_key. The frontend routes to pin-create next; set_pin
+        // wraps and opens the new DB, finalize_device_enrollment
+        // publishes the device cert + key packages.
 
         crate::diag!(
             "[reset] cleaned up memberships, key packages, welcomes, devices, and local DB for {user_id}"
@@ -826,28 +1150,45 @@ pub async fn reset_identity_and_recover(
     Ok(new_secret_key)
 }
 
-/// The user's security event log, most recent first.
+/// One page of the user's security event log, most recent first. Used by the
+/// Security settings page (latest three) and the Security events page (keyset
+/// pages, optionally filtered by `kinds`, #1548) to surface enrollments,
+/// rejections, identity resets, and secret-key rotations.
+///
+/// `before` is the previous page's `next_cursor`; `None` starts at the newest
+/// row. `kinds` `None` or empty = every kind.
 pub async fn list_security_events(
     state: &Arc<AppState>,
     user_id: String,
     limit: Option<i64>,
-) -> Result<Vec<SecurityEvent>> {
-    // Clamped here and again by the DS (#987).
+    before: Option<SecurityEventCursor>,
+    kinds: Option<Vec<String>>,
+) -> Result<SecurityEventsPage> {
+    // The clamp stays here AND is re-applied server-side (#987): a body cannot
+    // ask the DS for the whole table regardless of what this client sends.
     let limit = limit.unwrap_or(100).clamp(1, 500);
-    let rows = crate::commands::ds_reads::security_events(state, &user_id, limit).await?;
-    Ok(rows
-        .into_iter()
-        .map(|e| SecurityEvent {
-            id: e.id,
-            kind: e.kind,
-            device_id: e.device_id,
-            created_at: e.created_at,
-            metadata: e.metadata,
-        })
-        .collect())
+    let kinds = kinds.filter(|k| !k.is_empty());
+    let resp =
+        crate::commands::ds_reads::security_events(state, &user_id, limit, before, kinds).await?;
+    Ok(SecurityEventsPage {
+        events: resp
+            .events
+            .into_iter()
+            .map(|e| SecurityEvent {
+                id: e.id,
+                kind: e.kind,
+                device_id: e.device_id,
+                created_at: e.created_at,
+                metadata: e.metadata,
+            })
+            .collect(),
+        next_cursor: resp.next_cursor,
+    })
 }
 
-/// Existing-device side: reject an enrollment request.
+/// Existing-device side. Reject an enrollment request without installing
+/// anything. The new device's poller will see `Rejected` and surface a
+/// "request rejected" message to the user.
 pub async fn reject_device_enrollment(
     state: &Arc<AppState>,
     request_id: String,
@@ -859,7 +1200,9 @@ pub async fn reject_device_enrollment(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    // Device-signed without `want_approval_fields`: rejecting never needs the code.
+    // Fetch user_id / new_device_id for the security event. Device-signed, but
+    // WITHOUT `want_approval_fields`: rejecting needs the request's identity,
+    // never the verification code.
     let row = crate::commands::ds_reads::enrollment_request(state, &request_id, false)
         .await?
         .ok_or_else(|| {
@@ -867,11 +1210,17 @@ pub async fn reject_device_enrollment(
         })?;
     let (_user_id, new_device_id): (String, String) = (row.user_id, row.new_device_id);
 
-    // The DS binds the request to the signer.
+    // Flip the request to 'rejected'. Routed through the DS (#419 domains E+G) —
+    // the rejecting device is a fully-enrolled sibling, so it can sign; the DS
+    // binds the request to the signer (`WHERE id = ? AND user_id = actor`).
     let body = pollis_api::account::RejectEnrollmentBody {
         request_id,
         approved_by_device_id: approver_device_id,
-        // Same no-auth fallback actor.
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
         user_id: Some(_user_id.clone()),
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
@@ -880,7 +1229,11 @@ pub async fn reject_device_enrollment(
         kind: "device_rejected".to_string(),
         device_id: Some(new_device_id),
         metadata: None,
-        // Same no-auth fallback actor.
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
         user_id: Some(_user_id.clone()),
     };
     if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
@@ -890,10 +1243,27 @@ pub async fn reject_device_enrollment(
     Ok(())
 }
 
-/// After the account key is installed on the new device (approval, Secret Key
-/// recovery or identity reset), and after `set_pin`: publish the device cert and
-/// key packages, then externally join every group/DM with no local MLS state
-/// (essential on the Secret Key path, where no Welcomes exist). Idempotent.
+// ── Finalization ─────────────────────────────────────────────────────────────
+
+/// Run after a successful account_id_key install on the new device.
+/// Shared by BOTH the approval path and the Secret Key path:
+///   1. Publishes this device's cross-signing cert.
+///   2. Publishes fresh MLS key packages.
+///   3. Pulls any welcomes the approving device posted (approval path).
+///   4. For every group/DM the user is a member of where this device
+///      still has no local MLS state, externally joins via the stored
+///      GroupInfo. This is the critical step for the Secret Key path
+///      where no welcomes exist — but it's also safe for the approval
+///      path because it short-circuits when `has_local_group` is true.
+///
+/// Tauri-exposed wrapper around `finalize_enrollment`. Frontend invokes
+/// this after `set_pin` (or change-PIN flow) completes for an enrollment
+/// path: device approval, Secret-Key recovery, or identity reset. By
+/// that point the local DB is open and `AppState.unlock` carries the
+/// account identity, so the cert / KP / external-join work succeeds.
+///
+/// Safe to call when there's nothing to do — `ensure_*` and the
+/// external-join loop are idempotent.
 pub async fn finalize_device_enrollment(
     state: &Arc<AppState>,
     user_id: String,
@@ -902,7 +1272,7 @@ pub async fn finalize_device_enrollment(
 }
 
 async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()> {
-    // A claimed QR link (#1207) is done.
+    // The device is enrolled; a claimed QR link (#1207) has done its job.
     *state.device_link_pending.lock().await = None;
     let device_id = state
         .device_id
@@ -911,18 +1281,27 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set during finalize"))?;
 
+    // Publish this device's cross-signing cert now that account_id_key is
+    // in the keystore. No-op if already present.
     if let Err(e) = crate::commands::mls::ensure_device_cert(state, user_id, &device_id).await {
         crate::diag!("[enrollment] finalize: ensure_device_cert failed: {e}");
     }
 
+    // Publish fresh key packages so other devices can claim them for
+    // future groups.
     if let Err(e) =
         crate::commands::mls::ensure_mls_key_package(state, user_id, &device_id).await
     {
         crate::diag!("[enrollment] finalize: ensure_mls_key_package failed: {e}");
     }
 
-    // External-join every group/DM this user is in via the stored GroupInfo. The
-    // device has published its cert above, so this read can be device-signed.
+    // External-join every group/DM this user belongs to. The new device
+    // uses the stored GroupInfo to self-add via an MLS external commit —
+    // no coordination with sibling devices required.
+    // One DS read (#987), scoped by the DS to the signer's own memberships. By
+    // this point the device HAS published its cert (two steps up), so it can
+    // sign; that ordering is why this is the only enrollment read here that is
+    // not capability- or session-gated.
     let mine = crate::commands::ds_reads::conversations(state, user_id).await?;
     let candidate_ids: Vec<String> = mine.group_ids.into_iter().chain(mine.dm_ids).collect();
 
@@ -947,6 +1326,8 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     Ok(())
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -958,18 +1339,22 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+// ── Tests ────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn enrollment_wrap_roundtrip() {
+        // New device generates ephemeral keypair
         let mut rng = OsRng;
         let mut requester_priv_bytes = [0u8; 32];
         rng.fill_bytes(&mut requester_priv_bytes);
         let requester_priv = StaticSecret::from(requester_priv_bytes);
         let requester_pub = PublicKey::from(&requester_priv);
 
+        // Approver wraps account_id_key
         let mut approver_priv_bytes = [0u8; 32];
         rng.fill_bytes(&mut approver_priv_bytes);
         let approver_priv = StaticSecret::from(approver_priv_bytes);
@@ -993,6 +1378,7 @@ mod tests {
         wrapped.extend_from_slice(&ct);
         assert_eq!(wrapped.len(), WRAPPED_ACCOUNT_KEY_LEN);
 
+        // New device unwraps
         let unwrapped = unwrap_account_key(&wrapped, &requester_priv_bytes).unwrap();
         assert_eq!(unwrapped, plaintext);
     }
@@ -1027,19 +1413,28 @@ mod tests {
         wrapped.extend_from_slice(&nonce);
         wrapped.extend_from_slice(&ct);
 
+        // Attacker can't decrypt.
         assert!(unwrap_account_key(&wrapped, &attacker_priv).is_err());
     }
 
-    /// The 32 zero bytes are the canonical low-order point; `x25519-dalek` 2.x
-    /// returns the zero secret for it rather than failing.
+    // ── Non-contributory ECDH on the unwrap side ─────────────────────────────
+
+    /// The 32 zero bytes are the canonical low-order X25519 point: every private
+    /// key agrees to the all-zero shared secret with it. `x25519-dalek` 2.x does
+    /// NOT reject it — it returns the zero secret and expects the caller to
+    /// check — so before this fix the wrap key was a function of public values
+    /// alone and the Delivery Service could compute it.
     #[test]
     fn a_blob_whose_approver_pub_is_a_low_order_point_is_refused() {
         const LOW_ORDER_POINTS: [[u8; 32]; 3] = [
+            // The identity.
             [0u8; 32],
+            // Order 1 in the twist / small-order representative.
             [
                 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0,
             ],
+            // Order 8.
             [
                 224, 235, 122, 124, 59, 65, 184, 174, 22, 86, 227, 250, 241, 159, 196, 106, 218,
                 9, 141, 235, 156, 50, 177, 253, 134, 98, 5, 22, 95, 73, 184, 0,
@@ -1051,7 +1446,8 @@ mod tests {
         rng.fill_bytes(&mut requester_priv);
 
         for point in LOW_ORDER_POINTS {
-            // The server knows the wrap key too, so it can seal any seed.
+            // The server knows the wrap key too, so it can seal ANY seed it
+            // likes. Build exactly that blob.
             let victim = StaticSecret::from(requester_priv);
             let victim_pub = PublicKey::from(&victim);
             let forged_shared = victim.diffie_hellman(&PublicKey::from(point));
@@ -1074,7 +1470,8 @@ mod tests {
         }
     }
 
-    /// The check must not fire on an honest exchange.
+    /// And the check does not fire on an honest exchange — a contributory-only
+    /// rule that also rejected real approvals would break every enrollment.
     #[test]
     fn an_honest_exchange_is_contributory() {
         let mut rng = OsRng;
@@ -1096,9 +1493,16 @@ mod tests {
         assert!(constant_time_eq(b"", b""));
     }
 
-    // #793: the code must bind the ephemeral key.
+    // ── #793: the verification code must BIND the ephemeral key ──────────────
+    //
+    // The defect these pin: the code used to be a random number the new device
+    // POSTed to the server, and the approver read it back. A server that swapped
+    // `new_device_ephemeral_pub` and left the code alone produced two matching
+    // screens, a confirming user, and the account identity key wrapped to the
+    // attacker.
 
-    /// Stand-ins for the request ULID, account id and RFC3339 stamp.
+    /// The request context both ends actually have. `REQ`/`USER`/`WHEN` stand
+    /// in for the ULID, the account id and the RFC3339 stamp.
     const REQ: &str = "01J8ZQ5X7K0000000000000000";
     const USER: &str = "01J8ZQ0000000000000000USER";
     const WHEN: &str = "2026-09-18T10:11:12.131415+00:00";
@@ -1119,6 +1523,7 @@ mod tests {
 
     #[test]
     fn substituting_the_ephemeral_key_changes_the_code() {
+        // Exactly the attack in #793: the key is swapped in flight.
         let honest = [7u8; 32];
         let attacker = [8u8; 32];
         assert_ne!(
@@ -1138,9 +1543,16 @@ mod tests {
         assert_ne!(sas(&a), sas(&b));
     }
 
-    // The SAS must be per-request, not a global function of the key.
+    // ── The SAS must be per-request, not a global function of the key ────────
+    //
+    // The defect: the derivation was `Hkdf::new(None, ephemeral_pub)` under a
+    // fixed info string, so the code depended on ONE X25519 public key and
+    // nothing else. That turns the 2^40 grind into a one-time precomputation
+    // reusable against every user and every enrollment forever, rather than
+    // work an attacker has to redo inside each ten-minute TTL.
 
-    /// The same key derives different codes in different requests.
+    /// The property the fix buys: the SAME key derives DIFFERENT codes in
+    /// different requests, so no table of key→code can be built in advance.
     #[test]
     fn the_same_ephemeral_key_derives_a_different_code_in_a_different_request() {
         let key = [7u8; X25519_PUB_LEN];
@@ -1160,7 +1572,10 @@ mod tests {
         assert_ne!(base, other_time, "the code must be bound to the creation time");
     }
 
-    /// The requester's and approver's codes must agree for one request context.
+    /// The other half, and the one that breaks enrollment if it is wrong: the
+    /// requester's displayed code and the approver's re-derived code are the
+    /// same value whenever the request context is the same. This is the exact
+    /// pairing the two call sites perform.
     #[test]
     fn the_requester_and_the_approver_derive_the_same_code_for_one_request() {
         let mut rng = OsRng;
@@ -1168,7 +1583,10 @@ mod tests {
         rng.fill_bytes(&mut secret);
         let ephemeral_pub = PublicKey::from(&StaticSecret::from(secret));
 
+        // Requester: it minted request_id / created_at and knows its own user.
         let displayed = derive_verification_code(ephemeral_pub.as_bytes(), REQ, USER, WHEN);
+        // Approver: the same three strings arrive on the row it fetched, and
+        // the ephemeral pub is the one the DS stored.
         let re_derived = derive_verification_code(ephemeral_pub.as_bytes(), REQ, USER, WHEN);
 
         assert_eq!(
@@ -1178,7 +1596,10 @@ mod tests {
         assert_eq!(normalize_enrollment_sas(&displayed), displayed);
     }
 
-    /// A DS altering any context string on the row diverges the approver's code.
+    /// A Delivery Service that alters ANY of the three context strings on the
+    /// row it serves the approver makes the approver's code diverge from the
+    /// one on the new device's screen — which is the visible failure, not a
+    /// silent one.
     #[test]
     fn altering_the_stored_request_context_diverges_the_approvers_code() {
         let key = [3u8; X25519_PUB_LEN];
@@ -1196,18 +1617,24 @@ mod tests {
         }
     }
 
-    /// The salt encoding is injective across field boundaries.
+    /// The salt encoding is injective: no two different context triples can
+    /// collide, which is what a delimiter-joined salt would allow the moment a
+    /// field contained the delimiter.
     #[test]
     fn the_salt_encoding_cannot_be_confused_across_field_boundaries() {
         assert_ne!(sas_salt("ab", "c", "d"), sas_salt("a", "bc", "d"));
         assert_ne!(sas_salt("a", "bc", "d"), sas_salt("a", "b", "cd"));
         assert_ne!(sas_salt("", "a", "b"), sas_salt("a", "", "b"));
+        // And the domain tag opens every one of them.
         assert!(sas_salt("a", "b", "c").starts_with(ENROLL_SAS_SALT_DOMAIN));
     }
 
     #[test]
     fn the_code_is_wide_enough_that_grinding_is_not_cheap() {
-        // At least 40 bits; six digits would be 2^20, seconds of grinding.
+        // Width is the other half of the fix. A bound code is only as strong as it
+        // is wide: the server can grind ephemeral keypairs until one derives the
+        // victim's code. At six digits that is 2^20 — about a million keygens, or
+        // seconds. Eight characters over 32 symbols is 40 bits.
         let code = sas(&[3u8; 32]);
         assert_eq!(code.chars().count(), SAS_LEN);
         assert_eq!(SAS_LEN, 8);
@@ -1217,23 +1644,30 @@ mod tests {
         );
     }
 
-    /// #1096: the input rule is part of the security boundary.
+    /// #1096: the approver types the code, so the input rule is part of the
+    /// security boundary — a normalizer that "helpfully" mapped a lookalike
+    /// would let a mis-read code compare equal to the derived one.
     #[test]
     fn normalizing_typed_input_is_forgiving_about_form_and_strict_about_content() {
+        // Form: case, and the separators a human adds reading a code aloud.
         assert_eq!(normalize_enrollment_sas("h7k2pq3m"), "H7K2PQ3M");
         assert_eq!(normalize_enrollment_sas("H7K2 PQ3M"), "H7K2PQ3M");
         assert_eq!(normalize_enrollment_sas(" h7k2-pq3m\n"), "H7K2PQ3M");
 
+        // Content: an excluded glyph is dropped, NOT mapped to its lookalike.
         assert_eq!(normalize_enrollment_sas("O0"), "0");
         assert_eq!(normalize_enrollment_sas("I1"), "1");
         assert_eq!(normalize_enrollment_sas("L1"), "1");
         assert_eq!(normalize_enrollment_sas("UV"), "V");
         assert_eq!(normalize_enrollment_sas("oilu"), "");
 
+        // Bounded, and a partial code stays partial so the UI stays gated.
         assert_eq!(normalize_enrollment_sas("H7K2PQ3MEXTRA").len(), SAS_LEN);
         assert!(normalize_enrollment_sas("H7K").len() < SAS_LEN);
     }
 
+    /// The exported constants must describe the codes this module actually
+    /// derives, or every legitimate code would be rejected at the input.
     #[test]
     fn the_exported_input_rule_accepts_every_derived_code() {
         assert_eq!(ENROLLMENT_SAS_LEN, SAS_LEN);
@@ -1242,6 +1676,7 @@ mod tests {
             &SAS_ALPHABET[..],
             "the alphabet a UI validates against must be the one codes are built from"
         );
+        // A derived code survives normalization unchanged, for many keys.
         for seed in 0u8..32 {
             let code = sas(&[seed; X25519_PUB_LEN]);
             assert_eq!(normalize_enrollment_sas(&code), code);
@@ -1250,8 +1685,8 @@ mod tests {
 
     #[test]
     fn the_code_only_uses_unambiguous_characters() {
-        // I, L, O and U are excluded so reading the code aloud can't manufacture a
-        // false match or mismatch.
+        // I, L, O and U are excluded so a user reading digits aloud cannot
+        // manufacture a false mismatch (or a false match).
         for seed in 0u8..64 {
             for c in sas(&[seed; 32]).chars() {
                 assert!(SAS_ALPHABET.contains(&(c as u8)), "unexpected character {c}");
@@ -1259,6 +1694,8 @@ mod tests {
             }
         }
     }
+
+    // ── Transcript binding on the wrap key ───────────────────────────────────
 
     #[test]
     fn the_wrap_key_is_bound_to_both_public_keys() {
@@ -1268,6 +1705,7 @@ mod tests {
         let base = derive_wrap_key(&shared, &req, &app);
         assert_ne!(base, derive_wrap_key(&shared, &[3u8; 32], &app));
         assert_ne!(base, derive_wrap_key(&shared, &req, &[4u8; 32]));
+        // Order matters: swapping the roles must not derive the same key.
         assert_ne!(base, derive_wrap_key(&shared, &app, &req));
     }
 
@@ -1317,7 +1755,7 @@ mod tests {
         let app_priv = StaticSecret::from(app_bytes);
         let app_pub = PublicKey::from(&app_priv);
 
-        // The approver wrapped to the attacker's key (#793).
+        // The approver wrapped to the ATTACKER's key (the #793 scenario).
         let shared = app_priv.diffie_hellman(&attacker_pub);
         let wrap_key =
             derive_wrap_key(shared.as_bytes(), attacker_pub.as_bytes(), app_pub.as_bytes());
@@ -1328,6 +1766,8 @@ mod tests {
         blob.extend_from_slice(&nonce);
         blob.extend_from_slice(&ct);
 
+        // The real new device cannot open it — and, with the code now bound to the
+        // key, would never have been approved in the first place.
         assert!(unwrap_account_key(&blob, &victim_bytes).is_err());
         let _ = victim_pub;
     }

@@ -15,7 +15,7 @@
  *   pnpm --filter @pollis/e2e playwright email-change
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const NEW_EMAIL = "alice-new@example.com";

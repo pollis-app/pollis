@@ -54,6 +54,6 @@ pub async fn finalize_device_enrollment(state: State<'_, Arc<AppState>>, user_id
 }
 
 #[tauri::command]
-pub async fn list_security_events(state: State<'_, Arc<AppState>>, user_id: String, limit: Option<i64>) -> Result<Vec<SecurityEvent>> {
-    pollis_core::commands::device_enrollment::list_security_events(&state, user_id, limit).await
+pub async fn list_security_events(state: State<'_, Arc<AppState>>, user_id: String, limit: Option<i64>, before: Option<SecurityEventCursor>, kinds: Option<Vec<String>>) -> Result<SecurityEventsPage> {
+    pollis_core::commands::device_enrollment::list_security_events(&state, user_id, limit, before, kinds).await
 }

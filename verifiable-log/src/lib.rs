@@ -14,6 +14,7 @@ pub mod log;
 pub mod merkle;
 pub mod monitor;
 pub mod proof;
+pub mod reset;
 pub mod sth;
 
 pub use bundle::{Bundle, ConsistencyCheck, InclusionCheck, PublicKeyEntry};
@@ -27,9 +28,13 @@ pub use log::{Entry, TenantInvariant, UniqueDataInvariant, VerifiableLog};
 pub use proof::{
     verify_consistency_proof, verify_inclusion_proof, ConsistencyProof, InclusionProof,
 };
+pub use reset::{
+    HeadClass, ListedHead, ResetBody, ResetStatement, RetiredTree, SuccessorTree, RESET_DOMAIN,
+    RESET_FORMAT_VERSION,
+};
 pub use sth::{
-    is_equivocation, key_id_for, signing_key_from_seed_hex, sth_context_for_tree,
-    verifying_key_from_hex, SigningKey, Sth, VerifyingKey, KEY_ID_HEX_LEN,
+    is_equivocation, key_id_for, key_set_authority_for, signing_key_from_seed_hex,
+    sth_context_for_tree, verifying_key_from_hex, SigningKey, Sth, VerifyingKey, KEY_ID_HEX_LEN,
     STH_CONTEXTS, STH_CONTEXT_ACCOUNT_KEYS, STH_CONTEXT_BINARIES, STH_CONTEXT_COMMIT_LOG,
-    STH_PUB_LEN, STH_SIG_LEN,
+    STH_CONTEXT_COMMIT_LOG_2, STH_PUB_LEN, STH_SIG_LEN,
 };

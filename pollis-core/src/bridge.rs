@@ -256,6 +256,13 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::mls::poll_mls_welcomes(&state()?, user_id).await?;
             ok(())
         }
+        // #1571: mobile's half of desktop's sweep backstop — re-add a device
+        // missing from a conversation's tree (or evict a stale leaf). Run after
+        // the app's landing / resume ingest pass.
+        "reconcile_backstop_all" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(crate::commands::mls::reconcile_backstop_all(&state()?, &user_id).await?)
+        }
         "logout" => {
             let delete: bool = arg_opt(&args, "deleteData")?.unwrap_or(false);
             auth::logout(&state()?, delete).await?;
@@ -394,7 +401,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "list_security_events" => {
             let user_id: String = arg(&args, "userId")?;
             let limit: Option<i64> = arg_opt(&args, "limit")?;
-            ok(device_enrollment::list_security_events(&state()?, user_id, limit).await?)
+            let before: Option<device_enrollment::SecurityEventCursor> =
+                arg_opt(&args, "before")?;
+            let kinds: Option<Vec<String>> = arg_opt(&args, "kinds")?;
+            ok(device_enrollment::list_security_events(&state()?, user_id, limit, before, kinds)
+                .await?)
         }
         "delete_account" => {
             let user_id: String = arg(&args, "userId")?;

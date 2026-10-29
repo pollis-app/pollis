@@ -139,6 +139,11 @@ pub(super) async fn post_resealing<B: ClientRequest>(
         crate::commands::mls::rendezvous::Point::EnvelopeBeforePost,
     )
     .await;
+    // Test-harness only: the process dies with the envelope sealed — the
+    // sender's ratchet already past it — and not posted (#1524).
+    if super::send::test_hooks::take(super::send::test_hooks::Crash::AfterSeal) {
+        return Err(super::send::test_hooks::simulated_crash());
+    }
 
     for attempt in 1..=MAX_RESEALS {
         match crate::commands::mls::ds_post_envelope(state, &build(&sealed)).await? {

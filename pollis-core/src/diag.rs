@@ -55,7 +55,39 @@ pub fn log_dir(data_dir: &Path) -> PathBuf {
 pub fn emit(args: std::fmt::Arguments<'_>) {
     let line = redact(&args.to_string());
     eprintln!("{line}");
+    #[cfg(feature = "test-harness")]
+    loss_tap::observe(&line);
     write_line(&mut lock(), &line);
+}
+
+/// Test-harness only (#1524): every `[loss]` line this process has written
+/// since the last [`loss_tap::take`], so an integration suite can fail a run
+/// that lost a message it did not set out to lose. Compiled out of every
+/// shipping build.
+#[cfg(feature = "test-harness")]
+pub mod loss_tap {
+    use std::sync::Mutex;
+
+    static LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// The accepted loss (1) in the root `CLAUDE.md`: envelopes sealed before
+    /// this device joined the tree. Logged under `[loss]` so a field log shows
+    /// the cursor passed them, but not a loss this device could have avoided.
+    const PRE_JOIN: &str = "sealed before this device joined";
+
+    pub(super) fn observe(line: &str) {
+        if line.starts_with("[loss]") && !line.contains(PRE_JOIN) {
+            LINES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(line.to_string());
+        }
+    }
+
+    /// Drain the recorded lines.
+    pub fn take() -> Vec<String> {
+        std::mem::take(&mut *LINES.lock().unwrap_or_else(|e| e.into_inner()))
+    }
 }
 
 fn write_line(guard: &mut Option<Sink>, line: &str) {

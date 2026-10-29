@@ -6,7 +6,7 @@
 //! that the two cases this device was never entitled to read (sent before it
 //! joined, and its own control frames) do not.
 
-use crate::harness::{enroll_second_device, wipe, TestClient};
+use crate::harness::{enroll_second_device, expect_losses, wipe, TestClient};
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
 
@@ -47,6 +47,7 @@ async fn add_member(
 #[serial]
 async fn a_stranded_message_shows_as_one_placeholder() {
     wipe().await;
+    expect_losses();
 
     let mut alice = TestClient::new().await;
     alice.sign_up("alice@test.local").await;
@@ -111,6 +112,7 @@ async fn a_stranded_message_shows_as_one_placeholder() {
 #[serial]
 async fn a_message_that_will_not_open_shows_as_a_placeholder() {
     wipe().await;
+    expect_losses();
 
     let mut alice = TestClient::new().await;
     alice.sign_up("alice@test.local").await;

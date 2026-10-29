@@ -44,7 +44,8 @@ for `list_peer_verifications`). Both clients type it by hand — desktop in
 `mobile/hooks/queries/useSafety.ts` — so keep both in step with the Rust
 structs. Mobile once drifted (`combined` / `verification`): the profile showed
 a blank number and Mark verified never appeared to take (#1278). The Maestro
-`report` flow now asserts the 12 blocks and the verify toggle.
+`dm-safety` flow asserts the 12 blocks and the verify toggle (it was `report`
+until #1563 moved the number off the profile).
 
 ### TOFU pin store
 
@@ -103,9 +104,24 @@ cleared verified flag is what persists as evidence the swap happened.
 
 ## Verification UX
 
-- Profile page (`/user/$userId`) — safety number display + Verify button.
-  Reachable from DMs (avatar click), from group member lists (row click — wired
-  in `frontend/src/pages/Members.tsx`), and from channel author labels.
+- **In the DM, never on a profile (#1563).** The number belongs to a pair —
+  your key with theirs — so it lives where Signal and WhatsApp keep it: inside
+  the conversation, titled "You & <name>", with the digits, a QR of the digits
+  and the Verify toggle. A group DM offers one per other member, never one for
+  "the conversation". The profile shows none.
+  - Desktop: the DM's right panel lists "Verify safety number" (1:1) or one
+    "You & @name" row per peer (group DM) under the members
+    (`MembersPanel.tsx`); a row sets `?safety=<peerUserId>` and the panel
+    renders `SafetyNumberPanel.tsx` (panel kind `safety`, `useRightPanel`).
+    Test ids `safety-number`, `safety-number-digits`, `safety-status`,
+    `safety-verify-toggle`; Playwright `e2e/safety-number.spec.ts`.
+  - Mobile: the same rows (`components/direct/SafetyNumberRows.tsx`) on DM
+    info (`dm/info`) and on the members screen the chat header opens
+    (`conversation/info`), pushing `dm/safety` (a pane page on iPad,
+    `PANE_PATHS`). Test ids `text-safety-number`, `btn-verify`; Maestro
+    `flows/dm-safety.yaml`.
+  - The QR encodes the 60 digits, not `qr_payload`: two ML-DSA-44 keys in hex
+    are ~5 KB, past what a QR code can hold.
 - Shield-check (verified) / shield-alert (key changed) badges render in the
   same component shape across surfaces:
   - DM sidebar (`Sidebar.tsx`)
@@ -181,6 +197,16 @@ tree can never stand in for another:
   *within* a window and a member (who knows the real `conversation_id`) verifies
   across windows via `pollis-verify group`. This lands at the next full republish
   (frozen leaf → the #672/#699 key-rotation ceremony). See `docs/transparency.md`.
+  **Since #1579 the live commit log is `commit-log-2`** (`/v1/commit-log-2/...`,
+  context `pollis-verifiable-log:sth:v2:commit-log-2`), built only by appending to
+  persisted leaves (`internal/commit-log-2-leaves.json`, #1580). The first tree
+  (`/v1/...`, `sth:v2`) is retired and frozen after it signed forked heads (56, 113,
+  129) from the pruned DS table; `/v1/commit-log-reset.json` is the signed reset
+  statement (`verifiable-log/src/reset.rs`, domain `pollis-verifiable-log:reset:v1`)
+  listing its consistent chain to 137, the forks and older superseded heads.
+  `remote` reports the retired tree as RETIRED and fails on anything unlisted; a
+  key-set signer for the commit log also counts for `commit-log-2`
+  (`key_set_authority_for`).
 - **Account-key tenant** (`pollis-verifiable-log:sth:v2:account-keys`) — one leaf
   per account identity-key version, sourced from the append-only
   `account_key_log` table (dual-written with `users.account_id_pub` at signup and
@@ -363,7 +389,7 @@ never block a send, the same policy as the key-change banner above.
 `components/Security/AccountKeyAuditLine.tsx` — a single advisory status line
 (no modal, no blocker), warning-toned only on `alarm` (amber, where it appends
 the report's reason). The **peer** audit shows on the user profile page
-(`pages/UserProfile.tsx`, `/user/$userId`) beside the safety number; the
+(`pages/UserProfile.tsx`, `/user/$userId`); the
 **self** audit shows in its own "Account key" section on the security page
 (`pages/SecurityPage.tsx`).
 
@@ -382,8 +408,8 @@ is turned into verifying keys in exactly one place —
 
 | path | entry point | context |
 |---|---|---|
-| whole-log audit | `remote::verify_remote` | default + account + binaries |
-| per-group | `group::verify_group[_in_bundle]` | default (`sth:v2`) |
+| whole-log audit | `remote::verify_remote` | commit-log-2 + retired default (`sth:v2`) + account + binaries |
+| per-group | `group::verify_group[_in_bundle_with_context]` | commit-log-2 when served, else default (`sth:v2`) |
 | per-account | `account::verify_account[_in_bundle]` | account |
 | per-release | `release::verify_release[_in_bundle]` | binaries |
 | offline CLI | `monitor::verify_bundle` (`monitor verify --tree …`) | whichever `--tree` names |
@@ -421,6 +447,38 @@ Rules that keep it honest:
   no auto-detection (the bundle does not name its own tree, and guessing would
   let the log pick which question it is asked). `--now-ms` pins the clock the
   overlap window is measured against, so a verdict is reproducible.
+
+### Root-signed key set at runtime (#754, #1454)
+
+The offline root (`PINNED_LOG_ROOT_KEYS` in `transparency.rs`, mirrored in
+`verifiable-log-serve/src/pinned.rs`; a pollis-core test and
+`scripts/check-pinned-log-key.py` hold the two copies identical) signs
+`/v1/key-set.json`. Both the client and `pollis-verify` use the same steps for
+every tree, implemented once in `verifiable_log_serve::pinned`:
+
+1. Fetch `/v1/key-set.json` (`key_set_trust_via`).
+2. Verify it under a live pinned root, then take the signers it authorises for
+   this tree's STH context right now. The result is a `KeySetTrust { signers, alarm }`.
+3. Trust those signers **in addition to** the compiled pins, both in the client's
+   served-key check (`check_pin_trusting_at`) and at the verifier's fetch boundary
+   (`require_pinned_with`, via `verify_{account,release,group}_via_trusting`). The
+   client resolves `KeySetTrust` once and hands the same value to both checks.
+
+Failure handling:
+
+- **Fetch fails or no set is published** (404, network): `KeySetTrust::default()`,
+  so compiled pins only and no alarm. Old and self-hosted logs keep working.
+- **A set is served but cannot be attributed to the root** (forged, malformed,
+  expired, or naming no signer for this tree): compiled pins only, plus an alarm.
+  In the app, the self and peer audits report `Alarm` and verify-own-build reports
+  `Mismatch`. In the verifier, the report fails with the key-set violation first.
+  Never a silent accept.
+
+The key set cannot **revoke** a compiled pin. Retiring a compiled-in signer still
+needs a release. Tests: `key_set_runtime_tests` (pollis-core),
+`pinned::tests` and `tests/key_set.rs` (verifiable-log-serve, an end-to-end run
+over HTTP with a log signed by a key that only the key set names). Runbook:
+`docs/signing-key-compromise-runbook.md`.
 
 ### Auditing infrastructure
 

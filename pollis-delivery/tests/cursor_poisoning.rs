@@ -47,7 +47,9 @@ const POISON: &str = "9999-12-31T23:59:59.000000000+00:00";
 
 /// A staleness window wide enough that nothing here is excluded for dormancy —
 /// these tests are about the cursor value, not device liveness (#720).
-const STALE: &str = "-6 months";
+/// The DS's own default (12 months, #1486), so the suite runs the window an
+/// unconfigured deployment gets.
+const STALE: &str = pollis_delivery::messages::DEFAULT_WATERMARK_STALE_MODIFIER;
 
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("db.db").await;

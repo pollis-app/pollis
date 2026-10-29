@@ -19,6 +19,28 @@ encodings and invariants, and the bundle builder and signer.
    for the `mls-commit-log` tenant.
 3. Signs STHs with an ML-DSA-44 key and writes the bundle as JSON.
 
+That is the local and test path. In production the DS prunes `mls_commit_log`
+(#539), so the table is not the log of record (#1579): CI runs `append-commit-log`
+to append the rows above the last persisted `seq` to the persisted leaves
+(`internal/commit-log-2-leaves.json` in R2), then `build --commit-leaves
+--commit-tree commit-log-2` to sign over those leaves under the `commit-log-2` STH
+context. `append-commit-log` fails closed on a missing, shrunk or rewritten leaves
+file, on a file that does not reproduce `--published-sth`, and on a live row below
+the head that was never logged or has changed. It runs both invariant passes over
+the whole appended stream. See [`src/commit_leaves.rs`](src/commit_leaves.rs) and
+`docs/transparency.md`.
+
+`--commit-tree` defaults to `commit-log`, the retired first tree's context, which
+local and test logs still use. `commit-log-2` requires `--commit-leaves`.
+
+`commit-log-reset` mints the signed reset statement that retires the first
+commit-log tree (#1579). It reads the committed facts
+(`commit-log-retirement.json`), the served retired heads (`--retired-sths <dir>`)
+and the successor's persisted leaves, refuses unless every listed head is served
+with its root and (for chain and fork heads) a valid signature, and signs the
+statement under `pollis-verifiable-log:reset:v1`. See
+[`src/commit_log_reset.rs`](src/commit_log_reset.rs).
+
 ## Commit leaf encoding
 
 `Entry.data` for the `mls-commit-log` tenant is compact JSON with fields in this
@@ -103,6 +125,17 @@ TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... VLOG_SIGNING_KEY=... \
   cargo run -p verifiable-log-builder --bin builder -- \
   build --out bundle.json --account-out account-bundle.json --timestamp 1700000000000
 
+# Append the new commit-log rows to the persisted leaves, then sign over them
+# (what CI does, #1579). --seed-from-live / --seed-from <entries.json> start a
+# leaves file that does not exist yet; without one, a missing file is an error.
+cargo run -p verifiable-log-builder --bin builder -- \
+  append-commit-log --log-db ./commits.db --leaves leaves.json --out leaves.json \
+  --published-sth latest.json
+VLOG_SIGNING_KEY=<32-byte hex> \
+  cargo run -p verifiable-log-builder --bin builder -- \
+  build --db ./commits.db --commit-leaves leaves.json --out bundle.json \
+  --timestamp 1700000000000
+
 # Build the released-binaries tree from a JSON array of BinaryRecords.
 VLOG_SIGNING_KEY=<32-byte hex> \
   cargo run -p verifiable-log-builder --bin builder -- \
@@ -121,6 +154,8 @@ cargo run -p verifiable-log --bin monitor -- verify --tree binaries binaries-bun
   `TURSO_DATABASE_URL`.
 - `--log-db`: database holding `mls_commit_log`; falls back to `LOG_DB_URL`, then
   to `--db`. Uses `LOG_DB_AUTH_TOKEN`, then `TURSO_AUTH_TOKEN`.
+- `--commit-leaves`: build the commit-log tree from a persisted leaves file
+  instead of `mls_commit_log` (production, #1579).
 - `--account-out`: also write the account-key bundle, signed under
   `pollis-verifiable-log:sth:v2:account-keys`. `--account-timestamp` sets its STH
   timestamp separately (default: `--timestamp`), so an unchanged tree can be

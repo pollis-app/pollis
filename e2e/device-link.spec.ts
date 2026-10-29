@@ -10,7 +10,7 @@
  * screen here is reachable.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 

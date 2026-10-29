@@ -55,15 +55,15 @@ specifies **no TTL**.
 
 **Device-staleness bound (#720).** Since #720 the floor is bounded by member watermarks **and** by device
 *liveness*: a member device that has not **reported** a watermark within a configured window
-(`POLLIS_DS_WATERMARK_STALE_MONTHS`, **set to 12 months** in both deployed environments; the code
-default when unset is 6) stops pinning retention and is excluded from
+(`POLLIS_DS_WATERMARK_STALE_MONTHS`, **12 months** — the code default since #1486, and set explicitly in
+both deployed environments) stops pinning retention and is excluded from
 the floor, mirroring how a revoked device is excluded (#685). This is **not** a TTL and does not reopen
 the #688 bug: the bound is on the device's own last **report** (`conversation_watermark.reported_at`, a
 server-stamped wall-clock time), never on the message's age. A device that reported yesterday still pins
 every envelope below its cursor, however old. Coming back and reporting makes the device live again
 immediately (reversible; the device is not revoked or removed from any roster).
 
-**Why 12 and not the code default of 6** (decided 2026-08-04). This window is the *only* thing
+**Why 12 and not the original 6** (decided 2026-08-04; the code default followed in #1486). This window is the *only* thing
 standing between a returning user and missing mail, so its length is the blast radius of the third
 accepted loss below. The product principle in `CLAUDE.md` — *"given 'simpler but drops messages' vs
 'more complex but delivers,' pick the one that delivers"* — points at the longer window, and three
@@ -90,8 +90,8 @@ liveness.** A member who joins a busy conversation and keeps at least one device
 conversation's envelopes indefinitely; a member whose every device goes silent past the window stops
 pinning. The cost is a **third accepted message loss** — beyond "messages sent before you joined" and "a
 new device starts empty" — a device dormant past the window that later returns may find gaps. This is a
-deliberate storage/correctness trade. **N is decided: 12 months** (2026-08-04, rationale above), set
-explicitly in both deployed environments rather than left on the code default, and disclosed to users on
+deliberate storage/correctness trade. **N is decided: 12 months** (2026-08-04, rationale above), the code
+default (#1486) and also set explicitly in both deployed environments, and disclosed to users on
 the Learn page rather than only in this document.
 
 **Growth visibility (#720 checkbox 1).** The GC sweep computes an identity-free `message_envelope` growth
@@ -374,6 +374,35 @@ Three trees are published, all signed under one key with distinct context string
 
 The Signed Tree Head is `{tree_size, root_hash, timestamp, signature}` — ML-DSA-44 over
 `context || tree_size || root_hash || timestamp`.
+
+**The log of record is the persisted leaves, not the DS table (#1579).** The Delivery Service prunes
+`mls_commit_log` below its retention floor (§1, #539), so that table is only a window onto the commit log.
+The leaves the publisher has published are kept, append-only, in the transparency bucket at
+`internal/commit-log-2-leaves.json` (with a copy per size under `internal/commit-log-2-leaves/<size>.json`),
+the same way `internal/binary-records.json` holds the binaries tree. Each publish appends only the rows
+above the last persisted `seq`, so pruning a row never changes or removes a published leaf, and a missing,
+shrunk or rewritten leaves file stops the commit-log publish instead of rebuilding the tree. The two
+retention rules therefore do not conflict: the DS keeps a commit's bytes only as long as members need them,
+while the ledger keeps the commit's public leaf (pseudonyms, epoch, `seq`, `sha256(commit_data)`) forever.
+The persisted file holds exactly the pseudonymous leaves `/v1/commit-log-2/entries.json` serves and no
+real `conversation_id` or `sender_id`, so keeping it adds no retention beyond what the public ledger
+already holds.
+
+**The commit-log reset (#1579).** Before #1580 the tree was rebuilt from the live table on every publish.
+Once the DS began pruning on 28 October 2026, that put different leaves at already-signed positions, and
+three heads were signed and served that do not extend the log's consistent chain, which ends at size 137
+(signed 2026-10-28 16:43 UTC): sizes 56 and 113 (2026-10-28 20:24 UTC) and 129 (2026-10-29 05:34 UTC).
+The leaf hashes of all 137 leaves on that chain survive, so every head on it can still be checked, but
+the leaf data for 46 of them was pruned before any copy was kept and cannot be recovered. That is a loss
+of public ledger content, not of anything a user holds: the leaves carry only pseudonyms, epochs, `seq`
+and commit hashes, and no app checks the commit-log tree, so no user-facing check was affected. The first
+tree was therefore retired rather than repaired: every file of it stays served, frozen, under `/v1/`, a
+reset statement signed by the log key at `/v1/commit-log-reset.json` lists its consistent chain, the three
+forked heads and six older superseded heads, and the commit log continues as a new tree,
+`commit-log-2`, under `/v1/commit-log-2/` with its own signing context, append-only from its first leaf.
+The ledger's permanence holds for both trees: nothing of the retired tree was deleted, and the new tree
+is only ever appended to. Full account and how to verify both: `docs/transparency.md` → "Commit-log reset
+(#1579)".
 
 **Former exposure and the #701 mitigation, stated plainly:** the commit-log leaf *used to* publish a
 **stable `conversation_id` and a real `sender_id` in the clear**, so anyone could build a longitudinal

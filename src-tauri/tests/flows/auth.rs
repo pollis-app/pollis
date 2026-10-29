@@ -639,14 +639,17 @@ async fn revoking_a_device_records_a_security_event() {
     .expect("insert sibling user_device row");
 
     let revocations = || async {
-        let events: Vec<serde_json::Value> = invoke(
+        let page: serde_json::Value = invoke(
             &alice.webview,
             "list_security_events",
             json!({ "userId": user_id, "limit": 100 }),
         )
         .await
         .expect("list_security_events must be a reachable command");
-        events
+        page["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
             .into_iter()
             .filter(|e| e["kind"] == "device_revoked")
             .collect::<Vec<_>>()

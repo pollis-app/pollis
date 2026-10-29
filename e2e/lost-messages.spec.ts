@@ -18,7 +18,10 @@
  *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js lost-messages
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, expectLosses, type Page } from "./lib/zero-loss";
+
+// Every test here renders placeholders on purpose (#1524's zero-loss check).
+test.beforeEach(() => expectLosses());
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const BOB = { id: "u-bob", username: "bob" };

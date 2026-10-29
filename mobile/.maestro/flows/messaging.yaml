@@ -133,3 +133,5 @@ tags:
     visible: ".*maestro line one\\nmaestro line two[\\s\\S]*"
     timeout: 15000
 - takeScreenshot: messaging-07-multiline
+# Zero message loss (#1524).
+- runFlow: ../subflows/assert-no-loss.yaml

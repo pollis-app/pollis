@@ -106,8 +106,10 @@ function Direct() {
         variant="large"
         title={t("tabs.direct")}
         actions={
+          // Opens the new-message page, free to undo: touch-down (#1529).
           <IconButton
             testID="btn-new-dm"
+            pressIn
             filled
             accessibilityLabel={t("direct.newMessage")}
             icon={<Icon.pencil size={20} color={semantic.text} />}

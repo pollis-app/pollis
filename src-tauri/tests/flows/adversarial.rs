@@ -17,7 +17,8 @@
 
 use crate::harness::{
     arm_ds_fault, corrupt_commit_row, drop_commit_row, ds_fault_armed, ds_head_epoch,
-    ds_prune_commit_log, force_high_water_for_all_members, prune_commits_below, steal_leaf, wipe,
+    ds_prune_commit_log, expect_losses, force_high_water_for_all_members, prune_commits_below,
+    steal_leaf, wipe,
     writable_remote, DsFault, TestClient,
 };
 use serial_test::serial;
@@ -858,6 +859,9 @@ async fn epoch_gap_recovers_via_external_join() {
 #[serial]
 async fn commit_log_prune_recovers_via_external_join() {
     wipe().await;
+    // The pruned-gap message is lost on bob on purpose (a Tier-2 prune past a
+    // current member), and asserted on below.
+    expect_losses();
 
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;

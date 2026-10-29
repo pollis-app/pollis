@@ -1,5 +1,13 @@
-// Safety numbers are only ever peer-vs-self pairs, never the user's own.
-// Verification state is device-local.
+// Safety-number hooks — used by the DM's "You & <name>" screen
+// (app/dm/safety.tsx, #1563) to show the 60-digit fingerprint of the pair and
+// a "Verified" toggle. Mirrors the
+// desktop verification pattern: we never display the *own* user's
+// safety number, only peer-vs-self pairs.
+//
+// `get_safety_number` returns the 60-digit safety number and the current
+// verification status from the local pin store. Marking a peer verified
+// writes a row to the local `contact_verification` table; the
+// listing hook surfaces those for the contacts list / banners elsewhere.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
@@ -10,6 +18,7 @@ import { useObserver } from "mobx-react-lite";
 export interface SafetyNumberInfo {
   /** 60 decimal digits, grouped into 5-digit blocks for display. */
   safety_number: string;
+  /** Verification status pinned locally. */
   status: "unverified" | "verified" | "changed";
   peer_identity_version: number;
   /** Both pubkeys joined canonically; what a QR code would encode. */
@@ -51,6 +60,7 @@ export function useSetContactVerified() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: {
       success: (vars: { verified: boolean }) => (vars.verified ? "success" : "toggle"),
     } },

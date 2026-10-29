@@ -8,6 +8,7 @@ import { EmojiText } from "../Emoji/EmojiText";
 import { ResultThumbnails } from "./ResultThumbnails";
 import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
+import { PressButton } from "../ui/PressButton";
 
 /** `/learn` entry on why search is on-device: the server holds ciphertext and can't search. */
 const LEARN_ON_DEVICE_SEARCH_URL = "https://pollis.com/learn#on-device-search";
@@ -182,6 +183,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
           <div className="flex items-center gap-1">
             <Button
               data-testid="search-sort-recent"
+              activateOn="press"
               variant={activeSort === "recent" ? "secondary" : "ghost"}
               size="xs"
               onClick={() => setSort("recent")}
@@ -190,6 +192,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
             </Button>
             <Button
               data-testid="search-sort-relevant"
+              activateOn="press"
               variant={activeSort === "relevant" ? "secondary" : "ghost"}
               size="xs"
               onClick={() => setSort("relevant")}
@@ -206,7 +209,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
             <ul>
               {results.map((result) => (
                 <li key={result.message_id}>
-                  <button
+                  <PressButton
                     data-testid="search-result-item"
                     data-conversation-kind={result.conversation_kind ?? "unknown"}
                     onClick={() => onOpenResult(result)}
@@ -238,7 +241,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     </div>
 
                     <ResultThumbnails result={result} />
-                  </button>
+                  </PressButton>
                 </li>
               ))}
             </ul>
@@ -246,6 +249,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
               <div className="p-4 flex justify-center">
                 <Button
                   data-testid="search-load-more"
+                  activateOn="press"
                   variant="ghost"
                   size="sm"
                   onClick={() => void fetchNextPage()}

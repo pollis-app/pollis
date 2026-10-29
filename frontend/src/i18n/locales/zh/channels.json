@@ -133,7 +133,8 @@
     "empty": "没有待处理的邀请。",
     "invitedBy": "由 {{name}} 邀请",
     "accept": "接受",
-    "decline": "拒绝"
+    "decline": "拒绝",
+    "acceptFailed": "无法接受邀请，请重试。"
   },
   "inviteMember": {
     "pageTitle": "邀请成员 :: {{group}}",

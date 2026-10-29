@@ -246,8 +246,10 @@ function VaultScreen() {
           paddingTop: space.xs,
         }}
       >
+        {/* A view switch is free to undo: touch-down (#1529). */}
         <Chip
           testID="chip-vault-view-chat"
+          pressIn
           selected={view === "chat"}
           onPress={() => setView("chat")}
           leading={
@@ -261,6 +263,7 @@ function VaultScreen() {
         </Chip>
         <Chip
           testID="chip-vault-view-media"
+          pressIn
           selected={view === "media"}
           onPress={() => setView("media")}
           leading={
