@@ -133,6 +133,11 @@ pub struct OutgoingAttachment {
     pub blurhash: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Marked sensitive in the composer (#1568): receivers draw it blurred
+    /// until revealed. Travels only inside the encrypted envelope (`sens`);
+    /// absent from older renderers, which is `false`.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 /// What the outbox knows about one stored attachment without its bytes: all a
@@ -146,6 +151,7 @@ pub(super) struct AttMeta {
     pub blurhash: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub sensitive: bool,
 }
 
 /// The most one message may carry through the outbox, all attachments
@@ -200,6 +206,7 @@ async fn plan_attachments(attachments: &[OutgoingAttachment]) -> Result<Vec<AttM
             blurhash: att.blurhash.clone(),
             width: att.width,
             height: att.height,
+            sensitive: att.sensitive,
         });
     }
     Ok(metas)
@@ -212,8 +219,8 @@ fn no_staged(id: &str) -> Error {
 }
 
 const INSERT_ATTACHMENT_SQL: &str = "INSERT OR REPLACE INTO outbox_attachment
-       (message_id, position, filename, content_type, data, blurhash, width, height)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+       (message_id, position, filename, content_type, data, blurhash, width, height, sensitive)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
 pub(super) fn store_attachment_on(
     conn: &rusqlite::Connection,
@@ -233,6 +240,7 @@ pub(super) fn store_attachment_on(
             meta.blurhash,
             meta.width,
             meta.height,
+            meta.sensitive,
         ],
     )?;
     Ok(())
@@ -298,6 +306,11 @@ struct AttWire<'a> {
     w: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     h: Option<u32>,
+    /// Sensitive media (#1568). Omitted unless set, so an unmarked attachment
+    /// is byte-identical to one from before the flag existed, and an older
+    /// client — which ignores unknown keys — draws a marked one unblurred.
+    #[serde(skip_serializing_if = "is_false")]
+    sens: bool,
 }
 
 /// An entry the outbox has not uploaded yet: what to draw while it waits. No
@@ -313,6 +326,11 @@ struct PendingAttWire<'a> {
     w: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     h: Option<u32>,
+    /// Sensitive media (#1568). Omitted unless set, so an unmarked attachment
+    /// is byte-identical to one from before the flag existed, and an older
+    /// client — which ignores unknown keys — draws a marked one unblurred.
+    #[serde(skip_serializing_if = "is_false")]
+    sens: bool,
 }
 
 #[derive(Serialize)]
@@ -322,6 +340,10 @@ struct Envelope<'a, A> {
     /// Omitted, not `""`, when there is no caption — as the renderers do.
     #[serde(rename = "_txt", skip_serializing_if = "Option::is_none")]
     txt: Option<&'a str>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn caption(text: &str) -> Option<&str> {
@@ -344,6 +366,7 @@ fn provisional_content(text: &str, metas: &[AttMeta]) -> String {
                 bh: a.blurhash.as_deref(),
                 w: a.width,
                 h: a.height,
+                sens: a.sensitive,
             })
             .collect(),
         txt: caption(text),
@@ -373,6 +396,7 @@ fn final_content(
                 bh: r.blurhash.as_deref().or(a.blurhash.as_deref()),
                 w: r.width.or(a.width),
                 h: r.height.or(a.height),
+                sens: a.sensitive,
             })
             .collect(),
         txt: caption(text),
@@ -391,7 +415,7 @@ fn caption_of(content: &str) -> String {
 /// The stored attachments of `id`, in order, without their bytes.
 pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Result<Vec<AttMeta>> {
     let mut stmt = conn.prepare(
-        "SELECT filename, content_type, length(data), blurhash, width, height
+        "SELECT filename, content_type, length(data), blurhash, width, height, sensitive
          FROM outbox_attachment WHERE message_id = ?1 ORDER BY position",
     )?;
     let rows = stmt
@@ -403,6 +427,7 @@ pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Resu
                 blurhash: row.get(3)?,
                 width: row.get(4)?,
                 height: row.get(5)?,
+                sensitive: row.get(6)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1160,6 +1185,7 @@ mod tests {
             blurhash: Some("LKO2".to_string()),
             width: Some(4),
             height: Some(3),
+            sensitive: false,
         }
     }
 
@@ -1247,6 +1273,87 @@ mod tests {
             final_content("", &atts, &uploaded),
             r#"{"_att":[{"key":"media/abc.enc","url":"https://r2/media/abc.enc","name":"clip.mp4","ct":"video/mp4","size":1,"hash":"abc","kv":2,"sha":"d1g","bh":"LKO2","w":640,"h":3}]}"#
         );
+    }
+
+    /// #1568: a sensitive attachment is stored, read back and written into
+    /// both envelopes as `sens: true`; an unmarked one carries no `sens` at
+    /// all (the byte-for-byte tests above), so it is what it was before.
+    #[test]
+    fn a_sensitive_attachment_carries_sens_through_the_outbox() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let id = new_message_id();
+        let metas = [
+            AttMeta { sensitive: true, ..meta("a.png", 5) },
+            meta("b.png", 6),
+        ];
+        store_attachment_on(conn, &id, 0, &metas[0], b"first").unwrap();
+        store_attachment_on(conn, &id, 1, &metas[1], b"second").unwrap();
+        enqueue_on(conn, &queued(&id, ""), &metas).unwrap();
+
+        let stored = attachment_metas_on(conn, &id).unwrap();
+        assert!(stored[0].sensitive);
+        assert!(!stored[1].sensitive);
+        let (row, _) = load(conn, &id).unwrap().unwrap();
+        assert_eq!(
+            row.content.unwrap(),
+            r#"{"_att":[{"name":"a.png","ct":"image/png","size":5,"bh":"LKO2","w":4,"h":3,"sens":true},{"name":"b.png","ct":"image/png","size":6,"bh":"LKO2","w":4,"h":3}]}"#
+        );
+
+        let upload = |n: &str| crate::commands::r2::MediaUploadResult {
+            key: format!("media/{n}.enc"),
+            url: String::new(),
+            filename: format!("{n}.png"),
+            content_type: "image/png".to_string(),
+            size_bytes: 1,
+            content_hash: n.to_string(),
+            key_version: 1,
+            sha256: "s".to_string(),
+            blurhash: None,
+            width: None,
+            height: None,
+        };
+        let done = final_content("", &stored, &[upload("a"), upload("b")]);
+        let v: serde_json::Value = serde_json::from_str(&done).unwrap();
+        assert_eq!(v["_att"][0]["sens"], serde_json::Value::Bool(true));
+        assert!(v["_att"][1].get("sens").is_none());
+    }
+
+    /// #1568, old clients: an envelope carrying `sens` reads exactly as before
+    /// through every parser that predates the flag — the attachment refs a
+    /// delete releases, the search index, the export — because each one
+    /// ignores keys it does not know. And a renderer that predates the flag
+    /// (no `sensitive` in what it sends) sends an unmarked attachment.
+    #[test]
+    fn sens_is_invisible_to_clients_that_predate_it() {
+        let marked = r#"{"_att":[{"key":"media/a.enc","url":"","name":"a.png","ct":"image/png","size":1,"hash":"aa","kv":1,"sha":"s","bh":"LKO2","sens":true}],"_txt":"look"}"#;
+        let plain = r#"{"_att":[{"key":"media/a.enc","url":"","name":"a.png","ct":"image/png","size":1,"hash":"aa","kv":1,"sha":"s","bh":"LKO2"}],"_txt":"look"}"#;
+
+        let refs = |c: &str| {
+            super::super::edit_delete::parse_attachment_refs(c)
+                .into_iter()
+                .map(|r| (r.content_hash, r.r2_key))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(refs(marked), refs(plain));
+        assert_eq!(refs(marked).len(), 1);
+        assert_eq!(
+            crate::db::search_text::search_text(marked),
+            crate::db::search_text::search_text(plain)
+        );
+        assert!(crate::db::search_text::has_attachment(marked));
+        assert_eq!(caption_of(marked), "look");
+
+        let old: OutgoingAttachment = serde_json::from_str(
+            r#"{"stagedId":"s1","filename":"a.png","contentType":"image/png"}"#,
+        )
+        .unwrap();
+        assert!(!old.sensitive);
+        let new: OutgoingAttachment = serde_json::from_str(
+            r#"{"stagedId":"s1","filename":"a.png","contentType":"image/png","sensitive":true}"#,
+        )
+        .unwrap();
+        assert!(new.sensitive);
     }
 
     /// A redaction or tombstone that reaches a row the outbox still holds

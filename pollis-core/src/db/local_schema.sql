@@ -109,6 +109,9 @@ CREATE TABLE IF NOT EXISTS outbox_attachment (
     blurhash     TEXT,
     width        INTEGER,
     height       INTEGER,
+    -- Marked sensitive in the composer (#1568); written into the envelope as
+    -- `sens`. Must stay identical to its `ADDITIVE_COLUMNS` entry in local.rs.
+    sensitive    INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1)),
     PRIMARY KEY (message_id, position)
 );
 
