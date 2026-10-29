@@ -2,6 +2,8 @@
 
 Notes for future Claude sessions working inside `mobile/`. Root `CLAUDE.md` applies for repo-wide rules (commits, pnpm, etc.), but **design / UX rules in root `CLAUDE.md` are desktop-only and do NOT carry over to mobile** — in particular the "NO MODALS" rule is a desktop constraint. Mobile uses native mobile patterns (bottom sheets, full-screen confirmations, gesture-driven flows).
 
+**Comments:** the root `CLAUDE.md` → Style comment rule (#1540) applies here unchanged — comments say only what the code cannot.
+
 ## Project isolation — read first
 
 The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone Expo project that happens to live inside the repo.
