@@ -6,8 +6,7 @@ On-device full-text search over this device's decrypted message history (#850).
 proposed.** Message bodies are E2EE; the only plaintext that exists anywhere is
 the `content` column of the device's own SQLCipher database. A search box that
 worked on the server would be a search box proving the encryption did not. The
-rationale is also written up for users at `website/learn.html#on-device-search`,
-and the older engineering note is `frontend/docs/turso-search.md`.
+rationale is also written up for users at `website/learn.html#on-device-search`.
 
 ## What it replaced
 
@@ -274,6 +273,7 @@ separate, larger ticket.
 | Option | Why not |
 |---|---|
 | Server-side / Turso FTS | Bodies are E2EE; the server has ciphertext. Non-starter by design. |
+| FTS over remote metadata (`users.username`, group/channel names) | Not rejected, deferred: those columns are plaintext on Turso, but at Pollis's scale a `LIKE` is adequate and FTS5 shadow tables need manual sync. If it is ever done it is a Delivery Service endpoint — the client holds no database handle (#987). Turso's newer Tantivy-based `USING fts` lives in the in-process `turso` crate, not in hosted libSQL. |
 | Keep `LIKE`, fix only the UI | 40–57 ms full scan at 100k and growing, no ranking, and it matches R2 keys and content hashes. |
 | `trigram` tokenizer | Two-character CJK queries return nothing — fatal for Mandarin. |
 | ICU tokenizer | `SQLITE_ENABLE_ICU` is not compiled in; linking ICU on five platforms costs MB for what bigrams get free. |

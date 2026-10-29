@@ -53,9 +53,10 @@ WebKitGTK compatibility (already baked into the script).
 
 ### Skipping email OTP in development
 
-Add `DEV_OTP=000000` to `.env.development`. With this set, hitting "Continue" on
-the login screen skips the Resend email call and stores a hash of `000000` as the
-valid code — type it in the OTP field to sign in. The session persists to the OS
+Add `DEV_OTP=000000` to `.env.development`. OTP is issued and checked by the
+Delivery Service, so the DS you point at must run with the same `DEV_OTP`; with it
+set, hitting "Continue" on the login screen skips the Resend email and the DS
+accepts `000000` — type it in the OTP field to sign in. The session persists to the OS
 keystore so you only need to do this once per fresh install.
 
 For fully hands-free startup, set `DEV_EMAIL=you@example.com` instead. This
@@ -73,8 +74,8 @@ POLLIS_DATA_DIR=/tmp/pollis-dev2 pnpm dev
 ```
 
 `POLLIS_DATA_DIR` gives the second instance its own local SQLite database and
-keystore, so the two instances don't interfere. Both hit the same Turso database,
-so messages appear in real time across windows via LiveKit.
+keystore, so the two instances don't interfere. Both talk to the same Delivery
+Service, so messages appear in real time across windows via LiveKit.
 
 ### Testing multi-device (same user, two devices)
 
@@ -97,7 +98,7 @@ All dev-only env vars. Set them in `.env.development` or pass inline.
 
 | Variable | Purpose |
 |----------|---------|
-| `DEV_OTP` | Fixed OTP code (e.g. `000000`) — skips Resend email, accepts this code on the OTP screen |
+| `DEV_OTP` | Fixed OTP code (e.g. `000000`) — must match the DS's `DEV_OTP`; skips Resend email, accepts this code on the OTP screen |
 | `DEV_EMAIL` | Auto-login as this email on startup — bypasses OTP entirely |
 | `POLLIS_DATA_DIR` | Override the local data directory — isolates local DB and keystore for running multiple instances |
 
@@ -130,8 +131,8 @@ signing env vars are set — CI sets all of them.
 
 The integration harness (`src-tauri/tests/flows.rs`) is gated behind the
 `test-harness` Cargo feature because it takes ~3–4 minutes, serializes on a
-process-wide mutex, and requires a disposable Turso database configured in
-`.env.test` at the repo root. On a headless box, build the core without the
+process-wide mutex, and runs an in-process Delivery Service over process-local
+libsql files — no Turso database and no `.env.test` needed (#987). On a headless box, build the core without the
 desktop shell: `-p pollis --no-default-features --features test-harness`. See
 [`.codesight/wiki/testing.md`](.codesight/wiki/testing.md) for the full
 architecture.
@@ -159,6 +160,6 @@ These are enforced in review; a PR that ignores them will be sent back.
   is large. No AI attribution trailers.
 
 The renderer talks to the backend only through `frontend/src/bridge` (never
-`@tauri-apps/*` directly, never `fetch()` to a local server), and remote **writes**
-always go through a Delivery Service endpoint — never a client-side INSERT/UPDATE
-against Turso. The full rules live in [`CLAUDE.md`](CLAUDE.md).
+`@tauri-apps/*` directly, never `fetch()` to a local server), and every remote
+**read and write** goes through a Delivery Service endpoint — the client holds no
+database credential (#987). The full rules live in [`CLAUDE.md`](CLAUDE.md).

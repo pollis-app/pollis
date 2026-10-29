@@ -36,8 +36,8 @@ Start here. Navigate to the article you need.
 | Backend (host binding) | Tauri host — `#[tauri::command]` shims, plugins, `invoke_handler!`, lifecycle | `src-tauri/src/` |
 | Remote DB | Turso (libSQL) | `pollis-schema/migrations/000000_baseline.sql` + `000*.sql` |
 | DS write API | One typed struct per `POST /v1/…`, shared by client and server | `pollis-api/src/` |
-| Local DB | SQLite (rusqlite) | `pollis-core/src/db/local_schema.sql` |
-| Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls.rs` |
+| Local DB | SQLCipher (rusqlite), encrypted at rest | `pollis-core/src/db/local_schema.sql` |
+| Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls/` |
 | Media | LiveKit (Rust crate) | `pollis-core/src/commands/voice/`, `livekit/` |
 | Storage | Cloudflare R2 | `pollis-core/src/commands/r2.rs` |
 | Auth | Email OTP + device keystore (OS keychain, else machine-bound encrypted file) | `pollis-core/src/commands/auth.rs`, `pollis-core/src/keystore.rs` |

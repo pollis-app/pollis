@@ -1,7 +1,7 @@
 //! The MLS control-plane write endpoints beyond `POST /v1/commits`.
 //!
-//! These cover the non-`direct_submit` client writes (W4–W8 in
-//! `docs/goal-a-commit-log-sole-writer.md`) that must move behind the DS once
+//! These cover the non-`direct_submit` client writes (W4–W8 in the #420
+//! design) that must move behind the DS once
 //! the client holds only a read-only token on the log DB:
 //!
 //!   - `POST /v1/group-info`     — republish GroupInfo (W4), epoch-monotone.
