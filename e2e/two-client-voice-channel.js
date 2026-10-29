@@ -1,29 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client VOICE CHANNEL join/leave E2E (issue #570, extends M3).
- *
- * The M3a call test covers 1:1 DM calls. This covers the other real-time voice
- * surface — a Slack/Discord-style persistent GROUP voice channel: A + B are both
- * members of a group, both JOIN the same voice channel, each sees the other as a
- * participant, then A LEAVES and B sees the participant count drop back to one.
- *
- * Needs the same media stack as the call test (LiveKit + audio) PLUS group
- * membership (join_voice_channel derives an MLS-based E2EE voice key and fails
- * closed if the joiner isn't in the group's MLS state).
- *
- * Choreography:
- *   1. A + B sign up.
- *   2. A creates a group, invites B, B accepts (MLS welcome processed).
- *   3. A creates a VOICE channel (toggles the create-channel type switch).
- *   4. A opens the voice channel and clicks Join (voice-join-cta); waits until
- *      joined (voice-channel-view present).
- *   5. B opens the same voice channel and joins.
- *   6. ASSERT: on the joined side, the live participant roster shows 2 distinct
- *      users (both A and B). LiveKit presence is live, no polling of remote DB.
- *   7. A leaves (voice-tray-leave); B's participant count drops back to 1.
- *
- * On failure, dumps per-client A-FAIL.* / B-FAIL.* into e2e/artifacts/.
- */
+// Two-client voice channel join/leave (#570): both see 2 participants, then 1 after A leaves.
 
 const fs = require("fs");
 const path = require("path");
@@ -128,15 +104,13 @@ async function inviteMember(browser, email) {
   await h.waitTestId(browser, "menu-item-create-channel", 20000);
 }
 
-// Create a VOICE channel: toggle the type switch (#create-channel-type, default
-// "text") to voice before submitting. A voice channel returns to the group page.
+// Create a VOICE channel; it returns to the group page.
 async function createVoiceChannel(browser, channelName) {
   await h.clickTestId(browser, "menu-item-create-channel");
   await h.waitTestId(browser, "create-channel-page", 20000);
   await h.setSelectorValue(browser, "#create-channel-name", channelName);
   await h.clickSelector(browser, "#create-channel-type");
   await h.clickTestId(browser, "create-channel-submit-button");
-  // Returns to the group page; the new voice channel-option should appear.
   await h.waitTestId(browser, "menu-item-create-channel", 30000);
 }
 
@@ -160,8 +134,7 @@ async function acceptInvite(browser, timeoutMs) {
   throw new Error("B: group invite never appeared");
 }
 
-// Navigate into the group and click the voice channel-option (by name), landing
-// on the not-joined VoiceStage (voice-channel-observers + voice-join-cta).
+// Open the voice channel by name, landing on the not-joined VoiceStage.
 async function openVoiceChannel(browser, groupName, channelName, groupTimeoutMs) {
   const end = Date.now() + groupTimeoutMs;
   while (Date.now() < end) {
@@ -181,17 +154,13 @@ async function openVoiceChannel(browser, groupName, channelName, groupTimeoutMs)
   throw new Error(`group "${groupName}" never appeared`);
 }
 
-// Click Join and wait until joined (the joined spotlight/grid mounts).
 async function joinVoice(browser, tag) {
   await h.clickTestId(browser, "voice-join-cta");
   await h.waitTestId(browser, "voice-channel-view", JOIN_TIMEOUT_MS);
   console.log(`[voice-channel] ${tag}: joined the voice channel`);
 }
 
-// Distinct participant user IDs from the live roster. Root tiles carry class
-// vs-tile and testid voice-tile-<identity> (identity = voice-{user}[:device]);
-// mirrors userIdFromVoiceIdentity. Constrain to .vs-tile so the many
-// voice-tile-<sub>-* elements don't over-match.
+// Distinct user IDs from the roster; .vs-tile keeps voice-tile-<sub>-* from matching.
 async function participantUserIds(browser) {
   return browser.execute(() => {
     const ids = new Set();
@@ -268,30 +237,25 @@ async function main() {
     await signUp(A.browser, emailA, "A");
     await signUp(B.browser, emailB, "B");
 
-    // A: group + invite + voice channel.
     console.log(`[voice-channel] A: creating group "${groupName}"`);
     await createGroup(A.browser, groupName);
     await inviteMember(A.browser, emailB);
     console.log(`[voice-channel] A: creating voice channel "${channelName}"`);
     await createVoiceChannel(A.browser, channelName);
 
-    // B: accept invite.
     console.log("[voice-channel] B: accepting invite…");
     await acceptInvite(B.browser, INVITE_TIMEOUT_MS);
 
-    // A joins the voice channel.
     console.log("[voice-channel] A: opening + joining the voice channel");
     await openVoiceChannel(A.browser, groupName, channelName, GROUP_VISIBLE_TIMEOUT_MS);
     await joinVoice(A.browser, "A");
     await shot(A.browser, "voice-channel-A-joined.png");
 
-    // B joins the same voice channel.
     console.log("[voice-channel] B: opening + joining the voice channel");
     await openVoiceChannel(B.browser, groupName, channelName, GROUP_VISIBLE_TIMEOUT_MS);
     await joinVoice(B.browser, "B");
     await shot(B.browser, "voice-channel-B-joined.png");
 
-    // ASSERT: both see 2 participants.
     console.log("[voice-channel] waiting for both to see 2 participants…");
     await waitForParticipantCount(A.browser, "A", 2, CONVERGE_TIMEOUT_MS);
     await waitForParticipantCount(B.browser, "B", 2, CONVERGE_TIMEOUT_MS);
@@ -299,7 +263,6 @@ async function main() {
     await shot(B.browser, "voice-channel-B-two.png");
     console.log("[voice-channel] both clients see 2 participants");
 
-    // A leaves; B should drop back to 1.
     console.log("[voice-channel] A: leaving the voice channel");
     await h.clickTestId(A.browser, "voice-tray-leave");
     await h.waitTestId(A.browser, "voice-join-cta", 30000);

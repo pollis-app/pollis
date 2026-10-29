@@ -1,18 +1,4 @@
-/*
- * Terminal skin: attachments and reactions sit in the message body column
- * (#1489). They used to start at the timestamp column, far left of the text
- * they belong to; now the image strip, a file row and the reaction pills all
- * start where the text after `name :` starts — the terminal counterpart of
- * the refined skin's right column.
- *
- * Covers a multi-attachment row, consecutive messages from one sender (which
- * the refined skin would group), and a reply. The body column's x varies
- * with the author's name width, so each row is measured against itself.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true` (see
- * playwright.config.js). The mock has no media server, so thumbs render
- * their blurhash — enough to measure.
- */
+// Terminal skin (#1489): attachments and reactions start at the message body column.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -50,9 +36,7 @@ const msg = (
 });
 
 const MESSAGES = [
-  // Multi-attachment row: three pictures and a file.
   msg("m_multi", "u_dana", "dana", "holiday photos", "2026-08-01T09:00:00Z", [image("a"), image("b"), image("c"), file("itinerary")]),
-  // Consecutive message, same sender.
   msg("m_next", "u_dana", "dana", "one more", "2026-08-01T09:00:30Z", [image("d")]),
   // A reply from someone with a longer name, so its column sits elsewhere.
   msg("m_reply", "u_bartholomew", "bartholomew", "mine", "2026-08-01T09:01:00Z", [image("e")], { reply_to_id: "m_multi" }),
@@ -108,7 +92,6 @@ test.describe("terminal skin — attachments line up with the message text", () 
       const bodyX = await leftOf(row.getByTestId("message-content"));
       const timestampX = await leftOf(row.getByTestId("message-timestamp"));
       const authorX = await leftOf(row.getByTestId("message-author"));
-      // The body column is right of the timestamp and the name.
       expect(bodyX).toBeGreaterThan(authorX);
       expect(authorX).toBeGreaterThan(timestampX);
 

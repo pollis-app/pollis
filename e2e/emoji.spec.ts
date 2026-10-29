@@ -1,27 +1,4 @@
-/*
- * Custom emoji (#848) — the picker, caret-aware insertion, and token
- * rendering. BOTH skins.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`, so
- * `@tauri-apps/api/core` resolves to `frontend/src/__mocks__/tauri-core.ts`.
- * The mock reimplements `list_usable_emoji` / `get_emoji_url` with the same
- * contract as `pollis-core/src/commands/emoji.rs`: one flat usable set (the
- * permission predicate is "any group you are in", never "this conversation"),
- * and a hash that resolves to an image with no membership check at all.
- *
- * What each test is guarding:
- *   - the picker mounts the REAL standard set, not the eight hardcoded faces
- *     the old reaction picker shipped with;
- *   - search actually narrows;
- *   - a pick lands AT THE CARET. This is the integration-time wiring in
- *     `ChatInput.insertAtCursor` and it had no test — appending to the end
- *     would still look fine in a screenshot and be wrong for every user who
- *     ever goes back to fix a sentence;
- *   - a `<:name:hash>` token in a message body is an image, not literal text;
- *   - `:shortcode:` autocomplete and substitution in the composer: the trigger
- *     rules (including the `http://` and `10:30` negatives), custom-beats-
- *     standard, and both skins' acceptance idiom.
- */
+// Custom emoji (#848), both skins: real picker, insertion at the caret, token rendering, :shortcode: completion.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -136,14 +113,7 @@ function preloadFor(
   };
 }
 
-/**
- * Boot with the given skin and walk into the channel.
- *
- * The router runs on a memory history (`createMemoryHistory` in
- * `frontend/src/router.tsx`), so a deep-link `goto` would set the browser URL
- * and still render Root. Navigation goes through the UI, as in
- * `mentions.spec.js`.
- */
+/** Boot with the given skin and walk into the channel (memory-history router: navigate via the UI). */
 async function openChannel(
   page: Page,
   skin: Skin,
@@ -165,17 +135,7 @@ async function openChannel(
 
 const composer = (page: Page) => page.getByTestId("message-input");
 
-/**
- * What the composer thinks the message is.
- *
- * The composer is a contentEditable now — a custom emoji renders as an inline
- * image while you type, which a `<textarea>` cannot do — so it has no `.value`
- * for `toHaveValue` to read. `data-value` is the serialized wire text the
- * component mirrors onto the element on every change, i.e. the exact string a
- * send would put on the wire. Asserting on it is what keeps these tests about
- * the WIRE FORM rather than about what is drawn: the token below is what the
- * message carries even though the composer is showing a parrot.
- */
+/** What the composer thinks the message is: its data-value mirror of the wire text. */
 const expectComposerValue = (page: Page, value: string) =>
   expect(composer(page)).toHaveAttribute("data-value", value);
 
@@ -187,7 +147,6 @@ async function openPicker(page: Page) {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`custom emoji — ${skin} skin`, () => {
     test("the picker opens from the composer with the whole standard set", async ({
@@ -196,9 +155,7 @@ for (const skin of SKINS) {
       await openChannel(page, skin);
       await openPicker(page);
 
-      // The regression this guards is the old picker's eight hardcoded faces.
-      // Sections mount lazily, so this is what is on screen at open — the full
-      // set is ~1600 and the rest arrives on scroll.
+      // More than the old eight hardcoded faces; sections mount lazily, so this is only the first screen.
       const cells = page.getByTestId("emoji-cell");
       await expect.poll(() => cells.count()).toBeGreaterThanOrEqual(100);
 
@@ -212,11 +169,7 @@ for (const skin of SKINS) {
       // The category rail is the picker's other half of "this is the full set".
       await expect(page.getByTestId("emoji-category-flags")).toBeAttached();
 
-      // The whole panel is on screen and nothing is painted over it. The
-      // trigger sits hard against the left edge of the content region, which
-      // AppShell clips with `overflow: hidden` — a panel that grows leftwards
-      // from there is cut off and most of its cells become unclickable, which
-      // is exactly what shipped until this assertion existed.
+      // The whole panel is on screen: AppShell clips with overflow hidden, so a leftward panel gets cut off.
       const box = await page.getByTestId("emoji-picker").boundingBox();
       expect(box).not.toBeNull();
       const viewport = page.viewportSize();
@@ -255,9 +208,7 @@ for (const skin of SKINS) {
       const cells = page.getByTestId("emoji-cell");
       const before = await cells.count();
 
-      // A shortcode-only query leaves exactly the one custom emoji. ("parrot"
-      // on its own would also match the standard 🦜, which is correct and
-      // makes for a worse assertion.)
+      // A shortcode-only query leaves exactly the custom emoji ("parrot" also matches 🦜).
       await page.getByTestId("emoji-picker-search").fill("partypar");
       await expect(cells).toHaveCount(1);
       await expect(page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`)).toBeVisible();
@@ -322,8 +273,7 @@ for (const skin of SKINS) {
       await page.getByTestId("emoji-picker-search").fill("partyparrot");
       await page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`).click();
 
-      // The point of the rich composer: what you SEE while typing is the
-      // emoji. Before this, the composer showed 70 characters of hex.
+      // The rich composer shows the emoji itself while typing.
       const inline = composer(page).getByTestId("composer-emoji");
       await expect(inline).toBeVisible();
       await expect(inline).toHaveAttribute("data-shortcode", "partyparrot");
@@ -449,10 +399,7 @@ for (const skin of SKINS) {
   });
 
   test.describe(`:shortcode: autocomplete — ${skin} skin`, () => {
-    // The standard half of the index arrives over a dynamic import fired on
-    // composer focus. Typing a partial query and waiting for the completion to
-    // appear is the honest "it is live" signal; every test below starts here so
-    // none of them races the chunk.
+    // The standard index loads on composer focus; wait for a completion so no test races the chunk.
     async function typeAndWait(page: Page, text: string) {
       await composer(page).click();
       await composer(page).pressSequentially(text);
@@ -528,8 +475,7 @@ for (const skin of SKINS) {
 
       // A single letter is below the suggestion floor, and an emoticon has no
       // body characters at all.
-      // `fill("")` needs a form control; clear the contentEditable the way a
-      // person would.
+      // Clear the contentEditable the way a person would.
       await composer(page).press("ControlOrMeta+a");
       await composer(page).press("Backspace");
       await expectComposerValue(page, "");
@@ -572,9 +518,7 @@ for (const skin of SKINS) {
   test.describe(`reactions — ${skin} skin`, () => {
     agnosticTest("a message without reactions reserves no reactions row", async ({ page }) => {
       await openChannel(page, skin);
-      // The old design rendered a row under EVERY message holding a
-      // hover-revealed "+" — a blank line that read as a layout bug. The row
-      // must not exist at all until there is a reaction to show.
+      // The reaction row must not exist until there is a reaction to show.
       await expect(page.getByTestId("message-m1")).toBeVisible();
       await expect(page.getByTestId("message-reactions")).toHaveCount(0);
     });
@@ -660,9 +604,7 @@ for (const skin of SKINS) {
       const pills = row.getByTestId("reaction-pill");
       await expect(pills).toHaveCount(3);
 
-      // Refined once rendered the row as a third child of the avatar/body
-      // grid, so the pills fell into the 3.5rem gutter and stacked one per
-      // line. Every pill shares a top edge now.
+      // Every pill shares a top edge (refined once stacked them in the avatar gutter).
       const boxes = await pills.evaluateAll((els) =>
         els.map((el) => {
           const r = el.getBoundingClientRect();

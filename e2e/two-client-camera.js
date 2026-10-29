@@ -1,62 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client 1:1 CAMERA E2E — the camera slice of the media milestone
- * (issue #570, M3b). Directly validates the #568 camera-parity work end to
- * end: one client turns its webcam on in a live call, the OTHER client sees
- * the remote camera video tile render.
- *
- * Then (#394) A ALSO starts a screen share, and B must see A as TWO tiles — a
- * camera tile AND a screenshare tile — proving simultaneous camera+screen
- * render as two tiles instead of the screenshare replacing (dropping) the
- * camera. The Xvfb display + LiveKit this camera fixture already stands up also
- * support X11 screenshare, so no extra fixture is needed.
- *
- * Builds on the M3a call test (two-client-call.js): the signup + DM-establish +
- * place/accept-call choreography is reused verbatim (copied, matching how M3a
- * itself copied from two-client.js — these e2e flow helpers are duplicated per
- * test rather than shared). The camera step happens AFTER the call is connected
- * (both sides see two participants).
- *
- * Extra fixture over M3a: a VIRTUAL CAMERA (e2e/scripts/start-camera.sh) — a
- * v4l2loopback /dev/video0 fed a moving 1280x720 YUYV test pattern by ffmpeg —
- * so the app's Linux V4L2 capture path (pollis-capture-linux/src/camera.rs)
- * opens a real, changing signal headless.
- *
- * Choreography:
- *   1..7. Identical to two-client-call.js: A + B sign up, A DMs B, B accepts,
- *         A places the call, B accepts it, both converge on two participants.
- *   8. A turns its CAMERA on (the camera toggle pill). With exactly one camera
- *      (/dev/video0 is the only node on the runner) toggleCamera() starts it
- *      directly — no picker — capturing the loopback device and publishing a
- *      TrackSource::Camera track into the call room.
- *   9. Sanity on A: A's own local self-preview tile
- *      (`remote-video-tile-__local_camera_preview__`) appears — proof A's
- *      capture+publish actually engaged (isolates an A-side capture failure
- *      from a B-side delivery failure).
- *  10. ASSERT on B: poll until A's REMOTE CAMERA tile renders — a
- *      `remote-video-tile-<trackKey>` element nested inside A's participant tile
- *      (`voice-tile-voice-<A>`), excluding the local-preview keys and excluding
- *      screenshare feeds (a screenshare tile also carries a
- *      `voice-tile-stream-stats-` badge; a camera never does). Generous
- *      eventual timeout; no fixed sleeps for correctness.
- *  11. A turns the camera off and hangs up.
- *
- * Why that signal: on B, a remote participant's webcam lands in
- * `appStore.cameraRemotes[identity]` (screenShareSession's `remote_started`
- * with source==="camera"), which VoiceStage maps to the tile's `cameraTrackKey`,
- * which StageTile renders through RemoteVideoTile as
- * `data-testid="remote-video-tile-<trackKey>"` (a <canvas> on the Tauri /
- * WebKitGTK path). So the tile's mere PRESENCE proves A's camera track was
- * published, subscribed by B, and mounted for render. Camera and screenshare
- * share that testid prefix, so we additionally exclude screenshare tiles by the
- * stream-stats badge to keep the assertion camera-specific (M3c adds
- * screenshare; this keeps the two unambiguous even then).
- *
- * Assumes the media + backend fixtures are already up (the workflow runs
- * start-camera.sh → start-audio.sh → start-livekit.sh → start-backend.sh first).
- *
- * On failure, dumps per-client screenshots + page source into e2e/artifacts/.
- */
+// Two-client camera (#570 M3b, #394): B sees A's remote camera tile, then camera + screenshare as two tiles.
 
 const fs = require("fs");
 const path = require("path");
@@ -67,10 +10,7 @@ const shot = h.makeShot(ARTIFACTS);
 
 const PIN = "1357";
 
-// Reserved local-preview frame-WS keys the backend mirrors the SHARER's own
-// outgoing video under (for their self-view). These are the local user's own
-// tiles, never a remote camera — exclude them from the remote-camera assertion.
-// Must match cameraSession.ts / screenShareSession.ts.
+// Local self-preview key, never a remote camera; must match cameraSession.ts.
 const LOCAL_CAMERA_PREVIEW_KEY = "__local_camera_preview__";
 const LOCAL_PREVIEW_KEY = "__local_preview__";
 
@@ -86,9 +26,7 @@ const LOCAL_CAMERA_TIMEOUT_MS = 60_000;
 // SFU publish→subscribe round trip plus the first decoded frame, so generous.
 const REMOTE_CAMERA_TIMEOUT_MS = 120_000;
 
-// Build the app env for one client — identical to two-client-call.js. The
-// virtual-camera fixture needs no per-client env (the app enumerates
-// /dev/video* itself); PULSE_* / LIVEKIT_URL flow through via ...process.env.
+// App env as in two-client-call.js; the virtual camera needs no per-client env.
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
@@ -102,7 +40,6 @@ function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   };
 }
 
-// Full signup through the real UI — copied verbatim from two-client-call.js.
 async function signUp(browser, email, tag) {
   console.log(`[two-client-camera] ${tag}: signing up ${email}`);
   await h.waitTestId(browser, "auth-screen", 30000);
@@ -128,8 +65,7 @@ async function signUp(browser, email, tag) {
   console.log(`[two-client-camera] ${tag}: reached app-ready`);
 }
 
-// A: open "New Message", DM the target by email, land on the DM page. Copied
-// verbatim from two-client-call.js.
+// A: DM the target by email, landing on the DM page.
 async function startDmTo(browser, targetEmail) {
   await h.clickTestId(browser, "sidebar-row-dms");
   await h.clickTestId(browser, "menu-item-new-dm");
@@ -139,8 +75,7 @@ async function startDmTo(browser, targetEmail) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
-// B: poll the DMs list until the incoming request surfaces and accept it.
-// Copied verbatim from two-client-call.js.
+// B: poll the DMs list for the request and accept it.
 async function acceptIncomingDm(browser, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let attempt = 0;
@@ -165,8 +100,7 @@ async function acceptIncomingDm(browser, timeoutMs) {
   throw new Error("B: DM request never appeared");
 }
 
-// A: re-open the DM so DM.tsx remounts and React Query refetches — how A picks
-// up B's acceptance metadata past the staleTime. Copied verbatim from M3a.
+// A: re-open the DM so it refetches B's acceptance past the staleTime.
 async function reopenDm(browser) {
   await h.clickTestId(browser, "sidebar-row-dms").catch(() => {});
   await h.sleep(1000);
@@ -176,8 +110,7 @@ async function reopenDm(browser) {
   }
 }
 
-// A: poll until the DM-header call button appears (canCall = 1:1 && B accepted
-// && B online). Copied verbatim from two-client-call.js.
+// A: poll until the call button appears (1:1, B accepted and online).
 async function waitForCallButton(browser, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let attempt = 0;
@@ -196,8 +129,7 @@ async function waitForCallButton(browser, timeoutMs) {
   );
 }
 
-// Distinct call participants visible on this client, by user id. Copied
-// verbatim from two-client-call.js (mirrors userIdFromVoiceIdentity).
+// Distinct call participants by user id (mirrors userIdFromVoiceIdentity).
 async function callParticipantUserIds(browser) {
   return browser.execute(() => {
     const ids = new Set();
@@ -214,8 +146,7 @@ async function callParticipantUserIds(browser) {
   });
 }
 
-// Poll until this client's call stage shows at least two distinct participants.
-// Copied verbatim from two-client-call.js.
+// Poll until this client's call stage shows two distinct participants.
 async function waitForRemoteParticipant(browser, tag, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
@@ -229,10 +160,7 @@ async function waitForRemoteParticipant(browser, tag, timeoutMs) {
   throw new Error(`${tag}: the other call participant never appeared (no second voice tile)`);
 }
 
-// Click A's camera toggle. The global VoiceBar pill (`voice-bar-camera-button`)
-// is the primary control; on the full-screen call stage the footer tray offers
-// the same action as `voice-tray-camera`. Both call toggleCamera() identically,
-// so click whichever is present (prefer the bar pill, per the milestone spec).
+// Click the VoiceBar camera pill, else the stage tray's; both call toggleCamera().
 async function clickCameraToggle(browser, tag) {
   if (await h.present(browser, "voice-bar-camera-button")) {
     console.log(`[two-client-camera] ${tag}: clicking voice-bar-camera-button`);
@@ -247,9 +175,7 @@ async function clickCameraToggle(browser, tag) {
   throw new Error(`${tag}: no camera toggle (voice-bar-camera-button / voice-tray-camera) on screen`);
 }
 
-// A: poll until A's OWN local camera self-preview tile mounts — proof the
-// capture (open /dev/video0, negotiate a format) + local publish engaged. If
-// this never appears the failure is A-side (capture), not B-side (delivery).
+// A: poll for A's own camera self-preview; absent means an A-side capture failure.
 async function waitForLocalCameraPreview(browser, tag, timeoutMs) {
   const end = Date.now() + timeoutMs;
   const testId = `remote-video-tile-${LOCAL_CAMERA_PREVIEW_KEY}`;
@@ -266,13 +192,7 @@ async function waitForLocalCameraPreview(browser, tag, timeoutMs) {
   );
 }
 
-// Remote CAMERA tiles visible on this client: `remote-video-tile-<trackKey>`
-// elements nested inside a participant CAMERA tile — a `voice-tile-voice-<id>`
-// root (class `vs-tile`) whose key ends in `:cam` (a screenshare tile ends in
-// `:screen`). Camera and screenshare tiles are otherwise identical (both carry
-// the res·fps badge, both spotlightable), so the `:cam`/`:screen` suffix — not
-// the badge — is what tells them apart. Excludes the local-preview keys.
-// Returns the owning tiles' identities + track keys.
+// Remote camera tiles: `vs-tile` roots keyed `:cam` (not `:screen`) holding a non-local remote-video-tile.
 async function remoteCameraTiles(browser) {
   return browser.execute((localKeys) => {
     const out = [];
@@ -318,9 +238,7 @@ async function waitForRemoteCamera(browser, tag, timeoutMs) {
   );
 }
 
-// A: start a screen share ALONGSIDE the camera. Linux/X11 enumerates empty, so
-// the toggle starts capture directly with no picker (same as
-// two-client-screenshare.js). Bar pill first, stage tray as fallback.
+// A: start a screen share alongside the camera (Linux enumerates empty: no picker).
 async function startScreenShare(browser, tag) {
   if (await h.present(browser, "voice-bar-screenshare-button")) {
     await h.clickTestId(browser, "voice-bar-screenshare-button");
@@ -333,10 +251,7 @@ async function startScreenShare(browser, tag) {
   throw new Error(`${tag}: no screenshare toggle (voice-bar-screenshare-button / voice-tray-screenshare) on screen`);
 }
 
-// Which KINDS of remote video tile this client currently renders. A remote tile
-// (`voice-tile-voice-<id>` root with a nested non-local `remote-video-tile-`) is
-// a camera when its key ends `:cam`, a screenshare when it ends `:screen`. #394:
-// a participant publishing both must show up as BOTH kinds — two distinct tiles.
+// Kinds of remote video tile rendered: `:cam` camera, `:screen` screenshare (#394).
 async function remoteVideoTileKinds(browser) {
   return browser.execute((localKeys) => {
     let camera = false;
@@ -366,10 +281,7 @@ async function remoteVideoTileKinds(browser) {
   }, [LOCAL_CAMERA_PREVIEW_KEY, LOCAL_PREVIEW_KEY]);
 }
 
-// B: poll until it renders BOTH a remote camera tile AND a remote screenshare
-// tile — i.e. A's simultaneous camera+screen surfaces as two tiles (#394). This
-// is the regression guard for the old bug where a screenshare REPLACED the
-// camera tile and the camera was silently dropped.
+// B: poll until A shows as BOTH a camera and a screenshare tile (#394: the share used to replace the camera).
 async function waitForBothRemoteVideo(browser, tag, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let last = { camera: false, screenshare: false };
@@ -437,35 +349,29 @@ async function main() {
     });
     clients.push(B);
 
-    // Both sign up.
     await signUp(A.browser, emailA, "A");
     await shot(A.browser, "two-client-camera-A-ready.png");
     await signUp(B.browser, emailB, "B");
     await shot(B.browser, "two-client-camera-B-ready.png");
 
-    // A → DM B; B → accept. Establishes the DM + MLS group both directions.
     console.log(`[two-client-camera] A: starting DM to ${emailB}`);
     await startDmTo(A.browser, emailB);
     console.log("[two-client-camera] B: waiting for the DM request…");
     await acceptIncomingDm(B.browser, REQUEST_TIMEOUT_MS);
     console.log("[two-client-camera] B: DM request accepted");
 
-    // A → wait until B is seen online + accepted (call button renders).
     console.log("[two-client-camera] A: waiting to see B online + accepted…");
     await waitForCallButton(A.browser, CALL_BUTTON_TIMEOUT_MS);
 
-    // A → place the call.
     console.log("[two-client-camera] A: placing the call");
     await h.clickTestId(A.browser, "dm-header-call");
     await h.waitTestId(A.browser, "call-hang-up", 30000);
 
-    // B → accept the incoming-call alert.
     console.log("[two-client-camera] B: waiting for the incoming-call alert…");
     await h.waitTestId(B.browser, "status-bar-incoming-call-accept", INCOMING_CALL_TIMEOUT_MS);
     await h.clickTestId(B.browser, "status-bar-incoming-call-accept");
     await h.waitTestId(B.browser, "call-hang-up", 30000);
 
-    // Both sides see each other in the call (2 participants).
     console.log("[two-client-camera] waiting for both sides to converge in the call…");
     await waitForRemoteParticipant(A.browser, "A", CONVERGE_TIMEOUT_MS);
     await waitForRemoteParticipant(B.browser, "B", CONVERGE_TIMEOUT_MS);
@@ -473,7 +379,6 @@ async function main() {
     await shot(B.browser, "two-client-camera-B-in-call.png");
     console.log("[two-client-camera] both clients are in the call");
 
-    // ── M3b: A turns its camera ON ─────────────────────────────────────────
     console.log("[two-client-camera] A: turning the camera on");
     await clickCameraToggle(A.browser, "A");
 
@@ -481,15 +386,12 @@ async function main() {
     await waitForLocalCameraPreview(A.browser, "A", LOCAL_CAMERA_TIMEOUT_MS);
     await shot(A.browser, "two-client-camera-A-camera-on.png");
 
-    // ASSERT: B renders A's REMOTE camera tile.
     console.log("[two-client-camera] B: waiting for A's remote camera tile…");
     await waitForRemoteCamera(B.browser, "B", REMOTE_CAMERA_TIMEOUT_MS);
     await shot(B.browser, "two-client-camera-B-sees-camera.png");
     console.log("[two-client-camera] SUCCESS: B sees A's remote camera tile");
 
-    // ── #394: A ALSO shares its screen — camera + screenshare must render as
-    // TWO tiles for A on B. Before the fix, the screenshare took over A's tile
-    // and the camera was dropped; now each source gets its own tile. ──
+    // #394: A also shares its screen; B must see two tiles.
     console.log("[two-client-camera] A: starting a screen share alongside the camera");
     await startScreenShare(A.browser, "A");
     console.log("[two-client-camera] B: waiting for BOTH A's camera tile AND screenshare tile…");

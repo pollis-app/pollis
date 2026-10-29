@@ -1,12 +1,4 @@
-/*
- * Software Update page — the package-manager branch.
- *
- * A managed install (AUR / .deb / .rpm) cannot use the in-app updater, so the
- * page shows the command to run instead, in the shared `CodeSnippet`. The
- * command is the whole deliverable there, so the copy button has to put
- * exactly it on the clipboard and say so — through the clipboard bridge, the
- * same path the invite-link card uses.
- */
+// Software Update, package-manager branch: copy puts exactly the command on the clipboard.
 
 import { test, expect } from "./lib/zero-loss";
 

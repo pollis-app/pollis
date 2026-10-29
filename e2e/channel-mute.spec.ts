@@ -1,19 +1,4 @@
-/*
- * Per-channel mute (#1431), desktop half. BOTH skins.
- *
- *   1. The channel header's bell toggles the mute; it is written through
- *      `set_channel_muted` (account state on the DS) and the channel is
- *      dimmed, with a bell-off mark, in the sidebar and the group's list.
- *   2. Another device of the account changing the mute reaches this one
- *      through the DS's `channel_mutes_changed` nudge.
- *   3. Desktop notifications follow the push rule: channel chatter pings by
- *      default; a muted channel stays silent for chatter and @all, but a
- *      direct @mention still gets through.
- *
- * The push half (the DS skipping a muted member) is pinned in
- * `pollis-delivery` (`push::tests`) and the flows suite (`channel_mute.rs`);
- * the mobile half is `mobile/.maestro/flows/channel-mute.yaml`.
- */
+// Per-channel mute (#1431), desktop: bell toggle, cross-device sync, notifications (@mention still pings).
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -150,14 +135,12 @@ for (const skin of SKINS) {
         page.getByTestId("sidebar").locator('[data-muted="true"]'),
       ).toHaveCount(1);
 
-      // The group's channel list marks it too.
       await page.getByTestId("sidebar").getByRole("button", { name: "Book club", exact: true }).click();
       await expect(page.getByTestId(`channel-option-${GENERAL}`)).toContainText("general");
       await expect(
         page.getByTestId(`channel-option-${GENERAL}`).getByLabel(/muted/i),
       ).toBeVisible();
 
-      // And the bell unmutes.
       await page.getByTestId(`channel-option-${GENERAL}`).click();
       await page.getByTestId("channel-mute-toggle").click();
       await expect(page.getByTestId("channel-mute-toggle")).toHaveAttribute("aria-pressed", "false");
@@ -203,8 +186,7 @@ for (const skin of SKINS) {
       await mention(page, "all_mention", GENERAL);
       await mention(page, "user_mention", GENERAL);
       await expect.poll(() => count(page, "plugin:notification|notify")).toBe(2);
-      // Give the muted chatter's (async) wake-up time to have fired, if it
-      // were going to.
+      // Let the muted chatter's async wake-up fire, if it would.
       await page.waitForTimeout(1000);
       expect(await count(page, "plugin:notification|notify")).toBe(2);
       expect(await count(page, "play_sfx")).toBe(2);

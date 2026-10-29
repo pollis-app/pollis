@@ -1,24 +1,4 @@
-/*
- * Sensitive (spoiler) media (#1568), in BOTH skins.
- *
- *   - the composer's eye toggle marks an attachment sensitive and unmarks it,
- *     and a marked card shows the cover (blurhash + centred eye), not the
- *     picture; the card is half again as tall as the old 80px thumb;
- *   - a marked attachment is sent with `sensitive`, and the stored envelope
- *     carries `sens: true`; the sender's own copy is covered too;
- *   - a received sensitive attachment is covered by default; one click
- *     reveals that one attachment only, and the top-right eye hides it again;
- *   - the click that reveals a video does not open or play it;
- *   - the right panel's media grid and the lightbox share the reveal.
- *
- * Runs against the browser build with the Tauri IPC mock. The mock has no
- * media server; its `get_media_url` answers from the preload's `mediaUrls`,
- * which point at fixtures this spec serves with `page.route`.
- *
- * Set SENSITIVE_SHOTS=<dir> to also write the review screenshots there.
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js sensitive-media
- */
+// Sensitive media (#1568). SENSITIVE_SHOTS=<dir> also writes the review screenshots.
 
 import fs from "node:fs";
 import path from "node:path";

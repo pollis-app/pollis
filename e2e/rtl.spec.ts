@@ -1,30 +1,4 @@
-/*
- * Right-to-left layout (#855, phase 3) — geometry e2e.
- *
- * Runs against the browser-rendered frontend with the Tauri IPC mock, same as
- * the other browser-tier specs, and drives the REAL shipped `ar` locale rather
- * than a synthetic one: `dir="rtl"` comes from the language registry, so a spec
- * that invented its own RTL locale would be testing its own fixture.
- *
- * WHY EVERY ASSERTION HERE IS A MEASUREMENT
- * -----------------------------------------
- * `expect(html).toHaveAttribute("dir", "rtl")` passes on completely unmirrored
- * code — that attribute was already correct before any of this work, and it is
- * exactly what makes RTL breakage invisible. So nothing below asserts on `dir`,
- * on a class name, or on a Tailwind utility. Every test reads back
- * `getBoundingClientRect` — or, for a painted border, the RESOLVED PHYSICAL
- * computed value, which is the edge the browser actually drew on — and asserts
- * where pixels landed.
- *
- * Each test also pins the LTR case in the same body. A one-sided RTL assertion
- * can be satisfied by a layout that is broken in both directions; asserting
- * both proves the layout FOLLOWED the direction instead of sitting still.
- *
- * Every test runs in BOTH skins: they are genuinely different layouts (an IRC
- * row vs a Slack avatar gutter) that mirror through different code.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// RTL layout (#855), both skins, real `ar` locale: every assertion measures pixels, never `dir`, and pins LTR too.
 
 import { test, expect, type Locator, type Page } from "./lib/zero-loss";
 
@@ -59,9 +33,7 @@ function preloadState(skin: Skin) {
   return {
     session: USER,
     profile: { id: USER.id, username: USER.username },
-    // The right-hand panel is skin-defaulted (open in refined, shut in
-    // terminal); pin it open so the divider assertion has the same subject in
-    // both skins.
+    // Pin the right panel open so the divider assertion has one subject in both skins.
     preferences: JSON.stringify({ skin, right_panel_open_by_default: true }),
     groups: [
       {
@@ -119,18 +91,7 @@ function preloadState(skin: Skin) {
   };
 }
 
-/**
- * Boot the app in `language`.
- *
- * The language arrives through `navigator.languages`, which is what
- * `resolveInitialLanguage` reads on a fresh profile — the same path a real
- * Arabic-locale machine takes. `<html dir>` is written during i18n init, so it
- * is in place before the first paint.
- *
- * Calling this twice in one test is deliberate and safe: `addInitScript`
- * accumulates and the LAST one wins, and `boot` re-navigates, so the second
- * call is a clean reload of the whole app in the other direction.
- */
+/** Boot the app in `language` via navigator.languages; a second call cleanly reloads in the other direction. */
 async function boot(page: Page, skin: Skin, language: string) {
   await page.addInitScript(
     ({ preload, lang }) => {
@@ -165,20 +126,14 @@ async function boot(page: Page, skin: Skin, language: string) {
   );
   await page.goto("/");
   await expect(page.getByTestId("sidebar")).toBeVisible();
-  // Guard on the fixture itself. If the locale failed to take, every geometry
-  // assertion below would be measuring an LTR app and would quietly satisfy
-  // its LTR half. A precondition, not the test.
+  // Precondition: if the locale failed to take, every LTR half would pass vacuously.
   await expect(page.locator("html")).toHaveAttribute(
     "dir",
     language === RTL_LANG ? "rtl" : "ltr",
   );
 }
 
-/*
- * NOTE ON NAVIGATION: the router runs on `createMemoryHistory` (see
- * `frontend/src/router.tsx`), so the browser URL never changes. Everything
- * below navigates through the UI.
- */
+// Memory-history router: navigate through the UI.
 async function gotoChannel(page: Page) {
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
@@ -198,14 +153,7 @@ async function box(locator: Locator): Promise<Box> {
   return { left: b.x, right: b.x + b.width, width: b.width };
 }
 
-/**
- * Where the TEXT inside an element actually sits, as opposed to where the
- * element's own box sits.
- *
- * A block-level message body fills its column whatever the direction, so its
- * rect says nothing about alignment. A Range over its contents measures the
- * inline box the glyphs were laid into, which is the thing `dir="auto"` moves.
- */
+/** Where the TEXT inside an element sits (a Range over its contents), not the element's box. */
 async function textBox(
   locator: Locator,
 ): Promise<{ text: Box; container: Box }> {
@@ -223,13 +171,7 @@ async function textBox(
   });
 }
 
-/**
- * Where the FIRST and LAST characters of an element's text were painted.
- *
- * This is how you measure bidi reordering rather than assert it: the Unicode
- * bidi algorithm can move a run without changing a single character of the
- * string, so `toHaveText` sees nothing. A Range clamped to one character does.
- */
+/** Where the first and last characters were painted: bidi reordering is invisible to toHaveText. */
 async function firstLastCharLefts(
   locator: Locator,
 ): Promise<{ first: number; last: number; text: string }> {
@@ -368,10 +310,7 @@ for (const skin of SKINS) {
     test("a message body follows its own script, not the interface language", async ({
       page,
     }) => {
-      // The point of `dir="auto"` on the body: an English message in an Arabic
-      // app still reads left-to-right, and an Arabic message in an English app
-      // still reads right-to-left. Both are asserted, so a body that merely
-      // inherited the UI direction fails one of them whichever way the app is.
+      // `dir="auto"` on the body: each body reads in its own script's direction, whatever the app's.
       const bodyOf = (page: Page, id: string) =>
         page.getByTestId(`message-${id}`).getByTestId("message-content");
 
@@ -404,10 +343,7 @@ for (const skin of SKINS) {
     test("the composer's send arrow mirrors and its neighbours do not", async ({
       page,
     }) => {
-      // Icons that encode reading direction must flip; icons that encode a
-      // THING (a smiley) must not. Getting the second half wrong is the
-      // failure mode that makes an RTL build look sloppy, so it is asserted
-      // just as hard as the first.
+      // Direction icons must flip; icons for a THING (a smiley) must not.
       await boot(page, skin, RTL_LANG);
       await gotoChannel(page);
 
@@ -438,10 +374,7 @@ for (const skin of SKINS) {
     test("the message action cluster pins to the trailing edge of the row", async ({
       page,
     }) => {
-      // Both skins put the actions at the END of the row, but through
-      // different mechanisms — an absolutely-positioned toolbar in refined, a
-      // flex sibling with a leading margin in terminal — so each gets the
-      // assertion that exercises its own code.
+      // Both skins put actions at the row END via different mechanisms, so each gets its own assertion.
       const row = (page: Page) => page.getByTestId(`message-${LATIN_MESSAGE_ID}`);
       const cluster = (page: Page) =>
         row(page).getByTestId("reply-button").locator("xpath=..");
@@ -482,17 +415,7 @@ for (const skin of SKINS) {
     test("a reply reference indents from the reading edge and its arrow mirrors", async ({
       page,
     }) => {
-      // Two separate claims, both about the same row.
-      //
-      // 1. THE INSET. Terminal indents the reference row under the message it
-      //    answers with a hard `ps-14`; refined gets its inset for free from
-      //    the avatar-gutter grid column and has no padding of its own, so
-      //    only terminal has anything to measure here.
-      // 2. THE ARROW. Both skins mirror it, but from opposite starting points
-      //    on purpose: refined uses lucide's `CornerUpLeft` as-drawn (so it
-      //    flips under RTL), terminal uses `Reply` pre-flipped for LTR (so RTL
-      //    returns it to its natural drawing, i.e. unmirrored). Hence the
-      //    inverted expectations rather than one shared one.
+      // Terminal's reply-row inset (`ps-14`), and the arrow, which the skins mirror from opposite starting points.
       const preview = (page: Page) =>
         page.getByTestId(`reply-preview-${LATIN_MESSAGE_ID}`);
       // Comfortably more than the glyph's own width, comfortably less than the
@@ -526,10 +449,7 @@ for (const skin of SKINS) {
     test("a clock reading is not reordered by the interface direction", async ({
       page,
     }) => {
-      // "6:00 AM" in an RTL paragraph reorders to "AM 6:00" — the characters
-      // are untouched, so `toHaveText` sees nothing wrong, and only the
-      // painted positions show it. Hence a Range clamped to one character at
-      // each end rather than a text assertion.
+      // "6:00 AM" reorders to "AM 6:00" in RTL; only painted positions show it.
       const stamp = (page: Page) =>
         page.getByTestId(`message-${LATIN_MESSAGE_ID}`).getByTestId("message-timestamp");
 
@@ -548,10 +468,7 @@ for (const skin of SKINS) {
     test("the PIN boxes keep code order under a right-to-left interface", async ({
       page,
     }) => {
-      // A numeric code reads left-to-right in every locale. Left to inherit
-      // the document direction the boxes reverse, so the first box you type
-      // into renders last — a wrong PIN every time, with nothing on screen to
-      // explain why.
+      // A numeric code reads LTR in every locale, or the first box typed renders last.
       const digitLefts = async () =>
         page
           .getByTestId("pin-entry-screen")
@@ -592,22 +509,7 @@ for (const skin of SKINS) {
   });
 }
 
-/*
- * ────────────────────────────────────────────────────────────────────────────
- * Horizontal arrow-key navigation (#902).
- *
- * `.codesight/wiki/i18n.md` §4 listed this as knowingly unfixed after #855:
- * `NavigableList`, `NavigableGrid` and `EmojiPicker` all treated ArrowRight as
- * "next", which under `dir=rtl` walks the cursor backwards through the UI.
- *
- * These follow the same rule as everything else in this file — MEASURE, do not
- * assert on `dir`. The property under test is "the cursor moved the way the
- * key points ON SCREEN", which is a statement about pixels and is identical in
- * both directions. An index-shaped assertion would have to encode the answer
- * it is checking, and would pass on the unfixed code in LTR while saying
- * nothing about RTL.
- * ────────────────────────────────────────────────────────────────────────────
- */
+// Horizontal arrow-key navigation (#902): the cursor must move the way the key points on screen.
 
 /** Where DOM focus currently is, as a box plus a stable identity. */
 async function focusedCell(
@@ -641,10 +543,7 @@ for (const skin of SKINS) {
     test("a list's row controls are reached by the arrow that points at them", async ({
       page,
     }) => {
-      // `NavigableList` puts its controls at the INLINE END of the row, so
-      // `dir=rtl` draws them on the left and ArrowLeft is what must reach
-      // them. The test derives which key to press from where the control was
-      // actually painted, so it states the RULE rather than the answer.
+      // NavigableList puts controls at the inline END; derive the key from where the control was painted.
       const sides: Record<string, boolean> = {};
 
       for (const language of [RTL_LANG, LTR_LANG]) {
@@ -661,16 +560,7 @@ for (const skin of SKINS) {
         const controlOnRight = controlBox.left > listBox.left + listBox.width / 2;
         sides[language] = controlOnRight;
 
-        // Focus + press + assert as ONE retried step. A keystroke is consumed
-        // by whatever holds focus at the instant it is dispatched, so if a
-        // render lands between `focus()` and `press()` the arrow goes to the
-        // body and no amount of retrying the ASSERTION can recover it — the
-        // key it was waiting on has already been spent. That is a flake in the
-        // test, not in the app: it failed roughly one full-suite run in four,
-        // on `main`, always in the first (RTL) pass where the shortcuts page
-        // has the most left to settle. Retrying the whole interaction weakens
-        // nothing — an arrow that genuinely walks the wrong way still never
-        // lands on the control.
+        // Focus + press + assert as ONE retried step: a render between focus() and press() spends the key.
         await expect(async () => {
           await list.focus();
           await page.keyboard.press(controlOnRight ? "ArrowRight" : "ArrowLeft");
@@ -691,11 +581,7 @@ for (const skin of SKINS) {
     test("the emoji grid cursor follows the key you pressed, not the LTR order", async ({
       page,
     }) => {
-      // Start from a cell in the middle of the first row so neither direction
-      // is clamped at an edge, then assert the cursor moved RIGHTWARDS ON
-      // SCREEN for ArrowRight. Under `dir=rtl` that is the PREVIOUS emoji, and
-      // the unfixed code moved to the next one — which is drawn to the left,
-      // so this fails on it.
+      // Start mid-row so neither direction clamps; ArrowRight must move focus rightwards on screen.
       const START = 4;
       const indexAfterRight: Record<string, number> = {};
 

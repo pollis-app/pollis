@@ -1,19 +1,4 @@
-/*
- * Act on pointer-down where an accidental press is free to undo (#1529).
- * BOTH skins.
- *
- *   1. A converted control acts while the mouse button is still down, and
- *      the release of the same press does not run it a second time: the
- *      message "more" menu is a toggle (twice = closed again), and the
- *      breadcrumb Back walks history (twice = one entry too far).
- *   2. The same controls still work from the keyboard — Enter and Space
- *      produce a click with `detail === 0`, which always acts.
- *   3. A control that stays on release (the channel mute bell, a
- *      persisted toggle) does nothing on pointer-down, acts on release, and
- *      does nothing when the press is dragged off before release.
- *
- * The rule itself is pure and pinned in `frontend/tests/press-activation.test.ts`.
- */
+// Act on pointer-down where a press is free to undo (#1529); stay-on controls act on release.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 

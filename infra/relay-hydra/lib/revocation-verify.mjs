@@ -1,9 +1,4 @@
-// The client's verification path for the signed **relay revocation list**
-// (#813 Phase C), in one place — the sibling of lib/directory-verify.mjs.
-// The reconciler signs; this verifies. scripts/verify-directory.mjs runs it
-// against the live URL; test/revocation-contract.test.mjs runs it offline with
-// generated keys, forgeries, replays and cross-artifact confusion.
-//
+// Client verification of the signed relay revocation list (#813 Phase C); sibling of lib/directory-verify.mjs.
 // WHY A SECOND ARTIFACT AT ALL. The directory is the *availability* artifact: it
 // carries a ~1h TTL on purpose, so a wedged reconciler does not take the pool
 // down with it. That same hour is how long a seized relay stays trusted. You
@@ -28,9 +23,7 @@ export const REVOCATION_VERSION = 1;
 
 export class RevocationRejected extends Error {}
 
-// Verify a revocation envelope. Mirrors pollis-relay's `verify_revocations` and
-// pollis-core's directory verifier exactly.
-//
+// Verify a revocation envelope; mirrors pollis-relay's verify_revocations.
 // `seqFloor` is the lowest sequence number the caller accepts — pass
 // max(highest seq already seen, the seq the signed directory anchored). Anything
 // below it is a REPLAY: a genuinely-signed, not-yet-expired, but OLDER list that
@@ -99,10 +92,7 @@ export function verifyRevocations(
     }
     const addr = nonEmpty(entry.addr);
     const digest = nonEmpty(entry.cert_sha256_b64);
-    // An entry this build cannot act on fails the WHOLE list closed rather than
-    // being skipped. Skipping would silently downgrade a revocation published by
-    // a newer producer (a selector we do not know yet) into an admission —
-    // exactly the bypass revocation exists to prevent.
+    // An entry this build cannot act on fails the whole list closed; skipping would turn a revocation into an admission.
     if (addr === null && digest === null) {
       throw new RevocationRejected("revocation entry carries no addr and no cert_sha256_b64");
     }
@@ -131,12 +121,7 @@ export function verifyRevocations(
 }
 
 // Does `list` revoke this relay? Either selector matching is enough.
-//
-// The ADDRESS covers the shared-pool-identity case: every hydra node currently
-// presents the same pinned QUIC leaf, so a cert-keyed revocation would take the
-// whole pool down at once. The CERT DIGEST covers per-node and peer-hosted
-// identities (design §7), where the leaf really is the relay's name and the
-// address is not.
+// ADDRESS covers the shared pool leaf (a cert revocation would drop the whole pool); CERT DIGEST covers per-node and peer identities.
 export function revokes(list, { addr, cert_b64 }) {
   if (typeof addr === "string" && list.addrs.has(normalizeAddr(addr))) {
     return true;
@@ -148,7 +133,6 @@ export function revokes(list, { addr, cert_b64 }) {
 }
 
 // base64(SHA-256(DER)) — the cert_sha256_b64 selector's canonical form. Handy for
-// operators minting a revocation entry from a node's advertised cert_b64.
 export function certDigestB64(certDer) {
   return createHash("sha256").update(certDer).digest("base64");
 }

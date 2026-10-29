@@ -1,28 +1,5 @@
 #!/usr/bin/env node
-/*
- * Fast smoke check: the real Tauri app launches and the login screen
- * renders. Unlike e2e.js, this never touches the delivery service or Turso —
- * `checkStoredSession()` (frontend/src/App.tsx) resolves the logged-out path
- * entirely from local Tauri commands (getSession / listKnownAccounts), so
- * proving the auth screen shows up needs nothing but Vite + the app binary.
- * That makes this safe to run in CI with no shared-DB dependency.
- *
- * Flow: launch → wait for [data-testid="auth-screen"] → screenshot. Exits
- * non-zero (with FAIL.png/FAIL.html) if the screen never appears.
- *
- * No .env.development required (CI has none — it's Doppler-sourced, not
- * committed): the login screen doesn't read any of those vars before it
- * renders, so a missing file just means an empty env override.
- *
- * Config::from_env() (pollis-core/src/config.rs) DOES hard-require
- * TURSO_URL/TURSO_TOKEN/R2_S3_ENDPOINT/R2_PUBLIC_URL to be present — baked
- * in at compile time via option_env! or present at runtime — or the app
- * panics in its Tauri setup hook before any window opens, login screen or
- * not. Since this binary is built with a clean env (no baked secrets — see
- * README Prerequisites), unresolved placeholders are supplied here so the
- * app can boot; they are never dialed before auth-screen renders. Same
- * trick as mls-tests.yml's placeholder `.env.test`.
- */
+// Smoke: the real Tauri app launches and the login screen renders; no DS or Turso needed.
 
 const fs = require("fs");
 const path = require("path");
@@ -34,9 +11,7 @@ const h = require("./lib/harness");
 const ARTIFACTS = path.join(__dirname, "artifacts");
 const shot = h.makeShot(ARTIFACTS);
 
-// TURSO_URL / TURSO_TOKEN left this list in #987: the client no longer reads a
-// database credential (or links a database driver), so `Config::from_env` no
-// longer requires them and a placeholder would be dead weight.
+// Config::from_env panics at setup without these; never dialed before the auth screen.
 const REQUIRED_PLACEHOLDERS = {
   R2_S3_ENDPOINT: "https://placeholder.invalid",
   R2_PUBLIC_URL: "https://placeholder.invalid",

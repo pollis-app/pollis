@@ -1,14 +1,5 @@
 #!/usr/bin/env node
-/*
- * E2E: a wrong OTP code surfaces an inline error and does not let the user
- * past the code-entry screen. Same local stack as e2e.js (needs the
- * delivery service + writable test Turso — see e2e/README.md), but only
- * drives the auth screen, not the full signup flow.
- *
- * Flow: launch → email → request OTP → enter a WRONG 6-digit code →
- * assert [data-testid="auth-error"] appears and otp-form-container is still
- * shown (i.e. verification was rejected, not silently accepted).
- */
+// E2E: a wrong OTP shows an inline error and stays on the code screen.
 
 const fs = require("fs");
 const path = require("path");
@@ -22,7 +13,6 @@ const shot = h.makeShot(ARTIFACTS);
 async function main() {
   h.reap();
   // .env.development is optional (absent in CI); Turso comes from the process env
-  // (start-backend.sh) or .env.test. See e2e.js for the full rationale.
   const devEnv = h.readEnvFile(".env.development");
   const { TURSO_URL, TURSO_TOKEN } = h.tursoEnv();
 
@@ -32,9 +22,7 @@ async function main() {
   const vite = h.spawnVite(devEnv);
   children.push(vite);
 
-  // Delivery service. DEV_OTP is the code that WOULD verify — the whole point of
-  // this test is to send something else instead. Use the external DS when
-  // start-backend.sh already runs one (CI), else spawn our own on DS_PORT.
+  // External DS when start-backend.sh runs one (CI), else spawn our own.
   const deliveryUrl = process.env.POLLIS_DELIVERY_URL || h.DS_URL;
   if (!process.env.POLLIS_DELIVERY_URL) {
     const dsEnv = { ...process.env, TURSO_URL, TURSO_TOKEN,

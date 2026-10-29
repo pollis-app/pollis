@@ -1,51 +1,18 @@
 // Stale-node detection for the relay pool (#703 / #677).
 //
-// The pool is split-brained when it holds two relay generations at once: a
-// rolling push to a mutable image tag never updates a running node (Docker caches
-// by content hash, `--restart=always` never re-pulls), so nodes carry whatever
-// image existed when their instance launched. Because the relay bumps its ALPN
-// alongside PROTOCOL_VERSION, two generations means QUIC ALPN negotiation simply
-// fails against the wrong-generation node — the client can SEE it in the directory
-// but cannot USE it.
+// Split brain: running nodes never re-pull a mutable tag, and a wrong-generation node fails ALPN.
 //
-// The relay's GET /version now reports BOTH identities:
-//   { service, sha, protocol, protocol_version }
-// and this module turns that body into the two decisions the reconciler makes:
+// GET /version reports { service, sha, protocol, protocol_version }; this makes two decisions:
 //
-//   1. Directory membership — keyed on PROTOCOL identity. A node whose protocol
-//      does not match the pool's expected one is excluded from the signed
-//      directory IMMEDIATELY. Exclusion is instant, free and reversible; the
-//      client then never learns the wrong-generation node's address, which is the
-//      whole of the split-brain symptom. (Termination takes minutes and costs
-//      capacity — so we exclude first and cycle second.)
+//   1. Directory membership, by PROTOCOL: a mismatch is excluded immediately (instant, reversible).
+//   2. Cycling, by BUILD sha: a build-stale node keeps serving until replaced.
 //
-//   2. Cycling — keyed on BUILD identity (sha). A node whose sha does not match
-//      the intended build is replaced so the fleet converges on the intended
-//      image. An unrelated docs commit changes the sha without changing the
-//      protocol, so a build-stale node is NOT necessarily a directory-membership
-//      problem — it keeps serving clients until it is cycled.
+// INVARIANT: staleness is a POSITIVE identification, never absence of evidence; unreadable means keep.
 //
-// THE LOAD-BEARING INVARIANT: staleness is a POSITIVE identification of a wrong
-// build/protocol, NEVER an absence of evidence. A node we cannot read (no
-// /version, unparseable body, no sha) is UNKNOWN, not stale — treating "I can't
-// tell" as "wrong build" would cycle healthy nodes on a transient blip and could
-// churn the whole pool during any read failure. Every predicate below fails toward
-// "keep the node".
-//
-// Pure functions, no AWS, no network — the reconciler injects the parsed /version
-// body, the expected protocol, and the intended sha. This is the exact logic that
-// must not misfire, so it lives here where it is unit-testable
-// (test/staleness.test.mjs); index.mjs can't be imported under test (its AWS SDK
-// deps only exist in the Lambda runtime).
+// Pure functions, no AWS (test/staleness.test.mjs).
 
 // Parse a /version HTTP body into { sha, protocol, protocolVersion } or null.
-//
-// Returns null (UNKNOWN, never "stale") for anything we cannot read: a node that
-// answers 200 with a body we can't parse is indistinguishable, for staleness
-// purposes, from one that didn't answer at all. Old nodes (before /version carried
-// a protocol) parse fine but leave `protocol` undefined — see protocolMismatch,
-// which fails open on an absent protocol precisely so the /version rollout itself
-// doesn't empty the directory.
+// Returns null (UNKNOWN, never "stale") for anything unreadable; old nodes leave `protocol` undefined.
 export function parseVersion(body) {
   if (typeof body !== "string" || body.length === 0) {
     return null;
@@ -82,14 +49,7 @@ function isConcreteSha(sha) {
 //   - node unreadable (version === null)      -> false (it also failed the health
 //                                                 check, so it isn't in the healthy
 //                                                 set being assembled anyway)
-//   - node reports no protocol field          -> false. This is the migration case:
-//     a node running a build from BEFORE /version carried a protocol answers 200
-//     with just {service, sha}. Excluding every such node the moment this
-//     reconciler ships — before a single node has rolled to a protocol-reporting
-//     build — would empty the directory pool-wide. Those nodes are instead
-//     replaced by BUILD cycling (their sha != intended), and once the fleet
-//     reports a protocol a genuine future mismatch (v3 vs a future v4) is a
-//     positive disagreement and IS excluded here, instantly.
+//   - node reports no protocol field          -> false: pre-protocol builds are replaced by BUILD cycling.
 export function protocolMismatch(version, expectedProtocol) {
   if (!expectedProtocol) {
     return false;
@@ -143,9 +103,7 @@ export function isBuildStale(version, intendedSha) {
 export function selectCycleTargets({ nodes, intendedSha, healthyTotal, poolTotal, nodeFloor, maxPerRun }) {
   const buildStale = (nodes ?? []).filter((n) => isBuildStale(n.version, intendedSha));
 
-  // The pool must retain at least this many healthy nodes. Never demand more than
-  // the pool is even meant to hold, or a pool at/under the floor could never cycle
-  // at all (mirrors mayDrain()).
+  // Never demand more than the pool is meant to hold (mirrors mayDrain()).
   const required = Math.min(poolTotal, nodeFloor);
   const floorBudget = Math.max(0, healthyTotal - required);
   const budget = Math.max(0, Math.min(maxPerRun, floorBudget));

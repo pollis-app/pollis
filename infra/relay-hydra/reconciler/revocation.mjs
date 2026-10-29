@@ -1,11 +1,6 @@
 // Live relay revocation — the PRODUCER half (#813 Phase C).
 //
-// THE PROBLEM. A relay is trusted for exactly as long as its entry sits in the
-// signed directory, and the directory carries a ~1 hour TTL. So a seized or
-// compromised node stays valid for up to an hour after we know it is bad, and
-// nothing we do to the directory shortens that for a client that already holds
-// one. Dropping the node from `relays[]` (which this module also does) only helps
-// clients that re-fetch.
+// A relay is trusted while it sits in the ~1h-TTL directory; dropping it from relays[] only helps clients that re-fetch.
 //
 // THE MECHANISM. A second signed artifact — `revocations.json` — published beside
 // the directory, signed by the SAME Ed25519 key, with a much shorter TTL
@@ -16,28 +11,9 @@
 // directory's long TTL is a deliberate availability property (a wedged reconciler
 // must not take the pool down) and must not be traded away for freshness.
 //
-// THE SEQUENCE NUMBER IS SSM'S. `seq` is the revocation parameter's SSM
-// `Version`, not an operator-authored field. Parameter Store increments it on
-// every PutParameter, server-side, monotonically — so it is impossible for an
-// operator to forget to bump it, impossible for two edits to collide on the same
-// value, and it needs no extra state anywhere. Clients keep a high-water mark and
-// reject anything lower, which is what stops a genuinely-signed but OLDER list
-// being replayed to un-revoke a relay. (Corollary, in the runbook: never DELETE
-// the parameter — recreating it resets Version to 1, which every client will
-// reject as a rollback. Empty its `revoked` array instead.)
-//
-// THE DIRECTORY ANCHORS IT. The directory carries
-// `revocation: { seq, path, count }` — one additive, optional field, with
-// `version` still 1. That binds revocation freshness to directory freshness: an
-// on-path attacker cannot pair a fresh directory with a stale-but-unexpired
-// revocation list, because the directory it must serve states the minimum
-// sequence. The field is invisible to already-shipped clients, which ignore
-// unknown payload fields (see test/directory-contract.test.mjs).
-//
-// Pure functions, no AWS, no network — index.mjs injects the raw parameter value
-// and the node set. This is the logic that must not misfire, so it lives here
-// where it is unit-testable (test/revocation-contract.test.mjs); index.mjs cannot
-// be imported under test (its AWS SDK deps only exist in the Lambda runtime).
+// seq is the parameter's SSM Version (server-side, monotonic); clients reject lower. Never DELETE the parameter: it resets to 1.
+// The directory anchors it (`revocation: { seq, path, count }`), so a fresh directory cannot pair with a stale list.
+// Pure functions (index.mjs cannot be imported under test), covered by test/revocation-contract.test.mjs.
 
 import { createHash } from "node:crypto";
 
@@ -54,11 +30,7 @@ export const REVOCATION_VERSION = 1;
 //   { "cert_sha256_b64": "<32-byte digest, base64>" }
 // plus optional, purely descriptive `reason` and `revoked_at`.
 //
-// THROWS on anything it cannot fully understand. A revocation set we can only
-// partially parse must never be signed: half a revocation reads to every client
-// as "these relays are fine", which is the one outcome this feature must not
-// produce. The caller treats a throw as "publish nothing this cycle" and lets the
-// live artifacts expire, which fails closed on a 5-minute clock.
+// THROWS on anything it cannot fully understand: half a revocation reads as "these relays are fine".
 export function parseRevocationSet(raw, relayPort) {
   let parsed;
   try {
@@ -159,15 +131,7 @@ export function directoryAnchor({ seq, path, count }) {
 }
 
 // How long the directory itself should be valid for.
-//
-// While ANY relay is revoked, cut the directory TTL to `activeTtl` (default
-// 5 min). This is the only lever that helps ALREADY-SHIPPED clients, which know
-// nothing about revocations.json: a revoked node leaves `relays[]` on the next
-// reconcile, and a short TTL means an old client's cached directory stops being
-// usable in minutes rather than an hour. It is a deliberate fail-closed trade —
-// if the reconciler wedges DURING an active revocation the pool goes dark in
-// minutes instead of an hour, which is the correct direction while a node is
-// known-compromised.
+// While ANY relay is revoked, cut the TTL to `activeTtl`: the only lever for already-shipped clients (fail-closed).
 export function directoryTtlFor({ revokedCount, baseTtl, activeTtl }) {
   if (revokedCount > 0) {
     return Math.min(baseTtl, activeTtl);

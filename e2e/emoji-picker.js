@@ -1,34 +1,5 @@
 #!/usr/bin/env node
-/*
- * Emoji picker E2E (issue #848) — VISUAL verification that the real picker
- * renders and works in the shipped app.
- *
- * A note on the tool, because the ticket asked for Playwright: this repo has no
- * Playwright and cannot usefully have it here. Every e2e scenario drives the
- * REAL Tauri binary through `tauri-driver` + `WebKitWebDriver` (see
- * `e2e/README.md`), because the thing under test is the desktop app — the
- * picker's custom-emoji half calls `invoke("list_usable_emoji")` and
- * `invoke("get_emoji_url")`, neither of which exists in a browser. Playwright
- * drives browsers, not a WebKitGTK-backed Tauri window, and adding it would also
- * mean changing the frozen lockfile. So this follows the house convention
- * (webdriverio, one scenario per file, no runner) and gets to verify the actual
- * shipping surface instead of a browser-only mock of it.
- *
- * What it proves:
- *   1. The reaction affordance now opens the REAL picker — search box, category
- *      rail, skin-tone swatches, hundreds of cells — not the eight hard-coded
- *      emoji it used to be.
- *   2. Search narrows the grid, and the result is pickable.
- *   3. Picking one adds a reaction pill to the message.
- *   4. The category rail jumps between sections.
- *   5. The per-group Custom Emoji page renders and states the storage model.
- *
- * Screenshots land in `e2e/artifacts/emoji-*.png` — those are the visual record.
- *
- * Backend assumptions are the same as every other scenario: ONE shared external
- * backend (`e2e/scripts/start-backend.sh`, so `POLLIS_DELIVERY_URL` must be set)
- * and ONE Vite server. Single client — nothing here needs convergence.
- */
+// Emoji picker (#848) on the real Tauri binary: custom emoji need invoke(), so no browser mock.
 
 const fs = require("fs");
 const path = require("path");
@@ -39,7 +10,6 @@ const shot = h.makeShot(ARTIFACTS);
 
 const PIN = "2468";
 
-// Full signup through the real UI — the same flow every other scenario uses.
 async function signUp(browser, email) {
   console.log(`[emoji-picker] signing up ${email}`);
   await h.waitTestId(browser, "auth-screen", 30000);
@@ -79,13 +49,7 @@ async function createGroupWithChannel(browser, groupName, channelName) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
-/**
- * Click the breadcrumb trail segment whose text is `label`.
- *
- * The bar's chevrons are history back/forward now, so "back" from this channel
- * is the create-channel form it was made from, not the group. Climbing the
- * hierarchy is the trail's job — this clicks it the way a user would.
- */
+/** Click the breadcrumb segment `label` (the chevrons are history, not hierarchy). */
 async function clickTrailSegment(browser, label) {
   const clicked = await browser.execute((needle) => {
     const trail = document.querySelector('[data-testid="breadcrumb-trail"]');
@@ -164,12 +128,11 @@ async function main() {
     const groupName = `Emoji Test ${stamp}`;
     await createGroupWithChannel(browser, groupName, "general");
 
-    // A message to react to.
     await h.setComposerText(browser, `emoji e2e ${stamp}`);
     await h.clickTestId(browser, "message-send-button");
     await h.waitSelector(browser, '[data-testid="message-content"]', 30000, "the sent message");
 
-    // ── 1. The real picker opens ────────────────────────────────────────────
+    // 1. The real picker opens.
     await openReactionPicker(browser);
     await shot(browser, "emoji-picker-open.png");
 
@@ -186,7 +149,7 @@ async function main() {
       );
     }
 
-    // ── 2. Search narrows it ────────────────────────────────────────────────
+    // 2. Search narrows it.
     await h.setTestIdValue(browser, "emoji-picker-search", "grin");
     await h.sleep(600);
     const searched = await countSelector(browser, '[data-testid="emoji-cell"]');
@@ -196,13 +159,13 @@ async function main() {
     }
     await shot(browser, "emoji-picker-search.png");
 
-    // ── 3. Picking adds a reaction ──────────────────────────────────────────
+    // 3. Picking adds a reaction.
     await h.clickSelector(browser, '[data-testid="emoji-cell"]');
     await h.waitSelector(browser, '[data-testid="reaction-pill"]', 20000, "the new reaction pill");
     await shot(browser, "emoji-reaction-added.png");
     console.log("[emoji-picker] reaction pill rendered");
 
-    // ── 4. The category rail jumps ──────────────────────────────────────────
+    // 4. The category rail jumps.
     await openReactionPicker(browser);
     await h.clickTestId(browser, "emoji-category-flags");
     await h.sleep(800);
@@ -212,7 +175,7 @@ async function main() {
     await browser.keys(["Escape"]);
     await h.sleep(300);
 
-    // ── 5. The per-group Custom Emoji page ──────────────────────────────────
+    // 5. The per-group Custom Emoji page.
     await clickTrailSegment(browser, groupName);
     await h.waitTestId(browser, "menu-item-group-emoji", 20000);
     await h.clickTestId(browser, "menu-item-group-emoji");

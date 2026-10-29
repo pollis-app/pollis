@@ -1,20 +1,5 @@
 #!/usr/bin/env node
-/*
- * Self-contained E2E driver for the real Pollis desktop app.
- *
- * Same local stack as run.js (Vite dev server + local pollis-delivery with
- * DEV_OTP=000000 + the writable test DB), but instead of the WebdriverIO test
- * runner it drives the app through raw `webdriverio` remote() calls. The raw
- * client reliably drives this webkit2gtk build, whereas the mocha runner
- * intermittently stalls the first WebView command.
- *
- * Flow: launch → create account (email → dev OTP → save secret key → PIN) →
- * land on the ready app → screenshot. Nothing talks to prod; no email is sent.
- *
- * For a fast, network-free check that the app launches and the login screen
- * renders, see smoke.js instead — it doesn't touch the delivery service or
- * Turso at all.
- */
+// E2E driver for the real desktop app via raw webdriverio (the mocha runner stalls webkit2gtk).
 
 const fs = require("fs");
 const path = require("path");
@@ -27,22 +12,17 @@ const shot = h.makeShot(ARTIFACTS);
 
 async function main() {
   h.reap();
-  // .env.development is optional: present for a local run (dev R2/LiveKit creds),
-  // absent in CI where those come from the workflow env (start-backend.sh).
+  // .env.development is optional: absent in CI, where creds come from the workflow env.
   const devEnv = h.readEnvFile(".env.development");
   const { TURSO_URL, TURSO_TOKEN } = h.tursoEnv();
 
   const children = [];
   const stop = (c) => { try { c && c.kill("SIGKILL"); } catch (_) {} };
 
-  // Vite dev server (the UI the debug binary loads).
   const vite = h.spawnVite(devEnv);
   children.push(vite);
 
-  // Delivery service. When POLLIS_DELIVERY_URL is already set — CI runs the real
-  // pollis-delivery via e2e/scripts/start-backend.sh against the libsql fixture —
-  // use that external DS; otherwise spawn our own on DS_PORT so a plain
-  // `node e2e/e2e.js` stays self-contained (needs .env.test's writable Turso).
+  // External DS when POLLIS_DELIVERY_URL is set (CI), else spawn our own on DS_PORT.
   const deliveryUrl = process.env.POLLIS_DELIVERY_URL || h.DS_URL;
   if (!process.env.POLLIS_DELIVERY_URL) {
     const dsEnv = { ...process.env, TURSO_URL, TURSO_TOKEN,
@@ -55,11 +35,7 @@ async function main() {
     console.log(`[e2e] using external delivery service at ${deliveryUrl}`);
   }
 
-  // App env: dev creds + writable test DB + the DS. The two WebKit vars
-  // mirror the project's own `pnpm dev` script — WebKitGTK compositing is
-  // broken on this setup and causes rendering stalls / hung screenshot
-  // commands without them. R2 placeholders (present but never dialed during
-  // signup) come from process.env in CI or .env.development locally.
+  // The WebKit vars mirror `pnpm dev`: WebKitGTK compositing stalls screenshots without them.
   const appEnv = { ...devEnv, ...process.env, TURSO_URL, TURSO_TOKEN,
     POLLIS_DELIVERY_URL: deliveryUrl, POLLIS_DATA_DIR: path.join(__dirname, ".tmp-data"),
     WEBKIT_DISABLE_COMPOSITING_MODE: "1", GDK_BACKEND: "x11" };
@@ -84,13 +60,11 @@ async function main() {
       hostname: "127.0.0.1", port: 4444, path: "/",
       capabilities: { "tauri:options": { application: h.APP_BIN } },
       logLevel: "error",
-      // Fail a wedged command in 45s instead of the default 120s.
       connectionRetryTimeout: 45000,
       connectionRetryCount: 1,
     });
 
-    // Let the initial Vite page load settle before the first command (mirrors
-    // the reliable standalone probe).
+    // Let the initial Vite page load settle before the first command.
     await h.sleep(6000);
 
     const email = `e2e_${Date.now()}@pollis.test`;

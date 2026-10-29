@@ -1,12 +1,5 @@
-// End-to-end proof of the live relay revocation contract (#813 Phase C): sign
-// exactly as the reconciler does, then run the client's verification path over
-// it — including every fail-closed case. No AWS, no network.
-//
-// The tests here are deliberately weighted toward the ways revocation can go
-// WRONG, because the failure modes are asymmetric: a revocation that does not
-// take effect is a silent security hole, and one that fires when it should not
-// is a denial of service against our own pool. "It works on the happy path" is
-// not coverage for this feature.
+// Relay revocation contract (#813 Phase C): sign as the reconciler does, verify as the client does.
+// Weighted toward failure modes: a revocation that does not fire is a silent hole.
 //
 // Run: node --test   (from infra/relay-hydra/)
 
@@ -69,8 +62,6 @@ function freshDirectory(overrides = {}, revocation = null) {
   }
   return dir;
 }
-
-// ── The producer: parsing the operator-authored parameter ────────────────────
 
 test("producer: parses addr / ip / cert selectors and normalizes them", () => {
   const { revoked } = parseRevocationSet(
@@ -145,8 +136,6 @@ test("producer: no anchor at all when revocation is not configured", () => {
   });
 });
 
-// ── The consumer: verifying the signed revocation list ───────────────────────
-
 test("valid revocation list verifies and parses", () => {
   const env = publishRevocations(JSON.stringify({ revoked: [{ addr: "203.0.113.7:9444" }] }), 12);
   const list = verifyRevocations(env, pubRawB64, now, 0);
@@ -177,8 +166,6 @@ test("a cert-keyed revocation follows the relay wherever it moves", () => {
   assert.equal(revokes(list, { addr: "198.51.100.99:9444", cert_b64: CERT_B64 }), true);
   assert.equal(revokes(list, { addr: "198.51.100.99:9444", cert_b64: OTHER_CERT_B64 }), false);
 });
-
-// ── Fail-closed: forgery, tampering, replay, confusion ───────────────────────
 
 test("rejects a FORGED revocation list (wrong signing key)", () => {
   const { privateKey: attacker } = generateKeyPairSync("ed25519");
@@ -242,9 +229,7 @@ test("rejects version != 1 and a wrong type tag", () => {
 });
 
 test("an entry with no selector this build understands fails the WHOLE list closed", () => {
-  // A revocation published by a NEWER producer, keyed on something we do not
-  // know. Skipping it would silently downgrade a real revocation to an
-  // admission — the exact bypass this feature exists to prevent.
+  // A NEWER producer's unknown selector: skipping it would downgrade a revocation to an admission.
   const env = signEnvelope({
     version: 1,
     type: REVOCATION_TYPE,
@@ -271,8 +256,6 @@ test("a malformed cert digest fails the whole list closed", () => {
 test("rejects malformed envelope JSON", () => {
   assert.throws(() => verifyRevocations("{not json", pubRawB64, now, 0), /malformed envelope/);
 });
-
-// ── The client's admission step: directory x revocation list ─────────────────
 
 test("admitRelays returns the surviving relays and drops the revoked one", () => {
   const env = publishRevocations(JSON.stringify({ revoked: [{ addr: "203.0.113.7:9444" }] }), 12);
@@ -304,9 +287,7 @@ test("admitRelays FAILS CLOSED on an expired list, without it being re-fetched",
     pubRawB64,
     now,
   );
-  // The directory is still valid for another 55 minutes; the revocation list is
-  // not. Held evidence stops being evidence — this is the property that bounds
-  // exposure to the REVOCATION ttl instead of the directory ttl.
+  // Directory still valid, list expired: exposure is bounded by the revocation TTL.
   assert.doesNotThrow(() => admitRelays(dir, list, now + 299));
   assert.throws(() => admitRelays(dir, list, now + 300), /revocation list expired/);
 });

@@ -1,19 +1,4 @@
-/*
- * Email change now needs TWO codes (#1161).
- *
- * The device signature proves the account and the new-address code proves the
- * new mailbox — and a borrowed or stolen unlocked device satisfies both. The
- * second code goes to the address being LEFT, which is the one proof whoever
- * picked up the device does not have. The Delivery Service refuses a change
- * that does not answer it, so the UI has to collect it; a screen that asks for
- * one code sends a request the server will always reject.
- *
- * Runs against the browser build with the Tauri IPC mock
- * (`frontend/src/__mocks__/tauri-core.ts`), whose `verify_email_change` applies
- * the same fail-closed rule the DS does.
- *
- *   pnpm --filter @pollis/e2e playwright email-change
- */
+// Email change needs two codes (#1161): the second goes to the address being left.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -69,8 +54,7 @@ test("the code step asks for both the new address's code and the current address
   await boot(page);
   await reachCodeStep(page);
 
-  // Both fields, and the current-address one names the address being left so
-  // the user knows which mailbox to look in.
+  // The current-address field names the address being left.
   await expect(page.getByLabel("Code sent to the new address")).toBeVisible();
   await expect(page.getByLabel("Code sent to your current address")).toBeVisible();
   await expect(page.getByText(USER.email, { exact: false }).first()).toBeVisible();
@@ -111,7 +95,6 @@ test("both codes complete the change", async ({ page }) => {
   await page.getByLabel("Code sent to your current address").fill(CODE);
   await page.getByTestId("settings-email-verify").click();
 
-  // Back to the idle view, showing the new address.
   await expect(page.getByTestId("settings-email-change-button")).toBeVisible();
   await expect(page.getByTestId("settings-email-input")).toHaveValue(NEW_EMAIL);
 });
@@ -119,11 +102,7 @@ test("both codes complete the change", async ({ page }) => {
 test("typing into the new-address field stays there when the page's initial focus fires", async ({
   page,
 }) => {
-  // The settings page focuses its first control (Username) on a short timer
-  // after mount. When that timer landed between a fill's focus and its
-  // keystrokes, the new address was typed onto the end of the username and
-  // the send was refused as empty (#1258). Freeze the clock so it fires in
-  // exactly that gap.
+  // Freeze the clock so the page's delayed Username focus lands mid-fill (#1258).
   await page.clock.install();
   await boot(page);
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000);

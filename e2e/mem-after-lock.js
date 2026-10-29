@@ -1,8 +1,4 @@
-// §5.10 memory-after-lock: does `pin::lock` actually zeroize secrets in the
-// main `pollis` (Rust core) process memory, or do the PIN / account secret key
-// linger after lock? Signs up one client, snapshots process memory while
-// UNLOCKED (baseline — secrets SHOULD be present), then Ctrl+L locks, waits,
-// and snapshots again. Greps both cores for the real secret key + PIN.
+// §5.10: does pin::lock zeroize the PIN and secret key in the core's memory?
 const fs = require("fs");
 const path = require("path");
 const { spawn, execSync } = require("child_process");
@@ -20,22 +16,8 @@ function pidOfApp() {
   return pids[pids.length - 1]; // newest
 }
 
-// HOUSEKEEPING: every run leaves a core in systemd's store (root-owned,
-// ~8 MB compressed) that CONTAINS THE THROWAWAY ACCOUNT'S SECRET KEY. They age
-// out on systemd's retention, but after a session of repeated runs it is worth
-// `sudo coredumpctl --since=today ... ` / clearing
-// /var/lib/systemd/coredump by hand. The local copy this script greps is
-// deleted immediately; the systemd one is not ours to remove.
-//
-// Dump WITHOUT ptrace. `gcore` and /proc/pid/mem both need
-// CAP_SYS_PTRACE or kernel.yama.ptrace_scope=0 (this box is =1), which needs
-// root we do not have. But core_pattern pipes to systemd-coredump and
-// `ulimit -c` is unlimited, so SIGABRT makes the KERNEL write the core and
-// `coredumpctl dump` reads it back as our own user. It also has a property
-// gcore lacks: the image is the process exactly as the signal found it, since
-// nothing runs in-process to produce it.
-//
-// The cost is that the process dies, so each phase needs its own app run.
+// HOUSEKEEPING: each run leaves a systemd core holding the throwaway account's secret key; clear by hand.
+// SIGABRT + systemd-coredump instead of ptrace (not permitted here); each phase is its own app run.
 function abortAndGrep(phase, pid, needles) {
   const out = path.join(OUT, `core_${phase}.core`);
   try { execSync(`kill -ABRT ${pid}`); } catch (e) {
@@ -131,21 +113,12 @@ async function main() {
     await h.waitTestId(browser, "app-ready", 60000);
     console.log("[mem] app-ready (UNLOCKED)");
 
-    // Two forms of the same secret, because they have different fates.
-    //   - display: "A3-XXXXX-...", the string handed to the UI. It crosses
-    //     serde + IPC into the webview, so pollis-core cannot wipe every copy
-    //     and this one is expected to linger until the allocator reuses it.
-    //   - body: the dash-free, version-free payload. This is what HKDF consumes
-    //     and what the key-material buffers hold; #1141's fix made those
-    //     `Zeroizing`, so THIS is the needle that should come back 0.
+    // display crosses IPC and may linger; body is what the Zeroizing buffers hold (#1141), so expect 0.
     const secretBody = secretKey.replace(/^A3-/, "").replace(/-/g, "");
     const needles = [["secretKey", secretKey], ["secretBody", secretBody], ["PIN", PIN]];
     const pid = pidOfApp();
     console.log(`[mem] app pid = ${pid}`);
 
-    // PHASE is "unlocked" (the baseline that proves the grep works at all) or
-    // "locked" (the actual question). The dump kills the process, so the two
-    // phases are two runs of this script rather than two dumps in one.
     const phase = process.env.MEM_PHASE === "locked" ? "locked" : "unlocked";
 
     if (phase === "locked") {

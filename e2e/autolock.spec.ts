@@ -1,23 +1,4 @@
-/*
- * Idle auto-lock (#851) — the renderer's half, in both skins.
- *
- * The deadline itself is owned by Rust (`pollis-core/src/commands/autolock.rs`,
- * unit-tested there) because a WebView throttles its own timers exactly when the
- * window is hidden — the case auto-lock exists for. There is therefore nothing
- * to *time* in this tier. What these tests pin down is the contract between the
- * two halves, which is where a regression would actually hide:
- *
- *   1. the setting renders, applies, and survives a restart of this device,
- *   2. picking a window reaches the backend (`set_auto_lock_timeout`),
- *   3. the shell reports activity so the deadline can be reset at all, and
- *   4. when the backend says "locked", the app drops to the PIN gate with no
- *      decrypted content left rendered — the same place Cmd/Ctrl+L lands.
- *
- * (4) is the security property the ticket exists for, so it asserts on the
- * absence of the message body, not just on the presence of the PIN screen.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// Idle auto-lock (#851), renderer half: Rust owns the deadline; a lock leaves no decrypted content in DOM or cache.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -62,11 +43,7 @@ function preloadState(skin: Skin) {
   };
 }
 
-/*
- * NOTE ON NAVIGATION: the router runs on `createMemoryHistory` (see
- * `frontend/src/router.tsx`), so the browser URL never changes. Everything
- * below navigates through the UI and asserts on what is RENDERED.
- */
+// Memory-history router: navigate through the UI, assert on what renders.
 async function boot(page: Page, skin: Skin) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
@@ -98,12 +75,7 @@ async function openCommandPalette(page: Page) {
   await expect(page.getByTestId("search-panel")).toBeVisible();
 }
 
-/**
- * Navigate to Security through Cmd+K, which also proves the page is reachable
- * from the palette. The exact row is clicked rather than Enter-ing the first
- * hit: "security" is also a keyword on the Settings hub, so the top result for
- * that query is not the Security page.
- */
+/** Go to Security via Cmd+K; click the exact row, since "security" also matches the Settings hub. */
 async function gotoSecurity(page: Page) {
   await openCommandPalette(page);
   await page.getByTestId("search-panel-input").fill("Security");
@@ -123,11 +95,7 @@ async function gotoChannel(page: Page) {
   await expect(page.getByTestId(`message-${MESSAGE_ID}`)).toBeVisible();
 }
 
-/**
- * Every string sitting in the React Query cache. This is where decrypted
- * message bodies actually live — the cache is module-level, so it outlives the
- * shell and a DOM-only assertion would pass on an unmount alone.
- */
+/** Every string in the React Query cache, where decrypted bodies live (it outlives the shell). */
 async function cachedData(page: Page): Promise<string> {
   return page.evaluate(() =>
     JSON.stringify(
@@ -155,7 +123,6 @@ async function pushedTimeout(page: Page): Promise<number | null> {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`auto-lock — ${skin} skin`, () => {
     test("the window can be chosen, reaches the backend, and survives a restart", async ({
@@ -236,9 +203,7 @@ for (const skin of SKINS) {
       // the lock is testing something that was there to begin with.
       expect(await cachedData(page)).toContain(SECRET);
 
-      // Stand in for the Rust shell's `AppHandle::emit` when the idle deadline
-      // expires. Nothing about this path is auto-lock-specific on the renderer
-      // side — it is the same `handleLock` Cmd/Ctrl+L runs.
+      // Stand in for the shell's idle-lock emit; the renderer runs the same handleLock as Cmd/Ctrl+L.
       await page.evaluate(() => {
         (
           window as unknown as { __tauriEmit: (e: string, p?: unknown) => void }
@@ -248,10 +213,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("pin-entry-screen")).toBeVisible();
       await expect(page.getByTestId("sidebar")).toHaveCount(0);
       await expect(page.getByText(SECRET)).toHaveCount(0);
-      // The actual security property this ticket exists for: the decrypted
-      // body is gone from memory, not merely unmounted. Without the cache
-      // purge in App.tsx the two assertions above still pass and the plaintext
-      // is still one heap snapshot away.
+      // The security property: the body is gone from the cache, not merely unmounted (App.tsx purge).
       await expect.poll(() => cachedData(page)).not.toContain(SECRET);
 
       await page.screenshot({

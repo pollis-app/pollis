@@ -1,12 +1,4 @@
-/*
- * A Vault save that fails (#1497) says why, gives the draft back and offers a
- * retry. Before, desktop said nothing at all: the rejection was unhandled and
- * the composer had already cleared, so the draft was simply gone.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`, so
- * `@tauri-apps/api/core` resolves to `frontend/src/__mocks__/tauri-core.ts`,
- * whose `failSends` makes `send_vault_message` die on the connection.
- */
+// A failed Vault save (#1497) says why, restores the draft and offers a retry.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 

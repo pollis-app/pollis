@@ -2,12 +2,6 @@
 /**
  * Catalogue integrity check.
  *
- * Every locale is machine-translated, and the failure modes that matter are
- * precisely the ones the type checker and the e2e suite cannot see: a locale
- * whose plural families were copied across from English renders grammatically
- * wrong counts in Russian, Ukrainian and Arabic while passing every other
- * gate we have. So this checks the things that are otherwise invisible:
- *
  *   1. key parity with `en` — nothing orphaned (hard), nothing missing (WARN)
  *   2. plural families carry EXACTLY the CLDR categories the locale requires,
  *      taken from `Intl.PluralRules` rather than a hand-maintained table
@@ -16,31 +10,7 @@
  *      reads as a bug rather than as missing copy)
  *   5. every `t('ns:key')` call site in the renderer resolves in `en`
  *
- * ## Why "missing" is a warning and "orphaned" is not
- *
- * `en` is the only catalogue a key may be AUTHORED in, and `fallbackLng: "en"`
- * means a key the six machine-translated locales have not caught up on renders
- * the English string — visibly untranslated, never broken. That is the normal
- * steady state of a live product: a feature lands in English on Tuesday and the
- * translation pass follows. Failing the build for it would mean every feature
- * PR either blocks on translation or invents six machine translations nobody
- * reviewed, which is how a catalogue fills up with confident nonsense.
- *
- * So a key present in `en` and absent elsewhere is reported as a WARNING with a
- * count, and the run still passes. Everything that indicates the catalogue is
- * WRONG rather than merely BEHIND stays a hard failure:
- *
- *   - a key the locale has that `en` does not (orphaned) — a rename or a typo,
- *     and it is dead weight no code path can ever select;
- *   - a plural family the locale has STARTED but left incomplete — the exact
- *     copied-from-English bug this script was written for;
- *   - placeholder drift, including the rule that a plural form covering more
- *     than one number must show `{{count}}`;
- *   - an empty string, which renders as a blank slot instead of falling back;
- *   - a call site with no `en` entry at all, which renders a raw key id.
- *
- * A plural family the locale has not started AT ALL is untranslated, not
- * broken, so it counts toward the warning like any other missing key.
+ * Missing keys only WARN (fallbackLng renders English); anything WRONG rather than BEHIND fails.
  *
  * Run: `node scripts/i18n-check.mjs`
  */
@@ -71,7 +41,7 @@ function fail(message) {
   console.error(`  ✗ ${message}`);
 }
 
-// Untranslated-but-present-in-English. Reported, never fatal — see the header.
+// Untranslated-but-present-in-English; reported, never fatal.
 // `count` is how many KEYS the line stands for, so the summary can total them.
 const untranslatedByLocale = new Map();
 function warn(code, count, message) {
@@ -151,19 +121,9 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
   const categories = rules.resolvedOptions().pluralCategories;
   const declared = PLURAL_SUFFIXES.filter((s) => categories.includes(s));
 
-  // Categories reachable by a count this UI can actually render. Modern CLDR
-  // gives Spanish and French a `many` category, but only for magnitudes at or
-  // above a million — and nothing here counts members, attachments or minutes
-  // that high. Missing a reachable category (Russian `few` at 2, Arabic `two`)
-  // is a real defect that renders wrong grammar to real users; missing an
-  // unreachable one is a note, since i18next falls back to `other` anyway.
+  // Categories reachable by a count this UI renders (es/fr `many` starts at a million); unreachable ones are a note.
   const reachable = new Set();
-  // How many distinct integers select each category. A category selected by
-  // exactly ONE value states its own number — Arabic's dual `_two` means
-  // precisely two, so "[مرفقان]" needs no `{{count}}`, exactly as English
-  // `_one` needs none. Russian `_one` also covers 21 and 101, so there the
-  // same omission is a real bug. Counting, rather than assuming by suffix
-  // name, is what tells those two cases apart.
+  // How many integers select each category: a single-value category (Arabic _two, English _one) needs no {{count}}.
   const selectors = new Map();
   for (let n = 0; n <= 10000; n += 1) {
     const category = rules.select(n);
@@ -180,11 +140,7 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
     (s) => !reachable.has(s) && s !== "other",
   );
 
-  // 1. Non-plural key parity.
-  //
-  //    Missing is a WARNING: the key renders its English string via
-  //    `fallbackLng`, which is untranslated, not broken. Orphaned is a
-  //    FAILURE: nothing can ever select it, so it is a rename or a typo.
+  // 1. Non-plural key parity: missing WARNS, orphaned FAILS.
   const flatBase = baseKeys.filter((k) => !splitPlural(k));
   const missing = flatBase.filter((k) => !(k in locale));
   if (missing.length) {
@@ -205,13 +161,7 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
     );
   }
 
-  // 2. Plural families carry exactly the locale's CLDR categories.
-  //
-  //    A family the locale has not started at all is simply untranslated and
-  //    warns with the missing keys above. A family it has STARTED but left
-  //    incomplete is the copied-from-English bug this whole script exists for,
-  //    and stays a hard failure — i18next would silently fall back per form,
-  //    so half the counts on one screen would read in the wrong language.
+  // 2. Plural families carry exactly the locale's CLDR categories; a started-but-incomplete family fails.
   let familiesChecked = 0;
   let familiesUntranslated = 0;
   for (const family of baseFamilies) {
@@ -244,14 +194,7 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
     );
   }
 
-  // 3. Placeholder parity.
-  //
-  //    Compared like-for-like against the SAME plural form where the base has
-  //    one. A locale legitimately ADDS `{{count}}` to a form English left bare:
-  //    English `_one` means exactly 1 so "[attachment]" reads fine, but Russian
-  //    `_one` also covers 21 and 101, where a bare noun is wrong. So anything
-  //    the family uses somewhere is allowed; only a placeholder that appears
-  //    nowhere in the family is an error, as is dropping one this same form had.
+  // 3. Placeholder parity, per plural form; a placeholder used nowhere in the family, or dropped, is an error.
   let placeholderProblems = 0;
   for (const [key, value] of Object.entries(locale)) {
     const plural = splitPlural(key);
@@ -279,11 +222,7 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
     const dropped = want.filter(
       (p) => !got.includes(p) && !(exact && p === "count"),
     );
-    // A form covering MORE than one number must show that number. English
-    // `_one` means 1 and reads fine as "[attachment]", so comparing against it
-    // proves nothing — Russian `_one` also covers 21 and 101, where the bare
-    // noun is simply wrong. This is a positive requirement on the locale, not
-    // a diff against the base.
+    // A form covering MORE than one number must show it (Russian _one also covers 21, 101).
     if (
       plural &&
       !exact &&
@@ -351,10 +290,7 @@ for (const file of SRC_DIRS.flatMap((dir) => sourceFiles(dir))) {
   const text = readFileSync(file, "utf8");
   const where = file.replace(ROOT + "/", "");
 
-  // Most components scope themselves with `useTranslation("settings")` and
-  // then call `t("section.title")` unprefixed. Resolving those is the whole
-  // point — they are the large majority of call sites, and a bare regex for
-  // `ns:key` would silently check almost nothing.
+  // Resolve unprefixed t() calls against the component's useTranslation namespace.
   const declared = [];
   for (const match of text.matchAll(/useTranslation\(\s*(\[[^\]]*\]|[^)]*)\)/g)) {
     for (const ns of match[1].matchAll(/["'`]([\w.-]+)["'`]/g)) {
@@ -387,9 +323,7 @@ for (const key of unresolved) {
   fail(`call site has no ${BASE} entry: ${key}`);
 }
 
-// 6. Mobile's static catalogue table matches the directory listing. Metro has
-// no glob, so mobile/i18n/resources.ts is generated; a locale or namespace
-// that landed here without regenerating it would render English on mobile.
+// 6. Mobile's generated catalogue table (mobile/i18n/resources.ts) matches the directory listing.
 {
   const { listCatalogues, render, OUTPUT_PATH } = await import(
     "./mobile-i18n-resources.mjs"
@@ -407,10 +341,7 @@ for (const key of unresolved) {
   }
 }
 
-// 7. The emoji ranking/annotation modules mobile carries as copies match the
-// desktop originals. Mobile imports no frontend TypeScript (mobile/CLAUDE.md),
-// so these ~260 lines exist twice; the only permitted difference is where
-// `CustomEmoji` is imported from.
+// 7. Mobile's copies of the emoji ranking/annotation modules match desktop, bar the CustomEmoji import.
 {
   const MIRRORED = ["emojiRank.ts", "emojiAnnotations.ts", "useEmojiAnnotations.ts"];
   const normalise = (text) =>

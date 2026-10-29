@@ -1,30 +1,14 @@
 // Random region placement for the relay pool.
 //
-// The pool's desired-state is a single POOL-WIDE node count; which regions those
-// nodes live in is drawn at random, uniformly and WITH REPLACEMENT, so two nodes
-// may legitimately land in the same region. The draw is persisted so it stays
-// stable between rotations — re-randomizing on every 2-minute reconcile would
-// terminate and relaunch the whole pool continuously.
-//
-// Pure functions, no AWS: the reconciler injects the current state and an rng,
-// which is what makes the draw and the rotation policy unit-testable
-// (test/placement.test.mjs).
+// Regions are drawn uniformly WITH replacement and persisted, so a reconcile does not relaunch the pool.
+// Pure functions, no AWS (test/placement.test.mjs).
 
 // Parse the desired-state SSM parameter into a pool-wide node count.
 //
 // Accepts both shapes:
 //   {"total": 3}          — current
-//   {"us-west-2": 3}      — legacy per-region map, from before placement was
-//                           randomized. Summed, because Terraform's
-//                           ignore_changes leaves the live parameter untouched
-//                           across the upgrade; without this the pool would read
-//                           as 0 nodes on the first post-upgrade reconcile.
-// THROWS rather than falling back on anything it cannot interpret. A desired
-// total that silently defaults is worse than no answer at all: the rotation
-// predicate compares it against the recorded draw, so a wrong-but-plausible
-// number reads as "the operator resized the pool" and re-randomizes the entire
-// pool. A throw stops the reconcile, leaves the pool exactly as it is, and trips
-// the Lambda Errors alarm.
+//   {"us-west-2": 3}      — legacy per-region map, summed (Terraform ignore_changes kept it).
+// THROWS rather than falling back: a wrong-but-plausible total re-randomizes the whole pool.
 export function readDesiredTotal(raw) {
   let parsed;
   try {
@@ -42,11 +26,7 @@ export function readDesiredTotal(raw) {
   if (keys.length === 0) {
     throw new Error('desired-state is an empty object — expected {"total": N}');
   }
-  // Legacy per-region map, from before placement was randomized. Summed, because
-  // Terraform's ignore_changes leaves the live parameter untouched across the
-  // upgrade. Logged loudly: the two shapes are easy to confuse, and reading
-  // {"us-west-2":3,"us-east-1":3} as a pool of 6 rather than "3 each" is a
-  // mistake an operator should be told about, not left to infer from pool size.
+  // Legacy per-region map, summed; logged loudly since the two shapes are easy to confuse.
   const total = keys.reduce(
     (sum, key) => sum + requirePoolCount(parsed[key], `desired-state legacy entry ${key}`),
     0,
@@ -103,12 +83,7 @@ export function placementNeedsRedraw(current, { allowedRegions, total, now, rota
     return "no placement recorded yet";
   }
   const placement = current.placement;
-  // Per-region sanity, not just the sum. README tells operators to hand-edit this
-  // parameter to force a rotation, so a typo here is expected rather than
-  // hypothetical — and a placement whose entries are negative or above an ASG's
-  // max_size makes UpdateAutoScalingGroup throw on every reconcile. Without this
-  // check the sum could still match, the predicate would return "keep it", and
-  // the reconciler would wedge with no way to draw itself back out.
+  // Per-region sanity, not just the sum: a hand-edited negative or over-max entry would wedge the reconciler.
   const malformed = Object.entries(placement).filter(
     ([, n]) => typeof n !== "number" || !Number.isInteger(n) || n < 0,
   );
@@ -123,10 +98,7 @@ export function placementNeedsRedraw(current, { allowedRegions, total, now, rota
   if (stranded.length > 0) {
     return `placement holds no-longer-allowed region(s): ${stranded.join(", ")}`;
   }
-  // A drawn_at in the future (clock skew, or a typo'd hand-edit) would make the
-  // elapsed check negative and freeze rotation permanently — silently, since
-  // nothing else here depends on the timestamp. Treat it as due instead: a draw
-  // that claims to have happened after now is not a draw we can age.
+  // A future drawn_at (skew, typo) would freeze rotation; treat it as due.
   const drawnAt = typeof current.drawn_at === "number" ? current.drawn_at : 0;
   if (drawnAt > now) {
     return `placement drawn_at ${drawnAt} is in the future (now ${now}) — re-drawing rather than never rotating`;
@@ -143,32 +115,13 @@ export function clamp(n, lo, hi) {
 
 // May the regions in `draining` be scaled down yet?
 //
-// A rotation moves nodes between regions, and with a small pool over four regions
-// a draw disjoint from the current placement is routine — so scaling the losers to
-// zero in the same pass that the winners scale up from zero cold-starts the ENTIRE
-// pool. Nodes take minutes to boot and pull an image, so that is an outage on a
-// timer. Hold the old nodes until enough new ones are actually answering.
+// Scaling losers to zero while winners cold-start takes the pool out; hold old nodes until new ones answer.
 //
-// `draining` is a region -> POST-DRAIN TARGET map, not a bare list of names, and
-// that distinction is the whole bug this signature exists to prevent. A region is
-// "draining" whenever its target is BELOW its current desired capacity — which
-// includes a partial reduction like 2 -> 1, where the region keeps serving a node.
-// Counting such a region as a total loss understates the pool the drain would
-// leave behind, and with a 2-node pool at nodeFloor 2 the check can then NEVER be
-// satisfied: the retained node is exactly the one being subtracted. The observed
-// consequence (2026-09-01) was a pool at 5 running nodes against a desired 2, with
-// the reconciler logging "deferring scale-down of us-east-1, us-east-2, us-west-1:
-// 1 healthy node(s) outside them, need 2" every two minutes for days. Scale-UP is
-// unconditional and immediate, so a scale-down that can never fire is a ratchet:
-// every rotation adds a region and none is ever given back.
+// `draining` maps region -> POST-DRAIN TARGET: counting 2 -> 1 as a total loss made the guard unsatisfiable (2026-09-01).
 //
 // So each draining region contributes min(healthy there, its target) — the nodes
 // that survive the drain — while a region leaving entirely (target 0) contributes
 // nothing, which is the original, correct guard.
-//
-// Kept here, pure, because it is the part that decides whether the pool briefly
-// costs double or briefly serves nothing — index.mjs can't be imported under test
-// (its AWS SDK deps only exist in the Lambda runtime).
 export function mayDrain({ draining, perRegionHealthy, poolTotal, nodeFloor }) {
   const targets = draining ?? {};
   const regions = Object.keys(targets);

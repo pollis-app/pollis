@@ -2,37 +2,12 @@
 /**
  * The component inventory in `.codesight/wiki/ui.md`, generated (#933).
  *
- * The article had always claimed to be regenerated — "treat the filesystem as
- * the authority and regenerate rather than patch when it disagrees" — while no
- * generator existed anywhere in the repo. So the instruction could not be
- * followed, the count drifted by a third (111 claimed, 147 real), and each
- * person who noticed hand-patched the number instead, which is the loop that
- * produces a doc nobody trusts.
- *
- * This is that generator. It owns exactly one region of the article, fenced by
- * the markers below; every other section is prose and is never touched.
+ * Owns exactly one region of the article, fenced by the markers below; the rest is prose.
  *
  *   node scripts/ui-inventory.mjs           # rewrite the inventory in place
  *   node scripts/ui-inventory.mjs --check   # exit 1 if it is out of date
  *
- * ## Hand-written notes survive
- *
- * Some entries carry a sentence that no extractor could produce ("Memoised via
- * `observer()`", "Not a loading state"). Those are the most valuable lines in
- * the section, so the generator preserves them: everything a line carries
- * AFTER its backticked path is a note, and it is copied forward verbatim onto
- * the regenerated line for the same component. Delete the component and the
- * note goes with it; rename it and the note is dropped, which is the correct
- * prompt to rewrite it.
- *
- * ## What it extracts, and what it deliberately does not
- *
- * Component name and props come from a light regex scan, not a TypeScript AST.
- * The inventory is a NAVIGATION AID — its job is to get a reader to the right
- * file — so "the name is close enough to grep and the path is exact" is the
- * bar, and a full parser would be a dependency and a maintenance burden for no
- * extra navigational value. Props are listed when a `<Name>Props` type is
- * declared in the file and omitted otherwise; the article says as much.
+ * Text after an entry's backticked path is a hand-written note, carried forward verbatim.
  */
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -45,8 +20,6 @@ const ARTICLE = join(ROOT, ".codesight/wiki/ui.md");
 
 const BEGIN = "<!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->";
 const END = "<!-- END GENERATED: component inventory -->";
-
-// ── Extraction ─────────────────────────────────────────────────────────────
 
 function walk(dir) {
   const out = [];
@@ -61,15 +34,7 @@ function walk(dir) {
   return out;
 }
 
-/**
- * The name this file is about.
- *
- * An export whose name matches the filename wins, which is the repo's
- * convention and is what stops the old inventory's failure mode — it listed
- * `ALL_ALGORITHMS` for `DotMatrix.tsx` and a sub-component's props for
- * `VoiceSettingsPage.tsx`, because it took whatever was exported first.
- * Falling back to the filename keeps the entry useful even then.
- */
+/** The name this file is about: the export matching the filename, else the filename. */
 function componentName(source, file) {
   const stem = basename(file, ".tsx");
   const exported = new Set();
@@ -97,14 +62,7 @@ function componentName(source, file) {
   return firstPascal ?? stem;
 }
 
-/**
- * Top-level field names of the component's props type.
- *
- * Only a type NAMED for the component (`<Name>Props`) counts. A file's first
- * `*Props` type is very often a private sub-component's, which is how the old
- * inventory ended up attributing `DeviceSelect`'s props to the whole voice
- * settings page.
- */
+/** Top-level fields of the `<Name>Props` type only (a file's first *Props is often a sub-component's). */
 function propNames(source, name) {
   const re = new RegExp(
     `(?:interface|type)\\s+${name}Props\\b[^{]*\\{`,
@@ -174,14 +132,7 @@ export function collect() {
   return new Map([...groups].sort(([a], [b]) => a.localeCompare(b)));
 }
 
-// ── Rendering ──────────────────────────────────────────────────────────────
-
-/**
- * Hand-written notes from the existing block, keyed by component name.
- *
- * A note is whatever follows the backticked path on the line. Anything before
- * the path is regenerated and therefore not a place to write prose.
- */
+/** Hand-written notes from the existing block, keyed by component name. */
 export function existingNotes(article) {
   const notes = new Map();
   const block = between(article);
@@ -237,8 +188,6 @@ export function generate(article) {
   const block = renderBlock(collect(), existingNotes(article));
   return article.slice(0, start + BEGIN.length) + block + article.slice(end);
 }
-
-// ── CLI ────────────────────────────────────────────────────────────────────
 
 function main() {
   const check = process.argv.includes("--check");

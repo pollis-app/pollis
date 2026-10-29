@@ -1,8 +1,4 @@
-/**
- * Report abuse (#1213), desktop. From another person's message (and from
- * their profile), a report needs a reason, can also block, and sends ids and
- * the reason only: the message text never appears in what is sent.
- */
+// Report abuse (#1213): a report sends ids and the reason, never the message text.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 

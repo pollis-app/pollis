@@ -1,24 +1,4 @@
-/*
- * Jump-to-message must not leave a gap behind it (#1039) — browser-level e2e.
- *
- * A permalink or search hit pointing deep into a long conversation fetches
- * the page AROUND the target (#850). Before #1039 that page was simply merged
- * with the live newest page, and the log rendered the two as if they were
- * contiguous — the reader could scroll from message 150 straight into message
- * 350 with nothing to say two hundred messages were missing. The log now
- * opens an anchored window around the target instead and pages it forward
- * until it provably rejoins the live tail.
- *
- * The check is therefore a walk: jump far back, wheel forward to the newest
- * message, and demand that every message id in between was rendered on the
- * way. `paginate: true` is what makes the mock answer the around-read with a
- * real bounded page, so the gap exists to be crossed.
- *
- * Runs in both skins: row heights differ, and the load-newer trigger is a
- * distance from the bottom of a real scroll container.
- *
- *   pnpm --filter @pollis/e2e exec playwright test message-jump-gap
- */
+// Jump-to-message must not leave a gap (#1039): wheel from the target to the newest; every id must render.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -122,11 +102,7 @@ async function jumpTo(page: Page, index: number) {
   await expect(target).toContainText(`message number ${index}`);
 }
 
-/**
- * The other door into the same jump: a search hit navigates to the channel
- * with `?message=` on the URL. This is the path that already fetched the
- * around-page before #1039 — and then merged it straight into the live one.
- */
+/** The search-hit door into the same jump: `?message=` on the channel URL. */
 async function jumpViaSearchHit(page: Page, index: number) {
   await openCommandPalette(page);
   const palette = page.getByTestId("search-panel-input");
@@ -152,16 +128,7 @@ async function renderedIndices(page: Page): Promise<number[]> {
   );
 }
 
-/**
- * Wheel forward through the log the way a reader does, remembering every
- * message that was rendered along the way, until `untilId` is in the
- * document. Steps are shorter than the window's overscan, so a message the
- * log actually holds cannot slip past unrendered — which is what lets the
- * caller treat "never rendered" as "never loaded".
- *
- * Bounded: 300 messages at a dozen rows a step is ~25 steps plus the pages
- * they ask for; 200 is several times that.
- */
+/** Wheel forward, recording rendered messages, until `untilId` shows; steps are shorter than the overscan. */
 const MAX_WHEELS = 200;
 async function wheelForwardTo(page: Page, untilId: string): Promise<Set<number>> {
   const seen = new Set<number>();
@@ -179,11 +146,7 @@ async function wheelForwardTo(page: Page, untilId: string): Promise<Set<number>>
   return seen;
 }
 
-/**
- * The row's box once the log has stopped moving. The jump reveals its target
- * with a smooth scroll, so a box read straight after "visible" is a box
- * mid-animation.
- */
+/** The row's box once the jump's smooth scroll has settled. */
 async function settledBox(page: Page, testId: string) {
   const row = page.getByTestId(testId);
   let last = await row.boundingBox();
@@ -226,7 +189,6 @@ async function arrive(page: Page, index: number) {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`jump-to-message gap (#1039) — ${skin} skin`, () => {
     test("scrolling forward from a jump renders every message up to the live tail", async ({
@@ -238,7 +200,6 @@ for (const skin of SKINS) {
 
       // The jump landed in a window of its own: the live page is not in the
       // document, and neither is anything from the gap. On the unfixed build
-      // the live page was merged in and would be a wheel or two away.
       await expect(page.getByTestId(`message-${NEWEST}`)).toHaveCount(0);
       await expect(page.getByTestId(`message-${idAt(TARGET + PAGE + 1)}`)).toHaveCount(0);
 
@@ -334,9 +295,7 @@ for (const skin of SKINS) {
       await composer.fill("back to the present");
       await composer.press("Enter");
 
-      // Slack does the same: your own message is where the conversation is
-      // now, so that is where the log goes. The window's pages are gone with
-      // it — they were not contiguous with the tail.
+      // Your own send jumps to the live tail, dropping the non-contiguous window.
       await expect(page.getByText("back to the present")).toBeVisible();
       await expect(page.getByTestId(`message-${NEWEST}`)).toBeVisible();
       await expect(page.getByTestId(`message-${idAt(TARGET)}`)).toHaveCount(0);

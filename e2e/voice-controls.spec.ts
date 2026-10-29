@@ -1,30 +1,5 @@
-/*
- * Push-to-talk and deafen (#849) — the controls, and whether their states are
- * actually TELLABLE APART on screen. BOTH skins.
- *
- * The claim this guards is the whole point of the ticket: `ptt-idle` is not a
- * mute. The user has not muted themselves, they are simply not holding the key,
- * and drawing that as a mute is what makes push-to-talk feel broken. Deafened
- * is a third thing again. So every assertion here is a *difference* assertion —
- * `data-mic-state` for what the UI believes, and the computed colours/borders
- * for what a person would actually see.
- *
- * ## What is driven, and why
- *
- * The gate is authored in Rust (`pollis-core/src/commands/voice/gate.rs`) and
- * mirrored into the store; the renderer only ever displays it. Clicking mute in
- * this environment cannot round-trip, because `VoiceSessionManager.applyGate`
- * refuses unless its own LiveKit session is joined and there is no LiveKit here.
- * So these tests push the Rust-authored snapshot onto the store through
- * `window.__pollisStore` (exposed by `main.tsx` for exactly this) and assert
- * what gets drawn. That is the honest split: the transitions themselves have
- * unit tests in `gate.rs`; what had none was whether the four states look
- * different.
- *
- * The one place a real round trip IS possible is the settings toggle, because
- * `setInputMode` runs with `requireJoined: false` — so that test drives a click
- * and reads the mock's gate back.
- */
+// PTT and deafen (#849), both skins: ptt-idle, muted and deafened must look different.
+ // No LiveKit here, so tests push Rust-authored gate snapshots via window.__pollisStore.
 
 import { test, expect, type Page, type Locator } from "./lib/zero-loss";
 import { skinAgnosticTest } from "./lib/skins";
@@ -109,12 +84,7 @@ async function boot(page: Page, skin: Skin) {
   }, preloadFor(skin));
   await page.goto("/");
   await expect(page.getByTestId("app-ready")).toBeAttached();
-  // The controls use `transition-colors`, so the moment `data-mic-state`
-  // flips the computed colour is still the PREVIOUS state's and only
-  // animates to the new one. Sampling appearance right after the attribute
-  // settles therefore read a stale colour perhaps a third of the time, and
-  // two genuinely different states compared equal. These tests are about
-  // which colour a state lands on, never how it gets there.
+  // transition-colors made samples read the previous state's colour; disable it.
   await page.addStyleTag({
     content: "*, *::before, *::after { transition: none !important; animation: none !important; }",
   });
@@ -167,7 +137,6 @@ async function appearanceOf(locator: Locator): Promise<string> {
 }
 
 for (const skin of SKINS) {
-  // Skin-agnostic tests below run in one skin only — see e2e/lib/skins.ts.
   const agnosticTest = skinAgnosticTest(skin);
   test.describe(`push-to-talk + deafen — ${skin} skin`, () => {
     agnosticTest("the four mic states are labelled distinctly", async ({ page }) => {
@@ -249,10 +218,7 @@ for (const skin of SKINS) {
       expect(deafenOn).not.toBe(deafenLive);
       await page.screenshot({ path: `artifacts/voice-deafened-${skin}.png` });
 
-      // The pair as a whole is what separates deafened from muted: the mic
-      // button reports `deafened` rather than `muted`, and the deafen button
-      // lights up. (The mic GLYPH is shared between the two — both are MicOff,
-      // which is correct: in both cases nothing is going out.)
+      // Deafened vs muted: mic reports `deafened` and the deafen button lights (both show MicOff).
       await expect(mute).toHaveAttribute("data-mic-state", "deafened");
       await expect(deafen).toHaveAttribute("title", /undeafen|deafen/i);
     });
@@ -329,11 +295,4 @@ for (const skin of SKINS) {
   });
 }
 
-/*
- * The persistent strips — the terminal skin's bottom `VoiceBar` (AppShell
- * mounts it only for that skin) and the refined skin's `SidebarProfilePanel`
- * strip — carry a second, always-on copy of these controls. Their four-state
- * mic and deafen toggle are covered in BOTH skins by
- * `voice-sidebar-parity.spec.ts`, which asserts the four states are distinct in
- * rendered appearance rather than by state name (#891).
- */
+// The persistent strips' copies of these controls are covered by voice-sidebar-parity.spec.ts (#891).

@@ -1,18 +1,4 @@
-/*
- * A device revoked while it was not listening signs itself out (#1338).
- *
- * The live `device_revoked` nudge only reaches a device that is connected
- * when it is sent. One that was asleep used to stay signed in on empty pages
- * forever, because every later command failed with a bare 401 the app read as
- * transient. Now the core answers every command with `device_revoked`, and the
- * bridge's one chokepoint sends the app to sign-in with the reason on screen.
- *
- * What this pins, in both skins: whichever command finds out first, the app
- * ends the session (the core, not the app, decides the wipe), lands on sign-in
- * with the notice, and leaves no decrypted message on screen.
- *
- *   pnpm --filter @pollis/e2e playwright
- */
+// A device revoked while offline signs itself out (#1338), leaving no decrypted message on screen.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -87,9 +73,7 @@ for (const skin of SKINS) {
       (window as unknown as { __tauriRevokeDevice: () => void }).__tauriRevokeDevice();
     });
 
-    // Whichever command runs next finds out — often the palette's own search,
-    // which signs the app out before a result could be clicked. Keys only, so
-    // the step cannot race the sign-out it is waiting for.
+    // Whichever command runs next finds out; keys only, so this cannot race the sign-out.
     await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
     await page
       .getByTestId("search-panel-input")

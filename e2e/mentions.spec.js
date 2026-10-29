@@ -1,20 +1,6 @@
 // @ts-check
 /*
  * @username mentions — composer autocomplete + message rendering, BOTH skins (#843).
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`, so
- * `@tauri-apps/api/*` resolves to `frontend/src/__mocks__/`. That gives the
- * real React tree, the real CSS tokens and the real skin branching with no
- * MLS, no delivery service and no Turso — which is exactly the surface this
- * feature lives on. The backend half of #843 (who actually gets pushed) is
- * covered by the unit tests in `pollis-core/src/commands/messages/send.rs`.
- *
- * What each skin must prove:
- *   terminal — a GHOSTED inline completion after the caret, accepted with Tab,
- *              and NO pop-over list anywhere.
- *   refined  — the Slack/Discord list above the composer: arrow keys move the
- *              highlight, Enter accepts, Esc dismisses.
- * Plus, in both: your own mention renders stronger than someone else's.
  */
 
 const path = require("path");
@@ -29,8 +15,7 @@ const CHANNEL_ID = "c_general";
 
 // Two candidates share the "da" prefix so ranking and arrow-key movement are
 // both observable; "sam" matches neither, proving the list actually filters.
-// "mia" is the signed-in user and must never be offered — you can't mention
-// yourself.
+// "mia" is the signed-in user and must never be offered.
 const MEMBERS = [
   { user_id: "u_me", username: "mia", role: "admin", joined_at: "2026-01-01T00:00:00Z" },
   { user_id: "u_dana", username: "dana", role: "member", joined_at: "2026-01-01T00:00:00Z" },
@@ -80,14 +65,7 @@ function preloadFor(skin) {
   };
 }
 
-/**
- * Boot with the given skin and walk into the channel.
- *
- * The router runs on a MEMORY history (`createMemoryHistory` in
- * `frontend/src/router.tsx`), so a deep-link `goto` sets the browser URL but
- * the app still renders Root. Navigation has to go through the UI, exactly as
- * the WebDriver scenarios do.
- */
+/** Boot with the given skin and walk into the channel (memory-history router: navigate via the UI). */
 async function openChannel(page, skin) {
   await page.addInitScript((data) => {
     // @ts-ignore — read by frontend/src/__mocks__/tauri-core.ts on load.
@@ -108,15 +86,7 @@ async function openChannel(page, skin) {
 
 const composer = (page) => page.getByTestId("message-input");
 
-/**
- * What the composer thinks the message is.
- *
- * The composer is a contentEditable now (a custom emoji has to render as an
- * image while you type, which a `<textarea>` cannot do), so it has no `.value`
- * for `toHaveValue` to read. `data-value` is the serialized wire text the
- * component mirrors onto the element on every change — the exact string a send
- * would put on the wire.
- */
+/** What the composer thinks the message is: its data-value mirror of the wire text. */
 const expectComposerValue = (page, value) =>
   expect(composer(page)).toHaveAttribute("data-value", value);
 
@@ -189,7 +159,6 @@ test.describe("refined skin", () => {
     await expect(page.getByTestId("mention-option-sam")).toHaveCount(0);
     await expect(page.getByTestId("mention-option-mia")).toHaveCount(0);
 
-    // First row starts highlighted.
     await expect(page.getByTestId("mention-option-dana")).toHaveAttribute("data-active", "true");
 
     await page.screenshot({ path: shot("mentions-refined-list.png") });

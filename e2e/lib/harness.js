@@ -1,8 +1,4 @@
-/*
- * Shared plumbing for the raw-webdriverio Tauri e2e scripts (e2e.js,
- * smoke.js, ...). See e2e/README.md for why this drives the real app via
- * tauri-driver + WebKitWebDriver instead of the wdio test runner.
- */
+// Shared plumbing for the raw-webdriverio Tauri e2e scripts (see e2e/README.md).
 
 const fs = require("fs");
 const net = require("net");
@@ -22,9 +18,7 @@ const TAURI_DRIVER = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver")
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Parse a dotenv file from the repo root if it exists, else {}. In CI the app's
-// env is supplied by the workflow (e2e/scripts/start-backend.sh -> $GITHUB_ENV),
-// so .env.development / .env.test may not exist on disk — reading must not throw.
+// Parse a repo-root dotenv file, else {} (CI supplies env, so the file may not exist).
 function readEnvFile(name) {
   try {
     return dotenv.parse(fs.readFileSync(path.join(ROOT, name)));
@@ -33,9 +27,7 @@ function readEnvFile(name) {
   }
 }
 
-// Turso creds for the writable test DB. Prefer the process env (CI: exported by
-// e2e/scripts/start-backend.sh, which points these at the local libsql fixture)
-// and fall back to .env.test for a local run against a hand-provisioned DB.
+// Test-DB Turso creds: process env (CI's libsql fixture), else .env.test.
 function tursoEnv() {
   const fileEnv = readEnvFile(".env.test");
   const TURSO_URL = process.env.TURSO_URL || fileEnv.TURSO_URL;
@@ -51,9 +43,7 @@ function tursoEnv() {
 
 function reap() {
   const procs = ["tauri-driver", "WebKitWebDriver", "bin/vite"];
-  // Only reap a delivery service we OWN (the self-spawn path). When
-  // POLLIS_DELIVERY_URL is set the DS is an EXTERNAL fixture managed by
-  // e2e/scripts/start-backend.sh — killing it here would break the run.
+  // Only reap a DS we spawned; an external one (POLLIS_DELIVERY_URL) belongs to start-backend.sh.
   if (!process.env.POLLIS_DELIVERY_URL) {
     procs.push("target/debug/pollis-delivery");
   }
@@ -117,8 +107,6 @@ async function waitViteReady() {
   console.log("[e2e] Vite up and warmed");
 }
 
-// ---- app-driving helpers -------------------------------------------------
-
 async function present(browser, testId) {
   const els = await browser.$$(`[data-testid="${testId}"]`);
   return els.length > 0;
@@ -155,17 +143,7 @@ async function setTestIdValue(browser, testId, value) {
   await el.setValue(value);
 }
 
-// The chat composer, which is NOT a form control: it is a contentEditable, so
-// that a custom emoji can render as an inline image while you type. `setValue`
-// only works on inputs and textareas, so this clicks in and types, then waits
-// for the composer's own `data-value` mirror to catch up — which is also the
-// honest signal that the component (not just the DOM) saw the text.
-//
-// Each character is pressed AND released before the next one. `browser.keys`
-// can't do that: it presses every key of the sequence down first and only then
-// releases them all (it is built for chords), so a repeated letter is a second
-// keyDown of a key that is still held and WebKit drops it, along with the
-// spaces — "hello from A" arrived as "helo fromA" (#1298).
+// Composer is contentEditable: press+release per key (browser.keys chords drop repeats, #1298), then await data-value.
 async function setComposerText(browser, text) {
   await waitTestId(browser, "message-input");
   const el = await browser.$('[data-testid="message-input"]');
@@ -189,14 +167,7 @@ async function typeCode(browser, digits) {
   }
 }
 
-// ---- raw-CSS-selector variants ------------------------------------------
-// The testid helpers above cover the common case (an element whose own
-// data-testid is known). Some targets need a plain CSS selector instead:
-// a testid PREFIX match (e.g. the accept button `accept-request-<id>` whose
-// id isn't known ahead of time), or a real input that carries an `id` but no
-// testid (StartDM's visible field is `#dm-identifier`; its `dm-identifier-input`
-// testid is a hidden read-only mirror). These mirror present/waitTestId/
-// clickTestId/setTestIdValue but take any selector.
+// Raw-CSS-selector variants of the testid helpers, for prefix matches and id-only inputs.
 
 async function presentSelector(browser, selector) {
   const els = await browser.$$(selector);
@@ -214,8 +185,7 @@ async function waitSelector(browser, selector, timeoutMs = 30000, label = select
   throw new Error(`timed out waiting for ${label}`);
 }
 
-// Same in-page DOM click as clickTestId — WebKitWebDriver's native click
-// doesn't reliably fire React handlers here.
+// Same in-page DOM click as clickTestId.
 async function clickSelector(browser, selector) {
   await waitSelector(browser, selector);
   const ok = await browser.execute((sel) => {
@@ -234,23 +204,12 @@ async function setSelectorValue(browser, selector, value) {
   await el.setValue(value);
 }
 
-// ---- multi-client plumbing ----------------------------------------------
-// tauri-driver listens on a WebDriver port (--port) and spawns WebKitWebDriver
-// on a native port (--native-port). To run N isolated app instances against
-// ONE shared Vite dev server, each client gets a distinct (port, native-port)
-// pair. Client 0 keeps the historical 4444/4445 so the single-client scripts
-// (smoke.js / e2e.js / invalid-otp.js), which hardcode 4444, are unaffected.
+// Multi-client: each client gets its own (port, native-port); client 0 keeps 4444/4445 for single-client scripts.
 function clientPorts(index = 0) {
   return { driverPort: 4444 + index * 2, nativePort: 4445 + index * 2 };
 }
 
-// Spawn tauri-driver + a webdriverio session for one client, all reaped by the
-// caller (returns the tauri-driver child to kill) and by harness `reap()` (which
-// pkills every tauri-driver / WebKitWebDriver / pollis regardless of port).
-// `appEnv` is the FULL env for the app process (its own POLLIS_DATA_DIR, the
-// delivery/Turso creds, and the WebKit workaround vars). `settleMs` waits out
-// the initial Vite page load before the first WebDriver command, same as the
-// single-client scripts do after remote().
+// Spawn tauri-driver + a webdriverio session for one client; `appEnv` is the app's full env.
 async function startClient({ index = 0, appEnv, settleMs = 6000, label = `client${index}` }) {
   const { driverPort, nativePort } = clientPorts(index);
   console.log(`[e2e] ${label}: tauri-driver :${driverPort} (native :${nativePort})`);
@@ -265,7 +224,6 @@ async function startClient({ index = 0, appEnv, settleMs = 6000, label = `client
     hostname: "127.0.0.1", port: driverPort, path: "/",
     capabilities: { "tauri:options": { application: APP_BIN } },
     logLevel: "error",
-    // Fail a wedged command in 45s instead of the default 120s.
     connectionRetryTimeout: 45000,
     connectionRetryCount: 1,
   });

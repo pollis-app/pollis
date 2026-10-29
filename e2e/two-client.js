@@ -1,36 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client cross-client convergence E2E (issue #570, M2).
- *
- * Launches TWO isolated real Pollis desktop app instances against ONE shared
- * backend (the libsql + real pollis-delivery fixture from
- * e2e/scripts/start-backend.sh) and proves that a message sent by client A
- * appears in client B's UI — the first real MLS-through-the-real-renderer,
- * cross-client delivery test.
- *
- * Isolation: each client gets its own tauri-driver / WebKitWebDriver port pair
- * (A: 4444/4445, B: 4446/4447 — see harness.clientPorts) and its own
- * POLLIS_DATA_DIR (separate local SQLite + MLS state + keystore). ONE Vite dev
- * server serves both webviews.
- *
- * Conversation path — 1:1 DM request → accept (the fewest-step stable path):
- *   1. A + B both sign up through the real UI (reuses e2e.js's signup steps).
- *   2. A starts a DM to B by B's email (search_user_by_username matches email),
- *      landing on the DM page. This adds B to the DM's MLS group.
- *   3. B polls its DMs for the incoming request and accepts it, landing on the
- *      DM page (now a member of the MLS group).
- *   4. A sends a distinctive, random-token message.
- *   5. B polls its message list (re-opening the DM to re-fire the debounced
- *      envelope ingest — there's no LiveKit realtime hint in this fixture)
- *      until A's token text appears. Asserted, no fixed sleeps for correctness.
- *
- * Assumes the backend fixtures are already up (the workflow runs
- * start-backend.sh first, same as e2e-full). Both clients read
- * POLLIS_DELIVERY_URL / TURSO_URL / TURSO_TOKEN / R2_* from the env.
- *
- * On failure, dumps per-client screenshots (A-FAIL.png / B-FAIL.png) and page
- * source (A-FAIL.html / B-FAIL.html) into e2e/artifacts/ so CI is actionable.
- */
+// Two-client DM convergence (#570, M2): A's message appears in B's UI; two isolated apps, one backend.
 
 const fs = require("fs");
 const path = require("path");
@@ -41,15 +10,10 @@ const shot = h.makeShot(ARTIFACTS);
 
 const PIN = "1357";
 
-// How long to wait for eventual MLS/remote propagation between the two clients.
-// Generous: cross-client delivery is eventual (remote metadata read for the DM
-// request, MLS envelope fetch + decrypt for the message).
+// Cross-client delivery is eventual, so waits are generous.
 const REQUEST_TIMEOUT_MS = 120_000;
 const MESSAGE_TIMEOUT_MS = 180_000;
 
-// Build the app env for one client: shared backend creds from the process env
-// (start-backend.sh) or .env.development, a per-client data dir, and the WebKit
-// workaround vars every script needs on this setup.
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
@@ -63,8 +27,7 @@ function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   };
 }
 
-// Full signup through the real UI — the exact step sequence e2e.js proves,
-// factored so both clients run it. Leaves the client on [data-testid="app-ready"].
+// Full signup through the real UI; leaves the client on app-ready.
 async function signUp(browser, email, tag) {
   console.log(`[two-client] ${tag}: signing up ${email}`);
 
@@ -102,9 +65,7 @@ async function signUp(browser, email, tag) {
   console.log(`[two-client] ${tag}: reached app-ready`);
 }
 
-// A: open "New Message", DM the target by email, land on the DM page. The
-// visible identifier field carries id="dm-identifier" (its dm-identifier-input
-// testid is a hidden read-only mirror), so target the real input by id.
+// A: DM the target by email; target the real input by id (its testid is a hidden mirror).
 async function startDmTo(browser, targetEmail) {
   await h.clickTestId(browser, "sidebar-row-dms");
   await h.clickTestId(browser, "menu-item-new-dm");
@@ -116,10 +77,7 @@ async function startDmTo(browser, targetEmail) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
-// B: poll the DMs list until the incoming request surfaces (a remote metadata
-// read, not MLS-gated) and accept it. The accept button's testid embeds the
-// channel id (unknown ahead of time), so match by prefix. Re-mounts DMsPage on
-// each attempt to defeat React Query's 30s staleTime.
+// B: poll DMs for the request and accept it, remounting DMsPage to beat the 30s staleTime.
 async function acceptIncomingDm(browser, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let attempt = 0;
@@ -147,7 +105,6 @@ async function acceptIncomingDm(browser, timeoutMs) {
   throw new Error("B: DM request never appeared");
 }
 
-// Does any rendered message body contain the token?
 async function messageVisible(browser, token) {
   return browser.execute((tok) => {
     const nodes = document.querySelectorAll('[data-testid="message-content"]');
@@ -158,17 +115,13 @@ async function messageVisible(browser, token) {
   }, token);
 }
 
-// B: poll the DM until A's token appears. Re-opens the conversation each round
-// to re-fire the (5s-debounced) envelope ingest — the only pull path without a
-// LiveKit realtime hint, which this fixture doesn't provide.
+// B: poll the DM, re-opening it each round to re-fire the 5s-debounced ingest.
 async function waitForMessage(browser, token, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     if (await messageVisible(browser, token)) {
       return;
     }
-    // Re-open the DM (Home → DMs → first conversation) to remount MainContent
-    // and trigger a fresh ingest_dm_envelopes past the debounce window.
     await h.clickTestId(browser, "sidebar-row-dms").catch(() => {});
     await h.sleep(1000);
     if (await h.presentSelector(browser, '[data-testid^="dm-option-"]')) {
@@ -183,8 +136,7 @@ async function waitForMessage(browser, token, timeoutMs) {
 
 async function main() {
   h.reap();
-  // .env.development is optional (present locally for dev R2/LiveKit creds,
-  // absent in CI where they come from the workflow env / start-backend.sh).
+  // .env.development is optional (absent in CI).
   const devEnv = h.readEnvFile(".env.development");
   const turso = h.tursoEnv();
 
@@ -202,7 +154,6 @@ async function main() {
   const clients = [];
   const stop = (c) => { try { c && c.kill("SIGKILL"); } catch (_) {} };
 
-  // One shared Vite dev server for both webviews.
   const vite = h.spawnVite(devEnv);
   children.push(vite);
 
@@ -218,7 +169,6 @@ async function main() {
     await h.waitViteReady();
     console.log(`[two-client] using external delivery service at ${deliveryUrl}`);
 
-    // Bring up both isolated clients (distinct ports + data dirs).
     A = await h.startClient({
       index: 0, label: "A",
       appEnv: appEnvFor(devEnv, turso, deliveryUrl, path.join(__dirname, ".tmp-data-a")),
@@ -236,16 +186,13 @@ async function main() {
     await signUp(B.browser, emailB, "B");
     await shot(B.browser, "two-client-B-ready.png");
 
-    // A → DM B by email. Establishes the DM + adds B to its MLS group.
     console.log(`[two-client] A: starting DM to ${emailB}`);
     await startDmTo(A.browser, emailB);
 
-    // B → accept the incoming request (becomes an MLS group member).
     console.log("[two-client] B: waiting for the DM request…");
     await acceptIncomingDm(B.browser, REQUEST_TIMEOUT_MS);
     console.log("[two-client] B: DM request accepted");
 
-    // A → send the distinctive message and confirm it landed on A first.
     console.log(`[two-client] A: sending message with token ${token}`);
     await h.setComposerText(A.browser, `hello from A ${token}`);
     await h.clickTestId(A.browser, "message-send-button");
@@ -253,7 +200,6 @@ async function main() {
     console.log("[two-client] A: message shown locally");
     await shot(A.browser, "two-client-A-sent.png");
 
-    // B → poll until A's message converges into B's UI.
     console.log("[two-client] B: waiting for convergence…");
     await waitForMessage(B.browser, token, MESSAGE_TIMEOUT_MS);
     await shot(B.browser, "two-client-B-received.png");

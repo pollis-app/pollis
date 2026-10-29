@@ -1,21 +1,4 @@
-/*
- * The durable outbox (#1335): a message the user saw accepted is either
- * delivered or visibly unsent — never silently gone.
- *
- * Runs against the browser build with the Tauri IPC mock, which mirrors the
- * core's outbox: `send_message` stores the message first (pending) under the id
- * the renderer named it with, and a failing attempt (`failSends`) leaves it
- * failed. Covers, in both skins where it is drawn differently:
- *
- *   - a message a killed process left unsent is delivered by the launch drain;
- *   - one that still cannot go is shown failed, with Retry and Discard;
- *   - a send that fails now is kept, labelled, and Retry delivers it once;
- *   - Discard removes an unsent message;
- *   - an edit that cannot go is kept, labelled, and the drain delivers it
- *     (the edit outbox, #1555).
- *
- *   pnpm --filter @pollis/e2e exec playwright test -c playwright.config.js outbox
- */
+// The durable outbox (#1335): an accepted message is delivered or visibly unsent, never silently gone.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -218,8 +201,6 @@ test("Discard removes an unsent message", async ({ page }) => {
   );
   expect(left).toEqual([MSG_BOB]);
 });
-
-// ── The edit outbox (#1555) ─────────────────────────────────────────────────
 
 const MSG_MINE = "01HQ7Z3K9M2P5R8T1V4W6Y0MNE";
 

@@ -1,28 +1,4 @@
-/*
- * Device-enrollment approval (#1096) — the approver TYPES the code.
- *
- * The SAS this flow rests on is derived from the new device's ephemeral public
- * key. This screen used to display the Delivery Service's stored copy of that
- * code and submit the same value back on one click, so the comparison was
- * performed by nobody: a DS that swapped the ephemeral key and its stored code
- * to match satisfied every programmatic check, and approving handed the account
- * private key to whoever controlled the substituted key.
- *
- * `pollis-core` already compared against the code it derives itself (#793) —
- * the hole was the UI feeding that comparison a server-supplied value. So the
- * properties under test are the UI's:
- *
- *   1. no code appears anywhere on the screen, because none is fetched;
- *   2. approve is unavailable until a full code has been typed;
- *   3. what reaches `approve_device_enrollment` is exactly what was typed;
- *   4. a wrong code fails visibly and clears, rather than nudging the user
- *      toward editing one character until it passes.
- *
- * Runs against the browser build with `VITE_PLAYWRIGHT=true`; the mock's
- * `list_pending_enrollment_requests` returns the same code-free shape
- * `pollis-core` does, and its `approve_device_enrollment` accepts only the
- * request's real code — standing in for the derived-from-the-key check.
- */
+// Enrollment approval (#1096): the approver TYPES the code; a DS-supplied one would void the SAS check.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -83,8 +59,7 @@ async function submissions(
 test("the approval screen shows no code to click through", async ({ page }) => {
   await openApproval(page);
 
-  // The old screen rendered the code in `approval-verification-code`. Its
-  // absence is the fix: there is nothing fetched to display.
+  // No code is fetched, so none is displayed.
   await expect(page.getByTestId("approval-verification-code")).toHaveCount(0);
 
   // And the real code is nowhere in the rendered page either — not in a
@@ -92,7 +67,6 @@ test("the approval screen shows no code to click through", async ({ page }) => {
   const body = await page.locator("body").innerHTML();
   expect(body).not.toContain(CORRECT_CODE);
 
-  // What IS there is an empty field to type into.
   const input = page.getByTestId("approval-code-input");
   await expect(input).toBeVisible();
   await expect(input).toHaveValue("");
@@ -126,7 +100,6 @@ test("what is submitted is exactly what was typed", async ({ page }) => {
 
   await page.getByTestId("approve-enrollment-button").click();
 
-  // The takeover closes on success.
   await expect(page.getByTestId("enrollment-approval-prompt")).toHaveCount(0);
   expect(await submissions(page)).toEqual([
     { requestId: REQUEST_ID, verificationCode: CORRECT_CODE },

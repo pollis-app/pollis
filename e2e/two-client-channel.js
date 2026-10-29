@@ -1,34 +1,5 @@
 #!/usr/bin/env node
-/*
- * Two-client GROUP + TEXT-CHANNEL convergence E2E (issue #570, extends M2).
- *
- * The M2 test (two-client.js) proves 1:1 DM delivery. This proves the other
- * core conversation surface — a Slack-style GROUP text channel — converges
- * cross-client: user A creates a group + a text channel, invites B, B accepts
- * (which synchronously processes the MLS Welcome), A posts a message in the
- * channel, and B's UI eventually renders it.
- *
- * Isolation + backend assumptions are identical to two-client.js: two isolated
- * app instances (distinct driver ports + POLLIS_DATA_DIR), ONE shared external
- * backend (start-backend.sh — POLLIS_DELIVERY_URL must be set), ONE Vite server.
- *
- * Choreography:
- *   1. A + B sign up (reused verbatim from two-client.js).
- *   2. A creates a group (menu-item-groups -> menu-item-create-group -> form).
- *   3. A invites B by email (group page -> menu-item-invite-member -> form).
- *   4. A creates a text channel in the group (stays on the channel page).
- *   5. B accepts the invite (Root -> menu-item-invites -> accept-invite-<id>).
- *      accept_group_invite polls MLS welcomes synchronously, so B is in the
- *      group's MLS state before it navigates.
- *   6. B navigates into the channel (group-option-<id> -> channel-option-<id>,
- *      matched by visible name so default channels don't collide).
- *   7. A sends a distinctive random-token message in the channel.
- *   8. B polls its message list until A's token appears, re-opening the channel
- *      each round to re-fire the 5s-debounced ingest_channel_envelopes pull.
- *      Asserted; no fixed sleeps for correctness.
- *
- * On failure, dumps per-client A-FAIL.* / B-FAIL.* into e2e/artifacts/.
- */
+// Two-client group text channel convergence (#570): B accepts the invite and sees A's message.
 
 const fs = require("fs");
 const path = require("path");
@@ -56,7 +27,6 @@ function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   };
 }
 
-// Full signup through the real UI — copied verbatim from two-client.js.
 async function signUp(browser, email, tag) {
   console.log(`[two-client-channel] ${tag}: signing up ${email}`);
   await h.waitTestId(browser, "auth-screen", 30000);
@@ -83,8 +53,6 @@ async function signUp(browser, email, tag) {
 }
 
 // Click the first [data-testid^=prefix] whose visible text contains `text`.
-// Used for group-option-<id> / channel-option-<id> whose ids aren't known ahead
-// of time but whose label is the group/channel name.
 async function clickByPrefixText(browser, prefix, text) {
   const ok = await browser.execute((pfx, needle) => {
     for (const el of document.querySelectorAll(`[data-testid^="${pfx}"]`)) {
@@ -106,8 +74,7 @@ async function prefixTextPresent(browser, prefix, text) {
   }, prefix, text);
 }
 
-// Navigate to Root ("/") via the breadcrumb Home link (the first button in the
-// breadcrumb trail; absent only when already home). Confirmed by the Root menu.
+// Go Home via the breadcrumb (absent only when already home).
 async function goHome(browser) {
   const clicked = await browser.execute(() => {
     const trail = document.querySelector('[data-testid="breadcrumb-trail"]');
@@ -120,8 +87,7 @@ async function goHome(browser) {
   }
 }
 
-// A: create a group. From app-ready (Root). Lands on the group page, marked by
-// the admin-only menu-item-create-channel.
+// A: create a group; lands on the group page.
 async function createGroup(browser, groupName) {
   await h.clickTestId(browser, "menu-item-groups");
   await h.clickTestId(browser, "menu-item-create-group");
@@ -138,13 +104,11 @@ async function inviteMember(browser, email) {
   await h.setSelectorValue(browser, "#invite-username", email);
   await h.clickTestId(browser, "send-invite-button");
   await h.waitTestId(browser, "invite-sent-confirmation", 20000);
-  // Back to the group page (breadcrumb up one level).
   await h.clickTestId(browser, "breadcrumb-back-button");
   await h.waitTestId(browser, "menu-item-create-channel", 20000);
 }
 
-// A: create a text channel in the group (default type = text). Lands in the
-// channel, marked by the composer.
+// A: create a text channel; lands in it.
 async function createTextChannel(browser, channelName) {
   await h.clickTestId(browser, "menu-item-create-channel");
   await h.waitTestId(browser, "create-channel-page", 20000);
@@ -153,9 +117,7 @@ async function createTextChannel(browser, channelName) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
-// B: poll Root -> Invites until the incoming invite surfaces and accept it.
-// accept_group_invite polls MLS welcomes synchronously, so on return B is a
-// member of the group's MLS state.
+// B: poll Invites and accept; accept_group_invite processes the MLS welcome synchronously.
 async function acceptInvite(browser, timeoutMs) {
   const end = Date.now() + timeoutMs;
   let attempt = 0;
@@ -177,9 +139,7 @@ async function acceptInvite(browser, timeoutMs) {
   throw new Error("B: group invite never appeared");
 }
 
-// Navigate into a group's channel by NAME (group-option/channel-option ids are
-// unknown ahead of time; labels are the names). Polls for the group to appear
-// (B's group list refreshes after the invite accept invalidates the query).
+// Open a group's channel by NAME, polling until B's group list shows the group.
 async function openChannel(browser, groupName, channelName, groupTimeoutMs) {
   const end = Date.now() + groupTimeoutMs;
   while (Date.now() < end) {
@@ -188,7 +148,6 @@ async function openChannel(browser, groupName, channelName, groupTimeoutMs) {
     await h.waitTestId(browser, "menu-item-create-group", 15000);
     if (await prefixTextPresent(browser, "group-option-", groupName)) {
       await clickByPrefixText(browser, "group-option-", groupName);
-      // On the group page: wait for the channel row, then click it by name.
       await h.waitSelector(browser, '[data-testid^="channel-option-"]', 20000, "a channel row");
       await clickByPrefixText(browser, "channel-option-", channelName);
       await h.waitTestId(browser, "message-form", 20000);
@@ -210,16 +169,13 @@ async function messageVisible(browser, token) {
   }, token);
 }
 
-// B: poll the channel until A's token appears, re-opening the channel each round
-// to re-fire the 5s-debounced ingest_channel_envelopes pull (same technique as
-// two-client.js's DM waitForMessage, but for a channel).
+// B: poll the channel, re-opening each round to re-fire the 5s-debounced ingest.
 async function waitForChannelMessage(browser, groupName, channelName, token, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     if (await messageVisible(browser, token)) {
       return;
     }
-    // Re-open the channel to remount MainContent and re-ingest past the debounce.
     await openChannel(browser, groupName, channelName, 30000).catch(() => {});
     await h.sleep(6000);
   }
@@ -275,7 +231,6 @@ async function main() {
     await signUp(B.browser, emailB, "B");
     await shot(B.browser, "two-client-channel-B-ready.png");
 
-    // A: create group -> invite B -> create text channel (stays in the channel).
     console.log(`[two-client-channel] A: creating group "${groupName}"`);
     await createGroup(A.browser, groupName);
     console.log(`[two-client-channel] A: inviting ${emailB}`);
@@ -284,24 +239,20 @@ async function main() {
     await createTextChannel(A.browser, channelName);
     await shot(A.browser, "two-client-channel-A-channel.png");
 
-    // B: accept the invite (MLS welcome processed synchronously).
     console.log("[two-client-channel] B: waiting for the invite…");
     await acceptInvite(B.browser, INVITE_TIMEOUT_MS);
     console.log("[two-client-channel] B: invite accepted");
 
-    // B: navigate into the channel.
     console.log(`[two-client-channel] B: opening channel "${channelName}"`);
     await openChannel(B.browser, groupName, channelName, GROUP_VISIBLE_TIMEOUT_MS);
     await shot(B.browser, "two-client-channel-B-in-channel.png");
 
-    // A: post the distinctive message; confirm it rendered locally first.
     console.log(`[two-client-channel] A: sending channel message (token ${token})`);
     await h.setComposerText(A.browser, `hello channel ${token}`);
     await h.clickTestId(A.browser, "message-send-button");
     await waitForChannelMessage(A.browser, groupName, channelName, token, 30000);
     await shot(A.browser, "two-client-channel-A-sent.png");
 
-    // B: poll until A's message converges into B's channel view.
     console.log("[two-client-channel] B: waiting for convergence…");
     await waitForChannelMessage(B.browser, groupName, channelName, token, MESSAGE_TIMEOUT_MS);
     await shot(B.browser, "two-client-channel-B-received.png");

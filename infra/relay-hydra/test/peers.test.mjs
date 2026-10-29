@@ -1,6 +1,4 @@
-// Peer-relay publication (#813 wave 3): parsing the relays' parked-peer reports,
-// aggregating them pool-wide, and withholding revoked peers. No AWS, no network.
-//
+// Peer-relay publication (#813 wave 3): parse, aggregate, withhold revoked peers.
 // Run: node --test   (from infra/relay-hydra/)
 
 import { test } from "node:test";
@@ -23,8 +21,6 @@ function body(...names) {
   return JSON.stringify({ peers: names.map((n) => ({ cert_b64: certB64(n) })) });
 }
 
-// ── Parsing one relay's report ───────────────────────────────────────────────
-
 test("parses a well-formed parked-peer report", () => {
   assert.deepEqual(parsePeerReport(body("p1", "p2")), [
     { cert_b64: certB64("p1") },
@@ -33,9 +29,7 @@ test("parses a well-formed parked-peer report", () => {
 });
 
 test("an unreadable report contributes NO peers and never throws", () => {
-  // A relay build from before peer parking answers 404 (handled by the caller);
-  // anything else unreadable must degrade to "this node has no peers", because a
-  // shorter path is exactly where the pool was before peers existed.
+  // Anything unreadable degrades to "no peers" (a shorter path, as before peers).
   for (const bad of ["", "not json", "[]", "null", '"a string"', "{}", '{"peers":"nope"}', '{"peers":null}']) {
     assert.deepEqual(parsePeerReport(bad), [], `parsed ${JSON.stringify(bad)} as peers`);
   }
@@ -58,8 +52,6 @@ test("cert spellings are canonicalized, so one peer cannot become two entries", 
   ]);
 });
 
-// ── Aggregating across the pool ──────────────────────────────────────────────
-
 test("a peer parked at several relays collapses to one entry listing them all", () => {
   const peers = aggregatePeers([
     { addr: RELAY_B, peers: parsePeerReport(body("p1")) },
@@ -73,9 +65,7 @@ test("a peer parked at several relays collapses to one entry listing them all", 
 });
 
 test("an unchanged pool aggregates to byte-identical bytes", () => {
-  // The directory is re-signed every couple of minutes; a set that reshuffles per
-  // cycle would churn CloudFront and make real membership changes unreadable in a
-  // diff. Ordering is therefore total, not incidental.
+  // Ordering is total so the re-signed directory does not churn per cycle.
   const reports = [
     { addr: RELAY_A, peers: parsePeerReport(body("p2", "p1")) },
     { addr: RELAY_B, peers: parsePeerReport(body("p1", "p2")) },
@@ -94,8 +84,7 @@ test("a report from a relay with no address is ignored", () => {
 });
 
 test("the published peer set is capped, deterministically", () => {
-  // The directory is downloaded by every overlay-on client on every refresh, so
-  // the artifact's size cannot grow without bound with volunteer count.
+  // Every client downloads the directory, so its size is capped.
   const many = Array.from({ length: MAX_DIRECTORY_PEERS + 25 }, (_, i) => `peer-${i}`);
   const peers = aggregatePeers([{ addr: RELAY_A, peers: parsePeerReport(body(...many)) }]);
   assert.equal(peers.length, MAX_DIRECTORY_PEERS);
@@ -103,8 +92,6 @@ test("the published peer set is capped, deterministically", () => {
   const again = aggregatePeers([{ addr: RELAY_A, peers: parsePeerReport(body(...many.slice().reverse())) }]);
   assert.deepEqual(peers, again);
 });
-
-// ── Revocation ───────────────────────────────────────────────────────────────
 
 test("a revoked peer is excluded by the reconciler", () => {
   const peers = aggregatePeers([{ addr: RELAY_A, peers: parsePeerReport(body("p1", "p2")) }]);
