@@ -81,7 +81,7 @@ rejection under 2.3.7.
 
 ### App Store promotional text (170 chars max, editable without review)
 
-> `Groups, channels and direct messages that only the people in them can read. No ads, no tracking, no phone number.`
+> `End-to-end encrypted groups and DMs. No ads, no tracking, no phone number.`
 
 ### Category
 
