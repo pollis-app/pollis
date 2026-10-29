@@ -46,7 +46,8 @@ async fn unclaimed_count(user_id: &str, device_id: &str, suite: i64) -> i64 {
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package \
-             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
+             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3 \
+               AND last_resort = 0",
             libsql::params![user_id.to_string(), device_id.to_string(), suite],
         )
         .await

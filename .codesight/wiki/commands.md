@@ -557,6 +557,8 @@ Only three MLS commands are registered (`src-tauri/src/commands/mls.rs`):
 - `poll_mls_welcomes(user_id)`
 - `catch_up_all_mls_groups(user_id)`
 
+Mobile-only bridge arm (`pollis-core/src/bridge.rs`, no Tauri shim — desktop runs the full sweep above): `reconcile_backstop_all(userId)` → `{ checked, reconciled }` (#1571). The sweep's reconcile backstop for every conversation without its catch-up, run by `useInboxRealtime` after the landing and resume ingest pass (`mobile/lib/mlsBackstop.ts`), so a device missing from a conversation's tree is re-added on an all-mobile roster too.
+
 Corrected 2026-08-03 (#714):
 - ~~`reconcile_group_mls(conversation_id, actor_user_id)`~~ — **not a command**. Reconcile is internal: `pollis_core::commands::mls::reconcile_group_mls_impl`, driven by the sweep in `commands/mls/sweep.rs` and by `auth.rs`. It has no shim and no `generate_handler!` entry.
 - ~~`generate_mls_key_package(user_id)`~~ — **does not exist** anywhere in the tree under that name.

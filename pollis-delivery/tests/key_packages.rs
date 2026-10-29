@@ -282,6 +282,7 @@ async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: O
             ref_hash: ref_hash.to_string(),
             key_package: base64::engine::general_purpose::STANDARD.encode(ref_hash.as_bytes()),
             ciphersuite: suite,
+            last_resort: false,
         }],
         user_id: Some(user.to_string()),
     };
@@ -341,6 +342,7 @@ fn replenish_body(user: &str, device: &str, suite: i64, refs: &[&str]) -> Replen
                 ref_hash: r.to_string(),
                 key_package: base64::engine::general_purpose::STANDARD.encode(r.as_bytes()),
                 ciphersuite: Some(suite),
+                last_resort: false,
             })
             .collect(),
         user_id: Some(user.to_string()),

@@ -17,6 +17,13 @@
 //! * a CURRENT member, on its own sweep, re-adds a missing device the moment it
 //!   has a KeyPackage again — which is how a device running an older build (one
 //!   that only republishes its pool at sign-in) is recovered with no update.
+//!
+//! Since #1571 a device on a current build also holds a last-resort package,
+//! which is never consumed, so its pool running dry no longer strands it at all
+//! (`device_outside_tree.rs`). These tests therefore play a device on a build
+//! that predates last-resort packages: [`as_pre_last_resort_build`] removes its
+//! last-resort row before the pool is drained. Those builds are in the stores
+//! for as long as store builds lag, so the recovery paths below still matter.
 
 use crate::harness::{enroll_second_device, wipe, TestClient};
 use serde_json::json;
@@ -24,6 +31,23 @@ use serial_test::serial;
 
 /// One more than the pool size, so the last conversation finds it empty.
 const CONVERSATIONS: usize = 6;
+
+/// Make `client` look like a device on a build that predates last-resort
+/// packages (#1571): its pool, and no last-resort package to fall back on.
+async fn as_pre_last_resort_build(client: &TestClient) {
+    let (user, device) = identity(client).await;
+    crate::harness::writable_remote()
+        .await
+        .conn()
+        .await
+        .expect("remote conn")
+        .execute(
+            "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2 AND last_resort = 1",
+            libsql::params![user, device],
+        )
+        .await
+        .expect("drop the last-resort package");
+}
 
 /// `(user_id, device_id)` of `client`.
 async fn identity(client: &TestClient) -> (String, String) {
@@ -149,6 +173,7 @@ async fn a_device_whose_pool_ran_dry_joins_every_conversation_on_its_next_sweep(
     let mut bob = TestClient::new().await;
     bob.sign_up("bob@test.local").await;
     let d2 = identity(&alice_d2).await;
+    as_pre_last_resort_build(&alice_d2).await;
 
     let groups = strand_second_device(&bob, &alice_d1, &alice.username).await;
     assert_stranded(&bob, &groups, &d2).await;
@@ -183,6 +208,7 @@ async fn a_device_whose_pool_ran_dry_joins_a_conversation_when_it_ingests_it() {
     let mut bob = TestClient::new().await;
     bob.sign_up("bob@test.local").await;
     let d2 = identity(&alice_d2).await;
+    as_pre_last_resort_build(&alice_d2).await;
 
     let groups = strand_second_device(&bob, &alice_d1, &alice.username).await;
     assert_stranded(&bob, &groups, &d2).await;
@@ -214,6 +240,7 @@ async fn a_member_re_adds_a_missing_device_once_it_publishes_key_packages() {
     let mut bob = TestClient::new().await;
     bob.sign_up("bob@test.local").await;
     let d2 = identity(&alice_d2).await;
+    as_pre_last_resort_build(&alice_d2).await;
 
     let groups = strand_second_device(&bob, &alice_d1, &alice.username).await;
     assert_stranded(&bob, &groups, &d2).await;
@@ -255,6 +282,7 @@ async fn a_device_whose_pool_ran_dry_joins_every_dm_when_it_opens_them() {
     let alice = alice_d1.sign_up("alice@test.local").await;
     let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
     let d2 = identity(&alice_d2).await;
+    as_pre_last_resort_build(&alice_d2).await;
 
     let mut peers: Vec<TestClient> = Vec::with_capacity(CONVERSATIONS);
     let mut dms: Vec<String> = Vec::with_capacity(CONVERSATIONS);
@@ -301,7 +329,7 @@ async fn unclaimed(who: &(String, String)) -> i64 {
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package \
-             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0",
+             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND last_resort = 0",
             libsql::params![who.0.clone(), who.1.clone()],
         )
         .await
