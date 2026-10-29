@@ -12,11 +12,7 @@ interface TextAreaProps {
   rows?: number;
   className?: string;
   id?: string;
-  /**
-   * Key handler on the underlying `<textarea>`. Added for the thread composer
-   * (#825), which needs Enter-to-send with Shift+Enter for a newline — the
-   * same contract as the main chat input.
-   */
+  /** For the thread composer (#825): Enter sends, Shift+Enter adds a newline. */
   onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
 }
 

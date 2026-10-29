@@ -1,19 +1,12 @@
-// What a `new_message` wake-up should do once its envelopes are ingested.
-//
-// The wake-up names no sender (§5 signalling minimization), so whether the
-// message is our OWN — sent from this account's other device — is only known
-// after ingest, from the MLS-attributed `sender_id` of the newest local row.
-// A message of our own is shown exactly like anyone else's, but never raises
-// an alert or an unread badge. Kept pure so the rule is testable without a
-// renderer (`frontend/tests/message-wake.test.ts`).
+// What a `new_message` wake-up does after ingest. It names no sender (§5), so
+// "our own message from another device" is known only from the newest local
+// row's MLS-attributed `sender_id`; ours shows but never alerts or badges.
 
-/** The fields of the newest local message that the decision reads. */
 export interface WakeLatest {
   sender_id: string;
   sender_username?: string | null;
 }
 
-/** True when the newest message in the conversation is the user's own. */
 export function isOwnLatest(
   latest: WakeLatest | null | undefined,
   selfId: string | null | undefined,
@@ -25,12 +18,9 @@ export function isOwnLatest(
 }
 
 /**
- * Whether a wake-up should alert (notification + unread badge).
- *
- * Never for the conversation on screen, never for our own message. When
- * nothing could be read back (ingest failed, or the message is not decryptable
- * yet) it alerts, as every wake-up did before the sender could be told apart:
- * a missed alert for someone else's message is the worse failure.
+ * Whether a wake-up alerts (notification + badge): never for the open
+ * conversation or our own message. If nothing could be read back it alerts,
+ * since a missed alert is the worse failure.
  */
 export function shouldAlertForWake(args: {
   latest: WakeLatest | null | undefined;

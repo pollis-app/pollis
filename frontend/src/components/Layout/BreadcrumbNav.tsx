@@ -21,12 +21,7 @@ interface Segment {
   to: string;
 }
 
-/**
- * Derives the breadcrumb trail (`Segment[]`) from the current pathname plus the
- * loaded groups / channels / DM data. Pure pathname pattern-matching lifted out
- * of the component body so the render stays readable. Must be called from an
- * `observer()` component — it reads the MobX `appStore.channels` observable.
- */
+/** Breadcrumb trail from the pathname plus loaded data. Call from an `observer()`: it reads `appStore.channels`. */
 function useBreadcrumbTrail(): Segment[] {
   const { t } = useTranslation("nav");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -152,18 +147,10 @@ interface HistoryNavProps {
 }
 
 /**
- * The back/forward chevron pair, the way a browser — and Slack and Discord —
- * draw it: two buttons that walk the router's history, always on screen, each
- * greyed out and genuinely `disabled` when that direction has nowhere to go.
- *
- * Always-visible matters more than it looks: a control that disappears at the
- * root moves everything next to it sideways, so the trail would shift under
- * the pointer on the way home. Disabled keeps the geometry still AND tells a
- * screen reader the same thing the grey tells everyone else, which the
- * `aria-hidden` spacer div it replaced did not.
- *
- * Enablement comes from `historyNavStore`, never from `window.history.length`
- * — see `utils/historyNav.ts` for why that number cannot answer "forward?".
+ * Browser-style back/forward chevrons over router history: always shown (so
+ * the trail never shifts) and truly `disabled` when there's nowhere to go.
+ * Enablement comes from `historyNavStore`, never `window.history.length`
+ * (see `utils/historyNav.ts`).
  */
 const HistoryNav: React.FC<HistoryNavProps> = observer(({ iconSize }) => {
   const { t } = useTranslation("nav");
@@ -194,13 +181,7 @@ const HistoryNav: React.FC<HistoryNavProps> = observer(({ iconSize }) => {
   );
 });
 
-/**
- * BreadcrumbNav renders below the TitleBar on authenticated pages.
- * Shows the browser-style back/forward pair (router history, not the
- * breadcrumb hierarchy) plus the breadcrumb trail itself
- * ("Home / Direct Messages / @someone"), whose segments stay clickable for
- * the hierarchical jumps the arrows no longer do.
- */
+/** Back/forward pair plus the clickable breadcrumb trail, below the TitleBar. */
 export const BreadcrumbNav: React.FC = observer(() => {
   const { t } = useTranslation("nav");
   const router = useRouter();

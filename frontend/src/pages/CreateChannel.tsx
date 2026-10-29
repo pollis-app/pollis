@@ -81,7 +81,6 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
       };
       addChannel(channelData);
       setSelectedChannelId(channelData.id);
-      // Invalidate both channel queries so the sidebar and group page reflect the new channel
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id) }),
         queryClient.invalidateQueries({ queryKey: groupQueryKeys.channels(selectedGroupId) }),

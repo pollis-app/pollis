@@ -1,5 +1,4 @@
-// Router context type shared between router.tsx and page components.
-// Lives in types/ to avoid circular imports between router.tsx and page files.
+// Router context type, in types/ to avoid router.tsx ↔ page import cycles.
 
 export interface RouterContext {
   onLogout: () => void;

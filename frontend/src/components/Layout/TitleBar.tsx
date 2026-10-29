@@ -20,11 +20,9 @@ export const TitleBar: React.FC = () => {
     win().startDragging().catch(console.error);
   };
 
-  // macOS: native traffic lights are drawn by the OS. We just reserve enough
-  // horizontal space on the left so our own UI doesn't overlap them.
+  // macOS: reserve space for the OS-drawn traffic lights.
   const macControls = <div className="flex-shrink-0" style={{ width: 68 }} />;
 
-  // Windows / Linux controls (right side)
   const winControls = (
     <div className="flex items-center flex-shrink-0">
       <button
@@ -54,9 +52,7 @@ export const TitleBar: React.FC = () => {
     </div>
   );
 
-  // CSS app-region marker. Tauri ignores it and relies on
-  // data-tauri-drag-region + the onMouseDown handler below instead; the
-  // marker is harmless and keeps the drag region declarative in the DOM.
+  // Tauri ignores app-region; it uses data-tauri-drag-region + onMouseDown.
   const dragStyle: React.CSSProperties = {
     WebkitAppRegion: "drag",
   } as React.CSSProperties;
@@ -72,12 +68,8 @@ export const TitleBar: React.FC = () => {
       className="flex items-center justify-between flex-shrink-0 select-none bg-surface border-b border-line"
       style={{
         height: isMac ? 32 : 36,
-        // PHYSICAL on purpose (#855): these insets frame the OS window
-        // controls — macOS traffic lights top-left, Windows caption buttons
-        // top-right — whose positions come from the platform, not from the
-        // app's reading direction. 12px left matches Finder/Safari/native
-        // NSWindow placement; the previous 8px sat the dots noticeably
-        // tighter to the corner.
+        // PHYSICAL on purpose (#855): these frame the OS window controls,
+        // whose positions don't follow reading direction.
         paddingLeft: isMac ? 12 : 12,
         paddingRight: isMac ? 12 : 0,
         ...dragStyle,
@@ -92,7 +84,6 @@ export const TitleBar: React.FC = () => {
         </div>
       )}
 
-      {/* Center — title */}
       <span
         className="absolute left-1/2 -translate-x-1/2 text-xs font-mono pointer-events-none text-muted"
       >

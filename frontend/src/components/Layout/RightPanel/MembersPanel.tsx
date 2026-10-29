@@ -10,16 +10,10 @@ import { MemberRow } from "./MemberRow";
 import { MediaGrid } from "./MediaGrid";
 import type { MessageAttachment } from "../../../types";
 
-/**
- * How many attachments the grid renders. Each tile resolves its own bytes
- * through the media server, so an unbounded grid on a media-heavy channel
- * would fan out into hundreds of fetches the moment the panel opens. The cap
- * keeps that bounded; the conversation itself remains the full archive.
- */
+/** Grid cap: each tile fetches its own bytes, so unbounded would fan out on open. */
 const MEDIA_LIMIT = 30;
 
-/** What the media grid shows — the same split the message log's thumb strip
- * makes (`MessageItem`). */
+/** Pictures and videos, the split `MessageItem`'s thumb strip makes. */
 const isVisualMedia = (contentType: string): boolean =>
   contentType.startsWith("image/") || contentType.startsWith("video/");
 
@@ -37,16 +31,9 @@ interface Person {
 }
 
 /**
- * Members + shared media for the active conversation — Discord's member list
- * over Messenger's shared-media grid, which is what #824 asks for.
- *
- * Members come from the group for a channel/group route. A DM has no member
- * table, so its two participants are derived from the conversation record.
- *
- * On a route with no conversation at all (Preferences, Search, the root page)
- * the panel degrades to the plain online roster and drops the media grid —
- * "who is online" still answers a question there, "media shared in this
- * conversation" does not.
+ * Members + shared media for the active conversation (#824). A DM's two
+ * participants come from the conversation record; with no conversation the
+ * panel shows the online roster and no media.
  */
 export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
@@ -55,22 +42,16 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
-    // React Query, not the MobX store: `appStore.dmConversations` was never
-    // written — its two setters had no call sites — so this panel saw an empty
-    // list in every DM and reported "Members — 0" (#906). The query hook is
-    // the source of truth for remote data everywhere else in the app.
+    // React Query, not the store: `appStore.dmConversations` is never written (#906).
     const { data: dmConversations = [] } = useDMConversations();
     const hasContext = Boolean(groupId || channelId || conversationId);
 
-    // Online first, then alphabetical. Reading `presenceStore.isOnline` here
-    // (inside an observer) is what keeps the ordering live as people join and
-    // leave — `isOnline` is deliberately not an action for exactly this.
+    // Online first, then alphabetical. Reading `presenceStore.isOnline` inside
+    // the observer keeps the ordering live.
     const people = useMemo<Person[]>(() => {
       if (!hasContext) {
-        // No conversation to scope to, so the roster is simply everyone we
-        // can currently see online. Names come from the DM list — the only
-        // peer directory the client holds without a group — and fall back to
-        // the raw id for someone we share no DM with.
+        // No conversation: everyone visible online, named from the DM list
+        // (the raw id for someone we share no DM with).
         const known = new Map<string, { label: string; avatarKey: string | null }>();
         for (const dm of dmConversations) {
           if (dm.user2_id) {
@@ -152,24 +133,19 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       dmConversations,
       currentUser,
       groupMembers,
-      // Re-sort when anyone's presence flips. `byUser` is replaced (not
-      // mutated) by the store, so identity is a sound dependency.
+      // `byUser` is replaced, not mutated, so identity is a sound dependency.
       presenceStore.byUser,
     ]);
 
     const attachments = useMemo(() => {
       const seen = new Set<string>();
       const out: MessageAttachment[] = [];
-      // `messages` is oldest-first; walk backwards so the grid leads with the
-      // most recent media.
       for (let i = messages.length - 1; i >= 0 && out.length < MEDIA_LIMIT; i--) {
         const message = messages[i];
         if (message.deleted_at) {
           continue;
         }
         for (const attachment of message.attachments ?? []) {
-          // "Media" means pictures and videos; audio and files stay in the
-          // log, where their cards make sense at full width.
           if (!isVisualMedia(attachment.content_type)) {
             continue;
           }
@@ -183,9 +159,6 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       return out;
     }, [messages]);
 
-    // Terminal packs the column the way the left sidebar does — sections butt
-    // up against their hairline headers with no outer padding. Refined keeps
-    // the airier card rhythm.
     const rootClass = isTerminal
       ? "flex h-full flex-col overflow-y-auto"
       : "flex h-full flex-col gap-4 overflow-y-auto py-3";
@@ -235,18 +208,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
 interface SectionHeaderProps {
   label: string;
   isTerminal: boolean;
-  /** Hairline rule above the header as well as below — the left sidebar's
-      `bordered` treatment, used on every section after the first. */
+  /** Hairline above the header too (every section after the first). */
   bordered?: boolean;
 }
 
-/**
- * Section heading for the panel column. Terminal borrows the left sidebar's
- * `SectionHeader` chrome verbatim — a `h-bar` sticky strip, hairline under it,
- * and a second hairline above every section after the first — so both columns
- * read as the same UI. Refined keeps the lighter free-standing label it
- * already had.
- */
+/** Section heading; terminal borrows the left sidebar's `SectionHeader` chrome. */
 const SectionHeader: React.FC<SectionHeaderProps> = ({
   label,
   isTerminal,

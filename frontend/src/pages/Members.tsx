@@ -29,9 +29,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
   const currentUser = appStore.currentUser;
   const { data: members = [], isLoading } = useGroupMembers(groupId);
   const setRoleMutation = useSetMemberRole();
-  // peerUserId → { verified, key_changed }. Reuses the same query the DM
-  // sidebar already loads, so the badge state is consistent across every
-  // surface where the same person appears (DM, group, channel author).
+  // The same query as the DM sidebar, so badges agree everywhere.
   const verificationByPeer = usePeerVerificationMap();
 
   return (
@@ -59,8 +57,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
         }}
         renderRow={(m) => {
           const isSelf = m.user_id === currentUser?.id;
-          // Verified badge wins; a `key_changed` mismatch overrides it
-          // (matches the DM sidebar logic — see Sidebar.tsx).
+          // `key_changed` overrides verified, as in Sidebar.tsx.
           const verification = verificationByPeer.get(m.user_id);
           const badge = isSelf ? null : verification?.key_changed ? (
             <span
@@ -128,15 +125,8 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
           if (isAdmin && !isSelf) {
             return null;
           }
-          // `m.role` is the wire value ("admin" / "member") — a protocol token,
-          // not copy. It happens to read as English, which is exactly why it
-          // shipped straight to screen untranslated.
-          //
-          // Written as two literal keys rather than t(`members.role.${m.role}`)
-          // so `scripts/i18n-check.mjs` can see them: its call-site scan only
-          // resolves literals, and a computed key is invisible to it. A role the
-          // client does not know falls back to the raw value, which is still
-          // better than a blank slot.
+          // `m.role` is a wire value; two literal keys so i18n-check can see
+          // them. An unknown role shows raw.
           const roleLabel =
             m.role === "admin"
               ? t("members.role.admin")
@@ -153,9 +143,8 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
 
 
 /**
- * Pending invites (#1506): who was invited, by whom, and when. Every member
- * sees it; the member who sent an invite and the group's admins can revoke it.
- * Hidden while there are none — an empty "Invited" heading says nothing.
+ * Pending invites (#1506), visible to every member; the inviter and admins can
+ * revoke. Hidden when there are none.
  */
 const InvitedSection: React.FC<{ groupId: string; isAdmin: boolean }> = observer(
   ({ groupId, isAdmin }) => {

@@ -1,63 +1,36 @@
 /**
- * Chat-log keyboard navigation (bash-history style) — the pure state machine.
- *
- * ArrowUp from an empty composer (or with the caret on the first line) leaves
- * the input and walks up the message log; each focused row exposes its hover
- * action bar to Left/Right; ArrowDown past the newest message (or Tab/Escape)
- * returns to the composer. REPL muscle memory, end to end.
- *
- * The whole space of focus positions is one discriminated union, and the ONLY
- * way to move through it is `transitionMessageNav` — so contradictory states
- * ("an action is selected but no message is", "navigating while the composer
- * owns focus") are unrepresentable, and every transition is a total function
- * over (state × event) that can be unit-tested without a DOM
- * (`frontend/tests/message-nav.test.ts`).
- *
- * Deliberately free of MobX and the DOM: the store (`stores/messageNavStore`)
- * owns the live state, and `MessageList` projects it onto real element focus.
- * The rendered action bar is the source of truth for which actions a message
- * has — the context callback reads it — so this module never re-derives
- * per-message permissions and cannot drift from what is actually on screen.
+ * Chat-log keyboard navigation (bash-history style) as a pure state machine:
+ * ArrowUp from the composer walks up the log, Left/Right walk a row's action
+ * bar, ArrowDown past newest (or Tab/Escape) returns. One union, changed only by
+ * `transitionMessageNav`, testable without a DOM (`message-nav.test.ts`). The
+ * rendered action bar (via the context) is the source of truth for actions.
  */
 
-/** The composer-bar actions a focused message can expose, in visual order. */
 export type MessageNavAction = "reply" | "react" | "edit" | "more";
 
 export type MessageNavState =
-  /** The chat input owns focus; the log is not being navigated. */
   | { mode: "composer" }
-  /** A message row is focused (hover-style highlight), no action selected. */
   | { mode: "message"; messageId: string }
-  /** A specific action button on a focused message row is selected. */
   | { mode: "action"; messageId: string; action: MessageNavAction };
 
 export type MessageNavEvent =
-  /** ArrowUp handed off from the composer — focus the newest message. */
   | { type: "enter" }
-  /** ArrowUp within the log — one message older (stays at the oldest). */
+  /** One older; holds at the oldest. */
   | { type: "up" }
-  /** ArrowDown within the log — one message newer; past the newest exits
-   *  back to the composer. */
+  /** One newer; past the newest exits to the composer. */
   | { type: "down" }
-  /** One step along the action bar, toward its end. From the bare row this
-   *  selects the first action. */
+  /** Toward the bar's end; from the bare row selects the first action. */
   | { type: "nextAction" }
-  /** One step back along the action bar. From the first action this returns
-   *  to the bare row. */
+  /** Back along the bar; from the first action returns to the bare row. */
   | { type: "prevAction" }
-  /** Deliberate exit (Tab / Escape) — the caller refocuses the composer. */
+  /** Deliberate exit (Tab / Escape); the caller refocuses the composer. */
   | { type: "exit" }
-  /** Focus left the log some other way (a click elsewhere, the surface
-   *  changed). State resets but the caller must NOT steal focus back. */
+  /** Focus left some other way; reset, but never steal focus back. */
   | { type: "cancel" };
 
 /**
- * Transition function. `ids` is the rendered, navigable message list oldest →
- * newest; `actionsFor` reports the action bar of one message in visual order.
- *
- * Returns the SAME state object when nothing changes, so effect hooks keyed
- * on identity don't refire on no-op transitions (e.g. ArrowUp at the oldest
- * message).
+ * `ids` is the navigable list oldest → newest. Returns the SAME state object on
+ * no-op transitions so identity-keyed effects don't refire.
  */
 export function transitionMessageNav(
   state: MessageNavState,
@@ -78,14 +51,12 @@ export function transitionMessageNav(
     }
   }
 
-  // Movement events only exist inside the log.
   if (state.mode === "composer") {
     return state;
   }
 
   const index = ids.indexOf(state.messageId);
-  // The focused message vanished (deleted, filtered, conversation refetched):
-  // re-anchor to the newest message rather than dead-ending.
+  // The focused message vanished: re-anchor to the newest.
   if (index === -1) {
     const newest = ids[ids.length - 1];
     return newest === undefined
@@ -96,7 +67,6 @@ export function transitionMessageNav(
   switch (event.type) {
     case "up": {
       if (index === 0) {
-        // Already at the oldest — drop any action selection, else hold still.
         return state.mode === "message" ? state : { mode: "message", messageId: state.messageId };
       }
       return { mode: "message", messageId: ids[index - 1] };
@@ -111,7 +81,7 @@ export function transitionMessageNav(
       const actions = actionsFor(state.messageId);
       const first = actions[0];
       if (first === undefined) {
-        // No actions on this row (deleted tombstone) — nothing to select.
+          // No actions on this row (tombstone).
         return state;
       }
       if (state.mode === "message") {
@@ -119,7 +89,7 @@ export function transitionMessageNav(
       }
       const at = actions.indexOf(state.action);
       if (at === -1) {
-        // The selected action no longer exists on this row — clamp to first.
+          // The selected action is gone: clamp to the first.
         return { mode: "action", messageId: state.messageId, action: first };
       }
       const next = actions[at + 1];

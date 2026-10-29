@@ -74,8 +74,6 @@ export const SettingsHubPage: React.FC = observer(() => {
     <PageShell title={t("hub.title")} scrollable>
       <div data-testid="settings-hub-page" className="flex justify-center px-6 py-10">
         <div className="w-full max-w-md flex flex-col gap-6">
-          {/* Own-profile header — mirrors the layout of viewing another
-              user's profile (name on the left, avatar on the right). */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex flex-col min-w-0">
               <div

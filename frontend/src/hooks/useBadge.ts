@@ -6,8 +6,7 @@ import { useTauriReady } from './useTauriReady';
 import { isMac, isWindows } from '../utils/platform';
 import { logIgnored } from '../utils/log';
 
-// Lazy-loaded icon images for Windows taskbar swap.
-// Cached after the first fetch so repeated badge changes don't re-fetch.
+// Windows taskbar icon variants, fetched once.
 let windowsDefaultIcon: PollisImage | null = null;
 let windowsNotifIcon: PollisImage | null = null;
 
@@ -32,14 +31,8 @@ async function getWindowsNotifIcon(): Promise<PollisImage> {
 }
 
 /**
- * Syncs the total unread message count to the OS dock/taskbar badge.
- *
- * - macOS:   Dock badge via setBadgeCount()
- * - Linux:   Taskbar badge via setBadgeCount() (GNOME, KDE, XFCE via freedesktop D-Bus)
- * - Windows: Taskbar icon swap — replaces the window icon with a variant that
- *            has a built-in red dot indicator when there are unread messages.
- *
- * Call once from AppShell.
+ * Unread count → OS badge: Dock (macOS), taskbar via setBadgeCount (Linux), or
+ * a red-dot icon swap (Windows). Call once from AppShell.
  */
 export function useBadge() {
   const { isReady } = useTauriReady();
@@ -58,14 +51,12 @@ export function useBadge() {
         .then((img) => win.setIcon(img))
         .catch((err) => { console.warn('[badge] setIcon failed:', err); });
     } else {
-      // undefined clears the badge; a number sets it
       win.setBadgeCount(total > 0 ? total : undefined).catch((err) => {
         console.warn('[badge] setBadgeCount failed:', err);
       });
     }
 
-    // Mirror the unread count into the system tray icon (Linux + Windows).
-    // macOS has no tray; the dock badge above already covers that surface.
+    // Tray icon too (Linux + Windows); macOS has no tray.
     if (!isMac) {
       void setTrayUnread(total).catch((err) => {
         console.warn('[tray] setTrayUnread failed:', err);
@@ -73,7 +64,6 @@ export function useBadge() {
     }
   }, [isReady, total]);
 
-  // Restore the default icon/clear badge on unmount (logout / app teardown)
   useEffect(() => {
     if (!isReady) {
       return;

@@ -28,22 +28,17 @@ interface GroupEmojiProps {
   groupId: string;
 }
 
-/** The image chosen but not yet uploaded, plus what can be shown about it. */
 interface PickedImage {
-  /** Native path — the only thing the upload command is given. */
+  /** Native path, all the upload command is given. */
   path: string;
   name: string;
-  /** Blob URL for the local preview; null while it loads or if it failed. */
+  /** Local preview blob URL; null while loading or on failure. */
   previewUrl: string | null;
-  /** SOURCE size. The stored size is only known after the re-encode. */
+  /** SOURCE size; the stored size is known only after the re-encode. */
   sizeBytes: number | null;
 }
 
-/**
- * Human-readable size for the per-emoji storage column, and for the source
- * file's size before the re-encode has run — which is the only place the MB
- * rung is ever reached, since a stored emoji is capped at 48 KB.
- */
+/** Human-readable size; MB only for a source file (stored emoji are ≤ 48 KB). */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -55,26 +50,11 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * A group's custom emoji: add (any member), list, remove (admins only, #1280).
- *
- * Adding follows Discord's order — **image first, name derived**. Drop a file
- * anywhere on the window (or click the zone to browse), and the shortcode is
- * auto-filled from the filename, sanitised to `[a-z0-9_]`, for the user to
- * edit. Typing the name first still works and is never clobbered: an
- * auto-filled name is only written into a field the user has not touched.
- * Everything below the zone validates live, so the add button is disabled
- * rather than the failure being discovered by pressing it.
- *
- * The page states the storage model plainly rather than hiding it, because
- * "where did my upload go and how big is it now" is exactly the question a
- * shrink-on-upload feature has to be able to answer. Every image is re-encoded
- * on the Rust side to under 48 KB, and identical images across groups share one
- * stored object — so the size shown in the list is what is actually stored, not
- * what was uploaded. Before upload only the SOURCE size is knowable, and it is
- * labelled as such: the re-encode has not run yet.
- *
- * There is deliberately **no per-group limit** (#848). What is bounded is the
- * per-person total, which is what an attacker would have to pay.
+ * A group's custom emoji: add (any member), list, remove (admins, #1280).
+ * Image first, name auto-filled from the filename unless the user typed one.
+ * Rust re-encodes to under 48 KB and dedupes across groups, so the list shows
+ * stored size; before upload only the source size is known. No per-group
+ * limit (#848); the bound is per person.
  */
 export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
   const { t } = useTranslation("emoji");
@@ -85,18 +65,15 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
   const removeEmoji = useRemoveGroupEmoji();
 
   const group = groupsWithChannels?.find((g) => g.id === groupId);
-  // Any member may add (#848); only admins may remove (#1280) — the creator
-  // gets no exemption. The DS enforces both; this only decides what is drawn.
+  // Any member may add (#848); only admins remove (#1280). The DS enforces both.
   const isAdmin = group?.current_user_role === "admin";
 
   const [shortcode, setShortcode] = useState("");
-  // Whether the user has typed in the field. Gates the auto-fill so choosing an
-  // image never overwrites a name they wrote themselves.
+  // Gates the auto-fill so a typed name is never overwritten.
   const [shortcodeEdited, setShortcodeEdited] = useState(false);
   const [picked, setPicked] = useState<PickedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Release the previous preview when the choice changes, and on unmount.
   const previewUrl = picked?.previewUrl ?? null;
   useEffect(() => {
     return () => {
@@ -117,8 +94,7 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
       });
       setPicked({ path, name: fileName(path), previewUrl: null, sizeBytes: null });
 
-      // The preview is a courtesy — the upload reads the path itself, so a
-      // failure here costs a thumbnail, not the ability to add the emoji.
+      // The preview is a courtesy: a failure costs a thumbnail, not the upload.
       let bytes: Uint8Array<ArrayBuffer>;
       try {
         bytes = await readFile(path);
@@ -136,7 +112,6 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
         new Blob([bytes], { type: emojiMimeType(path) }),
       );
       setPicked((current) => {
-        // A second pick may have landed while this one was being read.
         if (!current || current.path !== path) {
           URL.revokeObjectURL(url);
           return current;
@@ -159,8 +134,7 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
 
   let shortcodeError: string | null = null;
   if (trimmed.length === 0) {
-    // Only once there is an image waiting on it — an empty field on an empty
-    // form is not an error yet.
+    // Not an error until an image is waiting on it.
     if (picked) {
       shortcodeError = t("manage.shortcodeRequired");
     }

@@ -142,7 +142,6 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </div>
       )}
 
-      {/* Progress Bar */}
       <div className="mb-4">
         <input
           type="range"
@@ -160,7 +159,6 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </div>
       </div>
 
-      {/* Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
@@ -188,7 +186,6 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           </button>
         </div>
 
-        {/* Volume Control */}
         <div className="flex items-center gap-2">
           <button
             onClick={toggleMute}

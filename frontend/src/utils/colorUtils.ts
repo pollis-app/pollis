@@ -33,7 +33,6 @@ export function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-/** Apply a hex accent color to the document CSS variables */
 export function applyAccentColor(hex: string): void {
   const [h, s, l] = hexToHsl(hex);
   document.documentElement.style.setProperty("--accent-h", String(h));
@@ -41,83 +40,62 @@ export function applyAccentColor(hex: string): void {
   document.documentElement.style.setProperty("--accent-l", `${l}%`);
 }
 
-/** Apply a hex background color to the document CSS variables */
 export function applyBackgroundColor(hex: string): void {
   const [h, s, l] = hexToHsl(hex);
   document.documentElement.style.setProperty("--bg-h", String(h));
   document.documentElement.style.setProperty("--bg-s", `${s}%`);
   document.documentElement.style.setProperty("--bg-l", `${l}%`);
-  // Notify subscribers (e.g. username coloring) that contrast target shifted.
   setBackgroundLightness(l);
 }
 
-/** Apply a font size (in px) to the document CSS variable */
 export function applyFontSize(px: number): void {
   document.documentElement.style.setProperty("--font-size-base", `${px}px`);
 }
 
 /**
- * UI skin. `terminal` is the default IRC/monospace look; `refined` is the
- * friendlier, proportional-sans, Slack/Discord-shaped alternate. Both share
- * the same `--c-*` token names — `refined` overrides them (and inverts the
- * mono default) via a `:root[data-skin="refined"]` block in `index.css`.
- * Unlike font size, the skin choice syncs across the user's devices (see
- * `PreferencesData.skin` in `usePreferences.ts`).
+ * UI skin: `terminal` (default) or `refined`, which overrides the shared `--c-*`
+ * tokens via `:root[data-skin="refined"]`. Synced, unlike font size.
  */
 export type Skin = "terminal" | "refined";
 
 export const SKINS: readonly Skin[] = ["terminal", "refined"] as const;
 
-/** Coerce an arbitrary stored value to a valid Skin, defaulting to terminal. */
 export function normalizeSkin(v: unknown): Skin {
   return v === "refined" ? "refined" : "terminal";
 }
 
-/** Apply the UI skin by setting the `data-skin` attribute on <html>. */
 export function applySkin(skin: Skin): void {
   document.documentElement.dataset.skin = skin;
 }
 
-/** Read the current skin from the `data-skin` attribute (default terminal). */
 export function readSkin(): Skin {
   return normalizeSkin(document.documentElement.dataset.skin);
 }
 
-/** Read the current accent color CSS vars as a hex string */
 export function readAccentHex(): string {
   const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--accent-h").trim() || "150", 10);
   const s = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--accent-s").trim() || "62");
   return hslToHex(h, s, 62);
 }
 
-/** Read the current background color CSS vars as a hex string */
 export function readBackgroundHex(): string {
   const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--bg-h").trim() || "38", 10);
   const s = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bg-s").trim() || "20");
   return hslToHex(h, s, 20);
 }
 
-/** Read the current --font-size-base as a number (px) */
 export function readFontSizePx(): number {
   const v = getComputedStyle(document.documentElement).getPropertyValue("--font-size-base").trim();
   return v ? parseInt(v, 10) : 15;
 }
 
-/**
- * Device-local font-size storage.
- *
- * Font size is per-device, not synced across the user's account — see
- * `usePreferences.ts` for the wider preferences mechanism. We key the
- * localStorage entry by user id so a shared OS account with multiple
- * Pollis users keeps each user's chosen size separate.
- */
+/** Device-local font size, keyed by user id so users sharing an OS account keep their own. */
 const FONT_SIZE_KEY_PREFIX = "pollis-font-size:";
 
 function fontSizeKey(userId: string | null | undefined): string {
   return `${FONT_SIZE_KEY_PREFIX}${userId ?? "anon"}`;
 }
 
-/** Returns the device-local font size (px) for this user, or null if unset. */
 export function loadDeviceFontSize(userId: string | null | undefined): number | null {
   try {
     const raw = localStorage.getItem(fontSizeKey(userId));
@@ -134,11 +112,10 @@ export function loadDeviceFontSize(userId: string | null | undefined): number | 
   }
 }
 
-/** Persists the device-local font size (px) for this user. */
 export function saveDeviceFontSize(userId: string | null | undefined, px: number): void {
   try {
     localStorage.setItem(fontSizeKey(userId), String(px));
   } catch {
-    // localStorage unavailable / quota exceeded — fall through silently
+    // localStorage unavailable / quota exceeded: ignore
   }
 }

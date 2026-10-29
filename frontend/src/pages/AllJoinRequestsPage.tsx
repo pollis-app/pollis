@@ -13,7 +13,6 @@ export const AllJoinRequestsPage: React.FC = () => {
   const approveMutation = useApproveJoinRequest();
   const rejectMutation = useRejectJoinRequest();
 
-  // Build a map of groupId → group name for display
   const groupNameById = useMemo(() => {
     const map: Record<string, string> = {};
     for (const g of groupsWithChannels) {
@@ -22,7 +21,6 @@ export const AllJoinRequestsPage: React.FC = () => {
     return map;
   }, [groupsWithChannels]);
 
-  // Group requests by group_id
   const requestsByGroup = useMemo(() => {
     const grouped: Record<string, typeof allRequests> = {};
     for (const req of allRequests) {

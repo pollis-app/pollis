@@ -1,35 +1,20 @@
 /**
- * Idle auto-lock (#851) — the renderer's half.
- *
- * The deadline itself lives in Rust (`pollis-core/src/commands/autolock.rs`)
- * because a WebView throttles its own timers once the window is hidden or
- * minimized, which is exactly when an auto-lock most needs to fire. This module
- * owns only the *choice*: which window the user picked on this device, and the
- * throttle that keeps activity reporting off the IPC hot path.
- *
- * The choice is deliberately **device-local**, like font size and the call
- * ringtone — auto-lock describes where a machine physically sits (a laptop in a
- * cafe wants 1 minute; a desktop in a locked room wants Off), so syncing it
- * would force one answer onto every device.
+ * Idle auto-lock (#851), the renderer's half: the deadline lives in Rust
+ * (`commands/autolock.rs`) because a WebView throttles timers when hidden. This
+ * holds the device-local choice (never synced) and the activity throttle.
  */
 
-/** The global event Rust emits when the idle deadline expires. Must match
- *  `AUTO_LOCK_EVENT` in `pollis-core/src/commands/autolock.rs`. */
+/** Must match `AUTO_LOCK_EVENT` in `pollis-core/src/commands/autolock.rs`. */
 export const AUTO_LOCK_EVENT = "auto-lock";
 
 export interface AutoLockOption {
-  /** Minutes of inactivity, or `null` for "never lock". */
   minutes: number | null;
 }
 
 /**
- * The offered windows. Rust validates against the same list
- * (`AUTO_LOCK_OPTIONS_MINUTES`), so a value that isn't here can't be installed
- * even by a caller that bypasses this UI.
+ * The offered windows; Rust validates against `AUTO_LOCK_OPTIONS_MINUTES`.
+ * Labels come from `autoLockLabel` in `pages/SecurityPage.tsx` (#855).
  */
-// `minutes` only — the human label is derived from it by `autoLockLabel` in
-// `pages/SecurityPage.tsx`, so the copy lives in the translation catalogue
-// rather than in a util (#855).
 export const AUTO_LOCK_OPTIONS: readonly AutoLockOption[] = [
   { minutes: null },
   { minutes: 1 },
@@ -38,11 +23,7 @@ export const AUTO_LOCK_OPTIONS: readonly AutoLockOption[] = [
   { minutes: 60 },
 ] as const;
 
-/**
- * Smallest gap between two activity reports. Typing must not turn into one IPC
- * call per keystroke; 15s is far below every offered window (the shortest is
- * 60s), so the deadline can never expire inside one throttle gap.
- */
+/** Min gap between activity reports; far below the shortest window (60s). */
 export const ACTIVITY_REPORT_THROTTLE_MS = 15_000;
 
 const AUTO_LOCK_KEY_PREFIX = "pollis-auto-lock:";
@@ -52,10 +33,8 @@ function autoLockKey(userId: string | null | undefined): string {
 }
 
 /**
- * The device-local auto-lock window for this user in minutes, or `null` for
- * Off. Off is also the default: an unset, unreadable, or corrupt entry all mean
- * "the user has not asked for this", and silently locking someone out of their
- * own app is worse than not locking.
+ * This user's auto-lock minutes, or `null` (Off). Unset or corrupt means Off:
+ * silently locking someone out is worse than not locking.
  */
 export function loadDeviceAutoLockMinutes(
   userId: string | null | undefined,
@@ -75,7 +54,6 @@ export function loadDeviceAutoLockMinutes(
   }
 }
 
-/** Persist the device-local auto-lock window. `null` clears it (Off). */
 export function saveDeviceAutoLockMinutes(
   userId: string | null | undefined,
   minutes: number | null,
@@ -87,6 +65,6 @@ export function saveDeviceAutoLockMinutes(
     }
     localStorage.setItem(autoLockKey(userId), String(minutes));
   } catch {
-    // localStorage unavailable / quota exceeded — fall through silently
+    // localStorage unavailable / quota exceeded: ignore
   }
 }

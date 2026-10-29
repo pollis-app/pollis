@@ -11,20 +11,16 @@ import { TextInput } from '../ui/TextInput';
 import { shellOpen } from '../../bridge';
 import { OfferCode } from './OfferCode';
 
-/// What the signed-in device is told this one is called.
 function desktopDeviceName(): string {
   return isMac ? 'Pollis on macOS' : isWindows ? 'Pollis on Windows' : isLinux ? 'Pollis on Linux' : 'Pollis desktop';
 }
 
 interface EmailOTPAuthProps {
   onSuccess: (result: api.AuthResult) => void | Promise<void>;
-  // When set, auto-populates the email field and immediately sends the OTP,
-  // advancing straight to the code-entry step.
+  // When set, fills the email and immediately sends the OTP.
   prefillEmail?: string;
-  // Incremented each time the parent wants to trigger a new prefill, even for
-  // the same email address (e.g. clicking the same chip after going back).
+  // Bumped to re-trigger a prefill, even for the same address.
   prefillNonce?: number;
-  // Called when the internal step changes so the parent can react (e.g. hide UI).
   onStepChange?: (step: 'email' | 'otp') => void;
 }
 
@@ -40,9 +36,8 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasAutoSubmittedRef = useRef(false);
-  // "Sign in with another device": this device shows a QR for a signed-in
-  // phone to scan (#1361), or takes the code a signed-in device shows under
-  // its own QR, pasted (#1207 — desktop has no camera scanner).
+  // "Sign in with another device": show a QR for a signed-in phone (#1361), or
+  // paste the code a signed-in device shows (#1207; desktop has no scanner).
   const [linkMode, setLinkMode] = useState(false);
   const [linkCode, setLinkCode] = useState('');
 
@@ -76,8 +71,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otp]);
 
-  // Fire whenever the parent bumps the nonce (chip click). Skip nonce === 0
-  // (initial mount) so we don't send a spurious request on page load.
+  // Fire when the parent bumps the nonce; 0 is the initial mount.
   useEffect(() => {
     if (!prefillEmail || !prefillNonce) {
       return;
@@ -126,10 +120,8 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     }
     setIsLoading(true);
     setError(null);
-    // Two steps, two failure messages. Only a failure of the verify itself can
-    // mean the code was wrong; once it is accepted, a failure in what follows
-    // (identity setup, device registration, the keystore) must not be shown as
-    // "Invalid code" — that is exactly how #1305's report read.
+    // Only a failure of the verify itself means a wrong code; later failures
+    // (identity, registration, keystore) must not read "Invalid code" (#1305).
     let result: api.AuthResult;
     try {
       result = await api.verifyOTP(email.trim(), otp.trim());
@@ -170,7 +162,6 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
               disabled={isLoading}
               autoFocus
             />
-            {/* Preserve testid for E2E tests */}
             <input data-testid="otp-input" type="hidden" value={otp} readOnly />
           </div>
           <Button
@@ -199,9 +190,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     return (
       <div data-testid="link-form-container" className="flex flex-col gap-6">
         <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
-        {/* #1361: this device shows a code and a signed-in phone scans it. */}
         <OfferCode deviceName={desktopDeviceName()} onSignedIn={onSuccess} />
-        {/* The fallback (#1207): a code shown by a signed-in device. */}
         <div className="flex flex-col gap-2 pt-4 border-t border-line">
           <h3 className="text-sm text-fg">{t('link.pasteHeading')}</h3>
           <p className="text-sm text-muted leading-relaxed">{t('link.codeIntro')}</p>
@@ -269,8 +258,6 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       >
         {t('link.useDevice')}
       </Button>
-      {/* Agreeing to the terms is part of creating the account (#1213): they
-          say abusive content is not tolerated. */}
       <p data-testid="legal-agree" className="text-xs text-muted text-center leading-relaxed">
         <Trans
           t={t}

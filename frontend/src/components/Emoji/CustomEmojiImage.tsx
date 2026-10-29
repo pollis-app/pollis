@@ -10,18 +10,11 @@ interface CustomEmojiImageProps {
 }
 
 /**
- * One custom emoji, rendered inline.
+ * One custom emoji, rendered inline. Falls back to the literal `:shortcode:`
+ * when the image can't be resolved (deleted, offline), which is why the
+ * shortcode travels with the hash in the wire token.
  *
- * Falls back to the literal `:shortcode:` text when the image cannot be
- * resolved — the emoji may have been deleted, or the device may be offline.
- * That fallback is the whole reason the shortcode travels alongside the hash in
- * the wire token: a message must stay readable when its decorations do not
- * load.
- *
- * The shortcode is only ever set as a text child and an `alt`/`title` value —
- * never interpolated into markup — and its alphabet (`[a-z0-9_]`) cannot carry
- * any anyway. Both, because one of them being true is not a reason to leave the
- * other to chance.
+ * The shortcode is only ever a text child or `alt`/`title`, never markup.
  */
 export const CustomEmojiImage: React.FC<CustomEmojiImageProps> = ({
   contentHash,
@@ -40,8 +33,7 @@ export const CustomEmojiImage: React.FC<CustomEmojiImageProps> = ({
   }
 
   if (!url) {
-    // A sized placeholder rather than nothing, so text does not reflow when the
-    // image lands.
+    // A sized placeholder so text doesn't reflow when the image lands.
     return (
       <span
         className={`inline-block align-[-0.25em] bg-surface-high ${className}`}

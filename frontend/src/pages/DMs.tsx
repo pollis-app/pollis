@@ -18,10 +18,8 @@ export const DMsPage: React.FC = observer(() => {
 
   const { data: conversations = [] } = useDMConversations();
   const { data: requests = [] } = useDMRequests();
-  // The shared extraction (this map was duplicated in three files) plus the
-  // batched preview fetch — both halves of #874 apply here.
   const verificationByPeer = usePeerVerificationMap();
-  // One batched preview fetch for every DM row (#874), not one call per row.
+  // One batched preview fetch for every row (#874).
   const conversationIds = useMemo(() => conversations.map((c) => c.id), [conversations]);
   const { data: lastMessages = {}, isLoading: previewsLoading } =
     useLastMessages(conversationIds);

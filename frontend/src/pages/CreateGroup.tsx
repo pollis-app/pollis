@@ -108,7 +108,6 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
             id="create-group-name"
             required
           />
-          {/* Preserve testid for E2E */}
           <input data-testid="create-group-name-input" type="hidden" value={name} readOnly />
 
           <TextInput

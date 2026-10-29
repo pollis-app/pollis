@@ -15,18 +15,9 @@ interface PinnedPanelProps {
 }
 
 /**
- * The conversation's pinned messages (#99), as a right-panel shape — the same
- * slot the thread panel uses, because both are "a focused subset of this
- * conversation" (Slack renders pins exactly here).
- *
- * Rows are deliberately panel-shaped rather than a `MessageItem` reuse, for
- * the reasons `ThreadMessageRow` documents; the one affordance a pin row
- * carries is unpin, which any member may use.
- *
- * The one non-generic state worth naming: on a device that just external-
- * joined, the pin KEY may not be unwrappable yet (it heals when any existing
- * member syncs). That surfaces as the query's error state, worded as
- * "not yet available" rather than failure.
+ * The conversation's pinned messages (#99), in the thread panel's slot. Any
+ * member may unpin. After an external join the pin key may not unwrap yet (it
+ * heals when a member syncs); that error reads "not yet available".
  */
 export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
   ({ channelId, conversationId }) => {

@@ -9,36 +9,20 @@ import { useTranslation } from "react-i18next";
 
 import { horizontalArrowStep } from "../../utils/direction";
 
-// Reusable arrow-key-navigable 2D grid.
-//
-// Sizing: cells target a fixed aspect ratio and grow to best-fill the
-// container (à la a video-call grid). They shrink as participant count
-// rises only down to `minCellWidth`; past that the grid scrolls
-// vertically and arrow navigation keeps the focused cell in view.
-//
-// Navigation: Arrow keys move in 2D (clamped at edges), Enter activates
-// the focused cell. Mouse hover is handled by the cell itself — the grid
-// only owns keyboard focus, so hover and keyboard selection are
-// independent triggers.
-//
-// CSS Grid lays cells out along the INLINE axis, so under `dir="rtl"` the
-// next cell is drawn to the left. `horizontalArrowStep` resolves the
-// left/right keys against the grid's real computed direction so the cursor
-// follows the key you pressed; Up/Down are unaffected (the block axis does
-// not mirror).
+// Arrow-key-navigable 2D grid. Cells keep a fixed aspect and best-fill the
+// container down to `minCellWidth`, then the grid scrolls. The grid owns only
+// keyboard focus; hover is the cell's. Left/right resolve against the computed
+// direction (`horizontalArrowStep`), since CSS Grid mirrors under RTL.
 
 export interface NavigableGridProps<T> {
   items: T[];
   getKey: (item: T) => string;
   renderCell: (item: T, state: { focused: boolean }) => React.ReactNode;
   onActivate?: (item: T) => void;
-  /** Floor cell width in px. Below this, the grid wraps to more rows. */
+  /** Floor cell width in px; below it the grid wraps. */
   minCellWidth?: number;
-  /** Ceiling cell width in px. Stops one or two tiles from ballooning
-   *  to fill the whole container — Discord-style "give each tile its
-   *  fair share, but no more than this". */
+  /** Ceiling cell width in px, so one or two tiles don't balloon. */
   maxCellWidth?: number;
-  /** width / height. Default 16/9. */
   aspect?: number;
   gap?: number;
   autoFocus?: boolean;
@@ -61,28 +45,14 @@ function computeLayout(
   aspect: number,
   gap: number,
 ): Layout {
-  // Only W gates layout — cellH is derived from cellW via the aspect
-  // ratio, so H is informational. Bailing on H <= 0 used to cause the
-  // observer view (NavigableGrid in a flex column where height settles
-  // after first paint) to render zero-sized tiles forever, since
-  // box.h started at 0 and the H-gated branch returned cellW: 0 from
-  // every recompute.
+  // Only W gates layout (H is derived via the aspect): gating on H rendered
+  // zero-sized tiles forever where height settles after first paint.
   void H;
   if (n === 0 || W <= 0) {
     return { cols: 1, cellW: 0, cellH: 0 };
   }
-  // Discord-style sizing: each tile gets `W / n` of the row width,
-  // clamped between minW and maxW. With one or two participants this
-  // prevents tiles from ballooning to fill the whole container; with
-  // many participants it prevents them from being squeezed to nothing
-  // (the layout wraps to additional rows instead and the container
-  // scrolls). Aspect-ratio is fixed (16:9 by default); height is
-  // derived, not negotiated against the container's height.
+  // Each tile gets `W / n`, clamped to [minW, maxW]; past the floor it wraps.
   const target = Math.max(minW, Math.min(maxW, W / n));
-  // How many tiles of `target` width (plus gaps between them) actually
-  // fit in this row? When target is forced up to minW (many users),
-  // this is < n and we wrap. When target is forced down to maxW (one
-  // user), cols == 1.
   let cols = Math.max(1, Math.floor((W + gap) / (target + gap)));
   cols = Math.min(cols, n);
   const cellW = Math.min(target, W);
@@ -103,20 +73,11 @@ export function NavigableGrid<T>({
   testId,
 }: NavigableGridProps<T>) {
   const { t } = useTranslation("common");
-  // Resolved at render, not as a default parameter, so the fallback follows
-  // a language change.
+  // Resolved at render so the fallback follows a language change.
   const resolvedEmptyLabel = emptyLabel ?? t("grid.empty");
-  // Track the grid container via a state-backed ref callback rather than
-  // useRef + useLayoutEffect with [] deps. The grid root is conditionally
-  // rendered (empty-state vs items-state are different JSX subtrees), so
-  // a single-shot useLayoutEffect binds ResizeObserver to whichever
-  // element happens to be mounted at first paint — when the empty branch
-  // renders first (query loading → 0 items → emptyLabel) and the items
-  // branch renders a tick later (data arrives → N items), the ref-based
-  // approach silently never installs the observer on the items
-  // container, box.w stays 0, computeLayout returns cellW: 0, and tiles
-  // render as zero-sized dots. The ref-callback variant re-fires the
-  // effect whenever the actual DOM element changes.
+  // A state-backed ref callback, not useRef + one-shot effect: the root is
+  // conditionally rendered (empty vs items), and the observer must follow the
+  // element actually mounted or tiles stay zero-sized.
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(0);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -135,7 +96,6 @@ export function NavigableGrid<T>({
     return () => ro.disconnect();
   }, [containerEl]);
 
-  // Keep focus in range as the participant set changes shape.
   useEffect(() => {
     setFocused((f) => Math.min(f, Math.max(0, items.length - 1)));
   }, [items.length]);
@@ -151,7 +111,6 @@ export function NavigableGrid<T>({
     [box.w, box.h, items.length, minCellWidth, maxCellWidth, aspect, gap],
   );
 
-  // Scroll the focused cell into view when navigating a scrolling grid.
   useEffect(() => {
     const el = containerEl?.querySelector<HTMLElement>(
       `[data-grid-index="${focused}"]`,
@@ -234,12 +193,8 @@ export function NavigableGrid<T>({
           key={getKey(item)}
           data-grid-index={i}
           onMouseDown={(e) => {
-            // A press on an interactive control inside the cell (volume
-            // slider, View Stream button, …) must behave natively —
-            // calling preventDefault here would kill the range drag and
-            // block the control from taking focus. Only a press on the
-            // inert tile body re-homes keyboard focus to the grid so
-            // arrow-nav keeps working after a click.
+            // A press on a control inside the cell behaves natively; only the
+            // inert tile body re-homes keyboard focus to the grid.
             const target = e.target as HTMLElement;
             if (target.closest('input, button, a, select, textarea, [role="slider"]')) {
               setFocused(i);

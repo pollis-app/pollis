@@ -18,7 +18,6 @@ export const GroupsPage: React.FC = observer(() => {
 
   const groups = groupsWithChannels ?? [];
 
-  // Build a map of groupId → pending join request count for badge display
   const joinRequestCountByGroup = useMemo(() => {
     const map: Record<string, number> = {};
     for (const req of allJoinRequests) {
@@ -44,7 +43,7 @@ export const GroupsPage: React.FC = observer(() => {
         const totalUnread = appStore.unreadFor(textChannels);
         const pendingJoinCount = joinRequestCountByGroup[g.id] ?? 0;
 
-        // Build description: prefer join request alert over static description text
+        // A join-request alert wins over the description.
         let description: React.ReactNode = g.description || undefined;
         if (pendingJoinCount > 0) {
           description = (

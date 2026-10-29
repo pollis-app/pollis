@@ -1,12 +1,7 @@
 import { useObserver } from "mobx-react-lite";
 import { typingStore, typingRoomKey } from "../stores/typingStore";
 
-/**
- * Returns the list of usernames currently typing in the named room, sorted
- * for stable display. The store is fed by `useLiveKitRealtime`'s typing
- * dispatcher and ages entries out via per-entry expiry timers, so this hook
- * just reflects whatever entries are currently live.
- */
+/** Usernames typing in the room, sorted; the store ages entries out itself. */
 export function useTypingState(args: {
   channelId: string | null;
   conversationId: string | null;

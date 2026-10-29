@@ -1,13 +1,6 @@
 /**
- * Translation namespaces, one per feature area.
- *
- * A namespace is a JSON file under `locales/<lng>/<namespace>.json`. Keys are
- * addressed as `namespace:section.item` — e.g. `auth:login.emailLabel`.
- *
- * `common` is the default namespace: shared verbs and nouns that appear all
- * over the UI (Cancel, Save, Close…). Anything specific to one feature belongs
- * in that feature's namespace instead, so a translator working on voice never
- * has to read the settings catalogue.
+ * Translation namespaces, one JSON file each (`locales/<lng>/<ns>.json`), keys
+ * as `ns:section.item`. `common` is the default, for shared verbs and nouns.
  */
 export const NAMESPACES = [
   "common",
@@ -24,9 +17,7 @@ export const NAMESPACES = [
   "vault",
   "errors",
   "arcade",
-  // Copy that exists only in the mobile app. It lives in this directory so the
-  // translators, `i18n-check` and the plural rules cover it like everything
-  // else; the desktop bundles it and never calls it.
+  // Mobile-only copy, here so translators and `i18n-check` cover it.
   "mobile",
 ] as const;
 

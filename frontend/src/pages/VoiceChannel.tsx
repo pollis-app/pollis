@@ -37,14 +37,12 @@ export const VoiceChannelPage: React.FC = observer(() => {
   const deleteChannelMutation = useDeleteChannel();
   const isPendingDelete = pendingDeleteChannelId === channelId;
 
-  // Clear the pending-delete bar when navigating away from the channel.
   useEffect(() => {
     return () => {
       setPendingDeleteChannelId(null);
     };
   }, [channelId, setPendingDeleteChannelId]);
 
-  // Esc cancels the pending-delete bar without leaving the page.
   useEffect(() => {
     if (!isPendingDelete) {
       return;
@@ -72,15 +70,13 @@ export const VoiceChannelPage: React.FC = observer(() => {
   const isInCall = activeVoiceChannelId === channelId;
   const { data: observerParticipants = [] } = useVoiceParticipants(isInCall ? null : channelId);
 
-  // Issue #176: arriving on this page is intent to maybe join. Warm DNS/TLS
-  // + token now so clicking Join is one round trip instead of cold-start.
+  // #176: arriving is intent to join; warm DNS/TLS + token now.
   useEffect(() => {
     if (!isInCall) {
       warmVoiceChannel(channelId);
     }
   }, [channelId, isInCall]);
 
-  // Auto-join once when preferences load, if the preference is enabled.
   const hasAutoJoined = useRef(false);
   useEffect(() => {
     if (hasAutoJoined.current || isInCall || !preferences.query.data) {
@@ -93,8 +89,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
   }, [preferences.query.data]);
 
 
-  // Admin rename/delete affordances live in the stage header, right of
-  // the pills and left of Join/Leave. Hidden while the delete bar is open.
+  // Admin rename/delete in the stage header; hidden while the delete bar is open.
   const headerActions =
     isAdmin && channel && !isPendingDelete ? (
       <>
@@ -122,8 +117,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
       </>
     ) : null;
 
-  // The pending-delete confirmation replaces the stage footer, following
-  // the established replace-the-bar pattern (no modal).
+  // The pending-delete confirmation replaces the stage footer (no modal).
   const deleteFooter = isPendingDelete ? (
     <div data-testid="delete-channel-bar">
       <div

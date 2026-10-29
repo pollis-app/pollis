@@ -33,13 +33,9 @@ import {
   saveDeviceAutoLockMinutes,
 } from "../utils/autoLock";
 
-// The plain-language explainer for everything on this page — what a root is,
-// what an inclusion tick means, and the difference between "couldn't check" and
-// "not in the log" (epic #589, topic 12).
+// The /learn explainer for this page's verdicts (#589, topic 12).
 const LEARN_DASHBOARDS_URL = "https://pollis.com/learn#reading-the-dashboards";
 
-// Map a PermissionState onto a human label + solid token color for the status
-// pill. No neon/glow — solid text colors only.
 function permissionPill(
   t: TFunction<"settings">,
   state: PermissionState | undefined,
@@ -63,10 +59,8 @@ function permissionPill(
   }
 }
 
-/// The two addresses in an `email_changed` row's metadata, or `null` when the
-/// row does not carry the expected JSON object. Never throws: the metadata
-/// column is free-form and a row written by some other build must render as an
-/// event with a vaguer detail line, not as a crashed page.
+/// The two addresses in an `email_changed` row's metadata, or `null`. Never
+/// throws: the column is free-form.
 function parseEmailChangeMetadata(
   metadata: string | null | undefined,
 ): { from: string; to: string } | null {
@@ -87,9 +81,7 @@ function parseEmailChangeMetadata(
   return null;
 }
 
-/// Human-readable summary for each `security_event.kind` the backend
-/// currently emits. Unknown kinds fall through to the raw string so we
-/// never silently drop new event types.
+/// Summary per `security_event.kind`; unknown kinds show raw, never dropped.
 function describe(
   t: TFunction<"settings">,
   event: api.SecurityEvent,
@@ -116,10 +108,7 @@ function describe(
           detail: t("security.eventDeviceRevokedDetailUnknown"),
         };
       }
-      // `name=<device name>` when the revoked row carried one (#947). The
-      // device id alone answers "was it revoked"; the name answers "which
-      // one", which is the question someone who has just lost a laptop is
-      // actually asking.
+      // `name=<device name>` (#947): which device, not just whether.
       const name = event.metadata?.startsWith("name=")
         ? event.metadata.slice("name=".length)
         : null;
@@ -141,10 +130,8 @@ function describe(
         detail: t("security.eventIdentityResetDetail"),
       };
     case "identity_rotated":
-      // Written by the Delivery Service inside the rotation transaction, not
-      // by a client. `credential=session` is the pre-enrollment soft reset
-      // (email code only — the DS also wiped memberships and other devices);
-      // `credential=signature` is a rotation from an enrolled device.
+      // DS-written in the rotation transaction. `credential=session`: the
+      // pre-enrollment soft reset; `credential=signature`: an enrolled device.
       return {
         heading: t("security.eventIdentityRotatedHeading"),
         detail: event.metadata?.includes("credential=session")
@@ -157,11 +144,8 @@ function describe(
         detail: t("security.eventSecretKeyRotatedDetail"),
       };
     case "email_changed": {
-      // Written by the Delivery Service as part of the change (#1161), not by
-      // a client — a client that simply omits the call cannot suppress it.
-      // Metadata is `{"from":"…","to":"…"}`; both addresses matter, because
-      // "from" is the mailbox that had to approve the move and "to" is where
-      // account recovery now points.
+      // DS-written (#1161), so a client can't suppress it. `{"from","to"}`: the
+      // approving mailbox and the new recovery address.
       const addresses = parseEmailChangeMetadata(event.metadata);
       return {
         heading: t("security.eventEmailChangedHeading"),
@@ -171,8 +155,7 @@ function describe(
       };
     }
     default:
-      // The raw backend `kind` for an event type this build doesn't know
-      // about: a wire value, deliberately not translated.
+      // Unknown kind: a wire value, not translated.
       return {
         heading: event.kind,
         detail: event.metadata ?? "",
@@ -187,18 +170,14 @@ function shortId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
-// How many security events to render before "Show older events". The backend
-// caps the fetch at 100 newest-first, so this is a display slice, not a query.
+// Display slice; the backend already caps at 100 newest-first.
 const SECURITY_EVENTS_PAGE_SIZE = 20;
 
 const sectionHeaderClass =
   "text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
 
-// The word the user must type to arm account deletion. Deliberately NOT part
-// of the translatable copy: the label and placeholder are interpolated from
-// this constant, so a locale cannot instruct the user to type a word the
-// comparison will never accept — which would make the button permanently dead
-// for everyone reading that language.
+// Typed to arm deletion. NOT translatable: label and placeholder interpolate
+// it, so no locale can ask for a word the comparison rejects.
 const DELETE_CONFIRM_WORD = "DELETE";
 
 export const SecurityPage: React.FC = observer(() => {
@@ -208,7 +187,6 @@ export const SecurityPage: React.FC = observer(() => {
   const { onDeleteAccount } = router.options.context as RouterContext;
   const { currentUser } = appStore;
   const { data: selfAudit } = useSelfAuditAccountKey();
-  // "This build" verification is on-demand (a mutation), never run on mount.
   const buildVerify = useVerifyOwnBuild();
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
@@ -225,25 +203,18 @@ export const SecurityPage: React.FC = observer(() => {
   const [confirmInput, setConfirmInput] = useState("");
   const [revoking, setRevoking] = useState(false);
 
-  // OS media permissions (camera / mic / screen): live status + revoke-on-quit
-  // pref + manual revoke. This is an access-control concern, so it lives here
-  // next to Devices rather than in Preferences.
+  // OS media permissions: an access-control concern, so here, not Preferences.
   const { query: prefsQuery, save: savePrefs } = usePreferences();
   const mediaPermissions = useMediaPermissions();
   const revokeMedia = useRevokeMediaPermissions();
   const [revokeMediaOnExit, setRevokeMediaOnExit] = useState<boolean>(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState<boolean>(false);
 
-  // The in-app terminal (#282) spawns the user's login shell, so it is off
-  // until someone here turns it on. The authority is Rust's
-  // `device-settings.json`, not this state — `terminal_open` reads the file and
-  // refuses regardless of what the renderer believes. This is the switch, not
-  // the lock.
+  // The in-app terminal (#282) ships off. Rust's `device-settings.json` is the
+  // authority (`terminal_open` refuses regardless); this is the switch, not the lock.
   const [terminalEnabled, setTerminalEnabled] = useState<boolean>(false);
 
-  // Idle auto-lock (#851). Device-local, like font size and the call ringtone:
-  // it describes where this machine physically sits, so it deliberately does
-  // not sync. Seeded from localStorage once the active user is known.
+  // Idle auto-lock (#851): device-local, never synced.
   const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
   const lockLabel = useShortcutLabel("app.lock");
 
@@ -253,15 +224,12 @@ export const SecurityPage: React.FC = observer(() => {
 
   useEffect(() => {
     void invoke<boolean>("get_terminal_enabled")
-      // Coerced, not trusted: a build without the command answers `null`, and
-      // anything that is not literally `true` means the shell stays off.
+        // Anything but literal `true` (e.g. an older build's null) means off.
       .then((enabled) => setTerminalEnabled(enabled === true))
       .catch(() => setTerminalEnabled(false));
   }, []);
 
-  // `AUTO_LOCK_OPTIONS` lives in `utils/autoLock.ts` — module-level data, so
-  // its `label` can't be translated there without freezing the language at
-  // import time. Key off the stable `minutes` value and translate here instead.
+  // Labels translated here, keyed on `minutes` (module data can't translate).
   const autoLockLabel = (minutes: number | null): string => {
     if (minutes === null) {
       return t("security.autoLockOff");
@@ -275,9 +243,7 @@ export const SecurityPage: React.FC = observer(() => {
   const handleAutoLock = (minutes: number | null) => {
     setAutoLockMinutes(minutes);
     saveDeviceAutoLockMinutes(currentUser?.id, minutes);
-    // Push straight away rather than waiting for the shell to remount — the
-    // backend owns the deadline, so until it hears about the change nothing
-    // has actually changed.
+    // Push now: the backend owns the deadline.
     void api.setAutoLockTimeout(minutes).catch((err) => {
       console.warn("[autolock] failed to apply timeout:", err);
     });
@@ -289,8 +255,7 @@ export const SecurityPage: React.FC = observer(() => {
     }
   }, [prefsQuery.data, currentUser?.id]);
 
-  // The running app version, shown in the "This build" section. Cheap and
-  // local — no transparency-log network call happens until the user clicks.
+  // Local version; no transparency-log call until the user clicks.
   useEffect(() => {
     let cancelled = false;
     getVersion()
@@ -311,18 +276,15 @@ export const SecurityPage: React.FC = observer(() => {
     setTerminalEnabled(val);
     void invoke("set_terminal_enabled", { enabled: val }).catch((err) => {
       console.warn("[terminal] set_terminal_enabled failed:", err);
-      // Snap back: the file is the truth, and it did not change.
       setTerminalEnabled(!val);
     });
   };
 
   const handleRevokeMediaOnExit = (val: boolean) => {
     setRevokeMediaOnExit(val);
-    // Merge into the existing prefs blob (save replaces the whole blob), so we
-    // never clobber unrelated preferences edited on the Preferences page.
+    // Merge: save replaces the whole blob.
     savePrefs({ ...(prefsQuery.data ?? {}), revoke_media_on_exit: val });
-    // Push immediately so a quit right after toggling picks up the new value
-    // without waiting for the throttled prefs round-trip.
+    // Push now so an immediate quit sees it.
     void invoke("set_revoke_media_on_exit", { enabled: val }).catch((err) => {
       console.warn("[media-permissions] set_revoke_media_on_exit failed:", err);
     });
@@ -406,8 +368,7 @@ export const SecurityPage: React.FC = observer(() => {
     setDeleteError(null);
     try {
       await api.deleteAccount(currentUser.id);
-      // Clear local state immediately so the user is logged out even if the
-      // callback chain from the router context is broken.
+      // Clear local state even if the router callback chain is broken.
       appStore.logout();
       if (onDeleteAccount) {
         onDeleteAccount();
@@ -427,8 +388,7 @@ export const SecurityPage: React.FC = observer(() => {
           className="flex flex-col gap-8 w-full max-w-md font-mono"
           data-testid="security-page"
         >
-          {/* Account key — advisory self-audit of your published identity key
-              against the public transparency log (#330). */}
+          {/* Advisory self-audit of your identity key against the log (#330). */}
           <section className="flex flex-col gap-4 mb-12" data-testid="account-key-section">
             <h2 className={sectionHeaderClass}>
               {t("security.accountKeyHeading")}
@@ -445,9 +405,7 @@ export const SecurityPage: React.FC = observer(() => {
             )}
           </section>
 
-          {/* This build — optional, on-demand check that this running build's
-              fingerprint is published in the public binaries transparency log
-              (#484). Never mandatory, never gates launch/update. */}
+          {/* Optional, on-demand build check against the binaries log (#484); never gates. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="this-build-section">
             <h2 className={sectionHeaderClass}>
               {t("security.thisBuildHeading")}
@@ -456,10 +414,7 @@ export const SecurityPage: React.FC = observer(() => {
               {t("security.thisBuildDescription")}
             </p>
 
-            {/* Reciprocal link into the /learn explainer that decodes this page
-                (epic #589, topic 12). The four verdicts below are easy to
-                misread — "unavailable" is not an accusation — so the legend has
-                to be reachable from the surface itself. */}
+            {/* The /learn legend, reachable from here: "unavailable" is not an accusation. */}
             <button
               type="button"
               data-testid="build-verify-learn-link"
@@ -471,9 +426,7 @@ export const SecurityPage: React.FC = observer(() => {
               {t("security.verdictsLink")}
             </button>
 
-            {/* Version + commit of the running build. Commit is only shown once
-                the check has run (it's baked into the report), and only if this
-                build actually baked one in. */}
+            {/* Commit shows only after the check, and only if the build baked one in. */}
             <div className="flex flex-col gap-0.5 text-xs text-dim">
               <span data-testid="build-version">
                 {t("security.buildVersion", {
@@ -517,7 +470,6 @@ export const SecurityPage: React.FC = observer(() => {
             </div>
           </section>
 
-          {/* PIN */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass}>
               {t("security.pinHeading")}
@@ -535,10 +487,7 @@ export const SecurityPage: React.FC = observer(() => {
             </div>
           </section>
 
-          {/* Auto-lock (#851) — sits with PIN because it is the same gate,
-              just reached without pressing anything. Device-local: the answer
-              depends on where this machine physically sits, so it deliberately
-              does not sync to your other devices. */}
+          {/* Auto-lock (#851) sits with PIN: the same gate. Device-local. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="auto-lock-section">
             <h2 className={sectionHeaderClass}>
               {t("security.autoLockHeading")}
@@ -546,12 +495,8 @@ export const SecurityPage: React.FC = observer(() => {
             <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.autoLockDescription", { shortcut: lockLabel })}
             </p>
-            {/* A group of toggle buttons rather than the `role="radiogroup"`
-                the neighbouring selectors use: without `role="radio"` +
-                `aria-checked` on the children (which would also commit us to
-                arrow-key traversal) a radiogroup announces every option as
-                unselected. `aria-pressed` states the selection honestly, and
-                renders identically. */}
+            {/* Toggle buttons with `aria-pressed`, not a radiogroup: without
+                `role="radio"` children it announces every option unselected. */}
             <div
               role="group"
               aria-label={t("security.autoLockAriaLabel")}
@@ -585,7 +530,6 @@ export const SecurityPage: React.FC = observer(() => {
             </p>
           </section>
 
-          {/* Link a new device by QR (#1207) */}
           {currentUser && (
             <section className="flex flex-col gap-4 mb-12">
               <h2 className={sectionHeaderClass}>{t("linkDevice.heading")}</h2>
@@ -598,7 +542,6 @@ export const SecurityPage: React.FC = observer(() => {
             </section>
           )}
 
-          {/* Devices */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass}>
               {t("security.devicesHeading")}
@@ -666,9 +609,7 @@ export const SecurityPage: React.FC = observer(() => {
             ) : (
               <NavigableList<api.DeviceInfo>
                 testId="devices-list"
-                // Keeps its keyboard navigation (rows have Revoke buttons), but
-                // must not claim focus on mount or on any re-render — same
-                // scroll-jump the events list had, just further up the page.
+                // Keyboard nav for Revoke, but never focus on mount or re-render.
                 autoFocus={false}
                 items={devices ?? []}
                 isLoading={devices === null}
@@ -709,7 +650,6 @@ export const SecurityPage: React.FC = observer(() => {
             )}
           </section>
 
-          {/* Security events */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass}>
               {t("security.eventsHeading")}
@@ -727,14 +667,8 @@ export const SecurityPage: React.FC = observer(() => {
               </p>
             )}
 
-            {/* Deliberately NOT a NavigableList. This is a read-only audit
-                trail with nothing to select, and that component's container is
-                `tabIndex={0}` + calls `.focus()` from an effect keyed on
-                `items`/`getKey` — both fresh identities on every render — so any
-                unrelated re-render of this page (a media-permissions refetch on
-                window focus, a keystroke in the revoke-confirm field) yanked
-                focus here and scrolled the user down to it. A plain list has no
-                focus to steal. */}
+            {/* NOT a NavigableList: a read-only trail, and its focus effect would
+                steal focus on every unrelated re-render. */}
             {events === null ? (
               <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
             ) : events.length === 0 ? (
@@ -759,8 +693,7 @@ export const SecurityPage: React.FC = observer(() => {
                     </div>
                   );
                 })}
-                {/* The backend already returns newest-first, capped at 100, so
-                    paging is a pure slice — no refetch, no cursor. */}
+                {/* Paging is a pure slice of the capped, newest-first list. */}
                 {events.length > visibleEvents && (
                   <div className="px-4 pt-2">
                     <Button
@@ -781,15 +714,11 @@ export const SecurityPage: React.FC = observer(() => {
             )}
           </section>
 
-          {/* Media permissions — OS camera/mic/screen access: live status,
-              revoke-on-quit, and a manual revoke. An access-control concern,
-              so it sits with Devices rather than in Preferences. */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass}>
               {t("security.mediaHeading")}
             </h2>
 
-            {/* Live OS status for each media device. */}
             <div className="flex flex-col gap-2">
               {[
                 {
@@ -837,8 +766,7 @@ export const SecurityPage: React.FC = observer(() => {
               </p>
             </div>
 
-            {/* Inline confirm (NO modal) — clicking "Revoke now" swaps the
-                button for a Confirm/Cancel row in place. */}
+            {/* Inline confirm (no modal): "Revoke now" becomes Confirm/Cancel. */}
             <div className="self-start">
               {confirmingRevoke ? (
                 <div className="flex items-center gap-2 flex-wrap">
@@ -868,14 +796,12 @@ export const SecurityPage: React.FC = observer(() => {
               )}
             </div>
 
-            {/* Result note from the last revoke, when the platform has one. */}
             {revokeMedia.data?.note && (
               <p className="text-xs font-mono text-muted">
                 {revokeMedia.data.note}
               </p>
             )}
 
-            {/* Honest, per-OS explanation of what "Revoke now" does. */}
             <p className="text-xs font-mono text-muted">
               {isMac && t("security.mediaNoteMac")}
               {isLinux && t("security.mediaNoteLinux")}
@@ -884,10 +810,8 @@ export const SecurityPage: React.FC = observer(() => {
             </p>
           </section>
 
-          {/* The in-app terminal. A shell is the single most powerful thing
-              this process can be asked to do, so it ships off and the switch
-              lives here rather than in Preferences — it is a capability grant,
-              not a comfort setting. */}
+          {/* The terminal ships off, and its switch lives here: a capability
+              grant, not a comfort setting. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="terminal-section">
             <h2 className={sectionHeaderClass}>
               {t("security.terminalHeading")}
@@ -905,10 +829,7 @@ export const SecurityPage: React.FC = observer(() => {
             </div>
           </section>
 
-          {/* Your data (#856) — the exit that is not delete_account. Strictly
-              on-device: Rust reads the local DB and writes the file the user
-              picked; nothing touches the network. Sits directly above the
-              danger zone so "get my data out" is visibly next to "delete it". */}
+          {/* Your data (#856): on-device export, right above the danger zone. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="export-section">
             <h2 className={sectionHeaderClass}>
               {t("security.exportHeading")}
@@ -925,8 +846,6 @@ export const SecurityPage: React.FC = observer(() => {
             />
           </section>
 
-          {/* Danger zone — account deletion lives at the very bottom of the
-              security page so it's the last thing a user can reach. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">
             <h2
               className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"

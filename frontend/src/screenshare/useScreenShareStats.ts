@@ -3,8 +3,7 @@ import { screenShareSession, type FrameStats } from "./screenShareSession";
 
 const EMPTY: FrameStats = { fps: 0, dimensions: null, lastFrameBytes: 0 };
 
-/** Subscribes to per-frame stats for a screen-share track —
- *  `screenShareSession.onStats`, derived from the Rust frame channel. */
+/** Per-frame stats for a screen-share track (`screenShareSession.onStats`). */
 export function useScreenShareStats(trackKey: string | null): FrameStats {
   const [stats, setStats] = useState<FrameStats>(EMPTY);
   useEffect(() => {

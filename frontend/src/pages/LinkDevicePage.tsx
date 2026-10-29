@@ -13,10 +13,9 @@ import * as api from "../services/api";
 import { errorMessage } from "../utils/errorMessage";
 
 /**
- * Link a new device (#1207), one step per view — the desktop twin of mobile's
- * self/link-device: PIN → the code (QR or copyable text) → waiting → Approve
- * → done. The PIN is verified in Rust; the key moves only on Approve of a
- * request whose link tag Rust verified. Each wait is one awaited Rust call.
+ * Link a new device (#1207), mobile's link-device twin: PIN → code → waiting →
+ * Approve → done. Rust verifies the PIN and the link tag; the key moves only
+ * on Approve.
  */
 
 type Step =
@@ -240,13 +239,11 @@ export const LinkDevicePage: React.FC = observer(() => {
   );
 });
 
-/** The code, as a QR (default) or as text with one-click copy. */
 const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }> = ({ handle, onCancel }) => {
   const { t } = useTranslation("settings");
   const [mode, setMode] = useState<"qr" | "code">("qr");
   const [copied, setCopied] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(() => Math.max(0, handle.expires_at - Math.floor(Date.now() / 1000)));
-  // A display clock for the countdown; it touches no network.
   useEffect(() => {
     const timer = window.setInterval(() => {
       setSecondsLeft(Math.max(0, handle.expires_at - Math.floor(Date.now() / 1000)));
@@ -273,8 +270,7 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
       </div>
       {mode === "qr" ? (
         <div className="self-start p-3 rounded-lg bg-accent" data-testid="link-device-showing">
-          {/* Dark modules on the accent: themed, and still normal polarity
-              (dark on light), which every camera decoder reads. */}
+          {/* Dark on light keeps normal polarity, which every decoder reads. */}
           <QRCodeSVG data-testid="link-device-qr" value={handle.qr_payload} size={208} bgColor="var(--c-accent)" fgColor="var(--c-bg)" marginSize={2} level="M" />
         </div>
       ) : (

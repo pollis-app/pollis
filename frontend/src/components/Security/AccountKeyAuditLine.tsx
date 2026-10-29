@@ -5,19 +5,13 @@ import type { AuditStatus } from "../../types";
 
 interface AccountKeyAuditLineProps {
   status: AuditStatus;
-  // One-line, human-readable explanation from the audit report. Surfaced as
-  // the reason on `alarm`; ignored for the other (self-explanatory) statuses.
+  // Shown as the reason on `alarm` only.
   detail: string;
   testId?: string;
 }
 
-// Terse copy + tone per audit status. Quiet and advisory — these alert, they
-// never block. `alarm` is the only warning-toned case (amber, matching
-// SecurityIndicator's `warning`); the rest sit in muted/accent text.
-//
-// `labelKey` is a `settings` translation key rather than the copy itself: this
-// table is module-level, so a `t()` here would snapshot the language at import
-// time. It is resolved in the component below, on every render.
+// Copy + tone per audit status: advisory, never blocking; only `alarm` is
+// warning-toned. `labelKey` is resolved at render, not import.
 const statusConfig: Record<
   AuditStatus,
   { icon: React.ReactElement; labelKey: string; color: string }
@@ -44,9 +38,7 @@ const statusConfig: Record<
   },
 };
 
-// A small, advisory status line surfacing the result of an account-key
-// transparency audit (issue #330). Used on the peer profile (peer audit) and
-// the security page (self audit).
+// Advisory account-key transparency audit status (#330), for peer and self.
 export const AccountKeyAuditLine: React.FC<AccountKeyAuditLineProps> = ({
   status,
   detail,
@@ -68,7 +60,6 @@ export const AccountKeyAuditLine: React.FC<AccountKeyAuditLineProps> = ({
         {icon}
         {t(labelKey)}
       </span>
-      {/* On alarm, append the report's reason so the user can act on it. */}
       {status === "alarm" && detail && (
         <span
           data-testid={`${testId}-reason`}

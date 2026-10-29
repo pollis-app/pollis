@@ -37,9 +37,7 @@ function isValidWindowState(s: unknown): s is WindowState {
   );
 }
 
-// Check whether a logical position falls within any connected monitor.
-// Each monitor reports physical pixels, so we divide by its scale factor
-// to get logical coordinates before comparing.
+// Whether a logical position is on any monitor (monitors report physical px).
 async function isPositionOnScreen(x: number, y: number): Promise<boolean> {
   const monitors = await availableMonitors();
   if (monitors.length === 0) {
@@ -86,7 +84,6 @@ export async function restoreWindowState(): Promise<void> {
     if (onScreen) {
       await appWindow.setPosition(new LogicalPosition(parsed.x, parsed.y));
     } else {
-      // Saved position is off-screen (e.g. disconnected monitor), center instead
       await appWindow.center();
     }
   } catch {

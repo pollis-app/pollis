@@ -27,12 +27,8 @@ import { listPendingEnrollmentRequests } from '../services/api';
 import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
 import i18n from '../i18n';
 
-// Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
-// Add new variants here as new event types are added on the Rust side.
-// (When the same UX outcome already exists as a variant, reuse it — e.g.
-// "dismiss call on my other devices" reuses `call_canceled` because the
-// renderer-side handling is identical. Don't split logic just because the
-// trigger is different.)
+// Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs. Reuse a
+// variant when the renderer handling is identical (e.g. `call_canceled`).
 type RealtimeEvent =
   | {
     // Routing only (§5): no sender. Who wrote it is read back after ingest.
@@ -47,8 +43,7 @@ type RealtimeEvent =
     sender_id: string;
     sender_username: string | null;
   }
-  // Per-user @username mention (#843). Same shape as all_mention — the
-  // difference is the audience: the backend publishes this ONLY to the
+  // @username mention (#843): like all_mention, but published only to the
   // members the message names.
   | {
     type: 'user_mention';
@@ -58,9 +53,7 @@ type RealtimeEvent =
     sender_username: string | null;
   }
   | {
-    // Sent to every device on the user's inbox when one of their devices is
-    // revoked. Each device re-checks its own registration and only the
-    // revoked one signs out.
+    // To every device of the user; each re-checks its own registration.
     type: 'device_revoked';
     device_id: string;
     user_id: string;
@@ -68,20 +61,17 @@ type RealtimeEvent =
   | {
     type: 'dm_created';
     conversation_id: string;
-    // The verified actor. Our OWN id when another of our devices created or
-    // accepted the DM (#1410): refetch, but raise no request alert.
+    // The verified actor; our OWN id when another of our devices made or
+    // accepted the DM (#1410): refetch, no alert.
     sender_id?: string | null;
-    // Creator's public username, so the DM-request alert can name the requester.
     sender_username?: string | null;
   }
   | {
     type: 'membership_changed';
     conversation_id?: string | null;
-    // 'invite' = you've been invited to a group (ping/notify)
-    // 'approval' = your join request was approved (silent)
-    // omitted = generic reconcile (silent — refetch only)
+    // 'invite': invited to a group (notify); 'approval': join approved
+    // (silent); omitted: generic reconcile (refetch only)
     kind?: 'invite' | 'approval' | null;
-    // Present on the 'invite' kind: who invited you and to which group.
     inviter_username?: string | null;
     group_name?: string | null;
   }
@@ -101,8 +91,6 @@ type RealtimeEvent =
     group_id: string;
   }
   | {
-    // A new join request was created for a group the recipient admins.
-    // Refetch the pending-request list (menu badge + bottom bar).
     type: 'join_requests_changed';
     group_id: string;
   }
@@ -124,13 +112,11 @@ type RealtimeEvent =
     type: 'enrollment_requested';
     request_id: string;
     new_device_id: string;
-    /// Set when the request belongs to a QR device link (#1207 / #1361). The
-    /// core forwards it from the DS packet; it carries no code (#1096).
+    /// A QR device link's request (#1207 / #1361); carries no code (#1096).
     link_id: string | null;
   }
   | {
-    // DS-originated (#1431): this account's channel mutes changed on another
-    // of its devices. Carries nothing; the mutes are re-read.
+    // DS-originated (#1431): mutes changed on another device; re-read them.
     type: 'channel_mutes_changed';
   }
   | {
@@ -141,9 +127,8 @@ type RealtimeEvent =
     type: 'call_invite';
     call_id: string;
     room_name: string;
-    // The caller as ATTRIBUTED by pollis-core's dispatcher — the DS-stamped
-    // verified signer, or the publishing participant — never a field the
-    // calling client chose. A ring with no attributable caller never arrives.
+    // Attributed by pollis-core (DS-verified signer or publishing
+    // participant), never a client-chosen field.
     caller_id: string;
     caller_username: string;
   }
@@ -192,14 +177,12 @@ export function useLiveKitRealtime() {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
 
-  // ── All room IDs this user should be connected to ─────────────────────────
-  // Derived from cached query data — no extra network calls.
+  // Rooms to connect, derived from cached queries.
 
   const allRoomIds = useMemo<string[]>(() => {
     const ids: string[] = [];
-    // One room per GROUP covers all channels in that group.
-    // The Rust send_message command publishes to the group room (mls_group_id),
-    // not to individual channel rooms — do not add channel IDs here.
+      // One room per GROUP: send_message publishes to the group room
+      // (mls_group_id), so never add channel ids here.
     if (groupsWithChannels) {
       for (const group of groupsWithChannels) {
         ids.push(group.id);
@@ -210,14 +193,12 @@ export function useLiveKitRealtime() {
         ids.push(conv.id);
       }
     }
-    // Personal inbox receives DM creation and membership change events.
+      // The personal inbox: DM creation and membership events.
     if (currentUser) {
       ids.push(`inbox-${currentUser.id}`);
     }
     return ids;
   }, [groupsWithChannels, dmConversations, currentUser?.id]);
-
-  // ── Room name lookup (for notification titles) ────────────────────────────
 
   const roomNameMapRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
@@ -237,34 +218,28 @@ export function useLiveKitRealtime() {
     roomNameMapRef.current = map;
   }, [groupsWithChannels, dmConversations]);
 
-  // ── Refs to avoid stale closures in the channel handler ───────────────────
-  // The channel handler is created once; these refs always hold current values.
+  // Refs keep the once-created channel handler current.
 
   const selectedChannelIdRef = useRef<string | null>(selectedChannelId);
   const selectedConversationIdRef = useRef<string | null>(selectedConversationId);
   useEffect(() => { selectedChannelIdRef.current = selectedChannelId; }, [selectedChannelId]);
   useEffect(() => { selectedConversationIdRef.current = selectedConversationId; }, [selectedConversationId]);
 
-  // queryClient changes reference on every render but is stable in practice;
-  // keep a ref so the channel handler doesn't need to be recreated.
   const queryClientRef = useRef(queryClient);
   useEffect(() => { queryClientRef.current = queryClient; }, [queryClient]);
 
   const currentUserIdRef = useRef<string | null>(currentUser?.id ?? null);
   useEffect(() => { currentUserIdRef.current = currentUser?.id ?? null; }, [currentUser?.id]);
 
-  // Track the voice room the user is currently connected to so we only play
-  // join/leave cues for rooms they can actually hear.
+  // Join/leave cues only for the room the user can hear.
   const activeVoiceChannelId = useObserver(() =>
     appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId,
   );
   const activeVoiceChannelIdRef = useRef<string | null>(activeVoiceChannelId);
   useEffect(() => { activeVoiceChannelIdRef.current = activeVoiceChannelId; }, [activeVoiceChannelId]);
 
-  // ── Notification permission + prefs → notify() ────────────────────────────
-  // Re-checks the OS permission whenever the user's notification preference
-  // changes so toggling "on" in Preferences → granting the OS prompt →
-  // immediately makes notify() start firing OS banners.
+  // Re-check OS permission when the preference changes, so granting the prompt
+  // takes effect at once.
 
   useEffect(() => {
     if (!isTauriReady) {
@@ -288,22 +263,16 @@ export function useLiveKitRealtime() {
     });
   }, [isTauriReady, prefsQuery.data?.allow_sound_effects, prefsQuery.data?.allow_desktop_notifications, currentUser?.id]);
 
-  // ── Channel mutes → notify() (#1431) ──────────────────────────────────────
-  // The DS already skips a muted channel's pushes; this keeps this desktop's
-  // own sounds and OS banners to the same rule.
+  // Channel mutes (#1431): the DS skips muted pushes; this applies the same rule
+  // to local sounds and banners.
   const { data: mutedChannels } = useMutedChannels();
   useEffect(() => {
     setMutedChannels(mutedChannels ?? []);
   }, [mutedChannels]);
 
-  // ── Enrollment poll fallback ────────────────────────────────────────────
-  // The enrollment-request inbox nudge is emitted server-side by the DS (the
-  // requesting device is pre-enrollment and can't sign a client-side
-  // send-data). But if THIS already-enrolled device was offline when a sibling
-  // requested enrollment, the live nudge was missed. Surface any still-pending
-  // request once, right after sign-in. One-shot (keyed on user id) — it's the
-  // documented "fallback in case the inbox push was missed" path, event-driven
-  // rather than an interval, so it respects the no-periodic-polling rule.
+  // Enrollment fallback: a sibling's request nudge may have been missed while
+  // offline, so surface any pending request once after sign-in (event-driven,
+  // not an interval).
   useEffect(() => {
     if (!isTauriReady || !currentUser) {
       return;
@@ -315,7 +284,6 @@ export function useLiveKitRealtime() {
         if (cancelled || pending.length === 0) {
           return;
         }
-        // Most recent first (the Rust query orders by created_at DESC).
         const r = pending[0];
         notify('enrollment', {
           title: i18n.t('settings:notify.enrollmentTitle'),
@@ -334,8 +302,7 @@ export function useLiveKitRealtime() {
     };
   }, [isTauriReady, currentUser?.id]);
 
-  // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
-  // Recreated if the user identity changes (e.g. logout → login as someone else).
+  // Subscribe: one typed Channel per user identity.
 
   useEffect(() => {
     if (!isTauriReady || !currentUser) {
@@ -344,9 +311,8 @@ export function useLiveKitRealtime() {
 
     const channel = new Channel<RealtimeEvent>();
 
-    // Pull new envelopes for a conversation, then invalidate so the local
-    // read picks them up. The local-first read path no longer runs ingest
-    // inside the queryFn, so realtime hints must drive it explicitly.
+    // Ingest, then invalidate: the local read no longer ingests in its queryFn,
+    // so realtime hints must drive it.
     const ingestAndInvalidate = (
       channelId: string | null,
       conversationId: string | null,
@@ -369,20 +335,13 @@ export function useLiveKitRealtime() {
             queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
           } else if (conversationId) {
             queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-            // Receipts (#857) arrive as MLS control envelopes on this very
-            // path — the ingest above is what decrypts and records them, so
-            // this is the point at which new ticks become visible. DM-only, and
-            // no polling anywhere: the peer's receipt publishes the same
-            // routing-only hint an ordinary message does.
+            // Receipts (#857) arrive as MLS control envelopes on this path.
             queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(conversationId) });
           }
-          // Previews are batched per set of conversations (#874), so there is
-          // no per-conversation key left to target — the prefix is the unit.
+          // Previews are batched (#874); the prefix is the unit.
           queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
-          // Threads live under their own key (`messages/thread/*`) that the two
-          // invalidations above do not reach. Refreshing them here is what lets
-          // the thread panel and its reply counts drop `refetchOnWindowFocus`
-          // (#874) without a peer's reply going unseen until the next focus.
+          // Threads have their own key; refreshing here replaces
+          // `refetchOnWindowFocus` (#874).
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.threads });
           queryClientRef.current.invalidateQueries({
             queryKey: messageQueryKeys.threadSummaries(targetId),
@@ -395,17 +354,11 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({
           queryKey: messageQueryKeys.dmConversations(currentUser.id),
         });
-        // An inbound DM arrives as a REQUEST first, and that list has its own
-        // key. Without this the request badge appeared only on the next window
-        // focus — which is what `useDMRequests` was overriding the global
-        // `refetchOnWindowFocus: false` for (#874).
+        // An inbound DM arrives as a REQUEST, under its own key (#874).
         queryClientRef.current.invalidateQueries({
           queryKey: blocksQueryKeys.dmRequests(currentUser.id),
         });
-        // Apply the Welcome now instead of waiting for the invitee to open
-        // the DM or restart the app. Without this, any message the inviter
-        // sends in the meantime can't be decrypted until the invitee
-        // manually triggers a poll.
+        // Apply the Welcome now, so the inviter's messages decrypt immediately.
         invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
           console.warn('[realtime] dm_created: poll_mls_welcomes failed:', err);
         });
@@ -415,9 +368,7 @@ export function useLiveKitRealtime() {
         }).catch((err) => {
           console.warn('[realtime] dm_created: process_pending_commits failed:', err);
         });
-        // One of our own other devices started or accepted this DM (#1410):
-        // the refetch above is the whole point, and there is nobody to alert
-        // about — it is not a request.
+        // Our own other device started or accepted it (#1410): no alert.
         if (event.sender_id && event.sender_id === currentUser.id) {
           return;
         }
@@ -432,15 +383,8 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'membership_changed') {
-        // Covers invite received, join-request approved, member removed,
-        // member left.
-        //
-        // NARROWED from the whole `['groups']` prefix (#874). That prefix also
-        // matches every `["groups", groupId, "channels"]` entry, so a single
-        // member joining somewhere refetched the channel list of every group
-        // the user is in — none of which changed. What actually moves is the
-        // user's own group list (which embeds their role) and the affected
-        // group's roster, so those are what get invalidated.
+        // Invite received, approval, member removed or left. Narrowed to the
+        // user's group list and the affected roster, not every channel list (#874).
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id),
         });
@@ -451,28 +395,21 @@ export function useLiveKitRealtime() {
           queryClientRef.current.invalidateQueries({
             queryKey: groupQueryKeys.members(event.conversation_id),
           });
-          // Channel create/rename/delete publish this same event (#874), so
-          // the named group's channel list is refreshed too — just that one,
-          // not every group's.
+          // Channel create/rename/delete publish this too (#874): refresh that
+          // group's channels.
           queryClientRef.current.invalidateQueries({
             queryKey: groupQueryKeys.channels(event.conversation_id),
           });
         } else {
-          // No group named: the event is a generic reconcile, so every roster
-          // is suspect. `["groups", <id>, "members"]` has the id in the middle,
-          // so there is no prefix that selects rosters — a predicate is the
-          // narrowest available match, and it still excludes channel lists.
+          // No group named: every roster is suspect. A predicate, since the id
+          // sits mid-key; channel lists stay excluded.
           queryClientRef.current.invalidateQueries({
             predicate: (q) => q.queryKey[0] === 'groups' && q.queryKey[2] === 'members',
           });
         }
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
-        // Same as dm_created: a membership change may have added us to an
-        // MLS group, so pull the Welcome and catch up on commits immediately.
-        // Awaited (not fire-and-forget) so any user action that follows the
-        // event handler returning runs against caught-up MLS state — issue
-        // #371 scenario 3 had these as `.catch` with no `await`, which let
-        // sends/edits race into encrypt at the prior epoch.
+        // Pull the Welcome and catch up on commits, awaited so a following
+        // action runs on caught-up MLS state (#371).
         try {
           await invoke('poll_mls_welcomes', { userId: currentUser.id });
         } catch (err) {
@@ -488,8 +425,7 @@ export function useLiveKitRealtime() {
             console.warn('[realtime] membership_changed: process_pending_commits failed:', err);
           }
         }
-        // Only invites raise a user-facing notification. Approvals and
-        // generic reconciles are silent — query invalidation handles them.
+        // Only invites notify; approvals and reconciles are silent.
         if (event.kind === 'invite') {
           let inviteBody: string;
           if (!event.inviter_username) {
@@ -515,10 +451,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'member_role_changed') {
-        // Targeted: only the affected group's member list and the current user's
-        // groups-with-channels (which embeds current_user_role). The second one
-        // used to be the whole `['groups']` prefix, which dragged every group's
-        // channel list along with it (#874).
+        // The affected roster and the user's groups-with-channels (role) (#874).
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.members(event.group_id),
         });
@@ -529,10 +462,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'join_requests_changed') {
-        // A new join request arrived for a group this admin manages. The
-        // per-group key is now the ONLY key — the cross-group aggregate reads
-        // the same entries (#874) — so this one invalidation updates both the
-        // menu badge and the group's bottom-bar pending list.
+        // The per-group key also feeds the cross-group aggregate (#874).
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.joinRequests(event.group_id),
         });
@@ -541,10 +471,8 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'voice_joined' || event.type === 'voice_left') {
         invalidateVoiceRoom(queryClientRef.current, event.channel_id);
-        // LiveKit's data channel doesn't echo packets back to the sender,
-        // so own-user join/leave is handled locally in voice/voiceBridge.ts.
-        // Here we only fire for OTHER participants, and only when the user
-        // is in the same room — otherwise it's noise from unrelated rooms.
+        // LiveKit doesn't echo to the sender (own join/leave is in
+        // voiceBridge.ts); only others, and only in our room.
         if (
           event.user_id !== currentUserIdRef.current
           && event.channel_id === activeVoiceChannelIdRef.current
@@ -560,36 +488,23 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'deleted_message') {
-        // Ingest applies the type='delete' tombstone envelope as a
-        // soft-delete on the local row; MessageList renders [deleted].
-        // `ingestAndInvalidate` already busts the preview cache — a second
-        // invalidation here bought a second identical refetch and nothing else
-        // (#874).
+        // Ingest applies the tombstone as a soft-delete; ingestAndInvalidate
+        // already busts previews (#874).
         ingestAndInvalidate(event.channel_id, event.conversation_id);
         return;
       }
 
       if (event.type === 'realtime_reconnected') {
-        // The event stream doesn't replay missed events, so resync state
-        // that may have drifted during the outage.
+        // Missed events aren't replayed, so resync what may have drifted.
         queryClientRef.current.invalidateQueries({ queryKey: voiceQueryKeys.allRoomCounts });
         queryClientRef.current.invalidateQueries({ queryKey: voiceQueryKeys.allParticipants });
-        // Wipe stale presence for the reconnected room — Rust will re-emit
-        // a fresh participant snapshot right after.
+        // Rust re-emits a fresh participant snapshot right after.
         presenceStore.resetRoom(event.room_id);
-        // The link healed, so a send that failed while it was down goes out
-        // now (#1335). Fire-and-forget: the drain refreshes what it settles.
+        // Link healed: drain the outbox (#1335).
         void flushOutbox(queryClientRef.current);
-        // Catch up on welcomes AND pending commits that may have arrived
-        // during the outage. Issue #371 scenario 4: this handler previously
-        // only polled welcomes, missing every commit posted to existing
-        // groups while the realtime channel was disconnected, which left
-        // the device stuck at a stale epoch until the next action-triggered
-        // catch-up (or, with #372 in play, possibly forever).
-        // `room_id` for group/DM rooms IS the MLS group id (group rooms
-        // use the group_id; DM rooms use the dm_channel_id which is also
-        // the MLS group id). Inbox rooms (`inbox-<userId>`) have no MLS
-        // group, so skip the per-room commit processing for those.
+        // Catch up on Welcomes AND commits missed while disconnected (#371).
+        // `room_id` is the MLS group id for group/DM rooms; inbox rooms
+        // (`inbox-<userId>`) have none.
         try {
           await invoke('poll_mls_welcomes', { userId: currentUser.id });
         } catch (err) {
@@ -604,14 +519,9 @@ export function useLiveKitRealtime() {
           } catch (err) {
             console.warn('[realtime] reconnect: process_pending_commits failed:', err);
           }
-          // That catch-up also ingested every envelope posted while we were
-          // away (the replay is interleaved with decryption) — but the
-          // wake-ups for them were lost with the connection, so nothing told
-          // the open conversation or the sidebar previews. The common case is
-          // a message this user sent from their OTHER device: it raises no
-          // push either, so without this it stayed invisible until the
-          // conversation was re-opened. A group room covers all its channels,
-          // hence the whole `messages` prefix.
+          // The catch-up ingested what arrived meanwhile, but those wake-ups
+          // were lost (often our own other device's sends, which raise no
+          // push), so refresh every message list.
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.all });
           queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
           queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(event.room_id) });
@@ -627,17 +537,13 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'enrollment_requested') {
-        // A QR-linked request (#1207 / #1361) is approved on the device at the
-        // other end of that QR, on the link tag or the scanned key — the new
-        // device shows no code, so the typed-code takeover below could never
-        // be completed. The link screen handles it.
+        // A QR-linked request (#1207 / #1361) is approved on the QR's device;
+        // there is no code for the typed-code takeover.
         if (!isTypedCodeRequest(event)) {
           return;
         }
-        // Immediate UI takeover — the user must explicitly approve or
-        // reject the request. Silently ignoring an enrollment is a quiet
-        // account-takeover vector. Sound + OS notification + overlay are
-        // all configured on the 'enrollment' category.
+        // Immediate takeover: ignoring an enrollment silently is an account-
+        // takeover vector.
         notify('enrollment', {
           title: i18n.t('settings:notify.enrollmentTitle'),
           body: i18n.t('settings:notify.enrollmentBody'),
@@ -667,15 +573,13 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'call_canceled') {
         const store = appStore;
-        // Callee receives this when the caller hangs up before pickup —
-        // dismiss the ring UI immediately.
+        // Callee: the caller hung up before pickup.
         const incoming = store.incomingCall;
         if (incoming && incoming.callId === event.call_id) {
           store.setIncomingCall(null);
         }
-        // Caller receives this when the callee declines — clear the
-        // outgoing-call slot so a subsequent hangup doesn't re-emit
-        // `cancel_call` toward a callee who has already declined.
+        // Caller: the callee declined; clear the slot so hangup doesn't
+        // re-send `cancel_call`.
         const outgoing = store.outgoingCall;
         if (outgoing && outgoing.callId === event.call_id) {
           store.setOutgoingCall(null);
@@ -689,9 +593,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'roster_changed') {
-        // A refetch hint, never a timeline line: membership changes are not
-        // announced in channels or DMs (#1506). Refresh the member list and
-        // its pending invites (an invite or a revoke reconciles too).
+        // A refetch hint, never a timeline line (#1506).
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.members(event.conversation_id),
         });
@@ -702,12 +604,9 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'key_changed') {
-        // Signal-style "safety number changed" — surface inline so the
-        // user re-verifies out-of-band. Advisory; sends are unaffected.
+        // Advisory "safety number changed"; sends are unaffected.
         keyChangeStore.flagChanged(event.peer_user_id, event.peer_identity_version);
-        // Refresh the shield-badge query so DM/contact lists drop the
-        // verified badge for this peer immediately, and the open profile
-        // recomputes its "Changed — re-verify" state.
+        // Drop the verified badge and recompute the profile state now.
         queryClientRef.current.invalidateQueries({
           queryKey: peerVerificationKeys.all,
         });
@@ -718,8 +617,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'typing') {
-        // Self-echoes from another device of the current user are noise —
-        // skip them so we never render "you are typing" to ourselves.
+        // Skip self-echoes from our other devices.
         if (event.user_id === currentUserIdRef.current) {
           return;
         }
@@ -735,38 +633,29 @@ export function useLiveKitRealtime() {
         return;
       }
 
-      // One of this user's devices was revoked. The inbox is per-user, so this
-      // reaches every device; authoritatively confirm with the backend whether
-      // it's THIS device that's gone (spoof-safe — a forged nudge can't sign
-      // out a still-valid device) and only then sign out. Errors (offline) are
-      // treated as "still registered" so we never sign out on a transient blip.
+      // Confirm with the backend that THIS device is the revoked one
+      // (spoof-safe) before signing out; errors count as still registered.
       if (event.type === 'device_revoked') {
         const userId = currentUserIdRef.current;
         if (!userId) {
           return;
         }
-        // The handler is sync, so chain rather than await.
         invoke<boolean>('is_current_device_registered', { userId })
           .then((stillRegistered) => {
             if (stillRegistered) {
               return;
             }
             console.warn('[realtime] this device was revoked — signing out');
-            // The same sign-out as a command refused with `device_revoked`
-            // (#1338): wipes the device and says why on sign-in.
+            // Same sign-out as a `device_revoked` refusal (#1338).
             deviceWasRevoked();
           })
-          // Offline / transient error — never sign out on a blip.
+            // Offline / transient: never sign out on a blip.
           .catch(logIgnored);
         return;
       }
 
-      // @all mention in a group. Arrives on the per-user inbox room (so it
-      // reaches members even when they're not in the group's LiveKit room),
-      // separate from the new_message event. Fires an OS ping that normal
-      // channel messages don't — notify() still suppresses it if the user has
-      // notifications off. Skip our own @all; the notifications-off pref and
-      // cooldown are enforced in notify().
+      // @all mention: on the per-user inbox, so it reaches members outside the
+      // group room. Skip our own; notify() applies prefs and cooldown.
       if (event.type === 'all_mention') {
         if (event.sender_id === currentUserIdRef.current) {
           return;
@@ -782,10 +671,8 @@ export function useLiveKitRealtime() {
         return;
       }
 
-      // @username mention in a group (#843). Same inbox-room delivery as
-      // all_mention, but the backend only sends it to the members actually
-      // named — so receiving one means this message is addressed to us, and
-      // it routes to the louder `user_mention` category. Skip our own.
+      // @username mention (#843): only sent to the members named, so it routes
+      // to the louder `user_mention` category. Skip our own.
       if (event.type === 'user_mention') {
         if (event.sender_id === currentUserIdRef.current) {
           return;
@@ -809,9 +696,7 @@ export function useLiveKitRealtime() {
       const conversationId = event.conversation_id;
       const incomingId = channelId ?? conversationId;
 
-      // Ingest the new envelope, then invalidate the affected room's
-      // query and last-message preview so they pick the new message up.
-      // A message from this user's OTHER device takes exactly this path too.
+      // Also the path for messages from this user's other device.
       const ingested = ingestAndInvalidate(channelId, conversationId);
 
       const isSelected =
@@ -821,10 +706,8 @@ export function useLiveKitRealtime() {
         return;
       }
 
-      // The wake-up names no sender (§5), so who wrote it is only known once
-      // the envelope is decrypted: read the newest local row back. Our own
-      // message (sent from another device) is shown, but never alerts or
-      // counts as unread.
+      // The wake-up names no sender (§5): read the newest local row after
+      // ingest. Our own message shows but never alerts or counts as unread.
       await ingested;
       let latest: WakeLatest | null = null;
       try {
@@ -859,7 +742,6 @@ export function useLiveKitRealtime() {
     });
 
     return () => {
-      // Disconnect all rooms when the user logs out.
       invoke('connect_rooms', {
         roomIds: [],
         userId: currentUser.id,
@@ -868,8 +750,7 @@ export function useLiveKitRealtime() {
     };
   }, [isTauriReady, currentUser?.id]);
 
-  // ── Connect rooms whenever the room list changes ───────────────────────────
-  // Rust handles the diff — only connects new rooms, disconnects removed ones.
+  // Connect rooms on list change; Rust diffs.
 
   useEffect(() => {
     if (!isTauriReady || !currentUser) {
@@ -885,9 +766,7 @@ export function useLiveKitRealtime() {
     });
   }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username]);
 
-  // One-time welcome poll on sign-in / app-ready. Catches welcomes for
-  // groups the user was invited to while offline so new-group invites
-  // apply without requiring them to open a channel from each group first.
+  // One-time Welcome poll on sign-in, for groups joined while offline.
   useEffect(() => {
     if (!isTauriReady || !currentUser) {
       return;

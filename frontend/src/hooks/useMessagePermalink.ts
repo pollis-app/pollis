@@ -11,18 +11,15 @@ import {
 } from "../utils/urlRouting";
 
 /**
- * Copying and opening message permalinks (#854).
- *
- * A permalink is `pollis://m/<conversation_id>/<message_id>` — a pointer, not a
- * capability. Opening one is resolved strictly against the local database.
+ * Message permalinks (#854): `pollis://m/<conversation_id>/<message_id>`, a
+ * pointer, not a capability, resolved strictly against the local database.
  */
 export function useMessagePermalink() {
   const navigate = useNavigate();
   const { data: groups = [] } = useUserGroupsWithChannels();
   const resolve = useResolvePermalink();
 
-  /** Put a message's permalink on the clipboard. Returns false if the OS
-   *  clipboard write failed. */
+  /** Copy a message's permalink; false if the clipboard write failed. */
   const copyPermalink = useCallback(
     async (conversationId: string, messageId: string): Promise<boolean> => {
       return writeClipboardText(
@@ -33,16 +30,9 @@ export function useMessagePermalink() {
   );
 
   /**
-   * Navigate to a message and flash it.
-   *
-   * Returns false when this device does not hold the message, which is the
-   * caller's cue to render the honest empty state. Nothing is navigated in that
-   * case — landing the user in a conversation they may not even be in would
-   * itself hint that the target exists.
-   *
-   * Routing resolves the conversation id to a CHANNEL route or a DM route by
-   * looking it up locally. It deliberately does not assume DM the way
-   * `pages/Search.tsx` does.
+   * Navigate to a message and flash it. Returns false, navigating nowhere,
+   * when this device doesn't hold it: landing in the conversation would hint
+   * the target exists. The route kind comes from a local lookup.
    */
   const openPermalink = useCallback(
     async (conversationId: string, messageId: string): Promise<boolean> => {

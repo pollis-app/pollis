@@ -15,12 +15,7 @@ import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { timeAgo } from "../utils/timeAgo";
 import { errorMessage } from "../utils/errorMessage";
 
-/**
- * Saved messages (#854).
- *
- * Bookmarks are device-local, so this list is whatever THIS device saved —
- * nothing syncs it, and no server knows it exists.
- */
+/** Saved messages (#854): device-local, so only what THIS device saved. */
 export const SavedPage: React.FC = () => {
   const { t } = useTranslation("saved");
   const { data: saved = [], isLoading } = useSavedMessages();
@@ -29,13 +24,11 @@ export const SavedPage: React.FC = () => {
   const unsaveMutation = useUnsaveMessage();
   const { openPermalink } = useMessagePermalink();
 
-  // Set when a jump fails, so the page can say so honestly instead of
-  // navigating somewhere misleading.
+  // A failed jump says so rather than navigating somewhere misleading.
   const [unresolved, setUnresolved] = useState(false);
 
-  // conversation_id → human label. Channels resolve through the group's channel
-  // list; DMs through the peer's name. An id that matches neither stays null and
-  // renders as a neutral word — the row must not invent a name.
+  // conversation_id → label (channel via its group, DM via the peer); unknown
+  // stays null rather than inventing a name.
   const conversationLabels = useMemo(() => {
     const labels = new Map<string, string>();
     for (const group of groups) {

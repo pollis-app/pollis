@@ -1,17 +1,10 @@
-// Top-down bullet-hell-lite easter egg. Pure vanilla — no React, no
-// framework. Mounts on a <canvas>, owns its own rAF loop, listeners, and
-// state. `start(canvas)` returns a handle whose `stop()` removes every
-// listener and cancels the loop; unmount the host element to reset.
+// Top-down bullet-hell easter egg on a <canvas>, no React. `stop()` removes
+// every listener and cancels the loop.
 //
-// Conventions:
-//  - Logical world space is fixed at WORLD_W x WORLD_H. The canvas is
-//    sized in CSS px (via ResizeObserver), the backing store is sized in
-//    devicePixelRatio px, and the world is fit-letterboxed inside.
-//  - World wraps toroidally — anything that crosses an edge re-enters
-//    from the opposite side. Collision pairs only test one wrap copy
-//    (closest-image distance) which is exact for radii << world size.
-//  - Fixed-timestep simulation at 60 Hz with an accumulator; render runs
-//    every rAF. Spiral-of-death guarded by max-frame clamp.
+// - Fixed logical world (WORLD_W x WORLD_H), letterboxed into a DPR-sized canvas.
+// - The world wraps toroidally; collisions test the closest wrap image only,
+//   exact for radii << world size.
+// - Fixed 60 Hz timestep with an accumulator and a max-frame clamp.
 
 import i18n from "../i18n";
 
@@ -113,12 +106,10 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   }
 
   const accentColor = readAccent();
-  // Enemies + their bullets are drawn in the inverted accent so they read
-  // distinctly from the player's accent-colored ship/shots/asteroids — high
-  // contrast without introducing a second theme color or a user preference.
+  // Enemies and hostile bullets use the inverted accent: contrast without a
+  // second theme color.
   const contrastColor = invertColor(accentColor, ctx);
 
-  // ─── DPR + letterbox transform ───────────────────────────────────────────
   let cssW = 0;
   let cssH = 0;
   let dpr = window.devicePixelRatio || 1;
@@ -143,7 +134,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
 
-  // ─── Input ───────────────────────────────────────────────────────────────
   const keys = new Set<string>();
   const mouse = { x: WORLD_W / 2, y: WORLD_H / 2, down: false };
 
@@ -199,7 +189,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   canvas.addEventListener("mousedown", onMouseDown);
   window.addEventListener("mouseup", onMouseUp);
 
-  // ─── State + reset ───────────────────────────────────────────────────────
   const state: GameState = {
     player: makePlayer(),
     bullets: [],
@@ -233,7 +222,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   };
   reset();
 
-  // ─── Loop ────────────────────────────────────────────────────────────────
   let rafId = 0;
   let lastFrame = performance.now();
   let accumulator = 0;
@@ -254,7 +242,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   };
   rafId = requestAnimationFrame(frame);
 
-  // ─── Simulation ──────────────────────────────────────────────────────────
   function tick(s: GameState, dt: number) {
     if (s.gameOver) {
       // Asteroids and enemies keep drifting on the game-over screen so it
@@ -269,7 +256,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       return;
     }
 
-    // ─── Player ─────────────────────────────────────────────────────────
     const p = s.player;
     let ax = 0;
     let ay = 0;
@@ -292,11 +278,9 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     }
     p.vel.x += ax * dt;
     p.vel.y += ay * dt;
-    // Velocity drag (frame-rate independent exp decay)
     const drag = Math.exp(-PLAYER_DRAG * dt);
     p.vel.x *= drag;
     p.vel.y *= drag;
-    // Speed cap
     const vmag = Math.hypot(p.vel.x, p.vel.y);
     if (vmag > PLAYER_MAX_SPEED) {
       p.vel.x = (p.vel.x / vmag) * PLAYER_MAX_SPEED;
@@ -313,7 +297,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       p.fireCd = PLAYER_FIRE_COOLDOWN;
     }
 
-    // ─── Bullets ────────────────────────────────────────────────────────
     for (const b of s.bullets) {
       if (!b.alive) {
         continue;
@@ -325,7 +308,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       }
     }
 
-    // ─── Asteroids ──────────────────────────────────────────────────────
     for (const a of s.asteroids) {
       if (!a.alive) {
         continue;
@@ -334,7 +316,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       a.rot += a.spin * dt;
     }
 
-    // ─── Enemies ────────────────────────────────────────────────────────
     for (const e of s.enemies) {
       if (!e.alive) {
         continue;
@@ -342,7 +323,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       const toPx = closestImageDelta(p.pos.x - e.pos.x, WORLD_W);
       const toPy = closestImageDelta(p.pos.y - e.pos.y, WORLD_H);
       const dist = Math.hypot(toPx, toPy) || 1;
-      // Light steering toward player, capped speed
       e.vel.x += (toPx / dist) * 60 * dt;
       e.vel.y += (toPy / dist) * 60 * dt;
       const evm = Math.hypot(e.vel.x, e.vel.y);
@@ -359,7 +339,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       }
     }
 
-    // ─── Spawns (difficulty ramps with elapsed time) ────────────────────
     const tSec = s.elapsedMs / 1000;
     s.asteroidSpawnCd -= dt;
     if (s.asteroids.length < 5 + Math.floor(tSec / 15) && s.asteroidSpawnCd <= 0) {
@@ -372,8 +351,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       s.enemySpawnCd = 10 - Math.min(6, tSec / 20);
     }
 
-    // ─── Collisions ─────────────────────────────────────────────────────
-    // Bullet × asteroid + bullet × enemy + bullet × player (hostile bullets)
     for (const b of s.bullets) {
       if (!b.alive) {
         continue;
@@ -411,7 +388,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
         }
       }
     }
-    // Player × asteroid + player × enemy
     if (p.invuln === 0) {
       for (const a of s.asteroids) {
         if (!a.alive) {
@@ -433,8 +409,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       }
     }
 
-    // ─── Compact dead entities periodically (every few seconds) ─────────
-    // Cheap inline filter — these arrays stay bounded.
     if ((s.elapsedMs | 0) % 500 < 17) {
       compact(s.bullets);
       compact(s.asteroids);
@@ -442,7 +416,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     }
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
   function render() {
     if (!ctx) {
       return;
@@ -452,7 +425,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     ctxR.setTransform(1, 0, 0, 1, 0, 0);
     ctxR.fillStyle = "#000";
     ctxR.fillRect(0, 0, canvas.width, canvas.height);
-    // Map world → canvas (with DPR scaling baked in)
     ctxR.setTransform(
       viewScale * dpr,
       0,
@@ -462,11 +434,9 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       viewOffsetY * dpr,
     );
 
-    // Arena background panel
     ctxR.fillStyle = "#02060a";
     ctxR.fillRect(0, 0, WORLD_W, WORLD_H);
 
-    // Starfield
     ctxR.fillStyle = accentColor;
     for (const s of state.stars) {
       ctxR.globalAlpha = s.brightness;
@@ -474,7 +444,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     }
     ctxR.globalAlpha = 1;
 
-    // Arena border
     ctxR.strokeStyle = accentColor;
     ctxR.lineWidth = 1.5;
     ctxR.globalAlpha = 0.35;
@@ -485,7 +454,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
 
     ctxR.restore();
 
-    // HUD in canvas pixel space
     drawHud(ctxR);
   }
 
@@ -494,14 +462,12 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.strokeStyle = accentColor;
     c.fillStyle = accentColor;
 
-    // Asteroids
     for (const a of state.asteroids) {
       if (!a.alive) {
         continue;
       }
       drawAtWrapped(c, a.pos, a.radius, () => drawAsteroid(c, a));
     }
-    // Bullets
     for (const b of state.bullets) {
       if (!b.alive) {
         continue;
@@ -510,8 +476,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       c.beginPath();
       c.arc(b.pos.x, b.pos.y, BULLET_RADIUS, 0, Math.PI * 2);
       if (b.hostile) {
-        // Inverted-accent outline so hostile fire is distinguishable from the
-        // player's accent-colored shots. Restore accent for later draws.
         c.strokeStyle = contrastColor;
         c.stroke();
         c.strokeStyle = accentColor;
@@ -521,7 +485,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     }
     c.globalAlpha = 1;
 
-    // Enemies
     for (const e of state.enemies) {
       if (!e.alive) {
         continue;
@@ -529,7 +492,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       drawAtWrapped(c, e.pos, ENEMY_RADIUS, () => drawEnemy(c, e));
     }
 
-    // Player (blink while invulnerable)
     const p = state.player;
     if (p.alive) {
       const blink = p.invuln > 0 && Math.floor(performance.now() / 80) % 2 === 0;
@@ -565,9 +527,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.save();
     c.translate(e.pos.x, e.pos.y);
     c.rotate(e.rot);
-    // Inverted silhouette: solid inverted-accent fill so enemies pop against
-    // the outline-only, accent-colored asteroids/player. Inner detail is a
-    // dark cutout. (drawEnemy's save/restore reverts fillStyle afterward.)
     c.fillStyle = contrastColor;
     c.beginPath();
     c.moveTo(ENEMY_RADIUS, 0);
@@ -585,7 +544,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.beginPath();
     c.arc(ENEMY_RADIUS * 0.15, 0, ENEMY_RADIUS * 0.18, 0, Math.PI * 2);
     c.stroke();
-    // Restore outer stroke for subsequent draws
     c.strokeStyle = accentColor;
     c.lineWidth = 2.2;
     c.restore();
@@ -602,7 +560,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.lineTo(-PLAYER_RADIUS * 0.85, -PLAYER_RADIUS * 0.75);
     c.closePath();
     c.stroke();
-    // Thrust flicker when accelerating
     if (
       keys.has("w") ||
       keys.has("a") ||
@@ -623,8 +580,7 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.restore();
   }
 
-  // Draw an entity at up to 4 wrapped offsets so wrap-around looks seamless
-  // near edges. Skips the offset copies if not near the relevant edge.
+  // Draw at up to 4 wrapped offsets so wrap-around is seamless near edges.
   function drawAtWrapped(
     c: CanvasRenderingContext2D,
     pos: Vec,
@@ -663,9 +619,7 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     const t = state.gameOver ? state.finalElapsedMs : state.elapsedMs;
     const mm = Math.floor(t / 60000).toString().padStart(2, "0");
     const ss = Math.floor((t % 60000) / 1000).toString().padStart(2, "0");
-    // Resolved per frame rather than cached: the HUD is redrawn every frame
-    // anyway, so this is what makes a language change show up without
-    // restarting the game.
+    // Resolved per frame so a language change shows without a restart.
     c.fillText(
       i18n.t("arcade:hud.score", {
         score: state.score.toString().padStart(6, "0"),
@@ -694,7 +648,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.restore();
   }
 
-  // ─── Stop ────────────────────────────────────────────────────────────────
   return {
     stop: () => {
       cancelAnimationFrame(rafId);
@@ -707,8 +660,6 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     },
   };
 }
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
 
 function makePlayer(): Player {
   return {
@@ -734,7 +685,6 @@ function makeStars(): Star[] {
 }
 
 function spawnBullet(s: GameState, from: Vec, angle: number, hostile: boolean) {
-  // Reuse a dead slot to keep the array bounded.
   let slot: Bullet | undefined;
   for (const b of s.bullets) {
     if (!b.alive) {
@@ -746,8 +696,7 @@ function spawnBullet(s: GameState, from: Vec, angle: number, hostile: boolean) {
   const life = hostile ? ENEMY_BULLET_LIFE : BULLET_LIFE;
   const vx = Math.cos(angle) * speed;
   const vy = Math.sin(angle) * speed;
-  // Spawn slightly forward of the firing entity so it doesn't self-hit
-  // and visually exits the hull cleanly.
+  // Spawn ahead of the hull so it doesn't self-hit.
   const px = from.x + Math.cos(angle) * 24;
   const py = from.y + Math.sin(angle) * 24;
   if (slot) {
@@ -770,7 +719,6 @@ function spawnBullet(s: GameState, from: Vec, angle: number, hostile: boolean) {
 }
 
 function spawnAsteroidAtEdge(radius: number): Asteroid {
-  // Pick a random edge; aim inward with some drift.
   const edge = Math.floor(Math.random() * 4);
   let x = 0;
   let y = 0;
@@ -922,11 +870,8 @@ function readAccent(): string {
 }
 
 /**
- * RGB-invert a CSS color. Normalizes any canvas-parseable color (the accent
- * arrives as `hsl(...)` from `--c-accent`) to RGB by round-tripping it through
- * the 2D context — the same parse the renderer already relies on — then
- * inverts each channel. Used to derive the enemy/hostile-bullet color from the
- * accent so the game stays single-accent and preference-free.
+ * RGB-invert a CSS color. Round-trips through the 2D context to normalise any
+ * canvas color (the accent arrives as `hsl(...)`) to RGB first.
  */
 function invertColor(color: string, ctx: CanvasRenderingContext2D): string {
   const prev = ctx.fillStyle;

@@ -1,42 +1,21 @@
 /*
- * Windowing the message log (#874).
- *
- * The log renders a bounded window of rows instead of the whole history, so
- * layout and paint stop scaling with how far back a conversation goes. The
- * windowing itself is `@tanstack/react-virtual`; this module is the part that
- * is specific to us — the bridge between "a message id" and "a live DOM row",
- * which three subsystems depend on and which windowing is what breaks.
- *
- * `messageJumpStore` (permalinks), `messageNavStore` (arrow-key focus) and the
- * reply-quote scroll all locate a row with `querySelector`. A row outside the
- * window is not in the document at all, so they cannot simply look: they have
- * to ASK for it first and wait for the render. `revealRow` is that ask, and it
- * is deliberately the only way any of them touch the DOM.
+ * Message-id ↔ live DOM row for the windowed log (#874). Rows outside the
+ * window aren't in the document, so permalinks, arrow-key nav and reply quotes
+ * must ASK via `revealRow`, the only way any of them touch the DOM. See
+ * `.codesight/wiki/ui.md` → "The windowed log".
  */
 
 import type { Virtualizer } from "@tanstack/react-virtual";
 
-/**
- * Row-height guesses, in rem so the estimate tracks the user's font setting
- * (a px constant would put a 20px-root user's window in the wrong place).
- * Only unmeasured rows use these — every row that has been on screen once is
- * remembered at its real height, keyed by timeline key, so the estimate stops
- * mattering as soon as the user has been there.
- */
+/** Row-height guesses in rem; only rows never yet measured use them. */
 const TERMINAL_ROW_REM = 2;
 const REFINED_ROW_REM = 3.25;
 
-/**
- * Rows kept mounted beyond each edge of the viewport. Generous on purpose:
- * the cost of an off-screen row is one row, and the benefit is that ordinary
- * one-step interactions (ArrowUp off the top edge, a reply quote a few rows
- * up) find their target already rendered and stay synchronous.
- */
+/** Rows mounted beyond each viewport edge, so one-step moves stay synchronous. */
 export const ROW_OVERSCAN = 10;
 
 export type MessageRowVirtualizer = Virtualizer<HTMLDivElement, Element>;
 
-/** Root font size in px, i.e. what 1rem currently means. */
 function rootFontSizePx(): number {
   const raw = parseFloat(
     getComputedStyle(document.documentElement).fontSize || "",
@@ -44,54 +23,27 @@ function rootFontSizePx(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 16;
 }
 
-/** Starting height guess for an unmeasured row of the given skin. */
 export function estimateRowPx(skin: string): number {
   const rem = skin === "refined" ? REFINED_ROW_REM : TERMINAL_ROW_REM;
   return rem * rootFontSizePx();
 }
 
-/**
- * How close to the top of the log counts as "asking for older messages".
- *
- * In rem, for the same reason the row estimates are (#934). This was a
- * hardcoded 150px, which at the 15px default happened to be ten lines of slack
- * — but a user on a 20px root gets taller rows and the SAME 150px, i.e. a
- * trigger that fires proportionally later in what they actually see. Ten rem
- * is 150px at 15px root by construction, so the default behaviour is unchanged
- * and only the scaling is new.
- */
+/** Distance from the top that triggers a load-more; rem so it scales (#934). */
 const LOAD_MORE_THRESHOLD_REM = 10;
 
-/**
- * The load-more threshold in px at the CURRENT root font size.
- *
- * Read per call rather than memoised: the font-size preference can change
- * under a mounted log, and this is one `getComputedStyle` on a scroll handler
- * that already reads three layout properties.
- */
+/** The load-more threshold in px, read per call so it follows a font-size change. */
 export function loadMoreThresholdPx(): number {
   return LOAD_MORE_THRESHOLD_REM * rootFontSizePx();
 }
 
-/**
- * The same value from an explicit root font size. Exported for the unit test
- * that pins the scaling — the DOM-reading wrapper above cannot be exercised
- * outside a browser.
- */
+/** The same from an explicit root size, for the unit test. */
 export function loadMoreThresholdPxAt(rootPx: number): number {
   return LOAD_MORE_THRESHOLD_REM * rootPx;
 }
 
-/**
- * What `revealRow` needs to know about the list. Deliberately three functions
- * rather than a component reference: the caller passes a ref-backed object, so
- * a reveal in flight always reads the CURRENT timeline instead of the one that
- * existed when the effect fired.
- */
+/** What `revealRow` needs; the caller passes a ref-backed object so an in-flight reveal reads the current timeline. */
 export interface MessageRowWindow {
-  /** The scroll container, or null before it mounts. */
   container: () => HTMLElement | null;
-  /** Timeline index of a message id, or undefined when the log has no such row. */
   indexOf: (messageId: string) => number | undefined;
   virtualizer: MessageRowVirtualizer;
 }
@@ -108,14 +60,7 @@ export function findRow(
   );
 }
 
-/**
- * Frames to wait for a row to appear after asking the window to move.
- *
- * The range recomputes on the scroll offset change, so in practice this
- * resolves on the first or second frame; the ceiling only exists so a target
- * that never renders (filtered out mid-flight, container detached) fails as a
- * null rather than as a hung promise.
- */
+/** Frames to wait for a row after moving the window; the cap turns a never-rendering target into null. */
 const MAX_REVEAL_FRAMES = 30;
 
 function nextFrame(): Promise<void> {
@@ -125,15 +70,9 @@ function nextFrame(): Promise<void> {
 }
 
 /**
- * Get a message's row into the live DOM and hand it back.
- *
- * Returns synchronously-resolved when the row is already rendered, which is
- * the common case and keeps ordinary navigation free. Otherwise it moves the
- * window to the row's index and waits for React to commit.
- *
- * `isCancelled` is checked after every frame so an effect that re-runs (a new
- * jump request, a conversation switch) can abandon an in-flight reveal instead
- * of scrolling somewhere the user has already left.
+ * Get a message's row into the live DOM and return it: immediately when
+ * rendered, else after moving the window and awaiting the commit.
+ * `isCancelled` is checked every frame so a re-run effect can abandon it.
  */
 export async function revealRow(
   win: MessageRowWindow,

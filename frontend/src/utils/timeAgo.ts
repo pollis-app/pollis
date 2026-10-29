@@ -1,8 +1,7 @@
 import i18n from "../i18n";
 import { toMs } from "./format";
 
-// Short, human-readable "time ago" string.
-// Accepts ISO strings, epoch ms, or epoch s.
+// Short "time ago" string from an ISO string, epoch ms or epoch s.
 export function timeAgo(input: string | number | Date): string {
   const d = input instanceof Date
     ? input

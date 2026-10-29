@@ -1,36 +1,29 @@
 import { invoke } from '../bridge';
 import type { User, Group, Channel, Message, AccountsIndex } from '../types';
 
-// ── Auth ───────────────────────────────────────────────────────────────────
-
 export async function requestOTP(email: string): Promise<void> {
   await invoke('request_otp', { email });
 }
 
-/// Backend `UserProfile` shape, including the optional fields the
-/// enrollment system layers in.
+/// Backend `UserProfile`, plus the enrollment fields.
 interface RawUserProfile {
   id: string;
   email: string;
   username: string;
-  /// First-device signup only — the freshly-generated Secret Key the
-  /// user must save once. Always undefined on subsequent logins.
+  /// First-device signup only: the new Secret Key, saved once.
   new_secret_key?: string;
-  /// True when this device must complete enrollment before accessing
-  /// the main app. Set when the user has an `account_id_pub` on the
-  /// server but no local `account_id_key`.
+  /// The server has `account_id_pub` but this device has no `account_id_key`.
   enrollment_required?: boolean;
 }
 
-/// Result of a successful authentication. The `user` is the normalized
-/// shape the rest of the app uses; `newSecretKey` and `enrollmentRequired`
-/// drive the post-auth routing decision.
+/// A successful authentication; `newSecretKey` and `enrollmentRequired` drive
+/// post-auth routing.
 export interface AuthResult {
   user: User;
   newSecretKey: string | null;
   enrollmentRequired: boolean;
-  /// Signed in by a QR device link (#1207): enrollment is approved on the
-  /// device that showed the code, so the gate shows no code to type.
+  /// QR device link (#1207): approval happens on the showing device, so the
+  /// gate shows no code.
   linked?: boolean;
 }
 
@@ -49,8 +42,7 @@ function rawProfileToAuthResult(profile: RawUserProfile, isResume: boolean): Aut
   };
 }
 
-/// The on-device diagnostics log with a short header (#1305) — local only;
-/// nothing is sent anywhere unless the user copies it out and sends it.
+/// The on-device diagnostics log with a header (#1305); local only.
 export async function getDiagnostics(): Promise<string> {
   return invoke<string>('get_diagnostics');
 }
@@ -59,8 +51,6 @@ export async function verifyOTP(email: string, code: string): Promise<AuthResult
   const profile = await invoke<RawUserProfile>('verify_otp', { email, code });
   return rawProfileToAuthResult(profile, false);
 }
-
-// ── PIN ────────────────────────────────────────────────────────────────────
 
 export interface UnlockStateSnapshot {
   last_active_user: string | null;
@@ -72,9 +62,8 @@ export async function getUnlockState(): Promise<UnlockStateSnapshot> {
   return invoke<UnlockStateSnapshot>('get_unlock_state');
 }
 
-/// Initial set (omit `oldPin`) or change (provide `oldPin`). The backend
-/// rewraps `db_key` and `account_id_key` under the new PIN, writes
-/// `pin_meta`, and drops the legacy `session_{uid}` blob on initial set.
+/// Initial set (no `oldPin`) or change: rewraps `db_key` and `account_id_key`
+/// under the new PIN.
 export async function setPin(newPin: string, oldPin?: string): Promise<void> {
   await invoke('set_pin', { newPin, oldPin: oldPin ?? null });
 }
@@ -83,13 +72,9 @@ export async function unlockWithPin(userId: string, pin: string): Promise<void> 
   await invoke('unlock', { userId, pin });
 }
 
-/// Finalize an enrollment after the user has set their PIN. Idempotent
-/// for the fresh-signup case: publishes the device cert + a fresh MLS
-/// key package, then external-joins every group/DM the user is already
-/// a member of where this device has no local MLS state. Run from the
-/// pin-create completion handler so it covers the fresh signup, the
-/// device-approval enrollment, the Secret-Key recovery, and the
-/// identity-reset paths uniformly.
+/// Finalize enrollment after the PIN is set: publish the device cert + key
+/// package, then external-join every group/DM lacking local MLS state.
+/// Idempotent; covers signup, approval, recovery and identity reset.
 export async function finalizeDeviceEnrollment(userId: string): Promise<void> {
   await invoke('finalize_device_enrollment', { userId });
 }
@@ -98,15 +83,13 @@ export async function lockUnlock(): Promise<void> {
   await invoke('lock');
 }
 
-/// Push this device's idle auto-lock window (#851) to the backend, which owns
-/// the deadline and the timer. `null` turns auto-lock off. Rust rejects any
-/// value the UI doesn't offer — see `AUTO_LOCK_OPTIONS` in `utils/autoLock.ts`.
+/// Push the idle auto-lock window (#851); `null` disables it. Rust rejects
+/// values not in `AUTO_LOCK_OPTIONS`.
 export async function setAutoLockTimeout(minutes: number | null): Promise<void> {
   await invoke('set_auto_lock_timeout', { minutes });
 }
 
-/// Tell the backend a human just interacted with this device, resetting the
-/// idle deadline. Throttled by the caller — never call this per keystroke.
+/// Reset the idle deadline. Callers throttle; never per keystroke.
 export async function reportUserActivity(): Promise<void> {
   await invoke('report_user_activity');
 }
@@ -119,15 +102,13 @@ export async function getSession(): Promise<AuthResult | null> {
   return rawProfileToAuthResult(profile, true);
 }
 
-// ── QR device link (#1207) ──────────────────────────────────────────────────
-// Mirrors pollis-core `commands::device_link`. Protocol and guardrails:
+// QR device link (#1207), mirroring `commands::device_link`; see
 // docs/qr-device-link-design.md.
 
 export interface DeviceLinkHandle {
   link_id: string;
-  /// `pollis-link:v1:<link_id>:<token>` — render as a QR, or copy for manual entry.
+  /// `pollis-link:v1:<link_id>:<token>`, shown as a QR or copied.
   qr_payload: string;
-  /// Unix seconds, server-set.
   expires_at: number;
 }
 
@@ -138,14 +119,12 @@ export type DeviceLinkStatus =
   | { state: 'tampered' }
   | { state: 'expired' };
 
-/// Create a link to show as a QR. The PIN is verified in Rust (same attempt
-/// counter as unlock), so this fails without it.
+/// Create a link to show as a QR; Rust verifies the PIN (unlock's attempt counter).
 export async function createDeviceLink(userId: string, pin: string): Promise<DeviceLinkHandle> {
   return invoke<DeviceLinkHandle>('create_device_link', { userId, pin });
 }
 
-/// Resolve when the link leaves `since` (its last `state`). One awaited call;
-/// the backoff and the deadline live in Rust, like `awaitEnrollmentApproval`.
+/// Resolve when the link leaves `since`; one awaited call, backoff in Rust.
 export async function awaitDeviceLink(userId: string, linkId: string, since: DeviceLinkStatus['state']): Promise<DeviceLinkStatus> {
   return invoke<DeviceLinkStatus>('await_device_link', { userId, linkId, since });
 }
@@ -158,13 +137,13 @@ export async function cancelDeviceLink(linkId: string): Promise<void> {
   await invoke('cancel_device_link', { linkId });
 }
 
-// ── QR sign-in shown by THIS (new) device (#1361) ──────────────────────────
+// QR sign-in shown by THIS (new) device (#1361).
 
 export interface DeviceOfferHandle {
   link_id: string;
-  /// `pollis-link:v2:<link_id>:<ephemeral public key>` — no secret.
+  /// `pollis-link:v2:<link_id>:<ephemeral public key>`; no secret.
   qr_payload: string;
-  /// Unix seconds, server-set. Show a fresh code after this.
+  /// Unix seconds; show a fresh code after this.
   expires_at: number;
 }
 
@@ -172,14 +151,12 @@ export type DeviceOfferWait =
   | { state: 'signed_in'; profile: RawUserProfile }
   | { state: 'expired' };
 
-/// Offer a code for a signed-in phone to scan. Replaces any earlier offer.
 export async function createDeviceOffer(deviceName: string): Promise<DeviceOfferHandle> {
   return invoke<DeviceOfferHandle>('create_device_offer', { deviceName });
 }
 
-/// Resolve when a signed-in device accepts the code (signed in, enrollment
-/// still to do) or when it lapses. One awaited call; the backoff and the
-/// deadline live in Rust.
+/// Resolve when a signed-in device accepts (enrollment still to do) or the
+/// code lapses; one awaited call.
 export async function awaitDeviceOffer(linkId: string): Promise<
   { state: 'signed_in'; result: AuthResult } | { state: 'expired' }
 > {
@@ -194,13 +171,10 @@ export async function cancelDeviceOffer(): Promise<void> {
   await invoke('cancel_device_offer');
 }
 
-/// Sign in by a code from another device's QR — pasted, on desktop.
 export async function claimDeviceLink(payload: string, deviceName: string): Promise<AuthResult> {
   const profile = await invoke<RawUserProfile>('claim_device_link', { payload, deviceName });
   return { ...rawProfileToAuthResult(profile, false), linked: true };
 }
-
-// ── Device enrollment ───────────────────────────────────────────────────────
 
 export interface EnrollmentHandle {
   request_id: string;
@@ -214,12 +188,8 @@ export type EnrollmentStatus =
   | { status: 'rejected' }
   | { status: 'expired' };
 
-/// One open enrollment request, as the APPROVING device sees it.
-///
-/// No verification code, on purpose (#1096) — the approver types the code shown
-/// on the new device, and Rust checks it against the value derived from the
-/// ephemeral key it fetched. The server's stored copy used to be here and the UI
-/// submitted it back verbatim, which made the SAS comparison a formality.
+/// An open enrollment request as the APPROVING device sees it. No code (#1096):
+/// the approver types the new device's code and Rust checks it.
 export interface PendingEnrollmentRequest {
   request_id: string;
   new_device_id: string;
@@ -236,14 +206,9 @@ export async function pollEnrollmentStatus(requestId: string): Promise<Enrollmen
 }
 
 /**
- * Resolves once the enrollment request reaches a terminal state (#874).
- *
- * Replaces a 2-second `setInterval` in the renderer. The new device is
- * pre-enrollment and cannot be pushed to, so the answer does have to be
- * fetched — but the fetching, its backoff, and its stop condition live in
- * Rust, which is the only place that can bound them against the request's own
- * TTL. Long-lived by design: this promise is meant to be outstanding for as
- * long as the user is walking to their other device.
+ * Resolves when the enrollment request reaches a terminal state (#874). The
+ * pre-enrollment device can't be pushed to, so Rust fetches with backoff,
+ * bounded by the request's TTL. Meant to stay outstanding for minutes.
  */
 export async function awaitEnrollmentApproval(requestId: string): Promise<EnrollmentStatus> {
   return invoke('await_enrollment_approval', { requestId });
@@ -265,17 +230,14 @@ export async function recoverWithSecretKey(userId: string, secretKey: string): P
   await invoke('recover_with_secret_key', { userId, secretKey });
 }
 
-/// Soft recovery. Destructive — orphans every existing device, removes
-/// the user from every group, and returns a brand-new Secret Key the
-/// frontend MUST display once and gate navigation on.
+/// Soft recovery. Destructive: orphans every device, leaves every group, and
+/// returns a new Secret Key the UI MUST show once and gate on.
 export async function resetIdentityAndRecover(
   userId: string,
   confirmEmail: string,
 ): Promise<string> {
   return invoke<string>('reset_identity_and_recover', { userId, confirmEmail });
 }
-
-// ── Security events ────────────────────────────────────────────────────────
 
 export interface SecurityEvent {
   id: string;
@@ -325,8 +287,8 @@ export interface ExportSummary {
   attachments_missing: MissingAttachment[];
 }
 
-/// On-device plaintext export (#856). `path` is a save-dialog result; the
-/// archive is written by Rust straight from the local DB — no network.
+/// On-device plaintext export (#856) to a save-dialog path, written by Rust from
+/// the local DB.
 export async function exportArchive(
   path: string,
   conversationId?: string,
@@ -340,8 +302,7 @@ export interface FetchSummary {
   failed: { content_hash: string; file: string; error: string }[];
 }
 
-/// The opt-in second step of the export — the ONE network call in the
-/// feature, only ever behind its own separately-worded button.
+/// The export's opt-in second step: its ONE network call.
 export async function fetchExportAttachments(
   filesDir: string,
   attachments: MissingAttachment[],
@@ -373,14 +334,11 @@ export async function revokeDevice(userId: string, deviceId: string): Promise<vo
   await invoke('revoke_device', { userId, deviceId });
 }
 
-// Whether this device is still registered for `userId`. `false` means it was
-// revoked and the caller should sign out. Spoof-resistant: confirmed against
-// the backend rather than a (forgeable) realtime nudge.
+// Whether this device is still registered (false = revoked; sign out),
+// confirmed with the backend rather than a forgeable nudge.
 export async function isCurrentDeviceRegistered(userId: string): Promise<boolean> {
   return invoke('is_current_device_registered', { userId });
 }
-
-// ── User ───────────────────────────────────────────────────────────────────
 
 export interface UserProfileData {
   id: string;
@@ -413,8 +371,6 @@ export async function updateUserProfile(
 export async function searchUserByUsername(username: string): Promise<UserProfileData | null> {
   return invoke('search_user_by_username', { username });
 }
-
-// ── Groups ─────────────────────────────────────────────────────────────────
 
 import { deriveSlug } from '../utils/urlRouting';
 
@@ -469,10 +425,7 @@ export async function listUserGroups(userId: string): Promise<Group[]> {
   return (groups || []).map(toGroup);
 }
 
-// #917: members-only on the Rust side, so the caller's id is now part of the
-// request rather than implied. It is passed explicitly instead of being read
-// from a store in here, because this module is a thin transport layer and the
-// hooks already hold the current user.
+// #917: members-only in Rust, so the requester id is passed explicitly.
 export async function listChannels(groupId: string, requesterId: string): Promise<Channel[]> {
   const channels = await invoke<RawChannel[]>('list_group_channels', { groupId, requesterId });
   return (channels || []).map(toChannel);
@@ -520,8 +473,6 @@ export async function updateGroup(groupId: string, name: string, description: st
   });
 }
 
-// ── Messages ───────────────────────────────────────────────────────────────
-
 type RawMessage = {
   id: string;
   conversation_id: string;
@@ -567,15 +518,3 @@ export async function sendMessage(
   });
   return toMessage(m);
 }
-
-// R2 media round-trips do NOT live here. Uploads go through
-// `services/r2-upload.ts`, which is also the only caller of the
-// `download_file` command — the `uploadFile` / `downloadFile` wrappers this
-// module used to export had no callers at all (#929).
-//
-// Neither do the Clerk-era auth/profile stubs (`authenticateWithClerk`,
-// `cancelAuth`, `getServiceUserData`, `updateServiceUserData`,
-// `updateServiceUserAvatar`). Clerk has not been the auth path for a long
-// time; four of the five existed only to throw, and nothing called any of
-// them. Auth is `requestOTP` / `verifyOTP`; profiles are `getUserProfile` /
-// `updateUserProfile`, both above.

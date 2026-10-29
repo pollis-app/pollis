@@ -108,7 +108,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 </p>
               </div>
 
-              {/* Known accounts row — most recent 3, sorted by last_seen desc */}
               {knownAccounts.length > 0 && authStep === "email" && (
                 <div className="flex flex-col gap-1">
                   <p className="text-xs font-mono text-muted">

@@ -12,9 +12,8 @@ interface PinEntryScreenProps {
   userId: string;
   username?: string;
   onUnlocked: () => void | Promise<void>;
-  // Routes to the Secret-Key recovery flow. After 10 wrong attempts the
-  // backend wipes the wrapped blobs, so this is also how a user who
-  // locked themselves out re-enrolls.
+  // Secret-Key recovery; also the way back in after 10 wrong attempts, when
+  // the backend wipes the wrapped blobs.
   onForgotPin: () => void;
   onSwitchAccount?: () => void;
 }

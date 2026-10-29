@@ -3,20 +3,12 @@ import { useTranslation } from "react-i18next";
 import { MessagesSquare } from "lucide-react";
 
 interface ThreadReplyCountProps {
-  /** Replies this device holds for this message's thread. */
   count: number;
-  /** Omitted where threads aren't available, which also hides the affordance. */
+  /** Omitted where threads aren't available, hiding the affordance. */
   onOpen?: () => void;
 }
 
-/**
- * The "N replies" affordance under a message that has a thread (#825) — the
- * only discoverable entry point into a thread from the channel, mirroring how
- * Slack surfaces one.
- *
- * Renders nothing when there are no replies, so an ordinary message is
- * completely unchanged.
- */
+/** The "N replies" entry into a thread (#825); nothing when there are none. */
 export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
   count,
   onOpen,

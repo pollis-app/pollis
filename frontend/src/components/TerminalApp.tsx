@@ -3,34 +3,24 @@ import { RouterProvider } from "@tanstack/react-router";
 import { createAppRouter } from "../router";
 import { historyNavStore } from "../stores/historyNavStore";
 
-// ─── TerminalApp ──────────────────────────────────────────────────────────────
-
 interface TerminalAppProps {
   onLogout: () => void;
   onLock: () => void;
   onDeleteAccount?: () => void;
 }
 
-/**
- * TerminalApp creates the in-memory TanStack Router and provides it to the
- * component tree. All chrome (TitleBar, VoiceBar, bottom breadcrumb bar) and
- * navigation logic lives in AppShell (the root route component).
- */
+/** Creates the in-memory router; chrome and navigation live in AppShell. */
 export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onLock, onDeleteAccount }) => {
-  // Create the router once. The router context carries the auth callbacks that
-  // page components (e.g. RootPage, SettingsPage) need to trigger logout /
-  // account deletion without prop drilling.
+  // Created once; the context carries the auth callbacks pages need.
   const router = useMemo(
     () => createAppRouter({ onLogout, onLock, onDeleteAccount }),
-    // Stable references — callbacks are defined with useCallback in App.tsx
-    // and do not change between renders.
+    // The callbacks are stable (useCallback in App.tsx).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
-  // Track the history cursor here, where the router lives, rather than in the
-  // chrome that reads it — `BreadcrumbNav` mounts and unmounts (skin changes,
-  // routes without the bar) and would forget the forward stack each time.
+  // Track the history cursor where the router lives: `BreadcrumbNav` remounts
+  // and would forget the forward stack.
   useEffect(() => {
     return historyNavStore.attach(router.history);
   }, [router]);

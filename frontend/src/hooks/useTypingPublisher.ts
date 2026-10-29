@@ -5,15 +5,10 @@ import { useObserver } from "mobx-react-lite";
 import { TYPING_REFRESH_MS } from "../stores/typingStore";
 
 /**
- * Returns a `notify(value)` callback that the chat input should fire on every
- * keystroke. Internally throttles to one `is_typing: true` packet every
- * TYPING_REFRESH_MS, and emits a single `is_typing: false` when the input
- * goes empty, the component unmounts, or the user stops typing for the
- * full refresh window.
- *
- * The publish target is a LiveKit room — `roomId` is the group's MLS group
- * id for channels and the DM conversation id for DMs. Pass `null` for
- * either id when not applicable; the receiver routes by whichever is set.
+ * A `notify(value)` to call on every keystroke: at most one `is_typing: true`
+ * per TYPING_REFRESH_MS, and one `false` when the input empties, on unmount,
+ * or after a full window of no typing. `roomId` is the group's MLS id or the
+ * DM conversation id.
  */
 export function useTypingPublisher(args: {
   roomId: string | null;
@@ -23,11 +18,6 @@ export function useTypingPublisher(args: {
   const { roomId, channelId, conversationId } = args;
   const currentUser = useObserver(() => appStore.currentUser);
 
-  // We avoid hammering publish_typing on every keystroke by tracking the
-  // last-sent timestamp and only re-emitting once the throttle window has
-  // elapsed. The trailing "stop" signal fires from a deferred timer the
-  // refresh resets — when the timer finally lands, the user is by
-  // definition no longer typing.
   const lastSentRef = useRef(0);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isActiveRef = useRef(false);
@@ -45,7 +35,6 @@ export function useTypingPublisher(args: {
         username: currentUser.username ?? null,
         isTyping,
       }).catch((err) => {
-        // Non-fatal — typing is best-effort.
         console.warn("[typing] publish_typing failed:", err);
       });
     },
@@ -66,7 +55,6 @@ export function useTypingPublisher(args: {
 
   const notify = useCallback(
     (value: string) => {
-      // Empty input means the user is no longer composing — clear immediately.
       if (value.trim().length === 0) {
         stop();
         return;
@@ -77,9 +65,7 @@ export function useTypingPublisher(args: {
         isActiveRef.current = true;
         publish(true);
       }
-      // Reset the trailing-stop timer. If the user keeps typing this never
-      // fires; if they pause for longer than the refresh window we declare
-      // them done and emit a stop.
+      // Reset the trailing-stop timer; a full pause emits a stop.
       if (stopTimerRef.current) {
         clearTimeout(stopTimerRef.current);
       }
@@ -90,9 +76,7 @@ export function useTypingPublisher(args: {
     [publish, stop],
   );
 
-  // Stop on unmount (component teardown / navigation away) and also when
-  // the room context changes — we don't want the previous room to keep
-  // rendering us as typing if the user switched channels mid-keystroke.
+  // Stop on unmount and on room change, so the old room doesn't show us typing.
   useEffect(() => {
     return () => {
       stop();

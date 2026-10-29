@@ -9,37 +9,28 @@ import { voiceSession, type JoinedEvent, type LeftEvent } from './VoiceSessionMa
 
 interface VoiceBridgeOptions {
   queryClient: QueryClient;
-  /** Reads the current preferences blob (e.g. `usePreferences().query.data`). */
   preferencesProvider: () => unknown;
 }
 
 interface BridgeHandle {
-  /** Tear down all listeners. Call from a `useEffect` cleanup if needed. */
   dispose: () => void;
 }
 
 /**
- * Wires voice session lifecycle events to the surrounding app: SFX cues,
- * React Query cache invalidation, and `publish_voice_presence` broadcasts.
- *
- * Designed to be installed once at app boot from a top-level component that
- * has access to the query client. The manager itself stays free of these
- * concerns.
+ * Wires voice session events to SFX, query invalidation and
+ * `publish_voice_presence`; installed once at boot so the manager stays free
+ * of them.
  */
 export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
   const { queryClient } = opts;
 
-  // Allow the manager to read preferences (APM config + user volumes) at
-  // join time without taking a React-Query dep itself.
+  // Preferences (APM, user volumes) read at join, without a React Query dep.
   voiceSession.configure({
     preferencesProvider: opts.preferencesProvider as () => never,
   });
 
-  // ── SFX coordination ────────────────────────────────────────────────────
-  // When the user switches from one voice room straight into another, both
-  // a `left` and a `joined` event fire back-to-back. The user perceives
-  // this as a single transition, not two events — so defer the leave cue by
-  // a macrotask, and if a join lands first, cancel both cues.
+  // A room switch fires `left` then `joined` back-to-back: defer the leave cue
+  // a macrotask and cancel both if a join lands first.
   let pendingLeaveSfx: ReturnType<typeof setTimeout> | null = null;
   let suppressNextJoinSfx = false;
 
@@ -66,9 +57,7 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       }).catch(logIgnored);
     }
 
-    // LiveKit doesn't echo our own broadcast back, so the observers in
-    // other clients refetch but we don't. Invalidate locally so the
-    // sidebar "N in call" label updates for the joining user too.
+    // LiveKit doesn't echo our broadcast, so invalidate locally too.
     invalidateVoiceRoom(queryClient, event.channelId);
   });
 
@@ -81,9 +70,7 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       pendingLeaveSfx = null;
     }, 0);
 
-    // If this client initiated a 1:1 call and the callee never picked up
-    // (outgoingCall still set when we leave the matching room), notify the
-    // callee to stop ringing. Mirrors the decline path in AppShell.
+    // Our unanswered outgoing call: tell the callee to stop ringing.
     const outgoing = appStore.outgoingCall;
     if (outgoing && event.channelId === `call-${outgoing.callId}`) {
       const { callId, calleeId } = outgoing;
@@ -91,23 +78,16 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       invoke('cancel_call', { otherUserId: calleeId, callId }).catch((e) => console.warn('cancel_call failed', e));
     }
 
-    // Optimistically remove ourselves from the cached observer list so the UI
-    // drops us immediately instead of waiting for the LiveKit RoomService
-    // refetch to round-trip. event.identity is our full per-device identity, so
-    // a sibling device of ours still in the room is left in place.
+    // Optimistically drop our own device identity from the cached observers
+    // (a sibling device stays).
     queryClient.setQueryData<Array<{ identity: string; name: string }>>(
       voiceQueryKeys.participants(event.channelId),
       (prev) => (prev ? prev.filter((p) => p.identity !== event.identity) : prev),
     );
 
     if (event.groupId) {
-      // Order matters: the voice disconnect must already be observable on
-      // LiveKit before we broadcast voice_left and invalidate. Otherwise
-      // observers refetch while LiveKit still counts us as present, and the
-      // "N in call" label stays stuck at the old value.
-      //
-      // The manager has already finished `leave_voice_channel` by the time
-      // this event fires, so there's no extra wait needed here.
+      // The disconnect is already visible to LiveKit (the manager finished
+      // `leave_voice_channel`); broadcasting earlier would leave "N in call" stale.
       invoke('publish_voice_presence', {
         groupId: event.groupId,
         channelId: event.channelId,

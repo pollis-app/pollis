@@ -1,13 +1,7 @@
 /**
- * Delivery / read receipts for DMs (#857).
- *
- * Receipts live in the device-local `message_receipt` table, per message and
- * per reader — never a single boolean — so a DM with several members renders
- * "3 of 5 read" from the same data a 1:1 DM renders a single tick from.
- *
- * Nothing here polls. Receipts arrive as MLS control envelopes on the ordinary
- * message path, so the same realtime hint that triggers a message ingest also
- * refreshes this query (see `useLiveKitRealtime`).
+ * DM delivery / read receipts (#857), device-local per message and reader.
+ * No polling: receipts arrive as MLS control envelopes, refreshed by the same
+ * realtime hint as messages.
  */
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
@@ -19,13 +13,8 @@ export const receiptQueryKeys = {
 };
 
 /**
- * Every receipt this device holds for one DM, keyed by message id for O(1)
- * lookup while rendering a list.
- *
- * Returns an empty map for a null conversation, for group channels (which never
- * have receipts), and while the user's reciprocal opt-out is off — in the last
- * case because the Rust side genuinely stores none, not because the UI is
- * hiding them.
+ * Every receipt for one DM, keyed by message id. Empty for group channels and
+ * when the user opted out (Rust then stores none).
  */
 export function useConversationReceipts(conversationId: string | null) {
   const query = useQuery({

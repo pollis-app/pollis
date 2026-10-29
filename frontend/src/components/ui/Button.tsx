@@ -21,20 +21,10 @@ interface ButtonProps {
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
   autoFocus?: boolean;
   "aria-label"?: string;
-  /**
-   * Selected state for a button acting as a toggle — e.g. one option in a
-   * group of mutually exclusive choices. Without it a "selected" option is
-   * announced identically to an unselected one, since the distinction is
-   * carried only by the `primary` variant's colour.
-   */
+  /** Selected state for a toggle-style option; otherwise only colour carries it. */
   "aria-pressed"?: boolean;
   "data-testid"?: string;
-  /**
-   * Outcome of the last copy this button performed — `idle`, `copied` or
-   * `failed`. The same marker the message copy-link button carries (#889), so
-   * a copy affordance's three states are assertable wherever one is rendered
-   * through this component (#898).
-   */
+  /** `idle` / `copied` / `failed`, the marker copy affordances carry (#889, #898). */
   "data-copy-state"?: string;
 }
 
@@ -56,8 +46,7 @@ export const Button: React.FC<ButtonProps> = ({
   "data-copy-state": copyState,
 }) => {
   const { t } = useTranslation("common");
-  // Resolved here rather than as a default parameter value so the fallback
-  // follows a language change instead of snapshotting the boot language.
+  // Resolved at render so the fallback follows a language change.
   const resolvedLoadingText = loadingText ?? t("states.buttonLoading");
   const isPrimary = variant === "primary";
   const isDanger = variant === "danger";

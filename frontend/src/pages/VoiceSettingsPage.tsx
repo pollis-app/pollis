@@ -34,7 +34,6 @@ const CAMERA_DEVICE_KEY = "pollis:camera-device";
 
 interface DeviceSelectProps {
   label: string;
-  // Structural `{ id, name }` so both AudioDevice and CameraSource fit.
   devices: { id: string; name: string }[];
   value: string;
   onChange: (id: string) => void;
@@ -76,8 +75,7 @@ interface NoiseSuppressionSelectProps {
   onChange: (level: NoiseSuppressionLevel) => void;
 }
 
-// The option values are wire values (persisted in preferences and passed to the
-// Rust APM) — only the labels are translated, keyed off the value.
+// Option values are wire values; only labels are translated.
 const NOISE_SUPPRESSION_LABEL_KEY: Record<NoiseSuppressionLevel, string> = {
   off: "settings.noiseSuppressionOff",
   low: "settings.noiseSuppressionLow",
@@ -119,7 +117,6 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
   );
 };
 
-/** fps → the key of the one-line use-case hint shown under the selector. */
 const SCREEN_SHARE_FPS_HINT_KEYS: Record<number, string> = {
   15: "settings.fpsHintDocuments",
   30: "settings.fpsHintStandard",
@@ -166,11 +163,8 @@ const PERMISSION_LABEL_KEY: Record<PermissionState, string> = {
   unsupported: "settings.permissionUnsupported",
 };
 
-/** One camera/mic permission row: status + a deep-link to System Settings.
- *  An app can't grant/revoke its own OS grant — only the user can — so the
- *  action is always "take me there", never an in-app toggle (issue #434). The
- *  deep-link only exists where the OS has a per-app privacy model (macOS /
- *  Windows); on Linux (`perSession`) there's nothing to link to. */
+/** A camera/mic permission row. The app can't change its own OS grant, so the
+ *  action deep-links to System Settings (#434), where one exists. */
 const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage: () => void }> = ({
   label,
   state,
@@ -195,16 +189,13 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
   );
 };
 
-// The token-backed half of the `<select>` skin — surface fill, foreground text
-// and the 2px hairline — as utilities. Paired with `selectStyle` below, which
-// keeps only what has no utility equivalent.
+// Token-backed select skin; `selectStyle` keeps what has no utility.
 const selectClass = "bg-surface text-fg border-2 border-line";
 
 const selectStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
-  // Logical padding: the trailing 28px reserves room for the caret, which
-  // sits on the inline-END edge and therefore swaps sides under `dir=rtl`.
+  // Logical padding: the caret sits on the inline-END edge, which swaps under RTL.
   paddingBlock: "6px",
   paddingInlineStart: "8px",
   paddingInlineEnd: "28px",
@@ -216,17 +207,12 @@ const selectStyle: React.CSSProperties = {
   width: "100%",
 };
 
-/**
- * Push the live APM config to the backend if the user is currently in a
- * voice channel. No-op otherwise (the backend command is itself a no-op
- * when no session is active).
- */
+/** Push the live APM config; the backend no-ops outside a voice session. */
 async function pushApmConfig(config: ApmConfig): Promise<void> {
   try {
     await invoke("set_voice_audio_processing", { config });
   } catch (e) {
-    // Best-effort — the next join_voice_channel will pass the full config
-    // anyway, so a transient IPC failure here is harmless.
+    // Best-effort: the next join passes the full config anyway.
     console.warn("[VoiceSettings] set_voice_audio_processing failed:", e);
   }
 }
@@ -251,9 +237,8 @@ export const VoiceSettingsPage: React.FC = observer(() => {
       const outs = devices.filter((d) => d.kind === "output");
       setInputs(ins);
       setOutputs(outs);
-      // Reset stale prefs: a saved id that's no longer enumerated would make
-      // the <select> silently fall back to its first option, so the dropdown
-      // shows one device while voice tries to open another. Clear it instead.
+      // Clear a saved id that's no longer enumerated, or the <select> shows one
+      // device while voice opens another.
       if (selectedInput !== "default" && !ins.some((d) => d.id === selectedInput)) {
         setSelectedInputState("default");
         void voiceSession.setInputDevice("default");
@@ -284,19 +269,14 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     }
   };
 
-  // ── Camera picker + preview (issue #434) ──────────────────────────────────
-  // All state lives in `cameraPreviewStore` — a discriminated union so invalid
-  // combos (error beside a live preview, a preview with no device, live while
-  // enumerating) are unrepresentable. Preview is OFF by default; the user opts
-  // in with the toggle (a settings page must not silently light the camera).
+  // Camera picker + preview (#434): state in `cameraPreviewStore`. Off by
+  // default; a settings page must not silently light the camera.
   const cam = cameraPreviewStore.state;
 
-  // OS camera/mic permission status (issue #434) — refetches on window focus, so
-  // returning from System Settings reflects the change without a manual refresh.
+  // Refetches on focus, so returning from System Settings updates it.
   const permissions = useMediaPermissions();
 
-  // The invoke resolves once capture has started; drive the union off it — no
-  // separate "started" event needed.
+  // The invoke resolves once capture started; no separate event.
   const runPreview = (id: string) => {
     cameraSession
       .startPreview(id)
@@ -320,7 +300,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     try { localStorage.setItem(CAMERA_DEVICE_KEY, id); } catch { /* ignore */ }
     const wasPreviewing = cameraPreviewStore.isPreviewing;
     cameraPreviewStore.select(id);
-    // `select` kept us in `starting` when previewing — actually restart capture.
+    // `select` kept us `starting`; actually restart capture.
     if (wasPreviewing) { runPreview(id); }
   };
 
@@ -341,10 +321,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * Persist a partial preference change and push the resulting APM config to
-   * the backend so mid-call changes take effect immediately.
-   */
+  /** Persist a change and push the APM config so mid-call changes apply now. */
   const savePrefsAndPushApm = (patch: Partial<PreferencesData>) => {
     const next: PreferencesData = { ...preferences.query.data, ...patch };
     preferences.save(next);
@@ -365,8 +342,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
   const inputMode: VoiceInputMode =
     preferences.query.data?.voice_input_mode ?? VOICE_INPUT_MODE_DEFAULT;
-  // Persist, then push to the Rust gate so a mid-call change takes effect
-  // immediately rather than at the next join.
+  // Persist, then push to the Rust gate so a mid-call change applies now.
   const handleInputMode = (mode: VoiceInputMode) => {
     preferences.save({ ...preferences.query.data, voice_input_mode: mode });
     void voiceSession.setInputMode(mode);
@@ -429,8 +405,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 onChange={setCamera}
                 fallbackLabel={t("settings.noCameraOption")}
               />
-              {/* Self-preview (mirrored). Off by default — the user opts in. 16:9
-                  letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
+              {/* Self-preview, 16:9 letterbox; RemoteVideoTile auto-mirrors the key. */}
               <div
                 data-testid="voice-camera-preview"
                 className="flex items-center justify-center overflow-hidden rounded border border-line"
@@ -499,12 +474,10 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             {t("settings.testHeading")}
           </h2>
 
-          {/* ── Microphone test ────────────────────────────────────────── */}
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
             <span className="text-muted">{t("settings.microphone")}</span>
 
-            {/* Level meter. Reserves its height even when idle so the
-                layout doesn't jump on start/stop. */}
+            {/* Reserves its height when idle so the layout doesn't jump. */}
             <div
               data-testid="voice-test-meter"
               aria-label={t("settings.micLevelLabel")}
@@ -568,8 +541,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
               </div>
             </div>
 
-            {/* Always rendered so the section height doesn't jump when the
-                mic test starts/stops. Disabled unless the mic test is live. */}
+            {/* Always rendered so the height doesn't jump; disabled unless testing. */}
             <Switch
               className="mt-4"
               label={t("settings.hearMyself")}
@@ -580,7 +552,6 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             />
           </div>
 
-          {/* ── Speaker test ───────────────────────────────────────────── */}
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
             <span className="text-muted">{t("settings.speaker")}</span>
             <div className="flex flex-wrap gap-2">
@@ -602,8 +573,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
               >
                 {t("settings.playChime")}
               </Button>
-              {/* Always rendered so the row doesn't grow/shrink when a tone
-                  starts/stops. Disabled when there's nothing to stop. */}
+              {/* Always rendered so the row doesn't shift; disabled when idle. */}
               <Button
                 data-testid="voice-test-stop-playback"
                 variant="secondary"

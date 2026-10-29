@@ -14,12 +14,8 @@ interface MemberRowProps {
 }
 
 /**
- * One person in the right panel's member list. Clicking opens their profile,
- * matching how member rows behave on the group Members page.
- *
- * Skin split mirrors the left sidebar's DM rows exactly: refined shows the
- * avatar with the presence dot anchored to it, terminal shows the bare dot so
- * every row stays one text-line tall.
+ * One person in the member list; clicking opens their profile. Refined shows
+ * the avatar + presence dot, terminal the bare dot (one text line tall).
  */
 export const MemberRow: React.FC<MemberRowProps> = observer(
   ({ userId, label, avatarKey, isAdmin }) => {

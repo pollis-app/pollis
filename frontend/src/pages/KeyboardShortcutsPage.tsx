@@ -18,10 +18,8 @@ interface Row {
   isOverridden: boolean;
 }
 
-// Build the canonical combo string from a captured keydown. Mirrors the
-// format consumed by parseCombo (`mod`, `alt`, `shift`, then the key).
-// metaKey OR ctrlKey collapses to `mod` to match the platform-primary
-// convention used by the defaults.
+// The canonical combo from a captured keydown (parseCombo's format); metaKey or
+// ctrlKey collapses to `mod`.
 function comboFromEvent(e: KeyboardEvent): string | null {
   const k = e.key;
   if (k === "Meta" || k === "Control" || k === "Alt" || k === "Shift") {
@@ -47,9 +45,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
   const overrides = query.data?.shortcut_overrides ?? {};
   const [capturingId, setCapturingId] = useState<ShortcutCommandId | null>(null);
 
-  // Command titles are stored as translation keys (see `keyboard/commands.ts`)
-  // and resolved here, at render time, so switching language re-labels the
-  // list instead of leaving it on whatever language the module was imported in.
+  // Titles resolved at render so a language switch re-labels the list.
   const rows: Row[] = ALL_SHORTCUT_COMMAND_IDS.map((id) => {
     const meta = SHORTCUT_COMMANDS[id];
     const override = overrides[id];
@@ -61,9 +57,8 @@ export const KeyboardShortcutsPage: React.FC = () => {
     };
   });
 
-  // Until the preferences query resolves we can't safely merge — writing
-  // `{ shortcut_overrides: ... }` alone would clobber accent_color, etc.
-  // Editing is disabled in the UI below until `data` is present.
+  // Editing waits for prefs: writing `{ shortcut_overrides }` alone would
+  // clobber the rest.
   const dataLoaded = !!query.data;
   const persistOverrides = useCallback(
     (next: { [commandId: string]: string }) => {
@@ -84,8 +79,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
     [overrides, persistOverrides],
   );
 
-  // Capture-phase listener so the global shortcut dispatcher (bubble phase)
-  // never sees the event while we're rebinding.
+  // Capture phase so the bubble-phase dispatcher never sees a rebind keystroke.
   useEffect(() => {
     if (!capturingId) {
       return;
@@ -95,9 +89,8 @@ export const KeyboardShortcutsPage: React.FC = () => {
       e.stopPropagation();
       e.stopImmediatePropagation();
 
-      // Esc with no modifiers cancels capture. Esc + any modifier is a
-      // valid binding (e.g. Shift+Esc); to bind plain Esc, use Reset on
-      // a command whose default is escape (e.g. nav.back).
+      // Plain Esc cancels capture; Esc + modifier is bindable. Plain Esc is
+      // reachable via Reset on a command that defaults to it.
       if (
         e.key === "Escape" &&
         !e.metaKey &&

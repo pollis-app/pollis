@@ -1,9 +1,5 @@
-// Fullscreen viewer for a participant's screen share. Mounted at the
-// AppShell level so it covers the route view but stays inside the app
-// chrome (TitleBar / Breadcrumb / VoiceBar). The viewer toggles with
-// `viewingScreenShareTrackKey`: a participant tile sets it on click,
-// and either the X button OR a click anywhere on the video area
-// clears it (returning to the in-tile preview).
+// Fullscreen viewer for a participant's screen share, inside the app chrome.
+// Toggled by `viewingScreenShareTrackKey`; the X or a click on the video clears it.
 
 import React from "react";
 import { X } from "lucide-react";
@@ -29,15 +25,13 @@ export const ScreenShareViewer: React.FC = observer(() => {
   const share = shareOf(voiceState);
   const screenShareLocalActive = share.kind === 'active';
   const screenShareLocalDimensions = share.kind === 'active' ? share.dimensions : null;
-  // Live frame stats for the viewed track (fps + dimensions). Keyed by the
-  // same track key the tile uses; inert when nothing is being viewed.
+  // Inert when nothing is viewed.
   const stats = useScreenShareStats(viewingScreenShareTrackKey);
   if (!viewingScreenShareTrackKey) {
     return null;
   }
-  // Resolve who/what we're viewing. Local stream uses the reserved
-  // LOCAL_PREVIEW_KEY sentinel; remote streams live on the publishing
-  // participant's `video` (#385).
+  // Local stream: the LOCAL_PREVIEW_KEY sentinel; remote: the publisher's
+  // `video` (#385).
   let label: string;
   let trackKey: string;
   let width: number | undefined;
@@ -64,7 +58,6 @@ export const ScreenShareViewer: React.FC = observer(() => {
     width = p.video.width;
     height = p.video.height;
   }
-  // Prefer the live stats dimensions/fps; fall back to the static hints.
   const liveW = stats.dimensions?.width ?? width;
   const liveH = stats.dimensions?.height ?? height;
   const resLabel = liveW && liveH ? `${liveW}×${liveH}` : "";
@@ -110,9 +103,7 @@ export const ScreenShareViewer: React.FC = observer(() => {
           <X size={14} />
         </button>
       </div>
-      {/* Click anywhere on the video area closes the viewer, matching
-        * the X. No nested interactive elements inside RemoteVideoTile,
-        * so a plain onClick on the wrapper is unambiguous. */}
+      {/* A click anywhere on the video closes, like the X (no nested controls). */}
       <div
         onClick={close}
         role="button"

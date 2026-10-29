@@ -2,22 +2,16 @@ import { invoke } from '../bridge';
 import { logIgnored } from './log';
 
 /**
- * Play a named sound effect via the Rust backend.
- *
- * Audio is played by rodio on the host audio device, bypassing WebKit's
- * GStreamer pipeline entirely (which is unreliable on Linux).
- * Errors are silently swallowed — a missing audio device should never
- * surface to the user.
+ * Play a named sound effect in Rust (rodio), bypassing WebKit's unreliable
+ * Linux GStreamer path. Errors are swallowed.
  */
 export function playSfx(sound: string): void {
   invoke('play_sfx', { sound }).catch(logIgnored);
 }
 
 export const SFX = {
-  /** Incoming DM or channel message when window is unfocused. */
+  /** Incoming message while the window is unfocused. */
   ping: 'ping',
-  /** Another user joined a voice channel. */
   join: 'join',
-  /** Another user left a voice channel. */
   leave: 'leave',
 } as const;

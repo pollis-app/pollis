@@ -18,14 +18,9 @@ interface RemoteUserVolumeSliderProps {
 }
 
 /**
- * Inline per-remote-user volume slider rendered alongside a participant
- * row in the voice channel. The 0.0..2.0 multiplier is applied by the
- * Rust mixer (see `set_remote_user_volume`) and persisted in the user's
- * preferences blob via `save_preferences`.
- *
- * Designed to live inside `NavigableList`'s `controls` slot — the input
- * is focusable, so ArrowLeft/Right + native range-slider keyboard
- * controls (Left/Right/Home/End) work as expected.
+ * Per-remote-user volume (0.0..2.0), applied by the Rust mixer
+ * (`set_remote_user_volume`) and persisted in preferences. Built for
+ * `NavigableList`'s `controls` slot.
  */
 export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
   identity,
@@ -42,9 +37,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
     (next: number) => {
       const clamped = clampRemoteUserVolume(next);
 
-      // Push the live value into the mixer immediately so the change is
-      // audible while the user drags. The prefs save below is throttled,
-      // but the mixer update is not.
+      // The mixer updates live while dragging; only the prefs save is throttled.
       invoke("set_remote_user_volume", { userId, volume: clamped }).catch(
         (e) => {
           console.warn(

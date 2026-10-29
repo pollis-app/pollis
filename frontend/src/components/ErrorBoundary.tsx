@@ -3,11 +3,7 @@ import { useTranslation } from "react-i18next";
 import { DotMatrix, gameOfLifeAlgorithm } from "./ui/DotMatrix";
 import { Button } from "./ui/Button";
 
-/**
- * The fallback UI, split out as a function component purely so it can call
- * `useTranslation` — the boundary itself has to stay a class, since only a
- * class can implement `getDerivedStateFromError`.
- */
+/** A function component so it can call `useTranslation`; the boundary must stay a class. */
 const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
   const { t } = useTranslation("errors");
 
@@ -27,7 +23,6 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
     >
       <DotMatrix algorithm={gameOfLifeAlgorithm} speed={0.6} />
 
-      {/* Content */}
       <div
         className="bg-surface border border-line"
         style={{
@@ -93,8 +88,7 @@ export class ErrorBoundary extends React.Component<
   }
 
   handleRestart = async () => {
-    // In dev mode the app loads from the Vite dev server — relaunch() would
-    // restart the binary without a dev server and show "Connection refused".
+    // In dev the app loads from Vite; relaunch() would come back without it.
     if (import.meta.env.DEV) {
       window.location.reload();
       return;
@@ -103,7 +97,6 @@ export class ErrorBoundary extends React.Component<
       const { relaunch } = await import("../bridge");
       await relaunch();
     } catch (e) {
-      // Fallback if neither host is available (e.g. browser-only mode)
       console.error("Could not relaunch:", e);
       window.location.reload();
     }

@@ -1,13 +1,6 @@
 /**
- * Merge each run of consecutive lost-message placeholders (#1312) into one row.
- *
- * A device that falls out of step usually loses several messages at once, and
- * a column of identical "couldn't be decrypted" rows says nothing the first
- * one doesn't. The run keeps its FIRST placeholder (its id, its time, its place
- * in the log) and records how many it stands for in `undecryptable_count`.
- *
- * `messages` must already be in display order; anything else between two
- * placeholders ends the run.
+ * Merge each run of lost-message placeholders (#1312) into its FIRST row, with
+ * `undecryptable_count`. `messages` must be in display order.
  */
 export function collapseUndecryptable<T extends { undecryptable?: boolean; undecryptable_count?: number }>(
   messages: T[],

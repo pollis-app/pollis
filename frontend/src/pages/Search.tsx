@@ -13,20 +13,13 @@ import { observer } from "mobx-react-lite";
 export const SearchPage: React.FC = observer(() => {
   const { t } = useTranslation("search");
   const navigate = useNavigate();
-  // A query handed over from the Cmd+K navigator (#850).
   const { q } = useSearch({ strict: false }) as { q?: string };
   const { data: groups = [] } = useUserGroupsWithChannels();
 
   /**
-   * Open a hit where it actually lives.
-   *
-   * This page used to navigate every result to `/dms/$conversationId`, so every
-   * channel hit landed on a broken DM route. The result now carries its own
-   * `conversation_kind` and `group_id` from `conversation_cache`; the local
-   * group tree is the fallback for a conversation this device has never listed.
-   *
-   * The jump is queued before navigating — `MessageList` claims it once the
-   * target row exists, scrolls to it and flashes it (#854's machinery, reused).
+   * Open a hit where it lives: `conversation_kind` / `group_id` from the
+   * result, the local group tree as fallback. The jump is queued first;
+   * `MessageList` claims it once the row exists.
    */
   const openResult = (result: SearchResult) => {
     messageJumpStore.request(result.conversation_id, result.message_id);

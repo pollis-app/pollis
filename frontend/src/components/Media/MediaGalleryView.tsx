@@ -7,27 +7,16 @@ import { useSkin } from "../../hooks/queries/usePreferences";
 import type { MessageAttachment } from "../../types";
 
 interface MediaGalleryViewProps {
-  /** Every attachment in the surface, newest first — the caller orders. */
+  /** Newest first; the caller orders. */
   attachments: MessageAttachment[];
-  /** Rendered when there is nothing to show. */
   emptyLabel: string;
 }
 
 /**
- * A Google-Photos-style roll over a set of attachments (#107): images and
- * videos as a responsive tile grid with a keyboard-navigable viewer, other
- * files as a flat list below.
- *
- * Deliberately GENERIC — it takes a bare `MessageAttachment[]` and knows
- * nothing about vaults, channels or DMs — so the same component can later
- * back a media view for any conversation. Today the Vault is its only
- * caller.
- *
- * Bytes resolve through the loopback media server via `getMediaUrl`, sharing
- * its in-flight cache with every other attachment surface. The full-screen
- * viewer follows the exact overlay shape `AttachmentDisplay`'s lightbox
- * established (the codebase's one sanctioned full-bleed surface), plus
- * prev/next so the roll can be walked without closing it.
+ * A photo-roll over a set of attachments (#107): images and videos as a tile
+ * grid with a keyboard-navigable viewer, other files listed below. Generic over
+ * `MessageAttachment[]`; the viewer is `AttachmentDisplay`'s lightbox shape
+ * plus prev/next.
  */
 export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
   attachments,
@@ -35,7 +24,6 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
 }) => {
   const { t } = useTranslation("vault");
   const isTerminal = useSkin() !== "refined";
-  // Viewer state: index into `media`, or null when closed.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const media = useMemo(
@@ -69,9 +57,8 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
     [media.length],
   );
 
-  // Viewer keyboard model: arrows walk the roll, Escape closes. Capture
-  // phase + stopImmediatePropagation for Escape, because the window-level
-  // nav.back shortcut also binds it and would navigate the page away.
+  // Arrows walk the roll, Escape closes. Escape is captured and stopped because
+  // the window-level nav.back shortcut also binds it.
   useEffect(() => {
     if (viewerIndex === null) {
       return;
@@ -146,8 +133,7 @@ interface GalleryTileProps {
   onOpen: () => void;
 }
 
-/** One square tile. Same resolution path as the right panel's `MediaTile`,
- * plus a click target and a play badge for videos. */
+/** One square tile, plus a click target and a play badge for videos. */
 const GalleryTile: React.FC<GalleryTileProps> = ({
   attachment,
   isTerminal,
@@ -224,15 +210,14 @@ const GalleryTile: React.FC<GalleryTileProps> = ({
 
 interface GalleryViewerProps {
   attachment: MessageAttachment;
-  /** "3 / 12" positional label, already translated. */
+  /** "3 / 12", already translated. */
   position: string;
   hasMultiple: boolean;
   onStep: (delta: number) => void;
   onClose: () => void;
 }
 
-/** The full-screen roll viewer — the `AttachmentDisplay` lightbox shape with
- * walk controls. */
+/** The full-screen viewer: the `AttachmentDisplay` lightbox with walk controls. */
 const GalleryViewer: React.FC<GalleryViewerProps> = ({
   attachment,
   position,
@@ -254,7 +239,7 @@ const GalleryViewer: React.FC<GalleryViewerProps> = ({
         }
       })
       .catch(() => {
-        /* the empty frame + filename below is the failure state */
+        /* the empty frame + filename is the failure state */
       });
     return () => {
       mounted = false;

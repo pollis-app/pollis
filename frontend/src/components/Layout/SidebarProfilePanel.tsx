@@ -13,19 +13,12 @@ import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf } from "../../types/voice-state";
 
 /**
- * Discord-style identity panel anchored to the sidebar bottom (refined skin).
- * Row 1 is always shown: avatar (with online dot) + display name + @username +
- * a settings gear. Row 2 appears only while connected to voice — the persistent
- * voice-status strip (channel + mic + deafen + screenshare + disconnect) that
- * the standalone terminal `VoiceBar` provides. In refined, AppShell hides that
- * bar and this strip owns the persistent voice controls instead, so it has to
- * carry the full set: the mic and deafen halves live in `SidebarVoiceControls`,
- * which shares its state mapping and labels with `VoiceBar` and the
- * `VoiceStage` tray. No participant count (per the design brief).
+ * Discord-style identity panel at the sidebar bottom (refined skin). Row 2
+ * appears while in voice and owns the persistent voice controls, since refined
+ * hides the terminal `VoiceBar`.
  */
 export const SidebarProfilePanel: React.FC = observer(() => {
   const { t } = useTranslation("nav");
-  // The return-to-voice labels are shared with terminal's VoiceBar.
   const { t: tVoice } = useTranslation("voice");
   const router = useRouter();
   const { data: profile } = useUserProfile();
@@ -41,9 +34,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
   const share = shareOf(voiceState);
   const shareActive = share.kind === "active";
 
-  // Resolve the connected channel's display name and owning group for the
-  // voice strip. Call channels (`call-<id>`) aren't in the groups tree, so
-  // label them generically.
+  // Call channels (`call-<id>`) aren't in the groups tree; label them generically.
   const { voiceChannelName, voiceGroupId } = (() => {
     if (!voiceChannelId) {
       return { voiceChannelName: "", voiceGroupId: null };
@@ -60,8 +51,6 @@ export const SidebarProfilePanel: React.FC = observer(() => {
     return { voiceChannelName: t("profile.voice"), voiceGroupId: null };
   })();
 
-  // Route back to the connected room — the same targets terminal's VoiceBar
-  // channel-name pill navigates to.
   const returnToVoice = () => {
     if (!voiceChannelId) {
       return;
@@ -83,7 +72,6 @@ export const SidebarProfilePanel: React.FC = observer(() => {
 
   return (
     <div className="flex shrink-0 flex-col border-t border-line bg-surface">
-      {/* Row 1 — identity */}
       <div className="flex items-center gap-2 px-2.5 py-2">
         <Avatar
           avatarKey={profile?.avatar_url}
@@ -112,7 +100,6 @@ export const SidebarProfilePanel: React.FC = observer(() => {
         </button>
       </div>
 
-      {/* Row 2 — persistent voice status (only while connected) */}
       {inVoice && (
         <div
           data-testid="sidebar-voice-strip"
@@ -123,8 +110,6 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             className="size-[0.933rem] shrink-0"
             style={{ color: "var(--c-voice-connected, var(--c-accent))" }}
           />
-          {/* The status text doubles as the way back to the room, mirroring
-              Discord's sidebar voice panel and terminal's VoiceBar pill. */}
           <button
             type="button"
             data-testid="sidebar-voice-return"
@@ -143,8 +128,6 @@ export const SidebarProfilePanel: React.FC = observer(() => {
               {voiceChannelName}
             </span>
           </button>
-          {/* Mic (four-state) + deafen. Same information and affordances as
-              terminal's VoiceBar, drawn in refined's idiom. */}
           <SidebarVoiceControls />
           <button
             type="button"

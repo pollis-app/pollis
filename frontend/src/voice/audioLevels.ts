@@ -1,12 +1,6 @@
-// Per-source multi-band audio levels, pushed from Rust at ~20 Hz via the
-// `audio_bands` voice event. Kept OUT of the MobX/React-Query state on
-// purpose: this is high-frequency cosmetic data (N participants × ~20 Hz)
-// and routing it through observable state would thrash every tile 20×/sec.
-//
-// Instead it's a tiny per-identity pub/sub. The participant tile's live
-// waveform subscribes and writes CSS variables straight onto its bar
-// element via a ref — so the meter animates with zero React re-renders.
-// Mirrors the `useScreenShareStats` per-frame-stats subscription pattern.
+// Per-source audio band levels (~20 Hz from Rust), kept OUT of observable
+// state so tiles don't re-render 20×/sec: a per-identity pub/sub whose
+// subscribers write CSS variables via a ref.
 
 import { userIdFromVoiceIdentity } from "./identity";
 
@@ -19,13 +13,9 @@ class AudioLevels {
   private listeners = new Map<string, Set<Listener>>();
   private latest = new Map<string, number[]>();
 
-  // Levels are keyed by *user id*, not the full device identity, to match the
-  // user-scoped tile model (VoiceStage merges a user's devices into one tile;
-  // the speaking indicator is likewise user-scoped). This is also what fixes
-  // the local meter: the local tile's identity is synthesized on the frontend
-  // and may not byte-match the device-suffixed identity the backend emits
-  // `audio_bands` under, but the user id always matches. Remote bands collapse
-  // per user (latest device wins), consistent with the merged tile.
+  // Keyed by user id, matching the user-scoped tiles; the local tile's
+  // synthesized identity may not match the device-suffixed one the backend
+  // emits, but the user id does.
   private key(identity: string): string {
     return userIdFromVoiceIdentity(identity);
   }
@@ -50,13 +40,11 @@ class AudioLevels {
     };
   }
 
-  /** Latest snapshot for an identity, if one has arrived (for seeding a
-   *  freshly-mounted subscriber before the next push). */
+  /** Latest snapshot, for seeding a fresh subscriber. */
   get(identity: string): number[] | undefined {
     return this.latest.get(this.key(identity));
   }
 
-  /** Called from the voice event handler when an `audio_bands` event lands. */
   push(identity: string, bands: number[]): void {
     const k = this.key(identity);
     this.latest.set(k, bands);
@@ -69,7 +57,6 @@ class AudioLevels {
     }
   }
 
-  /** Drop a participant's cached level (e.g. when they leave). */
   clear(identity: string): void {
     this.latest.delete(this.key(identity));
   }

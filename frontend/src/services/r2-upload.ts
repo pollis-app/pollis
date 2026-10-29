@@ -8,12 +8,8 @@ export async function uploadAvatar(
   file: File,
 ): Promise<PresignedUploadResponse> {
   const data = new Uint8Array(await file.arrayBuffer());
-  // Content-addressed: Rust hashes the bytes and writes
-  // `avatars/{userId}/{sha256}.{ext}` (#874). The key used to be a bare
-  // `avatars/{userId}` overwritten in place, and a mutable key is what made
-  // every viewer re-download every avatar on every launch — there was no way
-  // to tell a cached copy was still current. A new avatar is now a new key,
-  // which the profile row already publishes.
+  // Content-addressed (#874): Rust writes `avatars/{userId}/{sha256}.{ext}`, so
+  // a new avatar is a new key and cached copies never go stale.
   const result = await invoke<{ key: string; url: string }>('upload_public_file', {
     prefix: `avatars/${userId}`,
     data: Array.from(data),
@@ -55,27 +51,13 @@ function sniffImageMime(bytes: Uint8Array): string | null {
   return null;
 }
 
-// One live blob URL per legacy key. `URL.createObjectURL` pins its Blob in
-// memory until revoked, and this used to revoke nothing at all — every refetch
-// of the same avatar leaked another copy of the image for the life of the
-// document. Revoking the previous URL for a key when a new one replaces it
-// bounds that to one per distinct key.
+// One live blob URL per legacy key; the previous one is revoked on replace.
 const legacyBlobUrls = new Map<string, string>();
 
-/// Resolve a public (unencrypted) object — an avatar or group icon — to a URL
-/// the webview can use as `<img src>`.
-///
-/// Primary path: `get_public_file_url` returns a loopback media-server URL
-/// (`http://127.0.0.1:<port>/<token>/<hash>`) backed by the on-disk cache, so
-/// the bytes never cross the JSON IPC and a restart re-reads them from disk
-/// instead of R2. Same mechanism attachments and custom emoji already use.
-///
-/// Fallback, when Rust hands back the empty-string sentinel: a LEGACY key
-/// written before objects were content-addressed (`avatars/{userId}`), or a
-/// media server that isn't up. Those come down as bytes and become an
-/// in-memory Blob URL, exactly as every avatar did before #874. The MIME type
-/// is taken from the key extension when present and sniffed from magic bytes
-/// otherwise, so GIFs and animated WebPs still animate.
+/// Resolve a public object (avatar, group icon) to an `<img src>`: a loopback
+/// media-server URL backed by the disk cache, or, on the empty-string
+/// sentinel (a pre-#874 legacy key, or no media server), a Blob URL with the
+/// MIME from the extension or magic bytes.
 export async function getFileDownloadUrl(key: string): Promise<string> {
   const served = await invoke<string>('get_public_file_url', { key });
   if (served) {
@@ -96,10 +78,8 @@ export async function getFileDownloadUrl(key: string): Promise<string> {
   return url;
 }
 
-/// The arguments every media command takes to locate and open an attachment:
-/// the object, the digest to verify, and which key sealed it (#1382). Throws
-/// for a reference with no key scope — still uploading, or from before #1382 —
-/// so nothing ever asks Rust to decrypt it under a guessed key.
+/// The object, digest and sealing key (#1382) for media commands. Throws when
+/// there is no key scope (uploading, or pre-#1382), so Rust never guesses a key.
 export function mediaArgs(attachment: MessageAttachment) {
   if (!attachment.key_scope) {
     throw new Error('attachment is unavailable');
@@ -112,9 +92,7 @@ export function mediaArgs(attachment: MessageAttachment) {
   };
 }
 
-/// Download an encrypted media attachment, decrypt it, and return a blob URL
-/// safe for use as <img src> or an anchor href. The key comes from the
-/// conversation's MLS-wrapped key ring (or the Vault key) on the Rust side.
+/// Download and decrypt an attachment into a blob URL.
 export async function downloadAndDecryptMedia(attachment: MessageAttachment): Promise<string> {
   const bytes = await invoke<number[]>('download_media', mediaArgs(attachment));
   const mimeType = attachment.content_type;
@@ -122,30 +100,14 @@ export async function downloadAndDecryptMedia(attachment: MessageAttachment): Pr
   return URL.createObjectURL(blob);
 }
 
-// In-flight de-dup: while one caller is resolving a URL for a hash, any
-// other caller for the same hash awaits the same promise. Prevents a
-// render storm during scroll where 30 mounted MessageItems each kick
-// off identical invokes. Resolved promises stay cached for the life of
-// the document — an object id names one immutable object, so the URL is
-// permanently correct (the loopback server's port + token live for the
-// process; an unlock event would invalidate cached blob URLs from the
-// over-cap fallback path, but that's a fresh document anyway).
+// In-flight de-dup per hash, so mounted rows don't fire identical invokes;
+// resolved URLs stay cached (an object id names one immutable object).
 const inFlight = new Map<string, Promise<string>>();
 
-/// Resolve an attachment to a URL the webview can render directly via
-/// `<img src>` / `<audio src>` / `<video src>`.
-///
-/// Default path: the Rust side downloads, decrypts, re-encrypts under
-/// the per-session cache key, writes to disk, and returns
-/// `http://127.0.0.1:<port>/<token>/<hash>`. Subsequent calls for the
-/// same hash return the URL straight from the cached path. The local
-/// HTTP server (see `pollis-core::media_server`) decrypts and streams
-/// bytes — never through the JSON IPC, never via `Blob`/`asset://`.
-///
-/// Fallback: files larger than the per-file cap (100 MiB) skip the
-/// disk cache; Rust returns an empty string, and we fall back to
-/// `downloadAndDecryptMedia` which produces an in-memory Blob URL just
-/// for this render.
+/// An attachment URL for `<img>` / `<audio>` / `<video>`: Rust caches it
+/// re-encrypted on disk and returns `http://127.0.0.1:<port>/<token>/<hash>`
+/// (`pollis-core::media_server`). Files over the 100 MiB cap get an empty
+/// string and fall back to `downloadAndDecryptMedia`.
 export async function getMediaUrl(attachment: MessageAttachment): Promise<string> {
   const contentHash = attachment.content_hash;
   const cached = inFlight.get(contentHash);
@@ -164,7 +126,6 @@ export async function getMediaUrl(attachment: MessageAttachment): Promise<string
   })();
   inFlight.set(contentHash, promise);
   promise.catch(() => {
-    // On error, drop the cached rejection so the next caller retries.
     inFlight.delete(contentHash);
   });
   return promise;

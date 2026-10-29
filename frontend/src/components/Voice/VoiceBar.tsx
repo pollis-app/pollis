@@ -33,19 +33,15 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
     voiceActiveSpeakerIds,
   } = appStore;
   const gate = gateOf(voiceState);
-  // Four states, not a bool: deafened and push-to-talk-idle both stop the
-  // mic without the user having muted themselves, and showing either as a
-  // plain mute is what makes push-to-talk feel broken.
+  // Four states: deafened and PTT-idle close the mic without a self-mute.
   const micIndicator = micIndicatorOf(gate);
   const pttCombo = useShortcutLabel("voice.pushToTalk");
-  // Listen-only: joined without a working capture device. The mute toggle
-  // becomes a non-interactive "listening only" indicator.
+  // Listen-only: no working capture device; mute becomes an indicator.
   const micAvailable = voiceState.kind === 'joined' ? voiceState.micAvailable : true;
   const share = shareOf(voiceState);
   const shareActive = share.kind === 'active';
-  // Anything non-idle/non-picking means the button should become a "stop"
-  // affordance — covers in-flight `starting` (recovery from wedged publish)
-  // and `failed` (lets the user clear the error state by stopping).
+  // Any non-idle share state makes the button a "stop" (recovers a wedged
+  // `starting`, clears `failed`).
   const shareInFlight = share.kind !== 'idle';
   const camera = cameraOf(voiceState);
   const cameraActive = camera.kind === 'active';
@@ -61,18 +57,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const toggleDeafen = () => voiceSession.toggleDeafen();
   const leave = () => voiceSession.leave();
 
-  // The voice bar is feedback about *other* speakers, so always exclude self.
-  // The local participant is flagged `isLocal` by VoiceSessionManager (which
-  // owns the device-suffixed identity), so we read it off the list rather than
-  // reconstructing `voice-${userId}`.
-  // Exclude every identity belonging to the local USER, not just the one
-  // marked `isLocal`. A second enrolled device — and the overlap window of a
-  // reconnect, where the outgoing identity lingers — is a different identity
-  // for the same person, so filtering on `isLocal` alone let the user's own
-  // other device count as somebody else. That is what put a speaker label on
-  // the bar for a room the user is sitting in alone, and, because
-  // `disambiguateVoiceNames` suffixes the second occurrence of a name, it
-  // rendered as "dan (1)".
+  // Speaker label excludes every identity of the local USER: other devices
+  // and reconnect overlap are different identities for the same person.
   const localIdentity = voiceParticipants.find((p) => p.isLocal)?.identity ?? null;
   const localUserId = localIdentity ? userIdFromVoiceIdentity(localIdentity) : null;
   const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter(
@@ -80,11 +66,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   );
   const lastRemoteSpeakerId = remoteActiveSpeakerIds.at(-1);
 
-  // Count distinct *users*, not raw participant entries: a user joined from two
-  // devices (or mid-reconnect overlap) is one person, and voice + screenshare
-  // are two publications by the same identity, not two people. Dedupe by user
-  // id the same way VoiceStage merges device-identities into one tile, so this
-  // matches the sidebar's room count.
+  // Distinct users, deduped like VoiceStage's tiles, matching the sidebar count.
   const participantCount = new Set(
     voiceParticipants.map((p) => userIdFromVoiceIdentity(p.identity)),
   ).size;
@@ -94,7 +76,6 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       data-testid="voice-bar"
       className="flex items-center ps-1 pe-3 gap-2 font-mono text-xs flex-shrink-0 min-h-composer-flush border-t border-line bg-surface text-muted"
     >
-      {/* Channel name */}
       <PillButton
         data-testid="voice-bar-channel-name"
         accent="var(--c-accent)"
@@ -116,10 +97,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {channelName}
       </PillButton>
 
-      {/* Mute toggle — or, listen-only, a static "listening only" indicator.
-          `data-mic-state` carries the full four-state indicator so tests and
-          the tray agree on what is being shown. Push-to-talk-idle keeps the
-          live Mic glyph (the mic is armed, not switched off) but dims it. */}
+      {/* `data-mic-state` carries the four-state indicator for tests and the
+          tray. PTT idle keeps the Mic glyph, dimmed. */}
       {micAvailable ? (
         <PillButton
           data-testid="voice-bar-mute-button"
@@ -154,10 +133,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         </PillButton>
       )}
 
-      {/* Deafen toggle. Sits next to mute, as on Discord — deafen implies
-          mute, and undeafening restores whatever mute state it displaced.
-          Shown even listen-only: with no capture device you can still have
-          incoming audio worth silencing. */}
+      {/* Deafen implies mute; shown even listen-only. */}
       <PillButton
         data-testid="voice-bar-deafen-button"
         data-deafened={gate.deafened}
@@ -170,13 +146,9 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {gate.deafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
       </PillButton>
 
-      {/* Screen share toggle. On macOS we enumerate via SCShareableContent
-          and route to our in-app picker — the system picker
-          (SCContentSharingPicker) has an upstream crate bug that crashes
-          on selection (#283), so we use the same enumerate-and-pick
-          flow Slack/Discord/Zoom do. On Linux/Windows the helper falls
-          back to the system portal / WGC picker — the backend signals
-          this by returning an empty source list from enumerate(). */}
+      {/* macOS uses the in-app picker (SCContentSharingPicker crashes on
+          selection, #283); Linux/Windows fall back to the system picker,
+          signalled by an empty source list. */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
         accent={shareInFlight ? "var(--c-danger)" : "var(--c-accent)"}
@@ -202,12 +174,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
 
-      {/* Whether the live share is carrying sound. An indicator, not a
-          control: audio is chosen before the share starts, and offering a
-          mid-share toggle here would imply the capture can be
-          renegotiated without restarting it, which it cannot. Absent
-          entirely for a share that never asked for sound, so the bar
-          gains no chrome for the common case. */}
+      {/* An indicator, not a toggle: audio can't change mid-share. Absent for
+          shares without sound. */}
       {share.kind === "active" && share.audio.kind !== "off" ? (
         <span
           data-testid="voice-bar-share-audio-indicator"
@@ -241,9 +209,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         </span>
       ) : null}
 
-      {/* Camera toggle — webcam published into the same voice room as a
-          TrackSource::Camera track. With one camera it starts directly; with
-          several the in-app picker (CameraPicker) takes over the stage. */}
+      {/* One camera starts directly; several open CameraPicker. */}
       <PillButton
         data-testid="voice-bar-camera-button"
         accent={cameraInFlight && !cameraActive ? "var(--c-danger)" : "var(--c-accent)"}
@@ -269,7 +235,6 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
       </PillButton>
 
-      {/* Leave button */}
       <PillButton
         data-testid="voice-bar-leave-button"
         accent="var(--c-danger)"
@@ -283,12 +248,11 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
 
       <span className="text-line">|</span>
 
-      {/* Participant count */}
       <span data-testid="voice-bar-participant-count" className="text-dim">
         {t("bar.participants", { count: participantCount })}
       </span>
 
-      {/* Security indicator — audio is transport-encrypted (TLS) but not E2EE for v1 */}
+      {/* Voice is transport-encrypted (TLS), not E2EE, in v1. */}
       <span
         data-testid="voice-bar-security-indicator"
         style={{ marginInlineStart: "auto" }}
@@ -303,7 +267,6 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
           : null}
       </span>
 
-      {/* Voice settings shortcut */}
       <button
         data-testid="voice-bar-settings-button"
         onClick={() => navigate({ to: "/voice-settings" })}

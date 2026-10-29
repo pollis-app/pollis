@@ -9,16 +9,13 @@ type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "re
 // Mirrors `ReadOnlyLocation` in src-tauri/src/commands/install_kind.rs.
 type ReadOnlyLocation = "disk_image" | "translocated" | "translocated_healed";
 
-// The updater replaces the app bundle in place, so it fails with EROFS when the
-// app runs from a read-only mount (the disk image, or macOS App Translocation).
+// The updater replaces the bundle in place, so a read-only mount (disk image,
+// App Translocation) fails with EROFS.
 function isReadOnlyError(message: string): boolean {
   return /read-only file system|os error 30/i.test(message);
 }
 
-/**
- * Fully automatic update screen. On mount it checks for an update, downloads
- * it, installs it, and relaunches — no user interaction required.
- */
+/** Fully automatic update: check, download, install, relaunch. */
 export const UpdateScreen: React.FC = () => {
   const { t } = useTranslation("nav");
   const [phase, setPhase] = useState<UpdatePhase>("preparing");
@@ -30,24 +27,18 @@ export const UpdateScreen: React.FC = () => {
 
     async function runUpdate() {
       try {
-        // Gracefully tear down voice / realtime before the install.
-        // TerminalApp has already unmounted (appState flipped to
-        // update-required), which triggers VoiceSessionManager / realtime
-        // cleanup, but we also invoke leave_voice_channel directly to
-        // guarantee LiveKit is disconnected with its 5s timeout before
-        // the updater overwrites the binary.
+        // Disconnect LiveKit directly (5s timeout) before the binary is
+        // overwritten, beyond the unmount cleanup.
         setPhase("preparing");
         await invoke("leave_voice_channel").catch((e) => console.warn("leave_voice_channel failed", e));
-        // Small settle window so any in-flight MLS commits / network
-        // sends can finish before the process is replaced.
+        // Let in-flight MLS commits / sends finish.
         await new Promise((r) => setTimeout(r, 300));
 
         if (cancelled) {
           return;
         }
 
-        // An install from a read-only location is guaranteed to fail midway, so
-        // say how to fix it instead of attempting one.
+        // A read-only install location is guaranteed to fail: explain instead.
         const location = await invoke<ReadOnlyLocation | null>("detect_read_only_location").catch(() => null);
         if (cancelled) {
           return;
@@ -89,8 +80,7 @@ export const UpdateScreen: React.FC = () => {
               break;
             case "Progress":
               downloadedBytes += event.data.chunkLength;
-              // Tauri's plugin ships per-chunk byte counts plus the upfront
-              // `contentLength` from `Started` — no precomputed percentage.
+              // The plugin sends per-chunk bytes plus `contentLength` up front.
               if (totalBytes > 0) {
                 setProgress(Math.round((downloadedBytes / totalBytes) * 100));
               }
@@ -106,8 +96,7 @@ export const UpdateScreen: React.FC = () => {
         }
 
         setPhase("relaunching");
-        // Tauri's plugin completes the install but does NOT relaunch, so the
-        // renderer must.
+        // The plugin installs but does NOT relaunch.
         await relaunch();
       } catch (err) {
         if (!cancelled) {

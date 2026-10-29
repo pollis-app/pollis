@@ -63,9 +63,7 @@ function isValidHex(val: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(val);
 }
 
-// Project the three synced `relay_serving*` fields onto the config shape the
-// backend and the section component both speak. Absent fields fall back to
-// RELAY_SERVING_DEFAULTS (consent off, both conditions on).
+// The synced `relay_serving*` fields as a config; absent → RELAY_SERVING_DEFAULTS.
 function relayServingFromPrefs(prefs: PreferencesData): RelayServingConfig {
   return {
     enabled: prefs.relay_serving ?? RELAY_SERVING_DEFAULTS.enabled,
@@ -80,8 +78,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
-  // The panel's live state, so the switch below reports what is actually on
-  // screen rather than a synced default the device may have moved past.
+  // Live panel state, so the switch reflects what's on screen.
   const { isOpen: isRightPanelOpen, setPanel: setRightPanel } = useRightPanel();
   const [skin, setSkin] = useState<Skin>("terminal");
   const [hue, setHue] = useState<number>(38);
@@ -95,23 +92,17 @@ export const PreferencesPage: React.FC = observer(() => {
   const [sendReadReceipts, setSendReadReceipts] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
-  // `undefined` until the user touches it — that state means "this account has
-  // never expressed a preference", which is what lets a brand-new device seed
-  // itself from the skin instead of from a boolean nobody chose (#904). The
-  // SWITCH does not render this; it renders the panel's live state, because
-  // that is the thing the user is looking at while they flip it.
+  // `undefined` until touched: "never chose", so a new device seeds from the
+  // skin (#904). The switch renders the live panel state instead.
   const [rightPanelOpenByDefault, setRightPanelOpenByDefault] = useState<
     boolean | undefined
   >(undefined);
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
   const [menubarIcon, setMenubarIcon] = useState<boolean>(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>("off");
-  // Inline status line under the relay control: an apply error (e.g. Strict
-  // with no relay reachable) surfaces here rather than throwing.
+  // Apply errors (e.g. Strict with no relay) show inline instead of throwing.
   const [overlayStatus, setOverlayStatus] = useState<string | null>(null);
-  // "Be a relay" consent + its conditions (#813 §10.2). Entirely separate
-  // from `overlayMode` above — that routes this user's traffic, this carries
-  // other people's. Defaults to consent off, both conditions on.
+  // "Be a relay" consent (#813 §10.2), separate from `overlayMode`.
   const [relayServing, setRelayServing] = useState<RelayServingConfig>(RELAY_SERVING_DEFAULTS);
   const [relayServingError, setRelayServingError] = useState<string | null>(null);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
@@ -119,24 +110,19 @@ export const PreferencesPage: React.FC = observer(() => {
 
   const { query, save: savePrefs } = usePreferences();
 
-  // Live relay-serving status. `null` data means the host can't report it —
-  // the section says so plainly rather than implying the device is relaying.
+  // Null data: the host can't report it; the section says so.
   const relayStatusQuery = useRelayServingStatus();
   const applyRelayServing = useApplyRelayServing();
 
-  // Device-local message retention window (see useMessageRetention). Selecting
-  // an option fires the mutation immediately — the backend sweep is immediate.
+  // Device-local retention; the backend sweep runs immediately on change.
   const retentionQuery = useMessageRetention();
-  // Manual repair for the local full-text search index (#850).
   const rebuildSearchIndex = useRebuildSearchIndex();
   const setRetention = useSetMessageRetention();
   const retentionDays = retentionQuery.data ?? MESSAGE_RETENTION_OPTIONS[0].days;
 
-  // Apply saved preferences on first load
   useEffect(() => {
     if (query.data) {
       applyPreferences(query.data);
-      // Font size is device-local; seed once from any legacy remote value.
       applyDeviceFontSize(currentUser?.id, query.data);
       setSkin(normalizeSkin(query.data.skin));
       if (query.data.allow_desktop_notifications !== undefined) {
@@ -151,8 +137,7 @@ export const PreferencesPage: React.FC = observer(() => {
       if (query.data.sidebar_open_by_default !== undefined) {
         setSidebarOpenByDefault(query.data.sidebar_open_by_default);
       }
-      // No `!== undefined` guard: absent is a meaningful value here, and
-      // skipping it would strand the local state after a reset elsewhere.
+      // No `!== undefined` guard: absent is meaningful.
       setRightPanelOpenByDefault(query.data.right_panel_open_by_default);
       if (query.data.close_to_tray !== undefined) {
         setCloseToTray(query.data.close_to_tray);
@@ -165,7 +150,7 @@ export const PreferencesPage: React.FC = observer(() => {
     }
   }, [query.data, currentUser?.id]);
 
-  // Read current CSS var values on mount and sync all state + hex inputs
+  // Sync state and hex inputs from the current CSS vars on mount.
   useEffect(() => {
     const h = parseInt(getRootVar("--accent-h"));
     const s = parseInt(getRootVar("--accent-s"));
@@ -179,9 +164,7 @@ export const PreferencesPage: React.FC = observer(() => {
     if (!isNaN(bs)) { setBgSaturation(bs); }
     if (!isNaN(bl)) { setBgLightness(bl); }
     if (!isNaN(bh) && !isNaN(bs) && !isNaN(bl)) { setBgHexInput(hslToHex(bh, bs, bl)); }
-    // Font size: prefer the device-local store; fall back to whatever the
-    // CSS var currently resolves to (default 15px) so a fresh device
-    // shows the slider in a sane position before the user touches it.
+    // Device-local store first, else the CSS var (default 15px).
     const localFs = loadDeviceFontSize(currentUser?.id);
     if (localFs !== null) {
       setFontSize(localFs);
@@ -222,10 +205,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const skinVal = opts.skin ?? skin;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
-    // font_size is intentionally NOT included — it's device-local now,
-    // persisted via saveDeviceFontSize. We also strip any legacy
-    // `font_size` field from query.data so we stop overwriting our own
-    // local value back to the remote on every save.
+    // Strip the legacy `font_size` so saves never overwrite the device-local value.
     const { font_size: _legacyFontSize, ...rest } = query.data ?? {};
     void _legacyFontSize;
     savePrefs({
@@ -247,12 +227,9 @@ export const PreferencesPage: React.FC = observer(() => {
     });
   }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sendReadReceipts, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
 
-  // Drive the merged overlay engine (`set_overlay_mode`) to `val`, live. Never
-  // throws: a rejected apply (e.g. Strict with no relay reachable — the engine
-  // rolls back rather than silently going direct) is surfaced inline and the
-  // control snaps to whatever mode actually took effect (`get_overlay_mode`).
-  // `persist` writes the result through the synced preferences blob; the
-  // apply-on-load path passes false so it never re-saves.
+  // Apply `val` via `set_overlay_mode`. Never throws: a rejected apply (Strict
+  // with no relay rolls back rather than going direct) shows inline and the
+  // control snaps to `get_overlay_mode`. The on-load path passes persist=false.
   const applyOverlayMode = useCallback(async (val: OverlayMode, persist: boolean) => {
     try {
       await invoke("set_overlay_mode", { mode: val });
@@ -266,8 +243,7 @@ export const PreferencesPage: React.FC = observer(() => {
       try {
         actual = normalizeOverlayMode(await invoke<string>("get_overlay_mode"));
       } catch {
-        // `get_overlay_mode` itself failed — keep the best guess (`val`) and
-        // still surface the original apply error below.
+        // Keep `val` as the best guess; the apply error still shows.
       }
       setOverlayMode(actual);
       setOverlayStatus(msg);
@@ -277,9 +253,8 @@ export const PreferencesPage: React.FC = observer(() => {
     }
   }, [save]);
 
-  // Apply the saved relay preference after login/restart so the synced choice
-  // takes effect. Guarded: only invoke when the desired mode differs from the
-  // currently-running one, so a redundant re-apply never reconnects the DBs.
+  // Apply the saved mode after login/restart, only if it differs from the
+  // running one (a re-apply reconnects).
   useEffect(() => {
     const desired = query.data?.overlay_mode;
     if (desired === undefined) {
@@ -293,8 +268,7 @@ export const PreferencesPage: React.FC = observer(() => {
           return;
         }
       } catch {
-        // Couldn't read the live mode — fall through and apply anyway;
-        // `set_overlay_mode` is itself idempotent.
+        // Apply anyway; `set_overlay_mode` is idempotent.
       }
       if (!cancelled) {
         await applyOverlayMode(desired, false);
@@ -305,10 +279,7 @@ export const PreferencesPage: React.FC = observer(() => {
     };
   }, [query.data?.overlay_mode, applyOverlayMode]);
 
-  // One label per overlay mode, resolved once. `off` / `prefer` / `strict` are
-  // wire values, and the error line below used to interpolate the raw token
-  // into a translated sentence ("currently strict") while the buttons two
-  // sections down translated the very same three words.
+  // The modes are wire values; translated labels for the buttons and error line.
   const overlayModeLabels: Record<OverlayMode, string> = {
     off: t("overlay.modeOff"),
     prefer: t("overlay.modePrefer"),
@@ -324,15 +295,12 @@ export const PreferencesPage: React.FC = observer(() => {
     void applyOverlayMode(val, true);
   };
 
-  // Drive the running relay to `next`, live. Unlike the overlay control, a
-  // failed apply does NOT snap the toggle back: the consent is the user's
-  // choice, not the backend's, so we keep it, persist it, and say plainly in
-  // the status line that we can't confirm what the device is doing.
+  // Unlike the overlay control, a failed apply keeps the toggle: consent is the
+  // user's; the status line says we can't confirm.
   const applyRelayServingConfig = useCallback(async (next: RelayServingConfig, persist: boolean) => {
     try {
       const status = await applyRelayServing(next);
       setRelayServingError(null);
-      // The backend is the authority on what actually took effect.
       setRelayServing(status.config);
       if (persist) {
         save({ relayServing: status.config });
@@ -346,9 +314,7 @@ export const PreferencesPage: React.FC = observer(() => {
     }
   }, [applyRelayServing, save]);
 
-  // Re-apply the saved relay-serving choice after login/restart, so the
-  // synced consent takes effect. Guarded on the live config the backend
-  // reports, so a redundant apply never restarts the relay.
+  // Re-apply the saved consent after login/restart, only if the live config differs.
   useEffect(() => {
     if (!query.data) {
       return;
@@ -420,10 +386,8 @@ export const PreferencesPage: React.FC = observer(() => {
     save({ sidebarOpenByDefault: val });
   };
 
-  // Two writes, deliberately. The device-local one is what actually opens or
-  // shuts the panel here and now; the synced one is the seed a NEW device
-  // picks up. Without the first the switch would be inert on any device that
-  // has already made up its mind, which is every device after its first launch.
+  // Two writes: device-local (moves the panel now) and synced (seeds new
+  // devices).
   const handleRightPanelOpenByDefault = (val: boolean) => {
     setRightPanelOpenByDefault(val);
     setRightPanel(val ? "members" : "none");
@@ -433,9 +397,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleCloseToTray = (val: boolean) => {
     setCloseToTray(val);
     save({ closeToTray: val });
-    // Push immediately so the very next window close picks up the new
-    // value (useApplyPreferences would also re-fire, but only after the
-    // throttled save round-trips through the remote prefs query).
+    // Push now rather than after the throttled save round-trips.
     void setTrayCloseToTray(val).catch((err) => {
       console.warn("[tray] setTrayCloseToTray failed:", err);
     });
@@ -444,9 +406,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleMenubarIcon = (val: boolean) => {
     setMenubarIcon(val);
     save({ menubarIcon: val });
-    // Same reasoning as handleCloseToTray: apply right away so the icon
-    // appears/disappears the moment the toggle flips, without waiting
-    // for the throttled prefs round-trip.
+    // Push now, as with close-to-tray.
     void setTrayEnabled(val).catch((err) => {
       console.warn("[tray] setTrayEnabled failed:", err);
     });
@@ -457,10 +417,7 @@ export const PreferencesPage: React.FC = observer(() => {
     saveDeviceCallRingtone(currentUser?.id, val);
   };
 
-  // `MESSAGE_RETENTION_OPTIONS` lives in `hooks/queries/useMessageRetention.ts`
-  // — module-level data, so its `label` can't be translated there without
-  // freezing the language at import time. Key off the stable `days` value and
-  // translate here, at the render site, instead.
+  // Labels translated here, keyed on `days` (module data can't translate).
   const retentionLabel = (days: number): string => {
     if (days === RETENTION_FOREVER) {
       return t("retention.optionForever");
@@ -474,7 +431,6 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleAllowDesktopNotifications = async (val: boolean) => {
     setAllowDesktopNotifications(val);
     save({ notifications: val });
-    // When enabling, ensure we have OS-level permission (prompts on macOS)
     if (val) {
       try {
         const granted = await isPermissionGranted();
@@ -496,12 +452,9 @@ export const PreferencesPage: React.FC = observer(() => {
         <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-8">
 
-            {/* Language (this device). Deliberately first: someone who cannot
-                read the UI needs the control that fixes that at the top, not
-                buried under colour pickers. */}
+            {/* First, so someone who can't read the UI finds it. */}
             <LanguageSection userId={currentUser?.id ?? null} />
 
-            {/* Appearance — UI skin (synced across devices) */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -538,7 +491,6 @@ export const PreferencesPage: React.FC = observer(() => {
               </p>
             </section>
 
-            {/* Accent Color */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -585,7 +537,6 @@ export const PreferencesPage: React.FC = observer(() => {
                 />
               </div>
 
-              {/* Quick presets */}
               <div className="flex gap-2 flex-wrap">
                 {[
                   { id: "orange", label: t("accent.presetOrange"), h: 38, s: 90 },
@@ -619,7 +570,6 @@ export const PreferencesPage: React.FC = observer(() => {
               </div>
             </section>
 
-            {/* Background Color */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -666,7 +616,6 @@ export const PreferencesPage: React.FC = observer(() => {
                 />
               </div>
 
-              {/* Quick presets */}
               <div className="flex gap-2 flex-wrap">
                 {[
                   { id: "match-accent", label: t("background.presetMatchAccent"), h: hue, s: 20 },
@@ -702,9 +651,7 @@ export const PreferencesPage: React.FC = observer(() => {
             </section>
 
 
-            {/* Display (this device) — settings here are stored on this device only,
-                not synced across the user's account. Future device-specific items
-                should slot in here. */}
+            {/* Display: this device only, not synced. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -749,7 +696,6 @@ export const PreferencesPage: React.FC = observer(() => {
               </div>
             </section>
 
-            {/* Layout */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -806,7 +752,6 @@ export const PreferencesPage: React.FC = observer(() => {
               )}
             </section>
 
-            {/* Notifications */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -827,7 +772,6 @@ export const PreferencesPage: React.FC = observer(() => {
               />
             </section>
 
-            {/* Read receipts (#857) — DMs only. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -849,8 +793,7 @@ export const PreferencesPage: React.FC = observer(() => {
               </p>
             </section>
 
-            {/* Local message history (this device) — device-local retention
-                window stored in the local DB, not synced across the account. */}
+            {/* Local message history: device-local retention, not synced. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -889,12 +832,7 @@ export const PreferencesPage: React.FC = observer(() => {
               </p>
             </section>
 
-            {/* Message search index (#850) — device-local, inside the encrypted
-                database. The button is the escape hatch for the one failure a
-                contentless FTS5 index can have that nothing else repairs;
-                startup already rebuilds silently when `integrity-check` catches
-                it, so nobody should ever need this. It exists for when the
-                automatic repair is the thing that is wrong. */}
+            {/* Search index rebuild (#850): for when startup's own FTS5 repair fails. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
                 {t("searchIndex.heading")}
@@ -919,8 +857,7 @@ export const PreferencesPage: React.FC = observer(() => {
               </p>
             </section>
 
-            {/* Network privacy — relay overlay (#455). Synced across devices and
-                applied live via set_overlay_mode. */}
+            {/* Relay overlay (#455): synced, applied live. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -984,9 +921,7 @@ export const PreferencesPage: React.FC = observer(() => {
               )}
             </section>
 
-            {/* Run a relay for others (#813 §10.2) — a SEPARATE consent from
-                the mode control above. Never implied by turning the overlay
-                on; off by default; conditions default to Wi-Fi + power. */}
+            {/* A SEPARATE consent (#813 §10.2), never implied by the overlay. */}
             <RelayServingSection
               config={relayServing}
               status={relayStatusQuery.data ?? null}
@@ -994,7 +929,6 @@ export const PreferencesPage: React.FC = observer(() => {
               onChange={handleRelayServing}
             />
 
-            {/* Voice */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"

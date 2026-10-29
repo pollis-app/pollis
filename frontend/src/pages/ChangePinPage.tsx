@@ -21,7 +21,6 @@ export const ChangePinPage: React.FC = () => {
   const [done, setDone] = useState(false);
   const advancedRef = useRef<Record<Step, boolean>>({ old: false, new: false, confirm: false });
 
-  // Auto-advance between steps when a 4-digit value is entered.
   useEffect(() => {
     if (step === "old" && oldPin.length === 4 && !advancedRef.current.old) {
       advancedRef.current.old = true;

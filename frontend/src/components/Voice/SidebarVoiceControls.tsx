@@ -14,21 +14,10 @@ import {
 } from "./voiceControlLabels";
 
 /**
- * How each mic state is *drawn* in refined's sidebar strip.
- *
- * The four states have to be told apart at a glance, so each gets its own
- * shape as well as its own colour — colour alone is not an affordance, and
- * `live` vs `ptt-idle` in particular must not read as the same thing:
- *
- *  - `live`     accent mic on a lit accent-tinted chip — transmitting
- *  - `ptt-idle` dim mic in a dashed outline — armed, waiting for the key
- *  - `muted`    red crossed mic — you muted yourself
- *  - `deafened` red crossed mic *and* the deafen control goes red + crossed
- *
- * Each restates its colour under `hover:` on purpose. `.icon-btn-sm:hover`
- * paints every icon button accent, which on a stateful control is a lie —
- * without this, pointing at a muted mic turns it the same colour as a live
- * one. Hover feedback still lands, via the background.
+ * How each mic state is drawn in refined's sidebar strip: a distinct shape as
+ * well as colour per state (`live` and `ptt-idle` must not look alike). Each
+ * restates its colour under `hover:` because `.icon-btn-sm:hover` would paint
+ * a muted mic accent.
  */
 const MIC_TONE: Record<MicIndicator, string> = {
   live: "bg-active text-accent hover:text-accent",
@@ -38,28 +27,18 @@ const MIC_TONE: Record<MicIndicator, string> = {
 };
 
 /**
- * Mic + deafen controls for refined's persistent sidebar voice strip
- * (`SidebarProfilePanel`).
- *
- * Parity with terminal's `VoiceBar`, not a copy of it: the same information
- * (the four-state mic indicator) and the same affordances (mute, deafen),
- * drawn in refined's own idiom — ghost `icon-btn-sm` buttons and semantic
- * colour utilities instead of terminal's filled accent pills. Every string
- * comes from the shared `voiceControlLabels`, and the state itself from the
- * shared `micIndicatorOf`, so no surface can describe a state differently
- * from the others.
+ * Mic + deafen for refined's sidebar voice strip: parity with `VoiceBar` in
+ * refined's idiom, with labels from `voiceControlLabels` and state from
+ * `micIndicatorOf` so no surface describes a state differently.
  */
 export const SidebarVoiceControls: React.FC = observer(() => {
   const { t } = useTranslation("voice");
   const { voiceState } = appStore;
   const gate = gateOf(voiceState);
-  // Four states, not a bool: deafened and push-to-talk-idle both close the
-  // mic without the user having muted themselves, and drawing either as a
-  // plain mute is what makes push-to-talk look broken.
+  // Four states: deafened and PTT-idle close the mic without a self-mute.
   const micIndicator = micIndicatorOf(gate);
   const pttCombo = useShortcutLabel("voice.pushToTalk");
-  // Listen-only: joined without a working capture device. The mute toggle
-  // becomes a non-interactive "listening only" indicator.
+  // Listen-only: no working capture device; mute becomes an indicator.
   const micAvailable = voiceState.kind === "joined" ? voiceState.micAvailable : true;
 
   return (
@@ -94,10 +73,8 @@ export const SidebarVoiceControls: React.FC = observer(() => {
         </button>
       )}
 
-      {/* Deafen sits next to mute, as on Discord — deafen implies mute, and
-          undeafening restores whatever mute state it displaced. Rendered even
-          listen-only: with no capture device there is still incoming audio
-          worth silencing, and without this control there is no way back. */}
+      {/* Deafen implies mute; undeafen restores the prior mute. Shown even
+          listen-only, or there's no way to silence incoming audio. */}
       <button
         type="button"
         data-testid="sidebar-voice-deafen"

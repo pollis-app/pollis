@@ -7,24 +7,13 @@ import { useToggleReaction } from "../../hooks/queries/useReactions";
 interface ReactionAddButtonProps {
   messageId: string;
   iconSize: number;
-  /** The hover-bar button chrome, owned by MessageActions so every action in
-   * the bar shares one look. */
+  /** Hover-bar chrome, owned by MessageActions. */
   className: string;
-  /** Reported so the bar can stay visible while the picker is open even
-   * though the pointer has left the row. */
+  /** Lets the bar stay visible while the picker is open. */
   onOpenChange?: (open: boolean) => void;
 }
 
-/**
- * The add-reaction trigger in the message hover bar (#848). It used to be a
- * "+" pill on a permanent reactions row under every message; the row now
- * exists only once a reaction does, and adding one is an action like reply or
- * edit.
- *
- * `EmojiPickerButton` owns the panel: anchored, lazy-loaded, flipped to
- * whichever side of the row has room, closed on outside click or Escape. A
- * row near the top of the log opens downward; the composer's opens upward.
- */
+/** The add-reaction trigger in the message hover bar (#848). */
 export const ReactionAddButton: React.FC<ReactionAddButtonProps> = ({
   messageId,
   iconSize,

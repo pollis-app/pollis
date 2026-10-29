@@ -10,14 +10,8 @@ interface CreatedInviteLinkCardProps {
 }
 
 /**
- * #847 — the one and only view of a freshly minted invite link.
- *
- * This card is emphatic about being the last chance to copy on purpose. The
- * server stores only `sha256(secret)`, so unlike Slack or Discord — which keep
- * the code in plaintext and let you re-open it forever — this link genuinely
- * cannot be shown again by anyone, including us. That is the visible cost of
- * "a database read must not yield working invites", and hiding it would just
- * turn into a support question later.
+ * #847 — the only view of a freshly minted invite link. The server stores only
+ * `sha256(secret)`, so the link can never be shown again; the card says so.
  */
 export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ link }) => {
   const { t } = useTranslation("channels");
@@ -42,9 +36,7 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
         <p className="text-sm font-semibold text-fg">{t("inviteLinks.created")}</p>
         <p className="mt-1 text-xs text-dim">{t("inviteLinks.copyNotice")}</p>
       </div>
-      {/* A link that is only ever shown once and was never actually copied is
-          the worst thing to report as a success, so the snippet surfaces a
-          failed write as a failed state (#898). */}
+      {/* A failed copy of a once-shown link must read as failed (#898). */}
       <CodeSnippet
         value={link.url}
         data-testid="created-invite-link-url"

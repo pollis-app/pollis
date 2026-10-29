@@ -8,16 +8,9 @@ interface BridgeHandle {
 }
 
 /**
- * Mirrors voice-call + mute state into the menu-bar / system tray so its
- * "Mute mic" item reflects the real call, and forwards tray mute clicks
- * back to the voice session manager.
- *
- * Works under both runtimes via the tray bridge. On Linux/Windows the tray
- * is always present so the voice-state push runs there too; on macOS the
- * tray only exists when the "Show menu bar icon" preference is on, but
- * pushing voice state to a non-existent tray is a harmless no-op.
- *
- * Installed once at app boot from App.tsx alongside `installVoiceBridge`.
+ * Mirrors call + mute state into the tray's "Mute mic" item and forwards its
+ * clicks to the voice session. Pushing to an absent macOS tray is a no-op.
+ * Installed once from App.tsx.
  */
 export function installTrayVoiceBridge(): BridgeHandle {
   const pushState = (): void => {
@@ -29,9 +22,7 @@ export function installTrayVoiceBridge(): BridgeHandle {
     });
   };
 
-  // `autorun` pushes once immediately and re-runs whenever the voice state it
-  // reads changes. We re-derive inCall+muted inside pushState each run so
-  // reactivity churn doesn't matter for correctness.
+  // `autorun` pushes now and whenever the voice state it reads changes.
   const unsubStore = autorun(pushState);
 
   const unsubToggle = onTrayRequestToggleMute(() => {

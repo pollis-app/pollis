@@ -10,18 +10,9 @@ interface UnsentMessageActionsProps {
 }
 
 /**
- * Retry / Discard beside a message that did not send (#1335) — Slack's "Not
- * delivered · Try again · Delete". Retry re-runs delivery under the same
- * message id, so the message can never arrive twice. Discard removes it — and
- * because an earlier attempt may have reached the server before the app was
- * killed, the core first withdraws it from everyone (as "delete for
- * everyone" does) whenever it was ever sealed, so no recipient keeps a copy
- * the sender can no longer delete. Retry is absent when the send failed
- * before the core stored the message: there is nothing to retry then, only to
- * discard.
- *
- * Rendered by both skins' `MessageItem` and by the thread panel's row, so a
- * failed thread reply gets the same way out as a failed channel message.
+ * Retry / Discard beside a message that did not send (#1335). Retry reuses the
+ * message id, so it can't arrive twice. Discard first withdraws it from
+ * everyone if it was ever sealed. No Retry when the core never stored it.
  */
 export const UnsentMessageActions: React.FC<UnsentMessageActionsProps> = ({ message }) => {
   const { t } = useTranslation("chat");

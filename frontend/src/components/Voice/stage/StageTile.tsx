@@ -1,16 +1,6 @@
-// One participant on the voice stage. Flat amber-POSIX terminal tile:
-// name + live mic state (top-left), connection-quality bars (top-right),
-// a centered avatar with a live multi-band audio meter when audio-only, or
-// the screenshare feed (with LIVE + res·fps badges) when streaming.
-// Speaking flips the border to a solid accent — no glow. Motion is minimal
-// and informational: only the meter moves, driven by real per-source levels.
-//
-// The tile fills its parent (a NavigableGrid cell, a filmstrip cell, or
-// the spotlight main area), so callers own the sizing/position logic.
-//
-// Reuses the app's own building blocks: Avatar, RemoteVideoTile (the real
-// screenshare renderer), RemoteUserVolumeSlider (the persisted per-user
-// mixer volume), and useScreenShareStats. lucide icons throughout.
+// One participant tile on the voice stage: name + mic state, connection bars,
+// and either an avatar with a live audio meter or a video feed. Speaking flips
+// the border to solid accent. Fills its parent; callers own sizing.
 
 import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,12 +14,8 @@ import { RemoteVideoTile } from "../RemoteVideoTile";
 import { useScreenShareStats } from "../../../screenshare/useScreenShareStats";
 import { audioLevels, BAND_COUNT } from "../../../voice/audioLevels";
 
-// Live audio meter: BAND_COUNT bars whose heights track this source's
-// real per-band levels (pushed from Rust at ~20 Hz). Subscribes by
-// identity and writes CSS variables straight onto the bar container via a
-// ref — no React state, no re-render. Falls back to the static glyph
-// (CSS default heights) until/if levels arrive. Mounted only for in-call
-// audio-only tiles, so the subscription lifecycle matches the meter's.
+// Live audio meter from per-band levels (~20 Hz from Rust), written as CSS
+// variables via a ref: no React state, no re-render.
 const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -39,7 +25,6 @@ const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
     }
     const apply = (bands: number[]) => {
       for (let i = 0; i < BAND_COUNT; i++) {
-        // Floor at a small height so a silent bar still reads as a bar.
         const pct = Math.max(8, Math.round((bands[i] ?? 0) * 100));
         el.style.setProperty(`--eq${i}`, `${pct}%`);
       }
@@ -62,23 +47,17 @@ const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
 
 export type TileMode = "grid" | "film" | "big" | "preview";
 
-/** The single media surface a tile renders. A tile shows EXACTLY one of these —
- *  camera and screenshare are separate tiles, never crammed into one slot, so
- *  the old "both track keys set, one silently dropped" state is unrepresentable.
- *  A participant publishing camera + screenshare at once (#394) yields two tiles
- *  (`{kind:'camera'}` + `{kind:'screenshare'}`); see `tilesFor` in VoiceStage. */
+/** The ONE media surface a tile renders. Camera + screenshare at once (#394)
+ *  is two tiles (`tilesFor` in VoiceStage). */
 export type TileMedia =
   | { kind: "audio" }
   | { kind: "camera"; trackKey: string; width?: number; height?: number }
   | { kind: "screenshare"; trackKey: string; width?: number; height?: number };
 
 export interface StageTileModel {
-  /** Unique per tile: `${identity}` (audio), `${identity}:cam`, or
-   *  `${identity}:screen`. Distinct from `identity` because one participant can
-   *  own two tiles. */
+  /** `${identity}`, `${identity}:cam` or `${identity}:screen`: one participant can own two tiles. */
   tileKey: string;
-  /** Owning participant — drives name, mute/speaking, per-user volume. Shared by
-   *  a participant's camera and screenshare tiles. */
+  /** Owning participant: name, mute/speaking, per-user volume. */
   identity: string;
   name: string;
   avatarKey: string | null;
@@ -86,7 +65,6 @@ export interface StageTileModel {
   isLocal: boolean;
   isSpeaking: boolean;
   connectionQuality?: VoiceConnectionQuality;
-  /** Local user only, while the voice session is still negotiating. */
   isConnecting?: boolean;
   media: TileMedia;
 }
@@ -94,16 +72,12 @@ export interface StageTileModel {
 interface Props {
   participant: StageTileModel;
   mode: TileMode;
-  /** Keyboard focus from the enclosing NavigableGrid — reveals the volume
-   *  strip and highlights the border, mirroring mouse hover. */
+  /** NavigableGrid keyboard focus, mirroring hover. */
   focused?: boolean;
-  /** Focus this streamer in the inline spotlight. */
   onFocus?: (identity: string) => void;
-  /** Open the global fullscreen viewer for a track. */
   onView?: (trackKey: string) => void;
 }
 
-// LiveKit quality → the design's 3-step signal scale.
 function signalClass(q: VoiceConnectionQuality | undefined): string {
   switch (q) {
     case "poor":
@@ -124,9 +98,7 @@ export const StageTile: React.FC<Props> = ({
   onView,
 }) => {
   const { t } = useTranslation("voice");
-  // LiveKit's quality enum is a wire value, not copy — interpolating it raw
-  // produced "Connexion : excellent" for a French user. Written as four
-  // literal keys so `scripts/i18n-check.mjs` can resolve them.
+  // Four literal keys, not the raw wire enum, so i18n-check can resolve them.
   const qualityLabels: Record<VoiceConnectionQuality, string> = {
     excellent: t("tile.qualityExcellent"),
     good: t("tile.qualityGood"),
@@ -138,18 +110,12 @@ export const StageTile: React.FC<Props> = ({
   const preview = mode === "preview";
   const media = p.media;
 
-  // A tile carries video when its media is a camera OR a screenshare — the two
-  // are treated identically at the container level (#394): both are
-  // spotlightable, fullscreenable, and carry the LIVE + res·fps chrome. The
-  // pixels' source makes no difference to the container. An audio tile shows the
-  // avatar + meter.
+  // Camera and screenshare tiles are identical at the container level (#394).
   const videoTrack =
     media.kind === "camera" || media.kind === "screenshare"
       ? { trackKey: media.trackKey, width: media.width, height: media.height }
       : null;
   const isVideo = videoTrack !== null;
-  // A video tile in the filmstrip/grid is clickable to spotlight it; the big
-  // tile is already focused, the preview state isn't a live call.
   const focusable = isVideo && !big && !preview;
 
   const stats = useScreenShareStats(videoTrack?.trackKey ?? null);
@@ -203,7 +169,6 @@ export const StageTile: React.FC<Props> = ({
         )}
       </div>
 
-      {/* top-left: name + mic state */}
       <div className="vs-tl">
         <span className={"vs-name" + (p.isLocal ? " host" : "")}>
           {p.isMuted ? (
@@ -215,7 +180,6 @@ export const StageTile: React.FC<Props> = ({
         </span>
       </div>
 
-      {/* top-right: connecting spinner (local) → connection signal */}
       <div className="vs-tr">
         {p.isConnecting ? (
           <span
@@ -239,20 +203,15 @@ export const StageTile: React.FC<Props> = ({
         )}
       </div>
 
-      {/* LIVE badge: only useful before you join — once you're in the
-          channel the video itself makes it obvious who's streaming. */}
+      {/* LIVE only before joining; in-call the video says it. */}
       {isVideo && preview && (
         <div className="vs-bl"><span className="vs-tag live">{t("tile.liveBadge")}</span></div>
       )}
 
-      {/* res · fps badge on any in-call video tile (camera or screenshare). The
-          e2e suite tells camera from screenshare by the tile's `:cam`/`:screen`
-          key suffix, not this badge. */}
+      {/* Tests tell camera from screenshare by the tileKey suffix, not this badge. */}
       {isVideo && !preview && statsLabel && (
         <div className="vs-br">
-          {/* Machine-facing metric (res · fps) — stays monospace in BOTH
-              skins. Without font-machine the refined skin would swap the
-              stage's inherited font-mono to sans (index.css §refined). */}
+          {/* Machine-facing metric: `font-machine` keeps it mono in both skins. */}
           <span
             className="vs-tag res font-machine"
             data-testid={`voice-tile-stream-stats-${p.tileKey}`}
@@ -262,8 +221,6 @@ export const StageTile: React.FC<Props> = ({
         </div>
       )}
 
-      {/* hover controls — any video tile in-call (camera or screenshare) is
-          fullscreenable and spotlightable. */}
       {isVideo && !preview && videoTrack && (
         <div className="vs-hover">
           <button
@@ -287,11 +244,8 @@ export const StageTile: React.FC<Props> = ({
         </div>
       )}
 
-      {/* volume — remote only, and in-call only. While previewing the channel
-          (not joined) you're not listening to anyone, so a per-user output
-          volume control is meaningless; it appears on hover/focus once you've
-          joined. Keyed by identity (per-user output gain), so a participant's
-          camera and screenshare tiles both control the same volume. */}
+      {/* Per-user volume: remote and in-call only, keyed by identity so a
+          participant's tiles share it. */}
       {!p.isLocal && !preview && (
         <div
           className="vs-vol"

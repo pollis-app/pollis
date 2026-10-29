@@ -19,11 +19,7 @@ function describe(usernames: string[]): string | null {
   return `${usernames.length} people are typing…`;
 }
 
-/**
- * Renders the "X is typing…" hint above the chat input. Reserves a stable
- * row (height-fixed via min-height) so the input doesn't visually jump as
- * indicators come and go.
- */
+/** "X is typing…" above the chat input, in a fixed-height row so the input doesn't jump. */
 export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   channelId,
   conversationId,

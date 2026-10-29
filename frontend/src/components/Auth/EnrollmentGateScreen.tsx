@@ -11,21 +11,16 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import * as api from "../../services/api";
 
 interface EnrollmentGateScreenProps {
-  /// Signed in by a QR device link (#1207): start the enrollment request at
-  /// once and wait for Approve on the device that showed the QR — there is no
-  /// code for the user to read out.
+  /// Signed in by a QR device link (#1207): request at once and wait for the
+  /// QR's device to approve; there is no code to read out.
   linked?: boolean;
   userId: string;
-  /// Email address the user just signed in with, used as the required
-  /// confirmation in the soft-recovery flow.
+  /// Required confirmation in the soft-recovery flow.
   userEmail: string;
-  /// Called once enrollment completes successfully (status === 'approved').
   onEnrolled: () => void;
-  /// Called when the user gives up (e.g. cancel button) — returns to login.
   onCancel: () => void;
-  /// Called after a destructive soft-recovery reset. The caller is
-  /// expected to display the freshly-generated Secret Key ONCE before
-  /// transitioning to the main app.
+  /// After a destructive soft-recovery reset; the caller shows the new Secret
+  /// Key ONCE before the main app.
   onResetComplete: (newSecretKey: string) => void;
 }
 
@@ -54,11 +49,9 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   const { t } = useTranslation("auth");
   const [state, setState] = useState<GatePhase>({ phase: "choose" });
   const [isStarting, setIsStarting] = useState(false);
-  // Bumped whenever the user abandons a wait (cancel, unmount, restart). A
-  // late answer from a superseded request must not steer the UI — the promise
-  // it belongs to cannot be cancelled, so it is IGNORED instead. This replaces
-  // the `clearInterval` bookkeeping the old 2-second poll needed in five
-  // places (#874).
+  // Bumped whenever a wait is abandoned (cancel, unmount, restart). The awaited
+  // promise can't be cancelled, so a late answer from a superseded request is
+  // ignored.
   const waitGenerationRef = useRef(0);
 
   useEffect(() => {
@@ -67,8 +60,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
     };
   }, []);
 
-  // One awaited call. Rust waits with backoff, bounded by the request's own
-  // TTL, and resolves as soon as an existing device approves or rejects.
+  // One awaited call; Rust waits with backoff, bounded by the request's TTL.
   const awaitApproval = (requestId: string) => {
     waitGenerationRef.current += 1;
     const generation = waitGenerationRef.current;
@@ -110,10 +102,8 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
       });
       awaitApproval(handle.request_id);
     } catch (err) {
-      // Tauri rejects with a serialized string, not an Error — use String(err)
-      // (matching the other panes) so the real backend reason surfaces instead
-      // of a generic message. This also lets the session-error routing in the
-      // "error" pane detect "sign in again" cases.
+      // Surface the backend's reason; the "error" pane routes "sign in again"
+      // cases on it.
       const message = errorMessage(err) || t("enroll.startFailed");
       setState({ phase: "error", message });
     } finally {
@@ -121,8 +111,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
     }
   };
 
-  // A linked sign-in skips the chooser: the only next step is the request
-  // the QR's device will approve.
+  // A linked sign-in skips the chooser.
   useEffect(() => {
     if (linked) {
       void handleStartApproval();
@@ -131,13 +120,11 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   }, [linked]);
 
   const restart = () => {
-    // Abandon any outstanding wait — see `waitGenerationRef`.
     waitGenerationRef.current += 1;
     setState({ phase: "choose" });
   };
 
-  // `bg-bg` is a distinct background tint vs the OTP screen so users don't
-  // think they entered the wrong code.
+  // A distinct tint from the OTP screen so users don't think the code was wrong.
   return (
     <div
       data-testid="enrollment-gate-screen"
@@ -146,7 +133,6 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
         position: "relative",
       }}
     >
-      {/* Faster, more energetic dot matrix to differentiate from OTP screen */}
       <div style={{ position: "absolute", inset: 0, opacity: 0.45, pointerEvents: "none" }}>
         <DotMatrix speed={1.4} />
       </div>
@@ -161,14 +147,10 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           style={{
             width: "100%",
             maxWidth: 460,
-            // Center vertically when the window is tall enough, but fall back
-            // to scrolling (auto margins + overflow-y-auto on the parent, NOT
-            // items-center) when the card is taller than the viewport so the
-            // top isn't clipped on short windows.
+            // Auto margins (not items-center) so a card taller than the
+            // viewport scrolls instead of clipping its top.
             marginTop: "auto",
             marginBottom: "auto",
-            // Visually distinct accent border so this doesn't blend with
-            // the OTP card.
             border: "2px solid var(--c-accent)",
           }}
         >
@@ -247,11 +229,9 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
             )}
 
             {state.phase === "error" && (() => {
-              // A missing/expired OTP session (reaching this gate without a
-              // fresh verify — e.g. after an app relaunch) can't be retried
-              // in place: `start_device_enrollment` needs a live enrollment
-              // session, which only a fresh sign-in mints. Route those to
-              // sign-in rather than a "Try again" that just fails identically.
+              // A missing/expired OTP session (e.g. after relaunch) can't be
+              // retried in place: only a fresh sign-in mints the enrollment
+              // session `start_device_enrollment` needs.
               const needsResignin = /session|sign in/i.test(state.message);
               return (
                 <ResultPane
@@ -270,8 +250,6 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
     </div>
   );
 };
-
-// ── Sub-panes ──────────────────────────────────────────────────────────────
 
 const ChoosePane: React.FC<{
   onStartApproval: () => void;
@@ -327,8 +305,7 @@ const ChoosePane: React.FC<{
   );
 };
 
-/// Waiting on a QR-linked approval (#1207): no code to read out — the device
-/// that showed the QR approves on the link tag.
+/// Waiting on a QR-linked approval (#1207).
 const LinkedAwaitingPane: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
   const { t } = useTranslation("auth");
   return (
@@ -352,9 +329,7 @@ const AwaitingApprovalPane: React.FC<{
 }> = ({ code, expiresAt, onCancel }) => {
   const { t } = useTranslation("auth");
   const [secondsLeft, setSecondsLeft] = useState(() => secondsUntil(expiresAt));
-  // A display clock, not a poll: it ticks a rendered countdown and touches no
-  // network. The no-periodic-polling rule is about keepalives, not about
-  // seconds visibly counting down on screen.
+  // A display clock ticking a rendered countdown, not a network poll.
   useEffect(() => {
     const t = window.setInterval(() => {
       setSecondsLeft(secondsUntil(expiresAt));
@@ -419,8 +394,6 @@ const SecretKeyFallbackPane: React.FC<{
       await api.recoverWithSecretKey(userId, value.trim());
       onRecovered();
     } catch (err) {
-      // Surface the real backend reason (Tauri rejects with a string, not an
-      // Error) instead of a generic "Recovery failed".
       const message = errorMessage(err) || t("recover.failed");
       setError(message);
     } finally {
@@ -519,9 +492,6 @@ const ResetConfirmPane: React.FC<{
       const newKey = await api.resetIdentityAndRecover(userId, typedEmail.trim());
       onResetComplete(newKey);
     } catch (err) {
-      // Tauri rejects with a serialized string, not an Error — fall back to
-      // String(err) (matching PinEntryScreen) so the real backend reason
-      // surfaces instead of a generic "Reset failed".
       const message = errorMessage(err) || t("reset.failed");
       setError(message);
     } finally {
@@ -638,16 +608,13 @@ const ResultPane: React.FC<{
   );
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
 function secondsUntil(rfc3339: string): number {
   const target = new Date(rfc3339).getTime();
   const now = Date.now();
   return Math.max(0, Math.floor((target - now) / 1000));
 }
 
-// Clock-style M:SS. The surrounding copy ("… left") lives in the catalogue so
-// translators can put the unit wherever their language needs it.
+// Clock-style M:SS; the "… left" wording lives in the catalogue.
 function formatCountdown(s: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;

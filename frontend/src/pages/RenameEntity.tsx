@@ -19,26 +19,15 @@ type RenameEntityProps =
   | { kind: "channel"; groupId: string; channelId: string; onSuccess?: () => void };
 
 /**
- * Rename-and-describe form for a group or a channel (#874).
- *
- * These were two components, `RenameGroup` and `RenameChannel`, eleven
- * normalised lines apart: identical local state, identical trim/compare/
- * skip-if-unchanged submit, identical two signed-out and not-found guards,
- * identical markup. Everything that actually differed is the four lines below
- * — which entity is looked up, which mutation saves it, what the copy says,
- * and what the testids are called.
- *
- * The copy is spelled out as literal `t()` calls per kind rather than
- * assembled from a key prefix: `scripts/i18n-check.mjs` resolves literal call
- * sites only, and a computed key is invisible to it.
+ * Rename-and-describe form for a group or channel (#874). Copy is literal
+ * `t()` calls per kind so i18n-check can resolve them.
  */
 export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
   const { kind, groupId, onSuccess } = props;
   const { t } = useTranslation("channels");
   const { currentUser } = appStore;
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
-  // Both mutation hooks unconditionally — they register no queries and fire
-  // nothing until called, and hooks may not sit behind a branch.
+  // Both mutation hooks always: hooks can't branch, and these fire nothing until called.
   const updateGroup = useUpdateGroup();
   const updateChannel = useUpdateChannel();
 
@@ -50,10 +39,7 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
     : group?.channels.find((c) => c.id === props.channelId);
   const entity = isGroup ? group : channel;
   const isPending = isGroup ? updateGroup.isPending : updateChannel.isPending;
-  // Every entry point here is admin-only, but the page stays open across a
-  // demotion (or is reached some other way): a non-admin then sees the name
-  // and description as text, no description at all when there is none, and
-  // no Save (#1281). Channel edits are a group-admin right too.
+  // A non-admin (e.g. demoted while open) sees text and no Save (#1281).
   const isAdmin = group?.current_user_role === "admin";
   const nameMode = identityFieldMode(isAdmin, entity?.name);
   const descriptionMode = identityFieldMode(isAdmin, entity?.description);

@@ -1,19 +1,7 @@
-// Webcam session glue. The camera counterpart of `screenShareSession`:
-// subscribes to the backend camera-event Channel once per process and
-// mirrors the lifecycle into the MobX store.
-//
-// Frame transport is deliberately NOT reimplemented here. Local self-preview
-// and remote camera frames both ride the SAME loopback frame WebSocket the
-// screen-share path already owns (the Rust side mirrors local webcam frames
-// under `LOCAL_CAMERA_PREVIEW_KEY` and remote camera tracks flow through the
-// shared remote-video drain). So a camera tile just subscribes via
-// `screenShareSession.onFrame(trackKey)` like any other video tile — there's
-// one socket, one decoder, keyed by trackKey.
-//
-// Camera capture is Rust-side on every platform (macOS AVFoundation, Linux
-// V4L2, Windows Media Foundation), so — unlike screen share — there is no
-// Electron renderer branch: the deprecated Electron shell never grew a JS
-// camera path, and Tauri is the shipping shell.
+// Webcam session glue: subscribes to the backend camera-event Channel once per
+// process and mirrors the lifecycle into the store. Frames (local preview and
+// remote) ride screen share's loopback frame WebSocket, keyed by trackKey, so a
+// camera tile subscribes via `screenShareSession.onFrame(trackKey)`.
 
 import { reaction } from "mobx";
 
@@ -22,21 +10,12 @@ import i18n from "../i18n";
 import { appStore } from "../stores/appStore";
 import type { CameraEvent, CameraList } from "./types";
 
-/** Reserved frame-WS track key the backend mirrors the local outgoing
- *  webcam under, for the sharer's own preview. Must match
- *  `LOCAL_CAMERA_PREVIEW_KEY` in `pollis-core/src/commands/camera/mod.rs`.
- *  Distinct from screen share's `LOCAL_PREVIEW_KEY` so running both at once
- *  doesn't cross the two previews. */
+/** Must match `LOCAL_CAMERA_PREVIEW_KEY` in `pollis-core/src/commands/camera/mod.rs`;
+ *  distinct from screen share's `LOCAL_PREVIEW_KEY` so both previews can run. */
 export const LOCAL_CAMERA_PREVIEW_KEY = "__local_camera_preview__";
 
-/** Collapse a raw backend camera error into one clear status-bar sentence.
- *  Unknown shapes pass through unchanged so a novel error is never hidden.
- *
- *  Resolved through `i18n.t` rather than a component's `useTranslation`: the
- *  result is a one-shot string that lands in the voice state union (and the
- *  settings preview) at the moment capture fails, and is never re-rendered from
- *  its source. The lookup happens per call, so it is never a module-load
- *  snapshot of the language. */
+/** Collapse a raw backend camera error into one status-bar sentence; unknown
+ *  shapes pass through. Uses `i18n.t`: the string is stored once, not re-rendered. */
 export function friendlyCameraError(raw: string): string {
   const r = raw.toLowerCase();
   if (
@@ -71,12 +50,10 @@ export function friendlyCameraError(raw: string): string {
 
 class CameraSession {
   private subscribed = false;
-  // Held so teardown can detach the handler on logout — a late event would
-  // otherwise mutate the just-reset store.
+  // Detached on logout so a late event can't mutate the just-reset store.
   private eventsChannel: Channel<CameraEvent> | null = null;
 
   constructor() {
-    // Mirror screenShareSession: drop the event subscription on logout.
     reaction(
       () => appStore.currentUser,
       (user) => {
@@ -95,7 +72,6 @@ class CameraSession {
     }
   }
 
-  /** Idempotent. Wire the backend camera-event Channel once after auth. */
   async ensureSubscribed(): Promise<void> {
     if (this.subscribed) {
       return;
@@ -107,16 +83,12 @@ class CameraSession {
     await invoke("subscribe_camera_events", { onEvent: events });
   }
 
-  /** Enumerate capture devices. The backend spawns the helper and parks it
-   *  waiting for the upcoming `start(deviceId)`, so always pair an
+  /** The backend parks the helper waiting for `start(deviceId)`, so pair an
    *  enumerate that leads to a pick with a `start` or a `stop`. */
   async listDevices(): Promise<CameraList> {
     return await invoke<CameraList>("list_video_devices");
   }
 
-  /** Start capture with the picked device. The backend publishes a
-   *  `TrackSource::Camera` track into the active voice room and begins
-   *  mirroring local frames under `LOCAL_CAMERA_PREVIEW_KEY`. */
   async start(deviceId: string): Promise<void> {
     await invoke("start_camera", { deviceId });
   }
@@ -125,11 +97,8 @@ class CameraSession {
     await invoke("stop_camera");
   }
 
-  /** Start a PREVIEW-ONLY capture for the settings picker (issue #434): local
-   *  self-preview under `LOCAL_CAMERA_PREVIEW_KEY` with no voice room and
-   *  nothing published. Independent of {@link start} — safe to run out of a
-   *  call, and does not disturb an in-call camera. Pair with {@link stopPreview}
-   *  when the picker closes or the device changes. */
+  /** Preview-only capture for the settings picker (#434): no voice room, nothing
+   *  published, independent of an in-call camera. Pair with {@link stopPreview}. */
   async startPreview(deviceId: string): Promise<void> {
     await invoke("start_camera_preview", { deviceId });
   }
@@ -142,9 +111,7 @@ class CameraSession {
     const store = appStore;
     switch (ev.type) {
       case "local_started":
-        // The backend signals start after its helper has published. Drive
-        // the store through starting → active so the union lands in the
-        // same shape regardless of who initiated (picker vs recovery).
+        // Same starting → active path whoever initiated (picker vs recovery).
         store.cameraStartStarting();
         store.cameraStarted("camera", { width: ev.width, height: ev.height });
         break;

@@ -33,16 +33,9 @@ export const SettingsPage: React.FC = observer(() => {
   const [preferredName, setPreferredName] = useState("");
   const [email, setEmail] = useState("");
 
-  // Email-change flow lives entirely in this component:
-  //   'idle'    → display current email + "Change" button
-  //   'request' → input new address, send OTP
-  //   'verify'  → input BOTH OTPs, swap email
-  // Distinct mutations would obscure the linear UX, so we hold state locally.
-  //
-  // Two codes, not one (#1161): one to the new address (you control where you
-  // are going) and one to the current address (you control the account you are
-  // moving). The second is the only proof a borrowed unlocked device cannot
-  // satisfy on its own, so the flow cannot complete without it.
+  // Email change: idle → request (new address) → verify (BOTH codes). Two codes
+  // (#1161): the one to the current address is what a borrowed unlocked device
+  // can't satisfy.
   const [emailChangeStep, setEmailChangeStep] = useState<"idle" | "request" | "verify">("idle");
   const [pendingNewEmail, setPendingNewEmail] = useState("");
   const [emailOtpCode, setEmailOtpCode] = useState("");
@@ -68,7 +61,6 @@ export const SettingsPage: React.FC = observer(() => {
 
   useEffect(() => { setCurrentAvatarUrl(avatarDownloadUrl || null); }, [avatarDownloadUrl]);
 
-  // Accept image files dropped anywhere on the window while on this page.
   useEffect(() => {
     const handlePathDrop = (e: Event) => {
       const paths: string[] = (e as CustomEvent<{ paths: string[] }>).detail?.paths ?? [];
@@ -76,12 +68,8 @@ export const SettingsPage: React.FC = observer(() => {
       if (!imagePath) {
         return;
       }
-      // Read the dropped file's bytes and wrap them as a `File`. This used to
-      // go through `fetch(convertFileSrc(path))`, i.e. the asset protocol —
-      // which is switched off now (`src-tauri/tauri.conf.json`), because it was
-      // a second way to read an arbitrary path that the path scope did not
-      // cover. A drop is one of the two gestures Rust records, so the read
-      // below is in scope.
+      // Read the drop's bytes via bridge fs (a drop is a recorded path); the
+      // asset protocol is off.
       const name = imagePath.split(/[\\/]/).pop() ?? "image";
       readFile(imagePath)
         .then((bytes) => {
@@ -157,10 +145,8 @@ export const SettingsPage: React.FC = observer(() => {
   const handleSave = async () => {
     if (!currentUser) { return; }
     const nextUsername = username.trim();
-    // The DS refuses a username outside its rule (`is_valid_username`) and
-    // passes an UNCHANGED one through, because default names that predate the
-    // rule must still be able to save a display name. Same carve-out here, so
-    // the form explains the refusal before the round trip rather than after.
+    // The DS rejects an invalid username but passes an UNCHANGED one (legacy
+    // defaults); check the same way before the round trip.
     if (nextUsername !== (userData?.username ?? "") && !isValidUsername(nextUsername)) {
       setUsernameError(t("user.usernameInvalid"));
       return;
@@ -224,13 +210,8 @@ export const SettingsPage: React.FC = observer(() => {
         code: emailOtpCode.trim(),
         currentCode: currentEmailOtpCode.trim(),
       });
-      // The address the form renders comes from `appStore.currentUser`, NOT
-      // from the profile row — `useUserProfile` takes `email` off the session,
-      // because the row does not carry one. So invalidating refetched a value
-      // that had not changed and the page kept showing the old address until a
-      // reload. Update the store (the source) and write the cached profile
-      // through; a refetch would only re-derive the same two values. Mobile
-      // already updated its store here.
+      // The form's address comes from `appStore.currentUser` (the profile row
+      // has none), so update the store and write the cache through.
       const changedTo = pendingNewEmail.trim();
       appStore.setCurrentUser({ ...currentUser, email: changedTo });
       queryClient.setQueryData(
@@ -262,7 +243,6 @@ export const SettingsPage: React.FC = observer(() => {
         <div data-testid="settings-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-8">
 
-            {/* Account */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.accountHeading")}
@@ -323,9 +303,7 @@ export const SettingsPage: React.FC = observer(() => {
               </Button>
             </section>
 
-            {/* Email is its own section so the user doesn't mistake it for
-                something the "Save Changes" button covers — email only mutates
-                via the OTP-verified flow below. */}
+            {/* A separate section: email changes only via the OTP flow, not Save. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.emailHeading")}
@@ -476,7 +454,6 @@ export const SettingsPage: React.FC = observer(() => {
               )}
             </section>
 
-            {/* Avatar */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.avatarHeading")}

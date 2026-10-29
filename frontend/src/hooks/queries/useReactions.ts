@@ -24,8 +24,7 @@ interface ReactionVars {
   emoji: string;
 }
 
-/** The cached list with `userId` added to `emoji` — a new pill if nobody had
- * reacted with it yet. Pure: never mutates the cached array. */
+/** `userId` added to `emoji` (a new pill if needed), without mutating the cache. */
 function withReaction(reactions: Reaction[], userId: string, emoji: string): Reaction[] {
   const existing = reactions.find((r) => r.emoji === emoji);
   if (!existing) {
@@ -41,8 +40,7 @@ function withReaction(reactions: Reaction[], userId: string, emoji: string): Rea
   );
 }
 
-/** The cached list with `userId` taken off `emoji`; a pill nobody is left on
- * disappears, so an empty list means the row unmounts. */
+/** `userId` removed from `emoji`; an empty pill disappears. */
 function withoutReaction(reactions: Reaction[], userId: string, emoji: string): Reaction[] {
   return reactions
     .map((r) => {
@@ -56,11 +54,8 @@ function withoutReaction(reactions: Reaction[], userId: string, emoji: string): 
 }
 
 /**
- * Optimistic reaction write. The pill flips the instant the emoji is picked,
- * ahead of the round trip — a reaction that lands a second later reads as a
- * broken click. The mutation still owns the truth: on error the previous
- * list is put back, and either way the query is refetched once the write
- * settles so the DS's answer wins.
+ * Optimistic reaction write: the pill flips immediately, rolls back on error,
+ * and refetches on settle so the DS's answer wins.
  */
 function useOptimisticReactionMutation(
   command: "add_reaction" | "remove_reaction",
@@ -74,8 +69,7 @@ function useOptimisticReactionMutation(
     },
     onMutate: async ({ messageId, userId, emoji }) => {
       const key = reactionQueryKeys.message(messageId);
-      // A refetch already in flight would overwrite the optimistic list with
-      // the pre-write answer; stop it.
+        // An in-flight refetch would overwrite the optimistic list.
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<Reaction[]>(key);
       queryClient.setQueryData<Reaction[]>(key, (current = []) =>
@@ -105,13 +99,8 @@ export function useRemoveReaction() {
 }
 
 /**
- * Toggle the current user's reaction on one message: remove it if they
- * already reacted with that emoji, add it otherwise. Shared by the reaction
- * pills and the hover-bar picker so both agree on what a second click means.
- *
- * Decides from the cache at click time rather than from the last render's
- * list, so two quick clicks on the same emoji read the optimistic result of
- * the first and take the reaction back instead of adding it twice.
+ * Toggle the user's reaction on a message, shared by pills and the picker.
+ * Decides from the cache at click time, so a quick double click takes it back.
  */
 export function useToggleReaction(messageId: string) {
   const queryClient = useQueryClient();

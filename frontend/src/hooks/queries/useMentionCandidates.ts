@@ -6,18 +6,9 @@ import { useDMConversations } from "./useMessages";
 import type { MentionCandidate } from "../../utils/mentions";
 
 /**
- * The people the current user may `@mention` in the conversation they're
- * looking at (#843).
- *
- * PRIVACY: the pool is derived exclusively from membership the user can
- * already see — the selected group's roster, or the other party in the
- * selected DM. There is deliberately NO username lookup behind this: a
- * directory search would let anyone enumerate users outside their own
- * groups and DMs just by typing into a composer. The backend resolves
- * mentions against the same roster, so an `@name` nobody in the room
- * answers to is inert on both sides.
- *
- * The current user is excluded — you can't mention yourself.
+ * Who the current user may `@mention` here (#843), excluding themselves.
+ * PRIVACY: only membership they can already see (the group roster or the DM
+ * peer); never a username lookup, which would allow enumerating users.
  */
 export function useMentionCandidates(): MentionCandidate[] {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -25,8 +16,7 @@ export function useMentionCandidates(): MentionCandidate[] {
   const selectedChannelId = useObserver(() => appStore.selectedChannelId);
   const selectedConversationId = useObserver(() => appStore.selectedConversationId);
 
-  // Only fetch the roster when a channel is actually selected — a DM composer
-  // has no group to read.
+  // A DM composer has no group roster to read.
   const groupMembers = useGroupMembers(selectedChannelId ? selectedGroupId : null);
   const dmConversations = useDMConversations();
 

@@ -5,12 +5,8 @@ import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 
 /**
- * Pinned messages (#99).
- *
- * Pins are per-CONVERSATION shared state — every member sees the same list —
- * so unlike bookmarks (deliberately device-local, see `useBookmarks`) these
- * hooks are backed by the DS: the Rust commands seal/open pin content under
- * the conversation's pin master key and the server stores only ciphertext.
+ * Pinned messages (#99): shared per-conversation state, backed by the DS. Rust
+ * seals pin content under the conversation's pin master key.
  */
 
 /** Mirrors the Rust PinnedMessage in pollis-core/src/commands/pinned_messages.rs. */
@@ -33,12 +29,8 @@ export const pinQueryKeys = {
 };
 
 /**
- * One conversation's pins, newest first, decrypted in Rust.
- *
- * `conversationId` is the channel or DM id. The list can legitimately error
- * while the device is still waiting for the conversation's pin key (a fresh
- * external join); React Query surfaces that as `error` and retries on the
- * next mount, which matches the "heals on the next pass" design.
+ * One conversation's pins (channel or DM id), newest first. May error while
+ * awaiting the pin key after an external join; it heals on a later mount.
  */
 export function usePinnedMessages(conversationId: string | null) {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -54,7 +46,6 @@ export function usePinnedMessages(conversationId: string | null) {
   });
 }
 
-/** The pinned message ids for a conversation, for per-row pin indicators. */
 export function usePinnedMessageIds(conversationId: string | null): Set<string> {
   const { data: pins = [] } = usePinnedMessages(conversationId);
   return useMemo(() => new Set(pins.map((p) => p.message_id)), [pins]);
@@ -63,11 +54,11 @@ export function usePinnedMessageIds(conversationId: string | null): Set<string> 
 interface TogglePinVars {
   conversationId: string;
   messageId: string;
-  /** Current state — `true` means this toggle UNPINS. */
+  /** `true` means this toggle UNPINS. */
   isPinned: boolean;
 }
 
-/** Pin or unpin one message; any member may do either. */
+/** Pin or unpin one message; any member may. */
 export function useTogglePinnedMessage() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);

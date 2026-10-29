@@ -4,8 +4,7 @@ import type { EmojiAnnotationStack } from "./emojiAnnotations";
 import type { PickerEmoji } from "./emojiSearch";
 import { pickerEmojiId } from "./emojiSearch";
 
-/** Cells per row. Must match the `grid-cols-*` class below — the picker's
- * arrow-key navigation uses it to move a whole row at a time. */
+/** Cells per row; must match the `grid-cols-*` class below (row-wise arrow nav). */
 export const EMOJI_COLUMNS = 9;
 
 interface EmojiSectionProps {
@@ -13,7 +12,6 @@ interface EmojiSectionProps {
   title: string;
   items: readonly PickerEmoji[];
   toneIndex: number;
-  /** Localized names for the cell labels — see `useEmojiAnnotations`. */
   annotations: EmojiAnnotationStack;
   /** Index of this section's FIRST cell in the picker's flat nav order. */
   baseIndex: number;
@@ -23,18 +21,10 @@ interface EmojiSectionProps {
 }
 
 /**
- * One titled block of the picker, with a sticky header.
- *
- * The grid is mounted LAZILY. A full standard emoji set is ~1800 cells, and
- * mounting all of them makes opening the picker visibly slow in the WebKitGTK
- * webview — the categories a user never scrolls to should not cost anything. An
- * `IntersectionObserver` with a generous root margin swaps a correctly-sized
- * placeholder for the real grid shortly before the section comes into view, and
- * once mounted the grid stays mounted so scrolling back up never re-flashes.
- *
- * The placeholder is sized from the item count so the scrollbar is honest from
- * the first frame — otherwise the scroll position would jump as sections mount
- * underneath the user.
+ * One titled picker section with a sticky header. The grid mounts lazily (~1800
+ * cells is visibly slow in WebKitGTK) via an `IntersectionObserver`, behind a
+ * placeholder sized from the item count so the scrollbar is honest, and stays
+ * mounted once shown.
  */
 export const EmojiSection: React.FC<EmojiSectionProps> = ({
   id,
@@ -58,8 +48,7 @@ export const EmojiSection: React.FC<EmojiSectionProps> = ({
     if (!element) {
       return;
     }
-    // No IntersectionObserver (very old webview, or a test environment) →
-    // render everything rather than render nothing.
+    // No IntersectionObserver (old webview, tests): render everything.
     if (typeof IntersectionObserver === "undefined") {
       setMounted(true);
       return;

@@ -2,14 +2,8 @@ import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 interface TextInputProps {
-  /**
-   * Visible label above the field. Omit it only for a field whose purpose is
-   * already obvious from context (a search box at the top of a search page);
-   * pass `ariaLabel` in that case so the control is still named for a screen
-   * reader.
-   */
+  /** Visible label. Omit only when context makes the purpose obvious, and pass `ariaLabel`. */
   label?: string;
-  /** Accessible name when there is no visible `label`. */
   ariaLabel?: string;
   value: string;
   onChange: (value: string) => void;

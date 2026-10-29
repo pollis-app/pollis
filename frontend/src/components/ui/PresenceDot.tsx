@@ -8,14 +8,7 @@ interface PresenceDotProps {
   testId?: string;
 }
 
-/**
- * Standalone presence dot mirroring Avatar's overlay dot: online uses the
- * accent color, offline uses the bg color ringed in accent-muted.
- *
- * Used wherever there is no avatar behind it to anchor the dot — the terminal
- * skin's sidebar DM list and the right panel's member rows, both of which stay
- * exactly one text-line tall.
- */
+/** Standalone presence dot for rows with no avatar (terminal DM list, member rows). */
 export const PresenceDot: React.FC<PresenceDotProps> = observer(
   ({ userId, testId }) => {
     const { t } = useTranslation("common");

@@ -28,23 +28,16 @@ import { CustomEmojiImage } from "./CustomEmojiImage";
 interface EmojiPickerProps {
   /** Called with the text to insert: a character, or a `<:name:hash>` token. */
   onSelect: (text: string) => void;
-  /** Escape, or a selection when `closeOnSelect` is set. */
   onClose?: () => void;
-  /** Reaction pickers close on pick; the composer's stays open for a second one. */
   closeOnSelect?: boolean;
   className?: string;
   /**
-   * Pixel cap when the viewport cannot seat the panel at its natural height.
-   * Left undefined the panel keeps `h-[24rem]` exactly as before.
-   *
-   * A number rather than a class because it is computed from the trigger's
-   * position at open time — Tailwind cannot express it, and `h-[24rem]` still
-   * governs the ordinary case.
+   * Pixel cap computed from the trigger's position when the viewport can't
+   * seat the panel at its natural height; undefined keeps `h-[24rem]`.
    */
   maxHeight?: number;
 }
 
-/** One picker section before it is flattened for keyboard navigation. */
 interface Section {
   id: string;
   title: string;
@@ -52,22 +45,12 @@ interface Section {
 }
 
 /**
- * The emoji picker: the full standard set, searchable, categorised, with
- * recently-used and this user's custom emoji — Discord's shape.
+ * The emoji picker (Discord's shape). In-flow: no portal, fixed position or
+ * backdrop; callers float it with `absolute` (see `EmojiPickerButton`).
  *
- * **In-flow by construction.** It renders exactly where it is mounted: no
- * portal, no `position: fixed`, no backdrop. A caller that wants it floating
- * anchors it with `absolute` inside its own `relative` container (see
- * `EmojiPickerButton`), which is the pattern the existing reaction picker
- * already uses and the only one this codebase allows.
- *
- * **The custom section IS the permission rule.** It is filled from
- * `useUsableEmoji` — the Rust `list_usable_emoji`, i.e. every emoji from every
- * group the user belongs to, usable in any conversation (#848). The picker
- * deliberately does not narrow that by the conversation being typed in: doing
- * so is the intuitive-looking mistake that would stop a member of group A from
- * using A's emoji while talking in group B, which is the exact behaviour the
- * ticket asks for.
+ * The custom section is `useUsableEmoji`: every emoji from every group the user
+ * is in, usable in any conversation (#848). Do not narrow it to the current
+ * conversation's group.
  */
 export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
   ({ onSelect, onClose, closeOnSelect = false, className = "", maxHeight }) => {
@@ -85,8 +68,8 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
     const scrollRef = useRef<HTMLDivElement>(null);
     const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
 
-    // The lazy sections' observer root has to be a real node, and a ref does not
-    // trigger a re-render — so mirror it into state once, after mount.
+    // The lazy sections' observer root must be a real node; a ref doesn't
+    // re-render, so mirror it into state after mount.
     useEffect(() => {
       setScrollRoot(scrollRef.current);
     }, []);
@@ -110,9 +93,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         out.push({ id: "recent", title: t("picker.recent"), items: recents });
       }
 
-      // Custom emoji grouped by the group that registered them — the shape
-      // Discord uses, and the one that keeps "this came from group A" legible
-      // while you are typing in group B.
+      // Custom emoji grouped by registering group, so their origin stays legible.
       const byGroup = new Map<string, PickerEmoji[]>();
       for (const emoji of customEmoji) {
         const bucket = byGroup.get(emoji.group_id) ?? [];
@@ -141,8 +122,6 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
       return out;
     }, [query, customEmoji, recentIds, annotations, t]);
 
-    // Flat navigation order — the index each cell carries and what the arrow
-    // keys step through.
     const flatCount = useMemo(
       () => sections.reduce((total, section) => total + section.items.length, 0),
       [sections],
@@ -181,7 +160,6 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
       target?.scrollIntoView({ block: "start" });
     }, []);
 
-    // Keep the rail in step with the scroll position.
     const handleScroll = useCallback(() => {
       const root = scrollRef.current;
       if (!root) {
@@ -200,12 +178,8 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
     }, []);
 
     /**
-     * Move focus by `delta` cells in the flat order.
-     *
-     * Only MOUNTED cells can take focus — sections below the fold are still
-     * placeholders — so a move past that boundary scrolls instead, which mounts
-     * the next section, and the following keypress reaches it. Same behaviour a
-     * virtualised list gives, without a virtualiser.
+     * Move focus by `delta` cells. Only mounted cells can take focus, so a move
+     * past the fold scrolls instead, mounting the next section for the next key.
      */
     const moveFocus = useCallback(
       (from: number, delta: number) => {
@@ -229,10 +203,8 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
           onClose?.();
           return;
         }
-        // The emoji grid lays out along the inline axis, so under `dir="rtl"`
-        // the NEXT emoji is drawn to the left and ArrowLeft is the key that
-        // must reach it. Vertical steps are whole rows and do not mirror.
-        // See `utils/direction.ts`.
+        // Inline axis: under `dir="rtl"` ArrowLeft reaches the NEXT emoji.
+        // Vertical steps don't mirror (`utils/direction.ts`).
         const horizontal = horizontalArrowStep(event.key, event.currentTarget);
         const verticalDeltas: Record<string, number> = {
           ArrowDown: EMOJI_COLUMNS,
@@ -249,7 +221,6 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
 
         event.preventDefault();
         if (current < 0) {
-          // Focus is still in the search box; ArrowDown enters the grid.
           if (delta > 0) {
             moveFocus(0, 0);
           }
@@ -260,7 +231,6 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
       [moveFocus, onClose],
     );
 
-    // Each section's base index in the flat order.
     let cursor = 0;
     const withBase = sections.map((section) => {
       const base = cursor;
@@ -274,9 +244,8 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         role="dialog"
         aria-label={t("picker.label")}
         onKeyDown={handleKeyDown}
-        // `max-height` beats `height`, so the clamp shrinks the panel without
-        // touching its class. The grid is `flex-1 min-h-0 overflow-y-auto`, so
-        // the rows it loses become scroll rather than overflow.
+          // `max-height` shrinks the panel without touching its class; lost
+          // rows scroll.
         style={maxHeight === undefined ? undefined : { maxHeight }}
         className={`panel-raised flex flex-col overflow-hidden w-[22rem] h-[24rem] ${className}`}
       >

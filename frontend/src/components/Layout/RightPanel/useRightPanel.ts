@@ -7,64 +7,29 @@ import { useSkin, usePreferences } from "../../../hooks/queries/usePreferences";
 import type { PanelKind, PanelSearch } from "../../../types/panel";
 
 /**
- * Resolve which right-hand panel is showing, and how to change it
- * (#824, #825, #904).
- *
- * TWO PIECES OF STATE, DELIBERATELY KEPT APART
- * --------------------------------------------
- *   OPEN/CLOSED — device-local, scoped to the signed-in user, and touched by
- *     exactly one thing: the user toggling it. Navigating, reloading, changing
- *     skin, or another person signing in on this machine must all leave it
- *     alone. It lives in `rightPanelStore`.
- *
- *   THE SHAPE AND ITS DATA — thread vs members, and whose members — follows
- *     the route, because that is what the panel is FOR. The thread id is the
- *     only part in the URL, and it is route-scoped: leaving the conversation
- *     leaves the thread.
- *
- * Both used to be one `?panel=` search param, which is what made them move
- * together. Nothing carries search params across a navigation, so the open
- * state was reset by every click in the sidebar and fell back to a SKIN
- * default — shut in `terminal`, open in `refined`. Hence one bug with two
- * faces: a terminal panel that would not stay open and a refined one that
- * would not stay shut.
- *
- * SEEDING A DEVICE THAT HAS NO ANSWER YET
- * ---------------------------------------
- * A first launch has nothing remembered, so it falls back to the synced
- * `right_panel_open_by_default` preference, and failing that to the skin's
- * historical default — then WRITES that answer down. The write is what keeps
- * the skin out of it from then on: after the seed lands the skin is never
- * consulted again, so switching between `terminal` and `refined` cannot move a
- * panel the user has (or has not) opened. Seeding waits for the preferences
- * query to settle, because the skin is read from that same query and a seed
- * taken mid-flight would record the loading placeholder.
- *
- * This hook is the ONLY writer of the panel's state. Everything downstream
- * reads `kind`/`threadId` and never constructs the search object itself, so
- * the "thread open with no thread id" state has no way in.
+ * Which right-hand panel is showing, and how to change it (#824, #825, #904).
+ * Open/closed is device-local per user and moves only when the user toggles
+ * it (`rightPanelStore`); the shape follows the route (`?thread=` is the only
+ * URL part). This hook is the ONLY writer of either. See
+ * `.codesight/wiki/ui.md` → "The right panel".
  */
 export function useRightPanel() {
   const navigate = useNavigate();
-  // `strict: false` because the panel is a root-level concern rendered by
-  // AppShell — it must read the same param from whichever route matched.
+  // `strict: false`: the panel is a root-level concern rendered by AppShell.
   const search = useSearch({ strict: false }) as PanelSearch;
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const skin = useSkin();
   const { query } = usePreferences();
 
-  // `useObserver` rather than a bare read: this hook is used from components
-  // that are not all wrapped in `observer()`, and both of these must stay
-  // reactive for the panel to repaint when it is toggled or the user changes.
+  // `useObserver`: not every caller is wrapped in `observer()`.
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
   const remembered = useObserver(() => rightPanelStore.remembered(userId));
 
   const seed = query.data?.right_panel_open_by_default ?? skin === "refined";
   const isOpen = remembered ?? seed;
 
-  // Write the seed down once the preferences have actually landed. Guarded on
-  // `remembered`, so it fires once per user per device however many components
-  // hold this hook, and never overwrites a real answer.
+  // Write the seed once the preferences have landed; guarded on `remembered`
+  // so it never overwrites a real answer.
   useEffect(() => {
     if (!query.isSuccess) {
       return;
@@ -87,23 +52,16 @@ export function useRightPanel() {
 
   const setThread = useCallback(
     (thread: string | undefined) => {
-      // Target the concrete current pathname rather than a relative `"."`.
-      // This hook is used from AppShell, which renders at the ROOT route, so
-      // `"."` resolves against `/` and would navigate the user out of their
-      // conversation; omitting `to` entirely leaves the search type unresolved.
-      //
-      // `replace` so opening a thread doesn't bury the conversation in
-      // history — back should leave the conversation, not rewind a series of
-      // thread openings.
+      // The concrete pathname, not `"."`: AppShell renders at the ROOT route,
+      // so `"."` would resolve to `/`. `replace` so threads don't bury the
+      // conversation in history.
       navigate({
         to: pathname,
         search: (prev: Record<string, unknown>) => ({ ...prev, thread }),
         replace: true,
       });
     },
-    // `pathname` belongs here: without it the callback closes over whichever
-    // route was matched when the hook first ran, and every later call would
-    // navigate back to that stale path.
+    // Without `pathname` the callback would navigate to a stale route.
     [navigate, pathname],
   );
 
@@ -111,8 +69,7 @@ export function useRightPanel() {
     (pins: "1" | undefined) => {
       navigate({
         to: pathname,
-        // Opening pins drops any open thread — the two shapes share the slot,
-        // and keeping a stale `?thread=` would win the kind derivation.
+          // Pins and threads share the slot; a stale `?thread=` would win.
         search: (prev: Record<string, unknown>) => ({
           ...prev,
           pins,
@@ -124,10 +81,8 @@ export function useRightPanel() {
     [navigate, pathname],
   );
 
-  // Only navigates when there is actually a thread to drop. Without the guard,
-  // merely closing the panel would push a history entry on every route in the
-  // app — reintroducing a coupling between the panel and the URL that this
-  // whole change exists to remove.
+  // Navigate only when there is a thread to drop, so plain close never
+  // touches history.
   const clearThread = useCallback(() => {
     if (!search.thread) {
       return;
@@ -153,16 +108,13 @@ export function useRightPanel() {
 
   const openThread = useCallback(
     (rootMessageId: string) => {
-      // Opening a thread opens the panel: the user asked to read something
-      // that only renders in there.
       rightPanelStore.setOpen(userId, true);
       setThread(rootMessageId);
     },
     [userId, setThread],
   );
 
-  /** Toggle the pinned-messages panel (#99): open it, or drop back to the
-   * roster when it is already showing. */
+  /** Toggle the pinned-messages panel (#99), or back to the roster if showing. */
   const togglePins = useCallback(() => {
     if (kind === "pins") {
       setPins(undefined);

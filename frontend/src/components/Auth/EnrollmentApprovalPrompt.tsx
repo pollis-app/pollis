@@ -15,21 +15,13 @@ interface EnrollmentApprovalPromptProps {
   onResolved: () => void;
 }
 
-/// Full-screen takeover shown on every existing device when a sibling
-/// device of the same user posts a `device_enrollment_request`. The user
-/// must explicitly approve or reject — there is no auto-dismiss because
-/// silently ignoring an enrollment request would be a quiet account
+/// Full-screen takeover on every existing device when a sibling device requests
+/// enrollment. No auto-dismiss: ignoring a request silently would be a quiet
 /// takeover vector.
 ///
-/// The approver TYPES the code shown on the new device (#1096). This screen
-/// used to display the server's copy of it and submit that same value back on
-/// one click, so the SAS comparison the whole flow rests on was performed by
-/// nobody: a Delivery Service that swapped the new device's ephemeral key and
-/// its stored code to match satisfied every programmatic check, and approving
-/// handed the account private key to whoever controlled the substituted key.
-/// Typing puts the code the USER read off the other screen on one side of the
-/// comparison, and the code Rust derives from the ephemeral key it fetched on
-/// the other — so a swap fails without depending on the user's diligence.
+/// The approver TYPES the code shown on the new device (#1096), so the SAS
+/// comparison is the user's reading against the code Rust derives from the
+/// fetched ephemeral key, and a DS-side key swap fails.
 export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> = ({
   requestId,
   newDeviceId,
@@ -53,8 +45,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
       onResolved();
     } catch (err) {
       setError(errorMessage(err, t("approval.approveFailed")));
-      // Clear on failure: a wrong code is the signal to go and re-read the
-      // other screen, not to nudge one character and retry.
+      // Clear on failure: the user should re-read the other screen.
       setTypedCode("");
     } finally {
       setIsLoading(false);
@@ -74,7 +65,6 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
     }
   };
 
-  // Truncate the device id for display so the prompt is readable.
   const shortDeviceId = useMemo(
     () => `${newDeviceId.slice(0, 6)}…${newDeviceId.slice(-4)}`,
     [newDeviceId],

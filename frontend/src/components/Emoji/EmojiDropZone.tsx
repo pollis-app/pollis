@@ -6,29 +6,21 @@ import { dropTargetStore } from "../../stores/dropTargetStore";
 import { EMOJI_IMAGE_EXTENSIONS, isSupportedEmojiFile } from "./emojiShortcode";
 
 interface EmojiDropZoneProps {
-  /** Called with the native path of an accepted image. */
   onPick: (path: string) => void;
-  /** Called with the path of a drop this zone will not take (wrong type). */
+  /** A drop this zone will not take (wrong type). */
   onReject: (path: string) => void;
   disabled?: boolean;
-  /** Preview of the file already chosen; the prompt shows when absent. */
   children?: React.ReactNode;
 }
 
 /**
- * The image-first half of the custom-emoji upload (Discord's model): drop a
- * file anywhere on the window, or click to open the OS picker. The shortcode is
- * derived from whatever lands here, so this is the step that comes first.
+ * The image-first step of the custom-emoji upload (Discord's model): drop a file
+ * anywhere on the window, or click to pick.
  *
- * A native drag never reaches the DOM — Tauri intercepts the OS drop and hands
- * the window a payload of PATHS, which is exactly what the upload wants (the
- * Rust side reads and re-encodes the file, so bytes never cross the IPC). The
- * consequence is that "drag-over" is a window-level fact, not a hover: the zone
- * lights up while a drag is anywhere over the app, because it is the only place
- * on the page that can receive one.
- *
- * Registered as an INLINE drop target, so `AppShell`'s full-window drop overlay
- * stays out of the way — it would otherwise cover the affordance being lit up.
+ * Tauri hands the window a payload of PATHS (Rust reads and re-encodes, so bytes
+ * never cross the IPC), so "drag-over" is window-level: the zone lights while a
+ * drag is anywhere over the app. Registered as an INLINE drop target so
+ * `AppShell`'s drop overlay doesn't cover it.
  */
 export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
   onPick,
@@ -81,8 +73,7 @@ export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
     if (disabled) {
       return;
     }
-    // A file PATH, never bytes: the Rust side reads, re-encodes and uploads it,
-    // so a multi-megabyte source never crosses the JSON IPC.
+    // A PATH, never bytes: Rust reads, re-encodes and uploads it.
     const picked = await dialogOpen({
       multiple: false,
       title: t("manage.filePickerTitle"),

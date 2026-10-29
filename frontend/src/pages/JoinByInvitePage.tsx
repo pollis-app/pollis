@@ -3,10 +3,7 @@ import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { JoinByInvite } from "./JoinByInvite";
 
-/**
- * `/join` — paste an invite code. The discoverable half of #847; the other
- * surface is the `/invite/$token` deep link.
- */
+/** `/join`: paste an invite code (#847); the deep link is `/invite/$token`. */
 export const JoinByInvitePage: React.FC = () => {
   const { t } = useTranslation("channels");
 

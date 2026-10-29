@@ -5,9 +5,8 @@ import { CopyDiagnosticsButton } from "../components/Diagnostics/CopyDiagnostics
 import * as api from "../services/api";
 import { errorMessage } from "../utils/errorMessage";
 
-/// The on-device diagnostics log (#1305): what it holds, what it never holds,
-/// and the exact text "Copy diagnostics" would put on the clipboard — shown in
-/// full, so nobody has to take the description on trust.
+/// The on-device diagnostics log (#1305), shown in full exactly as "Copy
+/// diagnostics" would copy it.
 export const DiagnosticsPage: React.FC = () => {
   const { t } = useTranslation("settings");
   const [report, setReport] = useState<string | null>(null);

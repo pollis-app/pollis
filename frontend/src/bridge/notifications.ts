@@ -1,14 +1,4 @@
-/**
- * Notifications bridge — mirrors `@tauri-apps/plugin-notification`.
- *
- *   - isPermissionGranted() -> boolean
- *   - requestPermission() -> 'granted' | 'denied' | 'default'
- *   - sendNotification({ title, body, icon? })
- *
- * Routed through the plugin's raw IPC names
- * (`plugin:notification|notify`, `plugin:notification|is_permission_granted`,
- * `plugin:notification|request_permission`).
- */
+/** Notifications bridge, via `plugin:notification|*` raw IPC. */
 
 import { invoke } from "./invoke";
 import { escapeNotificationText } from "../utils/notificationText";
@@ -41,8 +31,7 @@ export interface NotificationOptions {
 export async function sendNotification(
   opts: NotificationOptions,
 ): Promise<void> {
-  // Tauri's plugin-notification expects { options: { title, body } } via the
-  // raw IPC. Match exactly what utils/notify.ts used to send.
+  // The raw IPC expects { options: { title, body } }.
   await invoke("plugin:notification|notify", {
     options: {
       title: escapeNotificationText(opts.title),

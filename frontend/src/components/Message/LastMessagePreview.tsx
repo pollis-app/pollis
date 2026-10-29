@@ -4,9 +4,7 @@ import { ScrambleText } from "../ui/ScrambleText";
 import type { Message } from "../../types";
 
 interface LastMessagePreviewProps {
-  // The row's newest message, or undefined when the conversation has none.
-  // Handed down rather than fetched here: the list owner asks for every row's
-  // preview in one batched call (#874), so this component only renders.
+  // Handed down: the list owner batches every row's preview into one call (#874).
   message?: Message;
   isLoading?: boolean;
 }
@@ -36,8 +34,7 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message,
     return t("preview.noMessages");
   })();
 
-  // While the batch is still in flight, show a scrambling placeholder so the
-  // row height never collapses.
+    // While the batch loads, a scrambling placeholder keeps the row height.
   if (isLoading && !text) {
     return <ScrambleText text={null} placeholderLength={24} typeSpeed={25} />;
   }

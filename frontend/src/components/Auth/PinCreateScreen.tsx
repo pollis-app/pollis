@@ -9,15 +9,12 @@ import { InputOtp } from "../ui/InputOtp";
 import * as api from "../../services/api";
 
 interface PinCreateScreenProps {
-  // Optional: set when the user is changing an existing PIN. The parent
-  // owns the copy flip ("Set a PIN" vs "Create a new PIN").
+  // Set when changing an existing PIN.
   oldPin?: string;
   onCreated: () => void | Promise<void>;
-  // Back button. Omit to hide (e.g. first-run migration where there's
-  // nowhere safe to go back to).
+  // Omit to hide (e.g. first-run migration, nowhere safe to go back to).
   onCancel?: () => void;
-  // Required rather than defaulted so the copy always comes from a caller that
-  // has translated it — a literal default here would be untranslatable.
+  // Required so the copy always comes translated from the caller.
   headline: string;
   subline: string;
 }
@@ -37,7 +34,6 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
   const [error, setError] = useState<string | null>(null);
   const hasAutoAdvancedRef = useRef(false);
 
-  // When the first PIN reaches length 4, auto-advance to confirm.
   useEffect(() => {
     if (firstPin.length < 4) {
       hasAutoAdvancedRef.current = false;
@@ -50,7 +46,6 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
     setStep("confirm");
   }, [firstPin]);
 
-  // Auto-submit when confirm reaches length 4.
   useEffect(() => {
     if (step !== "confirm" || confirmPin.length < 4 || isLoading) {
       return;
@@ -124,8 +119,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
 
             <div>
               <InputOtp
-                /* key forces a remount on step transition so the
-                   focus / highlight state resets to the first slot */
+                /* remount on step change to reset focus to the first slot */
                 key={step}
                 length={4}
                 value={currentValue}

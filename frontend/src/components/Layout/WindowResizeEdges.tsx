@@ -4,22 +4,10 @@ import { hasTauri } from "../../bridge/runtime";
 import "./WindowResizeEdges.css";
 
 /**
- * Invisible resize handles around the window perimeter.
- *
- * The window ships `decorations: false`. On macOS we re-add
- * `NSResizableWindowMask` and on Windows the DWM frame provides native resize
- * borders, so both get a comfortable grab region for free. Linux/Wayland gives
- * an undecorated toplevel *no* server-side resize edge, and there was no
- * client-side handle either — so the only resizable target was the literal 1px
- * compositor edge (the "pixel-perfect" cursor Dan hit).
- *
- * This overlays eight thin strips (four edges + four corners) that call the
- * compositor's interactive resize via `startResizeDragging`, matching how every
- * other frameless GTK app widens its grab area. Corners sit above edges so the
- * diagonal cursor wins in the shared region.
- *
- * Linux + Tauri only: elsewhere the native frame already handles this and an
- * overlay would only get in the way (traffic lights, rounded corners, DWM).
+ * Invisible resize strips around the window perimeter (Linux only). The window
+ * is `decorations: false`, and a Linux/Wayland undecorated toplevel gets no
+ * resize edge beyond the 1px compositor edge; macOS and Windows have native
+ * borders. Corners sit above edges so the diagonal cursor wins.
  */
 
 // WebKitGTK's user agent reports "X11; Linux x86_64" on both X11 and Wayland.
@@ -42,7 +30,6 @@ export const WindowResizeEdges: React.FC = () => {
   }
 
   const onMouseDown = (dir: ResizeDirection) => (e: React.MouseEvent) => {
-    // Primary button only — a right/middle click must not start a resize.
     if (e.button !== 0) {
       return;
     }

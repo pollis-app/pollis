@@ -47,7 +47,6 @@ export const InputOtp: React.FC<InputOtpProps> = ({
     if (!raw) {
       return;
     }
-    // Support pasting multiple digits
     const chars = raw.slice(0, length - index).split("");
     const next = [...digits];
     chars.forEach((ch, i) => {
@@ -79,11 +78,8 @@ export const InputOtp: React.FC<InputOtpProps> = ({
   };
 
   return (
-    // Pinned `ltr`: a 6-digit code is read left-to-right in every locale,
-    // and this row IS the code. Left to inherit `dir=rtl` the boxes reverse,
-    // so box 1 renders rightmost while the digits still read leftmost-first.
-    // Keeping the container LTR also keeps ArrowLeft/ArrowRight meaning
-    // previous/next, which is what `handleKeyDown` assumes.
+    // Pinned `ltr`: a code reads left-to-right in every locale, and
+    // `handleKeyDown` assumes ArrowLeft/Right mean previous/next.
     <div dir="ltr" className="flex items-center gap-1 justify-evenly">
       {digits.map((digit, index) => {
         const isFocused = focusedIndex === index;

@@ -17,8 +17,6 @@ import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
 
 export const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
-// ── Public types ─────────────────────────────────────────────────────────────
-
 /** Mirrors the `VoiceEvent` enum in `pollis-core/src/commands/voice.rs`. */
 export type VoiceEvent =
   | {
@@ -49,27 +47,22 @@ export type VoiceEvent =
 export interface JoinTimings {
   channel_id: string;
   jwt_mint_ms: number;
-  /** MLS resolve + catch-up + exporter-secret derivation. Runs before the
-   *  LiveKit connect, so it is pure added latency. */
+  /** MLS resolve + catch-up + exporter-secret derivation, before the LiveKit connect. */
   e2ee_ms: number;
   room_connect_ms: number;
   mic_init_ms: number;
   first_publish_ms: number;
-  /** Pseudonym resolution + the batched avatar lookup for the seed roster. */
   roster_ms: number;
   total_join_ms: number;
   join_started_at_ms: number;
 }
 
-/** What the user wants the session to be. `null` means "no voice session". */
 export interface VoiceIntent {
   channelId: string;
   groupId: string | null;
   /**
-   * The OTHER participant's user id when this is a 1:1 call (`call-<ulid>`
-   * room). Required for those rooms because their voice E2EE key is derived
-   * from the DM's MLS group between the two users, and the room itself has
-   * no DB row to look up. `null`/omitted for group channels and DMs.
+   * The OTHER user id in a 1:1 `call-<ulid>` room: its E2EE key derives from
+   * the pair's DM MLS group, and the room has no DB row. Omitted otherwise.
    */
   counterpartyUserId?: string | null;
 }
@@ -80,25 +73,18 @@ export interface VoiceSessionState {
   phase: VoicePhase;
   channelId: string | null;
   groupId: string | null;
-  /** The other user_id in a 1:1 call (`call-*` room). Null for group
-   *  voice channels. Needed by the screen-share E2EE path so its MLS key
-   *  derivation resolves the same group the Rust voice path picked. */
+  /** The other user id in a 1:1 `call-*` room, else null; the screen-share
+   *  E2EE derivation must resolve the same group. */
   counterpartyUserId: string | null;
   participants: VoiceParticipant[];
-  /** Local mic-mute intent, mirrored onto `voiceState.micMuted`. Separate from
-   *  a participant's audio DU — this is the local user's toggle, not a
-   *  speaking-derived value. */
+  /** Local mic-mute intent, mirrored onto `voiceState.micMuted`. */
   isMuted: boolean;
-  /** Push-to-talk / mute / deafen snapshot owned by Rust (#849), mirrored
-   *  onto `voiceState.gate`. `isMuted` above is kept equal to its
-   *  `self_muted` field — this carries the states a bool cannot express
-   *  (deafened, push-to-talk armed but idle). */
+  /** Rust's PTT / mute / deafen snapshot (#849), mirrored onto
+   *  `voiceState.gate`; `isMuted` equals its `self_muted`. */
   gate: VoiceGateState;
-  /** False when the session joined listen-only (no working capture device).
-   *  Mirrored onto the store's `joined.micAvailable`; drives the "listening
-   *  only" indicator in place of the mute toggle. */
+  /** False when joined listen-only (no capture device); drives "listening only". */
   micAvailable: boolean;
-  /** Last error from a failed join. Cleared on the next intent change. */
+  /** Last join error; cleared on the next intent change. */
   error: string | null;
 }
 
@@ -107,7 +93,6 @@ export interface JoinedEvent {
   groupId: string | null;
   userId: string;
   displayName: string;
-  /** Wall-clock ms between `setIntent` and `invoke('join_voice_channel')`. */
   intentToInvokeMs: number;
 }
 
@@ -116,9 +101,7 @@ export interface LeftEvent {
   groupId: string | null;
   userId: string;
   displayName: string;
-  /** Our full per-device voice identity (`voice-{userId}:{deviceId}`) for this
-   *  session, so observers can drop exactly this device — not the user's other
-   *  devices that may still be in the room. */
+  /** Our per-device identity, so observers drop exactly this device. */
   identity: string;
 }
 
@@ -131,12 +114,9 @@ type Listener = () => void;
 type EventListener<E extends keyof ManagerEventMap> = (payload: ManagerEventMap[E]) => void;
 
 /**
- * The gate a fresh session starts from. Mirrors Rust's
- * `TransmitGate::reset_for_join`: mute, deafen and any held push-to-talk
- * latch are session state and get cleared, but `mode` is a persisted user
- * preference and must survive — resetting it here would silently drop the
- * user out of push-to-talk on every rejoin, and would also put this mirror
- * out of step with the Rust gate, which keeps it.
+ * A fresh session's gate, mirroring Rust's `TransmitGate::reset_for_join`:
+ * mute, deafen and the PTT latch reset; `mode` (a persisted preference)
+ * survives, or every rejoin would drop out of push-to-talk.
  */
 function gateForNewSession(prev: VoiceGateState): VoiceGateState {
   return {
@@ -161,18 +141,9 @@ const INITIAL_STATE: VoiceSessionState = {
 };
 
 /**
- * Map a raw `join_voice_channel` error into something a user can act on.
- * The backend bubbles up LiveKit internals like
- * "LiveKit connect: engine: signal failure: validate request timed out" —
- * unhelpful in the UI. Connectivity failures (the common case when the
- * LiveKit server is down/unreachable) collapse to a single clear line; any
- * other message passes through so genuine config/permission errors stay
- * visible.
- *
- * Resolved through `i18n.t` rather than a component's `useTranslation`: the
- * result is a one-shot string that lands in `voiceError` at the moment the join
- * fails (the status bar renders it verbatim) and is never re-derived. The lookup
- * happens per call, so it is never a module-load snapshot of the language.
+ * Map a raw `join_voice_channel` error (LiveKit internals) to something
+ * actionable: connectivity failures collapse to one line, others pass
+ * through. Uses `i18n.t`: stored once in `voiceError`.
  */
 function friendlyJoinError(raw: string): string {
   const m = raw.toLowerCase();
@@ -192,67 +163,39 @@ function friendlyJoinError(raw: string): string {
   return raw;
 }
 
-// ── The manager ──────────────────────────────────────────────────────────────
-
 /**
- * Owns the voice session lifecycle outside React.
- *
- * Components call `setIntent(target | null)` to express what they want; the
- * manager reconciles current state to match. Rapid intent changes coalesce —
- * if intent flips A → B while a join to A is in flight, the manager finishes
- * A's transition (or aborts cleanly) and then reconciles to B without ever
- * exposing the inconsistency to other code.
- *
- * The race that motivated extracting this module: when a React effect re-runs
- * because of an unstable dep (e.g. React Query data resolving), the cleanup
- * fires `leave_voice_channel` and the new mount fires `join_voice_channel`
- * concurrently. The Rust join-guard (`voice.room.is_some()`) then rejects the
- * second join with "already connected". Owning intent here removes the
- * effect-driven cleanup/mount cycle entirely.
+ * Owns the voice session lifecycle outside React: components `setIntent`, and
+ * the manager reconciles, coalescing rapid changes (A → B mid-join finishes or
+ * aborts A, then joins B). This replaces effect cleanup/mount cycles whose
+ * concurrent leave + join tripped Rust's "already connected" guard.
  */
 class VoiceSessionManager {
   private state: VoiceSessionState = INITIAL_STATE;
   private listeners = new Set<Listener>();
   private eventListeners = new Map<keyof ManagerEventMap, Set<EventListener<keyof ManagerEventMap>>>();
 
-  /** What the user wants. Updated by `setIntent`. */
   private intent: VoiceIntent | null = null;
-  /** What's actually established. Mutated only by the reconciliation loop. */
+  /** What's established; mutated only by the reconciliation loop. */
   private current: { intent: VoiceIntent; userId: string; displayName: string } | null = null;
-  /** Guards against multiple reconciliation loops running concurrently. */
   private reconciling = false;
-  /** Wall-clock anchor captured at `setIntent` time, consumed at next join. */
+  /** Captured at `setIntent`, consumed at the next join. */
   private intentTs: number | null = null;
 
-  /** True after we've called `subscribe_voice_events` for this process. */
   private eventsAttached = false;
   /**
-   * This device's stable `device_id`, used to build the per-device voice
-   * identity `voice-{userId}:{deviceId}` (#140) so we can tell which
-   * participant is ourselves. Lazily fetched once via `get_device_id`; stays
-   * null (→ legacy `voice-{userId}` identity) only if the backend can't supply
-   * one yet.
-   *
-   * #836 did not change this. The identity LiveKit sees is now an opaque
-   * per-room pseudonym, but Rust pins its own pseudonym to exactly the string
-   * built here before it connects, so both ends still agree on one local
-   * identity — see `livekit::identity::pin_local_identity`.
+   * This device's `device_id` for the identity `voice-{userId}:{deviceId}`
+   * (#140), fetched lazily; null means the legacy `voice-{userId}`. Rust pins
+   * its LiveKit pseudonym (#836) to this exact string
+   * (`livekit::identity::pin_local_identity`).
    */
   private deviceId: string | null = null;
   /**
-   * Our own full voice identity (`voice-{userId}:{deviceId}`) for the active
-   * session. Set in `executeJoin` *before* `invoke('join_voice_channel')` so
-   * that `handleEvent` can flag the local participant `isLocal` even when the
-   * backend's seed `ParticipantJoined` arrives mid-join — i.e. before
-   * `this.current` is populated. Cleared when the session ends.
+   * Our identity for the active session, set BEFORE `join_voice_channel` so a
+   * seed `ParticipantJoined` arriving mid-join resolves `isLocal`.
    */
   private localIdentity: string | null = null;
-  /** Optional preferences source; lets the manager read APM config + user volumes. */
   private preferencesProvider: (() => PreferencesData | undefined) | null = null;
 
-  // ── Subscription API ──────────────────────────────────────────────────────
-
-  /** Subscribe to state changes. Returns an unsubscribe function. */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -260,12 +203,12 @@ class VoiceSessionManager {
     };
   }
 
-  /** Read the current state (immutable snapshot). Stable identity until a state mutation. */
+  /** Immutable snapshot; stable identity until a state mutation. */
   getSnapshot(): VoiceSessionState {
     return this.state;
   }
 
-  /** Subscribe to lifecycle events (`joined`, `left`). Returns an unsubscribe function. */
+  /** Subscribe to `joined` / `left`. Returns an unsubscribe. */
   on<E extends keyof ManagerEventMap>(event: E, listener: EventListener<E>): () => void {
     let set = this.eventListeners.get(event);
     if (!set) {
@@ -278,25 +221,14 @@ class VoiceSessionManager {
     };
   }
 
-  /**
-   * Inject a provider for user preferences. Called once at app boot from
-   * `voiceBridge`, which has access to React Query. Optional — without it the
-   * manager joins with default APM config.
-   */
+  /** Inject a preferences provider (from `voiceBridge`); without it, default APM config. */
   configure(opts: { preferencesProvider?: () => PreferencesData | undefined }): void {
     if (opts.preferencesProvider) {
       this.preferencesProvider = opts.preferencesProvider;
     }
   }
 
-  // ── Imperative API ────────────────────────────────────────────────────────
-
-  /**
-   * Set the desired voice channel. Pass `null` to leave any active session.
-   *
-   * Idempotent — calling with the current intent is a no-op. Concurrent or
-   * rapid changes coalesce: only the latest intent is honored.
-   */
+  /** Set the desired channel, `null` to leave. Idempotent; only the latest intent is honoured. */
   setIntent(target: VoiceIntent | null): void {
     if (sameIntent(target, this.intent)) {
       return;
@@ -306,77 +238,51 @@ class VoiceSessionManager {
     void this.reconcile();
   }
 
-  /** Convenience: clear intent. Equivalent to `setIntent(null)`. */
   leave(): void {
     this.setIntent(null);
   }
 
-  /**
-   * Re-run the reconciliation loop without changing intent. Used when an
-   * external guard input (e.g. `currentUser`) changes and the session needs
-   * to tear down even though the intent itself is still set.
-   */
+  /** Re-run reconciliation without changing intent, e.g. when `currentUser` changes. */
   refresh(): void {
     void this.reconcile();
   }
 
-  /** Toggle the local mic mute. No-op if not currently joined. */
+  /** No-op if not joined. */
   async toggleMute(): Promise<void> {
     await this.applyGate('toggle_voice_mute');
   }
 
-  /**
-   * Toggle self-deafen: silence all incoming audio. Implies self-mute, and
-   * undeafening restores whatever mute state deafening displaced — the
-   * decision is made in Rust, we just render the result.
-   */
+  /** Toggle self-deafen (implies mute; undeafen restores the prior mute), decided in Rust. */
   async toggleDeafen(): Promise<void> {
     await this.applyGate('toggle_voice_deafen');
   }
 
-  /**
-   * Choose voice-activity vs push-to-talk. Safe to call outside a call —
-   * the mode is a persisted preference, so this runs on preferences load
-   * as well as on change.
-   */
+  /** Voice-activity vs push-to-talk; a persisted preference, so also applied on prefs load. */
   async setInputMode(mode: VoiceInputMode): Promise<void> {
     await this.applyGate('set_voice_input_mode', { mode }, { requireJoined: false });
   }
 
-  /** Push-to-talk key down / up. */
   async setPushToTalkHeld(held: boolean): Promise<void> {
     await this.applyGate('set_voice_ptt_held', { held });
   }
 
   /**
-   * Release push-to-talk because the window lost keyboard focus.
-   *
-   * Distinct from `setPushToTalkHeld(false)` only in intent, but the
-   * intent is the whole point: the keyup for a key held while alt-tabbing
-   * is delivered to whatever the user switched to, never to us, so without
-   * this the mic stays open in the background.
-   *
-   * Deliberately fires even when the gate is not currently held — it costs
-   * one idempotent IPC call and removes any chance of the renderer and the
-   * Rust gate disagreeing about a stranded key.
+   * Release push-to-talk on focus loss: the keyup of a key held while alt-
+   * tabbing goes to the other app, so the mic would stay open. Fires even when
+   * not held; it's one idempotent call.
    */
   async releasePushToTalk(): Promise<void> {
     await this.applyGate('release_voice_ptt');
   }
 
-  /** Re-read the Rust gate without changing it (post-join / post-reload). */
   async syncGate(): Promise<void> {
     await this.applyGate('get_voice_gate_state');
   }
 
   /**
-   * Run one gate command and mirror the returned snapshot.
-   *
-   * Rust owns this state machine; every one of these commands returns the
-   * full `VoiceGateState` precisely because a transition can have
-   * consequences the caller did not ask for (unmuting while deafened also
-   * undeafens). Mirroring the whole snapshot is what keeps the UI honest —
-   * the renderer never predicts the outcome of a transition.
+   * Run one gate command and mirror the FULL returned snapshot: a transition
+   * can have side effects (unmuting while deafened undeafens), so the renderer
+   * never predicts.
    */
   private async applyGate(
     command: string,
@@ -387,22 +293,17 @@ class VoiceSessionManager {
       return;
     }
     try {
-      // Typed nullable deliberately: `invoke` resolves to whatever the command
-      // actually returned, and a gate command that returns nothing used to make
-      // the reads below throw a TypeError straight into the catch — turning a
-      // real backend fault into a silent no-op (#888). Mirroring an unknown
-      // gate is not possible, so bail loudly and leave the last good state up
-      // rather than writing a half-built one.
+      // Nullable on purpose: a command returning nothing used to throw into the
+      // catch and become a silent no-op (#888). Bail loudly, keeping the last
+      // good state.
       const gate = await invoke<VoiceGateState | null>(command, args);
       if (!gate) {
         console.error(`[voice] ${command} returned no gate state; leaving the previous gate in place`);
         return;
       }
       const localIdentity = this.localIdentity;
-      // The local tile follows what the room sees: not transmitting reads
-      // as muted to everyone else, so it should look muted to us too. The
-      // finer distinction (deafened vs PTT-idle vs muted) lives on `gate`
-      // and is drawn by the voice controls, not the participant tile.
+      // The local tile shows what the room sees: not transmitting reads as
+      // muted. Finer states are drawn by the voice controls.
       const participants = localIdentity
         ? this.state.participants.map((p) =>
             p.identity === localIdentity
@@ -416,7 +317,7 @@ class VoiceSessionManager {
     }
   }
 
-  /** Persist a device pref and live-switch the input device. Safe to call outside a session. */
+  /** Persist and live-switch the input device; safe outside a session. */
   async setInputDevice(deviceName: string): Promise<void> {
     persistDevicePref('input', deviceName);
     try {
@@ -426,7 +327,7 @@ class VoiceSessionManager {
     }
   }
 
-  /** Persist a device pref and live-switch the output device. Safe to call outside a session. */
+  /** Persist and live-switch the output device; safe outside a session. */
   async setOutputDevice(deviceName: string): Promise<void> {
     persistDevicePref('output', deviceName);
     try {
@@ -436,17 +337,12 @@ class VoiceSessionManager {
     }
   }
 
-  // ── Video (screenshare) ─────────────────────────────────────────────────
-  // A participant's screenshare lives on `participant.video` (#385), driven
-  // by the screenshare event adapter (`screenShareSession`) rather than a
-  // parallel `screenShareRemotes` map. Camera is unaffected —
-  // it stays on `appStore.cameraRemotes`.
+  // Screenshare lives on `participant.video` (#385), driven by
+  // `screenShareSession`; cameras stay on `appStore.cameraRemotes`.
 
   /**
-   * Attach a screenshare to the participant publishing it. Matches the
-   * publisher identity exactly, then falls back to a user-scoped match so a
-   * user-keyed event (the Electron `:view` path emits `voice-{userId}`) still
-   * lands on that user's tile. No-op if no participant matches.
+   * Attach a screenshare to its publisher: exact identity, else a user-scoped
+   * match for a user-keyed event. No-op if nobody matches.
    */
   setScreenShare(
     identity: string,
@@ -464,7 +360,6 @@ class VoiceSessionManager {
     this.setState({ participants });
   }
 
-  /** Clear whichever participant is publishing the given screenshare track. */
   clearScreenShare(trackKey: string): void {
     const idx = this.state.participants.findIndex(
       (p) => p.video.kind === 'screenshare' && p.video.trackKey === trackKey,
@@ -477,8 +372,7 @@ class VoiceSessionManager {
     this.setState({ participants });
   }
 
-  /** Locate a participant by publisher identity: exact identity first, else
-   *  the first participant with the same user id (user-scoped fallback). */
+  /** Exact identity first, else the first participant with the same user id. */
   private matchParticipant(identity: string): number {
     const exact = this.state.participants.findIndex((p) => p.identity === identity);
     if (exact !== -1) {
@@ -490,17 +384,13 @@ class VoiceSessionManager {
     );
   }
 
-  // ── Reconciliation ────────────────────────────────────────────────────────
-
   private async reconcile(): Promise<void> {
     if (this.reconciling) {
-      // The running loop will pick up the new intent on its next iteration.
       return;
     }
     this.reconciling = true;
     try {
-      // Each iteration drives one transition (leave or join). The loop exits
-      // when intent matches current.
+      // One transition (leave or join) per iteration, until intent matches current.
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const target = this.intent;
@@ -510,23 +400,20 @@ class VoiceSessionManager {
           return;
         }
 
-        // Need to leave first if (a) we have a current session and (b) the
-        // target differs OR guards are failing.
+        // Leave first if there is a session and the target differs or guards fail.
         if (this.current && (!sameIntent(target, current) || !this.guardsPass())) {
           await this.executeLeave();
           continue;
         }
 
-        // No current session. If guards fail or intent is null, we're done.
         if (!this.guardsPass() || target === null) {
           return;
         }
 
         const ok = await this.executeJoin(target);
         if (!ok) {
-          // Drop the intent so we don't spin retrying a failing join. If the
-          // user clicked a different channel during the failure window, keep
-          // that newer intent instead of clobbering it.
+          // Drop the intent so a failing join doesn't spin, unless the user
+          // already picked something newer.
           if (sameIntent(this.intent, target)) {
             this.intent = null;
             return;
@@ -558,13 +445,11 @@ class VoiceSessionManager {
     const avatarKey = store.userAvatarUrl ?? null;
 
     await this.ensureEventsChannel();
-    // Resolve our device id before building the optimistic local participant
-    // so its identity matches the device-suffixed one the backend will emit —
-    // otherwise the seed ParticipantJoined would land as a second tile.
+    // Device id first, so the optimistic local identity matches the backend's
+    // (else the seed ParticipantJoined adds a second tile).
     await this.ensureDeviceId();
     const localIdentity = this.localVoiceIdentity(userId);
-    // Record it now, before the seed ParticipantJoined events can arrive, so
-    // `handleEvent` resolves `isLocal` correctly during the join window.
+    // Before seed ParticipantJoined events can arrive (isLocal resolution).
     this.localIdentity = localIdentity;
 
     const intentTs = this.intentTs ?? performance.now();
@@ -577,8 +462,7 @@ class VoiceSessionManager {
       counterpartyUserId: target.counterpartyUserId ?? null,
       isMuted: false,
       gate: gateForNewSession(this.state.gate),
-      // Reset any stale listen-only state from a previous session; the
-      // backend re-asserts it via `mic_availability` on this join.
+      // Reset listen-only; the backend re-asserts it via `mic_availability`.
       micAvailable: true,
       participants: [
         {
@@ -610,8 +494,7 @@ class VoiceSessionManager {
       const raw = errorMessage(e);
       const msg = friendlyJoinError(raw);
       console.error('[voice] join_voice_channel failed:', raw);
-      // Best-effort cleanup in case the Rust side partially set up state
-      // before failing.
+      // Best-effort cleanup of any partial Rust state.
       invoke('leave_voice_channel').catch((e) => console.warn('leave_voice_channel failed', e));
       this.localIdentity = null;
       this.setState({
@@ -627,14 +510,13 @@ class VoiceSessionManager {
       return false;
     }
 
-    // Intent may have changed (or guards failed) during the join. Bail out so
-    // the loop can reconcile to the new target — `current` stays unset so the
-    // loop treats us as needing to leave the partial session.
+    // Intent changed or guards failed mid-join: bail with `current` unset so
+    // the loop leaves the partial session.
     if (!sameIntent(this.intent, target) || !this.guardsPass()) {
       try {
         await invoke('leave_voice_channel');
       } catch {
-        // Swallow — we're already on a transition path.
+        // Swallow: already on a transition path.
       }
       this.localIdentity = null;
       this.setState({
@@ -649,8 +531,7 @@ class VoiceSessionManager {
       return true;
     }
 
-    // Push saved per-remote-user volume preferences into the live mixer.
-    // Best-effort — a failure here just leaves a track at unity gain.
+    // Push saved per-user volumes into the mixer; a failure leaves unity gain.
     const userVolumes = this.preferencesProvider?.()?.user_volumes;
     if (userVolumes) {
       for (const [remoteUserId, volume] of Object.entries(userVolumes)) {
@@ -665,11 +546,8 @@ class VoiceSessionManager {
     this.current = { intent: target, userId, displayName };
     this.setState({ phase: 'joined' });
 
-    // Adopt the gate Rust actually joined with. The two sides agree by
-    // construction (both keep the input mode across a join and clear the
-    // rest), but a renderer reload during a live call leaves this mirror
-    // stale, and joining in push-to-talk must show as armed-idle rather
-    // than live from the first frame.
+    // Adopt the gate Rust joined with: a renderer reload mid-call leaves this
+    // mirror stale, and a PTT join must show armed-idle from the first frame.
     void this.syncGate();
 
     const intentToInvokeMs = Math.round(performance.now() - intentTs);
@@ -681,9 +559,7 @@ class VoiceSessionManager {
       intentToInvokeMs,
     });
 
-    // Dump the per-phase timings to the dev console so they can be
-    // copy-pasted into issue threads. Best-effort — a missing record is
-    // not fatal.
+    // Per-phase join timings to the dev console; best-effort.
     invoke<JoinTimings | null>('get_last_join_timings')
       .then((timings) => {
         if (timings) {
@@ -729,23 +605,15 @@ class VoiceSessionManager {
     }
   }
 
-  // ── Voice-event channel ───────────────────────────────────────────────────
-
   /**
-   * Build this device's voice identity: `voice-{userId}:{deviceId}` once the
-   * device id is known, else the legacy `voice-{userId}`. Must match exactly
-   * what the Rust side builds (`commands/livekit_identity.rs::voice_identity`)
-   * so the local participant's events resolve as `isLocal`.
+   * `voice-{userId}:{deviceId}` once known, else legacy `voice-{userId}`; must
+   * match Rust's `livekit_identity.rs::voice_identity` for `isLocal`.
    */
   private localVoiceIdentity(userId: string): string {
     return this.deviceId ? `voice-${userId}:${this.deviceId}` : `voice-${userId}`;
   }
 
-  /**
-   * Fetch and cache this device's `device_id`. Retries on a null/failed result
-   * (device_id is stable once login completes, so a non-null value is cached
-   * for the process); cheap enough to call before every join.
-   */
+  /** Fetch and cache `device_id`; retries on null (stable once login completes). */
   private async ensureDeviceId(): Promise<void> {
     if (this.deviceId) {
       return;
@@ -769,9 +637,8 @@ class VoiceSessionManager {
   }
 
   private handleEvent(event: VoiceEvent): void {
-    // Read the cached local identity (set at join time) rather than deriving it
-    // from `this.current`, which isn't populated until the join resolves — the
-    // seed ParticipantJoined for ourselves arrives before that.
+    // The cached identity: `this.current` isn't set until the join resolves,
+    // and our seed ParticipantJoined arrives first.
     const localIdentity = this.localIdentity;
 
     switch (event.type) {
@@ -790,8 +657,7 @@ class VoiceSessionManager {
       case 'participant_left': {
         audioLevels.clear(event.identity);
         const participants = this.state.participants.filter((p) => p.identity !== event.identity);
-        // No separate speaker list to prune — the store derives speakers from
-        // `participants`, so dropping the participant removes them.
+        // Speakers derive from `participants`, so nothing else to prune.
         this.setState({ participants });
         break;
       }
@@ -801,22 +667,16 @@ class VoiceSessionManager {
         const participants = this.state.participants.map((p) =>
           p.identity === event.identity ? { ...p, audio: audioSetMuted(p.audio, muted) } : p,
         );
-        // For the LOCAL identity we deliberately do NOT write `isMuted`
-        // here. Push-to-talk mutes/unmutes the LiveKit publication on
-        // every key press, so LiveKit echoes a muted/unmuted event back at
-        // us each time; deriving our own mute from that would make the
-        // mute button flicker in time with the PTT key and would fight the
-        // gate, which is the authority. The participant tile still follows
-        // the event — that IS what the room sees.
+        // For the LOCAL identity, never write `isMuted` from this event: PTT
+        // toggles the publication per key press, so the echo would make the
+        // mute button flicker and fight the gate (the authority). The tile still
+        // follows the event, which is what the room sees.
         const patch: Partial<VoiceSessionState> = { participants };
-        // No muted ⇒ not-speaking band-aid needed (was b5b7532): muting sets
-        // audio to `{kind:'muted'}` (already not-speaking), and audioSetSpeaking
-        // no-ops while muted, so a stuck active speaker is now unrepresentable.
         this.setState(patch);
         break;
       }
       case 'mic_availability': {
-        // Only ever carries the local identity. False = joined listen-only.
+        // Only ever the local identity; false = listen-only.
         if (event.identity === localIdentity) {
           this.setState({ micAvailable: event.available });
         }
@@ -831,8 +691,7 @@ class VoiceSessionManager {
         }
         const current = this.state.participants[idx];
         const audio = audioSetSpeaking(current.audio, speaking);
-        // No-op if the DU didn't move (already in that state, or muted-so-
-        // ignored) — avoids a needless re-render, matching the old dedup.
+        // No-op if the DU didn't move (avoids a re-render).
         if (audio.kind === current.audio.kind) {
           break;
         }
@@ -842,17 +701,15 @@ class VoiceSessionManager {
         break;
       }
       case 'audio_bands': {
-        // High-frequency cosmetic data — forward straight to the per-tile
-        // meter pub/sub, deliberately bypassing setState so it never
-        // triggers a React/MobX re-render. See `audioLevels.ts`.
+        // High-frequency: straight to the meter pub/sub, never setState
+        // (`audioLevels.ts`).
         audioLevels.push(event.identity, event.bands);
         break;
       }
       case 'connection_quality_changed': {
         const idx = this.state.participants.findIndex((p) => p.identity === event.identity);
         if (idx === -1) {
-          // Quality update for someone we don't know about yet — drop it;
-          // the join event lands first in practice.
+          // Unknown participant: drop it (the join lands first in practice).
           break;
         }
         if (this.state.participants[idx]?.connectionQuality === event.quality) {
@@ -864,24 +721,18 @@ class VoiceSessionManager {
         break;
       }
       case 'voice_e2ee_key_rotated': {
-        // MLS epoch advanced on the Rust side. All media E2EE now lives in
-        // Rust (the JS livekit-client screen-share view was removed), so the
-        // renderer has nothing to rotate — the Rust voice client already
-        // re-keyed both audio and screen-share. Nothing to do here.
+        // All media E2EE is in Rust, which already re-keyed; nothing to do.
         break;
       }
       case 'disconnected': {
-        // Server-initiated drop. Push through the reconciler so any in-flight
-        // join completes/cleans up cleanly first. The redundant
-        // `leave_voice_channel` is harmless on the Rust side.
+        // Server-initiated drop: through the reconciler so an in-flight join
+        // cleans up first.
         this.intent = null;
         void this.reconcile();
         break;
       }
     }
   }
-
-  // ── State plumbing ────────────────────────────────────────────────────────
 
   private setState(patch: Partial<VoiceSessionState>): void {
     this.state = { ...this.state, ...patch };
@@ -905,8 +756,6 @@ class VoiceSessionManager {
     return preferencesToApmConfig(prefs);
   }
 }
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function sameIntent(a: VoiceIntent | null, b: VoiceIntent | null): boolean {
   if (a === b) {
@@ -940,15 +789,12 @@ function persistDevicePref(kind: 'input' | 'output', deviceName: string): void {
     prefs[kind] = deviceName;
     localStorage.setItem(VOICE_DEVICES_KEY, JSON.stringify(prefs));
   } catch {
-    // localStorage unavailable; the preference won't survive a relaunch but
-    // the live switch (via the Tauri command above) still applies for this
-    // session.
+      // localStorage unavailable: the live switch still applies this session.
   }
 }
 
-/** Video state to seed a (re)joined participant with: preserve an existing
- *  active screenshare across a re-emitted seed `participant_joined` so a
- *  mid-share roster refresh doesn't blank the tile; otherwise `none`. */
+/** Seed video for a (re)joined participant: keep an active screenshare across
+ *  a re-emitted seed `participant_joined`, else `none`. */
 function preservedVideo(
   list: VoiceParticipant[],
   identity: string,
@@ -988,24 +834,18 @@ function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
   ].join('\n');
 }
 
-// ── Singleton + Zustand mirror ───────────────────────────────────────────────
-
 export const voiceSession = new VoiceSessionManager();
 
 /**
- * Mirror the manager's state slice onto the Zustand store so existing readers
- * (`VoiceBar`, `VoiceStage`, `AppShell`, `useLiveKitRealtime`, etc.)
- * keep working without changes. The manager is the source of truth; Zustand
- * is a write-through projection for the rendering layer.
+ * Write-through projection of the manager's state onto the MobX store for the
+ * rendering layer; the manager is the source of truth.
  */
 voiceSession.subscribe(() => {
   const s = voiceSession.getSnapshot();
   const store = appStore;
   const v = store.voiceState;
 
-  // Lifecycle transitions — drive the union via semantic methods. The
-  // store guards them, so out-of-order writes from a stale snapshot
-  // become no-ops + console.warn instead of bad state.
+  // Drive the union via semantic methods; the store drops out-of-order writes.
   switch (s.phase) {
     case 'idle': {
       if (v.kind === 'leaving' || v.kind === 'joining') {
@@ -1013,10 +853,8 @@ voiceSession.subscribe(() => {
       } else if (v.kind === 'joined') {
         store.voiceLeft();
       }
-      // If the manager moved straight from joining → idle with an error,
-      // surface it as a join failure even though we already collapsed to
-      // idle above. (The store's voiceJoinFailed only fires from joining;
-      // for the idle landing we set voiceError directly.)
+      // joining → idle with an error: set voiceError directly (voiceJoinFailed
+      // only fires from joining).
       if (s.error && store.voiceError !== s.error) {
         store.setVoiceError(s.error);
       }
@@ -1026,7 +864,6 @@ voiceSession.subscribe(() => {
       if (v.kind === 'idle' && s.channelId) {
         store.voiceStartJoining(s.channelId, s.counterpartyUserId);
       } else if (v.kind === 'joining' && s.channelId && (v.channelId !== s.channelId || v.counterpartyUserId !== s.counterpartyUserId)) {
-        // Channel switched mid-join — reset and restart.
         store.voiceLeft();
         store.voiceStartJoining(s.channelId, s.counterpartyUserId);
       }
@@ -1036,15 +873,11 @@ voiceSession.subscribe(() => {
       if (v.kind === 'joining' && s.channelId) {
         store.voiceJoined();
       } else if (v.kind === 'idle' && s.channelId) {
-        // Race: snapshot skipped 'joining'. Synthesize it.
         store.voiceStartJoining(s.channelId, s.counterpartyUserId);
         store.voiceJoined();
       }
-      // Mic-mute + availability mirror.
       const after = appStore.voiceState;
-      // The gate carries mute along with it (`voiceSetGate` keeps
-      // `micMuted` equal to `gate.self_muted`), so mirror it first and let
-      // the plain-mute mirror below cover the case where only that moved.
+      // Gate first (it carries mute); the plain-mute mirror covers the rest.
       if (after.kind === 'joined' && after.gate !== s.gate) {
         store.voiceSetGate(s.gate);
       }
@@ -1064,18 +897,12 @@ voiceSession.subscribe(() => {
     }
   }
 
-  // The participant list is the source of truth; the store DERIVES
-  // `voiceActiveSpeakerIds` / `isLocalSpeaking` as computeds off it (#385), so
-  // there is nothing to mirror for those any more.
+  // Speakers are computeds off the participant list (#385).
   if (store.voiceParticipants !== s.participants) {
     store.setVoiceParticipants(s.participants);
   }
-  // Drop a pinned fullscreen view whose screenshare has ended — the track is
-  // gone from every participant's `video` (share stopped, or the publisher
-  // left), so keeping it pinned would strand a dead overlay. This is the one
-  // central place that used to live in `removeScreenShareRemote`. The local
-  // preview pin (LOCAL_PREVIEW_KEY) is driven by the local share state, not a
-  // participant, so leave it untouched.
+  // Unpin a fullscreen view whose screenshare is gone from every participant.
+  // The local preview pin (LOCAL_PREVIEW_KEY) follows the local share instead.
   const viewing = store.viewingScreenShareTrackKey;
   if (viewing && viewing !== LOCAL_PREVIEW_KEY) {
     const stillLive = s.participants.some(
@@ -1085,17 +912,13 @@ voiceSession.subscribe(() => {
       store.setViewingScreenShareTrackKey(null);
     }
   }
-  // Join errors mirror through the store's separate voiceError field;
-  // the union's idle state doesn't carry the error itself.
+  // Join errors mirror through `voiceError`; the idle union carries none.
   if (store.voiceError !== s.error) {
     store.setVoiceError(s.error);
   }
 });
 
-// React to currentUser changes by re-running reconciliation.
-// Logging out should tear down any active voice session without each caller
-// having to remember to. `reaction` fires only when currentUser actually
-// changes, so the previous explicit `!==` guard is implicit.
+// Re-reconcile on currentUser change, so logout tears down voice.
 reaction(
   () => appStore.currentUser,
   () => {

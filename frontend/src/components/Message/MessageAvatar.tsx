@@ -8,11 +8,8 @@ interface MessageAvatarProps {
   size?: number;
 }
 
-// Resolves a message sender's avatar key from their profile and renders the
-// rounded avatar used by the refined skin's group-start rows. Kept out of the
-// terminal render path so its profile query only fires when the refined skin
-// actually shows an avatar. The underlying query is cached + deduped by
-// React Query, so many rows sharing a sender cost a single fetch.
+// Refined-skin sender avatar. Outside the terminal path so its profile query
+// only fires when an avatar is shown; React Query dedupes shared senders.
 export const MessageAvatar: React.FC<MessageAvatarProps> = ({
   userId,
   username,

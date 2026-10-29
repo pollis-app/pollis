@@ -1,19 +1,6 @@
-// Voice + screenshare state machine. Replaces the bag of flags
-// (`voicePhase`, `screenShareMode`, `screenShareLocalActive`,
-// `activeVoiceChannelId`, …) that used to live in appStore.ts.
-//
-// The bag-of-flags shape allowed contradictory combinations — e.g.
-// `screenShareMode === 'starting'` with `screenShareLocalActive === false`
-// is reachable while a publish is in flight, and every cleanup site had
-// to remember to reset both. Multiple Linux screenshare-wedge bugs in the
-// migration came down to "this flag was set, that one wasn't, the
-// reconciler took the wrong branch."
-//
-// Modelled as a discriminated union: the compiler enforces that
-// share-state only exists when voice is `joined`, errors live alongside
-// their state instead of in a parallel field, and exhaustive `switch`es
-// surface forgotten transitions at build time. Plain TypeScript — no
-// xstate, no library, zero runtime cost.
+// Voice + screenshare state machine as a discriminated union: share state only
+// exists while `joined`, errors live with their state, and exhaustive switches
+// catch forgotten transitions.
 
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
@@ -24,24 +11,17 @@ export type VoiceInputMode = 'voice_activity' | 'push_to_talk';
 export const VOICE_INPUT_MODE_DEFAULT: VoiceInputMode = 'voice_activity';
 
 /**
- * Mirrors `VoiceGateState` in `pollis-core/src/commands/voice/gate.rs` —
- * the snapshot every gate-mutating command returns.
- *
- * Rust owns this state machine; the renderer only ever *displays* it and
- * asks for transitions. In particular `transmitting` is derived in Rust,
- * so the UI must never recompute it from the other fields.
- *
- * Invariant carried over from Rust: `deafened` implies `self_muted`.
+ * Mirrors `VoiceGateState` in `pollis-core/src/commands/voice/gate.rs`. Rust
+ * owns it; never recompute `transmitting`. `deafened` implies `self_muted`.
  */
 export interface VoiceGateState {
   mode: VoiceInputMode;
-  /** The user's explicit mute. Deafen forces this on. */
+  /** The explicit mute; deafen forces it on. */
   self_muted: boolean;
-  /** Incoming audio silenced; implies `self_muted`. */
   deafened: boolean;
-  /** Push-to-talk key is down. Only meaningful in `push_to_talk` mode. */
+  /** Push-to-talk key down; only meaningful in `push_to_talk` mode. */
   ptt_held: boolean;
-  /** Derived in Rust: the mic is actually open right now. */
+  /** Derived in Rust: the mic is actually open. */
   transmitting: boolean;
 }
 
@@ -54,13 +34,8 @@ export const VOICE_GATE_INITIAL: VoiceGateState = {
 };
 
 /**
- * How the local mic should be *presented*. Collapses the gate into the
- * four states the UI draws, so components don't each re-derive it (and
- * disagree).
- *
- * `ptt-idle` is deliberately distinct from `muted`: the user has not
- * muted themselves, they simply are not holding the key, and showing that
- * as a mute would make push-to-talk look broken.
+ * The four mic states the UI draws, derived once so components agree.
+ * `ptt-idle` is not `muted`: showing it as a mute makes PTT look broken.
  */
 export type MicIndicator = 'live' | 'muted' | 'deafened' | 'ptt-idle';
 
@@ -77,17 +52,14 @@ export function micIndicatorOf(gate: VoiceGateState): MicIndicator {
   return 'live';
 }
 
-/** Top-level voice room lifecycle. Local-only — does not track remote
- *  participants (that's `voiceParticipants` in the store, kept separate
- *  because it's collection data driven by LiveKit events). */
+/** Local voice room lifecycle; remote participants are `voiceParticipants` in the store. */
 export type VoiceState =
   | { kind: 'idle' }
   | {
       kind: 'joining';
       channelId: string;
-      /** Other user_id in a 1:1 call (`call-*` room). Null for group
-       *  voice channels and regular DMs. Required by the screen-share
-       *  E2EE key derivation on the Rust voice-join path. */
+      /** The other user_id in a 1:1 `call-*` room, else null; the voice-join
+       *  E2EE key derivation needs it. */
       counterpartyUserId: string | null;
     }
   | {
@@ -95,37 +67,26 @@ export type VoiceState =
       channelId: string;
       counterpartyUserId: string | null;
       micMuted: boolean;
-      /** Push-to-talk / mute / deafen state, authored by Rust (#849).
-       *  `micMuted` above stays as the explicit-mute mirror that most of
-       *  the UI reads; anything that needs to tell deafened or PTT-idle
-       *  apart from a plain mute reads this instead. */
+      /** PTT / mute / deafen, authored by Rust (#849). Read this to tell
+       *  deafened or PTT-idle from a plain mute (`micMuted`). */
       gate: VoiceGateState;
-      /** False when this session joined *listen-only* — no working capture
-       *  device, so we're connected and receiving but not publishing audio.
-       *  The UI shows a "listening only" indicator instead of a mute toggle.
-       *  Set from the backend `mic_availability` event at join. */
+      /** False when joined listen-only (no capture device), per the
+       *  `mic_availability` event; the UI shows "listening only". */
       micAvailable: boolean;
       share: ShareState;
       camera: CameraState;
     }
   | { kind: 'leaving'; channelId: string };
 
-/** Local screen-share lifecycle. Only meaningful inside a `joined` voice
- *  state — the union forbids `active` share without an active voice
- *  session. */
+/** Local screen-share lifecycle, only inside `joined`. */
 export type ShareState =
   | { kind: 'idle' }
   | { kind: 'picking'; sources: SourceList }
   | {
       kind: 'starting';
-      /** `performance.now()` at start. Used by recovery affordances to
-       *  show "stuck?" UI after N seconds and to cap the publish
-       *  timeout from the outside. */
+      /** `performance.now()` at start, for "stuck?" recovery UI. */
       startedAt: number;
-      /** Whether the user asked to share the source's sound. Carried
-       *  through `starting` because audio negotiates on its own timeline
-       *  and the `active` state has to know whether to wait for it or
-       *  report it off. */
+      /** Carried through `starting` because audio negotiates separately. */
       withAudio: boolean;
     }
   | {
@@ -139,25 +100,16 @@ export type ShareState =
       error: string;
     };
 
-/** Whether a live share is carrying the source's sound, and why not when
- *  it isn't.
- *
- *  A union rather than a boolean because "audio is off" and "audio was
- *  asked for and this machine cannot provide it" need different UI: the
- *  first is silent, the second has to say so. `pending` is the window
- *  between video going live and the OS handing over an audio source —
- *  brief, but long enough to matter on a slow first activation. */
+/** Whether a live share carries sound. "Off" is silent; "requested but
+ *  unavailable" must be shown. `pending`: video live, audio not yet. */
 export type ShareAudioState =
   | { kind: 'off' }
   | { kind: 'pending' }
   | { kind: 'live' }
   | { kind: 'unavailable'; reason: string };
 
-/** Local webcam lifecycle. Mirrors `ShareState` — only meaningful inside a
- *  `joined` voice state, since a camera publishes into the active voice
- *  room. Unlike screen share, the camera picker shows a real device list on
- *  every platform (the OS enumerates capture devices), so `picking` always
- *  carries `cameras`. */
+/** Local webcam lifecycle, only inside `joined`; `picking` always carries
+ *  `cameras` (every OS enumerates devices). */
 export type CameraState =
   | { kind: 'idle' }
   | { kind: 'picking'; cameras: CameraSource[] }
@@ -169,37 +121,24 @@ export type CameraState =
     }
   | { kind: 'failed'; error: string };
 
-/** A voice participant's audio state. Modelled as a discriminated union so
- *  that "muted ⇒ not speaking" is a type-level guarantee (#385): there is no
- *  `{ muted: true, speaking: true }` to construct. `idle` = unmuted, not
- *  speaking. All transitions go through `voice/participantAudio.ts`, which is
- *  the single place the invariant lives. */
+/** A participant's audio as a DU, so "muted ⇒ not speaking" is a type-level
+ *  guarantee (#385). Transitions only via `voice/participantAudio.ts`. */
 export type ParticipantAudio =
   | { kind: 'muted' }
   | { kind: 'idle' }
   | { kind: 'speaking' };
 
-/** A voice participant's video state. Discriminated union so a participant's
- *  screenshare lives as one field on the participant (#385) instead of the old
- *  parallel `screenShareRemotes` map that keyed shares under a different scheme
- *  than the participant list. `none` = not screensharing.
- *
- *  Screenshare only — camera is deliberately NOT folded in here. Screenshare and
- *  camera coexist per participant (#394: a user can publish both at once), so a
- *  one-of union can't carry both; the webcam track stays on its own
- *  `cameraRemotes` axis. This DU models the screenshare axis. */
+/** A participant's screenshare as one field (#385); `none` = not sharing.
+ *  Camera stays on `cameraRemotes`, since both can coexist (#394). */
 export type ParticipantVideo =
   | { kind: 'none' }
   | { kind: 'screenshare'; trackKey: string; width: number; height: number };
 
-/** Narrow a `ParticipantVideo` to its active screenshare, or null. */
 export function screenshareOf(
   v: ParticipantVideo,
 ): { trackKey: string; width: number; height: number } | null {
   return v.kind === 'screenshare' ? v : null;
 }
-
-/** Helpers — read-only narrowings that consumers reach for a lot. */
 
 export function voiceChannelId(s: VoiceState): string | null {
   switch (s.kind) {

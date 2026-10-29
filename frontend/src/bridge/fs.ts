@@ -1,21 +1,11 @@
 /**
- * Filesystem bridge — narrow subset of `@tauri-apps/plugin-fs`.
+ * Filesystem bridge — read only: `readFile` (preview pre-send) and `stat`
+ * (filter directories out of drops).
  *
- * READ ONLY. Two calls, both of them reads:
- *   - readFile(path) -> bytes: image/video preview pre-send.
- *   - stat(path) -> { size, isFile, isDirectory, modifiedAtMs }: filter
- *     directories out of dropped paths before treating them as files.
- *
- * There is deliberately no `writeFile`. The renderer's one writer was "save
- * attachment as…", and that moved to Rust (`save_media_to_path`) so the saved
- * file gets this platform's provenance marker — macOS quarantine, Windows
- * mark-of-the-web — which nothing in the webview can apply. Nothing else ever
- * needed to write, so the capability went with it: `fs:allow-temp-write` is out
- * of `src-tauri/capabilities/default.json` too, and the renderer can no longer
- * put a file on the disk at all.
- *
- * Every path here is user-chosen — a picker result, or a file the OS dropped on
- * the window — and Rust records which (`src-tauri/src/pathscope.rs`).
+ * Deliberately no `writeFile`: saving goes through Rust (`save_media_to_path`)
+ * so the file gets the platform provenance marker (quarantine /
+ * mark-of-the-web). Paths are user-chosen and recorded by
+ * `src-tauri/src/pathscope.rs`.
  */
 
 export async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {

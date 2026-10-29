@@ -23,27 +23,19 @@ import {
 } from "../../types/voice-state";
 import { voiceSession } from "../../voice";
 
-/**
- * Mirrors `voice_apm::NsLevel` in src-tauri.
- */
+/** Mirrors `voice_apm::NsLevel` in src-tauri. */
 export type NoiseSuppressionLevel = "off" | "low" | "moderate" | "high";
 
 /**
- * Network-privacy relay overlay mode. Mirrors the Rust `pollis_relay::OverlayMode`
- * that `get_overlay_mode` / `set_overlay_mode` (see `commands/overlay.rs`) parse
- * and apply. `off` is the default direct path; `prefer` routes through the relay
- * when one is reachable and falls back to direct; `strict` routes only through the
- * relay and pauses sending rather than revealing the client IP when none is up.
+ * Relay overlay mode, mirroring `pollis_relay::OverlayMode`. `prefer` falls
+ * back to direct; `strict` pauses sending rather than reveal the client IP.
  */
 export type OverlayMode = "off" | "prefer" | "strict";
 
-/** Coerce an arbitrary string to a known `OverlayMode`; unknown/absent → `off`. */
 export function normalizeOverlayMode(v: string | undefined | null): OverlayMode {
   return v === "prefer" || v === "strict" ? v : "off";
 }
 
-/** Coerce an arbitrary string to a known `VoiceInputMode`; unknown/absent →
- *  `voice_activity`. */
 export function normalizeVoiceInputMode(v: string | undefined | null): VoiceInputMode {
   return v === "push_to_talk" ? v : VOICE_INPUT_MODE_DEFAULT;
 }
@@ -51,173 +43,83 @@ export function normalizeVoiceInputMode(v: string | undefined | null): VoiceInpu
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
-  /**
-   * UI skin — `terminal` (default IRC/monospace look) or `refined` (friendlier
-   * proportional-sans, Slack/Discord-shaped alternate). Synced across devices,
-   * like `accent_color`/`background_color`. Absent → terminal.
-   */
+  /** `terminal` (default) or `refined`; synced across devices. */
   skin?: Skin;
-  /**
-   * Legacy: font size used to be synced via the remote preferences blob.
-   * It is now device-local (see `loadDeviceFontSize` / `saveDeviceFontSize`
-   * in `colorUtils.ts`). This field is kept on the read path solely so
-   * existing remote rows can seed the device-local value once on first
-   * boot — it is never written back.
-   */
+  /** Legacy, read only: seeds the device-local font size once (`loadDeviceFontSize`). */
   font_size?: string;
   allow_desktop_notifications?: boolean;
   allow_sound_effects?: boolean;
   /**
-   * Delivery + read receipts in DMs (#857). Default **true**.
-   *
-   * **Reciprocal**, and deliberately so: while this is off the device emits no
-   * receipts of either kind AND records none, so you cannot see other people's
-   * either. It covers delivery as well as read because a delivery receipt is
-   * still a client-emitted "my device was online and fetched at time T" signal,
-   * which is exactly what a user declining receipts is declining.
-   *
-   * Enforced in Rust at `pollis-core/src/commands/messages/receipts.rs`
-   * (`emit_receipt` / `record_receipt`), never only in the UI. Synced through
-   * the preferences blob rather than kept device-local, because a privacy
-   * switch that silently fails to apply on your other laptop is a broken
-   * privacy switch.
-   *
-   * Group channels have no receipts at all, so this preference does not apply
-   * there.
+   * DM delivery + read receipts (#857), default true. Reciprocal: while off the
+   * device emits AND records none, delivery included (it still reveals "online
+   * at T"). Enforced in Rust (`receipts.rs`); synced so it applies on every
+   * device.
    */
   send_read_receipts?: boolean;
   /** Pre-AGC mic boost in dB. 0..=20; 0 = off. */
   mic_boost_db?: number;
   auto_gain_control?: boolean;
-  /** AGC target loudness (dB headroom from full scale). Smaller = louder. Range 3..=15. */
+  /** AGC target loudness (dB below full scale); smaller = louder; 3..=15. */
   agc_target_dbfs?: number;
   noise_suppression_level?: NoiseSuppressionLevel;
-  /** Acoustic echo cancellation. */
   echo_cancellation?: boolean;
-  /** RNNoise click/keystroke suppression (separate from APM's spectral NS). */
+  /** RNNoise click/keystroke suppression (separate from APM's NS). */
   click_suppression?: boolean;
-  /**
-   * Screen-share capture/encode framerate ceiling, in fps. One of
-   * `SCREEN_SHARE_FPS_OPTIONS` (15 / 30 / 60). Read at share-start and passed
-   * to the publish path (Rust `start_screen_share` under Tauri, `getUserMedia`
-   * constraints under Electron). Absent → `SCREEN_SHARE_FPS_DEFAULT`.
-   */
+  /** Screen-share fps ceiling, one of `SCREEN_SHARE_FPS_OPTIONS`, read at share start. */
   screen_share_max_fps?: number;
   /**
-   * Whether a screen share also carries the machine's sound.
-   *
-   * A stored preference and not just picker-local state, for a reason
-   * that is easy to miss: Linux never shows the in-app picker — the
-   * xdg-desktop-portal dialog is the picker — so without this there is
-   * nowhere on that platform to turn shared audio on at all. It doubles
-   * as the remembered default for the picker's toggle everywhere else.
-   * Absent → off, matching Slack/Discord/Zoom: sharing sound is always an
-   * explicit act, never a surprise.
+   * Whether a screen share carries sound. Stored because Linux has no in-app
+   * picker (the portal dialog is the picker); elsewhere it seeds the toggle.
+   * Absent → off: sharing sound is always explicit.
    */
   screen_share_audio?: boolean;
   auto_join_voice?: boolean;
-  /** Whether the left sidebar is open by default at app start. */
   sidebar_open_by_default?: boolean;
   /**
-   * Whether the right-hand context panel (#824) is open by default.
-   *
-   * Deliberately tri-state: `undefined` means "follow the skin" — open in
-   * `refined`, closed in `terminal` — while `true`/`false` is an explicit
-   * choice that holds across both skins. Defaulting it to a boolean here
-   * would silently freeze whichever skin the user happened to be on when
-   * the preference row was first written.
+   * Right panel open by default (#824). Tri-state: `undefined` follows the skin;
+   * a boolean holds across skins.
    */
   right_panel_open_by_default?: boolean;
-  /**
-   * Linux/Windows only: when true, closing the window hides the app to the
-   * system tray instead of fully exiting. macOS already hides via the Dock
-   * regardless. Default true.
-   */
+  /** Linux/Windows: closing hides to the tray instead of exiting. Default true. */
   close_to_tray?: boolean;
-  /**
-   * macOS only: when true, Pollis shows a status item in the menu bar
-   * (top-right) with quick controls (open, mute toggle, quit). Default
-   * false — the menu bar is prime real estate, so we wait for the user
-   * to opt in. Linux/Windows ignore this; their tray is always set up.
-   */
+  /** macOS: show a menu-bar status item. Default false (opt-in). */
   menubar_icon?: boolean;
   /**
-   * When true, Pollis clears the OS media permissions (camera / microphone /
-   * screen share) as it quits. macOS runs `tccutil reset` per kind so the OS
-   * re-prompts next use; Linux/Windows have no standing grant to clear. Pushed
-   * to the host via `set_revoke_media_on_exit`. Default false.
+   * Clear the OS media permissions on quit (macOS `tccutil reset`; nothing to
+   * clear elsewhere), via `set_revoke_media_on_exit`. Default false.
    */
   revoke_media_on_exit?: boolean;
   /**
-   * Per-remote-user output volume multipliers, keyed by `user_id`.
-   * Range 0.0..=2.0; 1.0 is unity. Absent users default to unity.
-   *
-   * NOTE (#140 — multi-device voice): when the same user can join a
-   * voice channel from multiple devices, decide whether to keep this
-   * user-scoped or shift to per-device. See `user_id_from_voice_identity`
-   * in `src-tauri/src/commands/voice.rs`.
+   * Per-remote-user output volume by `user_id`, 0.0..=2.0 (1.0 unity). User-
+   * scoped, not per device (#140).
    */
   user_volumes?: { [userId: string]: number };
-  /**
-   * Per-command keyboard shortcut overrides, keyed by `ShortcutCommandId`.
-   * Values are canonical combo strings (e.g. `"mod+shift+k"`) understood by
-   * `keyboard/keyCombo.ts`. Missing entries fall back to the built-in
-   * `defaultCombo` in `keyboard/commands.ts`.
-   */
+  /** Shortcut overrides by `ShortcutCommandId`, as `keyboard/keyCombo.ts` combos. */
   shortcut_overrides?: { [commandId: string]: string };
   /**
-   * How the microphone is gated in a voice call (#849): `voice_activity`
-   * (open whenever unmuted — the default and prior behaviour) or
-   * `push_to_talk` (open only while the push-to-talk key is held).
-   *
-   * Synced like every other preference so the choice follows the user
-   * across devices. Applied by pushing it to the Rust voice gate on load
-   * and on change — Rust owns the state machine, this is just where the
-   * preference is stored. Absent → `voice_activity`.
+   * Mic gating (#849): `voice_activity` (default) or `push_to_talk`. Synced;
+   * pushed to the Rust voice gate, which owns the state machine.
    */
   voice_input_mode?: VoiceInputMode;
-  /**
-   * Network-privacy relay overlay mode (#455). Persisted through the synced
-   * preferences blob like every other field so the choice survives restart and
-   * syncs across devices; applied live via `set_overlay_mode` on change and on
-   * load. Absent → `off` (the direct path). See `OverlayMode`.
-   */
+  /** Relay overlay mode (#455), synced and applied live via `set_overlay_mode`. */
   overlay_mode?: OverlayMode;
   /**
-   * Consent to act as a relay FOR OTHER PEOPLE (#813 §10.2). Deliberately
-   * separate from `overlay_mode` — routing your own traffic through the
-   * overlay never implies carrying anyone else's, and vice versa. Absent →
-   * `false`; this is opt-in only and must never be defaulted on.
+   * Consent to relay FOR OTHER PEOPLE (#813 §10.2), independent of
+   * `overlay_mode`. Opt-in only; never default it on.
    */
   relay_serving?: boolean;
-  /**
-   * Condition: only relay while the device reports an unmetered (Wi-Fi)
-   * connection. Absent → `true` (§10.2 / §11.6 — being a relay on a metered
-   * link is user-hostile if mis-defaulted).
-   */
+  /** Relay only on unmetered (Wi-Fi) links. Absent → true (§10.2 / §11.6). */
   relay_serving_wifi_only?: boolean;
-  /**
-   * Condition: only relay while the device is running on external power.
-   * Absent → `true`, same reasoning as `relay_serving_wifi_only`.
-   */
+  /** Relay only on external power. Absent → true. */
   relay_serving_power_only?: boolean;
 }
 
-// Voice-identity parsing (`userIdFromVoiceIdentity`) lives in
-// `voice/identity.ts` — the canonical home shared with the rest of the voice
-// layer. Import it from there.
-
-/**
- * Screen-share framerate presets, in fps. 15 = documents/browsing (cheapest,
- * good for constrained machines/networks), 30 = standard, 60 = motion/gameplay.
- */
+/** Screen-share fps presets: 15 documents, 30 standard, 60 motion. */
 export const SCREEN_SHARE_FPS_OPTIONS = [15, 30, 60] as const;
 export const SCREEN_SHARE_FPS_DEFAULT = 30;
 
-/** Shared audio is opt-in. See `screen_share_audio`. */
 export const SCREEN_SHARE_AUDIO_DEFAULT = false;
 
-/** Snap an arbitrary value to the nearest allowed preset; default if invalid. */
 export function clampScreenShareFps(v: number | undefined): number {
   if (v === undefined || !Number.isFinite(v)) {
     return SCREEN_SHARE_FPS_DEFAULT;
@@ -227,12 +129,10 @@ export function clampScreenShareFps(v: number | undefined): number {
   );
 }
 
-/** Volume slider range used by the per-remote-user output volume control. */
 export const REMOTE_USER_VOLUME_MIN = 0.0;
 export const REMOTE_USER_VOLUME_MAX = 2.0;
 export const REMOTE_USER_VOLUME_DEFAULT = 1.0;
 
-/** Clamp a remote-user volume to the supported range. NaN → unity. */
 export function clampRemoteUserVolume(v: number): number {
   if (!Number.isFinite(v)) {
     return REMOTE_USER_VOLUME_DEFAULT;
@@ -240,7 +140,6 @@ export function clampRemoteUserVolume(v: number): number {
   return Math.max(REMOTE_USER_VOLUME_MIN, Math.min(REMOTE_USER_VOLUME_MAX, v));
 }
 
-/** Defaults must match `voice_apm::ApmConfig::default` in src-tauri. */
 export const APM_DEFAULTS = {
   mic_boost_db: 0,
   auto_gain_control: true,
@@ -251,10 +150,8 @@ export const APM_DEFAULTS = {
 } as const;
 
 /**
- * The Rust-side `voice_apm::ApmConfig` shape. Sent over the IPC for both
- * `join_voice_channel` and the live `set_voice_audio_processing` command.
- * Field names are wire-format (no camelCase rewrite — they're inside an
- * object argument, not top-level invoke params).
+ * The Rust `voice_apm::ApmConfig`, for `join_voice_channel` and
+ * `set_voice_audio_processing`. Field names are wire-format.
  */
 export interface ApmConfig {
   mic_boost_db: number;
@@ -265,11 +162,7 @@ export interface ApmConfig {
   click_suppression: boolean;
 }
 
-/**
- * Project the user-facing voice prefs onto the APM config the backend
- * expects. Falls back to defaults whenever a pref is undefined so a
- * partially-loaded preferences row never produces NaNs or bad enum values.
- */
+/** Voice prefs → APM config, defaulting undefined fields so a partial row is safe. */
 export function preferencesToApmConfig(prefs: PreferencesData | undefined): ApmConfig {
   return {
     mic_boost_db: clampMicBoost(prefs?.mic_boost_db ?? APM_DEFAULTS.mic_boost_db),
@@ -281,7 +174,6 @@ export function preferencesToApmConfig(prefs: PreferencesData | undefined): ApmC
   };
 }
 
-/** AGC target is exposed in 3..=15 dB and the backend clamps the same. */
 function clampAgcTarget(v: number): number {
   if (!Number.isFinite(v)) {
     return APM_DEFAULTS.agc_target_dbfs;
@@ -296,10 +188,7 @@ function clampMicBoost(v: number): number {
   return Math.max(0, Math.min(20, Math.round(v)));
 }
 
-/**
- * Safely read a typed value from a preferences JSON string.
- * Returns defaultValue if the JSON is malformed or the key is absent.
- */
+/** Read a typed value from a preferences JSON string; default on bad JSON or absent key. */
 export function getPreference<T>(json: string, key: string, defaultValue: T): T {
   try {
     const parsed: unknown = JSON.parse(json);
@@ -310,18 +199,15 @@ export function getPreference<T>(json: string, key: string, defaultValue: T): T 
       }
     }
   } catch {
-    // Malformed JSON — fall through to default
+      // Malformed JSON: fall through to default
   }
   return defaultValue;
 }
 
 const prefsKey = (userId: string | null) => ["user", "preferences", userId] as const;
 
-// Remote write throttle window. The local React Query cache update + any
-// callsite-side live effects (CSS vars, mixer state) fire on every call;
-// only the actual `invoke("save_preferences")` is rate-limited. Leading +
-// trailing edges always fire; sustained calls during the window collapse
-// to one intermediate fire every SAVE_THROTTLE_MS.
+// Throttle for the remote `save_preferences` only; the cache update and live
+// effects fire every call. Leading and trailing edges always fire.
 const SAVE_THROTTLE_MS = 500;
 
 interface PendingSave {
@@ -413,17 +299,13 @@ export function usePreferences() {
           SCREEN_SHARE_AUDIO_DEFAULT,
         ),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
-        // Read back explicitly: `save` stringifies the whole object, so a
-        // field missing HERE is written but never loaded — the preference
-        // silently reverts to voice-activity on every refetch, and
-        // `applyPreferences` then pushes that default down onto the Rust
-        // gate, dropping a live call out of push-to-talk.
+        // Read back explicitly: a field missing here silently reverts to
+        // voice-activity on refetch and drops a live call out of PTT.
         voice_input_mode: normalizeVoiceInputMode(
           getPreference<string | undefined>(json, "voice_input_mode", undefined),
         ),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
-        // Default stays `undefined` on purpose — see the field docs. Absent
-        // means "follow the skin", which is not expressible as a boolean.
+        // Stays `undefined`: absent means "follow the skin".
         right_panel_open_by_default: getPreference<boolean | undefined>(
           json,
           "right_panel_open_by_default",
@@ -468,12 +350,8 @@ export function usePreferences() {
 }
 
 /**
- * Reactive current UI skin, for components that must branch their *structure*
- * (not just color) on the skin — e.g. the message row renders IRC-style in
- * terminal and Slack-style in refined. Backed by the synced preferences query,
- * so it updates the instant the toggle flips (the toggle writes the query
- * cache). Defaults to terminal before prefs load. Pure color/spacing
- * differences should use CSS (`:root[data-skin="refined"]`) instead of this.
+ * Reactive UI skin, for components whose STRUCTURE differs by skin. Defaults to
+ * terminal before prefs load; colour-only differences belong in CSS.
  */
 export function useSkin(): Skin {
   const { query } = usePreferences();
@@ -481,13 +359,8 @@ export function useSkin(): Skin {
 }
 
 /**
- * Reactive "send read receipts" preference (#857). Defaults to true before the
- * preferences query resolves, matching the stored default.
- *
- * This is a convenience for the renderer only — it decides whether to bother
- * observing rows and whether to show other people's receipts. The binding
- * enforcement lives in Rust (`receipts::emit_receipt` / `record_receipt`), so
- * nothing here can cause a receipt to be emitted against the user's wishes.
+ * Reactive "send read receipts" (#857), true until prefs load. Renderer
+ * convenience only; Rust enforces it.
  */
 export function useSendReadReceipts(): boolean {
   const { query } = usePreferences();
@@ -495,12 +368,8 @@ export function useSendReadReceipts(): boolean {
 }
 
 /**
- * Apply loaded preferences (accent_color, background_color) to CSS vars.
- * Call this once after the preferences query resolves.
- *
- * Font size is device-local — it is NOT applied from `prefs` here. The
- * device-local value (or one-time seed from the legacy remote field) is
- * applied separately via `applyDeviceFontSize`.
+ * Apply loaded preferences to CSS vars and the shortcut / voice modules. Font
+ * size is device-local (`applyDeviceFontSize`).
  */
 export function applyPreferences(prefs: PreferencesData): void {
   if (prefs.accent_color) {
@@ -510,25 +379,17 @@ export function applyPreferences(prefs: PreferencesData): void {
     applyBackgroundColor(prefs.background_color);
   }
   applySkin(normalizeSkin(prefs.skin));
-  // Shortcut overrides flow through the same bindings module that
-  // `useGlobalShortcut` resolves against on every keydown — no callsite
-  // changes needed. An undefined map clears any previous override.
+  // An undefined map clears any previous override.
   setShortcutOverrides(
     (prefs.shortcut_overrides ?? {}) as Partial<Record<ShortcutCommandId, string>>,
   );
-  // Push the input mode down to the Rust voice gate, which owns it. Safe
-  // outside a call and idempotent; doing it on load (not just on change)
-  // is what makes a synced push-to-talk preference apply on a fresh
-  // device before the user ever opens voice settings.
+  // On load too, so a synced PTT preference applies on a fresh device.
   void voiceSession.setInputMode(prefs.voice_input_mode ?? VOICE_INPUT_MODE_DEFAULT);
 }
 
 /**
- * Apply the device-local font size for `userId`. If localStorage has no
- * value yet but the legacy remote `prefs.font_size` is present, seed
- * localStorage from it once and apply it — this preserves the user's
- * existing setting through the migration to per-device storage. After
- * the seed, the remote field is ignored.
+ * Apply the device-local font size for `userId`, seeding it once from the
+ * legacy remote `font_size` if localStorage has none.
  */
 export function applyDeviceFontSize(
   userId: string | null | undefined,
@@ -549,22 +410,14 @@ export function applyDeviceFontSize(
 }
 
 /**
- * Subscribe to the preferences query and re-apply visual prefs to CSS vars
- * whenever the data arrives or changes. Mounted once near the app root so
- * both the login path and the app-reopen path (stored session) end up
- * applying CSS via the same mechanism, without a one-shot invoke in the
- * signed-in flow that could silently fail.
- *
- * Also handles the one-time seed of device-local font size from a legacy
- * remote `font_size` field — see `applyDeviceFontSize`.
+ * Re-apply visual prefs whenever the query data changes. Mounted once near the
+ * root so login and stored-session reopen share one path.
  */
 export function useApplyPreferences(): void {
   const { query } = usePreferences();
   const currentUser = useObserver(() => appStore.currentUser);
   const data = query.data;
-  // Stringify the override map so the effect re-runs when any override
-  // changes (a React Query refetch returns a new object reference, and we
-  // don't want to re-fire on unrelated pref edits either).
+  // Stringified so only an override change re-runs the effect.
   const overridesKey = JSON.stringify(data?.shortcut_overrides ?? {});
   useEffect(() => {
     if (data) {
@@ -573,10 +426,7 @@ export function useApplyPreferences(): void {
     }
   }, [data?.accent_color, data?.background_color, data?.skin, data?.font_size, overridesKey, currentUser?.id]);
 
-  // Push close-to-tray to the host so the close handler can pick
-  // hide-vs-quit synchronously. macOS ignores this (close already hides via
-  // the Dock path), but pushing is harmless and keeps the Linux/Windows
-  // path live.
+  // Pushed to the host so the close handler can decide synchronously.
   const closeToTray = data?.close_to_tray ?? true;
   useEffect(() => {
     void setTrayCloseToTray(closeToTray).catch((err) => {
@@ -584,10 +434,7 @@ export function useApplyPreferences(): void {
     });
   }, [closeToTray]);
 
-  // macOS menu-bar icon. Linux/Windows ignore this on the main side;
-  // they have a tray unconditionally once setup succeeds. Default
-  // is off, so the very first load on a fresh macOS install does NOT
-  // claim a menu-bar slot until the user opts in.
+  // macOS menu-bar icon; off by default, so a fresh install claims no slot.
   const menubarIcon = data?.menubar_icon ?? false;
   useEffect(() => {
     void setTrayEnabled(menubarIcon).catch((err) => {
@@ -595,9 +442,7 @@ export function useApplyPreferences(): void {
     });
   }, [menubarIcon]);
 
-  // Push the "revoke media permissions on quit" pref to the host so the
-  // ExitRequested hook can read it synchronously at shutdown. Same reasoning
-  // as close-to-tray above.
+  // Pushed so the ExitRequested hook can read it synchronously.
   const revokeMediaOnExit = data?.revoke_media_on_exit ?? false;
   useEffect(() => {
     void invoke("set_revoke_media_on_exit", { enabled: revokeMediaOnExit }).catch(

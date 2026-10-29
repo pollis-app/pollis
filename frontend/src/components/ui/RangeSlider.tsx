@@ -81,7 +81,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
         "
         style={{
           background: `linear-gradient(to right, var(--c-accent) 0%, var(--c-accent) ${pct}%, var(--c-border-active) ${pct}%, var(--c-border-active) 100%)`,
-          // Thumb color via CSS custom property (pseudo-elements can't use inline styles)
+          // Pseudo-elements can't use inline styles, hence the custom property.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ["--thumb-color" as any]: "var(--c-accent)",
         }}

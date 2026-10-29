@@ -8,19 +8,17 @@ import { errorMessage } from "../../utils/errorMessage";
 import { formatFileSize } from "../../utils/format";
 
 interface Props {
-  /// Narrows the export to one conversation; omit for the whole account.
+  /// One conversation; omit for the whole account.
   conversationId?: string;
-  /// Suggested file name in the OS save dialog, without the `.json`.
+  /// Save-dialog file name, without `.json`.
   fileStem: string;
-  /// `button` is the full-width settings-page control; `icon` is the compact
-  /// header trigger with its status line rendered beside it.
+  /// `button`: full-width settings control; `icon`: compact header trigger.
   variant?: "button" | "icon";
   testId?: string;
 }
 
-/// One entry point for #856: pick a file, write the archive, report the
-/// outcome inline. Strictly on-device — the write happens in Rust from the
-/// local database; nothing here (or behind it) touches the network.
+/// Archive export (#856): pick a file, write it in Rust from the local DB,
+/// report inline. Never touches the network.
 export const ExportArchiveButton: React.FC<Props> = ({
   conversationId,
   fileStem,
@@ -57,8 +55,7 @@ export const ExportArchiveButton: React.FC<Props> = ({
     }
   };
 
-  // Opt-in and separately worded: the archive is already on disk by the time
-  // this can be pressed, and it is the only path in the feature that talks to
+  // Opt-in and separately worded: the only path in the feature that talks to
   // the server.
   const missing = summary?.attachments_missing ?? [];
   const runFetch = async () => {
@@ -119,8 +116,7 @@ export const ExportArchiveButton: React.FC<Props> = ({
         path: summary.path,
       })
     : null;
-  // Only distinct attachments are counted here, so "copied" + "missing" is
-  // the number of files, not the number of references.
+  // Distinct attachments, so copied + missing counts files, not references.
   const files =
     summary && summary.attachments > 0
       ? [
