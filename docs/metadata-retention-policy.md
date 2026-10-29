@@ -378,16 +378,31 @@ The Signed Tree Head is `{tree_size, root_hash, timestamp, signature}` — ML-DS
 **The log of record is the persisted leaves, not the DS table (#1579).** The Delivery Service prunes
 `mls_commit_log` below its retention floor (§1, #539), so that table is only a window onto the commit log.
 The leaves the publisher has published are kept, append-only, in the transparency bucket at
-`internal/commit-log-leaves.json` (with a copy per size under `internal/commit-log-leaves/<size>.json`),
+`internal/commit-log-2-leaves.json` (with a copy per size under `internal/commit-log-2-leaves/<size>.json`),
 the same way `internal/binary-records.json` holds the binaries tree. Each publish appends only the rows
 above the last persisted `seq`, so pruning a row never changes or removes a published leaf, and a missing,
 shrunk or rewritten leaves file stops the commit-log publish instead of rebuilding the tree. The two
 retention rules therefore do not conflict: the DS keeps a commit's bytes only as long as members need them,
 while the ledger keeps the commit's public leaf (pseudonyms, epoch, `seq`, `sha256(commit_data)`) forever.
-The persisted file holds exactly the pseudonymous leaves `/v1/entries.json` serves and no real
-`conversation_id` or `sender_id`, so keeping it adds no retention beyond what the public ledger already
-holds. Before #1579 the tree was rebuilt from the live table on every publish, and once the DS began
-pruning, two heads were published that are not consistent with the earlier history; #1579 records them.
+The persisted file holds exactly the pseudonymous leaves `/v1/commit-log-2/entries.json` serves and no
+real `conversation_id` or `sender_id`, so keeping it adds no retention beyond what the public ledger
+already holds.
+
+**The commit-log reset (#1579).** Before #1580 the tree was rebuilt from the live table on every publish.
+Once the DS began pruning on 28 October 2026, that put different leaves at already-signed positions, and
+three heads were signed and served that do not extend the log's consistent chain, which ends at size 137
+(signed 2026-10-28 16:43 UTC): sizes 56 and 113 (2026-10-28 20:24 UTC) and 129 (2026-10-29 05:34 UTC).
+The leaf hashes of all 137 leaves on that chain survive, so every head on it can still be checked, but
+the leaf data for 46 of them was pruned before any copy was kept and cannot be recovered. That is a loss
+of public ledger content, not of anything a user holds: the leaves carry only pseudonyms, epochs, `seq`
+and commit hashes, and no app checks the commit-log tree, so no user-facing check was affected. The first
+tree was therefore retired rather than repaired: every file of it stays served, frozen, under `/v1/`, a
+reset statement signed by the log key at `/v1/commit-log-reset.json` lists its consistent chain, the three
+forked heads and six older superseded heads, and the commit log continues as a new tree,
+`commit-log-2`, under `/v1/commit-log-2/` with its own signing context, append-only from its first leaf.
+The ledger's permanence holds for both trees: nothing of the retired tree was deleted, and the new tree
+is only ever appended to. Full account and how to verify both: `docs/transparency.md` → "Commit-log reset
+(#1579)".
 
 **Former exposure and the #701 mitigation, stated plainly:** the commit-log leaf *used to* publish a
 **stable `conversation_id` and a real `sender_id` in the clear**, so anyone could build a longitudinal

@@ -197,6 +197,16 @@ tree can never stand in for another:
   *within* a window and a member (who knows the real `conversation_id`) verifies
   across windows via `pollis-verify group`. This lands at the next full republish
   (frozen leaf → the #672/#699 key-rotation ceremony). See `docs/transparency.md`.
+  **Since #1579 the live commit log is `commit-log-2`** (`/v1/commit-log-2/...`,
+  context `pollis-verifiable-log:sth:v2:commit-log-2`), built only by appending to
+  persisted leaves (`internal/commit-log-2-leaves.json`, #1580). The first tree
+  (`/v1/...`, `sth:v2`) is retired and frozen after it signed forked heads (56, 113,
+  129) from the pruned DS table; `/v1/commit-log-reset.json` is the signed reset
+  statement (`verifiable-log/src/reset.rs`, domain `pollis-verifiable-log:reset:v1`)
+  listing its consistent chain to 137, the forks and older superseded heads.
+  `remote` reports the retired tree as RETIRED and fails on anything unlisted; a
+  key-set signer for the commit log also counts for `commit-log-2`
+  (`key_set_authority_for`).
 - **Account-key tenant** (`pollis-verifiable-log:sth:v2:account-keys`) — one leaf
   per account identity-key version, sourced from the append-only
   `account_key_log` table (dual-written with `users.account_id_pub` at signup and
@@ -398,8 +408,8 @@ is turned into verifying keys in exactly one place —
 
 | path | entry point | context |
 |---|---|---|
-| whole-log audit | `remote::verify_remote` | default + account + binaries |
-| per-group | `group::verify_group[_in_bundle]` | default (`sth:v2`) |
+| whole-log audit | `remote::verify_remote` | commit-log-2 + retired default (`sth:v2`) + account + binaries |
+| per-group | `group::verify_group[_in_bundle_with_context]` | commit-log-2 when served, else default (`sth:v2`) |
 | per-account | `account::verify_account[_in_bundle]` | account |
 | per-release | `release::verify_release[_in_bundle]` | binaries |
 | offline CLI | `monitor::verify_bundle` (`monitor verify --tree …`) | whichever `--tree` names |

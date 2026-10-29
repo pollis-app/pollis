@@ -62,27 +62,41 @@ exits `0` (output shortened; numbers are illustrative):
 ```
 $ pollis-verify remote https://verify.pollis.com
 PASS  served public_key.json is the pinned log key
-PASS  STH[24] tree_size matches its URL
-PASS  STH[24] signature
-PASS  STH[49] tree_size matches its URL
-PASS  STH[49] signature
-PASS  latest.json matches the newest STH
-PASS  latest.json signature
-PASS  no equivocation between size 24 and size 49
-PASS  entries.json count matches manifest
-PASS  per-entry files match entries.json
-PASS  all entries satisfy tenant invariants
-PASS  STH[24] root matches replayed entries
-PASS  STH[49] root matches replayed entries
-PASS  inclusion: leaf 0 in size 49
+PASS  commit-log reset statement: signature (reset context) and self-consistency
+PASS  commit-log reset statement: retires commit-log at /v1 in favour of commit-log-2 at /v1/commit-log-2
+PASS  commit-log (retired): last consistent head, size 137, signature
+PASS  commit-log (retired): all 52 served heads on the consistent chain are signed and extend each other, up to size 137
+PASS  commit-log (retired): every head index.json and latest.json advertise is one the reset statement describes
+PASS  commit-log-2: STH[24] tree_size matches its URL
+PASS  commit-log-2: STH[24] signature
+PASS  commit-log-2: STH[49] signature
+PASS  commit-log-2: latest.json matches the newest STH
+PASS  commit-log-2: no equivocation between size 24 and size 49
+PASS  commit-log-2: all entries satisfy tenant invariants
+PASS  commit-log-2: STH[49] root matches replayed entries
+PASS  commit-log-2: inclusion: leaf 0 in size 49
 …
-PASS  consistency: size 24 -> size 49
+PASS  commit-log-2: consistency: size 24 -> size 49
+PASS  commit-log-2: its first leaf is the genesis the reset statement names
 PASS  account-keys: STH[12] signature (account context)
 …
 PASS  binaries: consistency: size 14 -> size 21
+RETIRED  commit-log (/v1): retired by the reset statement issued 2026-10-29 …; continued as commit-log-2
+KNOWN  commit-log (retired): forked head at size 56 (root …, signed 2026-10-28 20:24 UTC), listed in the reset statement
+KNOWN  commit-log (retired): forked head at size 113 (root …, signed 2026-10-28 20:24 UTC), listed in the reset statement
+KNOWN  commit-log (retired): forked head at size 129 (root …, signed 2026-10-29 05:34 UTC), listed in the reset statement
+KNOWN  commit-log (retired): 6 superseded heads from an earlier generation of the tree, listed in the reset statement
 
 OK: all checks passed
 ```
+
+The commit log's first tree, under `/v1/...`, was retired in October 2026 after it
+signed heads that do not extend its own history (#1579). `RETIRED` and `KNOWN` lines
+are information, not failures: the retired tree's consistent chain is still checked
+head by head, and a head it serves that the signed reset statement does not list is
+a `FAIL`. The live commit log is `commit-log-2`. See `docs/transparency.md` →
+"Commit-log reset (#1579)". `pollis-verify` older than `v0.10.0` does not know about
+the reset and fails on the retired tree.
 
 Any failure prints `FAIL` on the offending line, ends with
 `FAILED: one or more checks did not pass`, and exits non-zero. If the served key is
@@ -390,7 +404,7 @@ rebuilder (`.github/workflows/rebuild-verify.yml`, Linux payload only; see
 and shows its commit chain. The browser runs the `pollis-verify group` checks itself
 (`website/transparency.js`, a JavaScript port of `group.rs`): it fetches the static
 `index.json`, `public_key.json`, `sth/latest.json`, `entries.json` and the inclusion
-proofs for that conversation's entries from `https://verify.pollis.com/v1/`, refuses a
+proofs for that conversation's entries from `https://verify.pollis.com/v1/commit-log-2/`, refuses a
 served key that is not the pinned one, verifies the ML-DSA-44 head signature, every
 inclusion proof and the commit-log invariant, and produces the same `GroupReport` the
 CLI does. No server computes the verdict. You still trust the page's code as served
