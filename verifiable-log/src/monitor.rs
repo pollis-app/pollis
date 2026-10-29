@@ -1,24 +1,9 @@
-//! The monitor's verification pass, as a library.
+//! The monitor's verification pass over a [`Bundle`], shared by the CLI and the
+//! builder's gate suites so there is one verifier (#875).
 //!
-//! Everything the `monitor` CLI does to a [`Bundle`] lives here so it can be
-//! *called* rather than re-implemented. Before #875 it existed only inside the
-//! binary, so the builder's account-key and binaries gate suites each carried a
-//! hand-written copy of the loop — and both copies asserted the CLI's own
-//! limitation (it could only ever check the commit-log context) as though it
-//! were the intended behaviour. A verifier whose logic exists in three places is
-//! a verifier whose three answers can disagree.
-//!
-//! The pass is deliberately parameterised on the two things that differ between
-//! trees and callers:
-//!
-//! * `context` — the STH domain separation. There is no default: verifying an
-//!   account-key head under the commit-log context fails, and a FAIL that means
-//!   "you asked the wrong question" is indistinguishable from one that means
-//!   "this log is lying".
-//! * `invariants` — the tenant rules replayed over `entries`. The concrete
-//!   tenant invariants live in `verifiable-log-builder`, above this crate, so
-//!   the caller supplies them; [`unique_invariants`] is the generic fallback the
-//!   CLI uses when it only has the bundle's `enforce_unique` list.
+//! `context` has no default: a FAIL from asking under the wrong tree's context
+//! is indistinguishable from a lying log. Tenant invariants live in the
+//! builder, so callers supply them; [`unique_invariants`] is the fallback.
 
 use crate::bundle::Bundle;
 use crate::log::{TenantInvariant, UniqueDataInvariant, VerifiableLog};
@@ -27,21 +12,16 @@ use crate::sth::is_equivocation;
 
 /// What a verification pass is checking against.
 pub struct VerifyOptions<'a> {
-    /// STH domain-separation context — one of [`crate::sth::STH_CONTEXTS`].
+    /// One of [`crate::sth::STH_CONTEXTS`].
     pub context: &'a [u8],
-    /// Wall-clock milliseconds, used only to expire rotation-overlap keys.
-    ///
-    /// A verifier is allowed a clock (the builder is not — its output must be
-    /// deterministic). A clock wrong in the past keeps a retired key trusted
-    /// slightly too long; one wrong in the future retires it early and degrades
-    /// to "cannot verify", never to a false accusation of tampering.
+    /// Wall-clock milliseconds, used only to expire rotation-overlap keys. A
+    /// skewed clock trusts a retired key slightly too long or retires it early
+    /// ("cannot verify"), never a false tampering verdict.
     pub now_ms: u64,
 }
 
-/// [`UniqueDataInvariant`] for every named tenant — the generic replay rule a
-/// verifier can apply knowing nothing about a tenant beyond "leaves don't
-/// repeat". Weaker than a tenant's real invariant (which lives in the builder),
-/// and deliberately so: this crate must not grow tenant knowledge.
+/// [`UniqueDataInvariant`] for every named tenant. Deliberately weaker than the
+/// builder's real tenant invariants: this crate holds no tenant knowledge.
 pub fn unique_invariants(tenants: &[String]) -> Vec<(String, Box<dyn TenantInvariant>)> {
     tenants
         .iter()
@@ -54,8 +34,7 @@ pub fn unique_invariants(tenants: &[String]) -> Vec<(String, Box<dyn TenantInvar
 
 /// Run every check the monitor performs and return the overall verdict.
 ///
-/// `report` is called once per check with `(passed, label)` so a CLI can print a
-/// running PASS/FAIL log while a test can ignore it entirely.
+/// `report` is called once per check with `(passed, label)`.
 pub fn verify_bundle(
     bundle: &Bundle,
     opts: &VerifyOptions<'_>,
@@ -70,9 +49,8 @@ pub fn verify_bundle(
         }
     };
 
-    // The rotation-overlap key set: the active key plus any retired key still
-    // inside its window. Using `public_key` alone makes an honest log mid-
-    // rotation look tampered with.
+    // Using `public_key` alone would make an honest log mid-rotation look
+    // tampered with.
     let candidates = bundle.key_candidates(opts.now_ms);
     check(
         !candidates.is_empty(),
@@ -80,7 +58,6 @@ pub fn verify_bundle(
         &mut ok,
     );
 
-    // 1. STH signatures, under this tree's context and any acceptable key.
     for (i, sth) in bundle.sths.iter().enumerate() {
         let hit = sth.verify_any_with_context(&candidates, opts.context);
         check(
@@ -90,7 +67,6 @@ pub fn verify_bundle(
         );
     }
 
-    // 2. Equivocation: any two STHs at the same size with different roots.
     for i in 0..bundle.sths.len() {
         for j in (i + 1)..bundle.sths.len() {
             let equivocates = is_equivocation(&bundle.sths[i], &bundle.sths[j]);
@@ -105,7 +81,6 @@ pub fn verify_bundle(
         }
     }
 
-    // 3. Replay entries: run tenant invariants and confirm every STH root.
     if !bundle.entries.is_empty() {
         let mut log = VerifiableLog::new();
         for (tenant, invariant) in invariants {
@@ -140,7 +115,6 @@ pub fn verify_bundle(
         }
     }
 
-    // 4. Inclusion proofs.
     for (i, c) in bundle.inclusion.iter().enumerate() {
         let passed = bundle
             .sths
@@ -157,7 +131,6 @@ pub fn verify_bundle(
         );
     }
 
-    // 5. Consistency proofs.
     for (i, c) in bundle.consistency.iter().enumerate() {
         let passed = match (bundle.sths.get(c.old_index), bundle.sths.get(c.new_index)) {
             (Some(o), Some(n)) => proof::verify_consistency_proof(o, n, &c.proof),

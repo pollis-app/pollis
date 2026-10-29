@@ -1,19 +1,8 @@
-//! Compiles the vendored SQLCipher amalgamation.
+//! Compiles the vendored SQLCipher amalgamation, on every target (see lib.rs).
 //!
-//! The flag list below is `libsqlite3-sys` 0.35.0's `build_bundled` list for a
-//! Windows target, verbatim, plus the three flags that turn SQLCipher on and
-//! point it at our crypto provider. Keeping it identical matters: the Rust
-//! bindings `libsqlite3-sys` hands `rusqlite` come from its own
-//! `sqlcipher/bindgen_bundled_version.rs`, which was generated against this
-//! exact amalgamation with these exact flags, so a divergence here is a
-//! divergence between the declarations and the library.
-//!
-//! It is built on EVERY target, not just Windows. Only Windows links it into
-//! the application — `pollis-core` depends on this crate under `cfg(windows)`,
-//! and Linux/macOS/mobile keep `bundled-sqlcipher`'s own copy — but building it
-//! everywhere is what lets `tests/sqlcipher.rs` prove the crypto provider
-//! actually encrypts a database on the ordinary Linux gate, instead of that
-//! evidence existing only inside a 40-minute Windows job.
+//! The flags are `libsqlite3-sys` 0.35.0's Windows `build_bundled` list
+//! verbatim, plus the three SQLCipher flags. Keep them identical: its
+//! pre-generated bindings were built against exactly these flags.
 
 fn main() {
     println!("cargo:rerun-if-changed=vendor/sqlite3.c");
@@ -24,8 +13,7 @@ fn main() {
 
     let mut cfg = cc::Build::new();
     cfg.file("vendor/sqlite3.c")
-        // Where `#include <tomcrypt.h>` resolves. This directory holds exactly
-        // one header and it is ours.
+        // Where `#include <tomcrypt.h>` resolves: our one header.
         .include("include")
         .define("SQLITE_CORE", None)
         .define("SQLITE_DEFAULT_FOREIGN_KEYS", "1")
@@ -45,27 +33,22 @@ fn main() {
         .define("SQLITE_USE_URI", None)
         .define("HAVE_USLEEP", "1")
         .define("HAVE_ISNAN", None)
-        // The codec itself, and the temp-store setting SQLCipher requires so
-        // that temporary tables and the rollback journal never land unencrypted
-        // on disk.
+        // The codec, and the temp store SQLCipher requires so temp tables and
+        // the journal never land unencrypted on disk.
         .define("SQLITE_HAS_CODEC", None)
         .define("SQLITE_TEMP_STORE", "2")
-        // Selects `crypto_libtomcrypt.c` as the provider. Without it the
-        // amalgamation defaults to `SQLCIPHER_CRYPTO_OPENSSL` and wants
-        // <openssl/evp.h>, which is the whole problem.
+        // Selects `crypto_libtomcrypt.c`; the default provider is OpenSSL.
         .define("SQLCIPHER_CRYPTO_LIBTOMCRYPT", None)
         .warnings(false);
 
-    // `libsqlite3-sys` adds this on every non-Windows target; keeping parity
-    // matters most on the platforms where this build exists only to be tested.
+    // Parity with `libsqlite3-sys`, which adds this on every non-Windows target.
     if target_os != "windows" {
         cfg.define("HAVE_LOCALTIME_R", None);
     }
 
     cfg.compile("sqlcipher");
 
-    // SQLite's own system dependencies. Windows needs none of these, and macOS
-    // has them all in libSystem, which rustc already links.
+    // Windows needs none of these; macOS has them in libSystem.
     if target_os == "linux" || target_os == "android" {
         println!("cargo:rustc-link-lib=dylib=m");
         println!("cargo:rustc-link-lib=dylib=dl");

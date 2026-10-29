@@ -1,29 +1,9 @@
-//! A **live, lazily-refreshed** HTTP server over the verifiable log, reading the
-//! commit log directly from Turso/libSQL instead of a pre-generated directory.
+//! A live HTTP server that reads the commit log from Turso/libSQL and holds the
+//! same `/v1` surface as the static mode in memory, plus `/verify/group/<id>`.
 //!
-//! Where [`crate::server::DevServer`] serves a frozen `/v1` snapshot off disk,
-//! this server holds the same surface **in memory** and rebuilds it on demand:
-//!
-//! * It keeps the current signed [`Bundle`], the generated `/v1` artifact map
-//!   ([`layout::generate_artifacts`]), and the [`Instant`] it was last built.
-//! * Every request first **ensures freshness**: if the cache is older than the
-//!   TTL it is rebuilt (one DB pull → [`build_bundle`] → regenerate artifacts →
-//!   atomic swap); otherwise it is served untouched, with **no DB hit**.
-//! * Rebuilds are **single-flight**: a mutex with a double-checked TTL test means
-//!   that however many requests pile up during a stale window, exactly one of
-//!   them pulls the DB and the rest serve the freshly-swapped cache. The net
-//!   property is at most one DB pull per TTL regardless of request volume.
-//! * A rebuild that fails (DB down, a fork/regression the builder rejects) keeps
-//!   serving the last-good cache and logs the error — it never crashes.
-//!
-//! Public surface is identical to the static mode: the immutable `/v1/...`
-//! artifacts (with the same cache policy) plus the dynamic
-//! `GET /verify/group/<id>` endpoint. The per-group verdict is computed by
-//! [`verify_group_in_bundle`] against the in-memory bundle directly — the server
-//! never HTTP-fetches itself — so it shares the exact verdict core the CLI uses.
-//!
-//! Only this serve runtime reads the clock (TTL instants, the STH timestamp);
-//! the [`verifiable_log`] core and the [`verifiable_log_builder`] bundle logic
+//! Rebuilds are lazy and single-flight: at most one DB pull per TTL regardless
+//! of request volume, none while idle. A failed rebuild keeps serving the
+//! last-good cache. Only this runtime reads the clock; the log core and builder
 //! stay clock-free.
 
 use std::collections::BTreeMap;
@@ -34,7 +14,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use verifiable_log::SigningKey;
-// `verifying_key()` on a signing key comes from this trait (pin seam).
+// Brings `verifying_key()` onto the signing key.
 use ml_dsa::Keypair as _;
 use tiny_http::{Method, Request, Response, Server};
 use verifiable_log_builder::{build_bundle, source};
@@ -48,64 +28,44 @@ use crate::server::{
     respond_status, VERIFY_GROUP_PREFIX,
 };
 
-/// Number of request worker threads. Unlike the static server, the live verify
-/// endpoint does **not** call back into itself over HTTP, so a single rebuild can
-/// never deadlock a worker; multiple workers just keep cached reads concurrent.
 const WORKERS: usize = 4;
 
-/// The in-memory cache swapped in on each rebuild. Immutable once built; a
-/// rebuild produces a fresh `Cache` and atomically replaces the `Arc`.
+/// Immutable once built; a rebuild swaps in a fresh `Arc`.
 struct Cache {
-    /// The signed bundle, used to answer `/verify/group/<id>` directly.
     bundle: Bundle,
-    /// `relative path -> JSON bytes` for the `/v1` read API (see
-    /// [`layout::generate_artifacts`]).
     artifacts: BTreeMap<String, Vec<u8>>,
-    /// When this cache was built — the TTL is measured from here.
     built_at: Instant,
 }
 
-/// State shared by every worker thread: the DB source, the signing key, the TTL,
-/// a tokio runtime for the async DB read, and the single-flight cache.
 struct Shared {
     db: String,
-    /// Auth token for the (log) DB. Empty for a local SQLite file path, which
-    /// ignores it. Each DB carries its own token after Goal A's cutover.
+    /// Empty for a local SQLite path, which ignores it.
     token: String,
     signing_key: SigningKey,
     ttl: Duration,
     runtime: tokio::runtime::Runtime,
-    /// Last-good cache. `None` until the first successful rebuild (the server
-    /// starts cold — no DB load until the first request).
+    /// Last-good cache; `None` until the first successful rebuild.
     cache: RwLock<Option<Arc<Cache>>>,
     /// Single-flight guard: only the holder may rebuild.
     rebuild_lock: Mutex<()>,
-    /// Count of DB pulls performed — exposed for tests to assert single-flight
-    /// and TTL behaviour.
     rebuild_count: AtomicU64,
 }
 
 impl Shared {
-    /// Is the cache fresh enough to serve without rebuilding? A zero TTL means
-    /// "always rebuild", so it is never fresh.
+    /// A zero TTL means "always rebuild".
     fn is_fresh(&self, cache: &Cache) -> bool {
         !self.ttl.is_zero() && cache.built_at.elapsed() < self.ttl
     }
 
-    /// Return a cache guaranteed fresh per the TTL, rebuilding once under the
-    /// single-flight lock if stale. On a rebuild failure the last-good cache is
-    /// returned (and the error logged); only a failure with *no* last-good cache
-    /// surfaces as `Err`.
+    /// A cache fresh per the TTL, rebuilt once under the single-flight lock if
+    /// stale. `Err` only when a rebuild fails with no last-good cache.
     fn ensure_fresh(&self) -> Result<Arc<Cache>> {
-        // Fast path: a fresh cache needs no lock and no DB hit.
         if let Some(cache) = self.cache.read().unwrap().as_ref() {
             if self.is_fresh(cache) {
                 return Ok(cache.clone());
             }
         }
 
-        // Stale (or cold): serialise rebuilds. Whoever loses the race for the
-        // lock re-checks below and serves the winner's fresh cache.
         let _flight = self.rebuild_lock.lock().unwrap();
 
         // Double-check: a concurrent holder may have just rebuilt.
@@ -122,8 +82,6 @@ impl Shared {
                 Ok(cache)
             }
             Err(e) => {
-                // Keep serving the last-good cache if we have one; otherwise the
-                // caller must surface the failure (nothing to serve yet).
                 eprintln!("[transparency] rebuild failed, serving last-good cache: {e}");
                 match self.cache.read().unwrap().as_ref() {
                     Some(cache) => Ok(cache.clone()),
@@ -133,24 +91,18 @@ impl Shared {
         }
     }
 
-    /// One read-through rebuild: pull `mls_commit_log`, build the signed bundle,
-    /// regenerate the `/v1` artifact map. Counts exactly one DB pull.
+    /// Pull `mls_commit_log`, build the signed bundle, regenerate the artifacts.
     fn rebuild(&self) -> Result<Cache> {
         self.rebuild_count.fetch_add(1, Ordering::SeqCst);
 
-        // The libSQL read is async; drive it on the shared runtime. Single-flight
-        // means at most one of these runs at a time.
         let rows = self.runtime.block_on(async {
             let conn = source::connect_with_token(&self.db, &self.token).await?;
             source::read_commit_log(&conn).await
         })?;
 
-        // The serve runtime is allowed the clock; the builder stays deterministic
-        // by taking the timestamp as an argument.
         let bundle = build_bundle(&rows, &self.signing_key, now_ms())?;
 
-        // The builder and serve crates carry byte-identical bundle shapes; round
-        // -trip through JSON rather than depend on the builder's concrete type.
+        // The two crates' bundle shapes are byte-identical; round-trip via JSON.
         let bundle: Bundle = serde_json::from_slice(&serde_json::to_vec(&bundle)?)?;
 
         let (_manifest, artifacts) = layout::generate_artifacts(&bundle)?;
@@ -163,8 +115,7 @@ impl Shared {
     }
 }
 
-/// A running live server bound to a `127.0.0.1` port, served from a pool of
-/// background threads. Dropping it (or calling [`LiveServer::shutdown`]) stops
+/// A running live server on a pool of background threads; dropping it stops
 /// the pool.
 pub struct LiveServer {
     addr: SocketAddr,
@@ -174,16 +125,9 @@ pub struct LiveServer {
 }
 
 impl LiveServer {
-    /// Bind `127.0.0.1:<port>` (pass `0` for an ephemeral port) and start serving
-    /// a live view of `db`, refreshed at most once per `ttl`. The server starts
-    /// **cold** — the first request triggers the first DB pull, so an idle server
-    /// imposes no DB load.
-    ///
-    /// `db` is a libSQL/Turso URL (authenticated with the supplied `token`) or a
-    /// local SQLite path (which ignores the token). After Goal A's cutover this
-    /// is the log DB holding `mls_commit_log`, with its own credentials. The
-    /// caller must supply the signing key — the CLI loads it from env or file and
-    /// refuses to start without one.
+    /// Bind `127.0.0.1:<port>` (`0` = ephemeral) and serve a live view of `db` (a
+    /// libSQL URL or local SQLite path), refreshed at most once per `ttl`. Starts
+    /// cold: the first request triggers the first DB pull.
     pub fn spawn(
         db: String,
         token: String,
@@ -191,19 +135,14 @@ impl LiveServer {
         ttl: Duration,
         signing_key: SigningKey,
     ) -> Result<LiveServer> {
-        // Debug/dev + test convenience: trust this live server's own signing key
-        // so a local `serve live` (and the crate's tests) verify without the
-        // production pin. Safe in every profile: only a process serving a
-        // log can reach this, and the auditor CLI serves nothing.
+        // Trust our own key so local verification works without the production
+        // pin; see `pinned::DEV_EXTRA` for why this is safe.
         crate::pinned::trust_hex_for_dev(&hex::encode(signing_key.verifying_key().encode()));
 
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| ServeError::Config(format!("failed to start async runtime: {e}")))?;
 
-        // Bind host defaults to loopback for safe local/dev use. Set
-        // `VLOG_BIND_HOST=0.0.0.0` to listen on all interfaces — required when
-        // running inside a container behind a reverse proxy (Docker's
-        // port-forward and sibling containers cannot reach a loopback bind).
+        // Loopback by default; `VLOG_BIND_HOST=0.0.0.0` inside a container.
         let host = std::env::var("VLOG_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let server = Server::http((host.as_str(), port))
             .map_err(|e| ServeError::Http(format!("bind failed: {e}")))?;
@@ -243,31 +182,26 @@ impl LiveServer {
         })
     }
 
-    /// The bound port (resolved even when `0` was requested).
     pub fn port(&self) -> u16 {
         self.addr.port()
     }
 
-    /// Base URL a client should hit, e.g. `http://127.0.0.1:54321`.
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
     }
 
-    /// How many DB pulls (rebuilds) have happened so far. Exposed so tests can
-    /// assert single-flight and TTL behaviour.
+    /// DB pulls so far, for tests asserting single-flight and TTL behaviour.
     pub fn rebuild_count(&self) -> u64 {
         self.shared.rebuild_count.load(Ordering::SeqCst)
     }
 
-    /// Block the calling thread, keeping the server alive until the process is
-    /// killed. Used by the CLI `serve live` command.
+    /// Block until the process is killed.
     pub fn block_forever(self) {
         while self.handles.iter().any(|h| !h.is_finished()) {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
 
-    /// Stop the background threads and wait for them to exit.
     pub fn shutdown(mut self) {
         self.stop.store(true, Ordering::Relaxed);
         for handle in self.handles.drain(..) {
@@ -285,7 +219,6 @@ impl Drop for LiveServer {
     }
 }
 
-/// Accept requests until `stop` is set, polling so shutdown is prompt.
 fn serve_loop(server: &Server, shared: &Shared, stop: &AtomicBool) {
     while !stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(100)) {
@@ -296,22 +229,17 @@ fn serve_loop(server: &Server, shared: &Shared, stop: &AtomicBool) {
     }
 }
 
-/// Route one request: CORS preflight, the dynamic verify endpoint, or a static
-/// `/v1` artifact — each first ensuring the in-memory cache is fresh.
 fn handle_request(request: Request, shared: &Shared) {
     let method = request.method().clone();
 
-    // Strip any query string and keep the path.
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or("").to_string();
 
-    // CORS preflight for the browser calling the verify endpoint cross-origin.
     if method == Method::Options {
         cors_preflight(request);
         return;
     }
 
-    // Dynamic per-group verification endpoint.
     if let Some(encoded) = path.strip_prefix(VERIFY_GROUP_PREFIX) {
         if method != Method::Get {
             respond_status(request, 405, "method not allowed");
@@ -321,7 +249,6 @@ fn handle_request(request: Request, shared: &Shared) {
         return;
     }
 
-    // Static read API: GET/HEAD only.
     if method != Method::Get && method != Method::Head {
         respond_status(request, 405, "method not allowed");
         return;
@@ -333,7 +260,6 @@ fn handle_request(request: Request, shared: &Shared) {
         return;
     }
 
-    // Ensure the cache is fresh, then serve the in-memory artifact bytes.
     let cache = match shared.ensure_fresh() {
         Ok(cache) => cache,
         Err(e) => {
@@ -357,8 +283,6 @@ fn handle_request(request: Request, shared: &Shared) {
     let _ = request.respond(response);
 }
 
-/// Ensure freshness, then verify the requested group against the in-memory
-/// bundle directly — the same [`verify_group_in_bundle`] the CLI path ends in.
 fn handle_verify_group(request: Request, shared: &Shared, encoded_id: &str) {
     let id = percent_decode(encoded_id);
     if id.is_empty() {

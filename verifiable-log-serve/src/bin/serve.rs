@@ -1,17 +1,4 @@
-//! `serve` — the serve-layer CLI for the verifiable log.
-//!
-//! Subcommands:
-//! * `generate` — turn a signed bundle into the immutable `/v1/...` static tree.
-//! * `serve` — run a local dev HTTP server over a generated tree (testing/demo
-//!   only; the real deployment is to drop the directory on a static host).
-//! * `live` — serve a live, lazily-refreshed view read straight from Turso: the
-//!   same `/v1` surface and per-group endpoint as `serve`, but rebuilt in memory
-//!   on demand so new commits appear within the TTL with no idle DB load.
-//! * `verify-remote` — fetch the static API over HTTP and verify the log,
-//!   trusting only the published public key.
-//! * `verify-group` — fetch the static API and verify ONE conversation's commit
-//!   chain. This calls the exact same `verify_group` the backend HTTP endpoint
-//!   does, so the CLI and the server can never report different verdicts.
+//! `serve` — the operator CLI for the verifiable log's serve layer.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -192,10 +179,7 @@ fn run_generate(
     let bundle = layout::load_bundle(bundle_path)?;
     let manifest = layout::generate(&bundle, out)?;
 
-    // Publish the root-signed key set alongside the trees (#754). Verified against
-    // the pinned root FIRST: a statement that does not verify is not a degraded
-    // artifact, it is one that takes the whole log down for every client, because a
-    // client that cannot validate the key set trusts no signer at all.
+    // Root-signed key set (#754); `insert_key_set` refuses an unverifiable one.
     if let (Some(path), Some(root_hex)) = (key_set_path, root_key_hex) {
         let raw = std::fs::read_to_string(path)?;
         let statement: verifiable_log_serve::KeySetStatement = serde_json::from_str(&raw)
@@ -224,7 +208,6 @@ fn run_generate(
         out.join(layout::API_VERSION).display()
     );
 
-    // Account-key tree (separate tree, domain-separated STH) — only when asked.
     if let Some(account_path) = account_bundle_path {
         let account_bundle = layout::load_bundle(account_path)?;
         let account_manifest = layout::generate_account(&account_bundle, out)?;
@@ -239,8 +222,6 @@ fn run_generate(
         );
     }
 
-    // Binaries tree (binary transparency — a third separate tree, domain-
-    // separated STH) — only when asked.
     if let Some(binaries_path) = binaries_bundle_path {
         let binaries_bundle = layout::load_bundle(binaries_path)?;
         let binaries_manifest = layout::generate_binaries(&binaries_bundle, out)?;
@@ -278,9 +259,7 @@ fn run_live(
 ) -> Result<()> {
     let db = db.or_else(|| std::env::var("TURSO_DATABASE_URL").ok());
 
-    // The live server reads ONLY `mls_commit_log`, so it must read from the log
-    // DB. Resolve it from (1) --log-db, (2) LOG_DB_URL, (3) the main --db /
-    // TURSO_DATABASE_URL (single-DB / pre-cutover behaviour).
+    // The live server reads only `mls_commit_log`, from the log DB.
     let log_db = log_db
         .or_else(|| std::env::var("LOG_DB_URL").ok())
         .or_else(|| db.clone())
@@ -290,15 +269,12 @@ fn run_live(
                     .into(),
             )
         })?;
-    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
-    // tests, and pre-cutover all behave exactly as before. A local file path
-    // ignores the token entirely.
+    // A local file path ignores the token.
     let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
         .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
         .unwrap_or_default();
 
-    // Resolve the signing key BEFORE binding so a missing key fails fast — the
-    // live server refuses to start without one (same loader as the builder).
+    // Before binding, so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
     let server = LiveServer::spawn(

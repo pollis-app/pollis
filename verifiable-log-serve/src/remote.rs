@@ -1,14 +1,6 @@
-//! Remote verification: fetch the static read API over HTTP and verify the log
-//! trusting only the public key. This is the whole point of the serve layer —
-//! anyone can audit the log over plain HTTP, with no special access.
-//!
-//! Every cryptographic check reuses slice 1's verifiers
-//! ([`verifiable_log`]) — STH signatures, equivocation, entry/STH-root replay,
-//! inclusion, and consistency. Nothing here reimplements Merkle, proof, or
-//! signature logic; this module is purely transport + orchestration.
-//!
-//! Discovery is manifest-driven: we fetch `/v1/index.json` and let it tell us
-//! which STH sizes, entries, and proofs exist, then fetch and check each.
+//! Remote verification: fetch the static read API over HTTP, driven by the
+//! `index.json` manifest, and verify the whole log trusting only the pinned key.
+//! Transport + orchestration only; all crypto is [`verifiable_log`]'s.
 
 use std::collections::BTreeMap;
 
@@ -27,33 +19,19 @@ use crate::bundle::{
 use crate::error::{Result, ServeError};
 use crate::release::BINARIES_TENANT;
 
-/// The `format_version` alone, pulled out of a served manifest *before* any full
-/// deserialize. A future breaking change may add or rename fields a whole
-/// [`Manifest`] can no longer parse; reading only this one field first means a
-/// genuine version skew is reported as skew, not as a parse error that reads like
-/// tampering. Absent (a pre-#701 manifest) → 0 via `serde(default)`.
+/// Just `format_version`, read before any full deserialize so a breaking change
+/// reports as skew rather than a parse error that reads like tampering.
 #[derive(serde::Deserialize)]
 struct FormatProbe {
     #[serde(default)]
     format_version: u32,
 }
 
-/// Gate a served manifest body on its wire [`FORMAT_VERSION`], **before** trusting
-/// anything else in it.
+/// Gate a served manifest body on the [`FORMAT_VERSION`] ceiling before trusting
+/// anything in it: newer is [`ServeError::VersionSkew`], older is accepted.
 ///
-/// A log published in a format *newer* than this build understands is
-/// [`ServeError::VersionSkew`] — the verifier is too old, upgrade it — and is kept
-/// deliberately distinct from a verification failure. A format at or below what we
-/// support (including a legacy manifest with no `format_version` field → 0) is
-/// accepted and verified normally, so this build stays backward-compatible with
-/// the not-yet-republished log.
-///
-/// Applied to the commit-log manifest, which is the mandatory first fetch of both
-/// `remote` and `group`. The three trees are republished together under one
-/// bundle version, so gating that manifest covers the whole served bundle.
-///
-/// This is the **ceiling only**. Paths that decode leaf *contents* need the floor
-/// as well — see [`gate_leaf_format_version`], which `group` uses instead.
+/// The three trees are republished together, so gating the commit-log manifest
+/// covers the whole bundle. Leaf-decoding paths use [`gate_leaf_format_version`].
 pub(crate) fn gate_format_version(body: &str) -> Result<()> {
     let probe: FormatProbe = serde_json::from_str(body)
         .map_err(|e| ServeError::Http(format!("read manifest format_version: {e}")))?;
@@ -66,18 +44,10 @@ pub(crate) fn gate_format_version(body: &str) -> Result<()> {
     Ok(())
 }
 
-/// [`gate_format_version`] plus the [`MIN_LEAF_FORMAT_VERSION`] **floor**, for the
-/// paths that decode commit-log leaf contents rather than just checking bytes.
-///
-/// The ceiling alone is not enough for those paths. A verifier newer than the log
-/// passes the ceiling, then re-derives windowed pseudonyms (#701) against leaves
-/// that still carry raw ids, matches nothing, and reports `Found: no` with a
-/// confident `PASS` for a conversation the manifest itself lists. Refusing with
-/// [`ServeError::LogTooOld`] turns that silent wrong answer into an actionable
-/// one, which is the whole point of having a version gate.
+/// [`gate_format_version`] plus the [`MIN_LEAF_FORMAT_VERSION`] floor
+/// ([`ServeError::LogTooOld`]), for paths that decode commit-log leaves.
 pub(crate) fn gate_leaf_format_version(body: &str) -> Result<()> {
-    // One parse, then both bounds — the ceiling still reports first, exactly as
-    // it did when this delegated to `gate_format_version` and re-parsed.
+    // The ceiling reports first.
     let probe: FormatProbe = serde_json::from_str(body)
         .map_err(|e| ServeError::Http(format!("read manifest format_version: {e}")))?;
     if probe.format_version > FORMAT_VERSION {
@@ -96,9 +66,7 @@ pub(crate) fn gate_leaf_format_version(body: &str) -> Result<()> {
 }
 
 /// A pass/fail report over all remote checks. `ok` is the conjunction of every
-/// individual check; the labelled list is for human-readable output. `notes`
-/// carries non-failing warnings (e.g. an optional tree that is absent) — they
-/// are printed but do not flip `ok`.
+/// check; `notes` are warnings that never flip `ok`.
 pub struct Report {
     pub ok: bool,
     pub checks: Vec<(bool, String)>,
@@ -121,13 +89,10 @@ impl Report {
         self.checks.push((passed, label.into()));
     }
 
-    /// Record a non-failing warning — surfaced to the operator but it never
-    /// flips the overall verdict.
     fn note(&mut self, message: impl Into<String>) {
         self.notes.push(message.into());
     }
 
-    /// Print the per-check report and the overall verdict to stdout.
     pub fn print(&self) {
         for (passed, label) in &self.checks {
             println!("{}  {}", if *passed { "PASS" } else { "FAIL" }, label);
@@ -143,52 +108,34 @@ impl Report {
     }
 }
 
-/// Verify a log served at `base_url` (e.g. `http://127.0.0.1:1234`), trusting
-/// only the public key it publishes.
+/// Verify a log served at `base_url`, trusting only the pinned key.
 ///
-/// Prerequisite fetches (`public_key.json`, `index.json`) returning an error
-/// abort with `Err` — without them there is nothing to verify. Every subsequent
-/// problem (a bad signature, a tampered entry, a missing or forged proof) is
-/// recorded as a failed check and folded into [`Report::ok`], so a tampered
-/// artifact yields `Ok(Report { ok: false, .. })` rather than an error.
+/// `Err` only when a prerequisite (`public_key.json`, `index.json`) fails; a
+/// tampered artifact yields `Ok(Report { ok: false, .. })`.
 pub fn verify_remote(base_url: &str) -> Result<Report> {
     let base = base_url.trim_end_matches('/');
     let agent = build_agent(None)?;
 
     let mut report = Report::new();
 
-    // Prerequisites: the public key we anchor trust in, and the manifest that
-    // tells us what to fetch.
     let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
 
-    // Read the manifest body once and gate on its wire format *first* — before
-    // deserializing the full struct AND before judging the key set. A log newer
-    // than we understand must surface as "upgrade your verifier" (VersionSkew),
-    // never as a parse failure and never as "no usable key". The gate has to win
-    // over the empty-candidates check below: a future format bump that changes how
-    // keys are published could leave `active_keys` empty, and reporting that as a
-    // bad bundle would masquerade a version skew as tampering/misconfiguration —
-    // exactly the false alarm this gate exists to remove. Understanding the body
-    // is a precondition for making any judgement about its contents, keys included.
+    // Gate on the wire format before parsing the manifest or judging the key
+    // set: a future format could leave `active_keys` empty, and that must read as
+    // skew, not as a bad bundle.
     let index_url = format!("{base}/v1/index.json");
     let index_body = fetch_text(&agent, &index_url)?;
     gate_format_version(&index_body)?;
     let manifest: Manifest = serde_json::from_str(&index_body)
         .map_err(|e| ServeError::Http(format!("parse {index_url}: {e}")))?;
 
-    // The set of keys any head may verify under, at the current wall clock: during
-    // an overlap window both the new and the retiring key are published, so a head
-    // signed by either verifies and a rotation stays invisible. Only reached once
-    // the format gate has accepted the served version.
     let candidates = pk_doc.verifying_candidates(now_ms());
     if candidates.is_empty() {
         return Err(ServeError::BadBundle(
             "public_key.json has no usable key (all expired or malformed)".to_string(),
         ));
     }
-    // H-1: trust ONLY the pinned key, never the served one. Drop any served
-    // candidate that is not pinned; a log serving its own key (equivocation /
-    // MITM) is then left with no key to verify under and fails closed.
+    // H-1: trust only the pinned key; a log serving its own key fails closed.
     let candidates = crate::pinned::retain_pinned(candidates, &mut |ok, label| {
         report.check(ok, label);
     });
@@ -198,8 +145,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         ));
     }
 
-    // 1. Fetch every advertised STH and verify its signature. Keyed by size so
-    //    later proof checks can look the right head up.
+    // 1. Every advertised STH's signature, keyed by size for the proof checks.
     let mut sths: BTreeMap<u64, Sth> = BTreeMap::new();
     for size in &manifest.sth_sizes {
         let url = format!("{base}/v1/sth/{size}.json");
@@ -219,8 +165,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         }
     }
 
-    // latest.json must agree with the largest published head — it is the moving
-    // pointer clients follow, so a mismatch would silently strand auditors.
+    // latest.json is the pointer clients follow; it must match the newest head.
     if let Some(max_size) = manifest.latest_tree_size {
         match fetch_json::<Sth>(&agent, &format!("{base}/v1/sth/latest.json")) {
             Ok(latest) => {
@@ -233,8 +178,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         }
     }
 
-    // 2. Equivocation: any two heads at the same size with different roots.
-    //    (sths is keyed by size so this catches it across the whole set.)
+    // 2. Equivocation across every pair of heads.
     let collected: Vec<&Sth> = sths.values().collect();
     for i in 0..collected.len() {
         for j in (i + 1)..collected.len() {
@@ -248,9 +192,8 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         }
     }
 
-    // 3. Entries: fetch the ordered list, cross-check each per-entry file
-    //    against it (so tampering with EITHER artifact is caught), then replay
-    //    through the tenant invariants and confirm every STH root.
+    // 3. Entries: cross-check per-entry files against the list (tampering with
+    //    either is caught), replay through the invariants, confirm every root.
     let entries: Vec<Entry> = match fetch_json(&agent, &format!("{base}/v1/entries.json")) {
         Ok(e) => e,
         Err(e) => {
@@ -299,7 +242,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         }
     }
 
-    // 4. Inclusion proofs: each entry is committed by the head at its size.
+    // 4. Inclusion proofs.
     for r in &manifest.inclusion {
         let url = format!(
             "{base}/v1/proof/inclusion/{}/{}.json",
@@ -322,7 +265,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         );
     }
 
-    // 5. Consistency proofs: the smaller tree is a prefix of the larger.
+    // 5. Consistency proofs.
     for r in &manifest.consistency {
         let url = format!("{base}/v1/proof/consistency/{}-{}.json", r.first, r.second);
         let passed = match fetch_json::<ConsistencyProof>(&agent, &url) {
@@ -342,37 +285,18 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
         );
     }
 
-    // 6. Account-key tree (the second tenant). It is a fully separate tree under
-    //    `/v1/account-keys/...` with its own STHs signed under the account
-    //    domain context. Absent (404) → a warning, not a failure (the live
-    //    domain has no account tree until this feature's first publish). Present
-    //    but invalid → hard failure folded into `report.ok` exactly like the
-    //    commit-log checks. The commit-log checks above are untouched either way.
     verify_account_tree(&agent, base, &mut report);
-
-    // 7. Binaries tree (the third tenant, binary transparency). Same shape as the
-    //    account tree: a fully separate tree under `/v1/binaries/...` with STHs
-    //    signed under the binaries domain context. Absent (404) → a warning;
-    //    present but invalid → a hard failure folded into `report.ok`.
     verify_binaries_tree(&agent, base, &mut report);
 
     Ok(report)
 }
 
-/// Verify the account-key subtree served under `{base}/v1/account-keys/...`,
-/// mirroring the commit-log checks but verifying STH signatures under the
-/// account domain context and replaying through [`AccountKeyInvariant`].
-///
-/// An absent tree (the index 404s) records a note and returns without touching
-/// `report.ok`. Any present-but-invalid state (a bad signature, a tampered
-/// entry, a missing/forged proof, a malformed index) is a failed check — a hard
-/// failure, same as the commit log.
+/// The commit-log checks for `{base}/v1/account-keys/...`, under the account
+/// STH context and [`AccountKeyInvariant`]. An absent tree (404) is a note; a
+/// present-but-invalid one is a hard failure.
 fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     let prefix = format!("{base}/v1/account-keys");
 
-    // The manifest is the entry point. A 404 means the tree is simply not
-    // published yet — warn and skip. A transport/parse error on a present tree
-    // is a real problem and fails.
     let manifest: AccountManifest = match fetch_json_opt(agent, &format!("{prefix}/index.json")) {
         Ok(Some(m)) => m,
         Ok(None) => {
@@ -385,8 +309,6 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     };
 
-    // The account tree's public key (the same key; published for a self-
-    // contained subtree). Anchor trust in it before any signature check.
     let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
         Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
@@ -406,8 +328,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     };
 
-    // 1. Fetch every advertised account STH and verify its signature UNDER THE
-    //    ACCOUNT CONTEXT. A commit-log head presented here fails this check.
+    // 1. Signatures under the account context: a commit-log head fails here.
     let mut sths: BTreeMap<u64, Sth> = BTreeMap::new();
     for size in &manifest.sth_sizes {
         let url = format!("{prefix}/sth/{size}.json");
@@ -442,7 +363,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     }
 
-    // 2. Equivocation across the account heads.
+    // 2. Equivocation.
     let collected: Vec<&Sth> = sths.values().collect();
     for i in 0..collected.len() {
         for j in (i + 1)..collected.len() {
@@ -456,9 +377,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     }
 
-    // 3. Entries: cross-check per-entry files against the ordered list, replay
-    //    through the AccountKeyInvariant (no dup / no regression), and confirm
-    //    every STH root.
+    // 3. Entries, replayed through the AccountKeyInvariant.
     let entries: Vec<Entry> = match fetch_json(agent, &format!("{prefix}/entries.json")) {
         Ok(e) => e,
         Err(e) => {
@@ -483,10 +402,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     }
 
     if !entries.is_empty() {
-        // The account tree enforces the AccountKeyInvariant (strictly increasing
-        // identity_version per user, no duplicate) — strictly stronger than the
-        // commit log's uniqueness, so register it explicitly rather than the
-        // generic UniqueDataInvariant.
+        // Stronger than the generic UniqueDataInvariant.
         let mut log = VerifiableLog::new();
         log.register_invariant(ACCOUNT_TENANT, Box::new(AccountKeyInvariant));
         let mut replay_ok = true;
@@ -552,21 +468,11 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     }
 }
 
-/// Verify the binaries subtree served under `{base}/v1/binaries/...`, mirroring
-/// the account-key checks but verifying STH signatures under the binaries domain
-/// context and replaying through [`BinaryInvariant`] (no forked re-issue,
-/// monotonic release tags, payload/signed pairing).
-///
-/// An absent tree (the index 404s) records a note and returns without touching
-/// `report.ok`. Any present-but-invalid state (a bad signature, a tampered entry,
-/// a missing/forged proof, a malformed index) is a failed check — a hard failure,
-/// same as the other two trees.
+/// [`verify_account_tree`] for `{base}/v1/binaries/...`, under the binaries STH
+/// context and [`BinaryInvariant`].
 fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     let prefix = format!("{base}/v1/binaries");
 
-    // The manifest is the entry point. A 404 means the tree is simply not
-    // published yet — warn and skip. A transport/parse error on a present tree is
-    // a real problem and fails.
     let manifest: BinaryManifest = match fetch_json_opt(agent, &format!("{prefix}/index.json")) {
         Ok(Some(m)) => m,
         Ok(None) => {
@@ -579,8 +485,6 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     };
 
-    // The binaries tree's public key (the same key; published for a self-
-    // contained subtree). Anchor trust in it before any signature check.
     let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
         Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
@@ -600,8 +504,7 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     };
 
-    // 1. Fetch every advertised binaries STH and verify its signature UNDER THE
-    //    BINARIES CONTEXT. A commit-log or account-key head presented here fails.
+    // 1. Signatures under the binaries context: another tree's head fails here.
     let mut sths: BTreeMap<u64, Sth> = BTreeMap::new();
     for size in &manifest.sth_sizes {
         let url = format!("{prefix}/sth/{size}.json");
@@ -636,7 +539,7 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     }
 
-    // 2. Equivocation across the binaries heads.
+    // 2. Equivocation.
     let collected: Vec<&Sth> = sths.values().collect();
     for i in 0..collected.len() {
         for j in (i + 1)..collected.len() {
@@ -650,8 +553,7 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
         }
     }
 
-    // 3. Entries: cross-check per-entry files against the ordered list, replay
-    //    through the BinaryInvariant, and confirm every STH root.
+    // 3. Entries, replayed through the BinaryInvariant.
     let entries: Vec<Entry> = match fetch_json(agent, &format!("{prefix}/entries.json")) {
         Ok(e) => e,
         Err(e) => {
@@ -676,9 +578,6 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     }
 
     if !entries.is_empty() {
-        // The binaries tree enforces the BinaryInvariant (no forked re-issue,
-        // monotonic tags, payload/signed pairing) — register it explicitly rather
-        // than the generic UniqueDataInvariant.
         let mut log = VerifiableLog::new();
         log.register_invariant(BINARIES_TENANT, Box::new(BinaryInvariant));
         let mut replay_ok = true;
@@ -744,16 +643,10 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     }
 }
 
-/// A blocking HTTP agent with a sane timeout, shared by every fetch path.
-///
-/// `proxy` is the overlay seam: when `Some(url)` (e.g.
-/// `socks5h://127.0.0.1:9050`) every fetch is dialed through that SOCKS5 proxy,
-/// so an app running with the closed overlay on hides its real IP from the
-/// first-party transparency host (design `docs/relay-overlay-design.md` §14.4);
-/// when `None` the agent is byte-for-byte the pre-overlay one (a direct fetch to
-/// the loopback/static host, no proxy). A malformed proxy URL is surfaced as an
-/// `Err` — never silently downgraded to a direct fetch, which would leak the IP
-/// the overlay is meant to hide.
+/// A blocking HTTP agent, optionally dialing through a SOCKS5 `proxy` so the
+/// overlay hides the client's IP from the transparency host
+/// (`docs/relay-overlay-design.md` §14.4). A malformed proxy URL is `Err`, never
+/// silently downgraded to a direct fetch that would leak the IP.
 pub(crate) fn build_agent(proxy: Option<&str>) -> Result<ureq::Agent> {
     let mut builder =
         ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(30));
@@ -765,10 +658,7 @@ pub(crate) fn build_agent(proxy: Option<&str>) -> Result<ureq::Agent> {
     Ok(builder.build())
 }
 
-/// Blocking GET returning the raw body text. Used where the caller needs the
-/// bytes before deciding how to parse them — the version gate reads
-/// `format_version` off the manifest body first, then deserializes the full
-/// [`Manifest`] from the same string.
+/// Blocking GET returning the raw body, for the version gate to read first.
 pub(crate) fn fetch_text(agent: &ureq::Agent, url: &str) -> Result<String> {
     agent
         .get(url)
@@ -778,8 +668,6 @@ pub(crate) fn fetch_text(agent: &ureq::Agent, url: &str) -> Result<String> {
         .map_err(|e| ServeError::Http(format!("read body {url}: {e}")))
 }
 
-/// Blocking GET + JSON parse. A non-2xx status, transport error, or malformed
-/// body all map to [`ServeError::Http`].
 pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(agent: &ureq::Agent, url: &str) -> Result<T> {
     let body = agent
         .get(url)
@@ -790,11 +678,8 @@ pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(agent: &ureq::Agent, ur
     serde_json::from_str(&body).map_err(|e| ServeError::Http(format!("parse {url}: {e}")))
 }
 
-/// Like [`fetch_json`] but distinguishes a `404 Not Found` (the resource is
-/// simply absent) from a real failure: a 404 returns `Ok(None)`, a 2xx returns
-/// `Ok(Some(T))`, and any other status / transport / parse error returns `Err`.
-/// Used to tell "the optional account tree is not published" (a warning) apart
-/// from "the account tree is present but broken" (a hard failure).
+/// [`fetch_json`], but a 404 is `Ok(None)` so an unpublished optional tree is
+/// told apart from a broken one.
 pub(crate) fn fetch_json_opt<T: serde::de::DeserializeOwned>(
     agent: &ureq::Agent,
     url: &str,
@@ -813,15 +698,8 @@ pub(crate) fn fetch_json_opt<T: serde::de::DeserializeOwned>(
     }
 }
 
-// ── Overlay proxy plumbing ────────────────────────────────────────────────────
-//
-// The load-bearing proof for the transparency VERIFY overlay slice (design
-// `docs/relay-overlay-design.md` §14.4): `build_agent(Some("socks5://<shim>"))`
-// makes the blocking `ureq` fetch traverse the relay (the relay observes the
-// dial), while `build_agent(None)` dials the origin directly. An in-process
-// relay + SOCKS5 shim + a fake loopback HTTP origin is a full end-to-end check
-// of the seam pollis-core wires the closed overlay into — no live network, all
-// generated in-test. Mirrors the pattern in `pollis-core/src/net/overlay.rs`.
+// End-to-end check of the overlay proxy seam: in-process relay + SOCKS5 shim +
+// loopback HTTP origin.
 #[cfg(test)]
 mod overlay_proxy_tests {
     use super::*;
@@ -841,11 +719,8 @@ mod overlay_proxy_tests {
 
     const ORIGIN_NAME: &str = "origin.test";
 
-    /// A client identity carrying a device key + a valid offline cert chain —
-    /// exactly what a real client presents to the relay.
     fn identity() -> Arc<ClientIdentity> {
-        // The classic leaf key is only carried by the frame — the cert binds it,
-        // nothing verifies under it — so a fixed pattern stands in for it.
+        // Nothing verifies under the classic leaf key, so a fixed pattern works.
         const DEVICE_ED_PUB: [u8; 32] = [11u8; 32];
         let device = SigningKey::<MlDsa44>::from_seed(&[11u8; 32].into());
         let account = SigningKey::<MlDsa44>::from_seed(&[12u8; 32].into());
@@ -866,8 +741,7 @@ mod overlay_proxy_tests {
         ))
     }
 
-    /// Spawn an in-process relay that allows `ORIGIN_NAME` and resolves it to
-    /// loopback, returning its dial-through factory + the shared stats.
+    /// An in-process relay that allows `ORIGIN_NAME` and resolves it to loopback.
     fn spawn_relay() -> (Arc<dyn CircuitFactory>, Arc<RelayStats>) {
         let mut config = RelayConfig::new(
             "127.0.0.1:0".parse().unwrap(),
@@ -881,15 +755,13 @@ mod overlay_proxy_tests {
         let cert = config.server_cert();
         let stats = config.stats.clone();
         let (_task, addr) = RelayServer::spawn(config).unwrap();
-        // Leak the accept task: it lives for the whole (short) test process.
         std::mem::forget(_task);
         let factory: Arc<dyn CircuitFactory> =
             Arc::new(SingleHopFactory::new(Hop::new(addr, cert), identity()));
         (factory, stats)
     }
 
-    /// A loopback plain-HTTP origin that answers every request with `body` and
-    /// counts accepted connections.
+    /// A loopback HTTP origin answering `body` and counting connections.
     async fn spawn_plain_http(body: &'static str) -> (SocketAddr, Arc<AtomicUsize>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -900,7 +772,6 @@ mod overlay_proxy_tests {
                 c.fetch_add(1, Ordering::Relaxed);
                 let body = body.to_string();
                 tokio::spawn(async move {
-                    // Drain the request head, then reply.
                     let mut byte = [0u8; 1];
                     let mut buf = Vec::new();
                     while let Ok(n) = sock.read(&mut byte).await {
@@ -924,21 +795,13 @@ mod overlay_proxy_tests {
         (addr, count)
     }
 
-    /// A malformed proxy URL surfaces as an error — never a silent direct fetch,
-    /// which would leak the IP the overlay is meant to hide.
     #[test]
     fn build_agent_rejects_malformed_proxy() {
-        // An unsupported proxy scheme is rejected outright.
         assert!(build_agent(Some("socks6://127.0.0.1:9")).is_err());
-        // A valid SOCKS5 proxy URL builds.
         assert!(build_agent(Some("socks5://127.0.0.1:9050")).is_ok());
-        // The `None` (overlay-off) path is always fine.
         assert!(build_agent(None).is_ok());
     }
 
-    /// `build_agent(Some(shim))` routes the blocking fetch THROUGH the relay
-    /// (the relay records the dial); `build_agent(None)` dials the origin
-    /// directly (the relay sees no dial).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn build_agent_proxy_traverses_relay_none_goes_direct() {
         let (origin_addr, origin_conns) = spawn_plain_http(r#"{"ok":true}"#).await;
@@ -951,8 +814,7 @@ mod overlay_proxy_tests {
         let shim = OverlayShim::start(policy, factory).await.unwrap();
         let proxy = format!("socks5://{}", shim.socks_addr());
 
-        // Proxied: fetch the real name through the shim → relay → origin. `ureq`
-        // is blocking, so run it off the runtime.
+        // `ureq` is blocking, so run it off the runtime.
         let origin_port = origin_addr.port();
         let proxy_c = proxy.clone();
         let via_overlay: serde_json::Value = tokio::task::spawn_blocking(move || {
@@ -966,8 +828,6 @@ mod overlay_proxy_tests {
         assert_eq!(stats.dials(), 1, "the relay must have dialed the origin");
         assert_eq!(origin_conns.load(Ordering::Relaxed), 1);
 
-        // Direct: `None` dials the origin's loopback address itself; the relay
-        // sees no further dial.
         let direct: serde_json::Value = tokio::task::spawn_blocking(move || {
             let agent = build_agent(None).expect("proxy-less agent");
             fetch_json(&agent, &format!("http://127.0.0.1:{origin_port}/x.json"))

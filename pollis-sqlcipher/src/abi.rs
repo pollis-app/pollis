@@ -1,16 +1,8 @@
 //! The C ABI declared by `include/tomcrypt.h`, implemented over RustCrypto.
 //!
-//! Every function here is called only by SQLCipher's LibTomCrypt crypto
-//! provider, compiled into `vendor/sqlite3.c`.
-//!
-//! The symbols are `#[no_mangle]` on every target, and the amalgamation is
-//! compiled on every target, even though Windows is the only one that ships
-//! them: it means `tests/sqlcipher.rs` can drive a real encrypted database
-//! through this provider on Linux and macOS too. A mistake in here therefore
-//! surfaces in seconds on the ordinary gate rather than only in the Windows
-//! job. Nothing outside this crate links these names — `pollis-core` depends on
-//! `pollis-sqlcipher` under `cfg(windows)` only — so generic names like
-//! `hmac_init` cannot reach an image that has its own.
+//! Called only by SQLCipher's LibTomCrypt provider in `vendor/sqlite3.c`.
+//! `#[no_mangle]` on every target so the tests run everywhere; only Windows
+//! images link this crate, so generic names like `hmac_init` cannot collide.
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_ulong, c_void};
@@ -27,12 +19,8 @@ pub const CRYPT_ERROR: c_int = 1;
 /// AES block size, and therefore the SQLCipher page IV size.
 const AES_BLOCK: usize = 16;
 
-// ── Registry ─────────────────────────────────────────────────────────────────
-//
-// SQLCipher looks primitives up by name and then indexes `hash_descriptor` /
-// `cipher_descriptor` with what it got back. Our registries are fixed at
-// compile time — `register_*` has nothing to do — so the indices are constants
-// and a lookup can never fail for an algorithm we support.
+// SQLCipher looks primitives up by name, then indexes `hash_descriptor` /
+// `cipher_descriptor`. The registries are fixed, so the indices are constants.
 
 const HASH_SHA1: c_int = 0;
 const HASH_SHA256: c_int = 1;
@@ -184,13 +172,8 @@ pub unsafe extern "C" fn register_prng(desc: *const PrngDescriptor) -> c_int {
     0
 }
 
-// ── Randomness ───────────────────────────────────────────────────────────────
-//
-// SQLCipher's provider believes it is driving a Fortuna instance it seeds from
-// `sqlite3_randomness`. It is not: every read is the operating system CSPRNG
-// (`getrandom` / `BCryptGenRandom`), which cannot be left unseeded and is the
-// same source `rand::rngs::OsRng` gives the rest of pollis. Entropy handed in is
-// accepted and dropped — mixing it in could only lower the quality.
+// "Fortuna" is the OS CSPRNG (`OsRng`), which cannot be unseeded. Entropy
+// handed in is dropped: mixing it in could only lower the quality.
 
 #[repr(C)]
 pub struct PrngState {
@@ -251,8 +234,6 @@ pub unsafe extern "C" fn fortuna_done(prng: *mut PrngState) -> c_int {
     }
     CRYPT_OK
 }
-
-// ── HMAC ─────────────────────────────────────────────────────────────────────
 
 enum HmacKind {
     Sha1(Box<Hmac<Sha1>>),
@@ -348,8 +329,7 @@ pub unsafe extern "C" fn hmac_done(
         HmacKind::Sha512(m) => m.finalize().into_bytes().to_vec(),
     };
 
-    // A caller asking for fewer bytes than the digest holds would silently get a
-    // truncated MAC, so refuse instead.
+    // Refuse rather than silently truncate the MAC.
     if (*outlen as usize) < digest.len() {
         return CRYPT_ERROR;
     }
@@ -357,8 +337,6 @@ pub unsafe extern "C" fn hmac_done(
     *outlen = digest.len() as c_ulong;
     CRYPT_OK
 }
-
-// ── PBKDF2 ───────────────────────────────────────────────────────────────────
 
 /// # Safety
 /// `password`/`salt` must be readable for their stated lengths and `out`
@@ -402,8 +380,6 @@ pub unsafe extern "C" fn pkcs_5_alg2(
     }
     CRYPT_OK
 }
-
-// ── AES-CBC ──────────────────────────────────────────────────────────────────
 
 enum AesKey {
     A128(Box<aes::Aes128>),
@@ -617,9 +593,8 @@ mod tests {
         );
     }
 
-    /// A MAC split across two `hmac_process` calls — which is exactly how
-    /// SQLCipher MACs a page, feeding the page bytes and then the page number —
-    /// must equal the MAC of the concatenation.
+    /// SQLCipher MACs a page in two `hmac_process` calls (bytes, then page
+    /// number); that must equal the MAC of the concatenation.
     #[test]
     fn hmac_is_streaming() {
         let key = b"Jefe";
@@ -655,10 +630,8 @@ mod tests {
         );
     }
 
-    /// The KDF SQLCipher 4 actually uses. Cross-checked against the same
-    /// parameters run through OpenSSL's `PKCS5_PBKDF2_HMAC`, which is what the
-    /// Linux build's provider calls — so a Windows database and a Linux one
-    /// derive the same key from the same passphrase.
+    /// SQLCipher 4's KDF, cross-checked against OpenSSL's `PKCS5_PBKDF2_HMAC`
+    /// (the Linux provider) so both platforms derive the same key.
     #[test]
     fn pbkdf2_hmac_sha512_matches() {
         assert_eq!(
@@ -673,26 +646,12 @@ mod tests {
         );
     }
 
-    /// PBKDF2 at lengths that are not exactly one hash block.
+    /// PBKDF2 at lengths that are not exactly one hash block, which the
+    /// `dkLen == hLen` vectors never exercise. SQLCipher derives its HMAC
+    /// subkey as 32 bytes of PBKDF2-HMAC-SHA512 on every connection.
     ///
-    /// Every other KDF vector here derives `dkLen == hLen` — 20 bytes for
-    /// SHA-1, 64 for SHA-512 — so `T_2` is never computed and the truncation
-    /// path is never taken. An implementation that derives `T_1` and then pads
-    /// or truncates it to whatever was asked for passes all of them.
-    ///
-    /// `dkLen < hLen` is not a hypothetical either: SQLCipher derives the
-    /// per-database HMAC subkey as `PBKDF2-HMAC-SHA512(page_key, salt ^ 0x3a,
-    /// 2, key_sz)` — 32 bytes out of a 64-byte hash — and does so on EVERY
-    /// connection, including `pollis-core`'s, which supplies a raw key and so
-    /// skips PBKDF2 for the page key but still runs it for the HMAC key
-    /// (`sqlcipher_cipher_ctx_key_derive` in `vendor/sqlite3.c`; the passphrase
-    /// path derives the 32-byte page key the same way). That path had no
-    /// coverage at all.
-    ///
-    /// The SHA-1 vectors are RFC 6070 §2. The embedded NULs in the 16-byte case
-    /// are load-bearing twice: they are the RFC's own input, and they prove the
-    /// stated lengths are honoured rather than the inputs being read as C
-    /// strings.
+    /// SHA-1 vectors are RFC 6070 §2; the embedded NULs prove stated lengths are
+    /// honoured rather than inputs read as C strings.
     #[test]
     fn pbkdf2_derives_lengths_that_are_not_one_hash_block() {
         // dkLen 25 > hLen 20 — two blocks, the second one truncated.
@@ -711,8 +670,7 @@ mod tests {
             hex(&pbkdf2_kat(HASH_SHA1, b"pass\0word", b"sa\0lt", 4096, 16)),
             "56fa6aa75548099dcc37d7f03425e0c3"
         );
-        // dkLen 32 < hLen 64 — the exact shape SQLCipher 4 derives its page key
-        // with, and the one a truncation bug would break in production.
+        // dkLen 32 < hLen 64 — the shape SQLCipher 4 uses in production.
         assert_eq!(
             hex(&pbkdf2_kat(HASH_SHA512, b"password", b"salt", 4096, 32)),
             "d197b1b33db0143e018b12f3d1d1479e6cdebdcc97c5c0f87f6902e072f457b5"
@@ -786,9 +744,8 @@ mod tests {
         assert_eq!(round_trip, plain);
     }
 
-    /// The registry SQLCipher indexes into. `max_key_length` is what makes the
-    /// page cipher AES-**256**, and `block_length` is the page IV size — a wrong
-    /// value here would silently weaken every database.
+    /// `max_key_length` makes the page cipher AES-256 and `block_length` is the
+    /// IV size; a wrong value would silently weaken every database.
     #[test]
     fn registry_reports_aes_256_cbc() {
         unsafe {
@@ -806,9 +763,8 @@ mod tests {
         assert_eq!(hash_descriptor[HASH_SHA1 as usize].hashsize, 20);
     }
 
-    /// A truncated MAC would still round-trip inside SQLCipher while being a
-    /// weaker MAC, so a too-small output buffer has to be an error rather than a
-    /// short write.
+    /// A truncated MAC would still round-trip while being weaker, so a short
+    /// buffer must be an error.
     #[test]
     fn hmac_refuses_to_truncate() {
         let mut handle = HmacStateHandle { state: std::ptr::null_mut() };
@@ -844,22 +800,11 @@ mod tests {
         }
     }
 
-    /// Every byte the PRNG reports having written must actually have been
-    /// written.
+    /// Every byte the PRNG reports writing must be written; a partial fill
+    /// would leave part of a key as stale buffer contents.
     ///
-    /// [`fortuna_reads_from_the_os`] cannot see a partial fill. It asks only
-    /// that a read is not all-zero and that two reads differ, and a read that
-    /// fills the first 16 bytes of a 32-byte buffer with real randomness
-    /// carries both of those on its prefix while leaving half the key as
-    /// whatever the caller's buffer already held.
-    ///
-    /// So ask the question directly: pre-fill with a sentinel and see which
-    /// positions ever change. A position the PRNG never touches keeps the
-    /// sentinel in EVERY trial; a position it does touch keeps it with
-    /// probability 1/256, so a false "never written" across 64 trials has
-    /// probability 256^-64 and this cannot flake. The odd lengths are in the
-    /// list because a fill rounded down to a block boundary is the shape a
-    /// buffered PRNG gets wrong.
+    /// Sentinel pre-fill over 64 trials: a false "never written" has
+    /// probability 256^-64. Odd lengths catch fills rounded to a block.
     #[test]
     fn fortuna_writes_every_byte_it_reports() {
         const SENTINEL: u8 = 0xAA;
@@ -892,17 +837,9 @@ mod tests {
         }
     }
 
-    /// The PRNG has to be unpredictable, not merely non-repeating.
-    ///
-    /// A counter satisfies [`fortuna_reads_from_the_os`] completely: successive
-    /// reads differ and none is all-zero. What separates a counter from
-    /// randomness is WHERE it varies — a counter moves in its low-order bytes
-    /// and holds every other position constant read after read. Scoring each
-    /// byte position independently sees that immediately.
-    ///
-    /// Across 64 uniform draws a position is expected to take ~57 of the 256
-    /// values, so a threshold of 16 is far below anything randomness produces
-    /// and far above the 1 a constant or a high-order counter byte produces.
+    /// Unpredictable, not merely non-repeating: a counter would pass
+    /// [`fortuna_reads_from_the_os`] but holds most byte positions constant.
+    /// 64 uniform draws give a position ~57 distinct values; the threshold is 16.
     #[test]
     fn fortuna_does_not_merely_count() {
         const TRIALS: usize = 64;

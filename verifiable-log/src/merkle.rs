@@ -1,20 +1,10 @@
-//! RFC 6962 Merkle Tree Hash (MTH), inclusion proofs, and consistency
-//! proofs, plus the standalone verifiers from RFC 9162 (6962-bis).
-//!
-//! Generation works over a slice of *leaf hashes* (each already
-//! `SHA-256(0x00 || entry_bytes)`). The append-only [`crate::log::VerifiableLog`]
-//! keeps that slice and computes the structure on demand, so an "append" is
-//! just pushing one more leaf hash.
-//!
-//! Verification is implemented exactly as specified in RFC 9162 §2.1.3.2
-//! (inclusion) and §2.1.4.2 (consistency): bit-twiddling walks that need only
-//! the audit path, the leaf/old roots, and the tree sizes — never the whole
-//! tree.
+//! RFC 6962 Merkle Tree Hash, inclusion and consistency proofs over a slice of
+//! leaf hashes, plus the RFC 9162 §2.1.3.2 / §2.1.4.2 verifiers.
 
 use crate::hash::{empty_root, node_hash, Hash};
 
-/// Largest power of two strictly less than `n` (requires `n >= 2`). This is
-/// the split point `k` used throughout RFC 6962's recursive definitions.
+/// Largest power of two strictly less than `n` (requires `n >= 2`): RFC 6962's
+/// split point `k`.
 fn largest_power_of_two_below(n: usize) -> usize {
     debug_assert!(n >= 2);
     let mut k = 1;
@@ -44,8 +34,7 @@ pub fn root_hash(leaves: &[Hash]) -> Hash {
 /// Audit path proving the leaf at `index` is included in `MTH(leaves)`
 /// (RFC 6962 §2.1.1, `PATH`).
 ///
-/// Returns the sibling hashes bottom-up. `index` must be `< leaves.len()`;
-/// callers in this crate guarantee that.
+/// Returns the sibling hashes bottom-up. `index` must be `< leaves.len()`.
 pub fn inclusion_path(index: usize, leaves: &[Hash]) -> Vec<Hash> {
     let n = leaves.len();
     if n <= 1 {
@@ -93,9 +82,8 @@ fn subproof(m: usize, leaves: &[Hash], b: bool) -> Vec<Hash> {
     }
 }
 
-/// Verify an inclusion proof (RFC 9162 §2.1.3.2). Recomputes the root from
-/// `leaf_hash`, `leaf_index`, `tree_size`, and the audit `path`, then compares
-/// it to `root`. Returns `false` on any inconsistency — never panics.
+/// Verify an inclusion proof (RFC 9162 §2.1.3.2). `false` on any
+/// inconsistency; never panics.
 pub fn verify_inclusion(
     leaf_hash: &Hash,
     leaf_index: usize,
@@ -130,9 +118,8 @@ pub fn verify_inclusion(
     sn == 0 && r == *root
 }
 
-/// Verify a consistency proof (RFC 9162 §2.1.4.2) between an older tree of
-/// size `first` with root `first_hash` and a newer tree of size `second` with
-/// root `second_hash`. Returns `false` on any inconsistency — never panics.
+/// Verify a consistency proof (RFC 9162 §2.1.4.2). `false` on any
+/// inconsistency; never panics.
 pub fn verify_consistency(
     first: usize,
     second: usize,
@@ -143,7 +130,6 @@ pub fn verify_consistency(
     if first == 0 || first > second {
         return false;
     }
-    // Identical trees: the proof is empty and the roots must match.
     if first == second {
         return path.is_empty() && first_hash == second_hash;
     }

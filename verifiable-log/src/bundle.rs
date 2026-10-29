@@ -1,18 +1,9 @@
-//! The **monitor bundle** wire contract: the single JSON document the builder
-//! emits, the serve layer publishes, and the `monitor` CLI verifies.
+//! The monitor bundle wire contract: the JSON document the builder emits, the
+//! serve layer publishes, and the `monitor` CLI verifies.
 //!
-//! This type lives in the core crate rather than beside either of its users
-//! because it is the *joint* between them, and a joint restated in two places is
-//! a joint that drifts. It already had: the monitor carried a private stand-in
-//! `Bundle` with no `retired_keys` field, so serde silently dropped the rotation
-//! overlap set and the monitor reported FAIL for every head an honest log minted
-//! under a retiring key — a "tampering" verdict produced by a missing struct
-//! field. A verifier that can be wrong in *that* direction is worse than no
-//! verifier, so the shape a verifier parses is defined exactly once.
-//!
-//! `verifiable-log-builder` re-exports these types. `verifiable-log-serve` still
-//! carries its own parallel copy (`serve::bundle::Bundle`); pointing it here is
-//! the remaining step of the same consolidation.
+//! Defined once, here, because a drifted copy makes a verifier misreport an
+//! honest log as tampered (a stand-in without `retired_keys` did exactly that).
+//! `verifiable-log-serve` still has its own copy (`serve::bundle::Bundle`).
 
 use serde::{Deserialize, Serialize};
 
@@ -25,13 +16,11 @@ use crate::Entry;
 /// deserializes from absent, so a minimal fixture still parses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
-    /// ML-DSA-44 log public key, lowercase hex (1312 bytes) — the **active**
-    /// signing key.
+    /// The active ML-DSA-44 signing key, lowercase hex (1312 bytes).
     pub public_key: String,
-    /// Keys that no longer sign but must still be accepted until their
-    /// `not_after` (ms since epoch) — the rotation overlap window that keeps a
-    /// key change from being a flag day. Empty outside a rotation; serialized
-    /// only when non-empty so bundles stay byte-identical to before otherwise.
+    /// Keys that no longer sign but are accepted until their `not_after` (the
+    /// rotation overlap window). Omitted when empty so bundles stay
+    /// byte-identical outside a rotation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retired_keys: Vec<PublicKeyEntry>,
     /// Signed Tree Heads, oldest first.
@@ -59,10 +48,8 @@ pub struct PublicKeyEntry {
     /// [`key_id_for`] of `public_key`. A selection hint, never a trust input —
     /// the signature still has to verify under the key bytes.
     pub key_id: String,
-    /// Signature algorithm, e.g. `"ML-DSA-44"`. Present so a future algorithm
-    /// migration is a data change rather than another flag day.
+    /// Signature algorithm, e.g. `"ML-DSA-44"`.
     pub algorithm: String,
-    /// The public key, lowercase hex.
     pub public_key: String,
     /// Milliseconds since epoch after which this key must no longer be
     /// accepted. `None` = the active signing key, no expiry.
@@ -91,10 +78,8 @@ impl Bundle {
     /// active key first, then each retired key still inside its overlap window.
     ///
     /// Expiry is applied here so a retired key stops being accepted on schedule
-    /// even against a bundle nobody has republished — the overlap window is a
-    /// deadline, not a suggestion. Entries whose hex does not decode are
-    /// dropped rather than failing the whole set: one malformed published entry
-    /// must not disarm the keys that are fine.
+    /// even if the bundle is never republished. Undecodable entries are dropped
+    /// rather than failing the set, so one bad entry can't disarm the good keys.
     pub fn key_candidates(&self, now_ms: u64) -> Vec<(String, VerifyingKey)> {
         let mut out = Vec::with_capacity(1 + self.retired_keys.len());
         if let Ok(active) = verifying_key_from_hex(&self.public_key) {

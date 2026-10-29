@@ -1,39 +1,18 @@
 //! # verifiable-log-serve
 //!
-//! Slice 3 of the Key Transparency work (issue #330): the **serve layer**. It
-//! turns a signed monitor bundle (the output of `verifiable-log-builder`) into
-//! an immutable, host-agnostic **static artifact tree** that implements the
-//! log's public, unauthenticated read API — plus a tiny dev HTTP server and an
-//! end-to-end "fetch over HTTP and verify" path.
+//! The Key Transparency serve layer (#330): turns a signed monitor bundle into an
+//! immutable static artifact tree implementing the log's public read API, plus a
+//! dev HTTP server and a "fetch over HTTP and verify" path. Every artifact is
+//! immutable (an STH for `tree_size = N` never changes), so it is static files,
+//! not a query service.
 //!
-//! ## Why static
-//!
-//! Every artifact a transparency log serves is deterministic and immutable: an
-//! STH for `tree_size = N` never changes; a proof for `(leaf, tree_size)` is
-//! fixed forever. So the serve layer is **not** a query service over a DB — it
-//! is a precomputed directory of immutable JSON files served as static assets.
-//! Generate the tree, drop it on any static host (R2, Cloudflare Pages, an edge
-//! CDN — none chosen here), and reads are trivially cacheable.
-//!
-//! ## Layers
-//!
-//! * [`layout`] — generate the immutable `/v1/...` artifact tree from a bundle,
-//!   either to disk or as an in-memory map ([`layout::generate_artifacts`]).
-//! * [`server`] — a tiny dev/demo HTTP server over a generated directory (local
-//!   testing only; production is "serve the directory statically"). It also
-//!   exposes the dynamic `GET /verify/group/<id>` endpoint.
-//! * [`live`] — a live, lazily-refreshed server that reads the commit log
-//!   straight from Turso and rebuilds the same `/v1` surface in memory on demand
-//!   (single-flight, at most one DB pull per TTL). New commits appear within the
-//!   TTL with no idle DB load.
-//! * [`remote`] — fetch the static API over HTTP and verify the whole log
-//!   trusting only the public key, reusing slice 1's verifiers.
-//! * [`group`] — the one shared per-group verifier the CLI, the static endpoint,
-//!   and the live endpoint all call, so their verdicts cannot diverge.
-//! * [`account`] — the account-key tenant's analogue of [`group`]: the one
-//!   shared per-user key-history verifier. A second, fully separate Merkle tree
-//!   (its STHs signed under a domain-separated context) served under
-//!   `/v1/account-keys/...`; the commit-log `/v1` surface is untouched.
+//! * [`layout`] — generate the `/v1/...` artifact tree, to disk or in memory.
+//! * [`server`] — dev/demo HTTP server over a generated directory.
+//! * [`live`] — lazily-refreshed server reading the commit log from Turso.
+//! * [`remote`] — fetch the static API and verify it trusting only the public key.
+//! * [`group`] / [`account`] — the one shared per-group / per-user verifier, so
+//!   every caller's verdicts agree. Account keys are a separate Merkle tree with
+//!   domain-separated STHs under `/v1/account-keys/...`.
 //!
 //! The [`verifiable_log`] core stays dependency-pure: all HTTP lives here.
 
@@ -43,10 +22,8 @@ pub mod error;
 pub mod group;
 pub mod layout;
 pub mod pinned;
-/// The live, lazily-refreshed server that reads the commit log straight out of
-/// Turso. Behind `live` — the only part of this crate that needs a database — so
-/// a verification-only consumer does not link `libsql` (#987). See the feature's
-/// note in `Cargo.toml`.
+/// Behind `live`, the only part needing a database, so verification-only
+/// consumers don't link `libsql` (#987).
 #[cfg(feature = "live")]
 pub mod live;
 pub mod release;
@@ -60,11 +37,9 @@ pub use account::{
 pub use bundle::{
     AccountManifest, BinaryManifest, Bundle, Manifest, PublicKeyDoc, PublicKeyEntry,
 };
-// Re-exported so consumers that pin the log key (pollis-core) can assert its
-// length without depending on `verifiable-log` directly.
+// Re-exported so pollis-core needn't depend on `verifiable-log` directly.
 pub use verifiable_log::{key_id_for, verifying_key_from_hex, KEY_ID_HEX_LEN, STH_PUB_LEN, STH_SIG_LEN};
-// Root-signed key sets (#754). Re-exported so the client can verify a served
-// key set without taking a second direct dependency on the log crate.
+// Root-signed key sets (#754).
 pub use verifiable_log::{root_key_from_hex, KeySetStatement, SignerEntry};
 pub use error::{Result, ServeError};
 pub use group::{

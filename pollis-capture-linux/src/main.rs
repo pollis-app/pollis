@@ -1,25 +1,11 @@
-//! pollis-capture-linux
+//! pollis-capture-linux: capture subprocess talking to the parent over a Unix
+//! socket (wire protocol: `pollis-capture-proto`). See
+//! `.codesight/wiki/capture-split.md`.
 //!
-//! Subprocess helper. Owns the portal handshake + the pipewire stream;
-//! talks to the main Pollis binary over a Unix socket whose path the
-//! parent passes on the command line.
+//! `--audio` captures the default sink's monitor, which contains our own
+//! playback; the parent cancels that echo (`screenshare::self_echo`, #884).
 //!
-//! Wire protocol: `pollis-capture-proto`, which is the single definition
-//! of the framing and the only place it is documented. In screen mode this
-//! helper sends `0x01 Format` / `0x02 Frame`, plus `0x07 AudioFormat` /
-//! `0x08 AudioFrame` when launched with `--audio`, and `0xFF Error`.
-//!
-//! Audio (`--audio`, issue #884) captures the **default sink's monitor**
-//! via PipeWire, on its own thread and its own connection so it serves the
-//! X11 backend as well as the portal one — see `audio.rs`. It was absent
-//! for a long time under issue #175 because a sink monitor contains our
-//! own playback, so sharing it echoed the call back to everyone on it.
-//! That is now cancelled in the parent against the exact signal it played
-//! (`pollis-core`'s `screenshare::self_echo`), which is what made this
-//! safe to turn back on.
-//!
-//! No reverse channel. The parent stops capture by closing the socket;
-//! we observe EPIPE on next write or EOF on read and exit cleanly.
+//! The parent stops capture by closing the socket; we exit on EPIPE/EOF.
 
 #[cfg(not(target_os = "linux"))]
 fn main() {

@@ -1,14 +1,9 @@
-//! TLS/crypto plumbing for the outer relay hop.
+//! TLS plumbing for the outer relay hop.
 //!
-//! The relay's QUIC identity is a self-signed cert; the client pins that exact
-//! cert (the relay's identity *is* its cert bytes) rather than trusting a CA.
-//! This is deliberate: v0 relays are a small known set, and pinning the leaf
-//! sidesteps self-signed-as-CA path issues while still binding possession of the
-//! private key via the TLS 1.3 CertificateVerify (which the pinned verifier
-//! still checks against the ring provider — it does not blindly accept).
-//!
-//! The INNER TLS (client → real service) is never touched here; the relay only
-//! terminates the outer QUIC hop.
+//! A relay's identity is its self-signed cert bytes, which the client pins
+//! instead of trusting a CA. The pinned verifiers still check CertificateVerify
+//! via ring, so the peer must hold the private key. The inner TLS (client →
+//! real service) is never touched here.
 
 use std::sync::{Arc, Once};
 
@@ -18,15 +13,12 @@ use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 
-/// Subject name baked into the relay's self-signed cert and used as the QUIC
-/// server name on connect. Cert verification is by pinning, so the name is
-/// nominal, but a stable value keeps handshakes tidy.
+/// Subject / QUIC server name. Nominal: verification is by pinning.
 pub const RELAY_SERVER_NAME: &str = "pollis-relay";
 
 static PROVIDER_INIT: Once = Once::new();
 
-/// Install the ring `CryptoProvider` as the process default exactly once. Safe
-/// to call from every entry point; the `Once` makes repeat calls no-ops.
+/// Install the ring `CryptoProvider` as the process default; idempotent.
 pub fn ensure_crypto_provider() {
     PROVIDER_INIT.call_once(|| {
         // Ignore the error: another crate may have already installed a default.
@@ -58,12 +50,9 @@ pub fn generate_self_signed(name: &str) -> anyhow::Result<SelfSignedIdentity> {
     })
 }
 
-/// Load the relay's persisted QUIC identity from `key_path` (+ its cert at
-/// `<key_path>.crt`), generating and persisting a fresh one if either file is
-/// absent. Both are raw DER. This makes a relay node's identity **stable across
-/// restarts** (so pinned clients keep trusting it) yet **disposable/rotatable**
-/// (delete the files to mint a new identity) — the deploy shape §7 / the ops doc
-/// call for.
+/// Load the relay's QUIC identity from `key_path` (+ cert at `<key_path>.crt`,
+/// both raw DER), generating and persisting one if either is absent. Stable
+/// across restarts so pins hold; delete the files to rotate (§7).
 pub fn load_or_generate_identity(key_path: &str) -> anyhow::Result<SelfSignedIdentity> {
     let cert_path = format!("{key_path}.crt");
     if std::path::Path::new(key_path).exists() && std::path::Path::new(&cert_path).exists() {
@@ -106,9 +95,8 @@ fn restrict_key_perms(path: &str) {
     }
 }
 
-/// A CA cert plus a leaf cert issued by it for a given DNS name. Used only by
-/// tests to stand up a TLS "origin" server whose cert the client verifies for
-/// the *real* name, proving the inner TLS survives tunneling.
+/// A CA plus a leaf issued by it for a DNS name. Test-only: an "origin" whose
+/// cert is verified for the real name, proving inner TLS survives tunneling.
 #[derive(Debug)]
 pub struct IssuedChain {
     pub ca_der: CertificateDer<'static>,
@@ -141,10 +129,8 @@ pub fn generate_issued_chain(dns_name: &str) -> anyhow::Result<IssuedChain> {
     })
 }
 
-/// A `ServerCertVerifier` that accepts exactly one pinned leaf cert. Signature
-/// validation is still delegated to the ring provider, so a peer must actually
-/// hold the pinned cert's private key — pinning the bytes is authentication, not
-/// a bypass.
+/// Accepts exactly one pinned leaf cert. Signatures are still verified, so
+/// the peer must hold the pinned cert's private key.
 #[derive(Debug)]
 pub struct PinnedServerCertVerifier {
     pinned: CertificateDer<'static>,
@@ -161,14 +147,10 @@ impl PinnedServerCertVerifier {
     }
 }
 
-/// A `ServerCertVerifier` that accepts exactly one leaf cert **by SHA-256**.
-///
-/// Used only by a relay dialing the next hop of a circuit it is extending: the
-/// `Extend` frame carries 32 bytes rather than the ~500-byte DER, which keeps the
-/// frame small. Security-wise this is a belt on top of braces — the client
-/// independently pins the full DER inside the onion layer it runs to that hop
-/// (`onion::client_layer`), so this check bounds what `Extend` can be pointed at
-/// rather than being the thing that authenticates the hop.
+/// Accepts exactly one leaf cert by SHA-256; used by a relay dialing an
+/// `Extend`'s next hop. Not the hop's authentication: the client pins the full
+/// DER in its onion layer (`onion::client_layer`); this bounds what `Extend`
+/// can be pointed at.
 #[derive(Debug)]
 pub struct FingerprintPinnedVerifier {
     fingerprint: [u8; 32],

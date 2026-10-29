@@ -1,63 +1,34 @@
-//! The shared reqwest client helper (design §14.2).
+//! The shared reqwest client (design §14.2). Every HTTP caller goes through
+//! [`http_client`]: with the overlay on it routes via the loopback SOCKS5 shim.
 //!
-//! Every HTTP caller in the app should go through `http_client` instead of
-//! `reqwest::Client::new()`: when the overlay is on, it points the client at the
-//! loopback SOCKS5 shim via `socks5h://` (proxy-side DNS, so the real hostname
-//! reaches the relay and the inner TLS still terminates at the real service);
-//! when off, it is a plain client identical to `reqwest::Client::new()`.
-//!
-//! [`http_client`] caches and clones rather than building fresh each call —
-//! `reqwest::Client` is `Arc`-backed internally (cloning is cheap and shares
-//! the connection pool), but a *freshly built* client starts with an empty
-//! pool, so a per-call `.build()` silently pays a full TCP+TLS handshake on
-//! every single request. Benchmarked on the mobile dev build: ~3-4.5s per DS
-//! POST with a fresh client each time, on a control plane that chains a dozen
-//! of them sequentially through onboarding/group-setup — the dominant cost
-//! wasn't the DS's own work, it was reconnecting from scratch every time.
+//! Clients are cached, not built per call: a fresh client has an empty pool and
+//! pays a full TCP+TLS handshake per request (seconds per DS POST on mobile).
 
 use std::net::SocketAddr;
 use std::sync::{Mutex, OnceLock};
 
 use crate::shim::OverlayHandle;
 
-/// How long to wait for a connection to be established.
-///
-/// `reqwest`'s default for both of these is **no timeout at all**, which is why
-/// they are set here rather than left out: a host that completes the TCP
-/// handshake and then never answers — a black hole, a hung SFU-adjacent proxy, a
-/// relay that stopped forwarding — held a DS post or a media fetch open forever,
-/// and with the shared connection pool that stall is not confined to the one
-/// unlucky request.
+/// Set explicitly: reqwest's default is no timeout, so a silent peer would hold
+/// a request (and the shared pool) forever.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How long a single read may stall before the transfer is abandoned.
-///
-/// Deliberately an INACTIVITY deadline, not a total-request one
-/// (`ClientBuilder::timeout`): the same client fetches 100 MiB attachments, and
-/// a whole-request deadline generous enough for those on a slow link is too long
-/// to be a deadline at all. This bounds "the peer stopped sending", which is the
-/// failure being defended against, while a slow-but-progressing download runs to
-/// completion.
+/// An inactivity deadline, not a total-request one: the same client fetches
+/// 100 MiB attachments, which a whole-request deadline would have to allow for.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 static DIRECT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-// Overlay mode is off-by-default and rare relative to the direct path, but
-// still needs to reuse its connection pool across calls when it IS on. Keyed
-// by socks_addr (stable across a live Prefer/Strict mode flip — same shim,
-// same port — so a cached client stays valid through that).
+// Keyed by socks_addr, which is stable across a live Prefer/Strict flip.
 static OVERLAY_CLIENT: Mutex<Option<(SocketAddr, reqwest::Client)>> = Mutex::new(None);
 
-/// A reqwest client builder wired for the current overlay state. Prefer this
-/// over building the client directly when you need to customize TLS roots etc.;
-/// [`http_client`] is the zero-config entry point.
+/// A builder wired for the current overlay state, for callers that need custom
+/// TLS roots etc.
 pub fn http_client_builder(overlay: Option<&OverlayHandle>) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT);
     if let Some(handle) = overlay {
-        // socks5h:// = proxy-side DNS: the hostname travels to the relay, not a
-        // pre-resolved IP, so allowlisting and inner-TLS SNI both see the real
-        // name.
+        // socks5h:// = proxy-side DNS, so allowlisting and SNI see the real name.
         let proxy = reqwest::Proxy::all(format!("socks5h://{}", handle.socks_addr()))
             .expect("valid socks5h proxy URI from a SocketAddr");
         builder = builder.proxy(proxy);
@@ -65,10 +36,8 @@ pub fn http_client_builder(overlay: Option<&OverlayHandle>) -> reqwest::ClientBu
     builder
 }
 
-/// A reqwest client for the current overlay state, reused across calls so
-/// callers share one connection pool instead of reconnecting from scratch
-/// every request. `Some` → routed through the shim; `None` → a plain direct
-/// client (the overlay is genuinely inert).
+/// The cached client for the current overlay state: `Some` routes through the
+/// shim, `None` is a plain direct client.
 pub fn http_client(overlay: Option<&OverlayHandle>) -> reqwest::Client {
     match overlay {
         None => DIRECT_CLIENT
@@ -100,9 +69,6 @@ mod deadline_tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    /// The deadlines have to be long enough not to fire on a working peer and
-    /// short enough that a dead one is noticed. A future edit that zeroes or
-    /// balloons either is caught here rather than in production.
     #[test]
     fn the_deadlines_are_sane() {
         assert!(CONNECT_TIMEOUT >= Duration::from_secs(5));
@@ -111,12 +77,7 @@ mod deadline_tests {
         assert!(READ_TIMEOUT <= Duration::from_secs(60));
     }
 
-    /// The defect: `reqwest`'s default is NO timeout, so a peer that completes
-    /// the handshake and then never sends a byte held the caller forever — and,
-    /// because the client is shared, sat on the connection pool while it did.
-    ///
-    /// Against the pre-fix builder this test does not fail with a wrong error;
-    /// it never returns. The outer deadline is what turns that hang into a
+    /// Without a read timeout this hangs; the outer deadline turns that into a
     /// reported failure.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_peer_that_answers_nothing_is_abandoned_rather_than_waited_on() {
@@ -124,8 +85,7 @@ mod deadline_tests {
             .await
             .expect("bind black hole");
         let addr = listener.local_addr().expect("local addr");
-        // Sockets are parked so nothing closes them and turns the hang into an
-        // EOF the client would report immediately.
+        // Hold the sockets so the hang never becomes an immediate EOF.
         tokio::spawn(async move {
             let mut held = Vec::new();
             while let Ok((sock, _)) = listener.accept().await {
@@ -156,16 +116,11 @@ mod deadline_tests {
 mod seam_tests {
     use std::path::{Path, PathBuf};
 
-    /// Every crate's sanctioned client factory. A construction inside one of
-    /// these files IS the seam; anywhere else is the anti-pattern this module
-    /// exists to retire.
+    /// The only files allowed to construct a reqwest client.
     const SEAM_FILES: &[&str] = &[
-        // this module — the shared builder + cache
         "pollis-relay/src/http.rs",
-        // the thin re-export the desktop/mobile core calls
         "pollis-core/src/net/overlay.rs",
-        // the DS's own `OnceLock` client (the server has no overlay to route
-        // through, so it cannot share `pollis-relay`'s)
+        // The DS has no overlay, so it keeps its own `OnceLock` client.
         "pollis-delivery/src/util.rs",
     ];
 
@@ -177,11 +132,8 @@ mod seam_tests {
     }
 
     /// Source with every `#[cfg(test)]` module removed, by brace matching.
-    ///
-    /// Mirrors `pollis-core/tests/no_client_side_remote_writes.rs`, which faced
-    /// the same question and answered it the same way. Kept as a copy rather
-    /// than shared: the two crates do not depend on each other, and a guard that
-    /// needs a dependency to run is a guard that gets deleted.
+    /// A copy of `pollis-core/tests/no_client_side_remote_writes.rs`'s: the
+    /// crates don't depend on each other.
     fn without_test_modules(src: &str) -> String {
         let mut out = String::with_capacity(src.len());
         let mut rest = src;
@@ -207,8 +159,7 @@ mod seam_tests {
                     }
                     match end {
                         Some(e) => rest = &after[e..],
-                        // Unbalanced braces: keep the tail rather than silently
-                        // dropping source the guard is supposed to read.
+                        // Unbalanced: keep the tail rather than drop source.
                         None => {
                             out.push_str(after);
                             return out;
@@ -234,11 +185,7 @@ mod seam_tests {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if path.is_dir() {
-                // Build output, VCS metadata and node deps are not our source.
-                // `.claude` holds agent git worktrees — full checkouts of this
-                // same repo, so walking it reports every offender once per
-                // worktree and, worse, reports offenders from OTHER BRANCHES as
-                // if they were on this one.
+                // `.claude` holds agent worktrees: other branches' checkouts.
                 if matches!(name.as_ref(), "target" | ".git" | "node_modules" | ".claude") {
                     continue;
                 }
@@ -249,24 +196,12 @@ mod seam_tests {
         }
     }
 
-    /// A fresh `reqwest::Client` starts with an EMPTY connection pool, so
-    /// building one per call pays a full DNS + TCP + TLS handshake every
-    /// request — the cost this module's docs put at 3-4.5s per DS POST on a
-    /// mobile dev build. #875 found four such sites still live in the DS and
-    /// three in `pollis-core`, all on request paths.
+    /// Guards against a caller building its own (cold-pool) client (#875). A
+    /// caller that needs bespoke TLS roots adds itself to `SEAM_FILES`.
     ///
-    /// **Scope note.** This guard walks the WHOLE workspace, but the workflow
-    /// that runs it (`relay-image.yml`) is path-filtered to `pollis-relay/**`
-    /// and `pollis-device-cert/**`. A rogue client added in `pollis-core` or
-    /// `pollis-delivery` therefore does not trip it until something in the relay
-    /// crate changes — which is how it came to be red on `main` unnoticed.
-    ///
-    /// This is a GUARD, not a proof that any particular call got faster: it
-    /// cannot tell a warm pool from a cold one. What it makes impossible is the
-    /// *shape* coming back — a new outbound caller that quietly builds its own
-    /// client. If a caller genuinely needs bespoke TLS roots or a proxy, it adds
-    /// itself to `SEAM_FILES` deliberately, which is a review conversation
-    /// rather than a silent regression.
+    /// Walks the whole workspace, but `relay-image.yml` runs it only on
+    /// `pollis-relay/**` / `pollis-device-cert/**` changes, so an offender
+    /// elsewhere surfaces late.
     #[test]
     fn no_crate_builds_its_own_reqwest_client_outside_the_seam() {
         let root = workspace_root();
@@ -289,27 +224,18 @@ mod seam_tests {
             if SEAM_FILES.contains(&rel.as_str()) {
                 continue;
             }
-            // Integration-test crates (`<crate>/tests/**`) never ship, for the
-            // same reason `#[cfg(test)]` modules are excluded below: the vault
-            // soak's tap proxy and DS client deliberately build unpooled clients.
+            // `<crate>/tests/**` never ships.
             if rel.split('/').nth(1) == Some("tests") {
                 continue;
             }
             let Ok(src) = std::fs::read_to_string(file) else {
                 continue;
             };
-            // `#[cfg(test)]` modules are excluded, for the same reason
-            // `pollis-core/tests/no_client_side_remote_writes.rs` excludes them:
-            // a test that drives an HTTP surface legitimately builds its own
-            // client — `media_server.rs`'s `decrypted_bytes_are_never_storable_
-            // by_the_webview` fetches from the loopback server it just started,
-            // and routing that through the shared seam would test the seam
-            // instead of the server. The rule is about what SHIPPED code does.
+            // Tests that drive an HTTP surface legitimately build their own
+            // client; the rule is about shipped code.
             let src = without_test_modules(&src);
             for (n, line) in src.lines().enumerate() {
                 let t = line.trim_start();
-                // Comments and doc comments name the anti-pattern constantly;
-                // only real code counts.
                 if t.starts_with("//") {
                     continue;
                 }

@@ -1,13 +1,7 @@
-//! The local SOCKS5 shim: a generic anonymized-stream entry point on loopback.
-//!
-//! This is the §14.0 "generic CONNECT primitive". reqwest consumes it via
-//! `socks5h://` (proxy-side DNS); a future in-app webview / VPN points at the
-//! same port. On each SOCKS5 CONNECT the shim consults the [`RoutingPolicy`],
-//! then either builds an overlay circuit, dials the target directly, or — in
-//! Strict mode with no circuit — fails the SOCKS request cleanly (never hangs,
-//! never silently succeeds to nowhere).
-//!
-//! Only SOCKS5 CONNECT with no authentication is supported (loopback side only).
+//! The local SOCKS5 shim on loopback (§14.0). reqwest uses it via `socks5h://`.
+//! Each CONNECT goes through the [`RoutingPolicy`]: overlay circuit, direct
+//! dial, or (Strict, no circuit) a clean SOCKS failure, never a hang. Only
+//! no-auth CONNECT is supported.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -38,26 +32,21 @@ const REP_CMD_NOT_SUPPORTED: u8 = 0x07;
 pub struct OverlayHandle {
     socks_addr: SocketAddr,
     task: JoinHandle<()>,
-    /// Shared with the shim's live [`RoutingPolicy`]: flipping this switches
-    /// Prefer↔Strict for every in-flight and future SOCKS request without
-    /// restarting the shim (design §14 apply slice).
+    /// Shared with the shim's live [`RoutingPolicy`], so Prefer↔Strict flips
+    /// without restarting the shim.
     mode: Arc<AtomicU8>,
 }
 
 impl OverlayHandle {
-    /// The loopback `127.0.0.1:<port>` address callers point their SOCKS5 client
-    /// (`socks5h://…`) at.
     pub fn socks_addr(&self) -> SocketAddr {
         self.socks_addr
     }
 
-    /// The mode the shim is currently routing under.
     pub fn mode(&self) -> OverlayMode {
         OverlayMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
 
-    /// Flip the live routing mode (Prefer↔Strict). No shim restart, no DB
-    /// reconnect: the shim's routing policy reads this on the next request.
+    /// Flip the live routing mode; takes effect on the next request.
     pub fn set_mode(&self, mode: OverlayMode) {
         self.mode.store(mode.as_u8(), Ordering::Relaxed);
     }
@@ -69,7 +58,6 @@ impl Drop for OverlayHandle {
     }
 }
 
-/// The shim, owning the policy and the circuit factory.
 pub struct OverlayShim;
 
 impl OverlayShim {
@@ -81,8 +69,6 @@ impl OverlayShim {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let socks_addr = listener.local_addr()?;
 
-        // Capture the shared mode cell BEFORE the policy is moved into the shim,
-        // so the returned handle can flip Prefer↔Strict live.
         let mode = policy.mode_atomic();
         let policy = Arc::new(policy);
         let task = tokio::spawn(async move {
@@ -114,7 +100,6 @@ async fn serve_conn(
     policy: Arc<RoutingPolicy>,
     factory: Arc<dyn CircuitFactory>,
 ) -> anyhow::Result<()> {
-    // --- greeting: version + method negotiation (we only offer no-auth) ---
     let ver = client.read_u8().await?;
     if ver != SOCKS5_VERSION {
         anyhow::bail!("unsupported SOCKS version {ver}");
@@ -123,13 +108,12 @@ async fn serve_conn(
     let mut methods = vec![0u8; nmethods];
     client.read_exact(&mut methods).await?;
     if !methods.contains(&SOCKS5_NO_AUTH) {
-        // No acceptable methods.
         client.write_all(&[SOCKS5_VERSION, 0xFF]).await?;
         return Ok(());
     }
     client.write_all(&[SOCKS5_VERSION, SOCKS5_NO_AUTH]).await?;
 
-    // --- request: VER CMD RSV ATYP DST.ADDR DST.PORT ---
+    // Request: VER CMD RSV ATYP DST.ADDR DST.PORT
     let ver = client.read_u8().await?;
     let cmd = client.read_u8().await?;
     let _rsv = client.read_u8().await?;
@@ -167,20 +151,17 @@ async fn serve_conn(
         return Ok(());
     }
 
-    // --- routing decision ---
     let plan = policy.plan(&host);
     let upstream = establish_upstream(plan, &factory, &host, port).await;
 
     match upstream {
         Ok(mut up) => {
             reply(&mut client, REP_SUCCESS).await?;
-            // Pipe until either side closes.
             let _ = tokio::io::copy_bidirectional(&mut client, &mut up).await;
             Ok(())
         }
         Err(action) => {
-            // Degraded / unreachable: surface a clean SOCKS failure. Never hang,
-            // never a silent success (messages-must-work, design §7/§10.1).
+            // A clean SOCKS failure: never hang, never a silent success (§7/§10.1).
             let code = match action {
                 FinalAction::Degraded => REP_GENERAL_FAILURE,
                 _ => REP_HOST_UNREACHABLE,
@@ -191,9 +172,8 @@ async fn serve_conn(
     }
 }
 
-/// Execute a plan into a live upstream byte pipe, applying Prefer/Strict
-/// fallback semantics on overlay failure. On failure returns the [`FinalAction`]
-/// so the caller can pick the SOCKS reply code.
+/// Execute a plan, applying Prefer/Strict fallback on overlay failure. The
+/// error's [`FinalAction`] picks the SOCKS reply code.
 async fn establish_upstream(
     plan: PlannedRoute,
     factory: &Arc<dyn CircuitFactory>,

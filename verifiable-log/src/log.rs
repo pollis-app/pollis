@@ -1,11 +1,6 @@
-//! The append-only log itself: tenant-tagged entries, the pluggable
-//! per-tenant invariant hook, and [`VerifiableLog`] which hosts many tenants
-//! in a single Merkle tree.
-//!
-//! A single global tree (one STH covers every tenant) mirrors how
-//! Certificate Transparency logs work: tenants are logical partitions
-//! identified by `tenant`, and correctness rules specific to a tenant are
-//! enforced by a [`TenantInvariant`] hook consulted at append time.
+//! The append-only log: tenant-tagged entries in one Merkle tree (one STH
+//! covers every tenant), with per-tenant rules enforced by a
+//! [`TenantInvariant`] at append time.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +9,7 @@ use crate::hash::{leaf_hash, Hash};
 use crate::merkle;
 use crate::sth::Sth;
 
-/// Lowercase-hex serde for the opaque entry payload, keeping the JSON wire
-/// contract printable and stable.
+/// Lowercase-hex serde for the opaque entry payload.
 mod hex_bytes {
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -29,13 +23,10 @@ mod hex_bytes {
     }
 }
 
-/// A single log entry. `tenant` is an opaque, caller-chosen partition id;
-/// `data` is the tenant-specific payload, opaque to the core.
+/// A log entry: an opaque partition id and a payload opaque to the core.
 ///
-/// Canonical leaf encoding (the bytes that get hashed) is
-/// `len(tenant) as u32 big-endian || tenant_utf8 || data`. Length-prefixing
-/// the tenant makes the encoding unambiguous so two different
-/// `(tenant, data)` pairs can never collide into the same leaf bytes.
+/// Leaf encoding is `len(tenant) as u32 BE || tenant_utf8 || data`; the length
+/// prefix stops two `(tenant, data)` pairs colliding into the same leaf bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub tenant: String,
@@ -51,7 +42,6 @@ impl Entry {
         }
     }
 
-    /// Canonical byte encoding fed to the leaf hash. See the struct docs.
     pub fn encode(&self) -> Vec<u8> {
         let tenant = self.tenant.as_bytes();
         let mut out = Vec::with_capacity(4 + tenant.len() + self.data.len());
@@ -61,27 +51,18 @@ impl Entry {
         out
     }
 
-    /// Leaf hash `SHA-256(0x00 || encode())`.
     pub fn leaf_hash(&self) -> Hash {
         leaf_hash(&self.encode())
     }
 }
 
-/// Pluggable per-tenant correctness rule. Consulted on every append for a
-/// tenant that has one registered: it sees the entries already committed for
-/// that tenant (in order) and the candidate, and rejects the append by
-/// returning an [`InvariantViolation`].
-///
-/// A future commit-log tenant would implement this to enforce "one commit per
-/// (group, epoch)"; the account-key tenant would enforce monotonic key
-/// versions. This crate ships only [`UniqueDataInvariant`] as an example.
+/// Per-tenant correctness rule, consulted on every append for its tenant with
+/// that tenant's committed entries (in order) and the candidate.
 pub trait TenantInvariant: Send + Sync {
     fn check(&self, existing: &[&Entry], candidate: &Entry) -> std::result::Result<(), InvariantViolation>;
 }
 
-/// Example invariant: reject an append whose `data` duplicates any existing
-/// entry for the same tenant. Demonstrates the hook mechanism without
-/// implementing any real tenant's rules.
+/// Rejects an append whose `data` duplicates an existing entry for its tenant.
 pub struct UniqueDataInvariant;
 
 impl TenantInvariant for UniqueDataInvariant {
@@ -99,11 +80,8 @@ impl TenantInvariant for UniqueDataInvariant {
     }
 }
 
-/// An append-only, multi-tenant verifiable Merkle log.
-///
-/// Holds every entry in commit order plus its leaf hash. The Merkle structure
-/// (root, proofs) is derived on demand from the leaf hashes, so appending is
-/// O(1) amortised — just push.
+/// An append-only, multi-tenant verifiable Merkle log. Roots and proofs are
+/// derived on demand from the leaf hashes.
 #[derive(Default)]
 pub struct VerifiableLog {
     entries: Vec<Entry>,
@@ -116,15 +94,14 @@ impl VerifiableLog {
         Self::default()
     }
 
-    /// Register (or replace) the invariant hook for a tenant. Entries for
-    /// tenants without a registered hook are accepted unconditionally.
+    /// Register (or replace) a tenant's invariant. Tenants without one accept
+    /// every entry.
     pub fn register_invariant(&mut self, tenant: impl Into<String>, invariant: Box<dyn TenantInvariant>) {
         self.invariants.insert(tenant.into(), invariant);
     }
 
-    /// Append an entry, returning its leaf index. Runs the tenant's invariant
-    /// (if any) first; on violation the entry is rejected and the log is
-    /// unchanged.
+    /// Append an entry, returning its leaf index. On an invariant violation the
+    /// log is unchanged.
     pub fn append(&mut self, entry: Entry) -> Result<usize> {
         if let Some(invariant) = self.invariants.get(&entry.tenant) {
             let existing: Vec<&Entry> = self
@@ -140,7 +117,6 @@ impl VerifiableLog {
         Ok(index)
     }
 
-    /// Number of leaves currently in the log.
     pub fn size(&self) -> usize {
         self.entries.len()
     }
@@ -149,13 +125,11 @@ impl VerifiableLog {
         self.entries.is_empty()
     }
 
-    /// Current Merkle root.
     pub fn root(&self) -> Hash {
         merkle::root_hash(&self.leaves)
     }
 
     /// Merkle root the log had at `size` leaves (`size <= self.size()`).
-    /// Lets a monitor tie an entry list to every historical STH.
     pub fn root_at(&self, size: usize) -> Result<Hash> {
         if size > self.leaves.len() {
             return Err(Error::IndexOutOfRange {
@@ -170,13 +144,11 @@ impl VerifiableLog {
         self.entries.get(index)
     }
 
-    /// Produce a Signed Tree Head over the current tree. `timestamp` is
-    /// supplied by the caller — the core never reads the clock.
+    /// Sign a tree head over the current tree; the core never reads the clock.
     pub fn signed_tree_head(&self, signing_key: &crate::sth::SigningKey, timestamp: u64) -> Sth {
         Sth::create(signing_key, self.size() as u64, self.root(), timestamp)
     }
 
-    /// Build an inclusion proof for the leaf at `index`.
     pub fn inclusion_proof(&self, index: usize) -> Result<crate::proof::InclusionProof> {
         if index >= self.leaves.len() {
             return Err(Error::IndexOutOfRange {
@@ -192,8 +164,7 @@ impl VerifiableLog {
         })
     }
 
-    /// Build a consistency proof between tree sizes `first` and `second`
-    /// (`0 < first <= second <= size`).
+    /// Requires `0 < first <= second <= size`.
     pub fn consistency_proof(&self, first: usize, second: usize) -> Result<crate::proof::ConsistencyProof> {
         if first == 0 || first > second || second > self.leaves.len() {
             return Err(Error::InvalidTreeSizes { first, second });

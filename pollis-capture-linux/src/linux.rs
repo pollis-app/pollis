@@ -36,36 +36,24 @@ enum Mode {
     Camera,
 }
 
-/// Which capture backend the routing probe selected for this session.
-///
-/// This is decided ONCE at capture start. We route on *session type*,
-/// not desktop-environment name: GNOME and KDE both ship X11 sessions
-/// too, so a DE-name switch (issue #281's original misdiagnosis) would
-/// mis-route them. Under XWayland an X11 client gets a private root, not
-/// the composited screen, so X11 grab returns black on Wayland — the
-/// two-backend split is mandatory, not an optimization.
+/// Decided once at capture start, on session type rather than DE name (GNOME
+/// and KDE ship X11 sessions too). Under XWayland an X11 grab returns black,
+/// so the split is mandatory (#281).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Backend {
-    /// Wayland session with a working xdg-desktop-portal ScreenCast
-    /// backend + PipeWire. The original, unchanged path.
+    /// Wayland with an xdg-desktop-portal ScreenCast backend + PipeWire.
     Portal,
-    /// X11 session (Xorg or an X11 session of GNOME/KDE, plus
-    /// Cinnamon/MATE/XFCE which have no ScreenCast portal backend at
-    /// all). New xcb/SHM/RandR path.
+    /// Any X11 session (xcb/SHM/RandR).
     X11,
-    /// Wayland session with NO ScreenCast portal backend (e.g.
-    /// Cinnamon-on-Wayland-ish setups, or a portal install missing the
-    /// ScreenCast impl). Screen sharing is genuinely unavailable here —
-    /// surfaced as a distinct, non-"denied" error.
+    /// Wayland with no ScreenCast backend; surfaced as a distinct, non-"denied"
+    /// error.
     Unsupported,
 }
 
-/// Probe the session to decide the backend. Pure environment + bus
-/// inspection; no UI, no user interaction.
+/// Environment + bus inspection only; no UI.
 async fn probe_backend() -> Backend {
-    // 1. Session type. $XDG_SESSION_TYPE is the canonical signal;
-    //    corroborate with $WAYLAND_DISPLAY / $DISPLAY because some
-    //    minimal/embedded sessions don't set XDG_SESSION_TYPE.
+    // Some minimal sessions don't set XDG_SESSION_TYPE, so corroborate with
+    // $WAYLAND_DISPLAY / $DISPLAY.
     let session_type = std::env::var("XDG_SESSION_TYPE")
         .unwrap_or_default()
         .to_lowercase();
@@ -80,17 +68,10 @@ async fn probe_backend() -> Backend {
     let is_x11 = session_type == "x11" || (session_type.is_empty() && has_x11 && !has_wayland);
 
     if is_x11 && !is_wayland {
-        // X11 session — covers Cinnamon/MATE/XFCE (no ScreenCast
-        // portal backend exists) AND X11 sessions of GNOME/KDE. The
-        // X11 grab path works regardless of whether a portal is
-        // present, so we don't even probe the bus here.
         eprintln!("[capture] probe: X11 session -> X11 backend");
         return Backend::X11;
     }
 
-    // Wayland (or ambiguous-leaning-Wayland): the portal path is the
-    // only one that can work — XWayland would hand X11 a private root.
-    // Gate on the ScreenCast portal actually being present.
     if portal_screencast_available().await {
         eprintln!("[capture] probe: Wayland + ScreenCast portal -> Portal backend");
         Backend::Portal
@@ -102,22 +83,13 @@ async fn probe_backend() -> Backend {
     }
 }
 
-/// Is `org.freedesktop.portal.ScreenCast` actually available on the
-/// session bus? A bare `xdg-desktop-portal` with only the gtk backend
-/// (Cinnamon/MATE/XFCE default) does NOT implement ScreenCast — the
-/// interface is absent and the portal call errors before any picker UI.
-/// We detect that here so we can emit a precise "your DE has no
-/// ScreenCast backend" error instead of collapsing it into "denied".
+/// A gtk-only `xdg-desktop-portal` (Cinnamon/MATE/XFCE default) has no
+/// ScreenCast; detect that so the error isn't reported as "denied".
 async fn portal_screencast_available() -> bool {
     use ashpd::desktop::screencast::Screencast;
-    // Constructing the proxy resolves the org.freedesktop.portal.Desktop
-    // name and the ScreenCast interface. If the backend doesn't
-    // implement ScreenCast this fails fast without showing any UI.
     match Screencast::new().await {
         Ok(proxy) => {
-            // available_source_types() is a plain property read on the
-            // ScreenCast interface — succeeds only if a real backend is
-            // wired up, which is exactly the distinction we need.
+            // A property read succeeds only with a real backend wired up.
             match proxy.available_source_types().await {
                 Ok(_) => true,
                 Err(e) => {
@@ -136,10 +108,8 @@ async fn portal_screencast_available() -> bool {
 pub fn run() -> Result<()> {
     let args = Args::parse();
 
-    // PR_SET_PDEATHSIG: if the parent process dies (crash, kill -9,
-    // anything other than a clean exit that closes the socket), the
-    // kernel sends us SIGTERM so we don't end up an orphan with a live
-    // pipewire stream.
+    // If the parent dies uncleanly, the kernel sends us SIGTERM so we don't
+    // orphan a live pipewire stream.
     unsafe {
         libc_pdeathsig(pdeath::SIGTERM);
     }
@@ -158,9 +128,7 @@ async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
         .with_context(|| format!("connect to {socket_path}"))?;
     eprintln!("[capture] connected");
 
-    // Camera capture has no session-type dependency — V4L2 is a kernel
-    // API that works the same under X11, Wayland, or headless — so it
-    // skips the screen path's portal-vs-X11 probe entirely.
+    // V4L2 is display-agnostic, so camera skips the session probe.
     if mode == Mode::Camera {
         return crate::camera::run_camera(&mut sock).await;
     }
@@ -171,15 +139,10 @@ async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     match backend {
         Backend::Portal => run_portal(&mut sock, audio).await,
         Backend::X11 => {
-            // The X11 backend is synchronous (xcb + SHM) and has no
-            // async work; run it on a blocking thread and bridge frames
-            // back over the same channel-to-socket drain.
             run_x11(&mut sock, audio).await
         }
         Backend::Unsupported => {
-            // Distinct from user-denial. The parent maps this onto a
-            // "your desktop environment can't screen share" UI, not a
-            // "permission denied — grant it" UI.
+            // Distinct from denial: the parent shows "can't screen share here".
             let msg = "unsupported: Screen sharing requires xdg-desktop-portal \
                        with a ScreenCast backend; your desktop environment does \
                        not provide one.";
@@ -192,11 +155,8 @@ async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     }
 }
 
-/// Drain the capture channel → parent socket until the capture side ends
-/// or the parent goes away (any write error — EPIPE and friends). Shared
-/// by the portal, X11 and camera paths, which all bridge a synchronous
-/// capture thread to this one socket the same way. `tag` is the caller's
-/// log prefix.
+/// Drain the capture channel to the parent socket until either side ends.
+/// `tag` is the caller's log prefix.
 pub(crate) async fn drain_to_socket(
     sock: &mut UnixStream,
     rx: &mut mpsc::Receiver<CaptureMsg>,
@@ -210,10 +170,6 @@ pub(crate) async fn drain_to_socket(
     }
 }
 
-/// The original Wayland + xdg-desktop-portal + PipeWire path. Logic
-/// unchanged from before the split — only the wire encode now goes
-/// through the shared `pollis-capture-proto` crate instead of the
-/// hand-rolled `write_msg`/`send_error` that used to live here.
 async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
     eprintln!("[capture] opening portal (waits for user picker)");
 
@@ -223,10 +179,7 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
             v
         }
         Err(PortalError::Cancelled) => {
-            // User dismissed the picker. Surface with a distinct
-            // `cancel:` prefix so the parent can swallow the error
-            // silently instead of showing a red "permission denied"
-            // toast — cancelling is a normal flow, not a failure.
+            // `cancel:` lets the parent swallow a dismissed picker silently.
             eprintln!("[capture] portal cancelled by user");
             write_msg(
                 sock,
@@ -240,8 +193,6 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
         }
         Err(PortalError::Other(e)) => {
             eprintln!("[capture] portal error: {e}");
-            // Prefix lets the parent split portal-error vs. cancel vs.
-            // genuine deny rather than collapsing them.
             write_msg(
                 sock,
                 &CaptureMsg::Error {
@@ -254,15 +205,8 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
         }
     };
 
-    // Channel from the pipewire OS thread (sync world) into the tokio
-    // task (async world) that owns the socket. Capacity 2 with
-    // last-frame-wins backpressure: if the socket can't keep up we drop
-    // frames rather than block the capture thread.
-    //
-    // Deeper when audio shares the channel: a dropped video frame is a
-    // stale pixel the viewer never notices, but a dropped audio block is
-    // an audible click, and at capacity 2 a burst of video would evict
-    // every block behind it.
+    // Last-frame-wins: a slow socket drops frames rather than blocking the
+    // capture thread. Deeper with audio, where a dropped block is audible.
     let (tx, mut rx) = mpsc::channel::<CaptureMsg>(if audio { 16 } else { 2 });
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
@@ -280,10 +224,7 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
         })
         .context("spawn pipewire thread")?;
 
-    // Audio rides the same channel to the same socket, on its own thread
-    // and its own PipeWire connection. Never fails the share: the helper
-    // reports an `audio:`-prefixed error and the parent downgrades to
-    // video-only.
+    // Audio failure never fails the share (`audio:` error, video-only).
     let audio_thread = audio.then(|| crate::audio::spawn(tx.clone(), Arc::clone(&stop)));
     drop(tx);
 
@@ -295,16 +236,11 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
     Ok(())
 }
 
-/// The X11 backend (issue #281). Spawns the synchronous xcb/SHM capture
-/// loop on its own thread and drains its frames to the socket exactly
-/// the way the portal path drains the pipewire thread.
+/// The X11 backend (#281): the synchronous xcb/SHM loop on its own thread.
 async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
     eprintln!("[capture] starting X11 (xcb/SHM/RandR) backend");
 
-    // Deeper than the portal path's 2: video keeps last-frame-wins
-    // semantics, but audio cannot be dropped as freely — a discarded
-    // block is an audible gap, not a stale pixel — and here the two share
-    // one channel.
+    // Deeper with audio, as in `run_portal`.
     let (tx, mut rx) = mpsc::channel::<CaptureMsg>(if audio { 16 } else { 2 });
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
@@ -324,9 +260,6 @@ async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
         })
         .context("spawn x11 thread")?;
 
-    // PipeWire audio is a kernel/session-level service, independent of the
-    // display server — so an Xorg session shares sound exactly the way a
-    // Wayland one does.
     let audio_thread = audio.then(|| crate::audio::spawn(tx.clone(), Arc::clone(&stop)));
     drop(tx);
 
@@ -338,11 +271,8 @@ async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
     Ok(())
 }
 
-/// Distinguishes "user cancelled the picker" from "everything else"
-/// so the parent can swallow cancel silently. Without this, ashpd's
-/// `Response::Cancelled` collapses into the same anyhow error path as a
-/// genuine portal failure → the parent shows a misleading "permission
-/// denied" toast for a perfectly normal Escape-press.
+/// Keeps a cancelled picker apart from real failures so the parent doesn't
+/// show "permission denied" for an Escape-press.
 enum PortalError {
     Cancelled,
     Other(anyhow::Error),
@@ -383,10 +313,6 @@ async fn open_portal() -> std::result::Result<(u32, OwnedFd), PortalError> {
         .map_err(|e| anyhow!("portal start: {e}"))?;
     let response = match request.response() {
         Ok(r) => r,
-        // The picker callback returned a Cancelled response — user hit
-        // Escape, closed the window, or clicked Cancel. Surface this
-        // specifically; do NOT wrap in anyhow! since the parent's
-        // friendly-error mapping must see the structured signal.
         Err(ashpd::Error::Response(ResponseError::Cancelled)) => {
             return Err(PortalError::Cancelled);
         }
@@ -402,11 +328,8 @@ async fn open_portal() -> std::result::Result<(u32, OwnedFd), PortalError> {
         .await
         .map_err(|e| anyhow!("open pw remote: {e}"))?;
     let node_id = stream.pipe_wire_node_id();
-    // Leak the proxy + session — dropping them closes the screencast
-    // session on the portal side, which silently kills the pipewire
-    // stream (the fd stays open but produces no frames). The helper
-    // process's lifetime is the share's lifetime, so the leak is
-    // bounded.
+    // Leaked on purpose: dropping them closes the portal session, which
+    // silently stops frames. The process lives exactly as long as the share.
     std::mem::forget(session);
     std::mem::forget(proxy);
     Ok((node_id, fd))
@@ -444,9 +367,6 @@ mod pw {
         pw::init();
         let mainloop = pw::main_loop::MainLoopRc::new(None)?;
         let context = pw::context::ContextRc::new(&mainloop, None)?;
-        // Same fd serves both video (from the portal pipewire node) and
-        // the audio sink monitor capture. The portal-issued fd is a
-        // fully-fledged pipewire core fd, not a per-stream descriptor.
         let core = context.connect_fd_rc(fd, None)?;
 
         struct Data {
@@ -527,12 +447,8 @@ mod pw {
                 let stride = chunk.stride() as u32;
                 let size = chunk.size() as usize;
                 let Some(slice) = datas[0].data() else {
-                    // No CPU-mapped slice — almost certainly because the
-                    // compositor handed us a DMA-BUF buffer despite our
-                    // dataType param constraining to MemPtr|MemFd. Log
-                    // once so the next time something like #285's
-                    // "whole-monitor black preview" recurs, we see the
-                    // smoking gun instead of a silent drop.
+                    // Almost certainly a DMA-BUF despite the MemPtr|MemFd
+                    // constraint; log once (#285's black preview).
                     static WARNED: AtomicBool = AtomicBool::new(false);
                     if !WARNED.swap(true, Ordering::Relaxed) {
                         eprintln!(
@@ -546,9 +462,7 @@ mod pw {
                 if slice.len() < size {
                     return;
                 }
-                // Copy out — the pipewire buffer goes back into rotation
-                // as soon as we leave this closure. Last-frame-wins:
-                // try_send fails fast when full, we just skip.
+                // Copy out: the buffer returns to rotation after this closure.
                 let bgrx = slice[..size].to_vec();
                 let _ = tx_for_proc.try_send(CaptureMsg::Frame {
                     width,
@@ -575,11 +489,7 @@ mod pw {
                 Id,
                 pw::spa::param::format::MediaSubtype::Raw
             ),
-            // Wide format set — different compositors prefer different
-            // pixel layouts (KWin tends to ship BGRx/BGRA, Mutter often
-            // RGBx/RGBA, some DMA-BUF backends only YUV). Listing all
-            // common variants lets pipewire pick whichever it has
-            // available without us having to fingerprint the compositor.
+            // Compositors prefer different layouts, so offer them all.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoFormat,
                 Choice,
@@ -600,13 +510,8 @@ mod pw {
                 pw::spa::param::video::VideoFormat::I420,
                 pw::spa::param::video::VideoFormat::NV12
             ),
-            // First Rectangle = preferred/default. We bias the negotiated
-            // size toward 1080p so a compositor that honours the
-            // preference hands us a sensible default stream size. The
-            // full range stays wide because most compositors ignore the
-            // preference and only offer the source's native size; the
-            // parent reader (screenshare.rs) accepts whatever lands
-            // here at native resolution — no downstream cap is applied.
+            // Prefer 1080p; the range stays wide because most compositors
+            // only offer native size, which the parent accepts as-is.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoSize,
                 Choice,
@@ -616,10 +521,8 @@ mod pw {
                 pw::spa::utils::Rectangle { width: 1, height: 1 },
                 pw::spa::utils::Rectangle { width: 7680, height: 4320 }
             ),
-            // Preferred 60fps (matches the parent's MAX_SHARE_FPS cap);
-            // the parent reader hard-drops anything faster. Range stays
-            // open so a compositor that only offers its native refresh
-            // still negotiates — the parent FPS clamp is the backstop.
+            // Prefer 60fps (the parent's MAX_SHARE_FPS); the range stays open
+            // and the parent's clamp is the backstop.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoFramerate,
                 Choice,
@@ -637,17 +540,9 @@ mod pw {
         .0
         .into_inner();
 
-        // Buffers param: constrain the producer to CPU-mappable buffer
-        // types (MemPtr / MemFd), excluding DMA-BUF. Without this,
-        // KWin/Mutter happily hand back DMA-BUF for whole-monitor
-        // capture (zero-copy GPU texture). MAP_BUFFERS only maps
-        // CPU-mappable backings — DMA-BUF would arrive with
-        // `data() == None`, every frame would silently drop, and the
-        // whole-monitor share would look black on the publisher and
-        // never produce a track-started event on the receiver.
-        // Reading DMA-BUF would require importing it into an EGL/Vulkan
-        // context; we don't have one, and don't want one in this
-        // helper.
+        // Exclude DMA-BUF: it arrives with `data() == None` and every frame
+        // would silently drop (a black whole-monitor share). Reading it would
+        // need an EGL/Vulkan context this helper doesn't want.
         let data_type_mask: i32 =
             (1 << pw::spa::sys::SPA_DATA_MemPtr) | (1 << pw::spa::sys::SPA_DATA_MemFd);
         let buffers_obj = pw::spa::pod::Object {
@@ -693,12 +588,4 @@ mod pw {
         eprintln!("[capture/pw] mainloop exited");
         Ok(())
     }
-
-    // Audio lives in `crate::audio`, not here. It was pulled from this
-    // module under issue #175 because sink-monitor capture loops the call
-    // back to everyone on it; #884 restores it with that loop cancelled in
-    // the parent, where the exact played signal is known — see
-    // `pollis-core`'s `screenshare::self_echo`. It also no longer shares
-    // this connection: audio must work on the X11 backend too, and that
-    // path has no portal fd.
 }

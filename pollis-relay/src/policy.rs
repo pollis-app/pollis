@@ -1,20 +1,10 @@
-//! Per-target routing policy: overlay vs direct vs degraded-error, plus **live
-//! relay revocation**.
+//! Per-target routing policy (overlay / direct / degraded, design §6.4) and
+//! live relay revocation. Both are pure, no I/O.
 //!
-//! This encodes the plane split (design §6.4) and the first-party allowlist as
-//! *data*, and it is pure and unit-testable — no sockets. The shim asks
-//! [`RoutingPolicy::plan`] what to do with a target, then executes; if an overlay
-//! attempt fails, [`PlannedRoute::fallback_to_direct`] decides whether to fall
-//! back to a direct dial (Prefer) or surface a degraded error (Strict).
-//!
-//! The second half of this module ([`RevocationStore`] and friends) is the
-//! *identity* side of the same question: a relay may be in the signed directory
-//! and still be untrustworthy, because the directory is only re-signed with a
-//! ~1 hour TTL and a seized node stays "valid" until that lapses. Revocation is a
-//! second signed artifact with a much shorter life; see [`verify_revocations`].
-//! It is pure too — bytes in, decision out — so both the client (path selection)
-//! and the relay (refusing to extend a circuit to a revoked next hop) can share
-//! one enforcement point with no I/O of its own.
+//! Revocation exists because the signed directory has a ~1 hour TTL, so a
+//! seized relay stays "valid" until it lapses; the revocation list is a second,
+//! shorter-lived signed artifact shared by client path selection and relay
+//! `Extend` checks.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -41,8 +31,7 @@ pub enum OverlayMode {
 }
 
 impl OverlayMode {
-    /// Stable `u8` encoding so the mode can live in an [`AtomicU8`] the shim's
-    /// routing policy reads live (runtime Prefer↔Strict, design §14 / apply slice).
+    /// Encoding for the live-switchable [`AtomicU8`] mode cell.
     pub(crate) fn as_u8(self) -> u8 {
         match self {
             OverlayMode::Off => 0,
@@ -80,14 +69,11 @@ pub enum FinalAction {
     Degraded,
 }
 
-/// Decides how each target is routed, given the mode, the set of overlay
-/// (control-plane) hosts, and the set of always-direct (media) hosts.
+/// Decides how each target is routed, given the mode, the overlay
+/// (control-plane) hosts and the always-direct (media) hosts.
 ///
-/// `mode` is held in a shared [`AtomicU8`] rather than a plain field so a running
-/// shim can be flipped between `Prefer` and `Strict` **live** — no shim restart,
-/// no DB reconnect — via [`OverlayHandle::set_mode`](crate::shim::OverlayHandle::set_mode).
-/// The host sets are immutable for the shim's lifetime (a mode change never
-/// re-derives the plane split).
+/// `mode` is a shared [`AtomicU8`] so a running shim can switch Prefer↔Strict
+/// without a restart ([`OverlayHandle::set_mode`](crate::shim::OverlayHandle::set_mode)).
 #[derive(Clone)]
 pub struct RoutingPolicy {
     mode: Arc<AtomicU8>,
@@ -110,21 +96,16 @@ impl RoutingPolicy {
         OverlayMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
 
-    /// Flip the live routing mode. The shim's next `plan()` observes it — used to
-    /// switch Prefer↔Strict without restarting the shim (design §14 apply slice).
+    /// Flip the live routing mode; the shim's next `plan()` observes it.
     pub fn set_mode(&self, mode: OverlayMode) {
         self.mode.store(mode.as_u8(), Ordering::Relaxed);
     }
 
-    /// A handle onto the shared mode cell, so the [`OverlayHandle`] can flip it
-    /// after the policy has been moved into the shim.
     pub(crate) fn mode_atomic(&self) -> Arc<AtomicU8> {
         Arc::clone(&self.mode)
     }
 
-    // Routing is a per-HOST decision: which plane a destination belongs to does
-    // not depend on its port. The port is judged where it matters — by the
-    // relay's egress allowlist at the far end of the circuit.
+    // Routing is per host; the port is judged by the relay's egress allowlist.
     fn is_direct_host(&self, host: &str) -> bool {
         self.direct_hosts.iter().any(|p| p.matches_host(host))
     }
@@ -141,8 +122,6 @@ impl RoutingPolicy {
     /// - Control-plane host + `Strict` → Overlay (degrade on failure).
     /// - Any other host → Direct (e.g. non-first-party like Expo push, §14.4).
     pub fn plan(&self, host: &str) -> PlannedRoute {
-        // The media plane is always direct — it must never be taxed by the
-        // overlay, even in Strict mode (§6.4).
         if self.is_direct_host(host) {
             return PlannedRoute::Direct;
         }
@@ -154,7 +133,6 @@ impl RoutingPolicy {
             OverlayMode::Strict if self.is_overlay_host(host) => {
                 PlannedRoute::Overlay { fallback_to_direct: false }
             }
-            // Not a control-plane host: nothing to hide here, dial direct.
             _ => PlannedRoute::Direct,
         }
     }
@@ -179,25 +157,17 @@ impl RoutingPolicy {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Live relay revocation (#813 Phase C)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// The `type` discriminator every revocation payload must carry.
+/// The `type` discriminator every revocation payload must carry (#813).
 ///
-/// The revocation list and the signed directory are produced by the **same**
-/// Ed25519 key, so without a discriminator an attacker could feed a directory
-/// envelope to the revocation parser (or the reverse) and have the signature
-/// check pass. Both artifacts name themselves; a mismatch is a hard reject.
+/// The directory and the revocation list are signed by the same key, so
+/// without it one could be replayed as the other; a mismatch is a hard reject.
 pub const REVOCATION_TYPE: &str = "pollis-relay-revocations";
 
 /// The only revocation payload version this build understands.
 pub const REVOCATION_VERSION: u32 = 1;
 
-/// Why a revocation list was rejected. **Every variant is fail-closed**: a
-/// rejected list never becomes evidence that a relay is fine, it removes the
-/// evidence entirely, and [`RevocationStore::admit`] then answers
-/// [`Admission::Unevaluable`] — which is not an admission.
+/// Why a revocation list was rejected. Every variant is fail-closed: a rejected
+/// list leaves [`RevocationStore::admit`] answering [`Admission::Unevaluable`].
 #[derive(Debug, thiserror::Error)]
 pub enum RevocationError {
     #[error("malformed revocation envelope JSON")]
@@ -227,16 +197,14 @@ pub enum RevocationError {
     NotConfigured,
 }
 
-/// The signed envelope, byte-identical in shape to the directory's:
-/// base64 (STANDARD) of the payload bytes plus base64 of the 64-byte Ed25519
-/// signature over **exactly** those bytes. No canonicalization on either side.
+/// Same shape as the directory envelope: the Ed25519 signature covers exactly
+/// the decoded payload bytes, with no canonicalization.
 #[derive(Deserialize)]
 struct RevocationEnvelope {
     payload_b64: String,
     signature_b64: String,
 }
 
-/// The revocation payload — the exact bytes that get base64'd into `payload_b64`.
 #[derive(Deserialize)]
 struct RevocationPayload {
     version: u32,
@@ -248,8 +216,8 @@ struct RevocationPayload {
     revoked: Vec<RevokedEntry>,
 }
 
-/// One revocation. Both selectors are optional in the wire format but an entry
-/// carrying **neither** is rejected (see [`RevocationError::Unenforceable`]).
+/// One revocation. An entry carrying neither selector is rejected
+/// ([`RevocationError::Unenforceable`]).
 #[derive(Deserialize)]
 struct RevokedEntry {
     #[serde(default)]
@@ -258,12 +226,8 @@ struct RevokedEntry {
     cert_sha256_b64: Option<String>,
 }
 
-/// A verified, unexpired, non-rolled-back revocation list.
-///
-/// Construct one only via [`verify_revocations`] — there is deliberately no way
-/// to build this type from unverified data, so "I have a `RevocationList`" is
-/// itself the proof that the signature, version, type, expiry and sequence
-/// checks all passed.
+/// A verified, unexpired, non-rolled-back revocation list. Only
+/// [`verify_revocations`] constructs one, so holding it proves the checks passed.
 #[derive(Debug, Clone)]
 pub struct RevocationList {
     seq: u64,
@@ -276,8 +240,7 @@ pub struct RevocationList {
 }
 
 impl RevocationList {
-    /// The publisher's monotonic sequence number (the SSM parameter version of
-    /// the operator-authored revocation set — see `infra/relay-hydra`).
+    /// The publisher's monotonic sequence number (see `infra/relay-hydra`).
     pub fn seq(&self) -> u64 {
         self.seq
     }
@@ -290,10 +253,7 @@ impl RevocationList {
         self.expires_at
     }
 
-    /// How many relays this list revokes. An **empty list is legal and normal** —
-    /// unlike the directory's `relays`, where empty is a reject. "Nothing is
-    /// revoked right now" is the steady state and must be expressible, otherwise
-    /// there would be no fresh artifact to fail closed against.
+    /// How many relays this list revokes. Empty is legal and the steady state.
     pub fn len(&self) -> usize {
         self.addrs.len() + self.cert_digests.len()
     }
@@ -302,16 +262,13 @@ impl RevocationList {
         self.len() == 0
     }
 
-    /// Is `now_secs` still inside this list's validity window?
     pub fn is_fresh(&self, now_secs: i64) -> bool {
         now_secs < self.expires_at
     }
 
-    /// Does this list revoke `id`? Either selector matching is enough: the
-    /// address covers the shared-pool-identity case (every hydra node currently
-    /// presents the SAME pinned leaf, so a cert-keyed revocation would take the
-    /// whole pool down), the cert digest covers per-node and peer-hosted
-    /// identities where the leaf really is the relay's name (§7).
+    /// Either selector matching revokes. Address is needed because hydra nodes
+    /// share one pinned leaf (a cert revocation would drop the whole pool); the
+    /// cert digest covers per-node identities (§7).
     pub fn revokes(&self, id: &RelayIdentity<'_>) -> bool {
         if self.addrs.contains(&normalize_addr(id.addr)) {
             return true;
@@ -320,11 +277,8 @@ impl RevocationList {
     }
 }
 
-/// The relay being checked: the endpoint the directory advertised plus the DER
-/// leaf it actually presented on the wire.
-///
-/// Both are carried on purpose. The address is what an operator can revoke the
-/// instant a node is seized; the cert is what remains true if that node moves.
+/// The relay being checked: the advertised endpoint plus the DER leaf it
+/// presented on the wire.
 pub struct RelayIdentity<'a> {
     pub addr: &'a str,
     pub cert_der: &'a [u8],
@@ -337,30 +291,25 @@ pub enum Admission {
     Admit,
     /// Fresh evidence positively revokes this relay.
     Revoked,
-    /// **No usable evidence**: never loaded, expired, or revocation was never
-    /// configured on this node. Not an admission — see [`Admission::admitted`].
+    /// No usable evidence (never loaded, expired, or unconfigured). Not an
+    /// admission.
     Unevaluable,
 }
 
 impl Admission {
-    /// The single place the fail-closed rule is encoded: only [`Admission::Admit`]
-    /// is an admission. A caller that cannot evaluate revocation must not use the
-    /// relay, so "I don't know" and "revoked" are the same answer here.
+    /// The fail-closed rule: only [`Admission::Admit`] is an admission; "unknown"
+    /// and "revoked" are the same answer.
     pub fn admitted(self) -> bool {
         matches!(self, Admission::Admit)
     }
 }
 
-/// Verify a revocation envelope against the pinned directory-signing key.
+/// Verify a revocation envelope against the pinned directory-signing key:
+/// signature over the payload bytes first, then parse and range-check. Must
+/// match `infra/relay-hydra/lib/revocation-verify.mjs`.
 ///
-/// Mirrors `pollis-core`'s directory verifier and the JS reference
-/// (`infra/relay-hydra/lib/revocation-verify.mjs`) exactly: verify the Ed25519
-/// signature over the decoded payload bytes FIRST, then parse and range-check.
-///
-/// `seq_floor` is the lowest sequence number the caller will accept. Pass the
-/// highest sequence it has already seen (rollback protection) or the sequence the
-/// signed directory anchored (freshness binding) — whichever is greater. A list
-/// below the floor is a **replay** and is rejected.
+/// `seq_floor`: the greater of the highest seq already seen (rollback) and the
+/// seq the signed directory anchored (freshness). Below it is a replay.
 pub fn verify_revocations(
     envelope_bytes: &[u8],
     pinned_pubkey_b64: &str,
@@ -390,7 +339,6 @@ pub fn verify_revocations(
     if payload.version != REVOCATION_VERSION {
         return Err(RevocationError::UnsupportedVersion(payload.version));
     }
-    // Cross-artifact confusion guard — see REVOCATION_TYPE.
     if payload.kind != REVOCATION_TYPE {
         return Err(RevocationError::WrongType(payload.kind));
     }
@@ -410,10 +358,8 @@ pub fn verify_revocations(
     let mut addrs = HashSet::new();
     let mut cert_digests = HashSet::new();
     for entry in payload.revoked {
-        // An entry this build cannot act on fails the WHOLE list closed rather
-        // than being skipped. Skipping would silently downgrade a revocation
-        // published by a newer producer (a selector we don't know yet) into an
-        // admission — exactly the bypass revocation exists to prevent.
+        // An entry this build cannot act on fails the whole list closed: skipping
+        // it would turn a newer producer's revocation into an admission.
         let addr = entry.addr.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let digest = entry
             .cert_sha256_b64
@@ -429,8 +375,7 @@ pub fn verify_revocations(
             addrs.insert(normalize_addr(addr));
         }
         if let Some(digest) = digest {
-            // A digest that is not 32 bytes can never match a real SHA-256, so
-            // it is an unenforceable revocation, not a harmless one.
+            // A non-32-byte digest can never match, so it is unenforceable.
             let raw = B64
                 .decode(digest.as_bytes())
                 .map_err(|_| RevocationError::Unenforceable("cert_sha256_b64 is not base64"))?;
@@ -452,8 +397,6 @@ pub fn verify_revocations(
     })
 }
 
-/// Rebuild an Ed25519 [`VerifyingKey`] from the base64 of its raw 32 bytes (the
-/// `POLLIS_OVERLAY_DIRECTORY_KEY` shape).
 fn verifying_key_from_b64(pinned_pubkey_b64: &str) -> Result<VerifyingKey, RevocationError> {
     let raw = B64
         .decode(pinned_pubkey_b64.trim().as_bytes())
@@ -471,18 +414,11 @@ fn cert_digest_b64(cert_der: &[u8]) -> String {
 }
 
 /// The live revocation state a relay (or a client's path selector) consults.
+/// Clones share one cell, so a new list is seen by every in-flight `Extend`.
 ///
-/// Cheap to clone — every clone shares one cell, so a refresh task installing a
-/// newer list is observed immediately by every in-flight `Extend`.
-///
-/// **Fail-closed by construction:**
-/// - a store with no pinned key ([`RevocationStore::unconfigured`]) admits
-///   nothing;
-/// - a store that has never installed a list admits nothing;
-/// - a store whose list has expired admits nothing;
-/// - [`RevocationStore::install`] never accepts a list below the highest
-///   sequence already seen, so a captured older-but-unexpired list cannot be
-///   replayed to un-revoke a relay.
+/// Fail-closed: no pinned key, no installed list, or an expired list admits
+/// nothing, and [`RevocationStore::install`] never accepts a seq below the
+/// high-water mark (no un-revoking by replay).
 #[derive(Clone)]
 pub struct RevocationStore {
     inner: Arc<RwLock<StoreInner>>,
@@ -492,14 +428,11 @@ pub struct RevocationStore {
 
 struct StoreInner {
     list: Option<RevocationList>,
-    /// The highest sequence ever accepted. Monotonic; survives a rejected
-    /// install, so a rollback attempt cannot lower the bar for the next one.
+    /// Highest sequence ever accepted; monotonic, survives rejected installs.
     high_water: u64,
 }
 
 impl RevocationStore {
-    /// An empty store. Whether it can evaluate anything is decided entirely by
-    /// whether a directory key came with it.
     fn with_key(pinned_key_b64: Option<Arc<String>>) -> RevocationStore {
         RevocationStore {
             inner: Arc::new(RwLock::new(StoreInner {
@@ -516,30 +449,20 @@ impl RevocationStore {
         RevocationStore::with_key(Some(Arc::new(pinned_pubkey_b64.into())))
     }
 
-    /// A store for a node that was never given a directory key.
-    ///
-    /// This is **not** a bypass: it admits nothing. A relay deployed without the
-    /// key simply cannot extend circuits to other relays (single-hop
-    /// `CONNECT` is unaffected — there is no next hop to vouch for). Making the
-    /// unconfigured case permissive is the classic way revocation turns into
-    /// decoration, so it is deliberately the strictest state, not the loosest.
+    /// A store for a node with no directory key. Not a bypass: it admits
+    /// nothing, so such a relay cannot `Extend` (single-hop `CONNECT` still works).
     pub fn unconfigured() -> RevocationStore {
         RevocationStore::with_key(None)
     }
 
-    /// Is this store able to evaluate revocation at all?
     pub fn is_configured(&self) -> bool {
         self.pinned_key_b64.is_some()
     }
 
-    /// Verify `envelope_bytes` and adopt it if it is newer-or-equal to what we
-    /// hold. Returns the accepted sequence number.
+    /// Verify `envelope_bytes` and adopt it if newer-or-equal; returns its seq.
     ///
-    /// `directory_seq_floor` is the sequence the signed directory anchored, if
-    /// the caller has one; the effective floor is the max of that and the
-    /// store's own high-water mark. Binding to the directory is what stops an
-    /// on-path attacker pairing a *fresh* directory with a *stale but unexpired*
-    /// revocation list to hide the newest revocation.
+    /// `directory_seq_floor` (the seq the signed directory anchored) stops an
+    /// on-path attacker pairing a fresh directory with a stale-but-unexpired list.
     pub fn install(
         &self,
         envelope_bytes: &[u8],
@@ -557,8 +480,7 @@ impl RevocationStore {
         let list = verify_revocations(envelope_bytes, key, now_secs, floor)?;
         let seq = list.seq;
         let mut guard = self.write();
-        // Re-check under the write lock: two concurrent installs must not let the
-        // older one win.
+        // Re-check under the write lock so a concurrent older install can't win.
         if seq < guard.high_water {
             return Err(RevocationError::RolledBack {
                 seq,
@@ -570,17 +492,14 @@ impl RevocationStore {
         Ok(seq)
     }
 
-    /// The sequence of the currently-held list, if any.
     pub fn seq(&self) -> Option<u64> {
         self.read().list.as_ref().map(RevocationList::seq)
     }
 
-    /// The highest sequence ever accepted (never decreases).
     pub fn high_water(&self) -> u64 {
         self.read().high_water
     }
 
-    /// Decide whether `id` may be used right now.
     pub fn admit(&self, id: &RelayIdentity<'_>, now_secs: i64) -> Admission {
         if self.pinned_key_b64.is_none() {
             return Admission::Unevaluable;
@@ -589,10 +508,7 @@ impl RevocationStore {
         let Some(list) = guard.list.as_ref() else {
             return Admission::Unevaluable;
         };
-        // Staleness is checked at USE time, not just at install time: a list
-        // installed 10 minutes ago is worthless evidence now, and treating it as
-        // "not revoked" would restore exactly the TTL-window bug revocation
-        // exists to close.
+        // Staleness is checked at use time, not only at install time.
         if !list.is_fresh(now_secs) {
             return Admission::Unevaluable;
         }
@@ -634,25 +550,20 @@ mod tests {
             Allowlist::from_patterns(["control.test"]),
             Allowlist::default(),
         );
-        // Prefer: control-plane host routes overlay with direct fallback.
         assert_eq!(
             policy.plan("control.test"),
             PlannedRoute::Overlay { fallback_to_direct: true }
         );
-        // Flip to Strict live — same policy object, no rebuild.
         policy.set_mode(OverlayMode::Strict);
         assert_eq!(
             policy.plan("control.test"),
             PlannedRoute::Overlay { fallback_to_direct: false }
         );
-        // A clone shares the same cell — this is what the OverlayHandle holds.
         let handle_cell = policy.mode_handle_for_test();
         handle_cell.store(OverlayMode::Off.as_u8(), Ordering::Relaxed);
         assert_eq!(policy.mode(), OverlayMode::Off);
         assert_eq!(policy.plan("control.test"), PlannedRoute::Direct);
     }
-
-    // ── Live relay revocation (#813 Phase C) ────────────────────────────────
 
     mod revocation {
         use super::*;
@@ -662,7 +573,6 @@ mod tests {
         const CERT: &[u8] = b"a relay leaf, DER in real life";
         const OTHER_CERT: &[u8] = b"a different relay leaf";
 
-        // Deterministic keys so nothing here touches the RNG.
         fn signer() -> SigningKey {
             SigningKey::from_bytes(&[3u8; 32])
         }
@@ -675,7 +585,6 @@ mod tests {
             B64.encode(sk.verifying_key().to_bytes())
         }
 
-        /// Sign the EXACT payload bytes, exactly as the reconciler does.
         fn envelope(sk: &SigningKey, payload_json: &str) -> Vec<u8> {
             let payload = payload_json.as_bytes();
             let sig = sk.sign(payload);
@@ -690,7 +599,6 @@ mod tests {
             cert_digest_b64(cert)
         }
 
-        /// A well-formed payload revoking exactly `revoked` (already JSON).
         fn payload(seq: u64, expires_at: i64, revoked: &str) -> String {
             format!(
                 r#"{{"version":1,"type":"{REVOCATION_TYPE}","seq":{seq},"issued_at":{NOW},"expires_at":{expires_at},"revoked":[{revoked}]}}"#
@@ -731,13 +639,11 @@ mod tests {
                 store.admit(&id("203.0.113.7:9444", CERT), NOW),
                 Admission::Revoked
             );
-            // Case/whitespace normalized on both sides.
             assert_eq!(
                 store.admit(&id(" 203.0.113.7:9444 ", CERT), NOW),
                 Admission::Revoked
             );
-            // A different node in the same pool — sharing the SAME pinned leaf —
-            // is untouched. This is why address is a first-class selector.
+            // Another node sharing the same pinned leaf is untouched.
             assert_eq!(
                 store.admit(&id("203.0.113.8:9444", CERT), NOW),
                 Admission::Admit
@@ -752,7 +658,6 @@ mod tests {
             let store = RevocationStore::enforcing(pinned(&sk));
             store.install(&env, NOW, 0).unwrap();
 
-            // Identity-keyed: the relay is refused wherever it moves to.
             assert_eq!(
                 store.admit(&id("198.51.100.4:9444", CERT), NOW),
                 Admission::Revoked
@@ -766,14 +671,12 @@ mod tests {
         #[test]
         fn forged_revocation_is_rejected() {
             let sk = signer();
-            // Signed by someone else entirely.
             let forged = envelope(&attacker(), &payload(9, NOW + 300, ""));
             let store = RevocationStore::enforcing(pinned(&sk));
             assert!(matches!(
                 store.install(&forged, NOW, 0),
                 Err(RevocationError::BadSignature)
             ));
-            // ...and the store learned nothing from it.
             assert!(store.seq().is_none());
             assert_eq!(
                 store.admit(&id("203.0.113.7:9444", CERT), NOW),
@@ -789,8 +692,7 @@ mod tests {
                 &payload(3, NOW + 300, r#"{"addr":"203.0.113.7:9444"}"#),
             );
             let mut env: serde_json::Value = serde_json::from_slice(&good).unwrap();
-            // Swap in a payload that revokes nothing, keeping the old signature —
-            // i.e. an attacker trying to STRIP a revocation.
+            // Strip the revocation but keep the old signature.
             let stripped = payload(3, NOW + 300, "");
             env["payload_b64"] = serde_json::Value::String(
                 B64.encode(stripped.as_bytes()),
@@ -806,8 +708,6 @@ mod tests {
         #[test]
         fn a_directory_envelope_cannot_pose_as_a_revocation_list() {
             let sk = signer();
-            // A genuinely signed DIRECTORY, replayed at the revocation endpoint.
-            // Same key, same envelope shape — only the type tag stops it.
             let directory = format!(
                 r#"{{"version":1,"issued_at":{NOW},"expires_at":{},"relays":[{{"addr":"203.0.113.7:9444","region":"us-west-2","cert_b64":"QUJD"}}]}}"#,
                 NOW + 3600
@@ -828,14 +728,10 @@ mod tests {
             store.install(&env, NOW, 0).unwrap();
             assert_eq!(store.admit(&id("203.0.113.7:9444", CERT), NOW), Admission::Admit);
 
-            // One second past expiry the SAME held list is no longer evidence.
-            // This is the property that bounds the exposure window to the
-            // revocation TTL rather than the directory TTL.
             assert_eq!(
                 store.admit(&id("203.0.113.7:9444", CERT), NOW + 300),
                 Admission::Unevaluable
             );
-            // And it cannot be re-installed either.
             assert!(matches!(
                 store.install(&env, NOW + 300, 0),
                 Err(RevocationError::Expired { .. })
@@ -857,8 +753,6 @@ mod tests {
                 Admission::Revoked
             );
 
-            // Replaying the earlier, still-unexpired, genuinely-signed list must
-            // not restore the relay.
             assert!(matches!(
                 store.install(&old, NOW, 0),
                 Err(RevocationError::RolledBack { seq: 5, floor: 6 })
@@ -873,8 +767,6 @@ mod tests {
         #[test]
         fn directory_anchor_rejects_a_stale_but_unexpired_list() {
             let sk = signer();
-            // A fresh directory says "revocation seq is at least 9". Pairing it
-            // with a valid seq-7 list is the on-path downgrade attack.
             let stale = envelope(&sk, &payload(7, NOW + 300, ""));
             let store = RevocationStore::enforcing(pinned(&sk));
             assert!(matches!(
@@ -885,7 +777,6 @@ mod tests {
                 store.admit(&id("203.0.113.7:9444", CERT), NOW),
                 Admission::Unevaluable
             );
-            // The matching list is accepted.
             let current = envelope(&sk, &payload(9, NOW + 300, ""));
             assert_eq!(store.install(&current, NOW, 9).unwrap(), 9);
         }
@@ -919,9 +810,6 @@ mod tests {
         #[test]
         fn entry_with_no_usable_selector_fails_the_whole_list_closed() {
             let sk = signer();
-            // A revocation published by a NEWER producer, keyed on something this
-            // build does not understand. Silently skipping it would admit a relay
-            // the operator revoked.
             let env = envelope(
                 &sk,
                 &payload(4, NOW + 300, r#"{"region":"us-west-2","reason":"seized"}"#),
@@ -966,7 +854,6 @@ mod tests {
                 verify_revocations(b"not json at all", &key, NOW, 0),
                 Err(RevocationError::MalformedEnvelope)
             ));
-            // A pinned key that is not 32 bytes can never verify anything.
             assert!(matches!(
                 verify_revocations(&envelope(&sk, &payload(1, NOW + 300, "")), "QUJD", NOW, 0),
                 Err(RevocationError::BadPinnedKey)
@@ -982,8 +869,6 @@ mod tests {
                 &sk,
                 &payload(11, NOW + 300, r#"{"addr":"203.0.113.7:9444"}"#),
             );
-            // Installed on one handle, observed on the other — this is what makes
-            // an in-flight Extend see a revocation the instant it lands.
             store.install(&env, NOW, 0).unwrap();
             assert_eq!(
                 clone.admit(&id("203.0.113.7:9444", CERT), NOW),

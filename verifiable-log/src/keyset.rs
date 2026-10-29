@@ -1,28 +1,13 @@
-//! Root-signed key-set statements — what a client pins instead of a signer key (#754).
+//! Root-signed key-set statements: what a client pins instead of a signer key (#754).
 //!
-//! **The problem this exists to solve.** The log's signing seed is a GitHub Actions
-//! secret, and the client pins that signer's public key as a compiled-in constant.
-//! Those two facts together have no answer to a leak: an attacker holding the seed
-//! signs a forged tree, and the fix — a client update that re-pins — is itself
-//! verified *through the binaries tree the compromised key signs*. The attacker
-//! vouches for their own build of the remedy. Recovery requires an authority the
-//! online signer cannot speak for.
+//! A leaked online signer could sign a forged binaries tree vouching for its own
+//! "fix", so recovery needs an authority it cannot speak for. An offline root signs
+//! only "these key ids may sign these trees, until this date"; clients pin the root,
+//! and retiring a signer is a root statement, not a release.
 //!
-//! **The shape of the answer.** A separate root key, held offline, signs nothing but
-//! statements of the form "these key ids may sign these trees, until this date".
-//! Clients pin the ROOT. The signer set becomes data the client fetches and verifies
-//! rather than a constant compiled into it, so retiring a compromised signer is a
-//! statement the root signs — not a release.
-//!
-//! The root is deliberately dull: it signs rarely, so it can live offline in a way a
-//! per-release signer never could. That asymmetry is the entire security argument.
-//!
-//! **Why sorted and deduplicated.** The statement means a *set*. Two encodings of the
-//! same set must be the same bytes, or "the signature covers the set" is not quite
-//! true — a reordering would be a different signed object asserting the same thing,
-//! which is exactly the ambiguity signature schemes are supposed to remove. Both are
-//! enforced on verification, not merely on construction, because only the verifier's
-//! check binds an attacker.
+//! Signers must be sorted and unique so one set has exactly one signed encoding;
+//! this is enforced on verification, since only the verifier's check binds an
+//! attacker.
 
 use ml_dsa::{EncodedSignature, EncodedVerifyingKey, Keypair, MlDsa44, Signer, Verifier};
 use serde::{Deserialize, Serialize};
@@ -34,28 +19,22 @@ use crate::sth::{key_id_for, SigningKey, VerifyingKey};
 /// signature over one can never be replayed as the other even if a key were shared.
 pub const KEYSET_DOMAIN: &[u8] = b"pollis-verifiable-log:keyset:v1";
 
-/// Wire format version. Bumped when the signed preimage changes; a verifier that
-/// does not recognise the version refuses rather than guessing at the bytes.
+/// Bumped when the signed preimage changes; unknown versions are refused.
 pub const KEYSET_FORMAT_VERSION: u32 = 1;
 
-/// Encoded ML-DSA-44 public key length, in bytes.
 const PUBLIC_KEY_LEN: usize = 1312;
 
 /// One signer the root vouches for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignerEntry {
-    /// [`key_id_for`] of `public_key`. Carried so diagnostics and the `Sth.key_id`
-    /// hint can name a key without handling 1312 bytes; never a trust input on its
-    /// own — the key bytes are what verification uses.
+    /// [`key_id_for`] of `public_key`. A name for diagnostics and hints, never a
+    /// trust input.
     pub key_id: String,
-    /// ML-DSA-44 public key, lowercase hex (1312 bytes).
     pub public_key: String,
-    /// Domain-separation contexts this key may sign under, e.g. the per-tree STH
-    /// contexts. A compromise of the commit-log signer must not imply authority over
-    /// the binaries tree — which is the tree used to verify the fix.
+    /// STH contexts this key may sign under. A compromised commit-log signer must
+    /// not gain the binaries tree, which is what verifies the fix.
     pub trees: Vec<String>,
-    /// Milliseconds since epoch after which this signer is no longer accepted.
-    /// `None` = no scheduled expiry.
+    /// Ms since epoch after which this signer is no longer accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_after_ms: Option<u64>,
 }
@@ -64,20 +43,16 @@ pub struct SignerEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeySetStatement {
     pub format_version: u32,
-    /// When the root issued this statement (ms since epoch).
     pub issued_at_ms: u64,
-    /// When this statement stops being accepted, independent of the signers it
-    /// names. Bounds how long a client that cannot reach the log keeps trusting a
-    /// stale set — an unbounded statement would let an attacker who can block
-    /// updates freeze a compromised signer in place forever.
+    /// When this statement stops being accepted. Without it, an attacker who
+    /// blocks updates could freeze a compromised signer in place forever.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_after_ms: Option<u64>,
     /// Sorted by `key_id`, no duplicates. See the module note.
     pub signers: Vec<SignerEntry>,
-    /// Root ML-DSA-44 signature over [`signing_message`], hex (2420 bytes).
+    /// Root signature over [`signing_message`], hex.
     pub signature: String,
-    /// Which root signed it, so a client pinning several roots during a root
-    /// rotation selects rather than trial-verifies. A hint, outside the signature.
+    /// Which root signed it: a hint for root rotation, outside the signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_key_id: Option<String>,
 }
@@ -94,15 +69,13 @@ fn signing_message(
     m.extend_from_slice(KEYSET_DOMAIN);
     m.extend_from_slice(&format_version.to_be_bytes());
     m.extend_from_slice(&issued_at_ms.to_be_bytes());
-    // 0 is the "no expiry" sentinel: an epoch-0 expiry is already expired, so the
-    // sentinel can never collide with a meaningful value.
+    // 0 = no expiry; an epoch-0 expiry would already be expired, so no collision.
     m.extend_from_slice(&not_after_ms.unwrap_or(0).to_be_bytes());
     m.extend_from_slice(&(signers.len() as u32).to_be_bytes());
     for s in signers {
         m.extend_from_slice(&(s.key_id.len() as u32).to_be_bytes());
         m.extend_from_slice(s.key_id.as_bytes());
-        // The raw key, not its hex: one canonical representation, and it fails loudly
-        // here rather than admitting a differently-cased spelling of the same key.
+        // Raw bytes, not hex: one canonical form regardless of hex casing.
         let raw = decode_public_key(&s.public_key)?;
         m.extend_from_slice(&raw);
         m.extend_from_slice(&s.not_after_ms.unwrap_or(0).to_be_bytes());
@@ -123,9 +96,8 @@ fn decode_public_key(hex: &str) -> Result<Vec<u8>> {
             hex.len()
         )));
     }
-    // `hex::decode` rather than a hand-rolled `&hex[i..i + 2]` walk: this string
-    // arrives from a fetched key-set document, and byte-slicing it panics on a
-    // multi-byte char even when the length check above passed.
+    // Not byte-slicing: this is fetched input, and slicing panics on a multi-byte
+    // char even after the length check.
     hex::decode(hex).map_err(|_| Error::KeySet("public key is not lowercase hex".into()))
 }
 
@@ -159,8 +131,7 @@ fn validate(signers: &[SignerEntry]) -> Result<()> {
 }
 
 impl KeySetStatement {
-    /// Sign a key set with the offline root. Sorts and validates first, so a
-    /// statement this produced always verifies.
+    /// Sign a key set with the offline root. Sorts and validates first.
     pub fn create(
         root: &SigningKey,
         issued_at_ms: u64,
@@ -196,8 +167,8 @@ impl KeySetStatement {
             self.not_after_ms,
             &self.signers,
         )?;
-        // Same reason as `decode_public_key`: an odd-length or non-ASCII
-        // signature is attacker-reachable, and index-slicing it panics.
+        // Attacker-reachable input: decode, never index-slice (see
+        // `decode_public_key`).
         let raw = hex::decode(&self.signature)
             .map_err(|_| Error::KeySet("signature is not hex".into()))?;
         let encoded = EncodedSignature::<MlDsa44>::try_from(raw.as_slice())
@@ -228,10 +199,8 @@ impl KeySetStatement {
 
     /// The signers acceptable for `context` at `now_ms`.
     ///
-    /// Expiry is applied here rather than left to the caller so a stale statement
-    /// cannot quietly keep a retired signer alive: a statement past its own
-    /// `not_after_ms` yields nothing at all, which surfaces as "cannot verify"
-    /// rather than as silent acceptance.
+    /// Expiry is applied here so a stale statement can't keep a retired signer
+    /// alive: past its own `not_after_ms` it yields nothing ("cannot verify").
     pub fn active_signers_for(&self, context: &[u8], now_ms: u64) -> Vec<&SignerEntry> {
         if self.not_after_ms.is_some_and(|t| now_ms > t) {
             return Vec::new();
@@ -245,7 +214,6 @@ impl KeySetStatement {
     }
 }
 
-/// Decode a hex public key into a verifying key.
 pub fn root_key_from_hex(hex: &str) -> Result<VerifyingKey> {
     let raw = decode_public_key(hex)?;
     let encoded = EncodedVerifyingKey::<MlDsa44>::try_from(raw.as_slice())
@@ -281,8 +249,6 @@ mod tests {
         KeySetStatement::create(root_key, NOW, Some(NOW + 90 * 86_400_000), signers).expect("create")
     }
 
-    // ── The property the whole design rests on ───────────────────────────────
-
     #[test]
     fn a_statement_verifies_under_the_root_that_signed_it() {
         let r = root(1);
@@ -292,16 +258,12 @@ mod tests {
 
     #[test]
     fn a_different_root_cannot_vouch_for_a_key_set() {
-        // The point of the split: the online signer, or anyone else, must not be
-        // able to speak for which keys are valid.
         let st = statement(&root(1), vec![signer(2, &[COMMIT], None)]);
         assert!(st.verify(&root(9).verifying_key()).is_err());
     }
 
     #[test]
     fn substituting_a_signer_key_breaks_the_statement() {
-        // The attack this exists to stop: swap in a key you hold, keep everything
-        // else, and the client accepts your forged tree.
         let r = root(1);
         let mut st = statement(&r, vec![signer(2, &[COMMIT], None)]);
         st.signers[0].public_key = hex::encode(root(3).verifying_key().encode().as_slice());
@@ -310,8 +272,6 @@ mod tests {
 
     #[test]
     fn widening_a_signers_trees_breaks_the_statement() {
-        // A commit-log signer must not be able to grant itself the binaries tree —
-        // the tree used to verify the fix for its own compromise.
         let r = root(1);
         let mut st = statement(&r, vec![signer(2, &[COMMIT], None)]);
         st.signers[0].trees.push(BINARIES.to_string());
@@ -328,15 +288,11 @@ mod tests {
 
     #[test]
     fn reordering_the_set_breaks_the_statement() {
-        // The statement means a SET, so exactly one encoding may verify — otherwise
-        // "the signature covers the set" is not quite true.
         let r = root(1);
         let mut st = statement(&r, vec![signer(2, &[COMMIT], None), signer(3, &[COMMIT], None)]);
         st.signers.swap(0, 1);
         assert!(st.verify(&r.verifying_key()).is_err());
     }
-
-    // ── Shapes a verifier must refuse ────────────────────────────────────────
 
     #[test]
     fn a_duplicated_key_id_is_refused() {
@@ -365,8 +321,6 @@ mod tests {
         assert!(st.verify(&r.verifying_key()).is_err());
     }
 
-    // ── Expiry semantics ─────────────────────────────────────────────────────
-
     #[test]
     fn a_signer_is_only_active_for_the_trees_it_names() {
         let r = root(1);
@@ -385,18 +339,12 @@ mod tests {
 
     #[test]
     fn an_expired_statement_yields_no_signers_at_all() {
-        // The anti-freeze property: an attacker who can block a client's updates
-        // must not be able to pin a compromised signer in place forever. Past its
-        // own expiry the statement grants nothing, which surfaces as "cannot
-        // verify" rather than as silent continued trust.
         let r = root(1);
         let st = KeySetStatement::create(&r, NOW, Some(NOW + 1000), vec![signer(2, &[COMMIT], None)])
             .expect("create");
         assert_eq!(st.active_signers_for(COMMIT.as_bytes(), NOW).len(), 1);
         assert_eq!(st.active_signers_for(COMMIT.as_bytes(), NOW + 2000).len(), 0);
     }
-
-    // ── Root rotation ────────────────────────────────────────────────────────
 
     #[test]
     fn verify_any_accepts_either_root_during_an_overlap() {
@@ -416,8 +364,6 @@ mod tests {
 
     #[test]
     fn a_signature_cannot_be_lifted_onto_a_different_statement() {
-        // Length-prefixed canonical bytes: no two distinct statements share a
-        // preimage, so a valid signature is valid for exactly one of them.
         let r = root(1);
         let a = statement(&r, vec![signer(2, &[COMMIT], None)]);
         let mut b = statement(&r, vec![signer(3, &[BINARIES], None)]);
@@ -427,7 +373,6 @@ mod tests {
 
     #[test]
     fn the_root_key_id_hint_is_not_a_trust_input() {
-        // It is outside the signature by design; forging it must change nothing.
         let r = root(1);
         let mut st = statement(&r, vec![signer(2, &[COMMIT], None)]);
         st.root_key_id = Some("deadbeefdeadbeef".into());

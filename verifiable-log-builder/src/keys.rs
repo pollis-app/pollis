@@ -1,13 +1,6 @@
-//! Signing-key loading and dev keygen.
-//!
-//! Real key custody (HSM / KMS) is a later slice. Here a key comes from either
-//! an env var (32-byte hex) or a key file (32-byte hex). If neither is present
-//! the build **refuses** rather than inventing a key, so a prod bundle can
-//! never be signed with an accidental ephemeral key.
-//!
-//! The key is ML-DSA-44 since #668. An ML-DSA private key IS its 32-byte seed,
-//! so the *secret* custody format did not change at all — only the public half
-//! grew (32 → 1312 bytes), and it is published, not stored.
+//! Signing-key loading and dev keygen. The key (an ML-DSA-44 32-byte seed) comes
+//! from an env var or key file; with neither the build refuses rather than sign
+//! a prod bundle with an accidental ephemeral key.
 
 use std::path::Path;
 
@@ -18,13 +11,11 @@ use crate::error::{BuilderError, Result};
 
 /// A freshly generated dev keypair, hex-encoded.
 pub struct GeneratedKey {
-    /// 32-byte ML-DSA-44 seed (the whole private key), lowercase hex.
+    /// 32-byte ML-DSA-44 seed (the whole private key).
     pub secret_hex: String,
-    /// 1312-byte ML-DSA-44 public key, lowercase hex.
     pub public_hex: String,
 }
 
-/// Parse a 32-byte hex string into a `SigningKey`.
 fn parse_hex_key(hex_str: &str) -> Result<SigningKey<MlDsa44>> {
     let trimmed = hex_str.trim();
     let bytes = hex::decode(trimmed)
@@ -35,8 +26,7 @@ fn parse_hex_key(hex_str: &str) -> Result<SigningKey<MlDsa44>> {
     Ok(SigningKey::<MlDsa44>::from_seed(&arr.into()))
 }
 
-/// Load the signing key from, in order: the env var `env_var`, then
-/// `key_file` if provided. If neither yields a key, return [`BuilderError::NoSigningKey`].
+/// Load the signing key from `env_var`, then `key_file`.
 pub fn load_signing_key(env_var: &str, key_file: Option<&Path>) -> Result<SigningKey<MlDsa44>> {
     if let Ok(hex_str) = std::env::var(env_var) {
         if !hex_str.trim().is_empty() {
@@ -50,7 +40,6 @@ pub fn load_signing_key(env_var: &str, key_file: Option<&Path>) -> Result<Signin
     Err(BuilderError::NoSigningKey(env_var.to_string()))
 }
 
-/// Mint a throwaway ML-DSA-44 keypair for dev use.
 pub fn generate() -> GeneratedKey {
     let mut seed = [0u8; 32];
     OsRng.fill_bytes(&mut seed);

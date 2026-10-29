@@ -1,18 +1,7 @@
-//! `monitor` — the offline verification CLI ("the monitor", one-shot mode).
-//!
-//! Reads STHs, entries, and proofs from a local JSON fixture and verifies the
-//! whole bundle with no network and no database: STH signatures, equivocation,
-//! entry/STH-root agreement (replaying entries through tenant invariants),
-//! inclusion proofs, and consistency between STHs. Exits non-zero with a clear
-//! report if anything fails.
-//!
-//! The bundle shape and the check loop both live in the library
-//! ([`verifiable_log::bundle`], [`verifiable_log::monitor`]) so this binary is a
-//! thin argument-parsing shell over the same code the builder's gate suites
-//! verify against — the three used to be three separate transcriptions.
-//!
-//! A `gen-example` subcommand emits a known-good fixture so the verifier is
-//! easy to try (and so the test-suite has a round-trip target).
+//! `monitor`: the offline verification CLI, a thin shell over
+//! [`verifiable_log::monitor`]. Verifies a JSON bundle with no network or
+//! database and exits non-zero if any check fails. `gen-example` writes a
+//! known-good fixture.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -65,8 +54,7 @@ enum Command {
     },
 }
 
-/// The accepted `--tree` values, derived from the one context table so a fourth
-/// tree cannot be added to the library and missed here.
+/// The accepted `--tree` values, derived from [`STH_CONTEXTS`].
 fn tree_names() -> clap::builder::PossibleValuesParser {
     clap::builder::PossibleValuesParser::new(STH_CONTEXTS.iter().map(|(n, _)| *n))
 }
@@ -99,7 +87,6 @@ fn main() -> ExitCode {
     }
 }
 
-/// Wall-clock milliseconds. A verifier is allowed a clock; the log core is not.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -144,9 +131,7 @@ fn run_verify(
     Ok(ok)
 }
 
-/// Build a small multi-tenant log and serialize a known-good fixture.
 fn gen_example(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    // Deterministic key so the fixture is reproducible.
     let signing_key = SigningKey::from_seed(&[7u8; 32].into());
     let public_key = hex::encode(signing_key.verifying_key().encode());
 
@@ -164,10 +149,8 @@ fn gen_example(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
         log.append(entry.clone())?;
     }
 
-    // An STH after the third append and one over the full log.
     let first_size = 3usize;
     let sth_mid = {
-        // Re-derive the size-3 root via root_at, sign at a fixed timestamp.
         let root = log.root_at(first_size)?;
         Sth::create(&signing_key, first_size as u64, root, 1_700_000_000_000)
     };

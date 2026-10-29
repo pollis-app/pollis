@@ -1,43 +1,14 @@
-//! X11 screen-capture backend (issue #281).
+//! X11 screen-capture backend (#281), for X11 sessions whose DE ships no
+//! ScreenCast portal. Never used under Wayland, where XWayland's private
+//! root captures black. See `.codesight/wiki/capture-split.md`.
 //!
-//! Why this exists: on an X11 session there is frequently no
-//! xdg-desktop-portal ScreenCast backend at all — Cinnamon/MATE/XFCE
-//! ship only `xdg-desktop-portal-gtk`, which does NOT implement
-//! ScreenCast. The portal call errors before any picker appears, which
-//! the old code collapsed into "user denied". On X11 we don't need the
-//! portal: we can read the framebuffer directly.
+//! xcb + MIT-SHM (plain GetImage is too slow), one RandR monitor rather than
+//! the spanned root, full-frame copy per tick. No picker: X11 has no consent
+//! model. TODO (follow-up phases): XDamage, cursor compositing via XFixes,
+//! HiDPI / multi-monitor edge geometry.
 //!
-//! Why not X11 everywhere: under Wayland, XWayland gives an X11 client a
-//! *private* root window, not the real composited screen. XShm/XGetImage
-//! against it returns black. So this backend is only ever selected for a
-//! genuine X11 session (see `Backend::X11` in `linux.rs`).
-//!
-//! v1 scope (shippable, deliberately minimal):
-//!   - xcb + MIT-SHM. SHM is non-negotiable: a plain GetImage round-trip
-//!     at 1080p is unusably slow (full pixmap over the X socket every
-//!     frame).
-//!   - RandR is used to enumerate outputs and capture ONE monitor
-//!     (the primary, or the first active output), not the whole spanned
-//!     root — a multi-monitor spanned root would publish a giant canvas.
-//!   - Full-framebuffer SHM copy per tick. Correct; heavier on weak
-//!     CPUs. XDamage (changed-region only) is Phase 2, intentionally out
-//!     of v1 (see issue #281 follow-ups).
-//!   - No per-window consent picker: X11 has no consent model, so this
-//!     is monitor / full-screen capture only. Source selection therefore
-//!     reuses the protocol shape (a single Format then frames) without a
-//!     picker round-trip.
-//!
-//! Out of v1 (documented TODOs, NOT blockers):
-//!   - Phase 2: XDamage — only copy changed regions.
-//!   - Phase 3: cursor compositing via XFixes GetCursorImage.
-//!   - Phase 4: HiDPI / fractional scaling; multi-monitor edge geometry.
-//!
-//! Output pixel format: we request a `ZPixmap` from a 24/32-bit
-//! TrueColor visual. On the overwhelmingly common little-endian X
-//! server with a 32-bpp visual the byte order is B,G,R,X — exactly the
-//! BGRx the shared protocol and the parent's `argb_to_i420` expect. We
-//! validate the depth/bpp and bail with a clear error rather than ship
-//! wrong colors if a server hands us something exotic.
+//! A 24/32-bit ZPixmap on a little-endian server is BGRX, the protocol's
+//! format; anything else is rejected rather than shipped miscolored.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -48,7 +19,7 @@ use pollis_capture_proto::{now_us, CaptureMsg};
 use tokio::sync::mpsc;
 use xcb::{shm, x, Xid};
 
-/// Geometry of the monitor we capture, in root-window coordinates.
+/// Root-window coordinates.
 struct CaptureRegion {
     x: i16,
     y: i16,
@@ -56,7 +27,6 @@ struct CaptureRegion {
     height: u16,
 }
 
-/// Fetch a CRTC's geometry, or `None` if the request fails.
 fn crtc_info(
     conn: &xcb::Connection,
     crtc: xcb::randr::Crtc,
@@ -69,7 +39,6 @@ fn crtc_info(
 }
 
 impl CaptureRegion {
-    /// A CRTC becomes a capture region only if it has a non-zero size.
     fn from_crtc(c: &xcb::randr::GetCrtcInfoReply, what: &str) -> Option<Self> {
         if c.width() == 0 || c.height() == 0 {
             return None;
@@ -90,15 +59,10 @@ impl CaptureRegion {
     }
 }
 
-/// The RandR primary output's CRTC, if there is one and it is usable.
 fn primary_region(conn: &xcb::Connection, root: x::Window) -> Option<CaptureRegion> {
     let cookie = conn.send_request(&xcb::randr::GetOutputPrimary { window: root });
     let output = conn.wait_for_reply(cookie).ok()?.output();
-    // `Xid::is_none()` lives on every XID newtype the xcb 1.x bindings
-    // expose (Output / Crtc / Mode / …). It's the typed equivalent of
-    // X11's `None` sentinel — `0` for the resource id — without
-    // assuming the generated bindings expose a free `x::NONE` const
-    // (they don't — only the atom-shaped one, `x::ATOM_NONE`).
+    // `Xid::is_none()` is X11's `None` (0); xcb 1.x has no free `x::NONE`.
     if output.is_none() {
         return None;
     }
@@ -113,7 +77,6 @@ fn primary_region(conn: &xcb::Connection, root: x::Window) -> Option<CaptureRegi
     CaptureRegion::from_crtc(&crtc_info(conn, crtc)?, "primary output")
 }
 
-/// The first active CRTC RandR reports, if any.
 fn first_active_region(conn: &xcb::Connection, root: x::Window) -> Option<CaptureRegion> {
     let cookie = conn.send_request(&xcb::randr::GetScreenResourcesCurrent { window: root });
     let res = conn.wait_for_reply(cookie).ok()?;
@@ -126,15 +89,12 @@ fn first_active_region(conn: &xcb::Connection, root: x::Window) -> Option<Captur
     })
 }
 
-/// Pick the monitor to capture. Prefer the RandR primary output; fall
-/// back to the first connected/active CRTC; finally fall back to the
-/// whole root window if RandR is unavailable (very old server).
+/// RandR primary output, else the first active CRTC, else the whole root.
 fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion> {
     if let Some(region) = primary_region(conn, root).or_else(|| first_active_region(conn, root)) {
         return Ok(region);
     }
 
-    // RandR absent or no usable output: whole root window.
     let geom = conn.send_request(&x::GetGeometry {
         drawable: x::Drawable::Window(root),
     });
@@ -154,12 +114,9 @@ fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion>
     })
 }
 
-/// Run the synchronous SHM capture loop. Sends one Format then a Frame
-/// per tick (capped to ~60 Hz; the parent reader also enforces its own
-/// MAX_SHARE_FPS clamp, so this is just to avoid a busy spin). Returns
-/// when `stop` is set or the channel/socket is gone.
+/// The synchronous SHM loop: one Format, then a Frame per ~60 Hz tick, until
+/// `stop` or the channel closes.
 pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
-    // Connect with the RandR + MIT-SHM extensions.
     let (conn, screen_num) = xcb::Connection::connect_with_extensions(
         None,
         &[xcb::Extension::Shm, xcb::Extension::RandR],
@@ -174,9 +131,6 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         .ok_or_else(|| anyhow!("no X screen {screen_num}"))?;
     let root = screen.root();
     let root_depth = screen.root_depth();
-    // We rely on a 24/32-bpp TrueColor framebuffer so the ZPixmap byte
-    // order is BGRX on a little-endian server. Reject anything else
-    // loudly rather than publish miscolored frames.
     if root_depth != 24 && root_depth != 32 {
         return Err(anyhow!(
             "unsupported X root depth {root_depth} (need 24 or 32 for BGRx capture)"
@@ -195,12 +149,9 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         return Err(anyhow!("X11 capture region is zero-sized"));
     }
 
-    // 4 bytes per pixel (BGRX). Full-framebuffer buffer, reused every
-    // tick — v1 copies the whole region each frame (Phase 2 = XDamage).
     let bytes_per_pixel = 4usize;
     let frame_bytes = width as usize * height as usize * bytes_per_pixel;
 
-    // MIT-SHM segment sized for one full frame.
     let shmid = unsafe {
         libc::shmget(
             libc::IPC_PRIVATE,
@@ -218,8 +169,6 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         }
         return Err(anyhow!("shmat failed"));
     }
-    // Mark the segment removed-on-detach now so it can never leak even
-    // if we crash: the kernel keeps it alive until the last detach.
     let shmseg: shm::Seg = conn.generate_id();
     conn.send_and_check_request(&shm::Attach {
         shmseg,
@@ -227,11 +176,11 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         read_only: false,
     })
     .context("shm::Attach (MIT-SHM not available?)")?;
+    // Remove-on-detach now, so the segment can't leak even if we crash.
     unsafe {
         libc::shmctl(shmid, libc::IPC_RMID, std::ptr::null_mut());
     }
 
-    // Cleanup guard for the SHM detach + X seg detach.
     struct ShmGuard {
         addr: *mut libc::c_void,
     }
@@ -244,8 +193,6 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
     }
     let _guard = ShmGuard { addr: shmaddr };
 
-    // Announce the source size once. The parent creates the LiveKit
-    // track from this.
     if tx
         .blocking_send(CaptureMsg::Format {
             width: width as u32,
@@ -256,9 +203,8 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         return Ok(());
     }
 
-    // ~60 Hz tick. The parent reader also clamps to MAX_SHARE_FPS; this
-    // is the cheap producer-side spacer so we don't peg a core on a weak
-    // CPU doing full-frame copies.
+    // Producer-side spacer so full-frame copies don't peg a core; the parent
+    // also clamps to MAX_SHARE_FPS.
     let frame_interval = Duration::from_nanos(1_000_000_000 / 60);
     let slice =
         unsafe { std::slice::from_raw_parts(shmaddr as *const u8, frame_bytes) };
@@ -269,8 +215,6 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         }
         let tick_start = Instant::now();
 
-        // ZPixmap into the SHM segment. Synchronous round-trip but the
-        // pixels travel via shared memory, not the X socket.
         let cookie = conn.send_request(&shm::GetImage {
             drawable: x::Drawable::Window(root),
             x: region.x,
@@ -289,14 +233,11 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
             }
         }
 
-        // SHM stride for a ZPixmap is width * 4 (no row padding for
-        // 32bpp at these widths on the common servers; X pads to the
-        // scanline pad which is 32 bits == one pixel, so width*4 holds).
+        // The 32-bit scanline pad is one pixel, so the stride is width * 4.
         let stride = width as u32 * bytes_per_pixel as u32;
         let timestamp_us = now_us();
 
-        // Copy out of SHM — the next GetImage overwrites it. Last-frame-
-        // wins: try_send fails fast when the socket can't keep up.
+        // Copy out: the next GetImage overwrites the segment.
         let bgrx = slice.to_vec();
         if tx
             .try_send(CaptureMsg::Frame {
@@ -308,22 +249,19 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
             })
             .is_err()
         {
-            // Either full (drop this frame, last-frame-wins) or the
-            // receiver is gone (parent closed the socket -> exit).
+            // Full drops the frame; closed means the parent is gone.
             if tx.is_closed() {
                 break;
             }
         }
 
-        // Pace to ~60 Hz.
         let elapsed = tick_start.elapsed();
         if elapsed < frame_interval {
             std::thread::sleep(frame_interval - elapsed);
         }
     }
 
-    // Detach the X side of the SHM seg before the guard detaches our
-    // mapping.
+    // Detach the X side before the guard detaches our mapping.
     let _ = conn.send_and_check_request(&shm::Detach { shmseg });
     Ok(())
 }

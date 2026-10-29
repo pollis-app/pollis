@@ -1,27 +1,14 @@
-//! `pollis-verify` — independently verify the Pollis public transparency log.
-//!
-//! A verification-only CLI for auditors: it fetches the published artifacts over
-//! HTTP(S) and checks them, trusting only the pinned log public key (ML-DSA-44
-//! since #668; while that rotation is in flight no key is pinned and the
-//! verifier reports *unverified* rather than trusting the served one). It does
-//! not run, serve, or build anything — that's what the operator `serve` binary
-//! is for. Every subcommand exits non-zero if verification fails, so they slot
-//! into CI and scripts.
+//! `pollis-verify` — a verification-only auditor CLI for the Pollis public
+//! transparency log, trusting only the pinned log key. Every subcommand exits
+//! non-zero if verification fails.
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 use verifiable_log_serve::{account, group, release, remote, ServeError};
 
-/// What `--version` reports (#670).
-///
-/// The number comes from the crate's own concrete `version` field, which maps
-/// 1:1 onto the `pollis-verify-v*` release tag — so a downloaded binary can
-/// state which release it is. The commit is an annotation on top: the release
-/// and rebuild-verify workflows pass `POLLIS_VERIFY_GIT_SHA`, since the SHA is
-/// what the recipe in the binaries tree pins. A plain `cargo build` has no tag
-/// behind it and says so rather than naming a commit it cannot vouch for — an
-/// auditor comparing a local build against a release should see that
-/// difference, not have it papered over.
+/// What `--version` reports (#670): the crate version (1:1 with the
+/// `pollis-verify-v*` tag) plus the commit the release workflow stamps, or
+/// "source build" when unstamped rather than a commit it cannot vouch for.
 fn version_string() -> &'static str {
     static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     VERSION
@@ -144,26 +131,15 @@ fn run() -> Result<bool, ServeError> {
     }
 }
 
-/// Process exit codes, kept stable so scripts and CI can branch on them:
-///
-/// * `0` — verification passed.
-/// * `1` — verification **failed** (a bad signature, a forged proof, a fork, an
-///   epoch regression) or a transport/parse error. The log was checked and found
-///   wanting, or could not be fetched.
-/// * `2` — **version skew**: the log is published in a wire format newer than this
-///   binary understands, so it could not verify it *at all*. This is NOT a
-///   tampering finding — it means "upgrade your verifier". Distinct from `1` so
-///   the day after a key rotation / republish a stale binary does not read as
-///   "verification failed" (the same false-alarm mode #668 ruled out for the
-///   missing log pin: an inability to check must withhold trust, never alarm).
+/// Stable exit codes: `0` passed, `1` verification failed or transport/parse
+/// error, `2` version skew ("upgrade your verifier", not a tampering finding;
+/// #668).
 const EXIT_VERSION_SKEW: u8 = 2;
 
 fn main() -> ExitCode {
     match run() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
-        // Version skew is reported as version skew, with its own exit code and an
-        // actionable message — never folded into a verification failure.
         Err(ServeError::VersionSkew { served, supported }) => {
             eprintln!(
                 "your pollis-verify is too old for this log — upgrade it.\n\
@@ -212,16 +188,8 @@ mod tests {
         panic!("[workspace.package] has no version");
     }
 
-    /// #670: the binary released as `pollis-verify-v0.4.0` reported `1.1.0` —
-    /// the frozen workspace placeholder, which is not a version of anything —
-    /// so an auditor holding a download could not correlate it with the release
-    /// it came from. This is the auditor-facing tool for the transparency log,
-    /// so being unable to state its own identity is load-bearing, not cosmetic.
-    ///
-    /// Guards the specific regression: `verifiable-log-serve` going back to
-    /// `version.workspace = true`. `verifier-release.yml` covers the other half
-    /// (the number drifting away from the release tag), which can only be
-    /// checked where the tag exists.
+    /// #670: guards against going back to `version.workspace = true`;
+    /// `verifier-release.yml` checks the number against the tag.
     #[test]
     fn the_reported_version_is_this_crates_own_and_not_the_workspace_placeholder() {
         let version = env!("CARGO_PKG_VERSION");
@@ -238,11 +206,6 @@ mod tests {
         );
     }
 
-    /// A build with no release tag behind it has to say so. Naming a commit it
-    /// cannot vouch for would be worse than the placeholder it replaced: an
-    /// auditor comparing a local build against a download should see the
-    /// difference. `cargo test` is exactly such an unstamped build, unless the
-    /// caller stamped one, in which case it must be a full commit hash.
     #[test]
     fn the_build_provenance_suffix_is_either_a_commit_or_an_honest_disclaimer() {
         let reported = version_string();
