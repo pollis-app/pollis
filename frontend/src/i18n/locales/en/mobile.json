@@ -483,6 +483,10 @@
     "groups": "Groups",
     "self": "Self",
     "signInDevice": "Link",
+    "withInvites_one": "{{label}}, {{count}} group invite",
+    "withInvites_other": "{{label}}, {{count}} group invites",
+    "withRequests_one": "{{label}}, {{count}} message request",
+    "withRequests_other": "{{label}}, {{count}} message requests",
     "withUnread_one": "{{label}}, {{count}} unread",
     "withUnread_other": "{{label}}, {{count}} unread"
   },

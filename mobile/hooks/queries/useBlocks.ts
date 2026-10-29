@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import { dmQueryKeys } from "./useDMChannels";
+import { dmQueryKeys, dropDMRequests } from "./useDMChannels";
 
 // Mirrors `pollis_core::commands::blocks::BlockedUser` field for field. It
 // used to name these `blocked_id` / `blocked_username` / `created_at`, which
@@ -52,6 +52,16 @@ export function useBlockUser() {
       await invoke("block_user", {
         blockerId: currentUser.id,
         blockedId,
+      });
+    },
+    // Blocking declines the sender's request: it leaves the list, and the
+    // Direct tab badge, on the tap (#1561).
+    onMutate: async (blockedId: string) => {
+      await dropDMRequests(queryClient, currentUser?.id ?? null, (r) => r.user2_id === blockedId);
+    },
+    onError: () => {
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
       });
     },
     onSuccess: () => {

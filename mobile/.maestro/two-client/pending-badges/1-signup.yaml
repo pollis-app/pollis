@@ -1,0 +1,21 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# PENDING BADGES (#1561), part 1 of 3 — driven by
+# scripts/maestro-pending-badges.sh. Sign up a fresh account: nothing is
+# pending yet, so neither tab is badged. The app stays in the foreground on
+# the Groups tab while the peers send their requests and invites.
+
+- runFlow: ../../subflows/sign-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- assertNotVisible:
+    id: "badge-direct"
+- assertNotVisible:
+    id: "badge-groups"
+- takeScreenshot: pending-badges-01-none

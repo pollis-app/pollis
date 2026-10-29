@@ -1,0 +1,84 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# PENDING BADGES (#1561), part 2 of 3. Two strangers opened DMs with the
+# device (two message requests) and a third invited it to two groups. The
+# inbox wake-ups refresh the cached requests and invites, so both tab badges
+# must read 2 WITHOUT the device opening Direct or Groups — Slack/Discord
+# style, the pending items count into the number. Then: accepting one request
+# drops the Direct badge to 1, and blocking the other sender (the decline
+# path) clears it. Message requests is a root-stack page with no tab bar, so
+# each badge check is made back on Direct.
+
+- launchApp:
+    stopApp: false
+# Auto-lock may have engaged while the peers ran; unlock if so.
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "badge-direct"
+      containsChild:
+        text: "2"
+    timeout: 90000
+- extendedWaitUntil:
+    visible:
+      id: "badge-groups"
+      containsChild:
+        text: "2"
+    timeout: 90000
+- takeScreenshot: pending-badges-02-both-badged
+
+# Accept one request.
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-dm-requests"
+- extendedWaitUntil:
+    visible:
+      id: "screen-dm-requests"
+    timeout: 15000
+- tapOn:
+    id: "btn-accept-request-.*"
+    index: 0
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "badge-direct"
+      containsChild:
+        text: "1"
+    timeout: 15000
+- takeScreenshot: pending-badges-03-one-request
+
+# Block the other sender: the last request goes, and the badge with it.
+- tapOn:
+    id: "row-dm-requests"
+- extendedWaitUntil:
+    visible:
+      id: "btn-block-request-.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-block-request-.*"
+    index: 0
+- extendedWaitUntil:
+    notVisible:
+      id: "row-request-.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    notVisible:
+      id: "badge-direct"
+    timeout: 15000
+- assertNotVisible:
+    id: "row-dm-requests"
+# The invites are untouched.
+- assertVisible:
+    id: "badge-groups"
+- takeScreenshot: pending-badges-04-requests-cleared

@@ -472,6 +472,10 @@
     "groups": "Grupos",
     "self": "Tú",
     "signInDevice": "Vincular",
+    "withInvites_one": "{{label}}, {{count}} invitación a grupo",
+    "withInvites_other": "{{label}}, {{count}} invitaciones a grupos",
+    "withRequests_one": "{{label}}, {{count}} solicitud de mensaje",
+    "withRequests_other": "{{label}}, {{count}} solicitudes de mensaje",
     "withUnread_one": "{{label}}, {{count}} sin leer",
     "withUnread_other": "{{label}}, {{count}} sin leer"
   },

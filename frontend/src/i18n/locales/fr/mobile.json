@@ -472,6 +472,10 @@
     "groups": "Groupes",
     "self": "Moi",
     "signInDevice": "Lier",
+    "withInvites_one": "{{label}}, {{count}} invitation de groupe",
+    "withInvites_other": "{{label}}, {{count}} invitations de groupe",
+    "withRequests_one": "{{label}}, {{count}} demande de message",
+    "withRequests_other": "{{label}}, {{count}} demandes de message",
     "withUnread_one": "{{label}}, {{count}} non lu",
     "withUnread_other": "{{label}}, {{count}} non lus"
   },
