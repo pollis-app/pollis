@@ -291,6 +291,32 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
     Ok(report)
 }
 
+/// A subtree's served key set narrowed to the pinned log key (H-1): the
+/// subtrees are signed by the same key, so a server must not be able to swap in
+/// its own key there either. `None`, with a failed check, when no usable pinned
+/// key is served.
+fn pinned_subtree_candidates(
+    pk: &PublicKeyDoc,
+    tree: &str,
+    report: &mut Report,
+) -> Option<Vec<(String, verifiable_log::VerifyingKey)>> {
+    let served = pk.verifying_candidates(now_ms());
+    if served.is_empty() {
+        report.check(
+            false,
+            format!("{tree}: public_key.json has no usable key (all expired or malformed)"),
+        );
+        return None;
+    }
+    let kept = crate::pinned::retain_pinned(served, &mut |ok, label| {
+        report.check(ok, format!("{tree}: {label}"));
+    });
+    if kept.is_empty() {
+        return None;
+    }
+    Some(kept)
+}
+
 /// The commit-log checks for `{base}/v1/account-keys/...`, under the account
 /// STH context and [`AccountKeyInvariant`]. An absent tree (404) is a note; a
 /// present-but-invalid one is a hard failure.
@@ -311,16 +337,9 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
 
     let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
-        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
+        Ok(pk) => match pinned_subtree_candidates(&pk, "account-keys", report) {
             Some(vk) => vk,
-            None => {
-                report.check(
-                    false,
-                    "account-keys: public_key.json has no usable key (all expired or malformed)"
-                        .to_string(),
-                );
-                return;
-            }
+            None => return,
         },
         Err(e) => {
             report.check(false, format!("account-keys: fetch public_key.json: {e}"));
@@ -487,16 +506,9 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
 
     let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
-        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
+        Ok(pk) => match pinned_subtree_candidates(&pk, "binaries", report) {
             Some(vk) => vk,
-            None => {
-                report.check(
-                    false,
-                    "binaries: public_key.json has no usable key (all expired or malformed)"
-                        .to_string(),
-                );
-                return;
-            }
+            None => return,
         },
         Err(e) => {
             report.check(false, format!("binaries: fetch public_key.json: {e}"));
@@ -793,6 +805,37 @@ mod overlay_proxy_tests {
             }
         });
         (addr, count)
+    }
+
+    fn key_doc(vk: &verifiable_log::VerifyingKey) -> PublicKeyDoc {
+        let hex = hex::encode(vk.encode());
+        PublicKeyDoc {
+            public_key: hex.clone(),
+            keys: vec![crate::bundle::PublicKeyEntry {
+                key_id: verifiable_log::key_id_for(vk),
+                algorithm: "ML-DSA-44".to_string(),
+                public_key: hex,
+                not_after: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn subtree_refuses_a_served_key_that_is_not_pinned() {
+        use ml_dsa::Keypair as _;
+        let foreign = verifiable_log::SigningKey::from_seed(&[7u8; 32].into()).verifying_key();
+        let mut report = Report::new();
+        assert!(pinned_subtree_candidates(&key_doc(&foreign), "account-keys", &mut report).is_none());
+        assert!(!report.ok, "an unpinned subtree key must fail the audit");
+    }
+
+    #[test]
+    fn subtree_keeps_the_pinned_key() {
+        let pinned = verifiable_log::verifying_key_from_hex(crate::pinned::PINNED_LOG_PUBLIC_KEYS_HEX[0]).unwrap();
+        let mut report = Report::new();
+        let kept = pinned_subtree_candidates(&key_doc(&pinned), "binaries", &mut report).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert!(report.ok);
     }
 
     #[test]
