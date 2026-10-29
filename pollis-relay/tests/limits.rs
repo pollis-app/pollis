@@ -2,21 +2,14 @@
 //! **before** any handshake, and what a self-certified client can do with an
 //! opening `Layer` frame.
 //!
-//! Each test encodes an invariant that the code once did not hold:
+//! Each test encodes one invariant:
 //!
 //! - L1: QUIC connections are capped **per source IP** at accept — one host
 //!   cannot fill the global cap on its own.
-//! - L2: a stream that opens and then says nothing (or half of something) is
-//!   refused at the deadline, and the circuit slot it held is freed. Without
-//!   this, every such stream parked a task and a slot forever.
-//! - L3: a stream that opens with `Layer` — which any client can send, since it
-//!   is unauthenticated — is limited under the sending connection's address
-//!   like a direct stream. Previously it was admitted account-only, which with
-//!   self-minted accounts is no limit at all.
+//! - L2: a stream that stalls before its terminal command is refused at the deadline, freeing its slot.
+//! - L3: a `Layer`-opened stream is limited under the connection's address like a direct one.
 //! - L4: the egress allowlist binds `host:port`, not host alone: a bare entry
 //!   means 443 only, and an allowlisted host's other ports stay unreachable.
-//!
-//! Everything runs headless on loopback with certs generated in-test.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -63,8 +56,6 @@ fn client_identity() -> Arc<ClientIdentity> {
     Arc::new(ClientIdentity::new(USER, DEVICE, DEVICE_ED_PUB, device, cert))
 }
 
-// ---- test infrastructure ---------------------------------------------------
-
 struct TestRelay {
     addr: SocketAddr,
     cert: CertificateDer<'static>,
@@ -72,9 +63,7 @@ struct TestRelay {
     _task: tokio::task::JoinHandle<()>,
 }
 
-/// Spawn a relay with the given allowlist entries (verbatim — no port is
-/// appended, because the port rule is what some of these tests are about) and
-/// a chance to adjust the config.
+/// Spawn a relay with verbatim allowlist entries (no port appended) and a config hook.
 fn spawn_relay(allow: &[String], tune: impl FnOnce(&mut RelayConfig)) -> TestRelay {
     let mut config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
@@ -184,8 +173,6 @@ async fn echo_through<S: AsyncReadExt + AsyncWriteExt + Unpin>(stream: &mut S, p
     assert_eq!(&buf, payload);
 }
 
-// ---- L1: per-IP connection cap ---------------------------------------------
-
 /// Two connections from one address are admitted under a cap of two; the third
 /// is refused at accept — before any handshake frame, before any stream — and
 /// closing one lets the next through.
@@ -210,8 +197,6 @@ async fn l1_connections_are_capped_per_source_ip() {
         .await
         .expect("a slot freed by a closed connection is reusable");
 }
-
-// ---- L2: negotiation deadline ----------------------------------------------
 
 /// A stream that sends part of a frame and then stalls is refused at the
 /// deadline instead of parking a task forever.
@@ -271,8 +256,6 @@ async fn l2_a_stalled_admitted_stream_frees_its_circuit_slot() {
     echo_through(&mut stream, b"after-timeout").await;
 }
 
-// ---- L3: Layer opener is per-IP limited ------------------------------------
-
 /// Open a stream with `Layer`, complete the onion layer against the relay's own
 /// pinned cert (public in the directory — anyone can), and run a handshake +
 /// `Connect` inside it: exactly what a client does to pose as a previous hop.
@@ -307,10 +290,7 @@ async fn connect_through_a_forged_layer(
     Ok(())
 }
 
-/// With a per-IP cap of one circuit, a second circuit from the same address is
-/// refused **even when it arrives inside a `Layer`** — the opener buys no
-/// exemption. The same shape under a cap of two is admitted, so the refusal is
-/// the limit and not a broken layer path.
+/// Under a per-IP cap of one, a second circuit is refused even inside a `Layer`; a cap of two admits it.
 #[tokio::test]
 async fn l3_a_layer_opener_does_not_escape_the_per_ip_limits() {
     let (echo_addr, _c) = spawn_echo().await;
@@ -347,8 +327,6 @@ async fn l3_a_layer_opener_does_not_escape_the_per_ip_limits() {
         .await
         .expect("under the cap, a layered stream is served like a direct one");
 }
-
-// ---- L4: host:port allowlist ------------------------------------------------
 
 /// A bare host entry means HTTPS only: the same host on another port is
 /// `NotAllowed`. An explicit `host:port` permits exactly that port, and `:*`

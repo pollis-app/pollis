@@ -1,20 +1,13 @@
-//! Track-B fuzz target for `classify` (I1, client-side gap detection —
-//! `pollis_core::commands::mls::invariants`). Asserts the SAME property its Kani
-//! harness `i1_classify_no_gap_apply` proves: **replay never `Apply`s across a
-//! gap** — `Apply` ⟺ the next row's epoch is exactly `current_epoch`; a present
-//! but non-bridging row is always `GapRecover`, and no row is `Wait`.
+//! Fuzz target for `classify` (I1): replay never `Apply`s across a gap (Kani: `i1_classify_no_gap_apply`).
 //!
-//! NEGATIVE CHECK (teeth): build with `--cfg fuzz_mutant` and the target calls a
-//! buggy classifier that `Apply`s ANY present row (even a forward-gap one); the
-//! fuzzer trips the no-gap-apply assertion fast.
+//! Teeth: `--cfg fuzz_mutant` `Apply`s any present row.
 #![no_main]
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use pollis_core::commands::mls::invariants::{classify, ReplayStep};
 
-/// Small epoch domain (mirrors the Kani `0..=3`, widened slightly) — the
-/// no-gap-apply property is universal, so a tiny domain loses no generality.
+/// Small epoch domain; the property is universal.
 const DOMAIN: u64 = 5;
 
 #[derive(Debug, Arbitrary)]
@@ -24,8 +17,7 @@ struct Input {
     next: u64,
 }
 
-/// The classifier under test. Clean → real `classify`; `--cfg fuzz_mutant` → a
-/// buggy variant that applies any present row regardless of the gap.
+/// The classifier under test; `--cfg fuzz_mutant` ignores the gap.
 fn run(current_epoch: u64, next_row_epoch: Option<u64>) -> ReplayStep {
     #[cfg(not(fuzz_mutant))]
     {

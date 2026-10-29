@@ -2,11 +2,7 @@
 //! #1537): `enqueue_on`, a failed or refused attempt, `settle_on`, Discard and
 //! the drain's listing, on a real local schema, against a plain model.
 //!
-//! Fuzzed: sends (and a renderer re-invoking a send under the same id), retries
-//! the drain makes from its listing, attempts that land or fail, transient and
-//! permanent refusals, discards, and process deaths at any point — a death is
-//! simply the absence of the next transition, so every prefix of every
-//! sequence is also checked.
+//! Fuzzed: sends, re-invoked sends, drain retries, landing/failing attempts, refusals, discards and deaths.
 //!
 //! Properties, after every step:
 //!   * **Never duplicated:** at most one row per message id, and re-enqueuing a
@@ -16,12 +12,7 @@
 //!     oldest first.
 //!   * **Never demoted:** a delivered message stays delivered.
 //!
-//! The renderer half of the outbox (`pendingMessages.ts`, desktop and mobile)
-//! is TypeScript, unreachable from here; its reducers are pinned by the two
-//! `pending-messages.test.ts` suites.
-//!
-//! NEGATIVE CHECK (teeth): with `--cfg fuzz_mutant` a failed attempt is marked
-//! with an unguarded `UPDATE`, so a late failure demotes a delivered message.
+//! Teeth: `--cfg fuzz_mutant` uses an unguarded `UPDATE`, so a late failure demotes a delivered message.
 #![no_main]
 
 use std::collections::BTreeMap;

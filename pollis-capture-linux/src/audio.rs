@@ -1,40 +1,15 @@
 //! Shared-audio capture on Linux: the default sink's monitor, via
 //! PipeWire.
 //!
-//! This lives in its own thread and its own PipeWire connection rather
-//! than riding the portal's core fd, because it has to serve **both**
-//! screen-capture backends. The portal path has a core fd to share; the
-//! X11/xcb path (issue #281) has none, and a session on Xorg wanting to
-//! share a video's sound is not a stranger case than one on Wayland.
-//! Connecting independently means one audio implementation covers both.
+//! Its own PipeWire connection, so the X11 backend (no portal fd) gets audio too.
 //!
 //! ## What gets captured
 //!
-//! `stream.capture.sink = true` attaches the stream to the **default
-//! sink's monitor** — everything the machine is playing, mixed. That is
-//! deliberately coarser than macOS, where ScreenCaptureKit scopes audio to
-//! the same content filter as the video and so gives per-application sound
-//! for free when a window is shared. PipeWire can do per-application too,
-//! but only by resolving the shared window to its output node — and on
-//! Linux the portal owns the picker, so the helper is never told which
-//! window the user chose. Whole-system is the honest answer available
-//! here; the UI says so.
+//! The default sink's monitor: whole-system, since the portal never reveals the chosen window.
 //!
-//! ## The loopback problem, and why it is now solved
+//! ## Loopback
 //!
-//! The sink monitor contains **our own playback**, which during a call
-//! means every remote participant's voice. Publishing that verbatim sends
-//! everyone their own audio back a few hundred milliseconds late. This is
-//! exactly why the earlier attempt at Linux screenshare audio was pulled
-//! (see the note this module replaces in `linux.rs`), and it is not
-//! fixable inside this helper: by the time the monitor is readable, our
-//! contribution is already summed into the mix.
-//!
-//! It is fixable in the parent, which knows precisely what it played.
-//! `pollis-core`'s `screenshare::self_echo` runs the frames this module
-//! produces through an echo canceller whose render reference is the voice
-//! mixer's own output. That is why this module may capture the whole sink
-//! monitor without re-introducing the bug that shelved it.
+//! The monitor includes our own playback; `pollis-core`'s `screenshare::self_echo` cancels it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -43,20 +18,13 @@ use anyhow::{anyhow, Result};
 use pollis_capture_proto::{now_us, CaptureMsg};
 use tokio::sync::mpsc;
 
-/// What we ask PipeWire for. 48 kHz stereo s16 is what the parent's
-/// publish path wants anyway, and asking for it here means the common case
-/// needs no conversion at either end. PipeWire resamples for us if the
-/// sink runs at something else, so `param_changed` is still authoritative.
+/// 48 kHz stereo s16, what the parent publishes; `param_changed` stays authoritative.
 const WANT_RATE: u32 = 48_000;
 const WANT_CHANNELS: u32 = 2;
 
 /// Spawn the sink-monitor capture on its own thread.
 ///
-/// Audio is **strictly best-effort**: a machine with no PipeWire, no
-/// default sink, or a locked-down session must still be able to share its
-/// screen. Every failure below reports itself with the `audio:` prefix the
-/// parent treats as non-fatal and then lets the thread end, leaving video
-/// untouched.
+/// Strictly best-effort: failures send a non-fatal `audio:` error and end the thread.
 pub fn spawn(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("pollis-capture-pw-audio".into())
@@ -83,14 +51,10 @@ fn run(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&mainloop, None)?;
-    // Our own connection to the session's PipeWire daemon — not the
-    // portal's fd. See the module docs: the X11 backend has no portal fd
-    // at all, and audio must work there too.
+    // Our own connection, not the portal's fd (the X11 backend has none).
     let core = context.connect_rc(None)?;
 
-    /// Negotiated format, filled by `param_changed` before any buffer
-    /// arrives. `announced` guards against re-sending AudioFormat on a
-    /// renegotiation that didn't actually change anything.
+    /// Negotiated format; `announced` suppresses a no-op re-announce.
     struct Data {
         rate: u32,
         channels: u32,
@@ -189,8 +153,7 @@ fn run(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
             }
             let bytes = &slice[..chunk_size];
             let Some(pcm) = to_s16(bytes, ud.format) else {
-                // A format we didn't ask for and can't read. Dropping is
-                // the right call: guessing the layout would publish noise.
+                // Unreadable format: drop rather than publish noise.
                 static WARNED: AtomicBool = AtomicBool::new(false);
                 if !WARNED.swap(true, Ordering::Relaxed) {
                     eprintln!(
@@ -203,8 +166,7 @@ fn run(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
             if pcm.is_empty() {
                 return;
             }
-            // try_send, matching the video path: a stalled socket drops a
-            // block rather than blocking PipeWire's real-time thread.
+            // try_send: never block PipeWire's real-time thread.
             let _ = tx_for_proc.try_send(CaptureMsg::AudioFrame {
                 sample_rate: ud.rate,
                 channels: ud.channels,
@@ -232,9 +194,7 @@ fn run(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
         .ok_or_else(|| anyhow!("malformed audio format pod"))?;
     let mut params = [format_pod];
 
-    // `None` target: let the session manager attach us to whatever the
-    // default sink currently is, so switching output device mid-share
-    // follows the user rather than stranding us on the old device.
+    // `None` target follows the default sink if the user switches output mid-share.
     stream.connect(
         spa::utils::Direction::Input,
         None,
@@ -251,22 +211,8 @@ fn run(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
 /// Convert one interleaved PipeWire block to the interleaved s16 the wire
 /// protocol carries.
 ///
-/// We ask for `S16LE` and PipeWire converts for us in almost every case,
-/// but a node can still negotiate `F32LE` — it is the format the graph
-/// runs in internally, so it is the one a passthrough-minded session
-/// manager reaches for. Handling both is a dozen lines and avoids a silent
-/// no-audio share on those setups. Anything else returns `None` rather
-/// than guessing at a layout.
-// Compared with `==` rather than matched: `AudioFormat::S16` and
-// `AudioFormat::S16LE` are the same value on a little-endian target, so
-// listing both as patterns is an unreachable-arm warning rather than the
-// documentation it looks like.
-//
-// Note the asymmetry in libspa's constants — there is a native-endian
-// `S16` but no native-endian `F32`, only `F32LE`/`F32BE` and the PLANAR
-// `F32P`. `F32P` is deliberately absent below: it is a different memory
-// layout (one buffer per channel), so accepting it here would read
-// interleaved samples out of planar data and publish noise.
+/// `F32LE` is handled too, since some nodes negotiate it; anything else returns `None`.
+// `==`, not patterns: S16 and S16LE alias on little-endian. Planar `F32P` is deliberately rejected.
 fn to_s16(bytes: &[u8], format: pipewire::spa::param::audio::AudioFormat) -> Option<Vec<i16>> {
     use pipewire::spa::param::audio::AudioFormat;
 
@@ -315,9 +261,7 @@ mod tests {
         assert!((got[3] - 16_383).abs() <= 1);
     }
 
-    /// Out-of-range float input must clamp rather than wrap: an
-    /// unclamped `as i16` cast of a hot sample turns a loud passage into
-    /// full-scale noise of the opposite sign.
+    /// Out-of-range float input must clamp, not wrap.
     #[test]
     fn f32_overshoot_clamps_instead_of_wrapping() {
         let src: Vec<f32> = vec![1.5, -1.5];

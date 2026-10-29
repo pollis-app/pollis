@@ -48,8 +48,7 @@ fn client_signing_key() -> SigningKey<MlDsa44> {
     SigningKey::<MlDsa44>::from_seed(&[7u8; 32].into())
 }
 
-/// The user's account identity key — the test's "injected known account
-/// identity" (task §2). It certifies the device keys into a cert chain.
+/// The user's account identity key; it certifies the device keys.
 fn account_key() -> SigningKey<MlDsa44> {
     SigningKey::<MlDsa44>::from_seed(&[3u8; 32].into())
 }
@@ -78,8 +77,6 @@ fn client_identity() -> Arc<ClientIdentity> {
         cert,
     ))
 }
-
-// ---- test infrastructure ---------------------------------------------------
 
 /// A running relay plus what a client needs to reach it.
 struct TestRelay {
@@ -221,8 +218,6 @@ async fn read_http_head<S: AsyncReadExt + Unpin>(s: &mut S) -> std::io::Result<V
     Ok(buf)
 }
 
-// ---- T1 --------------------------------------------------------------------
-
 #[tokio::test]
 async fn t1_reqwest_through_overlay_to_tls_origin() {
     let (origin_addr, ca, origin_conns) = spawn_tls_origin("hello-through-the-relay").await;
@@ -232,9 +227,7 @@ async fn t1_reqwest_through_overlay_to_tls_origin() {
         .await
         .unwrap();
 
-    // The reqwest client trusts the test CA and routes through the shim. This is
-    // the production proxy path (http_client_builder) plus a test root; the
-    // proxy wiring is identical to `http_client(Some(&shim))`.
+    // The production proxy path (`http_client_builder`) plus a test root.
     let client = pollis_relay::http::http_client_builder(Some(&shim))
         .add_root_certificate(reqwest::Certificate::from_der(&ca).unwrap())
         .build()
@@ -252,8 +245,6 @@ async fn t1_reqwest_through_overlay_to_tls_origin() {
     assert_eq!(origin_conns.load(Ordering::Relaxed), 1);
     drop(shim);
 }
-
-// ---- T2 --------------------------------------------------------------------
 
 #[tokio::test]
 async fn t2_rustls_connector_through_overlay() {
@@ -297,8 +288,6 @@ async fn t2_rustls_connector_through_overlay() {
     drop(shim);
 }
 
-// ---- T3 --------------------------------------------------------------------
-
 #[tokio::test]
 async fn t3_allowlist_rejects_unlisted_host() {
     // Relay allows only origin.test; the shim routes blocked.test to overlay.
@@ -317,8 +306,6 @@ async fn t3_allowlist_rejects_unlisted_host() {
     drop(shim);
 }
 
-// ---- T4 --------------------------------------------------------------------
-
 #[test]
 fn t4_handshake_verification_unit() {
     let account = account_key();
@@ -333,8 +320,7 @@ fn t4_handshake_verification_unit() {
     );
     let now = proto::now_unix();
 
-    // Valid: signature under the presented device key + a cert chaining it to the
-    // account. Verified OFFLINE — no resolver.
+    // Valid: signed by the device key, with a cert chaining it to the account.
     let good = proto::sign_handshake(&device, USER, DEVICE, DEVICE_ED_PUB, cert.clone(), now, [1u8; 32]);
     let v = proto::verify_handshake(&good, now).unwrap();
     assert_eq!(v.user_id, USER);
@@ -353,8 +339,7 @@ fn t4_handshake_verification_unit() {
     forged.signature[0] ^= 0xFF;
     assert_eq!(proto::verify_handshake(&forged, now).unwrap_err(), RejectReason::Unauthorized);
 
-    // Forged cert: a device key NOT certified by the presented account_id_pub —
-    // sign a cert with a wrong account key but claim the real account id.
+    // Forged cert: signed by a wrong account key but claiming the real account id.
     let mut mismatched = good.clone();
     mismatched.cert.device_cert[0] ^= 0xFF;
     assert_eq!(proto::verify_handshake(&mismatched, now).unwrap_err(), RejectReason::Unauthorized);
@@ -386,9 +371,7 @@ async fn t4_relay_accepts_valid_rejects_forged() {
     assert_eq!(&buf, b"ping");
     assert_eq!(relay.stats.dials(), 1);
 
-    // Forged: the presented device key is NOT the one the cert binds (the cert
-    // was minted for a different signing key), so the offline chain fails →
-    // rejected, no dial.
+    // The presented device key is not the one the cert binds: rejected, no dial.
     let bad_device = SigningKey::<MlDsa44>::from_seed(&[9u8; 32].into());
     let wrong_cert = DeviceCertMaterial::mint(
         &account_key(),
@@ -417,8 +400,6 @@ async fn t4_relay_accepts_valid_rejects_forged() {
     assert_eq!(relay.stats.dials(), 1, "rejected client must not cause a dial");
     assert!(relay.stats.rejected() >= 1);
 }
-
-// ---- T5 --------------------------------------------------------------------
 
 #[test]
 fn t5_policy_pure() {
@@ -497,8 +478,6 @@ async fn t5_prefer_no_relay_falls_back_to_direct() {
     drop(shim);
 }
 
-// ---- T6 --------------------------------------------------------------------
-
 /// A plain (non-TLS) loopback HTTP/1.1 server that never involves the overlay.
 async fn spawn_plain_http(body: &'static str) -> SocketAddr {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -537,8 +516,6 @@ async fn t6_off_mode_client_is_direct() {
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "direct-and-inert");
 }
-
-// ---- T7: rate limiting (Slice 2a) ------------------------------------------
 
 /// A second concurrent circuit from the same account, over a per-account cap of
 /// 1, is refused cleanly as `Rejected(RateLimited)` — not dropped.
@@ -604,8 +581,6 @@ async fn t7_rate_limit_trips_to_rejected() {
     s3.read_exact(&mut buf).await.unwrap();
     assert_eq!(&buf, b"two!");
 }
-
-// ---- T8: graceful shutdown drains in-flight pipes (Slice 2a) ---------------
 
 #[tokio::test]
 async fn t8_graceful_shutdown_drains() {

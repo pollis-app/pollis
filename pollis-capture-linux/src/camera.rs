@@ -1,34 +1,16 @@
 //! Webcam capture (V4L2) for `pollis-capture-linux`.
 //!
-//! The Linux counterpart of `pollis-capture-macos`'s `camera.rs`. Where
-//! the screen path (`linux.rs`) has to fork on session type — Wayland
-//! needs the xdg-desktop-portal + PipeWire, X11 needs xcb/SHM — the
-//! camera path has **no such split**: V4L2 is a kernel API, so the same
-//! code captures a webcam identically under X11, Wayland, or a headless
-//! session. (A Flatpak/Snap sandbox would need the camera *portal*, but
-//! native Pollis isn't sandboxed — direct `/dev/videoN` access is the
-//! native-app convention Discord/Zoom/Chrome use.)
+//! V4L2 is a kernel API, so one code path covers X11, Wayland and headless.
 //!
 //! Handshake (shared `pollis-capture-proto`, identical to macOS):
 //!   1. enumerate capture devices and send the list (`Cameras`, 0x05).
-//!      We list every `/dev/videoN` node that reports a VIDEO_CAPTURE
-//!      capability *and* at least one pixel format — that filters out the
-//!      metadata-only sibling nodes UVC cameras expose (e.g. `/dev/video1`)
-//!      without doing any virtual-camera filtering (Discord/Zoom show
-//!      everything else).
+//!      Metadata-only UVC nodes are dropped; no virtual-camera filtering.
 //!   2. wait for the parent's `SelectCamera` (0x06) carrying the chosen
 //!      node path verbatim.
 //!   3. open the device, negotiate a format, and stream `Format` (0x01) +
 //!      `Frame` (0x02) BGRx frames until the parent closes the socket.
 //!
-//! Pixel format: webcams rarely speak BGRx natively. We prefer **MJPG**
-//! (the only HD format many UVC cameras expose — some are MJPG-only),
-//! decode it to RGB with `zune-jpeg`, and pack BGRx. We fall back to raw
-//! **YUYV** (4:2:2) for cameras without MJPG, converting in-process. H.264
-//! is intentionally ignored — decoding it would pull in a heavy codec for
-//! no gain, and every UVC camera also offers MJPG or YUYV. The parent's
-//! shared `argb_to_i420` + LiveKit publish is unchanged — it only ever
-//! sees BGRx, exactly like the screen and macOS-camera paths.
+//! Pixel format: prefer MJPG, fall back to YUYV; H.264 is ignored. Output is always BGRx.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -45,25 +27,17 @@ use v4l::io::traits::CaptureStream;
 use v4l::video::Capture;
 use v4l::{Device, FourCC};
 
-/// We prefer a 720p capture: a sane video-call default that every webcam
-/// supports, lighter on USB bandwidth and JPEG-decode CPU than 1080p, and
-/// the parent re-encodes to VP8 at a bitrate tuned to the negotiated size
-/// anyway. The driver adjusts to its nearest supported size; we publish
-/// whatever it actually gives us.
+/// 720p target; the driver adjusts to its nearest supported size.
 const TARGET_WIDTH: u32 = 1280;
 const TARGET_HEIGHT: u32 = 720;
 
-/// How long to wait for the parent's `SelectCamera` after we send the
-/// device list. Matches the macOS helper — generous to cover the user
-/// taking their time in the picker.
+/// How long to wait for `SelectCamera`; generous for a slow pick.
 const SELECT_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Entry point for `--mode camera`. Mirrors the macOS `run_camera`: speaks
-/// the same enumerate → select → stream handshake over the parent socket.
+/// Entry point for `--mode camera`.
 pub async fn run_camera(sock: &mut UnixStream) -> Result<()> {
     use pollis_capture_proto::write_msg;
 
-    // ── Phase 1: enumerate cameras + send the list ──────────────────────
     eprintln!("[capture/cam] enumerating V4L2 capture devices");
     let list = match enumerate_cameras() {
         Ok(list) => list,
@@ -78,7 +52,6 @@ pub async fn run_camera(sock: &mut UnixStream) -> Result<()> {
         .await
         .context("send Cameras")?;
 
-    // ── Phase 2: wait for the user's pick (SelectCamera) ────────────────
     let device_id = match timeout(SELECT_TIMEOUT, read_msg(sock)).await {
         Ok(Ok(Some(CaptureMsg::SelectCamera(sel)))) => sel.id,
         Ok(Ok(Some(CaptureMsg::Select(_)))) => {
@@ -96,13 +69,7 @@ pub async fn run_camera(sock: &mut UnixStream) -> Result<()> {
     };
     eprintln!("[capture/cam] selected camera: {device_id}");
 
-    // ── Phase 3: open the device + stream frames ────────────────────────
-    //
-    // V4L2 is a synchronous, blocking ioctl API, so capture runs on its
-    // own OS thread and feeds frames back over a bounded channel — the
-    // exact pattern the portal (pipewire) and X11 (xcb) screen backends
-    // use. Capacity 2 + last-frame-wins keeps the hot path from blocking
-    // when the socket can't keep up.
+    // V4L2 blocks, so capture runs on its own thread; capacity 2, last-frame-wins.
     let (tx, mut rx) = mpsc::channel::<CaptureMsg>(2);
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
@@ -128,11 +95,7 @@ pub async fn run_camera(sock: &mut UnixStream) -> Result<()> {
     Ok(())
 }
 
-/// Enumerate V4L2 capture devices. Lists every `/dev/videoN` node that
-/// advertises a VIDEO_CAPTURE capability and enumerates at least one pixel
-/// format — the format check drops the metadata-only nodes UVC cameras
-/// expose alongside the real capture node. No virtual-camera filtering;
-/// the parent shows whatever's left (Discord/Zoom convention).
+/// Enumerate `/dev/videoN` capture nodes that offer a pixel format.
 fn enumerate_cameras() -> Result<CameraList> {
     let mut cameras = Vec::new();
     for node in v4l::context::enum_devices() {
@@ -186,8 +149,7 @@ fn capture_loop(
     let dev = Device::with_path(device_id)
         .with_context(|| format!("open camera {device_id}"))?;
 
-    // Pick the best format the device supports: MJPG first (universal HD,
-    // sometimes the only option), then raw YUYV.
+    // MJPG first (some HD cameras are MJPG-only), then YUYV.
     let formats = Capture::enum_formats(&dev).context("enumerate formats")?;
     let supports = |fourcc: &[u8; 4]| formats.iter().any(|f| f.fourcc == FourCC::new(fourcc));
     let (fourcc, pixel) = if supports(b"MJPG") {
@@ -217,16 +179,14 @@ fn capture_loop(
         ));
     }
 
-    // Ask for 30fps; harmless if the driver ignores it (the parent caps
-    // the publish rate regardless).
+    // Ask for 30fps; harmless if ignored.
     let mut params = Capture::params(&dev).context("read params")?;
     params.interval = v4l::Fraction::new(1, 30);
     let _ = Capture::set_params(&dev, &params);
 
     let width = fmt.width;
     let height = fmt.height;
-    // Even dimensions for I420 chroma alignment, matching the screen +
-    // macOS-camera paths. The parent rounds too, but announce even.
+    // Even dimensions for I420 chroma alignment.
     let even_w = width & !1;
     let even_h = height & !1;
     if even_w == 0 || even_h == 0 {
@@ -234,7 +194,6 @@ fn capture_loop(
     }
     let stride = even_w * 4;
 
-    // mmap streaming with a small buffer ring.
     let mut stream = v4l::io::mmap::Stream::with_buffers(&dev, BufType::VideoCapture, 4)
         .context("start mmap stream")?;
 
@@ -247,9 +206,7 @@ fn capture_loop(
             Ok(v) => v,
             Err(e) => return Err(anyhow!("dequeue frame: {e}")),
         };
-        // Stamp at dequeue, not at enqueue-to-socket: the timestamp should
-        // reflect when the sensor frame left the driver, so decode/convert
-        // time shows up as measurable latency instead of hiding.
+        // Stamp at dequeue so decode/convert time counts as latency.
         let captured_us = now_us();
         let used = (meta.bytesused as usize).min(buf.len());
         let data = &buf[..used];
@@ -259,9 +216,7 @@ fn capture_loop(
             Pixel::Mjpg => mjpg_to_bgrx(data, even_w, even_h, &mut bgrx),
         };
         if !ok {
-            // A corrupt/short frame (rare MJPG hiccup, or a warm-up frame
-            // before the sensor settles). Skip it — the next one is along
-            // in ~33ms.
+            // A corrupt/short frame (MJPG hiccup or warm-up): skip it.
             continue;
         }
 
@@ -279,8 +234,7 @@ fn capture_loop(
             }
         }
 
-        // Last-frame-wins: try_send drops when the socket can't keep up,
-        // never blocking the capture thread.
+        // Last-frame-wins; never block the capture thread.
         let _ = tx.try_send(CaptureMsg::Frame {
             width: even_w,
             height: even_h,
@@ -292,10 +246,7 @@ fn capture_loop(
     Ok(())
 }
 
-/// Convert a packed YUYV (4:2:2) buffer to BGRx. Returns false if the
-/// source is too short for the claimed dimensions. Two pixels share one
-/// U/V pair: `[Y0 U Y1 V]` → two BGRx quads. BGRx == little-endian ARGB,
-/// the byte order the parent's `argb_to_i420` reads.
+/// Convert packed YUYV (4:2:2) to BGRx; false if `src` is too short.
 fn yuyv_to_bgrx(src: &[u8], width: u32, height: u32, dst: &mut [u8]) -> bool {
     let w = width as usize;
     let h = height as usize;
@@ -320,17 +271,14 @@ fn yuyv_to_bgrx(src: &[u8], width: u32, height: u32, dst: &mut [u8]) -> bool {
     true
 }
 
-/// Decode an MJPG buffer to RGB (`zune-jpeg`) and pack BGRx. Returns false
-/// on a decode error or a dimension mismatch — both are recoverable by
-/// skipping the frame.
+/// Decode MJPG to RGB and pack BGRx; false on a skippable bad frame.
 fn mjpg_to_bgrx(src: &[u8], width: u32, height: u32, dst: &mut [u8]) -> bool {
     use zune_jpeg::zune_core::bytestream::ZCursor;
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
 
     let opts = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
-    // zune-jpeg 0.5's reader trait wants BufRead+Seek (or its own
-    // ZCursor); a bare &[u8] doesn't qualify, so wrap it.
+    // zune-jpeg 0.5 needs BufRead+Seek; wrap the slice.
     let mut decoder = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(src), opts);
     let rgb: Vec<u8> = match decoder.decode() {
         Ok(px) => px,
@@ -341,8 +289,7 @@ fn mjpg_to_bgrx(src: &[u8], width: u32, height: u32, dst: &mut [u8]) -> bool {
     };
     let w = width as usize;
     let h = height as usize;
-    // The driver-negotiated size should match the JPEG's; bail (skip the
-    // frame) rather than read out of bounds if a stray frame disagrees.
+    // Skip a frame whose JPEG size disagrees rather than read out of bounds.
     if info.width as usize != w || info.height as usize != h {
         return false;
     }
@@ -362,9 +309,7 @@ fn mjpg_to_bgrx(src: &[u8], width: u32, height: u32, dst: &mut [u8]) -> bool {
     true
 }
 
-/// BT.601 limited-range YUV → BGRx, written into the first 4 bytes of
-/// `dst`. Integer approximation, matching the coefficients libyuv uses on
-/// the conversion side.
+/// BT.601 limited-range YUV → BGRx, matching libyuv's coefficients.
 #[inline]
 fn write_bgrx(dst: &mut [u8], y: i32, u: i32, v: i32) {
     let c = y - 16;
@@ -383,9 +328,7 @@ fn write_bgrx(dst: &mut [u8], y: i32, u: i32, v: i32) {
 mod tests {
     use super::*;
 
-    // A flat gray YUYV frame (Y=U=V=128) round-trips to a flat gray BGRx
-    // frame with opaque alpha. Pins both the BT.601 math and the 4-byte
-    // BGRx packing.
+    // Flat gray YUYV → flat gray opaque BGRx; pins BT.601 and packing.
     #[test]
     fn yuyv_gray_to_bgrx() {
         // 2x2, packed YUYV is 2 bytes/pixel: [Y0 U Y1 V] per pixel pair.
@@ -401,8 +344,7 @@ mod tests {
         }
     }
 
-    // A pure-red YUV sample must land in the R slot, not B — guards against
-    // a swapped channel order (the classic BGR/RGB bug).
+    // Pure red must land in R, not B.
     #[test]
     fn write_bgrx_red_channel_order() {
         let mut dst = [0u8; 4];

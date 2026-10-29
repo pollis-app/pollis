@@ -1,7 +1,6 @@
 //! Profile, preferences, blocks and DM conversations.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,11 +38,7 @@ pub struct BlockBody {
 /// `POST /v1/dm/create` — the DM, whether it was created now or already existed
 /// (#987).
 ///
-/// The client used to do the 2-person dedupe itself — scan `dm_channel_member`,
-/// find an existing pair, then re-read the channel — three reads and a race:
-/// two devices creating the same DM simultaneously each saw no existing pair and
-/// each created one. Deduping inside the write makes "one DM per pair" a
-/// property of the transaction rather than of the client's timing.
+/// The dedupe happens inside the write, so concurrent creates cannot make two DMs per pair.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum CreatedDm {
@@ -126,9 +121,7 @@ pub struct LeaveDmBody {
 
 /// `POST /v1/blocks/add` — add a user to the caller's own block list.
 ///
-/// A `#[serde(transparent)]` newtype over [`BlockBody`] for the same reason as
-/// [`crate::messages::AddReaction`]: add and remove share one field list, but the
-/// path is a property of the type, so each endpoint needs its own.
+/// A transparent newtype over [`BlockBody`] so each endpoint has its own path type.
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AddBlock(pub BlockBody);
@@ -139,18 +132,10 @@ pub struct AddBlock(pub BlockBody);
 #[serde(transparent)]
 pub struct RemoveBlock(pub BlockBody);
 
-// ── POST /v1/read-cursors/save ───────────────────────────────────────────────
-
 /// The caller's read cursors, encrypted, for the other devices on the account
 /// (#844).
 ///
-/// **This is deliberately NOT shaped like [`SavePreferencesBody`].** Preferences
-/// cross this boundary as plaintext JSON and land in `user_preferences` in the
-/// clear, which is a defensible trade for a theme name. A read cursor is not: it
-/// is a timestamped record of which conversations a human reads and when, so it
-/// crosses as an opaque AEAD blob and the DS stores exactly the bytes it is
-/// handed. The server has no key for it and never will — see
-/// `pollis_core::commands::messages::read_state`.
+/// Unlike [`SavePreferencesBody`], an opaque AEAD blob: read cursors reveal reading habits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveReadCursorsBody {
     /// The owner; when signed it must equal the authenticated user (you sync
@@ -162,16 +147,10 @@ pub struct SaveReadCursorsBody {
     pub blob: String,
 }
 
-// ── Per-channel mute (#1431) ─────────────────────────────────────────────────
-
 /// `POST /v1/channel-mutes/set` — mute or unmute one group channel for the
 /// caller's whole account.
 ///
-/// The mute is stored on the DS, in the clear, because the DS is what acts on
-/// it: the push fan-out (`pollis_delivery::push::notify_new_message`) skips a
-/// recipient who muted the channel unless the message names them directly by
-/// `@username`. Every device of the account reads the same row, which is what
-/// syncs it.
+/// Stored in the clear because the DS's push fan-out acts on it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetChannelMuteBody {
     /// The owner; when signed it must equal the authenticated user (you mute

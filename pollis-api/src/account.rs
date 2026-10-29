@@ -1,17 +1,13 @@
 //! Account lifecycle: identity rotation, deletion, recovery, security events,
 //! enrollment approval/rejection, device revocation and logout.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct RotateIdentityBody {
-    /// The `identity_version` the client read BEFORE rotating — i.e. the head of
-    /// `account_key_log` it believes it is appending onto. The new version is
-    /// `based_on_version + 1`. This is the CAS expectation, the exact analogue of
-    /// a commit's `based_on_epoch`.
+    /// The `identity_version` read before rotating: the CAS expectation (the new version is +1).
     pub based_on_version: i64,
     /// New account identity public key, base64 (STANDARD).
     pub account_id_pub: String,
@@ -66,15 +62,7 @@ pub struct RevokeDeviceBody {
 /// `POST /v1/devices/revoke` — the tombstone, plus the name the device had at
 /// the moment it was revoked (#987).
 ///
-/// The client writes a `device_revoked` security event straight after this, and
-/// a log line that says only "device 01HQ7Z..." is not the answer to "was it the
-/// laptop or the phone?". It used to `SELECT device_name` itself before the
-/// write; the name is on the row the DS is already touching.
-///
-/// `NotFound` keeps the pre-check the client did: the write is bound
-/// `WHERE user_id = actor`, so revoking a device that is not yours is already a
-/// silent no-op, and reporting it as success would tell a user their stolen
-/// laptop had been cut off when nothing happened.
+/// `NotFound` because revoking a device that is not yours is a silent no-op, not a success.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum DeviceRevoked {
@@ -117,9 +105,7 @@ pub struct DeleteAccountBody {
 /// `POST /v1/account/rotate-identity` — the `identity_version` the rotation
 /// landed on.
 ///
-/// A lost CAS race answers 409 (with the current head) rather than this type:
-/// the client must re-read and retry, and conflating "applied" with "rejected"
-/// in one body is how a caller ends up treating a refusal as a success.
+/// A lost CAS race answers 409 rather than this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum RotateIdentityResponse {

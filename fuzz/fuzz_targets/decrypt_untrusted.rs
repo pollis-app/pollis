@@ -1,26 +1,14 @@
-//! Fuzz target for the decrypt path's parsing (#1537): `MlsDecryptor::decrypt`
-//! and `envelope_lineage`, fed envelope bytes that arrive from the DS and are
-//! therefore untrusted — the TLS framing, the MLS header, the sender data and
-//! the AEAD all parse attacker-chosen bytes.
+//! Fuzz target for the decrypt path (#1537): untrusted envelope bytes into `MlsDecryptor::decrypt` and `envelope_lineage`.
 //!
-//! A real two-member group is stood up once (pollis-core's provider, suite and
-//! configurations) and a handful of genuine envelopes are sealed into it. Each
-//! input picks one, mutates it (flipped bytes, a truncation, appended junk) or
-//! replaces it outright, and decrypts it on the receiving member inside a
-//! savepoint that is rolled back, so no input spends a key another one needs.
+//! Inputs mutate genuine envelopes of a real group; each decrypt runs in a rolled-back savepoint.
 //!
 //! Properties:
 //!   * **No panic**, whatever the bytes.
 //!   * **Failure is an answer:** a decrypt that does not open returns a
 //!     `DecryptFailure`.
-//!   * **No forged acceptance:** a decrypt that opens yields exactly the
-//!     plaintext of the genuine envelope it was cut from, and only when that
-//!     envelope's bytes are intact (trailing bytes past a complete message are
-//!     ignored by the TLS reader, which is harmless: same message).
+//!   * **No forged acceptance:** an open yields exactly the intact genuine envelope's plaintext.
 //!
-//! NEGATIVE CHECK (teeth): with `--cfg fuzz_mutant` the target "decrypts" by
-//! header — anything whose MLS header parses at the group's position is taken
-//! as the genuine message — the shortcut a lineage pre-check must never become.
+//! Teeth: `--cfg fuzz_mutant` trusts the MLS header, as a lineage pre-check must never do.
 #![no_main]
 
 use std::sync::{Mutex, OnceLock};

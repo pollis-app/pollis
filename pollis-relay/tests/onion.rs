@@ -1,24 +1,14 @@
 //! Multi-hop onion proof tests (#813 Phase A, design §6.2).
 //!
-//! These are not happy-path tests. Each one is written to fail if the property
-//! that makes multi-hop worth building stops holding:
+//! Each test fails if a property that makes multi-hop worth building stops holding:
 //!
-//! - O1: a 3-hop circuit carries real TLS traffic end to end **while hops 1 and 2
-//!   have EMPTY destination allowlists** — so if either had been able to see the
-//!   destination, it would have refused it. The relay counters then pin down
-//!   exactly which node parsed a `Connect` (one: the last).
+//! - O1: a 3-hop circuit carries TLS while hops 1 and 2 have EMPTY allowlists; only the last parses `Connect`.
 //! - O2: the client's transport address is observed by the FIRST hop and by no
 //!   other — the last hop cannot see it.
-//! - O3: a forged layer is rejected two independent ways: the client refuses a
-//!   hop that presents the wrong leaf cert, and a forwarding relay refuses to
-//!   hand the circuit to a next hop whose cert fingerprint does not match.
+//! - O3: a forged layer is rejected by the client's pin and by the forwarding relay's fingerprint check.
 //! - O4: single-hop is unchanged, and a 2-hop circuit works.
 //! - O5: `allow_extend = false` refuses cleanly rather than dropping the stream.
-//! - O6/O7: version negotiation — a v4 client speaks v3 to a v3-only relay, a
-//!   v3 stream cannot smuggle an `Extend`, and a v3-only relay is refused for
-//!   multi-hop instead of being half-spoken to.
-//!
-//! Everything runs headless on loopback, with certs generated in-test.
+//! - O6/O7: version negotiation between v3 and v4.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -67,16 +57,12 @@ fn client_identity() -> Arc<ClientIdentity> {
     Arc::new(ClientIdentity::new(USER, DEVICE, DEVICE_ED_PUB, device, cert))
 }
 
-// ---- test relays -----------------------------------------------------------
-
 /// A running relay plus everything a test needs to reason about what it saw.
 struct TestRelay {
     addr: SocketAddr,
     cert: CertificateDer<'static>,
     stats: Arc<RelayStats>,
-    /// Transport addresses that connected to this node. Production nodes never
-    /// record this (`peer_observer` is `None`); the hook exists so a test can
-    /// assert who each hop could and could not see.
+    /// Transport addresses that connected to this node (test-only `peer_observer`).
     peers: Arc<Mutex<Vec<SocketAddr>>>,
     _task: tokio::task::JoinHandle<()>,
 }
@@ -96,12 +82,6 @@ impl TestRelay {
 }
 
 /// A revocation store holding a freshly-signed list that revokes nobody.
-///
-/// Every relay in this file needs one: a node that cannot evaluate revocation
-/// refuses to extend circuits (#813 Phase C, wired in `serve_extend`), so the
-/// production shape of a middle hop is "keyed, with a current list" and that is
-/// what these tests run. `tests/revocation.rs` covers the unkeyed and revoked
-/// cases directly.
 fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
     use base64::Engine as _;
     use ed25519_dalek::{Signer, SigningKey};
@@ -167,8 +147,6 @@ fn spawn_relay_with(allow: &[&str], overrides: &[(&str, IpAddr)], allow_extend: 
 fn spawn_relay(allow: &[&str], overrides: &[(&str, IpAddr)]) -> TestRelay {
     spawn_relay_with(allow, overrides, true)
 }
-
-// ---- loopback targets ------------------------------------------------------
 
 /// A loopback TCP echo server. Returns its address and a per-connection counter.
 async fn spawn_echo() -> (SocketAddr, Arc<AtomicUsize>) {
@@ -266,16 +244,10 @@ async fn echo_through(stream: &mut BoxedStream, payload: &[u8]) {
     assert_eq!(&buf, payload);
 }
 
-// ---- O1 --------------------------------------------------------------------
-
 /// A 3-hop circuit carries real inner TLS to the origin, and only the LAST hop
 /// ever learns the destination.
 ///
-/// The proof is structural, not statistical: hops 1 and 2 run with an **empty
-/// destination allowlist**, which permits nothing. If either of them had been in
-/// a position to read the `Connect`, it would have answered `NotAllowed` and the
-/// request would have failed. It succeeds, so neither saw it — and the counters
-/// confirm exactly one node parsed a `Connect` and exactly one node dialed.
+/// Structural proof: hops 1 and 2 would have answered `NotAllowed` had they seen the `Connect`.
 #[tokio::test]
 async fn o1_three_hops_hide_the_destination_from_every_hop_but_the_last() {
     let (origin_addr, ca, origin_conns) = spawn_tls_origin("hello-through-three-hops").await;
@@ -346,13 +318,7 @@ async fn o1_three_hops_hide_the_destination_from_every_hop_but_the_last() {
     assert_eq!(r3.stats.rejected(), 0);
 }
 
-// ---- O2 --------------------------------------------------------------------
-
 /// The last hop cannot see the client's address.
-///
-/// Every relay records the transport addresses that connect to it. The client's
-/// address is by definition the one hop 1 saw; the assertion is that it appears
-/// nowhere else. Hops 2 and 3 see relay-owned sockets instead.
 #[tokio::test]
 async fn o2_last_hop_never_sees_the_client_address() {
     let (echo_addr, _c) = spawn_echo().await;
@@ -390,14 +356,8 @@ async fn o2_last_hop_never_sees_the_client_address() {
     assert_ne!(r2.peers()[0], r3.peers()[0], "hops 2 and 3 have different predecessors");
 }
 
-// ---- O3 --------------------------------------------------------------------
-
 /// A hop that presents the wrong leaf cert is rejected by the CLIENT's own pin,
 /// inside the layer — the check that does not depend on any relay behaving.
-///
-/// The circuit is extended to hop 2 correctly (the forwarding relay's own
-/// fingerprint pin passes), and only then does the client run a layer pinned to a
-/// *different* relay's cert. It must fail, and no destination may be reached.
 #[tokio::test]
 async fn o3_client_rejects_a_layer_from_the_wrong_hop() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -476,8 +436,7 @@ async fn o3_allowlist_still_binds_at_the_last_hop() {
     let host = echo_addr.ip().to_string();
 
     let r1 = spawn_relay(&[], &[]);
-    // The last hop allows only some OTHER host, so the real destination is not
-    // permitted there.
+    // The last hop allows only some OTHER host.
     let r2 = spawn_relay(&["nothing.test"], &[]);
 
     let circuit = Circuit::build(vec![r1.hop(), r2.hop()], client_identity()).unwrap();
@@ -487,8 +446,6 @@ async fn o3_allowlist_still_binds_at_the_last_hop() {
     assert_eq!(r2.stats.dials(), 0, "and refused to dial it");
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
-
-// ---- O4 --------------------------------------------------------------------
 
 /// Single-hop is unchanged, and a 2-hop circuit works — the same `Circuit` API,
 /// a different path length.
@@ -531,8 +488,6 @@ async fn o4_hop_cap_is_enforced() {
     assert!(Circuit::build(Vec::new(), client_identity()).is_err());
 }
 
-// ---- O5 --------------------------------------------------------------------
-
 /// A relay configured last-hop-only refuses an `Extend` cleanly — a typed
 /// rejection, not a dropped stream — and dials nothing.
 #[tokio::test]
@@ -559,8 +514,6 @@ async fn o5_extend_disabled_refuses_cleanly() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
 
-// ---- O6: version negotiation ----------------------------------------------
-
 #[test]
 fn o6_version_helpers_agree_with_the_alpn_table() {
     assert_eq!(proto::version_from_alpn(proto::ALPN), Some(4));
@@ -573,9 +526,7 @@ fn o6_version_helpers_agree_with_the_alpn_table() {
     assert!(!proto::version_supported(proto::MIN_PROTOCOL_VERSION - 1));
 }
 
-/// The onion frames have no pre-v4 encoding, so the writers refuse to emit them
-/// at an older generation rather than putting bytes on a stream the peer would
-/// misparse.
+/// Onion frames have no pre-v4 encoding, so the writers refuse older generations.
 #[tokio::test]
 async fn o6_onion_frames_cannot_be_written_at_an_older_generation() {
     let mut buf = Vec::new();
@@ -596,9 +547,7 @@ async fn o6_onion_frames_cannot_be_written_at_an_older_generation() {
     assert!(proto::read_frame_header(&mut future).await.is_err());
 }
 
-/// A current relay still serves a client that speaks the older generation
-/// verbatim, and answers in that generation — the shipped fleet's clients keep
-/// working against an upgraded node.
+/// A current relay serves a v3 client in v3.
 #[tokio::test]
 async fn o7_relay_serves_an_older_generation_client() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -680,8 +629,6 @@ async fn o7_v3_stream_cannot_request_an_extend() {
     assert_eq!(r1.stats.extends(), 0);
     assert_eq!(r2.stats.layers(), 0, "the named next hop was never contacted");
 }
-
-// ---- O8: the single-hop client entry point is untouched --------------------
 
 /// `RelayClient::connect` — the v0 entry point `pollis-core` calls — still works
 /// exactly as before, over a relay that now also speaks the onion generation.

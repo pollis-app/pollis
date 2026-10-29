@@ -58,18 +58,10 @@ pub(crate) enum Wire {
 pub fn run() -> Result<()> {
     let args = Args::parse();
 
-    // Promote to an accessory Cocoa app at runtime. Display capture
-    // works without this (Mach services), but per-window SCStream
-    // asserts in CoreGraphics with `CGS_REQUIRE_INIT` when the
-    // process has no window-server connection. NSApplication +
-    // accessory activation policy connects us to the window server
-    // without showing a Dock icon or menu bar. No Info.plist needed.
+    // Accessory app: per-window SCStream asserts without a window-server connection.
     install_accessory_app();
 
-    // tokio runtime lives on a worker thread because `NSApp.run()`
-    // owns the main thread forever; when the worker decides to exit
-    // (parent socket closed / capture done) it calls process::exit
-    // and the kernel reaps both threads.
+    // `NSApp.run()` owns the main thread, so tokio runs on a worker that calls process::exit.
     let socket = args.socket;
     let mode = args.mode;
     let audio = args.audio;
@@ -94,8 +86,7 @@ pub fn run() -> Result<()> {
         })?;
 
     run_main_loop();
-    // run_main_loop never returns; the worker thread always
-    // process::exit's first. Unreachable but required for the type.
+    // Unreachable: the worker always process::exit's first.
     Ok(())
 }
 
@@ -117,9 +108,7 @@ fn run_main_loop() {
 
     let mtm = MainThreadMarker::new().expect("run_main_loop must run on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    // Blocking call into Cocoa's main run loop. Only returns on
-    // `[NSApp terminate:]`, which we never invoke — the tokio worker
-    // exits via `process::exit` instead.
+    // Returns only on `[NSApp terminate:]`, which we never invoke.
     app.run();
 }
 
@@ -131,9 +120,7 @@ async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     let (read_half, write_half) = sock.into_split();
     eprintln!("[capture-mac] connected");
 
-    // macOS has no PR_SET_PDEATHSIG. Poll getppid(): if the parent dies
-    // it reparents to launchd (ppid becomes 1) — exit so we don't leak a
-    // live capture session. Cheap, 1 s cadence.
+    // No PR_SET_PDEATHSIG on macOS: poll getppid() each second.
     spawn_parent_death_watch();
 
     match mode {
@@ -178,21 +165,11 @@ async fn run_screen(
     mut write_half: tokio::net::unix::OwnedWriteHalf,
     audio_flag: bool,
 ) -> Result<()> {
-    // ── Phase 1: enumerate + send the source list ───────────────────────
-    //
-    // SCShareableContent is the API Slack/Discord/Zoom/OBS use to
-    // enumerate displays + windows for their in-app pickers. We send
-    // the result to the parent verbatim; the parent renders the picker
-    // UI in the webview and sends back a Select.
     eprintln!("[capture-mac] enumerating shareable content");
     let (list, content_cache) = match enumerate_sources() {
         Ok(pair) => pair,
         Err(e) => {
-            // Permission denial / no displays / etc — surface as a
-            // structured protocol Error. Send the raw inner message
-            // (no prefix); the parent and frontend's
-            // friendly-error mapping rely on substring matching
-            // ("permission" / "declined") and a prefix would break it.
+            // Raw message, no prefix: the friendly-error mapping substring-matches it.
             let msg = format!("{e}");
             let _ = write_half.write_all(&encode_error(&msg)).await;
             return Err(anyhow!(msg));
@@ -208,10 +185,7 @@ async fn run_screen(
         .await
         .context("send Sources")?;
 
-    // ── Phase 2: wait for the user's pick (Select) ──────────────────────
-    //
-    // Parent reads Sources, renders the picker, user clicks, parent
-    // sends Select. Generous timeout to cover human-pace decision.
+    // Generous timeout for a human-paced pick.
     let mut reader = BufReader::with_capacity(4096, read_half);
     let select = tokio::time::timeout(
         std::time::Duration::from_secs(300),
@@ -227,8 +201,7 @@ async fn run_screen(
             ));
         }
         Ok(None) => {
-            // Parent closed the socket — user cancelled the picker. Not
-            // an error.
+            // Parent closed the socket: user cancelled. Not an error.
             eprintln!("[capture-mac] parent closed socket before Select — exiting");
             return Ok(());
         }
@@ -237,17 +210,11 @@ async fn run_screen(
     eprintln!("[capture-mac] received selection: {selection:?}");
     let with_audio = audio_flag || selection.with_audio();
 
-    // ── Phase 3: build SCContentFilter + SCStream, stream frames ────────
-    // 16 deep, not 2: with audio riding the same channel as video under
-    // try_send, a full channel drops whatever comes next — and a dropped
-    // 10 ms audio block is an audible click where a dropped video frame is
-    // just a stale pixel. Matches the Linux helper's depth.
+    // 16 deep: audio shares this channel, and a dropped audio block is an audible click.
     let (tx, rx) = mpsc::channel::<Wire>(16);
     let stop = Arc::new(AtomicBool::new(false));
 
-    // Start SCK on a dedicated blocking context: filter construction and
-    // SCStream::start_capture are Swift FFI. Errors before the first
-    // frame are sent as 0xFF and end the run.
+    // SCK Swift FFI on a blocking context; errors before the first frame end the run.
     let stop_for_cap = Arc::clone(&stop);
     let tx_for_cap = tx.clone();
     let _cap_handle = tokio::task::spawn_blocking(move || {
@@ -264,7 +231,6 @@ async fn run_screen(
         }
     });
 
-    // Drain channel → socket until the parent goes away.
     drain_to_socket(rx, write_half, Arc::clone(&stop)).await;
     Ok(())
 }
@@ -325,16 +291,9 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
     let raw_windows = content.windows();
     let windows: Vec<WindowSource> = raw_windows
         .iter()
-        // Window layer 0 = normal app window. Layers >= 1 are floating
-        // panels, the Dock, menu-bar status items, system overlays —
-        // none of those are things a user wants to "share". Negative
-        // layers (e.g. desktop background) also unhelpful. Slack /
-        // Discord filter identically.
+        // Layer 0 = normal app windows; others are panels, the Dock, overlays.
         .filter(|w| w.window_layer() == 0)
-        // `is_on_screen` excludes minimized + off-screen, but Apple
-        // also flags some agent-process windows as on-screen even
-        // when they're 1×1 pixel invisibles. The title + size
-        // filter below catches those.
+        // Some agent windows report on-screen at 1×1; the title + size filter catches them.
         .filter(|w| w.is_on_screen())
         .filter_map(|w| {
             let app = w.owning_application();
@@ -353,20 +312,14 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             let h_px = frame.height as u32;
 
-            // A real user-visible window has both a title and a
-            // non-trivial size. Anything missing either is almost
-            // always an invisible helper window (menu-bar agent,
-            // notification listener, IME panel, Docker daemon, etc.).
-            // The 64-pixel floor is generous — most real picker
-            // targets are at least a few hundred px.
+            // Untitled or tiny windows are almost always invisible helper windows.
             if title.is_empty() {
                 return None;
             }
             if w_px < 64 || h_px < 64 {
                 return None;
             }
-            // Drop our own windows from the list — no value to share
-            // Pollis to itself, and it can produce odd feedback loops.
+            // Drop our own windows: sharing Pollis to itself can loop.
             if bundle_id == "xyz.pollis.desktop" || app_name == "Pollis" {
                 return None;
             }
@@ -451,25 +404,15 @@ fn start_capture(
         use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
         config = config
             .with_captures_audio(true)
-            // Scoped to the SAME SCContentFilter as the video, which is
-            // what makes macOS's answer to "whole system or one app?"
-            // fall out for free: sharing a window captures that
-            // application's audio, sharing a display captures the system
-            // mix. Linux and Windows have no equivalent and take the
-            // system mix either way.
+            // Same filter as the video: a window shares its app's audio, a display the system mix.
             .with_sample_rate(AudioSampleRate::Rate48000)
             .with_channel_count(AudioChannelCount::Stereo)
-            // The single most important line in the audio path. Without
-            // it the capture contains Pollis's own output — meaning the
-            // call itself — and every participant hears themselves a few
-            // hundred milliseconds late. Linux has no equivalent, which
-            // is the entire reason `screenshare::self_echo` exists.
+            // Excludes our own output (the call itself); Linux uses `screenshare::self_echo` instead.
             .with_excludes_current_process_audio(true);
     }
     let mut stream = SCStream::new(&filter, &config);
 
-    // Announce the format. The parent creates the LiveKit track from
-    // this exactly as it does for the Linux Format message.
+    // Announce the format; the parent creates the track from it.
     tx.blocking_send(Wire::Bytes(encode_format(width, height)))
         .map_err(|_| anyhow!("parent gone before format"))?;
 
@@ -480,12 +423,7 @@ fn start_capture(
     };
     let _handler_id = stream.add_output_handler(handler, SCStreamOutputType::Screen);
     if with_audio {
-        // Announced up front rather than on the first buffer: the parent
-        // publishes its LiveKit track off this message, and a silent
-        // source (a paused video, a muted app) would otherwise never
-        // produce one. `channels: 1` is what goes on the wire because the
-        // handler downmixes SCK's planar stereo — see
-        // `MacOsAudioHandler`.
+        // Announced up front so a silent source still gets a track; mono after downmix.
         tx.blocking_send(Wire::Bytes(encode_audio_format(48_000, 1)))
             .map_err(|_| anyhow!("parent gone before audio format"))?;
         let audio_handler = MacOsAudioHandler {
@@ -578,9 +516,7 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsAudioHandler {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0);
-        // try_send, matching the video path: if the socket has stalled we
-        // drop a block rather than block SCK's dispatch queue, which would
-        // stall video capture too.
+        // try_send: a stalled socket must not block SCK's queue (and so video).
         let _ = self
             .tx
             .try_send(Wire::Bytes(encode_audio_frame(48_000, 1, timestamp_us, &pcm)));
@@ -633,12 +569,9 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0);
 
-        // BGRA == little-endian ARGB == the BGRx the parent's
-        // argb_to_i420 expects. Pack via the shared protocol encoder so
-        // the wire bytes are defined in exactly one place.
+        // BGRA == the BGRx the parent expects; header via the shared encoder.
         let header = encode_frame_header(width, height, stride, timestamp_us, bgra.len());
-        // Last-frame-wins: try_send drops when the socket can't keep up,
-        // never blocks SCK's dispatch queue.
+        // Last-frame-wins; never block SCK's dispatch queue.
         let _ = self.tx.try_send(Wire::Frame {
             header,
             bgrx: bgra.to_vec(),

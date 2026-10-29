@@ -7,20 +7,11 @@
 //! run in the order the DS accepted the envelopes (the 2026-10-27 loss, #1526).
 //!
 //! Two inputs:
-//!   * **Model:** envelopes inserted into several conversations in some
-//!     interleaving, numbered the way the DS numbers them (a per-conversation
-//!     `seq` and a group-wide `arrival`, both assigned in the inserting
-//!     transaction), delivered in the DS's `(conversation, seq)` listing order.
-//!     Properties: each listed conversation's bucket holds exactly its
-//!     envelopes in `seq` order and nothing else; an unlisted one is dropped;
-//!     the sorted run is the insertion order (every sender's order kept); each
-//!     conversation's own order is untouched; with no arrival (an older DS)
-//!     the run is left exactly as listed.
+//!   * **Model:** DS-numbered envelopes across conversations; buckets and the sorted run must keep insertion order.
 //!   * **Raw:** arbitrary bytes as a `CatchUpResponse` — no panic, and every
 //!     envelope lands in the bucket of its own conversation or nowhere.
 //!
-//! NEGATIVE CHECK (teeth): with `--cfg fuzz_mutant` the run is left in listing
-//! order — the conversation-by-conversation decrypt #1527 replaced.
+//! Teeth: `--cfg fuzz_mutant` leaves the run in listing order (pre-#1527).
 #![no_main]
 
 use arbitrary::Arbitrary;

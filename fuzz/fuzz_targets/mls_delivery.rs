@@ -1,36 +1,12 @@
-//! Model-based fuzz target for MLS delivery (#1537) — the stateful target the
-//! pure-function ones could never be: it drives REAL openmls state, through
-//! pollis-core's own storage provider, seal (`try_mls_encrypt`), decryptor
-//! (`MlsDecryptor`) and decrypt order (`into_sealing_order`), over a fuzzed
-//! sequence of events, and asserts the zero-loss invariant of #1524.
+//! Model-based fuzz target for MLS delivery (#1537): real openmls state, asserting #1524's zero-loss invariant.
 //!
-//! **Setup.** One group (`G`) with 2-4 channels, all sharing its one MLS group
-//! as Pollis channels do; 2-3 devices to start, each its own local database.
-//! A model DS holds the commit log and the envelopes, with the production
-//! numbering (a per-channel `seq`, a group-wide `arrival`) and the #1041 epoch
-//! gate: an envelope sealed at an epoch that is not the head is refused, and
-//! its sender catches up and re-seals.
+//! **Setup.** One group, 2-4 channels, 2-3 devices; a model DS with the #1041 epoch gate.
 //!
-//! **Fuzzed sequence.** Sends in any channel (an edit is the same envelope at
-//! this layer), self-updates, device adds and removes, devices catching up
-//! after any length of absence (the catch-up mirrors `ingest`: decrypt what is
-//! sealed at the current epoch, then for every commit apply it and decrypt
-//! what is sealed at the new epoch, each run in sealing order), and a process
-//! killed between a decrypt and its row, or between a seal and its post.
+//! **Fuzzed sequence.** Sends, self-updates, adds/removes, catch-ups, and kills mid-decrypt or mid-post.
 //!
-//! **Property.** After everyone comes back and drains: every message that
-//! landed at epoch `e` is stored, with its text, on every device still a member
-//! that joined at or before `e`; none is stored on a device that joined after
-//! `e`; no outbox still holds a message. The only exempt losses are the three
-//! in the root `CLAUDE.md` — here, only "sent before you joined" can arise.
+//! **Property.** After draining, every message at epoch `e` is on every member that joined by `e`; no outbox holds one.
 //!
-//! NEGATIVE CHECK (teeth): with `--cfg fuzz_mutant` the decrypt and its row are
-//! not one transaction (the bug #1524 fixed): a kill after the decrypt leaves
-//! the key spent and no row, the retry hits `SecretReuse`, and the message is
-//! lost. Each case costs real post-quantum key generation (~12 runs/s under
-//! ASan), too few for the fuzzer to rediscover a kill inside a 20 s teeth
-//! budget, so `corpus/mls_delivery/send-then-die-reading` seeds the shortest
-//! such sequence: one send, then a member killed while reading it.
+//! Teeth: `--cfg fuzz_mutant` splits the decrypt from its row (#1524); `corpus/mls_delivery/send-then-die-reading` seeds it.
 #![no_main]
 
 use std::collections::HashMap;

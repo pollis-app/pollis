@@ -1,15 +1,8 @@
 //! `Extend` may only reach relays the signed directory published (#813).
 //!
-//! Before this, `Extend` was an arbitrary-dial primitive: the frame carries a
-//! bare `SocketAddr` and a SHA-256 the client also chooses, so any authenticated
-//! client could make a first-party relay — or any volunteer's laptop, which runs
-//! the same `RelayServer` — open a QUIC connection to any address it named. The
-//! pinned fingerprint bounds who may talk *back*; it never bounded who gets
-//! *dialled*, and the packet leaving the node is the whole primitive.
+//! Otherwise any authenticated client could make a relay open QUIC to any address it named.
 //!
-//! Each test here pins one refusal class, and the ones that matter most assert
-//! it the only way that cannot be argued with: a UDP socket at the address the
-//! client named receives **nothing**.
+//! The key tests assert that a UDP socket at the named address receives **nothing**.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,8 +27,6 @@ const DEVICE: &str = "d_nexthop";
 const ISSUED_AT: u64 = 1_700_000_000;
 const DEVICE_ED_PUB: [u8; 32] = [7u8; 32];
 
-// ---- client ----------------------------------------------------------------
-
 fn client_identity() -> Arc<ClientIdentity> {
     let device = SigningKey::<MlDsa44>::from_seed(&[7u8; 32].into());
     let account = SigningKey::<MlDsa44>::from_seed(&[3u8; 32].into());
@@ -50,8 +41,6 @@ fn client_identity() -> Arc<ClientIdentity> {
     Arc::new(ClientIdentity::new(USER, DEVICE, DEVICE_ED_PUB, device, cert))
 }
 
-// ---- the test pool's signed artifacts --------------------------------------
-
 fn directory_key() -> Ed25519SigningKey {
     Ed25519SigningKey::from_bytes(&[55u8; 32])
 }
@@ -60,9 +49,7 @@ fn pinned_key_b64() -> String {
     B64.encode(directory_key().verifying_key().to_bytes())
 }
 
-/// A revocation store holding a freshly-signed list that revokes nobody — the
-/// production shape of a middle hop, so that revocation is never what refuses
-/// an `Extend` in this file.
+/// A fresh list revoking nobody, so revocation never refuses an `Extend` here.
 fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
     let now = proto::now_unix();
     let payload = format!(
@@ -107,8 +94,6 @@ fn install_directory(store: &NextHopDirectory, members: &[(SocketAddr, Vec<u8>)]
         .install(&serde_json::to_vec(&envelope).unwrap(), now)
         .expect("a freshly-signed directory installs");
 }
-
-// ---- relays ----------------------------------------------------------------
 
 struct TestRelay {
     addr: SocketAddr,
@@ -164,9 +149,6 @@ async fn spawn_echo() -> (SocketAddr, Arc<AtomicUsize>) {
 }
 
 /// A UDP socket that answers nothing and counts every datagram it is sent.
-///
-/// This is the victim of the finding: if the relay dials what the client named,
-/// a QUIC Initial lands here. The counter is the proof, not a log line.
 struct Blackhole {
     addr: SocketAddr,
     packets: Arc<AtomicUsize>,
@@ -216,8 +198,6 @@ async fn expect_extend_refused(
     }
 }
 
-// ---- the allowed case ------------------------------------------------------
-
 /// The property the refusals must not break: a next hop the signed directory
 /// lists is extended to, and the circuit carries bytes end to end.
 #[tokio::test]
@@ -245,8 +225,6 @@ async fn a_directory_listed_relay_is_extended_to() {
     assert_eq!(entry.stats.extends(), 1, "the listed hop must be extended to");
     assert_eq!(echo_conns.load(Ordering::Relaxed), 1);
 }
-
-// ---- the refusal classes ---------------------------------------------------
 
 /// The finding itself: an address the directory does not list is never dialled.
 /// The socket at that address is the witness — it receives nothing at all.
@@ -303,9 +281,7 @@ async fn a_private_address_is_refused_even_when_the_directory_lists_it() {
     assert_eq!(entry.stats.extends(), 0);
 }
 
-/// A node with no pinned directory key cannot evaluate the directory, and
-/// "cannot evaluate" is not permission — it simply stops being a middle hop.
-/// This is the volunteer-device default.
+/// A node with no pinned directory key cannot evaluate it, so it refuses to be a middle hop.
 #[tokio::test]
 async fn a_node_with_no_directory_refuses_every_extend() {
     let (echo_addr, _echo_conns) = spawn_echo().await;
@@ -325,9 +301,7 @@ async fn a_node_with_no_directory_refuses_every_extend() {
     assert_eq!(entry.stats.extends(), 0);
 }
 
-/// A directory that has lapsed is not evidence any more. Checked at USE time, so
-/// a node that stops refreshing stops extending rather than running on a
-/// membership list that may be hours out of date.
+/// A lapsed directory is no longer evidence; checked at use time.
 #[tokio::test]
 async fn an_expired_directory_stops_the_node_extending() {
     let (echo_addr, _echo_conns) = spawn_echo().await;
@@ -348,9 +322,7 @@ async fn an_expired_directory_stops_the_node_extending() {
     assert!(!victim.was_dialed(), "an expired directory permits nothing");
 }
 
-/// The directory entry pinned to this node's own leaf names this node. A hop to
-/// ourselves is a loop, so it is refused even though it is unimpeachably "in the
-/// directory".
+/// A hop to the directory entry pinned to our own leaf is a loop, so it is refused.
 #[tokio::test]
 async fn a_node_will_not_extend_to_itself() {
     let (echo_addr, _echo_conns) = spawn_echo().await;

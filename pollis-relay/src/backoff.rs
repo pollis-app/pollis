@@ -1,27 +1,6 @@
 //! The one jitter definition.
 //!
-//! Anything on a repeating schedule that a whole FLEET runs — a directory
-//! refresh, a revocation-list poll, a re-dial after an outage — has to spread
-//! itself out, or every device does the same thing at the same instant and the
-//! host they all talk to sees a wall instead of a stream. `park.rs` and
-//! `revocation_sync.rs` both say so in their own comments and both jittered;
-//! `net::overlay`'s directory refresh and `net::peer::reachability` did not, and
-//! #875 found that gap.
-//!
-//! The un-jittered directory refresh was the worse of the two, and not only on
-//! the failure path: its sleep is derived from the directory's `expires_at`,
-//! which is the SAME timestamp for every client in the fleet. So at steady state
-//! every device woke to refetch within a second of every other device, forever —
-//! a structural lockstep, not just an outage-recovery one.
-//!
-//! Deliberately NOT a full retry helper. The repo used to have exactly one
-//! retry seam — `RemoteDb::with_retry`, which reconnected a dropped libsql
-//! stream and retried a single idempotent statement once — and #987 deleted it
-//! along with the client's database handle, so there is no sanctioned retry
-//! helper at all now. The schedules that never used it didn't for real reasons
-//! (see the survey in #875): they retry different error types, on different
-//! delays, some forever. What they all genuinely share is this — spread the
-//! wake-up — so this is the piece that gets factored out, and nothing else.
+//! Fleet-wide schedules must spread out (#875). Deliberately not a retry helper.
 
 use std::time::Duration;
 
@@ -45,16 +24,9 @@ pub fn jittered(base: Duration) -> Duration {
 
 /// Jitter that only ever shortens: uniformly in `[0.875 * base, base]`.
 ///
-/// For a schedule whose CEILING is load-bearing rather than a sanity clamp —
-/// `net::peer::reachability` must refresh before the revocation list it forwards
-/// on goes stale, and fails closed if it oversleeps — symmetric jitter is not
-/// available: a draw above the ceiling eats into a safety margin that was
-/// calculated, not guessed. Shortening always is free in that direction, and
-/// spreads the fleet just as well.
+/// For schedules whose ceiling is a safety margin (`net::peer::reachability`), where overshoot is not allowed.
 ///
-/// Callers still clamp afterwards if they have a floor: at a pathological
-/// `base` near the floor there is no room to shorten, and a floor exists to stop
-/// a tight loop.
+/// Callers with a floor still clamp afterwards.
 pub fn jittered_down(base: Duration) -> Duration {
     let mut byte = [0u8; 1];
     if getrandom::getrandom(&mut byte).is_err() {
@@ -70,9 +42,7 @@ pub fn jittered_down(base: Duration) -> Duration {
 mod tests {
     use super::*;
 
-    /// The bound the callers rely on: a jittered sleep stays inside ±12.5%, so
-    /// it can never collapse to zero (a tight loop against the host) nor stretch
-    /// past a caller's own ceiling by more than an eighth.
+    /// A jittered sleep stays inside ±12.5%.
     #[test]
     fn jitter_stays_within_an_eighth_either_way() {
         let base = Duration::from_secs(60);
@@ -85,10 +55,7 @@ mod tests {
         }
     }
 
-    /// The property that makes it worth having at all: repeated calls do NOT
-    /// return the same value, so a fleet that starts together does not stay
-    /// together. (Vanishingly unlikely to flake — 500 draws from a 256-wide
-    /// spread.)
+    /// Repeated calls differ, so a fleet started together does not stay together.
     #[test]
     fn successive_draws_differ() {
         let base = Duration::from_secs(60);
@@ -109,9 +76,7 @@ mod tests {
         assert!(jittered_down(Duration::ZERO) >= Duration::from_millis(1));
     }
 
-    /// The property `jittered_down` exists for: it NEVER exceeds the base, so a
-    /// caller whose ceiling is a safety margin (refresh before the evidence you
-    /// forward on goes stale) can jitter without eating into it.
+    /// `jittered_down` never exceeds the base.
     #[test]
     fn downward_jitter_never_exceeds_the_base() {
         let base = Duration::from_secs(60);
@@ -122,8 +87,7 @@ mod tests {
         }
     }
 
-    /// It must still actually spread — a constant would leave the fleet in
-    /// lockstep, which is the whole reason either of these exists.
+    /// It must still actually spread.
     #[test]
     fn downward_jitter_still_varies() {
         let base = Duration::from_secs(60);

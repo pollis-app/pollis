@@ -1,11 +1,6 @@
 //! The local SOCKS5 shim: a generic anonymized-stream entry point on loopback.
 //!
-//! This is the §14.0 "generic CONNECT primitive". reqwest consumes it via
-//! `socks5h://` (proxy-side DNS); a future in-app webview / VPN points at the
-//! same port. On each SOCKS5 CONNECT the shim consults the [`RoutingPolicy`],
-//! then either builds an overlay circuit, dials the target directly, or — in
-//! Strict mode with no circuit — fails the SOCKS request cleanly (never hangs,
-//! never silently succeeds to nowhere).
+//! reqwest uses it via `socks5h://`; per CONNECT the [`RoutingPolicy`] picks overlay, direct, or a clean failure.
 //!
 //! Only SOCKS5 CONNECT with no authentication is supported (loopback side only).
 
@@ -38,9 +33,7 @@ const REP_CMD_NOT_SUPPORTED: u8 = 0x07;
 pub struct OverlayHandle {
     socks_addr: SocketAddr,
     task: JoinHandle<()>,
-    /// Shared with the shim's live [`RoutingPolicy`]: flipping this switches
-    /// Prefer↔Strict for every in-flight and future SOCKS request without
-    /// restarting the shim (design §14 apply slice).
+    /// Shared with the live [`RoutingPolicy`], so a mode flip needs no restart.
     mode: Arc<AtomicU8>,
 }
 
@@ -56,8 +49,7 @@ impl OverlayHandle {
         OverlayMode::from_u8(self.mode.load(Ordering::Relaxed))
     }
 
-    /// Flip the live routing mode (Prefer↔Strict). No shim restart, no DB
-    /// reconnect: the shim's routing policy reads this on the next request.
+    /// Flip the live routing mode (Prefer↔Strict); read on the next request.
     pub fn set_mode(&self, mode: OverlayMode) {
         self.mode.store(mode.as_u8(), Ordering::Relaxed);
     }

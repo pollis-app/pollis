@@ -21,14 +21,7 @@ fn signing_key() -> SigningKey {
 /// The signed directory this suite's relays check `Extend` against, plus the
 /// addresses published into it so far.
 ///
-/// **Every test relay that will be asked to `Extend` needs to be in it.** A
-/// relay only extends to an address the current signed directory lists
-/// (`pollis_relay::nexthop`), so a node built without this refuses every
-/// multi-hop dial with `ExtendFailed` — the same shape `healthy_revocations`
-/// exists for. It is shared and **additive** across the tests in one binary:
-/// each suite's relays bind fresh loopback ports, so one test's pool membership
-/// is invisible to another's, and re-signing on every spawn keeps the artifact
-/// fresh without any test having to sequence it.
+/// Every relay asked to `Extend` must be in it. Shared and additive across a binary's tests.
 fn pool() -> &'static (NextHopDirectory, Mutex<Vec<SocketAddr>>) {
     static POOL: OnceLock<(NextHopDirectory, Mutex<Vec<SocketAddr>>)> = OnceLock::new();
     POOL.get_or_init(|| {

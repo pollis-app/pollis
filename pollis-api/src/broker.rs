@@ -1,10 +1,6 @@
-//! Authorized-secrets broker (#393): LiveKit tokens/fan-out/roster and R2
-//! presigns. The DS holds the secrets; the client asks. (The Turso read-only
-//! token used to be brokered here; #987 deleted it — the client holds no
-//! database credential at all now.)
+//! Authorized-secrets broker (#393): LiveKit tokens/fan-out/roster and R2 presigns; the DS holds the secrets.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,21 +15,14 @@ pub struct LivekitTokenBody {
     ///   - `voice`    → `v-…`  (voice participant)
     ///   - `view`     → `w-…`  (screenshare receive; no data channel)
     ///
-    /// #836: the identity itself is an opaque, per-room pseudonym — the user and
-    /// device are ENCRYPTED into it under a key derived per logical room, so the
-    /// SFU cannot map a participant to an account or recognise the same account
-    /// across two rooms. Only the 2-character capability prefix stays legible,
-    /// because both ends route on it. Resolve one with
-    /// [`LivekitIdentitiesBody`]. See `pollis_delivery::participant_id`.
+    /// The identity is an opaque per-room pseudonym (#836); resolve with [`LivekitIdentitiesBody`].
     #[serde(default)]
     pub kind: Option<String>,
     /// No-auth path only: the user to mint for. IGNORED when auth is enforced
     /// (the user comes from the verified signer there).
     #[serde(default)]
     pub user_id: Option<String>,
-    /// No-auth path only: the device id half of the identity. IGNORED when auth
-    /// is enforced (the device comes from the signature-verified `X-Pollis-Device`
-    /// header there — a client cannot claim another device's identity).
+    /// No-auth path only: the device half; ignored when auth is enforced.
     #[serde(default)]
     pub device_id: Option<String>,
 }
@@ -61,16 +50,7 @@ pub struct LivekitParticipantsBody {
 
 /// Resolve opaque LiveKit participant identities back to Pollis users (#836).
 ///
-/// Participant identities are per-room pseudonyms minted by the DS, so a client
-/// that learns one from the LiveKit event stream cannot parse it — it asks here.
-/// The DS decrypts each one with the room's key and answers with the user (plus
-/// the profile fields the roster would have carried anyway).
-///
-/// The key stays server-side deliberately, exactly as in #828: a per-room key
-/// shipped in a release binary could be extracted, and one that resolves every
-/// room would hand back the whole graph. Authorization is the same as minting a
-/// token for `room`, so this reveals nothing the caller could not already see by
-/// joining it.
+/// The per-room key stays server-side (#828); authz matches minting a token for `room`.
 #[derive(Serialize, Deserialize)]
 pub struct LivekitIdentitiesBody {
     /// The LOGICAL room the identities were minted for (a conversation id,
@@ -89,13 +69,7 @@ pub struct LivekitIdentitiesBody {
 
 /// Hard ceiling on one presigned media PUT.
 ///
-/// The client caps a cached attachment at 100 MiB
-/// (`pollis_core::commands::r2::MEDIA_CACHE_MAX_FILE_BYTES`); the ciphertext is
-/// that plus a 16-byte AEAD tag per 4 MiB chunk, so the wire bound is the
-/// plaintext bound rounded up. It exists because "presign a PUT" with no signed
-/// length is permission to write an object of ANY size — the bucket bill is the
-/// vulnerability. Declared here so the uploader and the DS that refuses the
-/// upload cannot hold two different numbers.
+/// 100 MiB plaintext plus per-chunk AEAD tags; a presign without a signed length permits any size.
 pub const R2_MEDIA_MAX_BYTES: u64 = 104 * 1024 * 1024;
 
 /// Hard ceiling on one presigned avatar / group-icon PUT. These are decoration
@@ -117,30 +91,19 @@ pub struct R2PresignBody {
     /// is added to the signed headers, so R2 rejects a body of any other size —
     /// the presign stops being "here is permission to write, of any size".
     ///
-    /// REQUIRED for `put` on an `emoji/…` key (#848): those objects are
-    /// unencrypted, publicly fetchable, and bounded by
-    /// `pollis_delivery::emoji::EMOJI_MAX_BYTES`, and a size the server merely *believes*
-    /// is not a bound at all. Optional everywhere else, so every existing
-    /// media/avatar presign is byte-identical to before.
+    /// Required for `put` on `emoji/…` keys (#848), which are unencrypted and public.
     #[serde(default)]
     pub content_length: Option<u64>,
-    /// No-auth path only — see `pollis_delivery::broker::resolve_user`. Unused beyond the auth gate
-    /// (presign has no per-object authz), kept for shape-symmetry with the other
-    /// broker endpoints.
+    /// No-auth path only — see `pollis_delivery::broker::resolve_user`.
     #[serde(default)]
     pub user_id: Option<String>,
 }
-
-// ── Responses (#922) ─────────────────────────────────────────────────────────
 
 /// `POST /v1/livekit/token` — the participant JWT and the SFU to present it to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LivekitTokenResponse {
     pub token: String,
-    /// The DS's LiveKit address. EMPTY is the documented self-host case (a DS
-    /// with no `LIVEKIT_URL`), which the client resolves against its compiled-in
-    /// fallback — see `pollis_core`'s `resolve_livekit_url`. It is a `String`
-    /// rather than an `Option` because that is what the wire has always carried.
+    /// The DS's LiveKit address; EMPTY means self-host (the client falls back to its compiled-in one).
     pub url: String,
 }
 
@@ -152,25 +115,18 @@ pub struct LivekitSendDataResponse {
 
 /// One opaque LiveKit participant identity, resolved back to a Pollis user
 /// (#836).
-///
-/// `identity` is the per-room pseudonym the SFU sees; everything else is what
-/// only the DS can recover from it under that room's key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedIdentity {
     pub identity: String,
     pub user_id: String,
-    /// Display name. Since #836 the LiveKit JWT carries no `name` claim — it was
-    /// the username, which made pseudonymising the identity pointless — so this
-    /// comes from the DS's own DB rather than off the SFU. It is not a key.
+    /// Display name, from the DS's DB (the JWT carries no `name` since #836).
     #[serde(default)]
     pub name: String,
     /// `voice` / `view` / `realtime`. Absent on the roster endpoint, which has
     /// already filtered to real voice participants; present when resolving raw
     /// identities off the SDK event stream.
     ///
-    /// `skip_serializing_if` so the roster's bytes stay exactly what they were
-    /// before this type existed — the DS emitted no `kind` key there at all, and
-    /// serializing an explicit `null` would be a wire change on a live endpoint.
+    /// Skipped when `None` so the roster's bytes are unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 }

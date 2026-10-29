@@ -5,35 +5,13 @@
 //!   1. a **new-circuit token bucket** (rate) — smooths bursts of stream opens;
 //!   2. a **concurrent-circuit cap** — bounds simultaneously-open pipes.
 //!
-//! Everything is in-memory (no external store, per the task): a `HashMap` of
-//! token buckets keyed by IP / account, plus counters for live circuits. A
-//! [`CircuitGuard`] is returned on admission and decrements the concurrency
-//! counters on drop, so the accounting self-heals when a pipe closes for any
-//! reason. On breach the caller returns a clean `Rejected(RateLimited)` rather
-//! than dropping the stream.
+//! In-memory; a [`CircuitGuard`] frees concurrency on drop, and a breach is a clean `Rejected(RateLimited)`.
 //!
-//! Every admission is keyed on an IP. There is no account-only path: a stream
-//! that reaches this node inside an onion layer is keyed on the address of the
-//! QUIC peer that carried it — the previous relay, or whoever is *claiming* to be
-//! one, since an opening `Layer` frame is unauthenticated and any client can send
-//! it. An account-only path would let that client escape every per-IP bound by
-//! prefixing one frame, and with self-minted accounts the per-account bound is
-//! not a bound at all (`docs/relay-operations.md` §2). The cost is that a busy
-//! guard's fan-in to one exit is bounded per IP too; operators size
-//! `max_concurrent_per_ip` / `new_circuits_per_min_per_ip` for that fan-in.
+//! Every admission is keyed on an IP, onion-layer streams included: an unauthenticated `Layer` must not escape per-IP bounds.
 //!
-//! A second, coarser limiter — [`ConnectionLimiter`] — bounds **QUIC
-//! connections** per source IP before any stream exists. A connection is the
-//! unit of an unauthenticated attacker's cost: it needs no handshake frame, only
-//! keep-alives, so nothing above the transport would ever see it.
+//! [`ConnectionLimiter`] bounds QUIC connections per source IP before any stream exists.
 //!
-//! **No source IP is held in these maps.** Both limiters key on an [`IpKey`]:
-//! the first 16 bytes of HMAC-SHA256 over the address under a 32-byte key drawn
-//! from the OS CSPRNG once per boot, held only in memory and never logged,
-//! persisted or configurable. The limiters only need to tell sources apart, not
-//! know who they are; a memory dump yields pseudonyms that cannot be reversed by
-//! enumerating the address space and mean nothing after a restart. `IpKey` has
-//! no public constructor other than [`IpKey::of`], which hashes.
+//! **No source IP is held in these maps:** [`IpKey`] is a truncated HMAC-SHA256 under a per-boot in-memory key.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -94,10 +72,7 @@ impl IpHasher {
     }
 }
 
-/// Tunable limits. All four are per-key (one key = one IP, one key = one
-/// account). Defaults are deliberately generous — the allowlist already closes
-/// the open-proxy abuse surface (§1.2); these exist to blunt a single misbehaving
-/// or captured device, not to ration normal use.
+/// Tunable per-key limits; generous defaults, to blunt one bad device rather than ration use.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RateLimitConfig {
     /// New circuits per minute allowed per source IP (token-bucket refill).
@@ -176,11 +151,7 @@ impl RateLimiter {
         })
     }
 
-    /// Admit a new circuit for `(ip, account)`, or `None` if a limit is tripped.
-    /// On success returns a [`CircuitGuard`] that must be held for the circuit's
-    /// lifetime; dropping it frees the concurrency slots. Concurrency is reserved
-    /// first (reversible), then the rate tokens are spent — so a concurrency
-    /// reject never burns a token.
+    /// Admit a new circuit, or `None`; concurrency is reserved before tokens, so a concurrency reject burns none.
     pub fn admit(self: &Arc<Self>, ip: IpKey, account: [u8; 32]) -> Option<CircuitGuard> {
         if !self.reserve_ip(ip) {
             return None;
@@ -260,10 +231,7 @@ impl RateLimiter {
     }
 }
 
-/// Held for a circuit's lifetime; frees the per-IP and per-account concurrency
-/// slots when dropped. Every guard holds a per-IP slot — there is no way to
-/// build one without an address, which is what makes "a circuit that no per-IP
-/// limit counts" unrepresentable rather than merely avoided.
+/// Held for a circuit's lifetime; always holds a per-IP slot, so no circuit escapes per-IP limits.
 pub struct CircuitGuard {
     limiter: Arc<RateLimiter>,
     ip: IpKey,
@@ -279,10 +247,7 @@ impl Drop for CircuitGuard {
 
 /// Bounds simultaneously-open **QUIC connections** per source IP.
 ///
-/// Applied at accept, after QUIC address validation has proved the source can
-/// receive at that address (so a spoofed Initial never reaches it), and before
-/// the handshake runs — so the cost of holding a slot is borne by the address
-/// that holds it. Every slot is released by dropping its [`ConnectionSlot`].
+/// Applied at accept, after QUIC address validation and before the handshake.
 pub struct ConnectionLimiter {
     max_per_ip: u32,
     active: Mutex<HashMap<IpKey, u32>>,
@@ -429,10 +394,7 @@ mod tests {
         assert!(cl.acquire(ip()).is_none());
     }
 
-    /// The limiters hold pseudonyms, never addresses: the key's bytes and its
-    /// `Debug` form carry no trace of the IP, the same IP maps to the same key
-    /// within a boot (or the limiter could not count), and two hashers — two
-    /// boots — disagree.
+    /// The limiters hold pseudonyms: stable within a boot, unrelated across boots, no IP in bytes or `Debug`.
     #[test]
     fn ip_keys_are_stable_pseudonyms_not_addresses() {
         let v4 = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));

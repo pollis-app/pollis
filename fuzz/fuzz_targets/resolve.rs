@@ -1,20 +1,13 @@
-//! Track-B fuzz target for `resolve` (I2, own-commit canonicalization / the #411
-//! property — `pollis_core::commands::mls::invariants`). Asserts the SAME two
-//! directions its Kani harness `i2_resolve_sound` proves:
+//! Fuzz target for `resolve` (I2, #411), asserting both directions of Kani's `i2_resolve_sound`:
 //!
 //!   * **`Adopt` ⟹ `stored_at_epoch == Some(ours)`** — never adopt a foreign
 //!     commit (no phantom epoch, no fork).
 //!   * **`Rollback` ⟹ `stored_at_epoch != Some(ours)`** — never discard a landed
 //!     own commit (no wedge).
 //!
-//! Mirrors the Kani harness's DS coupling: a `Committed` outcome means the DS
-//! wrote OUR exact bytes at this epoch, so inputs where `Committed` disagrees with
-//! the stored bytes are not states the DS can produce — they are skipped (the
-//! fuzz analogue of `kani::assume`).
+//! States where `Committed` disagrees with the stored bytes are unreachable and skipped.
 //!
-//! NEGATIVE CHECK (teeth): build with `--cfg fuzz_mutant` and the target calls a
-//! buggy `resolve` that adopts an ambiguous `LostRace`/`Failed` outcome without
-//! consulting the log; the fuzzer trips the no-foreign-adopt assertion fast.
+//! Teeth: `--cfg fuzz_mutant` adopts ambiguous `LostRace`/`Failed` without consulting the log.
 #![no_main]
 
 use arbitrary::Arbitrary;
@@ -40,8 +33,7 @@ fn outcome_of(raw: u8) -> SubmitOutcome {
     }
 }
 
-/// The resolver under test. Clean → real `resolve`; `--cfg fuzz_mutant` → a buggy
-/// variant that adopts ambiguous outcomes unconditionally.
+/// The resolver under test; `--cfg fuzz_mutant` adopts ambiguous outcomes.
 fn run(outcome: SubmitOutcome, ours: &[u8], stored: Option<&[u8]>) -> Resolution {
     #[cfg(not(fuzz_mutant))]
     {
@@ -59,8 +51,7 @@ fn run(outcome: SubmitOutcome, ours: &[u8], stored: Option<&[u8]>) -> Resolution
 }
 
 fuzz_target!(|input: Input| {
-    // Keep byte vectors tiny and over a small domain so equal/unequal are both
-    // reachable (mirrors the Kani `0..=1` bytes, `N = 3`).
+    // Tiny byte domain so equal and unequal are both reachable.
     let ours: Vec<u8> = input.ours.iter().take(MAX_BYTES).map(|b| b % 2).collect();
     let stored_vec: Vec<u8> = input.stored.iter().take(MAX_BYTES).map(|b| b % 2).collect();
     let stored: Option<&[u8]> = if input.has_stored {
@@ -70,8 +61,7 @@ fuzz_target!(|input: Input| {
     };
     let outcome = outcome_of(input.outcome);
 
-    // DS coupling: `Committed` ⇒ the log holds OUR bytes at this epoch. States
-    // that violate this are unreachable in production — skip them (≈ kani::assume).
+    // `Committed` ⇒ the log holds our bytes; skip states violating that.
     if outcome == SubmitOutcome::Committed && stored != Some(&ours[..]) {
         return;
     }

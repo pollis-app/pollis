@@ -1,17 +1,8 @@
 //! The per-conversation attachment key ring (#1382).
 //!
-//! Every MLS conversation (a group, whose channels share one MLS group, or a
-//! DM) holds a ring of random 32-byte file keys. Attachments are sealed under
-//! a key derived from the ring's newest entry and a random per-file id; the
-//! ring itself crosses this boundary only WRAPPED under a KEK the members
-//! export from the current MLS epoch, exactly like the pin key
-//! (`crate::pins`). The DS stores the wrap and the ring's length, and can open
-//! neither the ring nor any file. See
-//! `pollis_core::commands::file_keys` for the client half.
+//! Each conversation's ring of file keys crosses here only wrapped under an MLS-exporter KEK, like `crate::pins`.
 
 use serde::{Deserialize, Serialize};
-
-// ── POST /v1/file-keys/keystate ──────────────────────────────────────────────
 
 /// What a keystate write is doing to the ring. The DS enforces each one's
 /// `key_version` rule, which is what makes a key fork unrepresentable.
@@ -62,8 +53,6 @@ pub struct UpsertFileKeystateBody {
 pub enum FileKeystateUpserted {
     Ok { updated: bool },
 }
-
-// ── POST /v1/read/file-keystate ──────────────────────────────────────────────
 
 /// Fetch a conversation's current wrapped ring. Membership-gated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

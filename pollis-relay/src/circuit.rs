@@ -9,16 +9,9 @@
 //!          not dest  neighbours not IP
 //! ```
 //!
-//! Construction, hop by hop: authenticate to the furthest hop reached so far,
-//! send it `Extend(next)`, and once it answers `Ok` run an onion layer
-//! ([`crate::onion`]) to the next hop *through* it. Every frame the client writes
-//! after that is wrapped in one layer per remaining hop, and each relay peels
-//! exactly one. Only the last hop ever receives the `Connect` naming the
-//! destination, and only the first hop ever sees the client's address.
+//! Telescoping: `Extend` the furthest hop, then run an onion layer ([`crate::onion`]) through it.
 //!
-//! This module owns the *mechanism*. Which relays a circuit is made of — guard
-//! pinning, path length, directory selection — is policy and lives in
-//! `pollis-core`'s `net::overlay` / `net::directory`.
+//! Path selection is policy and lives in `pollis-core`'s `net::overlay`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,9 +24,7 @@ use crate::onion;
 use crate::proto::{self, Connect, Extend};
 use crate::stream::BoxedStream;
 
-/// Hard ceiling on circuit length. Each hop costs a round trip to build and a
-/// nested TLS session to carry, and nothing in the design calls for more than
-/// three; the cap exists so a bad path source cannot ask for an unbounded chain.
+/// Hard ceiling on circuit length, so a bad path source cannot ask for an unbounded chain.
 pub const MAX_HOPS: usize = 4;
 
 /// One relay in a circuit: where it is and the cert that identifies it.
@@ -84,11 +75,7 @@ impl Circuit {
         Ok(())
     }
 
-    /// An n-hop circuit along `hops`, in order from the client outward. The last
-    /// entry is the hop that talks to the destination and must therefore be a
-    /// first-party relay — that is the caller's (path selection's) invariant to
-    /// hold; this crate enforces it as the destination allowlist each relay
-    /// applies to a `Connect`.
+    /// An n-hop circuit along `hops`, client outward; the last must be first-party (the caller's invariant).
     pub fn build(hops: Vec<Hop>, identity: Arc<ClientIdentity>) -> anyhow::Result<Circuit> {
         Self::validate_hops(&hops)?;
         Ok(Circuit { hops, identity })
@@ -104,16 +91,8 @@ impl Circuit {
     }
 
     /// Open a byte pipe through the circuit to `target_host:target_port`.
-    ///
-    /// For `n == 1` this is the v0 exchange verbatim: handshake + connect
-    /// pipelined to the one relay, then the raw pipe. For `n > 1` each
-    /// intermediate hop is told to `Extend` to its successor and the client runs
-    /// a fresh onion layer to that successor before speaking to it, so the
-    /// returned stream is wrapped in one encryption layer per hop past the first.
     pub async fn connect(&self, target_host: &str, target_port: u16) -> anyhow::Result<BoxedStream> {
-        // Re-checked here, not just at construction: `hops` is public enough to
-        // have been reshaped since, and an over-long circuit must fail before it
-        // dials rather than halfway along.
+        // Re-checked: `hops` may have been reshaped since construction.
         Self::validate_hops(&self.hops)?;
 
         let first = &self.hops[0];
@@ -135,9 +114,7 @@ impl Circuit {
             proto::write_handshake(&mut layer, &handshake, version).await?;
 
             match self.hops.get(i + 1) {
-                // Not the last hop: hand the circuit onward, then wrap the pipe
-                // in a layer only the next hop can read. Everything after this
-                // point is opaque to hop `i`.
+                // Not the last hop: extend onward and wrap in a layer only the next hop reads.
                 Some(next) => {
                     let extend = Extend {
                         addr: next.addr,
@@ -165,9 +142,7 @@ impl Circuit {
     }
 }
 
-/// Produces a byte pipe to a target through the overlay. The shim depends on
-/// this rather than a concrete `Circuit` so path selection / rebuild can slot in
-/// without touching the shim.
+/// Produces a byte pipe to a target through the overlay.
 #[async_trait]
 pub trait CircuitFactory: Send + Sync {
     async fn connect(&self, host: &str, port: u16) -> anyhow::Result<BoxedStream>;
@@ -193,9 +168,7 @@ impl CircuitFactory for SingleHopFactory {
     }
 }
 
-/// A factory that rebuilds the same fixed path per call. Useful for tests and
-/// for a caller that has already decided its path; a real client picks a fresh
-/// path per circuit from the directory, which is `pollis-core`'s job.
+/// A factory that rebuilds the same fixed path per call.
 pub struct StaticPathFactory {
     hops: Vec<Hop>,
     identity: Arc<ClientIdentity>,

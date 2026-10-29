@@ -1,9 +1,6 @@
 //! **Relay-side revocation enforcement at the call site** (#813 Phase C, wired).
 //!
-//! `pollis_relay::policy` has thorough unit tests for the store's decisions. This
-//! file tests the thing those cannot: that the relay *asks*. A store that returns
-//! the right verdict and is never consulted is decoration, and that is exactly
-//! the state this code shipped in until the `serve_extend` call site existed.
+//! Tests that the relay actually consults the store.
 //!
 //! Each test is written so the permissive version of the rule fails it:
 //!
@@ -11,10 +8,7 @@
 //!   "cannot evaluate" resolves the same way as "revoked".
 //! - R2: a next hop revoked by **address** is never even dialed. Proved
 //!   structurally: the next hop's peer observer records nobody.
-//! - R3: a next hop revoked by **cert digest** — with its address deliberately
-//!   NOT revoked — is refused *after* the QUIC handshake, so the identity check
-//!   runs on the cert the peer actually presented, not just on what the `Extend`
-//!   frame claimed. It is contacted and still never serves a layer.
+//! - R3: a next hop revoked by **cert digest** (address not revoked) is refused after the handshake.
 //! - R4: a list that has **expired since it was installed** stops admitting,
 //!   without anyone reinstalling anything (staleness is a use-time property).
 //! - R5: the check is **selective**, not blanket: a list revoking some other
@@ -64,8 +58,6 @@ fn client_identity() -> Arc<ClientIdentity> {
         cert,
     ))
 }
-
-// ---- signed revocation artifacts -------------------------------------------
 
 const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -118,8 +110,6 @@ fn cert_selector(cert: &CertificateDer<'static>) -> String {
     use sha2::{Digest, Sha256};
     B64.encode(Sha256::digest(cert.as_ref()))
 }
-
-// ---- test relays -----------------------------------------------------------
 
 struct TestRelay {
     addr: SocketAddr,
@@ -192,8 +182,7 @@ async fn spawn_echo() -> (SocketAddr, Arc<AtomicUsize>) {
 /// Assert a circuit attempt failed with the typed `ExtendFailed` rejection
 /// rather than succeeding, being dropped, or timing out.
 ///
-/// Takes the whole `Result` because `BoxedStream` is deliberately not `Debug` —
-/// a byte pipe has nothing safe to print.
+/// Takes the `Result` because `BoxedStream` is deliberately not `Debug`.
 fn assert_extend_failed(result: anyhow::Result<BoxedStream>, context: &str) {
     let err = match result {
         Ok(_) => panic!("{context}"),
@@ -206,14 +195,8 @@ fn assert_extend_failed(result: anyhow::Result<BoxedStream>, context: &str) {
     );
 }
 
-// ---- R1 --------------------------------------------------------------------
-
 /// A node that was never given the pinned directory key refuses to extend, even
 /// though `allow_extend` is true and the next hop is perfectly healthy.
-///
-/// This is the promise `RevocationStore::unconfigured`'s doc makes ("cannot
-/// extend circuits to other relays") and the one that was not true until the
-/// call site existed. The named next hop is never contacted at all.
 #[tokio::test]
 async fn r1_an_unkeyed_relay_cannot_be_a_middle_hop() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -237,8 +220,6 @@ async fn r1_an_unkeyed_relay_cannot_be_a_middle_hop() {
     assert_eq!(r2.stats.layers(), 0);
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
-
-// ---- R2 --------------------------------------------------------------------
 
 /// A next hop revoked by ADDRESS is refused before the dial — the seized node
 /// never sees a packet.
@@ -268,14 +249,9 @@ async fn r2_a_revoked_address_is_never_dialed() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
 
-// ---- R3 --------------------------------------------------------------------
-
 /// A next hop revoked by CERT DIGEST is refused too — and, because its address is
 /// deliberately left un-revoked, only the post-handshake check on the cert the
 /// peer actually presented can be what catches it.
-///
-/// That selector is the one that binds per-node and peer-hosted relay identities
-/// (§7 / phase D1), where nodes stop sharing one pooled leaf.
 #[tokio::test]
 async fn r3_a_revoked_cert_is_refused_on_the_identity_it_presents() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -306,8 +282,6 @@ async fn r3_a_revoked_cert_is_refused_on_the_identity_it_presents() {
     );
     assert_eq!(echo_conns.load(Ordering::Relaxed), 0);
 }
-
-// ---- R4 --------------------------------------------------------------------
 
 /// A list that was fresh when installed and has since expired stops admitting.
 /// Nobody reinstalls anything — staleness is enforced where the decision is made.
@@ -346,11 +320,7 @@ async fn r4_an_expired_list_stops_extends_at_use_time() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 1);
 }
 
-// ---- R5 --------------------------------------------------------------------
-
-/// The check is selective. A list that revokes a DIFFERENT relay still lets a
-/// healthy circuit through — otherwise "everything is refused" would pass every
-/// other test in this file for the wrong reason.
+/// The check is selective: a list revoking a DIFFERENT relay still admits a healthy circuit.
 #[tokio::test]
 async fn r5_revoking_someone_else_does_not_break_a_healthy_circuit() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -381,11 +351,7 @@ async fn r5_revoking_someone_else_does_not_break_a_healthy_circuit() {
     assert!(!bystander.was_contacted());
 }
 
-// ---- R6 --------------------------------------------------------------------
-
-/// Revocation takes effect on a running node: installing a newer list stops the
-/// very next extend, with no restart and no reconnect. That liveness is the whole
-/// reason the artifact has a 5-minute TTL instead of the directory's hour.
+/// Revocation is live: a newer list stops the very next extend, with no restart.
 #[tokio::test]
 async fn r6_a_newly_published_revocation_stops_the_next_extend() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -423,11 +389,7 @@ async fn r6_a_newly_published_revocation_stops_the_next_extend() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 1);
 }
 
-// ---- R7 --------------------------------------------------------------------
-
-/// Revocation gates `Extend` only. A node that terminates a circuit still serves
-/// it: there is no next hop to vouch for, and refusing here would take the
-/// single-hop fleet down for a reason that does not apply to it.
+/// Revocation gates `Extend` only; a terminating node still serves.
 #[tokio::test]
 async fn r7_single_hop_is_unaffected_by_an_unkeyed_node() {
     let (echo_addr, echo_conns) = spawn_echo().await;
@@ -447,16 +409,10 @@ async fn r7_single_hop_is_unaffected_by_an_unkeyed_node() {
     assert_eq!(echo_conns.load(Ordering::Relaxed), 1);
 }
 
-// ---- R8: the live-circuit gauge (requested by phase D1) --------------------
-
 /// `live_circuits` is a gauge over admitted streams: it tracks concurrency and it
 /// comes back down.
 ///
-/// The second half is the one that makes it worth having — a gauge that only ever
-/// climbs is strictly worse than the cumulative counter it supplements, because
-/// it looks like a live number and is not one. It is incremented per admitted
-/// *stream* (in `serve_authenticated`), which is what "circuit" means here, and
-/// released by a `Drop` guard so no error path can leak a count.
+/// Incremented per admitted stream and released by a `Drop` guard, so no error path leaks.
 #[tokio::test]
 async fn r8_the_live_circuit_gauge_rises_and_falls() {
     let (echo_addr, _echo_conns) = spawn_echo().await;

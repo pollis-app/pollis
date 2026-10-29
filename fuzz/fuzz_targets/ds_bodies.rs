@@ -1,21 +1,11 @@
-//! Fuzz target for the DS request bodies (#1537): the `pollis-api` wire types
-//! the Delivery Service parses from every signed POST on the message path, and
-//! the DS's admission check for the client-chosen stamps those bodies carry
-//! (`pollis_delivery::messages::check_cursor_stamp`).
+//! Fuzz target for the DS request bodies (#1537) and `check_cursor_stamp`.
 //!
 //! Properties:
 //!   * **No panic** parsing any bytes as any body.
-//!   * **No silent misparse:** a body the DS accepts re-serializes to bytes that
-//!     parse back to the same value — a round trip through the wire type is
-//!     stable, so nothing the client sent is dropped or reinterpreted on the way
-//!     into the handler.
-//!   * **Admitted stamps sort where their instants belong** — the reason the
-//!     check exists (`sent_at` and `last_fetched_at` are compared as text): for
-//!     any two admitted stamps, an earlier instant is the smaller string.
+//!   * **No silent misparse:** an accepted body round-trips to the same value.
+//!   * **Admitted stamps sort where their instants belong** when compared as text.
 //!
-//! NEGATIVE CHECK (teeth): with `--cfg fuzz_mutant` stamps are admitted by a
-//! lenient check (anything RFC 3339 in UTC), which lets a `Z`-suffixed stamp in
-//! beside the `+00:00` ones and breaks the ordering.
+//! Teeth: `--cfg fuzz_mutant` admits any UTC RFC 3339, letting `Z` and `+00:00` mix.
 #![no_main]
 
 use arbitrary::Arbitrary;
@@ -28,9 +18,7 @@ enum Input {
     Stamps(Stamp, Stamp),
 }
 
-/// A stamp built the way clients and old builds actually spell them — every
-/// fraction width, `Z` / `+00:00` / other offsets, odd separators — or any
-/// string at all.
+/// A stamp spelled as real clients spell them, or any string.
 #[derive(Debug, Arbitrary)]
 enum Stamp {
     Shaped {

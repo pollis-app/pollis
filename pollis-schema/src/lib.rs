@@ -1,93 +1,38 @@
 //! The remote schema, as data.
 //!
-//! Two databases ship (#420): the **main** Turso DB (users, groups, channels,
-//! envelopes, key packages …) and the **commit-log** DB (`mls_commit_log`,
-//! `mls_group_info`, `mls_welcome`, `mls_commit_since`). Each has its own
-//! numbered migration directory, applied in version order by
-//! `scripts/db-apply.sh`; this crate embeds both directories at compile time and
-//! exposes them in that same order.
-//!
-//! ## Why this is its own crate
-//!
-//! `pollis-delivery` deliberately does **not** depend on `pollis-core` — the DS
-//! is the sole writer to the MLS control plane and must not drag the client core
-//! (OpenMLS, keystore, the whole command layer) into its build. Before this
-//! crate existed, that independence was paid for by hand-rolling a partial
-//! `CREATE TABLE` block per test module, and those copies drifted: eleven
-//! different `user_device` definitions, `group_member` with and without its
-//! primary key, `mls_key_package` with a column production does not have. A
-//! missing primary key does not merely look untidy — it lets a test insert a
-//! duplicate membership row that production rejects, so the test proves less
-//! than it claims.
-//!
-//! `pollis-device-cert` is the precedent: a dependency-free crate that both
-//! sides share so there is exactly one definition of a shared artefact. Same
-//! shape here, and the same rule applies — nothing that is not schema goes in.
+//! Main DB and commit-log DB (#420) migrations, embedded in `scripts/db-apply.sh` order.
 //!
 //! ## Adding a migration
 //!
 //! Drop the numbered `.sql` file in `migrations/` (or `migrations-log/`) and add
 //! it to [`POST_BASELINE_MIGRATIONS`] (or [`POST_BASELINE_LOG_MIGRATIONS`]).
 //! `migrations/000000_baseline.sql` is frozen and must never be edited.
-//! `every_migration_file_is_listed` in this crate's tests fails if a file on
-//! disk is missing from the list, so the two cannot silently diverge.
 
 /// The two membership predicates that BOTH sides of a group-scoped write
 /// evaluate (#942).
 ///
-/// Group authorization is one rule with two implementations: the Delivery
-/// Service re-derives it server-side and is the enforcing copy
-/// (`pollis_delivery::groups`), while the client evaluates the same thing as a
-/// preflight so the user gets a fast, specific error instead of a bare 403
-/// (`pollis_core::commands::groups::authz`). The preflight is deliberate and
-/// worth keeping — but two hand-typed copies of one rule only ever drift, and
-/// when they do the client is wrong by definition and the symptom is a command
-/// that "works" locally and 403s remotely.
-///
-/// So the statements live here, in the crate both sides already depend on for
-/// exactly this reason: the tables themselves were hand-copied until drift
-/// produced eleven different `user_device` definitions (see the module docs).
-/// A read whose shape is a contract between the two crates is the same problem,
-/// and gets the same answer — one definition, shared, rather than two that
-/// happen to match today.
-///
-/// Parity over the resulting decisions is asserted in
-/// `pollis-delivery/tests/join_requests.rs::preflight_parity`.
+/// One shared definition so DS enforcement and the client preflight cannot drift; parity: `join_requests.rs::preflight_parity`.
 pub mod authz {
     /// The caller's role in a group, or no row when they are not a member.
     /// Parameters: `?1` group id, `?2` user id.
     ///
-    /// `role` is read as a column rather than tested in SQL on purpose: the two
-    /// crates map it to their own types (`GroupRole` / `Option<String>`) and an
-    /// undecodable value must error rather than silently read as "not an admin"
-    /// (#875).
+    /// `role` is read as a column so an undecodable value errors rather than reads as non-admin (#875).
     pub const GROUP_ROLE_SQL: &str =
         "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2";
 
     /// Whether a group id names a real group. Parameter: `?1` group id.
     ///
-    /// Not redundant with the schema's `REFERENCES groups(id)`: every
-    /// deployment runs with `foreign_keys=OFF` (remote Turso does not enforce
-    /// them, and both crates match that on every connection), so the constraint
-    /// is inert and existence has to be checked explicitly.
+    /// Needed: every deployment runs `foreign_keys=OFF`, so `REFERENCES` is inert.
     pub const GROUP_EXISTS_SQL: &str = "SELECT 1 FROM groups WHERE id = ?1";
 }
 
-/// Frozen baseline schema for the main remote DB. Embedded at compile time so a
-/// test harness can stamp a fresh database without an out-of-band migration
-/// step.
+/// Frozen baseline schema for the main remote DB.
 pub const BASELINE_SQL: &str = include_str!("../migrations/000000_baseline.sql");
 
-/// Schema for the SEPARATE commit-log DB (`LOG_DB_URL`): the MLS control-plane
-/// tables and their indexes, no FKs to the main DB. Embedded so a test harness
-/// can bootstrap a genuinely separate log DB — mirroring the #420 production
-/// split — and so a misrouted query (a main-DB read on the log connection, or
-/// vice versa) fails loudly instead of silently finding every table on one
-/// shared file.
+/// Schema for the separate commit-log DB (#420), so misrouted queries fail loudly in tests.
 pub const LOG_DB_SCHEMA: &str = include_str!("../migrations-log/000001_commit_log_db.sql");
 
 /// Migrations applied on top of the commit-log DB schema, in version order.
-/// Mirrors CI's `db-apply.sh` second apply (`MIGRATIONS_DIR=migrations-log`).
 pub const POST_BASELINE_LOG_MIGRATIONS: &[(u32, &str, &str)] = &[
     (
         2,
@@ -116,8 +61,7 @@ pub const POST_BASELINE_LOG_MIGRATIONS: &[(u32, &str, &str)] = &[
     ),
 ];
 
-/// Migrations applied on top of the baseline, in version order. CI's
-/// `db-apply.sh` is the production source of truth; this list mirrors it.
+/// Migrations applied on top of the baseline, in version order (mirrors `db-apply.sh`).
 pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
     (
         1,
@@ -149,9 +93,7 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "push_token",
         include_str!("../migrations/000006_push_token.sql"),
     ),
-    // Note: version 7 (000007) is intentionally skipped — it was a
-    // previously-reverted DS-trigger / commit-log-DB migration (see
-    // docs/goal-a-deploy-runbook.md "000007 hazard"). Reusing it would collide.
+    // Version 7 is intentionally skipped (reverted; see docs/goal-a-deploy-runbook.md).
     (
         8,
         "message_envelope_sealed_sender",
@@ -329,10 +271,7 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
     ),
 ];
 
-/// Every script for the MAIN DB, in apply order (baseline first). One element
-/// per file: each must be handed to a batch executor whole, because
-/// `migrations-log/000005` contains `CREATE TRIGGER … BEGIN … ; END` and a naive
-/// split on `;` would cut it in half.
+/// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.
 pub fn main_scripts() -> Vec<&'static str> {
     let mut out = vec![BASELINE_SQL];
     out.extend(POST_BASELINE_MIGRATIONS.iter().map(|(_, _, sql)| *sql));
@@ -346,22 +285,14 @@ pub fn log_scripts() -> Vec<&'static str> {
     out
 }
 
-/// Every script for a SINGLE-DB deploy — main scripts then log scripts against
-/// one URL, exactly the two `db-apply.sh` invocations a single-DB environment
-/// runs. Order matters and is load-bearing: the frozen baseline still carries
-/// pre-#420 copies of the three log tables without their `generation` column,
-/// and it is `migrations-log/000004` (applied second) that adds the column and
-/// swaps `idx_mls_commit_conv_epoch` for the generation-aware unique index.
-/// Applying the log scripts first would leave a `CREATE TABLE IF NOT EXISTS`
-/// no-op and a schema that no deploy has.
+/// Main then log scripts on one URL; order matters: `migrations-log/000004` upgrades the baseline's pre-#420 log tables.
 pub fn single_db_scripts() -> Vec<&'static str> {
     let mut out = main_scripts();
     out.extend(log_scripts());
     out
 }
 
-/// Stamp a real connection with the real schema. Behind the `libsql` feature so
-/// the constants above stay dependency-free; test targets turn it on.
+/// Stamp a real connection with the real schema (`libsql` feature).
 #[cfg(feature = "libsql")]
 pub mod apply {
     use libsql::{Connection, Error};
@@ -407,10 +338,7 @@ mod tests {
         out
     }
 
-    /// A migration file that exists on disk but is missing from the list above
-    /// would be applied by `db-apply.sh` in production and NOT by any test
-    /// harness — the exact split that lets a test pass against a schema no
-    /// deploy has. Fail the build instead.
+    /// A migration on disk but missing from the list would reach production untested.
     #[test]
     fn every_migration_file_is_listed() {
         let main = sql_files("migrations");

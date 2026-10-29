@@ -1,21 +1,13 @@
-//! Track-B fuzz target for message framing and padding (#1537,
-//! `pollis_core::commands::messages::framing`). Every decrypted payload goes
-//! through `classify` before anything is stored, and the bytes are whatever an
-//! authenticated member chose to seal — untrusted input on every device.
+//! Fuzz target for message framing and padding (#1537); decrypted payloads are untrusted.
 //!
 //! Properties:
 //!   * **No panic** on any buffer, through `classify`, `strip` and `thread_of`.
-//!   * **No misparse:** a buffer read as a redaction or a receipt is exactly
-//!     what `pad_redaction` / `pad_receipt` would write for the value it was
-//!     read as (up to the zero padding) — a malformed frame is never accepted
-//!     as a different valid control message.
+//!   * **No misparse:** a parsed redaction/receipt is exactly what its encoder writes for that value.
 //!   * **Round trip:** every encoder's output classifies back to what went in:
 //!     text (`pad`), threaded text (`pad_threaded`), a redaction, a receipt;
 //!     `strip(pad(t)) == t`; padding never shrinks.
 //!
-//! NEGATIVE CHECK (teeth): with `--cfg fuzz_mutant` the target classifies with a
-//! lenient redaction parser that takes everything after the header as the id,
-//! ignoring the length prefix — the misparse a hand-rolled parser would make.
+//! Teeth: `--cfg fuzz_mutant` ignores the redaction length prefix.
 #![no_main]
 
 use arbitrary::Arbitrary;

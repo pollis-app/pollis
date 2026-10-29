@@ -2,8 +2,7 @@
 //! signature: identity establishment, device registration, cert publication and
 //! enrollment requests.
 //!
-//! Wire types only — no handler logic, no DB access. See the matching module in
-//! `pollis-delivery` for what the server does with each one.
+//! Wire types only; see `pollis-delivery` for handling.
 
 use serde::{Deserialize, Serialize};
 
@@ -38,14 +37,9 @@ pub struct PublishCertBody {
     /// Raw 32-byte Ed25519 MLS signing pubkey, base64 (STANDARD) — the column the
     /// device-signature gate verifies against.
     pub mls_signature_pub: String,
-    /// Raw ML-DSA-44 MLS signing pubkey, base64 (STANDARD). Bound by cert v2
-    /// alongside the classic key, so both must be presented to re-derive the
-    /// signed payload here.
+    /// Raw ML-DSA-44 MLS signing pubkey, base64 (STANDARD), bound by cert v2.
     pub mls_signature_pub_pq: String,
-    /// The publishing user. IGNORED when a session is present (bound from the
-    /// session instead). REQUIRED on the cert-validity-alone (subsequent-device)
-    /// path, where there is no session to bind the user from — the cert
-    /// verification against this user's `account_id_pub` is the load-bearing proof.
+    /// The publishing user: ignored with a session, required on the subsequent-device path.
     #[serde(default)]
     pub user_id: Option<String>,
 }
