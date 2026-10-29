@@ -180,8 +180,10 @@ pub async fn send_text_with(
     send_message(conv_id, user_id, text, reply_to_id, thread_id, username, state).await
 }
 
-/// Edit the user's own message (core `edit_message`: re-encrypts and publishes
-/// an edit envelope; the local copy updates immediately).
+/// Edit the user's own message (core `edit_message`: stores the edit in the
+/// edit outbox, then re-encrypts and publishes an edit envelope; the local
+/// copy takes the new text once the DS has it, and reads show it as pending
+/// until then — #1555).
 pub async fn edit(
     state: &Arc<AppState>,
     conv_id: &str,

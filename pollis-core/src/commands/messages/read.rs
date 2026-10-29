@@ -93,7 +93,7 @@ pub async fn get_channel_messages(
     ingest_channel_envelopes_inner(state, &user_id, &channel_id).await?;
 
     let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
@@ -132,6 +132,7 @@ fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMe
         deleted_at,
         undecryptable: row.get::<_, Option<String>>(10)?.is_some(),
         send_state: row.get(11)?,
+        edit_state: None,
     })
 }
 
@@ -181,16 +182,23 @@ async fn read_local_channel_page(
     Ok(rows)
 }
 
-/// Attach sender usernames from the local `user_cache` table; for any
-/// sender_ids missing from the cache, do one batched remote fetch and
-/// write the results back. After the first read of a channel/DM, the
-/// cache is warm and subsequent reads are zero-remote.
-async fn attach_sender_usernames_local(
+/// Finish a page of rows for the renderer: show any unconfirmed edit of ours
+/// over its row (#1555, see `edit_outbox::overlay_pending_edits`), then attach
+/// sender usernames from the local `user_cache` table; for any sender_ids
+/// missing from the cache, do one batched remote fetch and write the results
+/// back. After the first read of a channel/DM, the cache is warm and
+/// subsequent reads are zero-remote. Every `ChannelMessage` read ends here.
+async fn hydrate_rows(
     state: &Arc<AppState>,
     messages: &mut [ChannelMessage],
 ) -> Result<()> {
     if messages.is_empty() {
         return Ok(());
+    }
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        super::edit_outbox::overlay_pending_edits(db.conn(), messages)?;
     }
 
     let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -248,7 +256,7 @@ async fn attach_sender_usernames_local(
             Err(e) => {
                 // Offline or transient — leave the missing names as None.
                 // Next ingest / read while online will fill them in.
-                crate::diag!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
+                crate::diag!("[messages] hydrate_rows: remote fallback failed: {e}");
             }
         }
     }
@@ -262,7 +270,7 @@ async fn attach_sender_usernames_local(
 /// Local-only read of a channel page. Does NOT trigger ingest — callers
 /// fire `ingest_channel_envelopes` separately, off the critical render
 /// path. Usernames come from the local `user_cache` (with a one-shot
-/// remote fallback for cache misses, see `attach_sender_usernames_local`).
+/// remote fallback for cache misses, see `hydrate_rows`).
 pub async fn read_channel_messages(
     channel_id: String,
     limit: Option<i64>,
@@ -271,7 +279,7 @@ pub async fn read_channel_messages(
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
     let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
@@ -294,7 +302,7 @@ pub async fn read_dm_messages(
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
     let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
@@ -388,7 +396,7 @@ pub async fn read_last_messages(
         out
     };
 
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
     Ok(messages)
 }
 
@@ -417,7 +425,7 @@ pub async fn get_dm_messages(
     ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await?;
 
     let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
@@ -512,7 +520,7 @@ pub async fn read_messages_around(
         page
     };
 
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
 
     // The cursor points at the OLDEST row returned, so scrolling further back
     // from a jump continues from here exactly as it would from any other page.
@@ -601,7 +609,7 @@ pub async fn read_messages_after(
         read_after_on(db.conn(), &conversation_id, &cursor, limit)?
     };
 
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
 
     Ok(MessagePage { messages, next_cursor })
 }
@@ -640,7 +648,7 @@ pub async fn read_thread_messages(
         mapped.filter_map(|r| r.ok()).collect()
     };
 
-    attach_sender_usernames_local(state, &mut messages).await?;
+    hydrate_rows(state, &mut messages).await?;
     Ok(messages)
 }
 

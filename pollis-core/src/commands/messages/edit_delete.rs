@@ -924,9 +924,15 @@ async fn cleanup_attachment(
     }
 }
 
-/// Edit a message: updates the sender's local decrypted copy immediately and
-/// publishes an encrypted edit envelope to Turso so all other group members
-/// receive the updated content on their next fetch.
+/// Edit a message through the edit outbox (#1555).
+///
+/// The edit is stored FIRST, before any network work, and the sender's
+/// `message` row is left exactly as every other member holds it; the row takes
+/// the new text only once the DS holds the edit envelope
+/// ([`super::edit_outbox`]). Until then every read shows the pending text with
+/// an `edit_state`. A failed attempt leaves the edit queued — `failed`, or
+/// `rejected` when no retry can fix it — and returns the error; the outbox
+/// drain (after unlock, on reconnect, on resume) delivers it later.
 ///
 /// The edit envelope uses type='edit' with target_message_id pointing at the
 /// original message. A DELETE+INSERT replaces any prior pending edit, so Turso
@@ -938,29 +944,61 @@ pub async fn edit_message(
     new_content: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // An unsent message (#1335) has no envelope for an edit to target; the
-    // recipients would get an edit of a message they never received. The
-    // renderer offers Retry or Discard on such a row instead.
-    if super::outbox::is_unsent(state, &message_id).await? {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "message has not been sent yet"
-        )));
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        super::edit_outbox::enqueue_edit_on(
+            db.conn(),
+            &conversation_id,
+            &message_id,
+            &user_id,
+            &new_content,
+        )?;
     }
-    let envelope_id = Ulid::new().to_string();
+    // Test-harness only: the process dies with the edit stored and nothing
+    // posted (#1555) — the drain after restart must deliver it everywhere.
+    if super::send::test_hooks::take(super::send::test_hooks::Crash::EditAfterEnqueue) {
+        return Err(super::send::test_hooks::simulated_crash());
+    }
+    super::edit_outbox::deliver_edit(state, &message_id).await
+}
 
-    // Resolve the MLS group for this conversation (channel → group_id, DM → conversation_id).
-    let (mls_group_id, _) = resolve_mls_group(state, &conversation_id).await?;
+/// Seal and post one stored edit, then confirm it locally — the network half
+/// of an edit, run under the target's outbox lock by
+/// [`super::edit_outbox::deliver_edit`].
+pub(super) async fn post_edit(
+    state: &Arc<AppState>,
+    edit: &super::edit_outbox::QueuedEdit,
+) -> Result<()> {
+    state.check_not_outdated()?;
+    let super::edit_outbox::QueuedEdit {
+        target_message_id: message_id,
+        envelope_id,
+        conversation_id,
+        sender_id: user_id,
+        content: new_content,
+    } = edit;
+
+    // Resolve the MLS group for this conversation (channel → group_id, DM →
+    // conversation_id). Not (or no longer) a member: no attempt will ever get
+    // further, so say so in a way the outbox records as `rejected`.
+    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+    if !resolved.authorized {
+        return Err(super::outbox::not_a_member());
+    }
+    let mls_group_id = resolved.mls_group_id;
 
     // Catch up MLS state before encrypting. Without this, an edit can be
     // emitted at a stale epoch — recipients at the current epoch will fail
     // to decrypt it. send_message does the same two-step catch-up here
-    // (poll_mls_welcomes + catch-up) and edit_message was missing it. See
-    // issue #371 scenario 2.
+    // (poll_mls_welcomes + catch-up). See issue #371 scenario 2.
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
             if let Err(e) =
-                crate::commands::mls::poll_mls_welcomes_inner(state, &user_id, did).await
+                crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
             {
                 crate::diag!("[messages] edit_message: poll_mls_welcomes for {mls_group_id}: {e}");
             }
@@ -970,23 +1008,19 @@ pub async fn edit_message(
     // `process_pending_commits_inner`): editing advances this device to head, and
     // with `max_past_epochs = 0` a current-epoch inbound message we haven't
     // fetched yet would be stranded when we advance past its epoch (issue #440,
-    // the committer strand). Safe here — edit_message holds no MLS group lock, so
-    // the catch-up re-acquiring it cannot deadlock.
+    // the committer strand). Safe here — this holds no MLS group lock, so the
+    // catch-up re-acquiring it cannot deadlock.
     if let Err(e) =
-        super::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
+        super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
     {
         crate::diag!("[messages] edit_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
-    // Encrypt the new content with MLS and update local cache atomically.
-    // First attempt — if the group is missing (e.g. local DB was wiped),
-    // transparently repair and retry.
     let needs_repair = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
         !crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
     };
-
     if needs_repair {
         // Local MLS state is missing (e.g. a local DB wipe). Rejoin THIS device
         // from the group's published GroupInfo — the same non-destructive
@@ -994,12 +1028,12 @@ pub async fn edit_message(
         // commit log to repair one device: deleting canonical history destroys
         // every member's ability to decrypt past messages and can fork the
         // group. See docs/mls-reconcile-hardening.md (INV-1/INV-4).
-        crate::commands::mls::external_join_group(state, &mls_group_id, &user_id).await?;
+        crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
     }
 
     // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
     // pad TEXT edits to a size bucket; leave attachment edits unpadded.
-    let plaintext: Vec<u8> = if is_attachment_content(&new_content) {
+    let plaintext: Vec<u8> = if is_attachment_content(new_content) {
         new_content.as_bytes().to_vec()
     } else {
         super::framing::pad(new_content.as_bytes())
@@ -1014,48 +1048,27 @@ pub async fn edit_message(
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-
-        let sealed = super::seal::seal_under_lock(
-            db.conn(),
-            &mls_group_id,
-            &conversation_id,
-            &plaintext,
-            &held,
-        )?;
-
-        let rows_affected = db.conn().execute(
-            "UPDATE message SET content = ?1, edited_at = ?2
-             WHERE id = ?3 AND sender_id = ?4 AND deleted_at IS NULL",
-            rusqlite::params![new_content, sealed.sent_at, message_id, user_id],
-        )?;
-
-        if rows_affected == 0 {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "Message not found, already deleted, or you are not the sender"
-            )));
-        }
-
-        sealed
+        super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
     // Replacing the pending edit is a delete, so it needs the target's deletion
     // capability (#1086) — the same proof a self-delete presents, and the reason
     // one member cannot clobber another author's unfetched edit.
     let delete_token =
-        super::delete_capability::envelope_delete_token(state, &message_id).await;
+        super::delete_capability::envelope_delete_token(state, message_id).await;
 
     // Replace any existing edit envelope for this message with the new one
-    // (DELETE + INSERT, single transaction on the DS side). DS seam: route the
-    // replace through the Delivery Service. Re-sealed at the new epoch if a
-    // commit landed since our catch-up (#1041).
-    super::seal::post_resealing(
+    // (DELETE + INSERT, single transaction on the DS side) — including this
+    // very envelope, if an earlier attempt landed unseen. Re-sealed at the new
+    // epoch if a commit landed since our catch-up (#1041).
+    let sealed = super::seal::post_resealing(
         state,
         super::seal::Target {
             mls_group_id: &mls_group_id,
-            conversation_id: &conversation_id,
-            user_id: &user_id,
+            conversation_id,
+            user_id,
             plaintext: &plaintext,
-            envelope_id: &envelope_id,
+            envelope_id,
         },
         sealed,
         |sealed| pollis_api::messages::EditMessageBody {
@@ -1069,40 +1082,45 @@ pub async fn edit_message(
             epoch: Some(sealed.epoch),
             delete_token: delete_token.clone(),
         },
-        |conn, sealed| {
-            conn.execute(
-                "UPDATE message SET edited_at = ?1 WHERE id = ?2",
-                rusqlite::params![sealed.sent_at, message_id],
-            )?;
-            Ok(())
-        },
+        |_, _| Ok(()),
     )
     .await?;
 
+    // Test-harness only: the DS holds the edit and this device has not
+    // recorded that (#1555) — the retry must converge, not fork.
+    if super::send::test_hooks::take(super::send::test_hooks::Crash::EditAfterPost) {
+        return Err(super::send::test_hooks::simulated_crash());
+    }
+
+    // Delivered: the row takes the new text now, and only now.
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        super::edit_outbox::confirm_edit_on(db.conn(), edit, &sealed.sent_at)?;
+    }
+
     // Notify recipients via LiveKit so they invalidate their cache immediately.
     // Non-fatal — errors are logged, not returned.
-    let is_channel = mls_group_id != conversation_id;
+    let is_channel = mls_group_id != *conversation_id;
     let room_id = mls_group_id;
     if is_channel {
         if let Err(e) = crate::commands::livekit::publish_edited_message_to_room(
             &state.livekit,
             &room_id,
-            Some(&conversation_id),
+            Some(conversation_id),
             None,
-            &message_id,
+            message_id,
         ).await {
             crate::diag!("[realtime] edit_message: publish to group {room_id}: {e}");
         }
-    } else {
-        if let Err(e) = crate::commands::livekit::publish_edited_message_to_room(
-            &state.livekit,
-            &room_id,
-            None,
-            Some(&conversation_id),
-            &message_id,
-        ).await {
-            crate::diag!("[realtime] edit_message: publish to DM room {room_id}: {e}");
-        }
+    } else if let Err(e) = crate::commands::livekit::publish_edited_message_to_room(
+        &state.livekit,
+        &room_id,
+        None,
+        Some(conversation_id),
+        message_id,
+    ).await {
+        crate::diag!("[realtime] edit_message: publish to DM room {room_id}: {e}");
     }
 
     Ok(())

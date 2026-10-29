@@ -91,7 +91,8 @@ async fn send_with_id(
 async fn drain(c: &TestClient) {
     for _ in 0..4 {
         let report = c.flush_outbox().await;
-        if report["failed"].as_array().is_none_or(|f| f.is_empty()) {
+        let empty = |k: &str| report[k].as_array().is_none_or(|f| f.is_empty());
+        if empty("failed") && empty("edits_failed") {
             return;
         }
     }
@@ -310,6 +311,111 @@ async fn a_sender_killed_between_seal_and_post_still_delivers() {
     }
 }
 
+/// The row for `id` as `c` reads it.
+async fn read_one(c: &TestClient, channel: &str, id: &str) -> serde_json::Value {
+    c.fetch_channel_messages(channel)
+        .await
+        .into_iter()
+        .find(|m| m["id"] == id)
+        .unwrap_or_else(|| panic!("{id} missing"))
+}
+
+async fn try_edit(c: &TestClient, channel: &str, id: &str, text: &str) -> Result<serde_json::Value, String> {
+    c.invoke_try(
+        "edit_message",
+        json!({
+            "conversationId": channel,
+            "messageId": id,
+            "userId": c.user_id(),
+            "newContent": text,
+        }),
+    )
+    .await
+}
+
+async fn restart(c: &TestClient) {
+    let uid = c.user_id().to_string();
+    c.invoke_json("lock", json!({})).await;
+    c.invoke_json("unlock", json!({ "userId": uid, "pin": crate::harness::TEST_PIN }))
+        .await;
+}
+
+/// The editing device dies with the edit stored and nothing posted (#1555) —
+/// the point where, before the edit outbox, the sender's copy had already
+/// changed and nobody else's ever would. Now the sender's row still holds what
+/// everyone holds; its read shows the edit as pending; and after the restart
+/// the drain delivers it, so every member's copy matches.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_editor_killed_between_storing_and_posting_converges() {
+    let (alice, bob, _group, channel) = pair().await;
+    let id = alice.send_channel_message_id(&channel, "draft").await;
+    bob.ingest_channel(&channel).await;
+
+    test_hooks::crash_next_send(Crash::EditAfterEnqueue);
+    let err = try_edit(&alice, &channel, &id, "final").await.expect_err("the kill ends the edit");
+    assert!(err.contains("simulated process death"), "{err}");
+
+    // Nothing reached the DS, and the sender's view says so.
+    assert_reads_all(&bob, "bob", &channel, &["draft"]).await;
+    let mine = read_one(&alice, &channel, &id).await;
+    assert_eq!(mine["content"], "final");
+    assert_eq!(mine["edit_state"], "pending");
+
+    restart(&alice).await;
+    drain(&alice).await;
+    for (c, who) in [(&bob, "bob"), (&alice, "alice")] {
+        assert_reads_all(c, who, &channel, &["final"]).await;
+        let m = read_one(c, &channel, &id).await;
+        assert!(m["edit_state"].is_null(), "{who}: {m}");
+        assert!(m["edited_at"].is_string(), "{who}: {m}");
+    }
+}
+
+/// The editing device dies after the DS took the edit and before it recorded
+/// that (#1555). The other members already hold the new text; the sender's
+/// retry after the restart re-posts the same edit (same envelope id) and lands
+/// on the same text, never a second, different one.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_editor_killed_after_the_post_converges_without_a_fork() {
+    let (alice, bob, _group, channel) = pair().await;
+    let id = alice.send_channel_message_id(&channel, "draft").await;
+    bob.ingest_channel(&channel).await;
+
+    test_hooks::crash_next_send(Crash::EditAfterPost);
+    try_edit(&alice, &channel, &id, "final").await.expect_err("the kill ends the edit");
+    assert_reads_all(&bob, "bob", &channel, &["final"]).await;
+    assert_eq!(read_one(&alice, &channel, &id).await["edit_state"], "pending");
+
+    restart(&alice).await;
+    drain(&alice).await;
+    for (c, who) in [(&bob, "bob"), (&alice, "alice")] {
+        assert_reads_all(c, who, &channel, &["final"]).await;
+        assert!(read_one(c, &channel, &id).await["edit_state"].is_null(), "{who}");
+    }
+}
+
+/// An edit that cannot reach the DS stays queued, shown as failed, and the
+/// next drain delivers it — no user action, no lost edit (#1555).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_edit_that_times_out_unlanded_is_delivered_by_the_drain() {
+    let (alice, bob, group, channel) = pair().await;
+    let id = alice.send_channel_message_id(&channel, "draft").await;
+    bob.ingest_channel(&channel).await;
+    arm_ds_fault(DsFault::SendTimesOutUnlanded);
+    try_edit(&alice, &channel, &id, "final").await.expect_err("the editor sees a timeout");
+    assert_eq!(read_one(&alice, &channel, &id).await["edit_state"], "failed");
+    assert_reads_all(&bob, "bob", &channel, &["draft"]).await;
+
+    // A commit lands meanwhile, so the retry seals at a newer epoch.
+    assert!(bob.self_update(&group).await);
+    drain(&alice).await;
+    assert_reads_all(&bob, "bob", &channel, &["final"]).await;
+    assert_reads_all(&alice, "alice", &channel, &["final"]).await;
+}
+
 // ── The soak ────────────────────────────────────────────────────────────────
 
 /// One message the soak sent: where, by which device, and its text now.
@@ -389,9 +495,12 @@ async fn zero_loss_soak_multi_device_multi_channel() {
                 arm_ds_fault(f);
                 faults += 1;
             }
-        } else if rng.gen_bool(0.03) {
-            // A sender killed with its envelope sealed and unposted.
-            test_hooks::crash_next_send(Crash::AfterSeal);
+        } else if rng.gen_bool(0.05) {
+            // A sender killed with its envelope sealed and unposted, or an
+            // editor killed with its edit stored, or posted and unrecorded
+            // (#1555).
+            const KILLS: [Crash; 3] = [Crash::AfterSeal, Crash::EditAfterEnqueue, Crash::EditAfterPost];
+            test_hooks::crash_next_send(KILLS[rng.gen_range(0..KILLS.len())]);
             kills += 1;
         }
         let ch = rng.gen_range(0..channels.len());
@@ -420,15 +529,17 @@ async fn zero_loss_soak_multi_device_multi_channel() {
                     "userId": dev.user_id(),
                     "newContent": text,
                 });
-                // A failed edit is retried, as its author would.
-                let mut ok = false;
-                for _ in 0..3 {
-                    if dev.invoke_try("edit_message", args.clone()).await.is_ok() {
-                        ok = true;
-                        break;
-                    }
-                }
-                assert!(ok, "an edit failed three times running");
+                // A failed (or killed) edit stays in the edit outbox (#1555):
+                // the drains deliver it, and its author sees it meanwhile.
+                let landed = dev.invoke_try("edit_message", args).await.is_ok();
+                let mine = dev
+                    .fetch_channel_messages(&channels[s.channel])
+                    .await
+                    .into_iter()
+                    .find(|m| m["id"] == id.as_str())
+                    .expect("the editor holds its own message");
+                assert_eq!(mine["content"].as_str(), Some(text.as_str()), "the editor sees its edit");
+                assert_eq!(mine["edit_state"].is_null(), landed, "{mine}");
                 s.text = text;
             }
             62..=71 => {
@@ -510,6 +621,7 @@ async fn zero_loss_soak_multi_device_multi_channel() {
                     "{} holds a stale text for {id}",
                     names[d]
                 );
+                assert!(m["edit_state"].is_null(), "{} still holds an unsent edit of {id}", names[d]);
             }
             let expected = sent.values().filter(|s| s.channel == ci).count();
             assert_eq!(by_id.len(), expected, "{} holds a message nobody sent", names[d]);

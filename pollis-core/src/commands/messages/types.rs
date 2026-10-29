@@ -67,6 +67,13 @@ pub struct ChannelMessage {
     /// for everything delivered or received. Omitted from the JSON when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_state: Option<String>,
+    /// The edit outbox (#1555): set on this device's own message while an edit
+    /// of it is stored but not yet confirmed by the DS — `content` is then the
+    /// edited text. Same values as `send_state`: `pending` (drawn as an
+    /// ordinary edit), `failed` / `rejected` (labelled as not sent). Omitted
+    /// from the JSON when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_state: Option<String>,
 }
 
 /// Opaque pagination cursor — the (sent_at, id) of the oldest row on the
