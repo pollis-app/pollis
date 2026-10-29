@@ -1,35 +1,11 @@
-//! Per-release binary-transparency verification — the one shared function the
-//! static report generator, the auditor CLI (`pollis-verify release <tag>`), and
-//! a future live endpoint all call, so their verdicts can never diverge. This is
-//! the binaries tenant's analogue of [`crate::account`].
+//! Per-release binary-transparency verification: the one function the static
+//! report generator and the auditor CLI (`pollis-verify release <tag>`) share.
+//! The binaries analogue of [`crate::account`].
 //!
-//! Given the published binaries tree (served under `/v1/binaries/...`) and a
-//! release tag, it isolates that tag's artifacts and decides whether the
-//! published tree is trustworthy for it:
-//!
-//! 1. **Trust anchor.** Verify the latest binaries STH's signature *first* —
-//!    crucially under the binaries tree's domain-separated
-//!    [`binaries::STH_CONTEXT`], so a commit-log or account-key head can never
-//!    stand in for a binaries head even though the same key signs all three. The
-//!    signature is checked against the *set* of keys the log publishes as
-//!    currently acceptable (active signer + any key still inside its
-//!    rotation-overlap window), so a key changeover never tells a user their
-//!    genuine binary is unattested.
-//! 2. **Inclusion.** Each of the tag's entries must have an inclusion proof that
-//!    verifies against that binaries STH (reusing slice 1's
-//!    [`verifiable_log::proof::verify_inclusion_proof`]).
-//! 3. **Invariant.** Replay the **whole tree** through the [`BinaryInvariant`] —
-//!    no fork, monotonic release tags, payload/signed pairing. Unlike the
-//!    per-user account replay, the binary invariant is partly *global* (tag order
-//!    spans releases; a signed leaf's payload may sit anywhere earlier), so the
-//!    honest re-check replays every entry, then reports the requested tag's
-//!    artifacts.
-//!
-//! Every cryptographic check is reused from slices 1–2; nothing here
-//! reimplements Merkle, proof, signature, or invariant logic. Transport/parse
-//! failures for the prerequisites return `Err`; a tampered/forked tree is **not**
-//! an error — it yields a [`ReleaseReport`] with `chain_valid == false` and
-//! populated `violations`.
+//! The STH is verified under the domain-separated [`binaries::STH_CONTEXT`], so
+//! a head of another tree can never stand in even though one key signs all
+//! three. Transport/parse failures are `Err`; a tampered tree is a
+//! [`ReleaseReport`] with `chain_valid == false`.
 
 use std::collections::BTreeMap;
 
@@ -42,24 +18,17 @@ use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json};
 
-/// Tenant id the binary entries carry in the shared log. Re-exported from the
-/// builder so layout/remote can filter on it without reaching across crates.
+/// Tenant id of binary entries in the shared log.
 pub const BINARIES_TENANT: &str = binaries::TENANT;
 
-/// Re-exported because it is part of [`ReleaseArtifact`]'s public shape — a
-/// consumer (e.g. the app's in-app build check, which selects leaves by layer)
-/// must be able to name it without depending on the builder crate.
+/// Re-exported as part of [`ReleaseArtifact`]'s shape, so consumers needn't
+/// depend on the builder crate.
 pub use binaries::Layer;
 
-/// Re-exported for the same reason as [`Layer`]: since #944 the recorded build
-/// recipe is part of [`ReleaseArtifact`], because a rebuilder has to be able to
-/// check it *ran in the environment the leaf names* before it is entitled to
-/// call a byte divergence a reproducibility failure.
+/// Re-exported for the same reason as [`Layer`].
 pub use binaries::Toolchain;
 
-/// One released artifact in a tag's set, as reported to a caller. Mirrors the
-/// key structural fields of a [`BinaryRecord`] plus whether its inclusion proof
-/// checked out against the signed head.
+/// One released artifact in a tag's set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseArtifact {
     /// `darwin` | `windows` | `linux`.
@@ -68,96 +37,62 @@ pub struct ReleaseArtifact {
     pub arch: String,
     /// `dmg` | `app` | `nsis` | `appimage` | `deb` | `rpm`.
     pub bundle: String,
-    /// The reproducible payload vs the signed wrapper.
     pub layer: Layer,
-    /// The shipped file name.
     pub artifact_name: String,
     /// Hash of the reproducible pre-signature payload, lowercase hex.
     pub payload_sha256: String,
     /// Hash of the shipped artifact, lowercase hex.
     pub artifact_sha256: String,
-    /// URI of this artifact's provenance attestation.
     pub provenance_uri: String,
-    /// The build recipe the release recorded for this artifact, verbatim from
-    /// the leaf.
-    ///
-    /// Surfaced (#944) because a rebuilder cannot honestly classify a byte
-    /// divergence without it. The Linux AppImage vendors host system libraries
-    /// (`libkrb5`, `libsqlite3`, `libsystemd`, …) that `linuxdeploy` copies off
-    /// the runner, so a rebuild on a DIFFERENT runner image legitimately
-    /// produces different bytes with identical source. v1.9.3 diverged for
-    /// exactly that reason and was published as an unexplained "did not
-    /// reproduce" for three days, because the verdict step could not see that
-    /// the two builds ran on different images. It can now.
-    ///
-    /// Tags attested before #939 carry `"unknown"` in every version field; that
-    /// is a *recorded* fact about the leaf, not a defect here, and a consumer
-    /// must treat it as "the recipe is unknown", never as a match.
+    /// The build recipe recorded in the leaf (#944): without it a rebuilder
+    /// can't tell a runner-image difference (e.g. AppImage-vendored host libs)
+    /// from a real reproducibility failure. Pre-#939 tags carry `"unknown"`,
+    /// which a consumer must treat as unknown, never as a match.
     pub toolchain: Toolchain,
-    /// Did this entry's inclusion proof verify against the latest binaries STH?
+    /// Inclusion proof verified against the latest binaries STH.
     pub included: bool,
 }
 
-/// The structured result of verifying a single release tag's binaries. This is
-/// the exact shape the CLI prints and the static `/verify/release/<tag>` report
-/// carries — same function, same output, so they can never disagree.
+/// Result of verifying one release tag; the shape the CLI prints and the static
+/// `/verify/release/<tag>` report carries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseReport {
-    /// The release tag that was verified (echoed back).
     pub release_tag: String,
-    /// Were any artifacts found for this tag?
     pub found: bool,
     /// Tree size of the binaries STH everything was checked against.
     pub sth_tree_size: u64,
-    /// Root hash of that STH, lowercase hex.
     pub root_hex: String,
     /// The tag's artifacts, in tree (publish) order.
     pub artifacts: Vec<ReleaseArtifact>,
-    /// Overall verdict: binaries STH signature valid (under the binaries context)
-    /// AND every selected artifact included AND the whole tree satisfies the
-    /// binary invariant.
+    /// STH signature valid AND every artifact included AND the whole tree
+    /// satisfies the binary invariant.
     pub chain_valid: bool,
-    /// Human-readable reasons `chain_valid` is false (empty when it is true).
+    /// Why `chain_valid` is false (empty when true).
     pub violations: Vec<String>,
 }
 
-/// Verify a single release tag's binaries against the binaries tree served at
-/// `base_url` (e.g. `http://127.0.0.1:8787`), trusting only the published key.
-///
-/// A thin transport wrapper around [`verify_release_in_bundle`]: it fetches the
-/// binaries tree's prerequisites (`binaries/public_key.json`,
-/// `binaries/sth/latest.json`, `binaries/entries.json`) and this tag's inclusion
-/// proofs into an in-memory [`Bundle`], then hands them to the shared core — the
-/// one place the verdict is computed.
-///
-/// Returns `Err` only for transport/parse failures of the prerequisites; any
-/// *verification* failure is folded into the report as `chain_valid = false`.
+/// Verify a release tag's binaries against the binaries tree at `base_url`,
+/// trusting only the pinned key. `Err` only for transport/parse failures;
+/// verification failures are `chain_valid = false`.
 pub fn verify_release(base_url: &str, release_tag: &str) -> Result<ReleaseReport> {
     verify_release_via(base_url, release_tag, None)
 }
 
-/// [`verify_release`] with an optional SOCKS5 `proxy` (e.g.
-/// `socks5h://127.0.0.1:9050`) for every fetch. When the closed overlay is on,
-/// pollis-core passes the loopback shim here so the blocking `ureq` verify path
-/// routes through the relay and does not leak the client's IP to the first-party
-/// transparency host (design §14.4). `None` is exactly [`verify_release`] — a
-/// direct fetch, byte-for-byte the pre-overlay behaviour. A malformed proxy URL
-/// is returned as `Err`, never silently downgraded to a direct fetch.
+/// [`verify_release`] with an optional SOCKS5 `proxy`; see
+/// [`crate::group::verify_group_via`].
 pub fn verify_release_via(
     base_url: &str,
     release_tag: &str,
     proxy: Option<&str>,
 ) -> Result<ReleaseReport> {
     let agent = build_agent(proxy)?;
-    // Root-then-signers (#754, #1454): a signer the offline root authorises for
-    // this tree is trusted alongside the compiled pin, without a release.
+    // Root-authorised signers are trusted alongside the compiled pin (#754, #1454).
     let trust = crate::pinned::key_set_trust(&agent, base_url, binaries::STH_CONTEXT);
     verify_release_with(&agent, base_url, release_tag, &trust)
 }
 
-/// [`verify_release_via`] with the key-set trust decision supplied by the caller, so a
-/// caller that also pin-checks the served key itself (pollis-core) uses the very
-/// same decision the verifier does. `trust.alarm` fails the report.
+/// [`verify_release_via`] with a caller-supplied key-set decision; see
+/// [`crate::group::verify_group_via_trusting`].
 pub fn verify_release_via_trusting(
     base_url: &str,
     release_tag: &str,
@@ -176,22 +111,14 @@ fn verify_release_with(
 ) -> Result<ReleaseReport> {
     let base = base_url.trim_end_matches('/');
 
-    // Prerequisites, all under the binaries subtree.
     let pk_doc: PublicKeyDoc =
         fetch_json(agent, &format!("{base}/v1/binaries/public_key.json"))?;
-    // H-1: the pin belongs HERE, at the fetch boundary — this document came off
-    // an untrusted server. The `*_in_bundle` core below is deliberately NOT
-    // gated: it also verifies a bundle the caller already holds (the publisher
-    // precomputing its own report), where the bundle's own key is the right
-    // anchor and there is no third party to distrust.
-    // Rebind to the pinned-only subset: every key the verdict core may accept from
-    // here on is a pinned one, never a key the server merely listed beside it.
+    // H-1: pin at the fetch boundary; see `group::verify_group_with`.
     let pk_doc = crate::pinned::require_pinned_with(&pk_doc, now_ms(), trust)
         .map_err(crate::error::ServeError::BadBundle)?;
     let sth: Sth = fetch_json(agent, &format!("{base}/v1/binaries/sth/latest.json"))?;
     let entries: Vec<Entry> = fetch_json(agent, &format!("{base}/v1/binaries/entries.json"))?;
 
-    // Plan which proofs to fetch: only this tag's entries (decode + match).
     let tag_indices: Vec<usize> = entries
         .iter()
         .enumerate()
@@ -216,13 +143,7 @@ fn verify_release_with(
     }
 
     let bundle = Bundle {
-        // Verification-side reconstruction, never re-published. The served key
-        // document's rotation-overlap set is carried through so the verdict core
-        // accepts a head signed by a key that is retiring but still inside its
-        // window — during a changeover `public_key.json` and `sth/latest.json` are
-        // separate artifacts on separate cache policies and legitimately move at
-        // different moments. Dropping the set here (#875) made an honest log
-        // mid-rotation tell a user their genuine binary was unattested.
+        // Keep the rotation-overlap set, or mid-rotation fails (#875).
         retired_keys: pk_doc.overlap_keys(),
         public_key: pk_doc.public_key,
         sths: vec![sth],
@@ -233,8 +154,7 @@ fn verify_release_with(
     };
 
     let mut report = verify_release_in_bundle(&bundle, release_tag);
-    // A served key set we cannot attribute to the root is an alarm even when the
-    // tree verifies under the compiled pin: never a silent accept.
+    // An unattributable served key set is an alarm even under the compiled pin.
     if let Some(v) = trust.alarm_violation() {
         report.chain_valid = false;
         report.violations.insert(0, v);
@@ -242,23 +162,14 @@ fn verify_release_with(
     Ok(report)
 }
 
-/// Verify a single release tag's binaries against an **already-loaded** binaries
-/// [`Bundle`] — no IO. This is the shared verdict core: both the URL-based
-/// [`verify_release`] and the static report generator call it, so a tag's verdict
-/// is identical no matter how the bundle was obtained.
-///
-/// Never panics; a tampered/forked tree yields `chain_valid == false` with
-/// populated `violations` rather than an error.
+/// Verify a release tag against an already-loaded binaries [`Bundle`], no IO:
+/// the shared verdict core. Never panics.
 pub fn verify_release_in_bundle(bundle: &Bundle, release_tag: &str) -> ReleaseReport {
     verify_release_in_bundle_at(bundle, release_tag, now_ms())
 }
 
-/// [`verify_release_in_bundle`] against an explicit `now_ms`, which decides which
-/// rotation-overlap keys have expired.
-///
-/// The clock is a parameter so the overlap window is testable without waiting for
-/// one, and so a caller that needs a deterministic verdict can supply its own
-/// instant. [`verify_release_in_bundle`] is exactly this against the wall clock.
+/// [`verify_release_in_bundle`] against an explicit `now_ms`, which decides
+/// which rotation-overlap keys have expired.
 pub fn verify_release_in_bundle_at(
     bundle: &Bundle,
     release_tag: &str,
@@ -266,12 +177,7 @@ pub fn verify_release_in_bundle_at(
 ) -> ReleaseReport {
     let mut violations: Vec<String> = Vec::new();
 
-    // 1. Trust anchor: the newest binaries head, verified under the binaries
-    //    domain context and under ANY key the log publishes as acceptable right
-    //    now — the active signer plus any key still inside its rotation-overlap
-    //    window. An STH minted for the commit-log or account-key tree still fails
-    //    here even though the same key signed it: the context, not the key,
-    //    separates the trees. Expiry is applied here, not trusted from the server.
+    // Expiry is applied here, not trusted from the server.
     let candidates = bundle.key_candidates(now_ms);
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
@@ -289,9 +195,7 @@ pub fn verify_release_in_bundle_at(
         );
     }
 
-    // 2. Membership: every entry that decodes as a binary leaf for this tag,
-    //    paired with its global leaf index (used to locate its proof). Tree order
-    //    is publish order, so no explicit sort is needed.
+    // Tree order is publish order, so no sort is needed.
     let selected: Vec<(usize, BinaryRecord)> = bundle
         .entries
         .iter()
@@ -303,8 +207,6 @@ pub fn verify_release_in_bundle_at(
 
     let found = !selected.is_empty();
 
-    // Index the bundle's inclusion proofs by leaf index, keeping only those
-    // checked against the newest head.
     let inclusion_by_index: BTreeMap<usize, &InclusionProof> = bundle
         .inclusion
         .iter()
@@ -312,7 +214,6 @@ pub fn verify_release_in_bundle_at(
         .map(|c| (c.proof.leaf_index as usize, &c.proof))
         .collect();
 
-    // 3. Inclusion: each selected entry must be committed by the latest STH.
     let mut artifacts: Vec<ReleaseArtifact> = Vec::with_capacity(selected.len());
     let mut all_included = true;
     for (leaf_index, record) in &selected {
@@ -347,12 +248,8 @@ pub fn verify_release_in_bundle_at(
         });
     }
 
-    // 4. Invariant: replay the WHOLE tree through the binary rules (no fork,
-    //    monotonic release tags, payload/signed pairing). The invariant is partly
-    //    global — tag order spans releases and a signed leaf's payload can sit
-    //    anywhere earlier — so unlike the per-user account replay it must see
-    //    every entry. Reuse slice 2's invariant verbatim; a rejected append is
-    //    exactly a detected violation.
+    // The binary invariant is partly global (tag order spans releases; a signed
+    // leaf's payload may sit anywhere earlier), so replay the whole tree.
     let mut log = VerifiableLog::new();
     log.register_invariant(BINARIES_TENANT, Box::new(BinaryInvariant));
     let mut invariant_ok = true;
@@ -380,7 +277,6 @@ pub fn verify_release_in_bundle_at(
 }
 
 impl ReleaseReport {
-    /// Print a human-readable report to stdout (used by the CLI's text mode).
     pub fn print(&self) {
         println!("Release: {}", self.release_tag);
         println!("Found:   {}", if self.found { "yes" } else { "no" });
@@ -419,7 +315,6 @@ impl ReleaseReport {
     }
 }
 
-/// Render a [`Layer`] for human output.
 fn layer_str(layer: Layer) -> &'static str {
     match layer {
         Layer::Payload => "payload",

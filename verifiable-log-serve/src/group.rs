@@ -1,30 +1,7 @@
-//! Per-group verification — the one shared function the CLI and the backend
-//! HTTP endpoint both call, so they can never diverge.
-//!
-//! Given a published static read API (slice 3) and a conversation id, this
-//! fetches the log over HTTP, isolates that conversation's commits, and decides
-//! whether the group's commit chain is trustworthy:
-//!
-//! 1. **Trust anchor.** Fetch `public_key.json` + `sth/latest.json` and verify
-//!    the STH signature *first*, against the *set* of keys that document
-//!    publishes as currently acceptable (active signer + any key still inside its
-//!    rotation-overlap window). Everything downstream is checked against that
-//!    signed root — an unsigned/forged head is worth nothing.
-//! 2. **Membership.** Select the entries whose [`CommitLeaf`] decodes and whose
-//!    windowed pseudonym matches the one re-derived for the real
-//!    `conversation_id` in that leaf's window (#701), in `seq` order — every
-//!    window of the conversation.
-//! 3. **Inclusion.** For each selected entry, fetch its inclusion proof and
-//!    verify it against the latest STH (reusing slice 1's
-//!    [`verifiable_log::proof::verify_inclusion_proof`]).
-//! 4. **Invariant.** Replay the group's commits through slice 2's
-//!    [`CommitLogInvariant`] (epoch strictly increasing, no fork).
-//!
-//! Every cryptographic check is reused from slices 1–2; nothing here
-//! reimplements Merkle, proof, signature, or invariant logic. Transport/parse
-//! failures for the prerequisites return `Err`; a tampered/forked/regressed
-//! group is **not** an error — it yields a [`GroupReport`] with
-//! `chain_valid == false` and populated `violations`.
+//! Per-group verification: the one function the CLI and the HTTP endpoint
+//! share, so they can never diverge. Transport/parse failures are `Err`; a
+//! tampered, forked or regressed group is a [`GroupReport`] with
+//! `chain_valid == false`.
 
 use std::collections::BTreeMap;
 
@@ -39,91 +16,64 @@ use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json, fetch_text, fetch_text_opt, gate_leaf_format_version};
 
-/// One commit in a group's chain, as reported to a caller. Mirrors the
-/// structural fields of a [`CommitLeaf`] plus whether its inclusion proof
-/// checked out against the signed head.
+/// One commit in a group's chain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupCommit {
-    /// Suite generation of the lineage this commit belongs to (#454 P4). 0 for
-    /// a conversation that has never migrated to the post-quantum hybrid suite.
+    /// Suite generation of this commit's lineage (#454); 0 if never migrated.
     pub generation: u64,
     /// MLS epoch after this commit, within `generation`'s lineage.
     pub epoch: u64,
-    /// Global insertion order (`mls_commit_log.seq`).
     pub seq: i64,
-    /// Windowed, conversation-bound pseudonym for the committer (#701) — the
-    /// opaque published value, not the real user id. Recorded, not authorized
-    /// (see [`CommitLeaf`]).
+    /// Windowed, conversation-bound committer pseudonym (#701). Recorded, not
+    /// authorized (see [`CommitLeaf`]).
     pub sender_pseudonym: String,
-    /// `sha256(commit_data)`, lowercase hex.
     pub commit_sha256: String,
-    /// Did this entry's inclusion proof verify against the latest STH?
+    /// Inclusion proof verified against the latest STH.
     pub included: bool,
 }
 
-/// The structured result of verifying a single group. This is the exact shape
-/// the CLI prints and the HTTP endpoint returns as JSON — same function, same
-/// output, so the two can never report different things for the same input.
+/// Result of verifying one group; the shape the CLI prints and the HTTP
+/// endpoint returns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupReport {
-    /// The conversation id that was verified (echoed back).
     pub group_id: String,
-    /// Were any commits found for this conversation?
     pub found: bool,
     /// Tree size of the STH everything was checked against.
     pub sth_tree_size: u64,
-    /// Root hash of that STH, lowercase hex.
     pub root_hex: String,
-    /// The group's commits, in `seq` order.
     pub commits: Vec<GroupCommit>,
-    /// Overall verdict: STH signature valid AND every selected entry included
-    /// AND the commit-log invariant holds.
+    /// STH signature valid AND every entry included AND the invariant holds.
     pub chain_valid: bool,
-    /// Human-readable reasons `chain_valid` is false (empty when it is true).
+    /// Why `chain_valid` is false (empty when true).
     pub violations: Vec<String>,
 }
 
-/// Verify a single conversation's commit chain against the static log served at
-/// `base_url` (e.g. `http://127.0.0.1:8787`), trusting only the published key.
-///
-/// This is a thin transport wrapper: it fetches the prerequisites
-/// (`public_key.json`, `sth/latest.json`, `entries.json`) and the inclusion
-/// proofs for this group's entries into an in-memory [`Bundle`], then hands them
-/// to [`verify_group_in_bundle`] — the one place the actual verdict is computed.
-/// The live server ([`crate::live`]) calls that same core against its in-memory
-/// bundle directly, so the URL-fetched and in-memory paths **cannot diverge**.
-///
-/// Returns `Err` only for transport/parse failures of the prerequisites —
-/// without them there is nothing to verify. Any *verification* failure (bad
-/// signature, a missing or forged inclusion proof, a fork, an epoch regression)
-/// is folded into the returned report as `chain_valid = false` with a
-/// `violations` entry; it never panics and never returns `Err` for those.
+/// Verify a conversation's commit chain against the static log at `base_url`,
+/// trusting only the pinned key. Fetches into a [`Bundle`] and defers to
+/// [`verify_group_in_bundle_with_context`]. `Err` only for transport/parse
+/// failures; verification failures are `chain_valid = false`.
 pub fn verify_group(base_url: &str, conversation_id: &str) -> Result<GroupReport> {
     verify_group_via(base_url, conversation_id, None)
 }
 
-/// [`verify_group`] with an optional SOCKS5 `proxy` (e.g.
-/// `socks5h://127.0.0.1:9050`) for every fetch. When the closed overlay is on,
-/// pollis-core passes the loopback shim here so the blocking `ureq` verify path
-/// routes through the relay and does not leak the client's IP to the first-party
-/// transparency host (design §14.4). `None` is exactly [`verify_group`] — a
-/// direct fetch, byte-for-byte the pre-overlay behaviour. A malformed proxy URL
-/// is returned as `Err`, never silently downgraded to a direct fetch.
+/// [`verify_group`] with an optional SOCKS5 `proxy` for every fetch, so the
+/// overlay can hide the client's IP from the transparency host. A malformed
+/// proxy URL is `Err`, never a silent downgrade to a direct fetch.
 pub fn verify_group_via(
     base_url: &str,
     conversation_id: &str,
     proxy: Option<&str>,
 ) -> Result<GroupReport> {
     let agent = build_agent(proxy)?;
-    // Root-then-signers (#754, #1454): a signer the offline root authorises for
-    // this tree is trusted alongside the compiled pin, without a release.
+    // A signer the offline root authorises for this tree is trusted alongside
+    // the compiled pin, without a release (#754, #1454).
     let trust = crate::pinned::key_set_trust(&agent, base_url, verifiable_log::STH_CONTEXT_COMMIT_LOG);
     verify_group_with(&agent, base_url, conversation_id, &trust)
 }
 
-/// [`verify_group_via`] with the key-set trust decision supplied by the caller, so a
-/// caller that also pin-checks the served key itself (pollis-core) uses the very
-/// same decision the verifier does. `trust.alarm` fails the report.
+/// [`verify_group_via`] with a caller-supplied key-set decision, so a caller
+/// that also pin-checks the served key (pollis-core) uses the same decision.
+/// `trust.alarm` fails the report.
 pub fn verify_group_via_trusting(
     base_url: &str,
     conversation_id: &str,
@@ -142,20 +92,13 @@ fn verify_group_with(
 ) -> Result<GroupReport> {
     let base = base_url.trim_end_matches('/');
 
-    // Version gate first: `group` decodes commit leaves, whose encoding changed at
-    // the #701 republish, so a verifier older than the log would silently select
-    // nothing and report "Found: no" for a conversation that is really there. Read
-    // the manifest's `format_version` up front and refuse a log newer than we
-    // understand with VersionSkew ("upgrade your verifier") rather than a
-    // misleading empty result.
+    // Gate on `format_version` first: a verifier older than the leaf encoding
+    // would select nothing and misreport "Found: no" (#701).
     //
-    // #1579: a log that serves `commit-log-2` has retired its first commit-log
-    // tree, so a conversation is verified against the successor, under its own
-    // context. Only a log without one (self-hosted, or published before the
-    // reset) is read from `/v1/...`. Hiding the successor gains an attacker
-    // nothing here: the first tree is frozen, its heads are signed under the
-    // retired context, and `remote` fails a log that names a successor it does
-    // not serve.
+    // A log serving `commit-log-2` has retired the first tree, so verify against
+    // the successor under its own context (#1579). Hiding the successor gains
+    // nothing: the first tree is frozen under the retired context, and `remote`
+    // fails a log that names a successor it does not serve.
     let successor = format!("{base}/{}", crate::layout::COMMIT_LOG_2_API_PREFIX);
     let (prefix, context, index_body) =
         match fetch_text_opt(agent, &format!("{successor}/index.json"))? {
@@ -168,27 +111,17 @@ fn verify_group_with(
         };
     gate_leaf_format_version(&index_body)?;
 
-    // Prerequisites: the published key, the latest signed head, and the full
-    // ordered entry list. Without these there is nothing to verify.
     let pk_doc: PublicKeyDoc = fetch_json(agent, &format!("{prefix}/public_key.json"))?;
-    // H-1: the pin belongs HERE, at the fetch boundary — this document came off
-    // an untrusted server. The `*_in_bundle` core below is deliberately NOT
-    // gated: it also verifies a bundle the caller already holds (the publisher
-    // precomputing its own report), where the bundle's own key is the right
-    // anchor and there is no third party to distrust.
-    // Rebind to the pinned-only subset: every key the verdict core may accept from
-    // here on is a pinned one, never a key the server merely listed beside it.
+    // H-1: pin at the fetch boundary, since this document came off an untrusted
+    // server. The `*_in_bundle` core is deliberately ungated: a publisher's own
+    // bundle is anchored by its own key. Rebinding keeps only pinned keys.
     let pk_doc = crate::pinned::require_pinned_with(&pk_doc, now_ms(), trust)
         .map_err(crate::error::ServeError::BadBundle)?;
     let sth: Sth = fetch_json(agent, &format!("{prefix}/sth/latest.json"))?;
     let entries: Vec<Entry> = fetch_json(agent, &format!("{prefix}/entries.json"))?;
 
-    // Plan which proofs to fetch: only this group's entries. Since #701 the leaf
-    // carries a windowed pseudonym, not the raw id, so we match by re-deriving the
-    // pseudonym for the conversation *in each leaf's own window* (window = seq /
-    // WINDOW_SIZE) — the same thing a member does to recover their history across
-    // windows. This selection is a fetch optimisation; the verdict-bearing
-    // selection is re-derived inside the shared core, so the two can't disagree.
+    // Match by re-deriving the conversation's pseudonym in each leaf's own
+    // window (#701). This is only a fetch optimisation; the core re-selects.
     let group_indices: Vec<usize> = entries
         .iter()
         .enumerate()
@@ -201,9 +134,7 @@ fn verify_group_with(
         .map(|(i, _)| i)
         .collect();
 
-    // Fetch each selected entry's inclusion proof against the latest STH. A
-    // failed fetch simply omits the proof — the core then marks that entry
-    // not-included, exactly as the old fetch-per-entry path did.
+    // A failed proof fetch omits the proof; the core marks that entry not included.
     let mut inclusion: Vec<InclusionCheck> = Vec::with_capacity(group_indices.len());
     for i in &group_indices {
         let url = format!("{prefix}/proof/inclusion/{}/{}.json", sth.tree_size, i);
@@ -219,13 +150,9 @@ fn verify_group_with(
     }
 
     let bundle = Bundle {
-        // Verification-side reconstruction, never re-published. The served key
-        // document's rotation-overlap set is carried through so the verdict core
-        // accepts a head signed by a key that is retiring but still inside its
-        // window — during a changeover `public_key.json` and `sth/latest.json` are
-        // separate artifacts on separate cache policies and legitimately move at
-        // different moments. Dropping the set here (#875) made an honest log
-        // mid-rotation report `chain_valid = false`.
+        // Carry the served rotation-overlap set: `public_key.json` and
+        // `sth/latest.json` move at different moments, so an honest log
+        // mid-rotation must not fail (#875).
         retired_keys: pk_doc.overlap_keys(),
         public_key: pk_doc.public_key,
         sths: vec![sth],
@@ -236,8 +163,8 @@ fn verify_group_with(
     };
 
     let mut report = verify_group_in_bundle_with_context(&bundle, conversation_id, now_ms(), context);
-    // A served key set we cannot attribute to the root is an alarm even when the
-    // tree verifies under the compiled pin: never a silent accept.
+    // A served key set the root doesn't vouch for is an alarm even when the tree
+    // verifies under the compiled pin.
     if let Some(v) = trust.alarm_violation() {
         report.chain_valid = false;
         report.violations.insert(0, v);
@@ -245,46 +172,20 @@ fn verify_group_with(
     Ok(report)
 }
 
-/// Verify a single conversation's commit chain against an **already-loaded**
-/// [`Bundle`] — no IO. This is the shared verdict core: both the URL-based
-/// [`verify_group`] and the live server's `/verify/group/<id>` endpoint call it,
-/// so a group's verdict is identical no matter how the bundle was obtained.
+/// Verify a conversation's commit chain against an already-loaded [`Bundle`],
+/// no IO: the shared verdict core behind [`verify_group`] and the live
+/// `/verify/group/<id>` endpoint. Never panics.
 ///
-/// **This is the member/auditor path (#701).** `conversation_id` is the *real*
-/// id — something only a member (or an auditor a member has told) knows, since the
-/// published log carries windowed pseudonyms, not raw ids. Knowing it lets this
-/// function recover the conversation's *entire* history across every window and
-/// check the **full-strength** invariant, closing the window-boundary residual an
-/// outside-only replay cannot (see [`CommitLogInvariant`]).
-///
-/// The checks mirror the static read API exactly:
-///
-/// 1. **Trust anchor.** The newest STH's signature must verify under the
-///    bundle's published key. If not, the report still lists the group's commits
-///    but the verdict is doomed.
-/// 2. **Membership.** Select entries whose [`CommitLeaf`] decodes and whose
-///    `conversation_pseudonym` equals the pseudonym re-derived for
-///    `conversation_id` in that leaf's own window (`seq / WINDOW_SIZE`), in `seq`
-///    order — i.e. every window of this conversation.
-/// 3. **Inclusion.** Each selected entry must have an inclusion proof (against
-///    the newest STH) in the bundle that verifies.
-/// 4. **Invariant.** Replay the group's commits through slice 2's
-///    [`CommitLogInvariant`], **regrouped under a single key** so the check spans
-///    windows (epoch strictly increasing, no fork — across the whole conversation,
-///    not just within a window).
-///
-/// Never panics; a tampered/forked/regressed group yields `chain_valid == false`
-/// with populated `violations` rather than an error.
+/// This is the member/auditor path (#701): `conversation_id` is the real id, so
+/// every window's pseudonym can be re-derived and the invariant checked across
+/// window boundaries, which an outside-only replay cannot (see
+/// [`CommitLogInvariant`]).
 pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupReport {
     verify_group_in_bundle_at(bundle, conversation_id, now_ms())
 }
 
-/// [`verify_group_in_bundle`] against an explicit `now_ms`, which decides which
-/// rotation-overlap keys have expired.
-///
-/// The clock is a parameter so the overlap window is testable without waiting for
-/// one, and so a caller that needs a deterministic verdict can supply its own
-/// instant. [`verify_group_in_bundle`] is exactly this against the wall clock.
+/// [`verify_group_in_bundle`] against an explicit `now_ms`, which decides
+/// which rotation-overlap keys have expired (testable, deterministic).
 pub fn verify_group_in_bundle_at(
     bundle: &Bundle,
     conversation_id: &str,
@@ -298,10 +199,9 @@ pub fn verify_group_in_bundle_at(
     )
 }
 
-/// [`verify_group_in_bundle_at`] for a commit-log tree whose heads are signed
-/// under `context`: [`verifiable_log::STH_CONTEXT_COMMIT_LOG`] for the first
-/// tree, [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`] for its successor (#1579).
-/// A head of one tree never anchors a report about the other.
+/// [`verify_group_in_bundle_at`] for a tree whose heads are signed under
+/// `context` (first tree or commit-log-2, #1579). A head of one tree never
+/// anchors a report about the other.
 pub fn verify_group_in_bundle_with_context(
     bundle: &Bundle,
     conversation_id: &str,
@@ -310,12 +210,8 @@ pub fn verify_group_in_bundle_with_context(
 ) -> GroupReport {
     let mut violations: Vec<String> = Vec::new();
 
-    // 1. Trust anchor: the newest published head, verified under ANY key the log
-    //    publishes as acceptable right now — the active signer plus any key still
-    //    inside its rotation-overlap window. A head is honest if it verifies under
-    //    one of them; only verifying under none is evidence of a problem. Expiry is
-    //    applied here (not trusted from the server), so a retired key stops being
-    //    accepted on schedule.
+    // Accept any key the log publishes as currently acceptable; expiry is
+    // applied here, not trusted from the server.
     let candidates = bundle.key_candidates(now_ms);
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
@@ -330,10 +226,6 @@ pub fn verify_group_in_bundle_with_context(
         violations.push("STH signature is invalid — published head is not trustworthy".to_string());
     }
 
-    // 2. Membership: every entry whose published pseudonym matches the one this
-    //    conversation would carry in that leaf's own window — i.e. all of the
-    //    conversation's commits, across every window — paired with its global leaf
-    //    index (used to locate its proof).
     let mut selected: Vec<(usize, CommitLeaf)> = bundle
         .entries
         .iter()
@@ -345,14 +237,11 @@ pub fn verify_group_in_bundle_with_context(
                 == derive_conversation_pseudonym(conversation_id, window_for_seq(leaf.seq))
         })
         .collect();
-    // The log is already in seq order, but sort defensively so the chain we
-    // report and replay is unambiguous regardless of source ordering.
+    // Sort defensively so the reported and replayed chain is source-order independent.
     selected.sort_by_key(|(_, leaf)| leaf.seq);
 
     let found = !selected.is_empty();
 
-    // Index the bundle's inclusion proofs by leaf index, keeping only those
-    // checked against the newest head — the one this report is anchored to.
     let inclusion_by_index: BTreeMap<usize, &InclusionProof> = bundle
         .inclusion
         .iter()
@@ -360,7 +249,6 @@ pub fn verify_group_in_bundle_with_context(
         .map(|c| (c.proof.leaf_index as usize, &c.proof))
         .collect();
 
-    // 3. Inclusion: each selected entry must be committed by the latest STH.
     let mut commits: Vec<GroupCommit> = Vec::with_capacity(selected.len());
     let mut all_included = true;
     for (leaf_index, leaf) in &selected {
@@ -391,17 +279,9 @@ pub fn verify_group_in_bundle_with_context(
         });
     }
 
-    // 4. Invariant: replay this group's commits through the commit-log rules
-    //    (no fork, no epoch regression). Reuse slice 2's invariant verbatim — a
-    //    rejected append is exactly a detected violation.
-    //
-    //    Since #701 the selected leaves carry a *different* pseudonym per window,
-    //    so replaying them as-is would let [`CommitLogInvariant`] group only
-    //    within a window and miss a boundary-straddling fork/regression. Because
-    //    we know the real `conversation_id`, we regroup every selected leaf under
-    //    one canonical key (the real id) so the invariant spans all windows — the
-    //    full-strength check a member is entitled to, and the whole reason this
-    //    path takes the real id rather than a pseudonym.
+    // Leaves carry a different pseudonym per window, so regroup them under the
+    // real id: otherwise [`CommitLogInvariant`] would group per window and miss
+    // a fork or regression straddling a window boundary (#701).
     let mut log = VerifiableLog::new();
     log.register_invariant(TENANT, Box::new(CommitLogInvariant));
     let mut invariant_ok = true;
@@ -442,7 +322,6 @@ pub fn verify_group_in_bundle_with_context(
 }
 
 impl GroupReport {
-    /// Print a human-readable report to stdout (used by the CLI's text mode).
     pub fn print(&self) {
         println!("Group:   {}", self.group_id);
         println!("Found:   {}", if self.found { "yes" } else { "no" });

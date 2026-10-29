@@ -1,34 +1,12 @@
-//! Account, device, key-package, enrollment and object READS (#987).
-//!
-//! The `/v1/read/*` family: everything about *identities and their material*
-//! that the client used to `SELECT` for itself. Three of these carry a credential
-//! that is not a device signature, and each has a reason:
-//!
-//!   * [`AccountProbeBody`] is **unauthenticated**, because it runs at every app
-//!     launch BEFORE PIN entry — the local database is closed, so `ds_post`
-//!     cannot load the device signer, and no OTP has run either, so there is no
-//!     session. See §6.5 of #987 and the doc on the type.
-//!   * [`EnrollmentRequestBody`] is gated on **possession of `request_id`**, not
-//!     on a session, because a session-gated enrollment poll is *guaranteed* to
-//!     401 before the request it polls expires: the DS session TTL and the
-//!     enrollment TTL are both 600s, and the session is minted at `verify-otp`,
-//!     strictly BEFORE the request is created.
-//!   * [`RecoveryBlobBody`] accepts an **OTP session only** — never a plain
-//!     request and never a device signature, because the caller by definition has
-//!     no device yet and the blob is the account's last line of recovery.
-//!
-//! Everything else here is device-signed like the rest of the API.
+//! Account, device, key-package, enrollment and object reads: the `/v1/read/*`
+//! family (#987). Device-signed, except three with documented reasons:
+//! [`AccountProbeBody`] (unauthenticated), [`EnrollmentRequestBody`]
+//! (`request_id` is the capability) and [`RecoveryBlobBody`] (OTP session only).
 
 use serde::{Deserialize, Serialize};
 
-// ── POST /v1/read/account-keys ───────────────────────────────────────────────
-
-/// Cross-signing roots for a batch of users — safety numbers, TOFU pinning, the
-/// reconcile pre-pin, and the self-audit's local view.
-///
-/// Batched because the sites that use it are batch-shaped: a whole group roster
-/// on reconcile, the whole pinned-contact list when the sidebar opens. The
-/// per-user version of this cost one round trip per contact.
+/// Cross-signing roots for a batch of users (safety numbers, TOFU pinning,
+/// reconcile, self-audit). Batched because every caller is roster-shaped.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountKeysBody {
     pub user_ids: Vec<String>,
@@ -36,9 +14,8 @@ pub struct AccountKeysBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountKeysResponse {
-    /// One entry per user that RESOLVES. A requested id with no row, or with a
-    /// NULL `account_id_pub`, is absent — which is what the direct read did, and
-    /// what the TOFU logic reads as "not provisioned yet, do not pin".
+    /// One entry per user that resolves. A missing row or NULL `account_id_pub`
+    /// is absent, which TOFU reads as "not provisioned yet, do not pin".
     pub keys: Vec<AccountKeyRow>,
 }
 
@@ -50,16 +27,8 @@ pub struct AccountKeyRow {
     pub identity_version: i64,
 }
 
-// ── POST /v1/read/devices ────────────────────────────────────────────────────
-
-/// A user's devices, with as much of the cross-signing material as the caller is
-/// entitled to.
-///
-/// Serves the device-list UI, the "is this device still registered" check, the
-/// stale-cert sweep and the avatar-free roster lookups. Callers ask for one
-/// user's devices; asking for ANOTHER user's returns only the columns that are
-/// already public to any group member (the cert chain), never `device_name` or
-/// `last_seen`.
+/// A user's devices. For another user's devices only the cert chain (already
+/// public to group members) is returned, never `device_name` or `last_seen`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevicesBody {
     /// Whose devices. `None` → the authenticated user.
@@ -68,9 +37,8 @@ pub struct DevicesBody {
     /// Narrow to these device ids. Empty → every device of the user.
     #[serde(default)]
     pub device_ids: Vec<String>,
-    /// Include tombstoned (`revoked_at IS NOT NULL`) rows. The device list wants
-    /// them hidden; cert verification needs the tombstone, because "revoked" and
-    /// "absent" are different verdicts.
+    /// Include tombstoned rows: cert verification needs them, because "revoked"
+    /// and "absent" are different verdicts.
     #[serde(default)]
     pub include_revoked: bool,
 }
@@ -80,13 +48,9 @@ pub struct DevicesResponse {
     pub devices: Vec<DeviceRow>,
 }
 
-/// One `user_device` row.
-///
-/// Every column is `Option` because every one is genuinely nullable
-/// mid-enrollment, and the client distinguishes the states: NULL cert columns on
-/// a live row mean "cert publish has not landed yet" (retry), a non-NULL
-/// `revoked_at` is a verdict. `device_name` and `last_seen` are `None` for
-/// anyone but the owner.
+/// One `user_device` row. NULL cert columns on a live row mean "cert publish
+/// not landed yet" (retry); non-NULL `revoked_at` is a verdict. `device_name`
+/// and `last_seen` are `None` for anyone but the owner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceRow {
     pub device_id: String,
@@ -113,22 +77,15 @@ pub struct DeviceRow {
     pub mls_signature_pub_pq: Option<String>,
 }
 
-// ── POST /v1/read/key-packages ───────────────────────────────────────────────
-
 /// Key-package discovery: how many of MY packages are left, and which of a
 /// roster's devices have one to claim.
-///
-/// The two halves share an endpoint because they are the same table and the
-/// reconcile path wants the second immediately after the roster read it already
-/// paid for.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyPackagesBody {
-    /// Count MY unclaimed packages in this suite, for the replenish shortfall.
-    /// `None` → do not count.
+    /// Count MY unclaimed packages in this suite. `None` → do not count.
     #[serde(default)]
     pub count_for_ciphersuite: Option<i64>,
-    /// List `(user_id, device_id)` pairs among these users that have at least
-    /// one unclaimed package in `pairs_ciphersuite`.
+    /// Users whose `(user_id, device_id)` pairs with an unclaimed package in
+    /// `pairs_ciphersuite` to list.
     #[serde(default)]
     pub pairs_for_user_ids: Vec<String>,
     #[serde(default)]
@@ -137,26 +94,18 @@ pub struct KeyPackagesBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyPackagesResponse {
-    /// Unclaimed packages the authenticated device still has in the requested
-    /// suite. `None` when the caller did not ask.
+    /// The caller's unclaimed packages in the requested suite; `None` if not asked.
     #[serde(default)]
     pub unclaimed: Option<i64>,
-    /// Does the authenticated device hold a last-resort package in the counted
-    /// suite (#1571)? Answered only alongside `unclaimed`. `None` from a
-    /// Delivery Service that predates last-resort packages — the client then
-    /// does not try to publish one, because that server would store it as a
-    /// regular package.
-    ///
-    /// `unclaimed` never counts the last-resort package: it is not part of the
-    /// pool a refill tops up.
+    /// Whether the caller holds a last-resort package in the counted suite
+    /// (#1571); never counted in `unclaimed`. `None` from a DS that predates
+    /// last-resort packages, so the client must not publish one (it would be
+    /// stored as a regular package).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_last_resort: Option<bool>,
-    /// `(user_id, device_id)` pairs with a claimable package.
-    ///
-    /// A short list here is indistinguishable from "these devices have no
-    /// package", which is why the DS answers an ERROR rather than a truncated
-    /// list if any chunk of the query fails — a silently short roster is how a
-    /// device quietly stays out of a group.
+    /// `(user_id, device_id)` pairs with a claimable package. The DS errors
+    /// rather than truncating: a silently short list keeps a device out of a
+    /// group.
     #[serde(default)]
     pub pairs: Vec<DevicePair>,
 }
@@ -167,13 +116,8 @@ pub struct DevicePair {
     pub device_id: String,
 }
 
-// ── POST /v1/read/registered-devices ─────────────────────────────────────────
-
-/// Every non-revoked `(user_id, device_id)` still registered for a roster.
-///
-/// Reconcile uses it to drop leaves whose device row was revoked while the user
-/// remains a member. Separate from [`DevicesBody`] because it is roster-wide and
-/// returns no cert material — only the pair.
+/// Every non-revoked `(user_id, device_id)` registered for a roster, so
+/// reconcile can drop leaves of revoked devices whose user is still a member.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisteredDevicesBody {
     pub user_ids: Vec<String>,
@@ -184,17 +128,11 @@ pub struct RegisteredDevicesResponse {
     pub pairs: Vec<DevicePair>,
 }
 
-// ── POST /v1/read/roster-identities ──────────────────────────────────────────
-
-/// Every roster user's cross-signing root plus ALL of their `user_device` rows
-/// (revoked ones included — "revoked" is a verdict, "absent" a retry).
+/// Every roster user's cross-signing root plus all their `user_device` rows,
+/// revoked included ("revoked" is a verdict, "absent" a retry).
 ///
-/// The committer-side input to the leaf cross-signing check: before a claimed
-/// KeyPackage becomes an Add proposal, and before an existing leaf is retained,
-/// reconcile proves the leaf's signature key is the one the user's own
-/// `account_id_pub` certified. Batched over the roster so a reconcile costs one
-/// round trip, not one per member. INPUTS ONLY — the verdict is a signature
-/// check over a chain rooted in the user's identity key, which the DS is not
+/// Inputs to the committer's leaf cross-signing check only: the verdict is a
+/// signature check rooted in the user's identity key, which the DS is not
 /// trusted to evaluate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RosterIdentitiesBody {
@@ -206,31 +144,20 @@ pub struct RosterIdentitiesResponse {
     pub identities: Vec<crate::reads::AddedIdentity>,
 }
 
-// ── POST /v1/read/enrollment ─────────────────────────────────────────────────
-
 /// Poll one device-enrollment request, or list the caller's pending ones.
 ///
-/// # Why `request_id` is the credential
-///
-/// The polling device has no signing key (that is what it is being enrolled to
-/// get) and cannot use its OTP session either: the session is minted at
-/// `verify-otp`, strictly BEFORE the enrollment request is created, and both
-/// TTLs are 600 seconds — so a session-gated poll is *guaranteed* to 401 before
-/// the request it is polling expires. Verified, not assumed.
-///
-/// Possession of `request_id` is cryptographically safe as the gate:
-/// `wrapped_account_key` is sealed to the requesting device's ephemeral X25519
-/// public key, whose private half never leaves that process's memory. A holder of
-/// the id learns a status and a blob they cannot open.
+/// `request_id` is the credential: the polling device has no signing key, and
+/// its OTP session (minted before the request, same 600s TTL) is guaranteed to
+/// expire first. Safe because `wrapped_account_key` is sealed to the
+/// requester's in-memory ephemeral X25519 key; a holder of the id learns only a
+/// status and a blob they cannot open.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrollmentRequestBody {
-    /// The capability. A 128-bit ULID minted by the requesting device.
+    /// The capability: a 128-bit ULID minted by the requesting device.
     pub request_id: String,
-    /// Set by an APPROVING sibling — a fully enrolled, device-signing client
-    /// that needs the columns the approval flow validates against
-    /// (`new_device_ephemeral_pub`, `verification_code`). Served only to a
-    /// signed caller who owns the request's user; a bare capability holder
-    /// never receives them.
+    /// Set by an approving sibling that needs `new_device_ephemeral_pub` and
+    /// `verification_code`. Served only to a signed caller who owns the
+    /// request's user, never to a bare capability holder.
     #[serde(default)]
     pub want_approval_fields: bool,
 }
@@ -261,9 +188,8 @@ pub struct EnrollmentRequestRow {
     pub verification_code: Option<String>,
 }
 
-/// List the authenticated user's still-open enrollment requests — the
-/// existing-device side, called at login in case the inbox push was missed.
-/// Device-signed; this is not capability-gated because it enumerates.
+/// The authenticated user's open enrollment requests (existing-device side, in
+/// case the inbox push was missed). Device-signed because it enumerates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingEnrollmentsBody {
     #[serde(default)]
@@ -275,17 +201,12 @@ pub struct PendingEnrollmentsResponse {
     pub requests: Vec<EnrollmentRequestRow>,
 }
 
-// ── POST /v1/read/recovery-blob ──────────────────────────────────────────────
-
 /// The Secret-Key-wrapped account identity, for recovery on a device with
 /// nothing.
 ///
-/// OTP session only — never plain, never device-signed. The caller has no device
-/// (that is the situation), and the blob is the account's last line of recovery,
-/// so the credential has to be the email OTP they just proved. The DS
-/// rate-limits this hard and records a security event per fetch: the blob is
-/// useless without the Secret Key, but a *fetch* is exactly the signal an account
-/// owner wants to see if it was not them.
+/// OTP session only: the caller has no device by definition. The DS
+/// rate-limits it and records a security event per fetch, since a fetch is the
+/// signal an owner wants to see if it was not them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryBlobBody {
     /// Must equal the session's user; a mismatch is a 403.
@@ -309,14 +230,8 @@ pub struct RecoveryBlob {
     pub wrapped_key: String,
 }
 
-// ── POST /v1/read/account-status ─────────────────────────────────────────────
-
-/// The caller's own account row: identity version, email, username.
-///
-/// Self-scoped by construction — the DS answers for the authenticated user and
-/// ignores any id in the body — because `email` is on it. Serves cert signing
-/// (which needs `identity_version` to stamp), the identity-rotation CAS
-/// expectation, and the reset flow's email confirmation.
+/// The caller's own account row. Self-scoped (any id in the body is ignored)
+/// because it carries `email`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountStatusBody {
     #[serde(default)]
@@ -338,34 +253,19 @@ pub struct AccountStatus {
     pub email: Option<String>,
     #[serde(default)]
     pub username: Option<String>,
-    /// base64. `None` before the first identity is established — which is
-    /// precisely what "this device needs enrollment" is derived from.
+    /// base64. `None` before the first identity is established, which is how
+    /// "this device needs enrollment" is derived.
     #[serde(default)]
     pub account_id_pub: Option<String>,
 }
 
-// ── POST /v1/auth/account-probe ──────────────────────────────────────────────
-
 /// Does this account exist, and does it have an identity yet?
 ///
-/// # The bootstrap dead end (#987 §6.5)
-///
-/// `get_session` runs at EVERY app launch, before PIN entry. At that moment the
-/// local SQLCipher database is closed, so `ds_post` cannot load the ML-DSA-44
-/// device signer and errors with *"not signed in for DS request signing"*;
-/// `device_id` is not set either; and no OTP has run, so there is no session
-/// bearer. There is no credential available, and the answer gates the
-/// PRE-UNLOCK UI — a device that needs enrollment has no PIN to unlock with — so
-/// it cannot be deferred until after unlock.
-///
-/// Hence: unauthenticated, and rate-limited by IP.
-///
-/// The disclosure is strictly smaller than one we already ship. `user_id` is a
-/// 128-bit ULID that the caller read out of its OWN `accounts.json` — it is not
-/// guessable and not an enumeration surface — while `verify-otp` already returns
-/// `has_identity` for an *email address*, which is guessable. Answering here for
-/// an id the caller already holds tells an attacker nothing they could not learn
-/// more easily elsewhere.
+/// Unauthenticated and IP-rate-limited (#987 §6.5): it runs at every launch
+/// before PIN entry, when no device signer, `device_id` or session exists, and
+/// it gates the pre-unlock UI. Discloses less than `verify-otp`, which answers
+/// `has_identity` for a guessable email; `user_id` is an unguessable ULID from
+/// the caller's own `accounts.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountProbeBody {
     pub user_id: String,
@@ -375,64 +275,46 @@ pub struct AccountProbeBody {
 pub struct AccountProbeResponse {
     /// The account's current `identity_version`, when it has an identity.
     ///
-    /// Here rather than on `account-status` because of the BOOTSTRAP PIVOT:
-    /// `ensure_device_cert` must stamp this version into the cert it is about to
-    /// sign, and it runs on a device whose `user_device.mls_signature_pub` is
-    /// still NULL — the column the DS reads to authenticate a signature. The
-    /// write that establishes the credential cannot be authenticated by that
-    /// credential, and neither can the read that feeds it. A session does not
-    /// close the gap either: sibling-approval enrollment publishes its cert on
-    /// cert-validity ALONE precisely because a slow human approval outlives the
-    /// session TTL.
-    ///
-    /// It is not a disclosure. Every device cert carries `cert_identity_version`
-    /// in the clear, `POST /v1/read/account-keys` returns it for any user id to
-    /// any authenticated caller, and it is a small counter of how many times the
-    /// account has been reset. `email` and `username`, which are NOT public in
-    /// that sense, stay on the authenticated `account-status` read.
+    /// Here rather than on `account-status` because `ensure_device_cert` must
+    /// stamp it before the device's `mls_signature_pub` exists, so neither a
+    /// device signature nor a session (which a slow sibling approval outlives)
+    /// can authenticate the read. Not a disclosure: every cert and
+    /// `account-keys` already expose it.
     #[serde(default)]
     pub identity_version: Option<i64>,
-    /// The `users` row exists. `false` means the locally cached account is stale
-    /// and should be dropped.
+    /// `false` → the locally cached account is stale and should be dropped.
     pub exists: bool,
-    /// `users.account_id_pub` is non-NULL. `false` on an existing account means
-    /// this install must go through enrollment before it can unlock.
+    /// `false` on an existing account → this install must enroll before it can
+    /// unlock.
     pub has_identity: bool,
 }
 
-// ── POST /v1/read/security-events ────────────────────────────────────────────
-
-/// The caller's own security-event log, most recent first, one keyset page at a
-/// time (#1548).
-///
-/// `before` and `kinds` are optional and skipped when unset, so a body without
-/// them is byte-identical to the pre-#1548 body and gets the pre-#1548 answer:
-/// the newest `limit` rows of every kind.
+/// The caller's own security-event log, newest first, one keyset page at a time
+/// (#1548). A body without `before`/`kinds` gets the newest `limit` rows of
+/// every kind.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityEventsBody {
     #[serde(default)]
     pub user_id: Option<String>,
-    /// Clamped server-side to `1..=500`, matching the client's previous clamp,
-    /// so a body cannot ask for the whole table.
+    /// Clamped server-side to `1..=500`.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Return only rows strictly older than this `(created_at, id)` — the
-    /// previous page's `next_cursor`. `None` = start at the newest row.
+    /// Return only rows strictly older than this cursor (the previous page's
+    /// `next_cursor`). `None` = start at the newest row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<SecurityEventCursor>,
-    /// Return only these `kind`s. `None` or empty = every kind. At most
-    /// [`SECURITY_EVENTS_MAX_KINDS`]; a longer list is refused.
+    /// Return only these `kind`s; `None` or empty = every kind. At most
+    /// [`SECURITY_EVENTS_MAX_KINDS`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kinds: Option<Vec<String>>,
 }
 
-/// The most `kinds` one [`SecurityEventsBody`] may name. Far above the handful
-/// of kinds that exist; it bounds the bound-parameter count, nothing else.
+/// The most `kinds` one [`SecurityEventsBody`] may name; bounds the
+/// bound-parameter count.
 pub const SECURITY_EVENTS_MAX_KINDS: usize = 32;
 
-/// A keyset position in the security-event log: the `(created_at, id)` of the
-/// last row a page returned. `id` is the tiebreak, so rows written in the same
-/// second are each served exactly once across a page boundary.
+/// A keyset position: the `(created_at, id)` of a page's last row. `id` breaks
+/// ties so same-second rows are served exactly once across a page boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecurityEventCursor {
     pub created_at: String,
@@ -442,9 +324,8 @@ pub struct SecurityEventCursor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityEventsResponse {
     pub events: Vec<SecurityEventRow>,
-    /// Where the next page starts, or `None` when this page reached the oldest
-    /// matching row. Omitted from the JSON when `None`; a pre-#1548 client
-    /// ignores it either way.
+    /// Where the next page starts; `None` when this page reached the oldest
+    /// matching row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<SecurityEventCursor>,
 }
@@ -460,24 +341,19 @@ pub struct SecurityEventRow {
     pub metadata: Option<String>,
 }
 
-// ── POST /v1/read/emoji ──────────────────────────────────────────────────────
-
-/// Custom emoji: the usable set (every group the caller is in) and single-object
-/// resolution for rendering.
+/// Custom emoji: the usable set and single-object resolution.
 ///
-/// The two are one endpoint but NOT one rule, and the distinction is #848's:
-/// enumerating a group's emoji is group metadata (shortcodes leak the way
-/// channel names do, `created_by` names members) and is members-only, while
-/// RESOLVING one hash you were already handed is part of reading a message you
-/// can already read, and is deliberately ungated.
+/// Two rules (#848): enumerating a group's emoji is members-only group
+/// metadata; resolving a hash you were already handed is part of reading a
+/// message and deliberately ungated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmojiReadBody {
-    /// Every emoji usable by the caller — the picker's source AND the send
-    /// permission rule, which is why they are one query.
+    /// Every emoji usable by the caller: the picker's source and the send
+    /// permission rule.
     #[serde(default)]
     pub want_usable: bool,
-    /// Resolve these content hashes to their stored object metadata. Not
-    /// membership-gated, by design.
+    /// Resolve these content hashes to object metadata. Not membership-gated, by
+    /// design.
     #[serde(default)]
     pub content_hashes: Vec<String>,
 }
@@ -497,12 +373,7 @@ pub struct EmojiObject {
     pub content_type: String,
 }
 
-// ── POST /v1/read/objects ────────────────────────────────────────────────────
-
-/// Content-addressed dedup probe: is this blob already stored?
-///
-/// One endpoint for both object tables because the question and the answer are
-/// the same shape; the caller says which table it means.
+/// Content-addressed dedup probe: is this blob already stored in `kind`'s table?
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectExistsBody {
     pub content_hash: String,
@@ -521,15 +392,9 @@ pub struct ObjectExistsResponse {
     pub exists: bool,
 }
 
-// ── POST /v1/read/read-cursors ───────────────────────────────────────────────
-
-/// This account's synced read-cursor blob, so a device can merge the other
-/// devices' read positions into its own (#844).
-///
-/// Device-signed, and the DS binds it to the authenticated user: the blob is
-/// undecryptable without the account identity key, but *serving* it to anyone
-/// who asks would still leak its size and change rate to an unauthenticated
-/// caller, so it is scoped like every other per-account read here.
+/// This account's synced read-cursor blob, so a device can merge other
+/// devices' read positions (#844). Bound to the authenticated user: the blob is
+/// undecryptable, but serving it to anyone would leak its size and change rate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadCursorsBody {
     /// Must equal the authenticated user; a mismatch is a 403.
@@ -538,8 +403,7 @@ pub struct ReadCursorsBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadCursorsResponse {
-    /// `None` → this account has never pushed a cursor blob. A first-run device
-    /// gets this and simply has nothing to merge; it is not an error.
+    /// `None` → this account has never pushed a cursor blob; not an error.
     #[serde(default)]
     pub cursors: Option<EncryptedReadCursors>,
 }

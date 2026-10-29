@@ -1,16 +1,4 @@
-//! `builder` — reads `mls_commit_log` and emits a signed monitor bundle.
-//!
-//! Subcommands:
-//! * `append-commit-log` — append the DS rows above the last persisted `seq` to
-//!   the commit log's persisted leaves, its log of record (#1579). Fails closed.
-//! * `build` — sign STHs over the persisted commit-log leaves (`--commit-leaves`)
-//!   or, without that flag, over every DS row; write the bundle.
-//! * `build-binaries` — read a JSON file of `BinaryRecord`s and write a signed
-//!   binaries-tree bundle (binary transparency, Phase 1). No DB.
-//! * `keygen` — mint a throwaway ML-DSA-44 keypair (hex) for dev.
-//!
-//! The emitted bundle is verified with `monitor verify <bundle.json>` from the
-//! `verifiable-log` crate, unchanged.
+//! `builder`: signs the transparency-log bundles; `monitor verify` checks them.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -266,11 +254,8 @@ enum Command {
 
 /// Parse `<public_key_hex>:<tree,tree>[:<not_after_ms>]` into a signer entry.
 ///
-/// The tree contexts themselves contain colons (`pollis-verifiable-log:sth:v2`), so
-/// this splits the key off the FRONT and the optional expiry off the BACK — and only
-/// treats a trailing segment as an expiry when it is entirely digits. A naive
-/// `split(':')` silently mangles every real context, which is how the first version
-/// of this failed.
+/// Tree contexts contain colons, so the key is split off the front and the
+/// expiry off the back, and only an all-digit tail counts as an expiry.
 fn parse_signer(spec: &str) -> std::result::Result<verifiable_log::SignerEntry, String> {
     let (key_hex, rest) = spec
         .split_once(':')
@@ -414,11 +399,9 @@ fn main() -> ExitCode {
 
 /// Parse `--retired-key <public_key_hex>:<not_after_ms>` into bundle entries.
 ///
-/// The key id is *derived* from the key rather than accepted from the operator,
-/// so a typo cannot publish an id that names a different key than the bytes
-/// beside it. A malformed entry is a hard error: silently dropping one would
-/// publish a shorter overlap set than intended and strand clients pinning the
-/// omitted key.
+/// The key id is derived, never operator-supplied, so it cannot name a different
+/// key. A malformed entry is a hard error: dropping one would strand clients
+/// pinning that key.
 fn parse_retired_keys(specs: &[String]) -> Result<Vec<RetiredKey>> {
     specs
         .iter()
@@ -464,27 +447,17 @@ async fn run_build(
         .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
         .ok_or(BuilderError::NoDbSource)?;
 
-    // The commit log lives in its own DB after Goal A's cutover. Resolve it from
-    // (1) --log-db, (2) LOG_DB_URL, (3) the main DB (single-DB / pre-cutover).
     let log_db = log_db
         .or_else(|| std::env::var("LOG_DB_URL").ok())
         .unwrap_or_else(|| db.clone());
-    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
-    // tests, and pre-cutover all behave exactly as before.
     let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
         .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
         .unwrap_or_default();
 
-    // Resolve the signing key BEFORE touching the DB so a missing key fails fast.
+    // Before touching the DB, so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
-    // The two tenants are INDEPENDENT: the commit log lives in the log DB and the
-    // account-key directory in the main DB, on separate Merkle trees. A transient
-    // empty commit log (e.g. right after Goal A's cutover) must NOT block the
-    // account-key bundle, and vice versa. So we read both first, then decide.
-
-    // Commit-log tenant (frozen contract). From the persisted log of record when
-    // given (#1579); otherwise from the LOG DB with its token.
+    // The tenants are independent: an empty one must not block the other's bundle.
     let commit_source = match &commit_leaves {
         Some(path) => CommitSource::Leaves(commit_leaves::load(path)?.ok_or_else(|| {
             BuilderError::PersistedLeaves(format!(
@@ -503,31 +476,20 @@ async fn run_build(
     };
     let commit_empty = commit_count == 0;
 
-    // Account-key tenant (separate tree, domain-separated STH) — only when asked.
-    // It stays in the MAIN DB (TURSO_AUTH_TOKEN), independent of the log DB.
+    // The account-key log is in the main DB, not the log DB.
     let account_rows = if account_out.is_some() {
         let conn = source::connect(&db).await?;
         Some(source::read_account_key_log(&conn).await?)
     } else {
         None
     };
-    // "Absent" (not requested) counts the same as "empty" for the all-empty check.
     let account_empty = account_rows.as_ref().is_none_or(|r| r.is_empty());
 
-    // Only hard-fail when there is nothing to publish from EITHER tenant. With at
-    // least one non-empty source we go on to write a bundle for each — an empty
-    // source yields a valid empty/zero-length bundle (see below), never an abort.
     if commit_empty && account_empty {
-        // The DB connected fine; the commit log is just empty. Surface that
-        // distinct condition (EmptyCommitLog), not the missing-source NoDbSource.
         return Err(BuilderError::EmptyCommitLog);
     }
 
-    // Commit-log bundle. `build_bundle` over zero rows is well-defined — it emits
-    // a valid bundle with a single STH over tree size 0 and no entries — so we
-    // ALWAYS write `out`. That keeps the downstream `serve generate --bundle
-    // bundle.json` step working (the file always exists and parses) instead of
-    // crashing on a missing file when the commit log happens to be empty.
+    // Always write `out`, even empty (a size-0 STH), so `serve generate` has a file.
     if commit_empty {
         eprintln!(
             "notice: commit log is empty (db connected OK) — writing an empty commit-log \
@@ -546,7 +508,7 @@ async fn run_build(
     let json = serde_json::to_string_pretty(&bundle)?;
     std::fs::write(&out, json)?;
 
-    // Never print the raw commit_data or the auth token — only safe metadata.
+    // Counts only: never commit_data or the token.
     println!(
         "wrote commit-log bundle: {} commits, {} STH(s), {} inclusion proof(s) -> {}",
         commit_count,
@@ -555,9 +517,6 @@ async fn run_build(
         out.display()
     );
 
-    // Account-key bundle, written independently of the commit log's state. Like
-    // the commit bundle, a zero-row account log yields a valid empty bundle, so
-    // `serve generate --account-bundle ...` always has a file to read.
     if let (Some(account_out), Some(account_rows)) = (account_out, account_rows) {
         if account_rows.is_empty() {
             eprintln!(
@@ -584,15 +543,13 @@ async fn run_build(
     Ok(())
 }
 
-/// Where `build` takes the commit-log leaves from.
 enum CommitSource {
-    /// The persisted log of record (#1579), which is what CI publishes.
+    /// The persisted log of record (#1579); what CI publishes.
     Leaves(Vec<verifiable_log::Entry>),
     /// Every DS row. Right only for a local or test database.
     Rows(Vec<source::CommitRow>),
 }
 
-/// Append the live rows above the persisted head and write the new leaves.
 #[tokio::main(flavor = "current_thread")]
 async fn run_append_commit_log(
     log_db: Option<String>,
@@ -662,8 +619,6 @@ async fn run_append_commit_log(
     Ok(())
 }
 
-/// Check the committed retirement facts against the served retired heads, then
-/// sign the reset statement (#1579).
 fn run_commit_log_reset(
     retirement: &std::path::Path,
     retired_sths: &std::path::Path,
@@ -692,8 +647,7 @@ fn run_commit_log_reset(
         served.insert(size, serde_json::from_str::<verifiable_log::Sth>(&raw)?);
     }
 
-    // The retired heads were signed by this same key; it is the only key the
-    // statement can describe them under.
+    // The retired heads were signed by this same key.
     let vk = ml_dsa::Keypair::verifying_key(&signing_key);
     let candidates = vec![(verifiable_log::key_id_for(&vk), vk)];
     commit_log_reset::check_against_served(&facts, &served, &candidates)?;
@@ -716,9 +670,6 @@ fn run_commit_log_reset(
     Ok(())
 }
 
-/// Read `BinaryRecord`s from a JSON file and write a signed binaries bundle.
-/// Synchronous — the binaries tenant reads a file, not a DB, so there is no
-/// async runtime here (contrast [`run_build`]).
 fn run_build_binaries(
     binaries_in: PathBuf,
     out: PathBuf,
@@ -727,7 +678,6 @@ fn run_build_binaries(
     signing_key_file: Option<&std::path::Path>,
     retired_key: &[String],
 ) -> Result<()> {
-    // Resolve the signing key BEFORE reading input so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
     let raw = std::fs::read_to_string(&binaries_in)?;
@@ -756,7 +706,6 @@ fn run_build_binaries(
     Ok(())
 }
 
-/// Sign a key-set statement with the offline root and write it out.
 fn run_key_set(
     root_key_env: &str,
     root_key_file: Option<&std::path::Path>,
@@ -775,9 +724,8 @@ fn run_key_set(
     let statement = verifiable_log::KeySetStatement::create(&root, issued_at, not_after, signers)
         .map_err(|e| BuilderError::SigningKey(e.to_string()))?;
 
-    // Verify what we just signed before writing it. A ceremony that emits an
-    // unverifiable statement is worse than one that fails: it is discovered by
-    // clients, at the moment they most need the key set to work.
+    // An unverifiable statement would only be discovered by clients, when they
+    // most need it, so verify before writing.
     statement
         .verify(&ml_dsa::Keypair::verifying_key(&root))
         .map_err(|e| BuilderError::SigningKey(format!("refusing to write an unverifiable statement: {e}")))?;
@@ -812,15 +760,12 @@ fn run_keygen() {
 mod signer_spec_tests {
     use super::parse_signer;
 
-    /// A real ML-DSA-44 public key, hex — generated here so the test needs no fixture.
     fn pubkey() -> String {
         use ml_dsa::{Keypair, MlDsa44, SigningKey};
         let sk = SigningKey::<MlDsa44>::from_seed(&[7u8; 32].into());
         hex::encode(sk.verifying_key().encode())
     }
 
-    // The bug this pins: tree contexts contain colons, so splitting the spec on
-    // every ':' mangles them. Caught live during the first ceremony run.
     #[test]
     fn a_tree_context_containing_colons_survives_parsing() {
         let s = parse_signer(&format!("{}:pollis-verifiable-log:sth:v2", pubkey())).expect("parse");
@@ -847,7 +792,6 @@ mod signer_spec_tests {
         assert_eq!(s.not_after_ms, Some(1_707_776_000_000));
     }
 
-    // `:binaries` is a tree suffix, not an expiry — only an all-digit tail is.
     #[test]
     fn a_non_numeric_tail_stays_part_of_the_tree() {
         let s = parse_signer(&format!("{}:pollis-verifiable-log:sth:v2:binaries", pubkey()))

@@ -1,26 +1,7 @@
-//! A tiny dev/demo HTTP server over a generated artifact directory.
-//!
-//! This exists for local testing and demos only. The real deployment of the
-//! *read API* is "drop the generated `/v1` directory on a static host" — there
-//! is no query service, no database, no app logic to run. This server maps a
-//! request path to a file under the root and serves it with the right
-//! `Content-Type` and cache policy:
-//!
-//! * immutable artifacts (everything except the two that move) →
-//!   `Cache-Control: public, max-age=31536000, immutable`
-//! * `sth/latest.json` and `index.json` (which move as the log grows) →
-//!   `Cache-Control: no-cache`
-//!
-//! On top of the static read API it also exposes ONE dynamic endpoint —
-//! `GET /verify/group/<id>` — which runs the shared [`crate::group::verify_group`]
-//! against this server's own `/v1` base and returns a [`crate::group::GroupReport`]
-//! as JSON. It carries `Access-Control-Allow-Origin: *` (and answers `OPTIONS`
-//! preflight) so the static marketing site can call it cross-origin, and it is
-//! served `no-cache` because it is computed per request, not immutable.
-//!
-//! The static read API is credential-free by design; the verify endpoint takes
-//! no auth either — it only re-derives a verdict anyone could compute from the
-//! public artifacts.
+//! Dev/demo HTTP server over a generated artifact directory. Production is a
+//! static host; this only adds per-path `Content-Type` and cache policy, plus
+//! one dynamic, unauthenticated, CORS-open endpoint `GET /verify/group/<id>`
+//! that re-derives a verdict anyone could compute from the public artifacts.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,9 +25,8 @@ pub(crate) const VERIFY_GROUP_PREFIX: &str = "/verify/group/";
 /// so more than one worker is required or that self-request would deadlock.
 const WORKERS: usize = 4;
 
-/// A running dev server bound to a `127.0.0.1` port, served from a pool of
-/// background threads. Dropping it (or calling [`DevServer::shutdown`]) stops
-/// the pool.
+/// A running dev server on `127.0.0.1`. Dropping it (or calling
+/// [`DevServer::shutdown`]) stops the worker pool.
 pub struct DevServer {
     addr: std::net::SocketAddr,
     stop: Arc<AtomicBool>,
@@ -54,9 +34,8 @@ pub struct DevServer {
 }
 
 impl DevServer {
-    /// Bind `127.0.0.1:<port>` (pass `0` for an ephemeral port) and start
-    /// serving `root` from a pool of background threads. Returns once the
-    /// socket is bound, so [`DevServer::port`] is immediately usable.
+    /// Bind `127.0.0.1:<port>` (`0` = ephemeral) and start serving `root`.
+    /// Returns once bound, so [`DevServer::port`] is immediately usable.
     pub fn spawn(root: PathBuf, port: u16) -> Result<DevServer> {
         let server = Server::http(("127.0.0.1", port))
             .map_err(|e| ServeError::Http(format!("bind failed: {e}")))?;
@@ -65,10 +44,9 @@ impl DevServer {
             .to_ip()
             .ok_or_else(|| ServeError::Http("server bound to a non-IP address".into()))?;
 
-        // Debug/dev + test convenience: trust the key of the log we are about to
-        // serve, so `cargo run serve` against a local dev log (and the crate's
-        // own tests) verify without the production pin. Safe in every profile: only a process
-        // serving a log can reach this, and the auditor CLI serves nothing.
+        // Trust the served log's own keys so a local dev log verifies without the
+        // production pin. Safe in every profile: only a process serving a log
+        // reaches this, and the auditor CLI serves nothing.
         for rel in [
             "v1/public_key.json",
             "v1/commit-log-2/public_key.json",
@@ -101,26 +79,22 @@ impl DevServer {
         Ok(DevServer { addr, stop, handles })
     }
 
-    /// The bound port (resolved even when `0` was requested).
     pub fn port(&self) -> u16 {
         self.addr.port()
     }
 
-    /// Base URL a client should hit, e.g. `http://127.0.0.1:54321`.
+    /// Base URL, e.g. `http://127.0.0.1:54321`.
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
     }
 
-    /// Block the calling thread, keeping the server alive until the process is
-    /// killed. Used by the CLI `serve` command.
+    /// Block until the process is killed. Used by the CLI `serve` command.
     pub fn block_forever(self) {
-        // The serve loops only return on `stop`, which we never set here.
         while self.handles.iter().any(|h| !h.is_finished()) {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
 
-    /// Stop the background threads and wait for them to exit.
     pub fn shutdown(mut self) {
         self.stop.store(true, Ordering::Relaxed);
         for handle in self.handles.drain(..) {
@@ -138,7 +112,6 @@ impl Drop for DevServer {
     }
 }
 
-/// Accept requests until `stop` is set, polling so shutdown is prompt.
 fn serve_loop(server: &Server, root: &Path, base_url: &str, stop: &AtomicBool) {
     while !stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(100)) {
@@ -149,23 +122,17 @@ fn serve_loop(server: &Server, root: &Path, base_url: &str, stop: &AtomicBool) {
     }
 }
 
-/// Route one request. `OPTIONS` is answered as a CORS preflight; the dynamic
-/// verify endpoint is handled specially; everything else is a read-only static
-/// file lookup under `root`.
 fn handle_request(request: Request, root: &Path, base_url: &str) {
     let method = request.method().clone();
 
-    // Strip any query string and keep the path.
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or("").to_string();
 
-    // CORS preflight for the browser calling the verify endpoint cross-origin.
     if method == Method::Options {
         cors_preflight(request);
         return;
     }
 
-    // Dynamic per-group verification endpoint.
     if let Some(encoded) = path.strip_prefix(VERIFY_GROUP_PREFIX) {
         if method != Method::Get {
             respond_status(request, 405, "method not allowed");
@@ -175,7 +142,6 @@ fn handle_request(request: Request, root: &Path, base_url: &str) {
         return;
     }
 
-    // Static read API: GET/HEAD only.
     if method != Method::Get && method != Method::Head {
         respond_status(request, 405, "method not allowed");
         return;
@@ -205,9 +171,7 @@ fn handle_request(request: Request, root: &Path, base_url: &str) {
     let _ = request.respond(response);
 }
 
-/// Run the shared per-group verifier against our own `/v1` base and return the
-/// [`crate::group::GroupReport`] as JSON. This is the SAME function the CLI
-/// calls, so the two can never disagree.
+/// Runs the same verifier the CLI calls, so the two can never disagree.
 fn handle_verify_group(request: Request, base_url: &str, encoded_id: &str) {
     let id = percent_decode(encoded_id);
     if id.is_empty() {
@@ -234,8 +198,6 @@ fn handle_verify_group(request: Request, base_url: &str, encoded_id: &str) {
     }
 }
 
-/// Answer a CORS preflight (`OPTIONS`) so the static site can call the verify
-/// endpoint cross-origin.
 pub(crate) fn cors_preflight(request: Request) {
     let response = Response::empty(204)
         .with_header(header("Access-Control-Allow-Origin", "*"))
@@ -245,8 +207,6 @@ pub(crate) fn cors_preflight(request: Request) {
     let _ = request.respond(response);
 }
 
-/// The cache policy for a request path: short for the two documents that move,
-/// long-immutable for everything else.
 pub(crate) fn cache_control_for(path: &str) -> &'static str {
     if path.ends_with("/latest.json") || path.ends_with("/index.json") {
         SHORT_CACHE
@@ -255,8 +215,7 @@ pub(crate) fn cache_control_for(path: &str) -> &'static str {
     }
 }
 
-/// Respond with a JSON body, the cross-origin header (so the static site can
-/// read it), and `no-cache` (the verdict is computed, not immutable).
+/// JSON body, CORS-open, `no-cache` (the verdict is computed, not immutable).
 pub(crate) fn respond_json(request: Request, status: u16, body: String) {
     let response = Response::from_string(body)
         .with_status_code(status)
@@ -274,10 +233,8 @@ pub(crate) fn respond_status(request: Request, status: u16, message: &str) {
     let _ = request.respond(response);
 }
 
-/// Decode `%XX` percent-escapes in a single URL path segment. Unrecognised or
-/// truncated escapes are passed through literally; invalid UTF-8 is replaced
-/// rather than panicking. (`+` is left as-is — it is a literal in a path, only
-/// a space in a query string.)
+/// Decode `%XX` escapes in one path segment. Bad escapes pass through literally;
+/// `+` stays literal (it means space only in a query string).
 pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -305,13 +262,11 @@ fn hex_nibble(b: u8) -> Option<u8> {
     }
 }
 
-/// Minimal JSON string escaping for the small error messages we embed by hand.
 pub(crate) fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")
 }
 
-/// Build a header, falling back silently if the static inputs ever fail to
-/// parse (they don't — both are valid header bytes).
+/// Infallible for the static header names and values used here.
 pub(crate) fn header(name: &str, value: &str) -> Header {
     Header::from_bytes(name.as_bytes(), value.as_bytes())
         .unwrap_or_else(|_| Header::from_bytes(&b"X-Invalid"[..], &b"1"[..]).unwrap())
@@ -326,7 +281,6 @@ mod tests {
         assert_eq!(percent_decode("conv-a"), "conv-a");
         assert_eq!(percent_decode("group%20one"), "group one");
         assert_eq!(percent_decode("a%2Fb"), "a/b");
-        // Truncated / invalid escapes pass through literally, never panic.
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz"), "%zz");
     }

@@ -308,7 +308,6 @@ pub mod apply {
 
     async fn run(conn: &Connection, scripts: Vec<&'static str>) -> Result<(), Error> {
         for sql in scripts {
-            // Native batch: parses trigger bodies correctly, unlike a `;` split.
             conn.execute_batch(sql).await?;
         }
         Ok(())

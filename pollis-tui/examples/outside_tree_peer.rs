@@ -1,11 +1,8 @@
 //! Dev-DS peers for the mobile Maestro `device-outside-tree` flow (#1571).
 //!
-//! The incident: a user's second device (a phone) was enrolled, then a peer
-//! opened a DM with the user, the user accepted on their FIRST device and the
-//! two exchanged messages — all while the phone never ran. When the phone
-//! finally opened the DM it was empty. This drives exactly that, with the
-//! phone's KeyPackage pool spent first, so the only thing that can add it is
-//! its last-resort package.
+//! A peer opens a DM with the user, who accepts and chats on their first device
+//! while their phone is off with its regular KeyPackage pool spent, so only the
+//! last-resort package can add the phone.
 //!
 //! Two roles, two processes (each its own data dir):
 //!
@@ -156,10 +153,8 @@ async fn creator(email: &str, owner_id: &str, owner_email: &str) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    // Spend the phone's regular pool the way it is spent in life: every
-    // conversation the owner is invited to adds each of the owner's devices at
-    // invite time, claiming one package from each, and the phone is not running
-    // to refill. After `POOL` invites its regular pool is empty.
+    // Each invite claims one package from each of the owner's devices; the
+    // phone is not running to refill, so `POOL` invites empty its regular pool.
     for i in 0..POOL {
         let made = groups::create_group(format!("Outside the tree {i}"), None, me.clone(), Some(true), Some(false), &state)
             .await

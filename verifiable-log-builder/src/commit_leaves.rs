@@ -1,39 +1,9 @@
-//! The commit log's **persisted leaves** — its log of record (#1579).
-//!
-//! The DS prunes `mls_commit_log` below a retention floor (#539), so the live
-//! table is only a *window* onto the log, never the log itself. Rebuilding the
-//! tree from that window on each publish put different leaves at already-signed
-//! positions the first time a prune removed a published row, and every earlier
-//! signed head became unreproducible. So the leaves the builder publishes are
-//! kept outside the DS, the same way `internal/binary-records.json` holds the
-//! binaries tree's records, and each publish only **appends** to them.
-//!
-//! The persisted file is a JSON array of [`Entry`] values in leaf order — the
-//! exact shape of the served `/v1/entries.json`. It holds only the published,
-//! pseudonymous leaves (#701), never a real `conversation_id` or `sender_id`, so
-//! keeping it longer than the DS keeps its rows discloses nothing the public log
-//! does not already disclose.
-//!
-//! [`append_rows`] is the whole contract, and it fails closed:
-//!
-//! * the persisted leaves must decode as commit-log leaves in strictly
-//!   increasing `seq` order;
-//! * they must reproduce the latest **published** head (size and root). A
-//!   missing, shrunk or rewritten file therefore cannot publish over the old
-//!   tree;
-//! * a live row at or below the last persisted `seq` must equal the leaf
-//!   already published for it, and must have one. A row that appears or
-//!   changes below the head is refused, never skipped;
-//! * only rows above the last persisted `seq` are appended. A pruned row simply
-//!   is not read again; its leaf stays where it was published.
-//!
-//! Both [`CommitLogInvariant`] passes run on the whole appended stream: the
-//! public, within-window check over the pseudonymous leaves, and the
-//! full-strength check keyed on real ids. For the second, a persisted leaf is
-//! re-keyed to its real conversation whenever a live row's conversation derives
-//! that leaf's pseudonym for that leaf's window, so a new commit is still checked
-//! against the conversation's already-published history after the rows behind
-//! that history have been pruned.
+//! The commit log's persisted leaves: its log of record, append-only, because
+//! the DS prunes `mls_commit_log` and a rebuild from it would rewrite signed
+//! positions (#1579, `docs/transparency.md`). The file holds only the published
+//! pseudonymous leaves (#701), so keeping it longer than the DS discloses nothing
+//! new. [`append_rows`] fails closed on any leaf that is missing, shrunk,
+//! rewritten, or disagrees with a live row below the head.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -46,18 +16,15 @@ use crate::commit_log::{
 use crate::error::{BuilderError, Result};
 use crate::source::CommitRow;
 
-/// The result of one append: the full new leaf list and how many were added.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppendOutcome {
-    /// Every leaf of the log, persisted ones first, in leaf order.
+    /// Every leaf of the log, persisted ones first.
     pub leaves: Vec<Entry>,
-    /// How many leaves this run appended.
     pub appended: usize,
 }
 
-/// Read a persisted leaves file. `Ok(None)` only when the file does not exist;
-/// any other read or parse failure is an error, so an unreadable file can never
-/// be mistaken for "nothing persisted yet".
+/// `Ok(None)` only when the file does not exist, so an unreadable file is never
+/// mistaken for "nothing persisted yet".
 pub fn load(path: &Path) -> Result<Option<Vec<Entry>>> {
     match std::fs::read_to_string(path) {
         Ok(raw) => Ok(Some(serde_json::from_str(&raw)?)),
@@ -70,7 +37,6 @@ fn refuse(msg: impl Into<String>) -> BuilderError {
     BuilderError::PersistedLeaves(msg.into())
 }
 
-/// Decode persisted leaves, checking tenant and strictly increasing `seq`.
 fn decode_all(entries: &[Entry]) -> Result<Vec<CommitLeaf>> {
     let mut out: Vec<CommitLeaf> = Vec::with_capacity(entries.len());
     for (i, entry) in entries.iter().enumerate() {
@@ -123,10 +89,8 @@ pub fn check_reproduces(entries: &[Entry], published: &Sth) -> Result<()> {
 
 /// Append the live rows above the last persisted `seq` to `persisted`.
 ///
-/// `published` is the latest head already served for this tree, when one is.
-/// `live` must be the DS rows in ascending `seq` order (what
-/// [`crate::source::read_commit_log`] returns). See the module docs for every
-/// condition this refuses.
+/// `published` is the latest head already served for this tree, if any; `live`
+/// must be in ascending `seq` order.
 pub fn append_rows(
     persisted: &[Entry],
     live: &[CommitRow],
@@ -175,9 +139,9 @@ pub fn append_rows(
         }
     }
 
-    // (1) Full-strength gate on real ids, over the whole appended stream.
-    // A persisted leaf's pseudonym is re-keyed to the real conversation when a
-    // live conversation derives it for that leaf's window.
+    // Full-strength gate on real ids: re-key a persisted leaf to its real
+    // conversation when a live one derives its pseudonym, so new commits are
+    // checked against history whose rows were already pruned.
     let mut real_by_pseudonym: HashMap<(String, u64), String> = HashMap::new();
     let windows: BTreeSet<u64> = persisted_leaves
         .iter()
@@ -208,7 +172,7 @@ pub fn append_rows(
         identity_log.append(row.to_identity_leaf().to_entry()?)?;
     }
 
-    // (2) The published, pseudonymous stream: exactly what a replayer checks.
+    // The published pseudonymous stream, exactly as a replayer checks it.
     let mut leaves: Vec<Entry> = persisted.to_vec();
     for row in &new_rows {
         leaves.push(row.to_leaf().to_entry()?);

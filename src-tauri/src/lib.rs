@@ -360,7 +360,6 @@ pub fn run() {
             tray_handle.manage(tray::TrayState::default());
             tray::setup(&tray_handle);
 
-            // Event-driven relay status (no polling).
             commands::relay_serving::install_status_sink(tray_handle.clone());
 
             // Rust owns the auto-lock deadline because a WebView throttles its

@@ -1,27 +1,11 @@
-//! Minting the commit log's **reset statement** (#1579).
+//! Mints the reset statement that retires the first commit-log tree and names
+//! its successor, `commit-log-2` (#1579).
 //!
-//! The first commit-log tree (`/v1/...`, STH context
-//! [`verifiable_log::STH_CONTEXT_COMMIT_LOG`]) is retired: after the DS began
-//! pruning `mls_commit_log`, the publisher signed heads that do not extend its own
-//! earlier history. Its successor, `commit-log-2`, is built from the persisted
-//! leaves ([`crate::commit_leaves`]) and signed under
-//! [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`].
-//!
-//! The facts about the retired tree (its last consistent head, the leaf hashes
-//! that head commits to, and every other served head with its root) were
-//! recovered from what is served and are committed to the repository as
-//! `commit-log-retirement.json`, so they are reviewed like code. The CI publish
-//! mints the signed statement from that file, because it is the only place the
-//! signing key exists:
-//!
-//! 1. [`check_against_served`] refuses unless every head the file lists is
-//!    actually served with that root, and every chain or fork head verifies under
-//!    the signing key in the retired context. A statement that disagreed with what
-//!    is served would be worse than none.
-//! 2. [`build_body`] adds the successor's identity and its genesis (the hash of
-//!    its first persisted leaf).
-//! 3. [`verifiable_log::ResetStatement::create`] validates the whole body and
-//!    signs it.
+//! The retired tree's facts are committed as `commit-log-retirement.json` so
+//! they are reviewed like code; CI mints the statement because only it holds the
+//! signing key. [`check_against_served`] refuses unless every listed head is
+//! served with that root and verifies in the retired context: a statement that
+//! disagreed with what is served would be worse than none.
 
 use std::collections::BTreeMap;
 

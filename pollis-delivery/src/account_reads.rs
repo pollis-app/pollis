@@ -1,22 +1,9 @@
-//! Account, device, key-package, enrollment and object READ handlers (#987).
+//! Account, device, key-package, enrollment and object reads (`/v1/read/*`,
+//! #987). Device-signed except [`account_probe`], [`enrollment`] and
+//! [`recovery_blob`], whose credentials are explained at each handler.
 //!
-//! The `/v1/read/*` family. Most of it is ordinary device-signed reads; the three
-//! that are not each carry a specific reason, stated at the handler:
-//!
-//!   * [`account_probe`] is UNAUTHENTICATED, because it runs before PIN entry
-//!     when no credential of any kind exists (#987 §6.5).
-//!   * [`enrollment`] is gated on POSSESSION OF `request_id`, because a
-//!     session-gated enrollment poll is arithmetically guaranteed to 401 before
-//!     the request it polls expires.
-//!   * [`recovery_blob`] accepts an OTP SESSION ONLY, because its caller by
-//!     definition has no device yet and the blob is the account's last line of
-//!     recovery.
-//!
-//! Everything here supplies INPUTS. No handler in this module evaluates a
-//! certificate chain, decides whether a key changed, or answers a
-//! safety-number question: those are cryptographic judgements rooted in the
-//! user's own identity key, and the DS is outside the trust boundary that makes
-//! them meaningful.
+//! Everything here supplies inputs only: cert chains, key-change and
+//! safety-number judgements stay on the client, outside the DS's trust.
 
 use axum::{
     body::Bytes,
@@ -34,16 +21,10 @@ use crate::util::{BIND_CHUNK, b64, placeholders};
 
 pub use pollis_api::account_reads::*;
 
-// ── POST /v1/read/account-keys ───────────────────────────────────────────────
-
 /// POST `/v1/read/account-keys` — cross-signing roots for a batch of users.
 ///
-/// Any authenticated caller may ask for any user's `account_id_pub`: it is a
-/// PUBLIC key, it is what safety numbers are computed from, and it is published
-/// to the transparency log. What this does not do is decide anything with it —
-/// the TOFU comparison, the pin update and the `KeyChanged` signal all stay on
-/// the client, against the client's own local pin, which is the only copy the DS
-/// cannot influence.
+/// Any authenticated caller may read any user's public `account_id_pub`; the
+/// TOFU comparison stays on the client, against its own local pin.
 pub async fn account_keys(
     State(state): State<AppState>,
     req: RawRequest,
@@ -66,10 +47,7 @@ pub async fn account_keys(
         let params: Vec<libsql::Value> = chunk.iter().map(|id| id.clone().into()).collect();
         let mut rows = conn.query(&sql, params).await?;
         while let Some(row) = rows.next().await? {
-            // A NULL `account_id_pub` is a user who has not established an
-            // identity yet. Omitted rather than sent as null, because the client
-            // reads absence as "not provisioned, do not pin" and a present-but-
-            // empty key would be a different (wrong) answer.
+            // No identity yet: omitted, which the client reads as "do not pin".
             let Some(pubkey) = row.get::<Option<Vec<u8>>>(1)? else {
                 continue;
             };
@@ -83,16 +61,8 @@ pub async fn account_keys(
     Ok(ok_response::<AccountKeysBody>(AccountKeysResponse { keys }))
 }
 
-// ── POST /v1/read/devices ────────────────────────────────────────────────────
-
-/// POST `/v1/read/devices` — a user's devices, with the columns the caller is
-/// entitled to.
-///
-/// Asking about YOUR OWN devices returns the management columns (`device_name`,
-/// `last_seen`). Asking about someone else's returns only the cross-signing
-/// material, which any group member can already observe through a commit's add
-/// metadata — a device name is a human-chosen string ("Dan's work laptop") and
-/// has no business crossing that line.
+/// POST `/v1/read/devices` — a user's devices. Management columns (name,
+/// `last_seen`) only for your own; others get cross-signing material only.
 pub async fn devices(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let parsed: DevicesBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
@@ -118,10 +88,7 @@ pub async fn devices(State(state): State<AppState>, req: RawRequest) -> Result<R
 }
 
 /// The `user_device` rows for one user, optionally narrowed to named devices.
-///
-/// `with_management_columns` gates `device_name` / `last_seen` / `created_at`;
-/// the cert columns are always included, because verifying a device's cert is
-/// something every peer legitimately does.
+/// `with_management_columns` gates `device_name` / `last_seen` / `created_at`.
 pub async fn device_rows(
     conn: &Connection,
     user_id: &str,
@@ -140,9 +107,7 @@ pub async fn device_rows(
                            device_cert, cert_issued_at, cert_identity_version, \
                            mls_signature_pub, mls_signature_pub_pq FROM user_device";
 
-    // An empty `device_ids` means "every device"; a non-empty one is chunked so
-    // a large fleet cannot exceed SQLite's bound-parameter ceiling. Device ids
-    // are caller-supplied and bound by position, never interpolated.
+    // An empty `device_ids` means every device.
     let mut queries: Vec<(String, Vec<libsql::Value>)> = Vec::new();
     if device_ids.is_empty() {
         queries.push((
@@ -197,23 +162,18 @@ pub async fn device_rows(
     Ok(out)
 }
 
-// ── POST /v1/read/key-packages ───────────────────────────────────────────────
-
-/// Unclaimed KeyPackages `(user_id, device_id)` still has in `suite` — the
-/// replenish shortfall. The one definition behind both this endpoint's
-/// `count_for_ciphersuite` and the count the Welcome drain reports (#1412).
+/// Unclaimed regular KeyPackages `(user_id, device_id)` has in `suite`, behind
+/// both this endpoint and the Welcome drain's count (#1412).
 ///
-/// Callers pass the AUTHENTICATED identity, never a body-named one: the number
-/// decides how many packages that device publishes.
+/// Callers pass the authenticated identity: the number decides how many
+/// packages that device publishes.
 pub async fn unclaimed_key_package_count(
     conn: &Connection,
     user_id: &str,
     device_id: &str,
     suite: i64,
 ) -> anyhow::Result<i64> {
-    // `last_resort = 0`: the last-resort package (#1571) is not part of the
-    // pool a refill tops up. Counting it would leave a device one package short
-    // forever, and an old client never has one, so for it this is unchanged.
+    // The last-resort package (#1571) is not part of the pool a refill tops up.
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package \
@@ -229,8 +189,7 @@ pub async fn unclaimed_key_package_count(
 }
 
 /// Does `(user_id, device_id)` hold a last-resort KeyPackage in `suite` (#1571)?
-/// Like [`unclaimed_key_package_count`], callers pass the AUTHENTICATED identity:
-/// the answer decides whether that device publishes one.
+/// Callers pass the authenticated identity.
 pub async fn has_last_resort_key_package(
     conn: &Connection,
     user_id: &str,
@@ -251,10 +210,8 @@ pub async fn has_last_resort_key_package(
 /// POST `/v1/read/key-packages` — the replenish shortfall and the roster's
 /// claimable devices.
 ///
-/// The `pairs` half decides WHICH devices reconcile adds to the MLS tree, so a
-/// short answer is not a degraded answer — it is a device silently left out of a
-/// group with no error anywhere. Any failure below therefore propagates as a 500
-/// rather than being trimmed into a plausible-looking list.
+/// `pairs` decides which devices reconcile adds, so any failure is a 500, never
+/// a silently short list.
 pub async fn key_packages(
     State(state): State<AppState>,
     req: RawRequest,
@@ -271,9 +228,6 @@ pub async fn key_packages(
     let conn = state.db.conn().await?;
 
     let (unclaimed, has_last_resort) = match parsed.count_for_ciphersuite {
-        // Scoped to the AUTHENTICATED device, never a body-named one: this
-        // number drives how many packages that device publishes, and answering
-        // for someone else's pool would make it publish into the wrong one.
         Some(suite) => (
             Some(unclaimed_key_package_count(&conn, &who.user_id, &who.device_id, suite).await?),
             Some(has_last_resort_key_package(&conn, &who.user_id, &who.device_id, suite).await?),
@@ -317,14 +271,9 @@ pub async fn key_packages(
     }))
 }
 
-// ── POST /v1/read/registered-devices ─────────────────────────────────────────
-
 /// POST `/v1/read/registered-devices` — every non-revoked `(user, device)` pair
-/// for a roster.
-///
-/// Reconcile subtracts this from the MLS tree to find leaves whose device row was
-/// revoked while the user remained a member. A short list here would evict live
-/// devices, so a failure is an error, never a trim.
+/// for a roster. Reconcile evicts leaves missing from it, so a failure is an
+/// error, never a trim.
 pub async fn registered_devices(
     State(state): State<AppState>,
     req: RawRequest,
@@ -344,17 +293,9 @@ pub async fn registered_devices(
     ))
 }
 
-// ── POST /v1/read/roster-identities ──────────────────────────────────────────
-
 /// POST `/v1/read/roster-identities` — every roster user's `account_id_pub` and
-/// all of their `user_device` rows, revoked included.
-///
-/// The committer-side half of leaf cross-signing (`mls/device.rs::
-/// IdentityDirectory`). A missing user or row is simply absent, which the client
-/// reads as "unverifiable — refuse to add", never as "verified". Answers an
-/// ERROR rather than a short list on any failure, for the same reason
-/// `registered_devices` does: a silently short answer would refuse (or, for an
-/// existing leaf, evict) a live device.
+/// device rows, revoked included, for committer-side leaf cross-signing.
+/// Errors rather than trims, like [`registered_devices`].
 pub async fn roster_identities(
     State(state): State<AppState>,
     req: RawRequest,
@@ -374,24 +315,11 @@ pub async fn roster_identities(
     ))
 }
 
-/// Every NON-REVOKED `(user_id, device_id)` pair for a roster.
+/// Every non-revoked `(user_id, device_id)` pair for a roster.
 ///
-/// `revoked_at IS NULL` is the load-bearing clause (#679): `revoke_device`
-/// TOMBSTONES the row rather than deleting it — deliberately, so a peer can tell
-/// "revoked, drop the rejoin" from "not replicated yet, retry" — so a revoked
-/// device has to be excluded by the PREDICATE, never by the row's absence.
-/// Without it, reconcile keeps the revoked leaf in `desired`, never places it in
-/// `to_remove`, and the revoked device goes on decrypting.
-///
-/// Ids are BOUND, never interpolated: an id containing a quote must match itself
-/// exactly or not at all. It used to be spliced in behind a character filter
-/// that silently mangled anything else, which made the query answer a question
-/// nobody asked — and an answer to the wrong question is not a trustworthy place
-/// to put a revocation check.
-///
-/// An empty roster short-circuits rather than building `IN ()`.
-///
-/// `pub` so the #679 regression suite drives the real query rather than a copy.
+/// `revoked_at IS NULL` is load-bearing (#679): revocation tombstones the row,
+/// so without it reconcile keeps the revoked leaf and that device goes on
+/// decrypting.
 pub async fn registered_device_pairs(
     conn: &Connection,
     user_ids: &[String],
@@ -415,31 +343,15 @@ pub async fn registered_device_pairs(
     Ok(pairs)
 }
 
-// ── POST /v1/read/enrollment ─────────────────────────────────────────────────
-
 /// POST `/v1/read/enrollment` — poll one enrollment request.
 ///
-/// # The credential is the `request_id`
+/// The credential is possession of `request_id`. The caller has no signing key,
+/// and an OTP session (minted before the request, same 600 s TTL) would expire
+/// while the request is still valid. The id is a sound gate because
+/// `wrapped_account_key` is sealed to the requester's in-memory ephemeral key.
 ///
-/// Not a device signature: the caller has no signing key, which is the entire
-/// reason it is enrolling. Not an OTP session either, and this is the part worth
-/// stating because the obvious design fails silently. The DS session TTL is 600
-/// seconds and the enrollment TTL is 600 seconds, and the session is minted at
-/// `verify-otp`, STRICTLY BEFORE the enrollment request is created — so a
-/// session-gated poll is guaranteed to 401 while the request it is polling is
-/// still valid. The poll runs for `TTL + 5`, which makes it certain rather than
-/// likely.
-///
-/// Possession of the id is a sound gate because the payload is sealed to
-/// something the id does not confer: `wrapped_account_key` is encrypted to the
-/// requesting device's ephemeral X25519 public key, whose private half never
-/// leaves that process's memory. A holder of the id learns a status string and a
-/// blob they cannot open.
-///
-/// The approval-side columns are the exception, and they need MORE than the
-/// capability: `verification_code` is what a human reads aloud to authorize the
-/// enrollment, so it is served only to a device-signed sibling that owns the
-/// request's account.
+/// `verification_code` authorizes the enrollment when read aloud, so it is
+/// served only to a device-signed sibling on the same account.
 pub async fn enrollment(
     State(state): State<AppState>,
     req: RawRequest,
@@ -483,10 +395,7 @@ pub async fn enrollment(
     drop(rows);
 
     if parsed.want_approval_fields {
-        // The approval columns require the STRONGER credential. A bare
-        // capability holder — which is anyone who can guess or intercept a
-        // request id — must never read the verification code, because reading
-        // it out is what a human does to authorize the enrollment.
+        // Approval columns need the device signature, not just the id.
         let who = match authed_user(&state, &req, None).await? {
             Ok(u) => u,
             Err(resp) => return Ok(resp),
@@ -505,8 +414,8 @@ pub async fn enrollment(
     ))
 }
 
-/// POST `/v1/read/pending-enrollments` — the authenticated user's still-open
-/// requests. Device-signed, because unlike [`enrollment`] this ENUMERATES.
+/// POST `/v1/read/pending-enrollments` — the authenticated user's open
+/// requests. Device-signed, because unlike [`enrollment`] this enumerates.
 pub async fn pending_enrollments(
     State(state): State<AppState>,
     req: RawRequest,
@@ -520,9 +429,8 @@ pub async fn pending_enrollments(
         Err(resp) => return Ok(resp),
     };
 
-    // Requests bound to a live QR device link (#1207) are approved on the device
-    // showing that QR, on the link tag — the new device shows no code, so a
-    // typed-code approval list could never complete them. Leave them out.
+    // QR-link-bound requests (#1207) are approved via the link and show no code,
+    // so they are left out.
     let link_bound = state.links.bound_request_ids(&who, crate::util::now_unix());
     let conn = state.db.conn().await?;
     let mut rows = conn
@@ -550,8 +458,7 @@ pub async fn pending_enrollments(
             created_at: row.get(5)?,
             wrapped_account_key: None,
             new_device_ephemeral_pub: None,
-            // Served here because this endpoint IS the approving device's list
-            // and the code is what it displays for the human to compare.
+            // The approving device displays it for the human to compare.
             verification_code: row.get(6)?,
         });
     }
@@ -560,20 +467,11 @@ pub async fn pending_enrollments(
     ))
 }
 
-// ── POST /v1/read/recovery-blob ──────────────────────────────────────────────
-
 /// POST `/v1/read/recovery-blob` — the Secret-Key-wrapped account identity.
 ///
-/// **OTP session only.** Never plain (this is the account's last line of
-/// recovery), and never device-signed (the caller has no device — that is the
-/// situation it is recovering from). The credential is the email OTP the caller
-/// just proved, which is exactly the authorization the recovery flow has always
-/// rested on; before #987 it rested on it *implicitly*, because possession of
-/// the baked read token was all the database asked for.
-///
-/// Every fetch records a security event. The blob is useless without the Secret
-/// Key, but a FETCH is precisely the signal an account owner wants to see if it
-/// was not them.
+/// Session only: never plain (last line of recovery), never device-signed (the
+/// caller has no device). Every fetch records a security event, the signal an
+/// owner wants if it was not them.
 pub async fn recovery_blob(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -617,9 +515,7 @@ pub async fn recovery_blob(
     };
     drop(rows);
 
-    // Best-effort: an audit row that fails to write must not fail a recovery the
-    // user is legitimately performing, and the event is a notification, not a
-    // gate.
+    // Best-effort: the audit row is a notification, not a gate.
     if blob.is_some() {
         if let Err(e) = conn
             .execute(
@@ -638,12 +534,8 @@ pub async fn recovery_blob(
     }))
 }
 
-// ── POST /v1/read/account-status ─────────────────────────────────────────────
-
-/// POST `/v1/read/account-status` — the caller's own account row.
-///
-/// Self-scoped by construction: the id in the body is only the no-auth path's
-/// input and a mismatch is a 403, because `email` is on this row.
+/// POST `/v1/read/account-status` — the caller's own account row (it carries
+/// `email`, so a body id mismatch is a 403).
 pub async fn account_status(
     State(state): State<AppState>,
     req: RawRequest,
@@ -677,9 +569,7 @@ pub async fn account_row(
     match rows.next().await? {
         Some(row) => Ok(Some(AccountStatus {
             user_id: user_id.to_string(),
-            // The column is nullable pre-migration-13; the client's own default
-            // was 1, kept here so a NULL cannot become a 0 that stamps an
-            // unverifiable cert.
+            // NULL means 1, never 0, which would stamp an unverifiable cert.
             identity_version: row.get::<Option<i64>>(0)?.unwrap_or(1),
             email: row.get(1)?,
             username: row.get(2)?,
@@ -689,23 +579,12 @@ pub async fn account_row(
     }
 }
 
-// ── POST /v1/auth/account-probe ──────────────────────────────────────────────
-
 /// POST `/v1/auth/account-probe` — does this account exist, and does it have an
 /// identity?
 ///
-/// **Unauthenticated, and it has to be.** This runs at every app launch, before
-/// PIN entry: the local SQLCipher database is closed, so `ds_post` cannot load
-/// the device signer; `device_id` is not set; and no OTP has run, so there is no
-/// session bearer either. There is no credential in existence at that moment,
-/// and the answer gates the PRE-UNLOCK UI — a device that needs enrollment has no
-/// PIN to unlock with — so it cannot be deferred past the point where one exists.
-///
-/// The disclosure is strictly smaller than one already shipped. `user_id` is a
-/// 128-bit ULID the caller read out of its OWN `accounts.json`: not guessable,
-/// not an enumeration surface. Meanwhile `verify-otp` already answers
-/// `has_identity` for an EMAIL ADDRESS, which is guessable. Rate-limited per IP
-/// by the router, like the other unauthenticated endpoints.
+/// Unauthenticated: it gates the pre-unlock UI, before any credential exists
+/// (#987 §6.5). `user_id` is an unguessable ULID, so it discloses less than
+/// `verify-otp` already does for an email. Rate-limited per IP.
 pub async fn account_probe(
     State(state): State<AppState>,
     body: Bytes,
@@ -725,10 +604,7 @@ pub async fn account_probe(
             libsql::params![parsed.user_id.clone()],
         )
         .await?;
-    // `identity_version` rides along for the bootstrap pivot — see the field's
-    // doc on `AccountProbeResponse`. It is served only for an account that HAS
-    // an identity, because a version without a key is not a fact any caller can
-    // use, and withholding it keeps this response's shape honest.
+    // `identity_version` only for an account that has an identity.
     let (exists, has_identity, identity_version) = match rows.next().await? {
         Some(row) => {
             let has = row.get::<Option<Vec<u8>>>(0)?.is_some();
@@ -748,8 +624,6 @@ pub async fn account_probe(
     }))
 }
 
-// ── POST /v1/read/security-events ────────────────────────────────────────────
-
 /// POST `/v1/read/security-events` — the caller's own audit log.
 pub async fn security_events(
     State(state): State<AppState>,
@@ -763,8 +637,6 @@ pub async fn security_events(
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
-    // Clamped server-side, matching the client's previous clamp, so a body
-    // cannot ask for the whole table.
     let limit = parsed.limit.unwrap_or(100).clamp(1, 500);
     let kinds = parsed.kinds.unwrap_or_default();
     if kinds.len() > SECURITY_EVENTS_MAX_KINDS {
@@ -784,9 +656,7 @@ pub async fn security_events(
             metadata: row.get(4)?,
         });
     }
-    // One row past the page was asked for: its presence is the only honest
-    // "there is more" (a full page alone cannot tell the last page from one
-    // that happens to end exactly on the limit).
+    // One extra row was fetched; its presence means there is a next page.
     let next_cursor = if events.len() as i64 > limit {
         events.truncate(limit as usize);
         events.last().map(|e| SecurityEventCursor {
@@ -807,9 +677,7 @@ pub async fn security_events(
 /// `WHERE user_id = ?1 [AND kind IN (…)] [AND (created_at, id) < (?, ?)]
 ///  ORDER BY created_at DESC, id DESC LIMIT limit + 1`
 ///
-/// Served by `idx_security_event_user_created_id` unfiltered and by
-/// `idx_security_event_user_kind` filtered (migration 000041). Never OFFSET: a
-/// row written while someone pages would shift every later page by one.
+/// Never OFFSET: a row written mid-paging would shift every later page.
 pub fn security_events_query(
     user_id: &str,
     before: Option<&SecurityEventCursor>,
@@ -839,16 +707,10 @@ pub fn security_events_query(
     (sql, params)
 }
 
-// ── POST /v1/read/emoji ──────────────────────────────────────────────────────
-
 /// POST `/v1/read/emoji` — the usable set, and object resolution for rendering.
 ///
-/// The two halves have deliberately different rules (#848): enumerating is
-/// membership-derived (the `usable` query JOINs `group_member`, so the picker's
-/// source and the send-permission rule are literally the same set), while
-/// resolving a hash you were already handed is part of reading a message you can
-/// already read and is ungated. Keeping both here does not merge the rules — it
-/// puts them next to each other where the difference is visible.
+/// Enumerating is membership-derived; resolving a hash you were already handed
+/// is ungated (#848).
 pub async fn emoji(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     let parsed: EmojiReadBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
@@ -890,12 +752,8 @@ pub async fn emoji(State(state): State<AppState>, req: RawRequest) -> Result<Res
     }))
 }
 
-// ── POST /v1/read/objects ────────────────────────────────────────────────────
-
-/// POST `/v1/read/objects` — content-addressed dedup probe.
-///
-/// Answers a bare boolean about a hash the caller already computed from bytes it
-/// already holds, so it discloses nothing the caller did not bring.
+/// POST `/v1/read/objects` — content-addressed dedup probe; discloses nothing
+/// beyond a hash the caller computed itself.
 pub async fn object_exists(
     State(state): State<AppState>,
     req: RawRequest,
@@ -921,19 +779,10 @@ pub async fn object_exists(
     }))
 }
 
-// ── POST /v1/read/read-cursors ───────────────────────────────────────────────
-
 /// POST `/v1/read/read-cursors` — this account's synced read-cursor blob (#844).
 ///
-/// Device-signed and bound to the authenticated user. Serving the row to any
-/// caller would be *cryptographically* harmless — it is AES-256-GCM under a key
-/// derived from the account identity key, which the DS has never held — but it
-/// would still hand a stranger the blob's size and change rate, which is exactly
-/// the metadata this feature works to blunt. So it is scoped like every other
-/// per-account read in this module.
-///
-/// A missing row is `cursors: None`, not a 404: a first-run device has nothing
-/// to merge, and that is an ordinary state rather than an error.
+/// Self-scoped although encrypted: the blob's size and change rate are
+/// metadata. A missing row is `cursors: None`, not a 404.
 pub async fn read_cursors(
     State(state): State<AppState>,
     req: RawRequest,

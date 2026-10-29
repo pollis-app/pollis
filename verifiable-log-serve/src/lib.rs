@@ -39,10 +39,8 @@ pub use bundle::{
 };
 // Re-exported so pollis-core needn't depend on `verifiable-log` directly.
 pub use verifiable_log::{key_id_for, verifying_key_from_hex, KEY_ID_HEX_LEN, STH_PUB_LEN, STH_SIG_LEN};
-// Root-signed key sets (#754).
 pub use verifiable_log::{root_key_from_hex, KeySetStatement, SignerEntry};
 pub use pinned::{key_set_trust_via, KeySetOutcome, KeySetTrust, PINNED_LOG_ROOT_KEYS};
-// The per-tree STH contexts a key set authorises signers for.
 pub use verifiable_log::{
     STH_CONTEXT_ACCOUNT_KEYS, STH_CONTEXT_BINARIES, STH_CONTEXT_COMMIT_LOG,
     STH_CONTEXT_COMMIT_LOG_2,

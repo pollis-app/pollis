@@ -1,60 +1,9 @@
-//! Domain D — key-packages, device-cert re-signing, and push tokens.
+//! Key packages, device-cert re-signing and push tokens (#419 domain D), all on
+//! the main DB.
 //!
-//! These are the **owner-scoped** client writes in the key-package / device /
-//! push-token surface (#419 §D). Every endpoint copies the domain-A convention
-//! ([`crate::messages`]): a thin axum handler `gate`s the request, parses the
-//! body, calls a pure `apply_*(conn, authed, body) -> WriteOutcome` that embeds
-//! BOTH authorization and the write, and maps the outcome to 200/403/400/500.
-//! The handler and the integration harness share the `apply_*` fn, so the test
-//! suite exercises the exact authz the production handler runs.
-//!
-//! ## Where the writes land
-//!
-//! Every domain-D table — `mls_key_package`, `user_device`, `push_token` — lives
-//! in the **MAIN DB** (`state.db`), so all `apply_*` fns run on the main
-//! connection.
-//!
-//! ## Authorization
-//!
-//! Every write here is **owner-scoped**: a user publishes/replenishes key
-//! packages, re-signs device certs, and registers push tokens only for THEIR OWN
-//! account. [`resolve_actor`] proves a signed request acts as itself (a
-//! body-supplied `user_id` that differs from the authenticated user is
-//! `Forbidden`), and the write then binds `user_id = actor` server-side so a
-//! caller can never attach a row to another user. On the no-auth path
-//! (`authed == None`) the actor comes from the body, mirroring `commit::submit`.
-//!
-//! ## What is NOT here — the bootstrap writes (kept direct in pollis-core)
-//!
-//! Two domain-D writes deliberately stay on the client's direct path and are
-//! absent from this module:
-//!
-//!   - **device registration** (`auth.rs::register_device`, INSERT `user_device`)
-//!     and **first device-cert publish** (`device.rs::ensure_device_cert`, the
-//!     UPDATE that sets `user_device.mls_signature_pub`).
-//!
-//! These are the **bootstrap** writes. DS auth ([`crate::auth::verify_request`])
-//! authenticates a request by looking up `user_device.mls_signature_pub` for the
-//! `(user_id, device_id)` and verifying the Ed25519 signature against it. Until
-//! that column is populated a device CANNOT produce a signature the DS will
-//! accept (it would 401) — and the write that populates it is `ensure_device_cert`
-//! itself. That is an irreducible chicken-and-egg: the write that establishes the
-//! signing credential cannot be authenticated by that same credential. So device
-//! registration + the cert publish remain direct; everything a device does
-//! *after* it is enrolled (key packages, push tokens, cert re-signing) is signed
-//! and routed here. Folding the bootstrap behind an OTP-session-gated DS endpoint
-//! is the prerequisite for flipping clients to a read-only Turso token, and is
-//! out of scope for this owner-scoped-signature slice.
-//!
-//! **Key-package CLAIM** (`POST /v1/key-packages/claim`) is the one domain-D
-//! write that is NOT owner-scoped: you claim someone *else's* package while
-//! adding their device, so it cannot use [`resolve_actor`]. The gate only
-//! authenticates the claimer (any enrolled device may claim — claiming is how you
-//! add a member); the target comes from the body. It returns the claimed package
-//! bytes (not a [`WriteOutcome`]) so the caller can build the MLS Add commit, so
-//! it has its own [`ClaimOutcome`] / `claim_outcome_response`. It is a standalone
-//! endpoint (blocker C1, Goal B #419) rather than a DS-side step of `/v1/commits`
-//! because the client needs the bytes BEFORE it can build the commit it submits.
+//! Every write is owner-scoped via [`resolve_actor`] (`user_id = actor`), except
+//! the key-package claim: claiming someone else's package is how you add them,
+//! so it is gated by [`may_claim_from`] and claim budgets instead.
 
 use axum::{
     extract::State,
@@ -75,21 +24,11 @@ use crate::writes::{
 use crate::AppState;
 use crate::util::b64_decode;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::devices::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies are shared with the client via `pollis-api`.
 pub use pollis_api::devices::*;
 
-// ── Key-package entries ──────────────────────────────────────────────────────
-
-// ── POST /v1/key-packages ────────────────────────────────────────────────────
-
-/// POST /v1/key-packages — publish (insert-only) one or more key packages for
-/// the actor's own device. Idempotent (`INSERT OR IGNORE` keyed on `ref_hash`),
-/// so a retry is benign. Used by both the single-package publish and the
-/// replenish-top-up client paths (neither deletes).
+/// POST /v1/key-packages — publish key packages for the actor's own device.
+/// Idempotent (`INSERT OR IGNORE` on `ref_hash`).
 pub async fn publish_key_packages(
     State(state): State<AppState>,
     req: RawRequest,
@@ -102,9 +41,6 @@ pub async fn publish_key_packages(
     outcome_response::<PublishKeyPackagesBody>(apply_publish_key_packages(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// INSERT OR IGNORE each key package with `user_id = actor`. Authz: the actor is
-/// the signer (a body `user_id` that differs is `Forbidden`); rows are bound to
-/// the actor, so a caller can never publish a package under another user.
 pub async fn apply_publish_key_packages(
     conn: &Connection,
     authed: Option<&str>,
@@ -118,8 +54,6 @@ pub async fn apply_publish_key_packages(
         return Ok(WriteOutcome::Invalid(why));
     }
     // Decode every package before touching the DB, so a bad blob writes nothing.
-    // A malformed package is the whole write's problem; surface as 500 (the
-    // handler maps decode-at-parse to 400, but here it is a bad row).
     let mut decoded: Vec<(&KeyPackageEntry, Vec<u8>)> = Vec::with_capacity(body.packages.len());
     for pkg in &body.packages {
         decoded.push((pkg, b64_decode(&pkg.key_package)?));
@@ -127,8 +61,8 @@ pub async fn apply_publish_key_packages(
     let tx = conn.transaction().await?;
     for (pkg, kp) in decoded {
         if pkg.last_resort {
-            // A device has ONE last-resort package per suite (the partial
-            // unique index enforces it). Publishing a new one replaces the old.
+            // One last-resort package per device and suite (partial unique
+            // index); a new one replaces the old.
             tx.execute(
                 "DELETE FROM mls_key_package \
                  WHERE user_id = ?1 AND device_id = ?2 AND ciphersuite = ?3 AND last_resort = 1",
@@ -155,9 +89,8 @@ pub async fn apply_publish_key_packages(
     Ok(WriteOutcome::Ok)
 }
 
-/// A request may carry at most ONE last-resort package per suite (#1571): the
-/// partial unique index `idx_mls_kp_last_resort` would refuse the second
-/// mid-write, and refusing it up front is a clean 400 instead of a 500.
+/// At most one last-resort package per suite (#1571); refused up front as a 400
+/// rather than by `idx_mls_kp_last_resort` mid-write as a 500.
 fn last_resort_shape_error(packages: &[KeyPackageEntry]) -> Option<&'static str> {
     let mut suites: Vec<i64> = packages
         .iter()
@@ -173,11 +106,9 @@ fn last_resort_shape_error(packages: &[KeyPackageEntry]) -> Option<&'static str>
     None
 }
 
-// ── POST /v1/key-packages/replenish ──────────────────────────────────────────
-
 /// POST /v1/key-packages/replenish — atomically clear this device's stale
-/// unclaimed key packages and publish a fresh pool. One transaction so the pool
-/// is never observed empty mid-refill.
+/// unclaimed key packages and publish a fresh pool, so the pool is never
+/// observed empty mid-refill.
 pub async fn replenish_key_packages(
     State(state): State<AppState>,
     req: RawRequest,
@@ -190,10 +121,6 @@ pub async fn replenish_key_packages(
     outcome_response::<ReplenishKeyPackagesBody>(apply_replenish_key_packages(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// DELETE the actor's stale unclaimed packages for `device_id` (and legacy
-/// NULL-device rows), then INSERT the fresh pool — one transaction. Authz:
-/// owner-scoped; the DELETE and every INSERT are bound to `user_id = actor`, so
-/// a caller can only ever rotate their own device's pool.
 pub async fn apply_replenish_key_packages(
     conn: &Connection,
     authed: Option<&str>,
@@ -206,7 +133,6 @@ pub async fn apply_replenish_key_packages(
     if let Some(why) = last_resort_shape_error(&body.packages) {
         return Ok(WriteOutcome::Invalid(why));
     }
-    // Decode every package up front so a bad blob aborts before we touch the DB.
     let mut decoded: Vec<(String, Vec<u8>, i64, bool)> = Vec::with_capacity(body.packages.len());
     for pkg in &body.packages {
         decoded.push((
@@ -216,28 +142,16 @@ pub async fn apply_replenish_key_packages(
             pkg.last_resort,
         ));
     }
-    // A rotation replaces the pool for the SUITES it is publishing, and only
-    // those. Today that is one suite (classic) and every stored row is classic,
-    // so this is exactly the old whole-device wipe. It matters from #454 P2 on,
-    // when a device keeps a classic and a hybrid pool side by side: an unscoped
-    // delete would make the second rotation silently destroy the first pool.
-    // An empty request keeps the historical whole-device semantics.
+    // A rotation replaces the pool only for the suites it publishes, so pools of
+    // different suites can coexist (#454). An empty request wipes the device.
     let mut suites: Vec<i64> = decoded.iter().map(|(_, _, s, _)| *s).collect();
     suites.sort_unstable();
     suites.dedup();
 
     let tx = conn.transaction().await?;
-    // Remove unclaimed packages for THIS device only — their private keys may no
-    // longer exist in the device's current local DB (e.g. after a wipe). Also
-    // clear legacy packages with NULL device_id for this user.
-    //
-    // That includes the device's LAST-RESORT package in a rotated suite (#1571),
-    // deliberately: it is unclaimed by construction, and the reason a rotation
-    // deletes the pool (its private keys may be gone) is just as true of it. A
-    // rotating client that knows about last-resort packages sends a fresh one in
-    // this same request, so the device is never without one; a client that
-    // predates them sends none and is left exactly where it always was, with a
-    // regular pool only.
+    // Unclaimed packages' private keys may be gone from the local DB (e.g. after
+    // a wipe), so they go, including this suite's last-resort package (#1571); a
+    // current client sends a fresh one in the same request.
     if suites.is_empty() {
         tx.execute(
             "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
@@ -274,36 +188,23 @@ pub async fn apply_replenish_key_packages(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/key-packages/claim ──────────────────────────────────────────────
-
 /// How far back the durable claim budget counts.
 const CLAIM_WINDOW_SECS: i64 = 3600;
 
-/// Claims one account may make against ONE other account's pool per
-/// [`CLAIM_WINDOW_SECS`].
-///
-/// Sized for the real add path: adding a user to a group claims one package per
-/// device they have, a handful at most, and a retried add repeats that. Sixty an
-/// hour covers a very device-heavy user being added to a dozen conversations by
-/// the same person; it is nowhere near a drain.
+/// Claims one account may make against one other account's pool per
+/// [`CLAIM_WINDOW_SECS`]. An add claims one package per target device.
 const CLAIM_MAX_PER_PAIR: i64 = 60;
 
-/// Claims ALL accounts together may make against one target device's pool per
-/// [`CLAIM_WINDOW_SECS`]. The pair budget catches one attacker; this catches a
-/// handful of accounts splitting the work between them.
-///
-/// Above the pair budget by a wide margin, because this one is shared by every
-/// legitimate adder in the world: a popular account joining many groups at once
-/// genuinely does have many different people claiming its packages.
+/// Claims all accounts together may make against one target device's pool per
+/// [`CLAIM_WINDOW_SECS`], catching accounts that split the work. Well above the
+/// pair budget: every legitimate adder shares it.
 const CLAIM_MAX_PER_TARGET: i64 = 300;
 
 /// The result of a key-package claim.
 ///
-/// [`ClaimOutcome::NoKeyPackage`] is a normal control-flow outcome (the add path
-/// skips that device), NOT an error — it maps to 404, distinct from a 500 DB
-/// failure. The two refusals below are about the CALLER, not the pool, and are
-/// deliberately distinguishable from an empty pool: an honest adder needs to know
-/// whether to move on or to back off.
+/// [`ClaimOutcome::NoKeyPackage`] (404) is normal control flow: the add path
+/// skips that device. The refusals are about the caller and stay distinct from
+/// an empty pool, so an honest adder knows whether to move on or back off.
 #[derive(Debug)]
 pub enum ClaimOutcome {
     Claimed { ref_hash: String, key_package: Vec<u8> },
@@ -314,10 +215,8 @@ pub enum ClaimOutcome {
     RateLimited,
 }
 
-/// POST /v1/key-packages/claim — atomically claim one of a TARGET user's
-/// (optionally a specific device's) unclaimed key packages and return its bytes,
-/// so the caller can build the MLS Add commit that brings that device into the
-/// group.
+/// POST /v1/key-packages/claim — atomically claim one of a target user's (or
+/// device's) key packages and return its bytes, for the caller's Add commit.
 pub async fn claim_key_package(
     State(state): State<AppState>,
     req: RawRequest,
@@ -336,11 +235,8 @@ pub async fn claim_key_package(
     ))
 }
 
-/// Map a [`ClaimOutcome`] to its HTTP response: 200 + `{ ref_hash, key_package }`
-/// (base64) on a claim, 404 + a typed error when the target has no unclaimed
-/// package, 403 when the claimer may not draw from that pool, 429 when it is over
-/// budget. Shared by the production handler and the integration harness so both
-/// surface the same signals the client's control flow keys on.
+/// Map a [`ClaimOutcome`] to 200 / 404 / 403 / 429. Shared with the integration
+/// harness so both surface the signals the client's control flow keys on.
 pub fn claim_outcome_response<B>(outcome: ClaimOutcome) -> Response
 where
     B: pollis_api::DsRequest<Response = ClaimKeyPackageResponse>,
@@ -372,57 +268,11 @@ where
 
 /// May `claimer` draw from `target`'s key-package pool at all?
 ///
-/// Claiming is cross-account by construction — it is the mechanism for adding
-/// someone — so the gate cannot be "the target is you". It used to be the
-/// product's reachability rule instead (not blocked either way), on the argument
-/// that anybody may start a conversation with anybody, so a claim from a
-/// stranger is a claim from a prospective correspondent.
-///
-/// That argument does not survive contact with the numbers. A claim is a ONE-WAY
-/// flip and a device publishes a pool of FIVE
-/// (`pollis_core::commands::mls::key_packages`'s `TARGET`), while the per-pair
-/// budget is sixty an hour — so the budget never bound anything, and any
-/// unblocked stranger could empty a device's pool in five requests. A device with
-/// an empty pool cannot be added to a group at all, so that is targeted exclusion
-/// from every NEW conversation until the device next comes online to replenish —
-/// indefinitely, for a device that is offline.
-///
-/// So the gate is now a RELATIONSHIP, not merely the absence of a block: the
-/// claimer and the target must share a conversation's DESIRED ROSTER (or be the
-/// same account). That is the same set the MLS tree is reconciled against —
-/// `group_member` plus pending `group_invite` invitees — and it is what every
-/// claim path has already written by the time it claims:
-///
-///   * group invite — `/v1/invites/create` writes the pending `group_invite`
-///     row, and `send_group_invite` then reconciles IMMEDIATELY so the invitee's
-///     Welcome is staged before they accept (that is what makes accepting
-///     independent of the inviter being online). The invitee is not yet a
-///     `group_member`, which is why the gate is the desired roster and not
-///     [`crate::writes::is_member`];
-///   * join-request approval and invite-link redemption write the member row
-///     first, then the client reconciles;
-///   * DM — `/v1/dm/create` writes `dm_channel` and every `dm_channel_member`
-///     row in ONE transaction, and only then does the client initialise and
-///     reconcile the MLS group. A DM request's recipient row exists from that
-///     moment (un-accepted, which membership does not depend on);
-///   * suite migration — the roster is the group's existing members;
-///   * a user's own second device — `claimer == target`.
-///
-/// The block check stays underneath it: being in a roster with someone you have
-/// since blocked is not a licence to drain their pool.
-///
-/// What this leaves is narrower but not nothing. Anyone may invite anyone, so an
-/// attacker can put a victim in their own group's pending roster and claim from
-/// there — but that is now a VISIBLE act (the victim gets a pending invite),
-/// blockable, and budgeted (`/v1/invites/create` moved to the rate limiter's
-/// `probe` tier), instead of a silent request from a stranger. And a co-member
-/// can still drain a pool they have honest reason to draw from; no budget fixes
-/// that while the pool is five and an honest adder spends one per add — any cap
-/// low enough to matter would refuse real adds. The structural answer is a
-/// LAST-RESORT KeyPackage (the RFC 9420 / X3DH device: one package handed out
-/// repeatedly rather than consumed, so a pool can be depleted but never
-/// emptied). #1571 implements it: the claim falls back to the device's
-/// last-resort package when its pool is empty (`last_resort_package`).
+/// Only when they share some conversation's desired roster (or are the same
+/// account) and neither has blocked the other: an empty pool locks a device out
+/// of every new conversation, and a stranger could otherwise drain it. Every
+/// claim path has written the roster row by the time it claims. See
+/// `.codesight/wiki/mls.md` for the residual risk.
 async fn may_claim_from(
     conn: &Connection,
     claimer: &str,
@@ -437,30 +287,17 @@ async fn may_claim_from(
     shares_a_desired_roster(conn, claimer, target).await
 }
 
-/// Do these two accounts sit in any one conversation's desired roster?
-///
-/// Both shapes a roster takes: a group — counting a pending invitee as present,
-/// exactly as [`crate::directory::desired_roster`] does, and in either position
-/// so an INVITER claiming for an INVITEE and a member claiming for a co-member
-/// both pass — and a DM channel. A group's channels share its MLS group, so the
-/// group leg covers them.
+/// Do these two accounts sit in any one conversation's desired roster? A
+/// pending invitee counts as present, as in [`crate::directory::desired_roster`].
 async fn shares_a_desired_roster(
     conn: &Connection,
     a: &str,
     b: &str,
 ) -> anyhow::Result<bool> {
-    // Written as four explicit EXISTS legs rather than one `UNION` CTE: the CTE
-    // materializes all of `group_member` and `group_invite` before it can join,
-    // while these use `idx_gm_user` (`group_member(user_id)`) and
-    // `idx_invite_invitee` (`group_invite(invitee_id, status)`) to reach the
-    // handful of rows that matter. Both directions of each pairing are listed so
-    // an INVITER claiming for an INVITEE and a member claiming for a co-member
-    // both pass.
-    //
-    // No `status` filter on `group_invite`, deliberately:
-    // `directory::desired_roster` has none either, and this predicate must agree
-    // with the roster the MLS tree is reconciled against or the two disagree
-    // about who may be added.
+    // Explicit EXISTS legs, not a `UNION` CTE, so `idx_gm_user` and
+    // `idx_invite_invitee` apply instead of materializing both tables. No
+    // `status` filter on `group_invite`: it must agree with
+    // `directory::desired_roster`, which has none.
     let mut rows = conn
         .query(
             "SELECT 1 WHERE \
@@ -516,44 +353,15 @@ async fn recent_claims(
     })
 }
 
-/// Atomically claim one unclaimed key package for the target and return its
-/// hash-ref + TLS bytes (or [`ClaimOutcome::NoKeyPackage`]). This is the exact
-/// `UPDATE … RETURNING` the client ran directly before the DS seam: it selects
-/// the OLDEST unclaimed package (`ORDER BY created_at ASC LIMIT 1`) matching the
-/// target — `user_id` only, or `user_id AND device_id` when a device is named —
-/// and flips its `claimed` flag in one statement. The match is additionally
-/// narrowed to the requested ciphersuite, so the suite pools stay disjoint. An
-/// absent `ciphersuite` means the *current* suite ([`CIPHERSUITE_PQ`]) — #454
-/// read it as classic, and #669 flipped it when the classic suite was retired,
-/// so an old client's untagged claim now lands in the only pool anyone
-/// publishes.
+/// Claim the target's oldest unclaimed package in the requested suite (absent
+/// means [`CIPHERSUITE_PQ`], #669), falling back to the device's last-resort
+/// package. Two concurrent claims of one row cannot both win: the single writer
+/// re-evaluates `claimed = 0` at execution.
 ///
-/// Atomicity: the `WHERE claimed = 0` subquery is re-evaluated under the single
-/// libsql writer at statement-execution time, so two concurrent claims of the
-/// same one-package pool can never both win — the first sets `claimed = 1`, the
-/// second's subquery no longer sees an unclaimed row and `RETURNING` yields zero
-/// rows (→ `NoKeyPackage`). Exactly one winner per row.
-///
-/// ## What `claimer` buys (#419's "KP exhaustion" note, now closed)
-///
-/// A claim is a ONE-WAY flip: the package is spent whether or not the claimer
-/// ever builds the Add. With no bound, one authenticated account could empty a
-/// target's pool in a loop, and a device with an empty pool cannot be added to
-/// any group until it replenishes — a stranger holding an arbitrary user out of
-/// every conversation they are invited to. So a claim now costs the claimer:
-///
-///   * it must be allowed to reach the target at all ([`may_claim_from`]);
-///   * it is counted against a DURABLE per-(claimer, target) budget and a wider
-///     per-target-device one, both read from `mls_key_package_claim` rather than
-///     memory, so a rolling deploy does not hand out a fresh allowance and every
-///     DS instance sees the same count (the #847 pattern);
-///   * and a SUCCESSFUL claim is recorded. Only successes count: a claim against
-///     an empty pool took nothing, and charging for it would let a target's own
-///     exhaustion lock out the honest adders retrying behind it.
-///
-/// `claimer` is `None` only on the DS's no-auth (dev/test) path, which has no
-/// signed identity to attribute a claim to and already trusts whoever asks; the
-/// budget is skipped there exactly as every other authz check is.
+/// With a `claimer`, the claim must pass [`may_claim_from`] and durable
+/// per-pair and per-target budgets read from `mls_key_package_claim` (#847).
+/// Only successful claims are recorded, so a target's own exhaustion cannot lock
+/// out honest adders retrying behind it. `None` is the no-auth path.
 pub async fn apply_claim_key_package(
     conn: &Connection,
     claimer: Option<&str>,
@@ -572,12 +380,8 @@ pub async fn apply_claim_key_package(
     let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_PQ);
     let claimed = match claim_regular(conn, body, suite).await? {
         Some(hit) => Some(hit),
-        // The pool is empty: fall back to the device's last-resort package
-        // (#1571). It is read, never flipped, so it stays available for every
-        // later add. Only a DEVICE-scoped claim falls back: the user-scoped path
-        // (`target_device_id: None`) adds "some device of this user", and handing
-        // out one device's last-resort package there would pick a device
-        // arbitrarily. Every live add path names the device.
+        // Pool empty: fall back to the last-resort package (#1571), only for a
+        // device-scoped claim; a user-scoped one would pick a device arbitrarily.
         None => match &body.target_device_id {
             Some(device_id) => {
                 last_resort_package(conn, &body.target_user_id, device_id, suite).await?
@@ -611,9 +415,7 @@ pub async fn apply_claim_key_package(
     })
 }
 
-/// Atomically claim the OLDEST unclaimed REGULAR package for the target: the
-/// pre-#1571 claim, narrowed to `last_resort = 0` so the pool is spent before the
-/// package that never may be.
+/// Atomically claim the oldest unclaimed regular (`last_resort = 0`) package.
 async fn claim_regular(
     conn: &Connection,
     body: &ClaimKeyPackageBody,
@@ -657,10 +459,8 @@ async fn claim_regular(
     })
 }
 
-/// The device's last-resort package in `suite`, if it published one (#1571).
-/// A plain SELECT: serving it changes nothing, so any number of committers may
-/// be handed the same package, which is the point. The audit row and both claim
-/// budgets still apply to it, in [`apply_claim_key_package`].
+/// The device's last-resort package in `suite` (#1571). Read, never flipped, so
+/// every later add can be handed it.
 async fn last_resort_package(
     conn: &Connection,
     user_id: &str,
@@ -682,12 +482,9 @@ async fn last_resort_package(
     })
 }
 
-// ── POST /v1/devices/resign ──────────────────────────────────────────────────
-
-/// POST /v1/devices/resign — re-stamp the cross-signing certs the client signed
-/// (with the account identity key) onto the actor's own `user_device` rows after
-/// an identity rotation. Does NOT touch `mls_signature_pub` — only the cert
-/// columns — so it cannot change any device's auth credential.
+/// POST /v1/devices/resign — store re-signed device certs on the actor's own
+/// devices after an identity rotation. Touches only the cert columns, never a
+/// device's auth credential.
 pub async fn resign_device_certs(
     State(state): State<AppState>,
     req: RawRequest,
@@ -698,22 +495,14 @@ pub async fn resign_device_certs(
     };
     let conn = state.db.conn().await?;
     let outcome = apply_resign_device_certs(&conn, authed.as_deref(), &parsed).await?;
-    // Whole-fleet cert rewrite → evict the whole user's cached pubkeys (#658).
-    // Today this UPDATE deliberately leaves `mls_signature_pub_pq` alone, so no
-    // cached key can actually be wrong; the eviction is here so that stays true
-    // if the statement ever grows to touch the key columns, and it costs one
-    // re-read on an operation that happens once per identity rotation.
+    // Defensive eviction (#658): no key column changes today, but this stays
+    // correct if one ever does.
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         state.device_keys.invalidate_user(&owner);
     }
     outcome_response::<ResignDeviceCertsBody>(outcome)
 }
 
-/// UPDATE each device's cert columns, every statement scoped
-/// `WHERE device_id = ? AND user_id = actor`. Authz: user-scoped — the actor may
-/// re-sign certs for any device of THEIR OWN account (a whole-fleet operation
-/// after rotation), but the `user_id = actor` bind makes another user's rows
-/// untouchable.
 pub async fn apply_resign_device_certs(
     conn: &Connection,
     authed: Option<&str>,
@@ -744,18 +533,14 @@ pub async fn apply_resign_device_certs(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/push-tokens ─────────────────────────────────────────────────────
-
-/// POST /v1/push-tokens — upsert this device's Expo push token. Keyed on the
-/// token (unique per install), so re-registering after an account switch
-/// reassigns ownership rather than duplicating.
+/// POST /v1/push-tokens — upsert this device's Expo push token, keyed on the
+/// token so an account switch reassigns it.
 pub async fn register_push_token(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    // #1090: the binding needs the SERVER-VERIFIED device, so this endpoint
-    // gates with `gate_or_session_kind` rather than `gate_and_parse` — the
-    // device id comes from the credential, never from the body.
+    // The device binding needs the server-verified device id, never the body's
+    // (#1090).
     let (authed, cred) = match crate::writes::gate_or_session_kind(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
@@ -775,18 +560,13 @@ pub async fn register_push_token(
     )
 }
 
-/// Push tokens kept per user (#1090). A person has a phone and maybe a tablet;
-/// anything past this is churn from reinstalls, and every stale row multiplies
-/// one message into another Expo call.
+/// Push tokens kept per user (#1090); each stale row is another Expo call per
+/// message.
 pub const PUSH_TOKENS_PER_USER: i64 = 10;
 
-/// Whether `token` is shaped like the Expo push token this fan-out can actually
-/// deliver to (`push::EXPO_ENDPOINT` takes nothing else).
-///
-/// Shape-only, and that is the point: a token is a routing address, so the DS
-/// cannot tell a live one from a dead one — but it can refuse the strings that
-/// were never tokens at all, which is what stops the table being used as free
-/// per-user storage or padded with junk to inflate fan-out.
+/// Whether `token` is shaped like an Expo push token. Shape-only: the DS cannot
+/// tell live from dead, but can refuse junk used as storage or to inflate
+/// fan-out.
 pub fn is_expo_push_token(token: &str) -> bool {
     let inner = token
         .strip_prefix("ExponentPushToken[")
@@ -805,27 +585,10 @@ pub fn is_expo_push_token(token: &str) -> bool {
     }
 }
 
-/// Upsert the push token with `user_id = actor`. Authz: owner-scoped — the token
-/// is bound to the actor, so a caller can never register a token under another
-/// user (the body's `user_id`, if present, must equal the signer).
-///
-/// #1090, three bounds on top of that:
-///
-/// * **Shape.** A string that is not an Expo push token is refused outright, so
-///   the table cannot be padded with junk that inflates every fan-out.
-/// * **Device binding.** `token` is the primary key and the conflict branch used
-///   to reassign `user_id` unconditionally, so anyone holding a victim's token
-///   string could point it at their own account: the victim's phone then got the
-///   attacker's notifications and none of its own. The row now records the
-///   SERVER-VERIFIED registering device, and a re-register is only honoured from
-///   that same device. This keeps the case the original design wanted —
-///   switching accounts on one phone, where the same install re-registers under
-///   a new user — while refusing the one it did not: a different device
-///   presenting a stolen token. A legacy row with no binding adopts the first
-///   device to re-register it.
-/// * **Cap.** At most [`PUSH_TOKENS_PER_USER`], oldest evicted first, so a
-///   reinstall loop cannot grow one message into an unbounded number of Expo
-///   calls.
+/// Upsert the push token for the actor (#1090): Expo-shaped only, capped at
+/// [`PUSH_TOKENS_PER_USER`], and bound to the server-verified device. Another
+/// account may take a token over only from that same device (an account switch
+/// on one phone), so a stolen token string cannot redirect a victim's pushes.
 pub async fn apply_register_push_token(
     conn: &Connection,
     authed: Option<&str>,
@@ -854,8 +617,7 @@ pub async fn apply_register_push_token(
     drop(rows);
 
     if let Some((owner, bound_device)) = &existing {
-        // A different account may only take the token over from the device that
-        // registered it. `None` is a pre-#1090 row with no binding: adopt it.
+        // `None` is a pre-#1090 row with no binding: adopt it.
         let same_device = match (bound_device.as_deref(), device_id) {
             (Some(bound), Some(asking)) => bound == asking,
             (None, _) => true,
@@ -884,8 +646,7 @@ pub async fn apply_register_push_token(
     )
     .await?;
 
-    // Cap with oldest-first eviction. Ordered by `updated_at` then `token` so the
-    // victim is deterministic when several rows share a stamp.
+    // Oldest-first eviction; `token` breaks ties deterministically.
     conn.execute(
         "DELETE FROM push_token WHERE user_id = ?1 AND token NOT IN ( \
              SELECT token FROM push_token WHERE user_id = ?1 \

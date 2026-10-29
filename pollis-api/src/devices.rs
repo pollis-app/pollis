@@ -77,16 +77,9 @@ pub struct KeyPackageEntry {
     /// the blob, so mistagging at worst fails an add.
     #[serde(default)]
     pub ciphersuite: Option<i64>,
-    /// This is the device's LAST-RESORT package in its suite (#1571, RFC 9420
-    /// §16.8): handed out only when the device has no unclaimed regular package
-    /// left, and never consumed, so a registered device can always be added.
-    ///
-    /// ADDITIVE in both directions. A client that predates it never sends it,
-    /// so every package it publishes is a regular one, exactly as before; a
-    /// Delivery Service that predates it ignores the field and stores the
-    /// package as a regular one, which costs nothing but its reuse. Omitted on
-    /// the wire when false, so a regular package serializes byte-for-byte as it
-    /// did.
+    /// The device's last-resort package in its suite (#1571, RFC 9420 §16.8):
+    /// handed out only when no regular package is left, and never consumed.
+    /// Omitted when false, so older peers on either side see a regular package.
     #[serde(default, skip_serializing_if = "is_false")]
     pub last_resort: bool,
 }
@@ -107,7 +100,6 @@ pub struct ResignedCert {
 }
 
 impl KeyPackageEntry {
-    /// The suite to persist for this package, defaulting to the current one.
     pub fn suite(&self) -> i64 {
         self.ciphersuite.unwrap_or(CIPHERSUITE_PQ)
     }
