@@ -434,8 +434,6 @@
       "pairHeading": "Vincular un dispositivo nuevo",
       "pairHint": "Confirma que este código coincide con el que se muestra en el otro dispositivo y luego apruébalo.",
       "pairIntro": "Un dispositivo nuevo quiere vincularse a tu cuenta.",
-      "recoveryDescription": "Para añadir un dispositivo nuevo, entra en él con tu correo o vincúlalo desde Dispositivos, arriba.",
-      "recoveryHeading": "Recuperación",
       "reject": "Rechazar",
       "rejectA11y": "Rechazar el registro",
       "safetyHeading": "Seguridad",

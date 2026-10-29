@@ -421,8 +421,6 @@
       "pairHeading": "配对新设备",
       "pairHint": "确认此验证码与另一台设备上显示的一致，然后批准。",
       "pairIntro": "有一台新设备想要与你的账户配对。",
-      "recoveryDescription": "要添加新设备，可以在新设备上用邮箱登录，或在上方“设备”中关联。",
-      "recoveryHeading": "恢复",
       "reject": "拒绝",
       "rejectA11y": "拒绝设备注册",
       "safetyHeading": "安全",
