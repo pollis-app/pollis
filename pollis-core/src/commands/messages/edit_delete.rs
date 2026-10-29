@@ -7,29 +7,13 @@ use pollis_api::messages::DeleteMessageBody;
 use crate::error::Result;
 use crate::state::AppState;
 
-/// The `POST /v1/messages/delete` request body.
+/// The `POST /v1/messages/delete` body, built in one place so the self- and
+/// admin-delete paths agree on which id goes in which `String` slot.
 ///
-/// The DS reads `actor_id` as the acting user whenever request signing is off
-/// (`pollis_delivery::writes::resolve_actor`: auth on → the signed user, auth off
-/// → this field, missing → `Forbidden`). Omitting it made the endpoint return a
-/// hard 403 on every no-auth deployment while the authenticated path looked
-/// healthy.
-///
-/// Since #875 the OMISSION is caught by the type: [`DeleteMessageBody`] is the
-/// same struct `pollis-delivery` parses, and a Rust struct literal must name
-/// every field, so a call site that forgets `actor_id` does not compile. This
-/// builder survives that change because it still gives the two call sites
-/// (self-delete and admin-delete) one place to agree on which id goes in which
-/// slot — a thing the type cannot check, since both are `String`.
-///
-/// `actor_id` is NOT a permission grant on the signed path: `resolve_actor`
-/// requires it to equal the authenticated user and rejects otherwise, so sending
-/// it can never widen what the caller may do.
-///
-/// `delete_token` is the per-envelope deletion capability (#1086) — `None` on
-/// the admin branch, which is a re-derived permission rather than a claim of
-/// authorship, and `Some` on the self branch whenever this device can compute
-/// one.
+/// `actor_id` is the acting user when request signing is off; on the signed
+/// path the DS requires it to equal the authenticated user, so it never widens
+/// permission. `delete_token` (#1086) is `None` on the admin branch, which is a
+/// re-derived permission rather than a claim of authorship.
 pub fn delete_message_body(
     message_id: &str,
     conversation_id: &str,
@@ -47,17 +31,13 @@ pub fn delete_message_body(
 }
 
 /// The "for everyone" half of a self-delete: an E2EE redaction for members who
-/// already fetched the message, then the removal of its envelope (and any
-/// pending edit) from the DS for those who have not. Deleting an envelope the
-/// DS does not hold is a no-op, so this is also how a DISCARD withdraws an
-/// unsent message whose post may have landed (#1335).
+/// already fetched the message, then removal of its envelope and pending edit
+/// from the DS. Also how a discard withdraws an unsent message whose post may
+/// have landed (#1335).
 ///
-/// The redaction is sent FIRST so there is no window where the original is
-/// gone but no redaction is in flight for an in-progress fetch. The removal
-/// proves authorship rather than asserting it (#1086): the DS checks the token
-/// against the hash stored with the envelope. `None` — this device cannot
-/// compute one, or the message predates the capability — leaves the DS on its
-/// legacy membership check.
+/// The redaction goes first so no in-progress fetch sees the original vanish
+/// without a redaction in flight. The removal proves authorship with the
+/// deletion capability (#1086).
 pub(super) async fn retract_for_everyone(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -70,68 +50,24 @@ pub(super) async fn retract_for_everyone(
     crate::commands::mls::ds_post_ok(state, &body).await
 }
 
-/// Delete a message.
-///
-/// Two paths, selected automatically by comparing `user_id` (the caller) to the
-/// target message's author as recorded in the LOCAL `message` row (the
-/// credential-authenticated sender). The remote envelope's `sender_id` is now the
-/// sealed sentinel (#607) and is never consulted for authorship:
-///
-/// **Self-delete** (caller is the original sender) — "delete for everyone":
-/// sends an **E2EE redaction control message** (an MLS application message whose
-/// plaintext is a `0xF6` framing frame carrying the target id, indistinguishable
-/// on the wire from a short text message) so every member who already received
-/// the message soft-deletes it on their next ingest — but only after each
-/// recipient verifies the redaction's MLS-authenticated author matches the
-/// target message's author (`ingest::decrypt_and_persist_one`), so neither the
-/// server nor another member can redact a message they did not author. Also
-/// removes the original envelope + any pending edit from Turso (so a recipient
-/// who has NOT fetched yet never receives it, and the ciphertext does not linger
-/// at rest), soft-deletes the sender's own local row, and broadcasts a
-/// `deleted_message` realtime event for immediate cache invalidation. The
-/// durable path is the redaction envelope; the realtime ping is only a hint.
-///
-/// **Admin-delete** (caller is a different user, must be a group admin in the
-/// channel's group): writes a `type='delete'` tombstone envelope to Turso so
-/// every other member soft-deletes the message on their next ingest, also
-/// removes the original message envelope and any pending edit, soft-deletes
-/// the admin's own local row, and broadcasts a `deleted_message` realtime
-/// event so currently-connected clients invalidate their cache immediately.
-/// Admin-delete is server-authorized (moderation) and uses the plaintext
-/// tombstone because an admin generally cannot author an MLS message on behalf
-/// of another member. Admin-delete is rejected for DM messages (no admin
-/// concept in 1:1 DMs).
-///
-/// Attachment cleanup: if the message had one or more attachments, each
-/// content_hash's reference is RELEASED server-side through the DS (#690). The
-/// DS reference-counts the `attachment_object` row and collects it — and
-/// permits the R2 object's deletion — only when NO message anywhere still
-/// references the object, so deleting one message cannot strand another that
-/// names the same object. The local ref-count pass survives as a cheap
-/// first pass (skip the R2 round trip when this device still references the hash),
-/// but the client no longer assumes its local view is complete: the server-side
-/// count is the authority. R2 deletion is best-effort and must not fail the
-/// overall delete; orphaned R2 objects can be reclaimed by a future sweep.
+/// Delete a message: the author's E2EE redaction ("delete for everyone"), or a
+/// group admin's server-authorized tombstone. Self vs admin is decided from the
+/// LOCAL row's credential-authenticated sender, never the sealed envelope
+/// (#607). Attachment references are released through the DS, which collects
+/// an object only when no message references it (#690). See
+/// `.codesight/wiki/mls.md` (message deletion).
 pub async fn delete_message(
     message_id: String,
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // Deleting a message the outbox still holds (#1335) is discarding it —
-    // which also withdraws it from everyone if an attempt may have reached the
-    // DS (see `outbox::discard_unsent_message`).
+    // Deleting a message the outbox still holds is discarding it (#1335).
     if super::outbox::is_unsent(state, &message_id).await? {
         super::outbox::discard_unsent_message(message_id, state).await?;
         return Ok(());
     }
-    // Resolve the message's AUTHOR + conversation. Authorship MUST come from the
-    // LOCAL `message` row — its `sender_id` is the credential-authenticated author
-    // (written from the MLS credential at ingest, or self-attributed at send).
-    // The remote `message_envelope.sender_id` is now ALWAYS the sealed sentinel
-    // (#607), so it can no longer reveal who authored the message; it serves only
-    // as a fallback for the conversation_id when this device holds no local copy
-    // (an admin deleting a message they never fetched). Deriving self-vs-admin
-    // from the sealed envelope would misroute EVERY self-delete to the admin path.
+    // Authorship comes from the local row; the remote `sender_id` is always the
+    // sealed sentinel (#607) and would misroute every self-delete to admin.
     let local_row: Option<(String, String)> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -147,10 +83,8 @@ pub async fn delete_message(
     let (msg_sender_id, conversation_id): (String, String) = match local_row {
         Some(t) => t,
         None => {
-            // No local copy: this can only be an admin-delete (a self-delete
-            // requires you authored — and therefore hold — the message). Take the
-            // conversation from the remote envelope and leave the author unknown
-            // (empty), which forces the admin branch below.
+            // No local copy: only an admin-delete is possible, so leave the
+            // author empty to force the admin branch.
             match crate::commands::ds_reads::message_conversation(state, &message_id).await? {
                 Some(cid) => (String::new(), cid),
                 None => {
@@ -165,16 +99,8 @@ pub async fn delete_message(
     let is_admin_delete = msg_sender_id != user_id;
 
     if is_admin_delete {
-        // Admin path: caller must be an admin in the group that owns this
-        // channel. DMs (no `channels` row) are not moderatable.
-        // ONE request: the channel id resolves to its owning group server-side
-        // and the caller's role comes back with it, so "is this a group channel"
-        // and "am I an admin of it" are answered together.
-        //
-        // #875: non-membership used to answer "only the sender can delete this
-        // message" — the same string as the DM case above, which is a different
-        // condition. A DM genuinely has no admin concept; being outside the
-        // group is being outside the group, and the shared preflight says so.
+        // Admin path: the caller must be an admin of the channel's group; DMs
+        // (`!role.exists`) are not moderatable.
         let role =
             crate::commands::ds_reads::group_role(state, &conversation_id, &user_id).await?;
         if !role.exists {
@@ -192,35 +118,22 @@ pub async fn delete_message(
                 "only group admins can delete other members' messages"
             )));
         }
-        // The RESOLVED group id, echoed by the same answer that authorized the
-        // delete — so the realtime nudge below cannot address a different group
-        // than the one the check ran against.
+        // The group id from the same answer that authorized the delete, so the
+        // realtime nudge cannot address a different group.
         let group_id = role.group_id.clone();
 
-        // Remove the original message envelope and any pending edit so
-        // late-joiners or unsynced devices never receive the now-deleted
-        // content. Then write the tombstone envelope so every existing
-        // member soft-deletes on next ingest. The server re-verifies admin
-        // authority (it must not trust the client's branch choice). DS seam:
-        // route the whole 3-write op (one transaction server-side) through the
-        // Delivery Service.
-        // No capability: an admin delete is authorised by the re-derived admin
-        // role, not by proving authorship, and an admin cannot compute another
-        // member's token by design.
+        // The DS removes the envelope and pending edit and writes the tombstone
+        // in one transaction, re-verifying admin authority itself. No
+        // capability: an admin cannot compute another member's token by design.
         let body =
             delete_message_body(&message_id, &conversation_id, &msg_sender_id, &user_id, None);
         crate::commands::mls::ds_post_ok(state, &body).await?;
 
-        // Local `message.deleted_at` only — a display/presence field, never
-        // compared lexically against a cursor, so it deliberately does NOT go
-        // through `envelope_sent_at` (which exists for the watermark-ordered
-        // `message_envelope.sent_at` column).
+        // A display field, never compared against a cursor, so not
+        // `envelope_sent_at`.
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Soft-delete locally and collect orphaned attachments. The admin
-        // may not have a local row (joined after the message was sent and
-        // it's already aged out) — that's fine, the tombstone in Turso is
-        // what propagates the delete.
+        // The admin may hold no local row; the tombstone propagates the delete.
         let attachments: Vec<(AttachmentRef, bool)> = {
             let guard = state.local_db.lock().await;
             let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -240,25 +153,16 @@ pub async fn delete_message(
             if attachments.is_empty() {
                 Vec::new()
             } else {
-                // Reference-count against every non-deleted local message,
-                // not just the admin's own — if any local copy still
-                // references the hash (e.g. another member also attached
-                // the same file in a separate message they sent), keep R2.
-                // This is a cheap first pass; the DS is the authority.
                 let orphaned = filter_orphaned_locally_all(db.conn(), &attachments)?;
                 mark_locally_orphaned(attachments, &orphaned)
             }
         };
 
-        // Release EVERY attachment's reference for the deleted message; the DS
-        // collects the shared object only when no reference remains.
         for (att, locally_orphaned) in attachments {
             cleanup_attachment(state, &message_id, &att, locally_orphaned).await;
         }
 
-        // Broadcast so currently-connected clients invalidate their message
-        // cache without waiting for a refetch. Non-fatal — ingest of the
-        // tombstone envelope is the durable path.
+        // A hint only; ingesting the tombstone is the durable path.
         if let Err(e) = crate::commands::livekit::publish_deleted_message_to_room(
             &state.livekit,
             &group_id,
@@ -272,26 +176,11 @@ pub async fn delete_message(
         return Ok(());
     }
 
-    // Self-delete path (caller is the original sender) — "delete for everyone".
-    //
-    // Two facets, both needed:
-    //   1. Send an E2EE redaction control message so members who ALREADY fetched
-    //      the message soft-delete their local copy (verified author-side — see
-    //      `send_redaction_message`).
-    //   2. Remove the original envelope + any pending edit from Turso so a member
-    //      who has NOT fetched yet never receives it and the ciphertext does not
-    //      linger at rest.
-    // The redaction is sent FIRST so there is no window where the original is
-    // gone but no redaction is in flight for an in-progress fetch.
     retract_for_everyone(state, &conversation_id, &message_id, &user_id).await?;
 
-    // Read the local decrypted content before soft-deleting so we can inspect
-    // any embedded attachment metadata. Then SOFT-delete the local row (content
-    // cleared, `deleted_at` set) — the sender sees the same `[deleted]`
-    // placeholder every recipient does, rather than the message silently
-    // vanishing only for them. Compute which attachments are no longer
-    // referenced by any of this user's other non-deleted messages. Done inside a
-    // single lock scope to avoid races with concurrent sends.
+    // Soft-delete (not remove) so the sender sees the same `[deleted]`
+    // placeholder as recipients; one lock scope so a concurrent send cannot
+    // race the orphan count.
     let attachments: Vec<(AttachmentRef, bool)> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -304,10 +193,8 @@ pub async fn delete_message(
             )
             .optional()?;
 
-        // Local `message.deleted_at` only — a display/presence field, never
-        // compared lexically against a cursor, so it deliberately does NOT go
-        // through `envelope_sent_at` (which exists for the watermark-ordered
-        // `message_envelope.sent_at` column).
+        // A display field, never compared against a cursor, so not
+        // `envelope_sent_at`.
         let now = chrono::Utc::now().to_rfc3339();
         let rows_affected = db.conn().execute(
             "UPDATE message SET content = NULL, deleted_at = ?1
@@ -331,16 +218,11 @@ pub async fn delete_message(
         }
     };
 
-    // Release EVERY attachment's reference for the deleted message; the DS
-    // collects the shared object (and permits the R2 delete) only when no
-    // reference remains.
     for (att, locally_orphaned) in attachments {
         cleanup_attachment(state, &message_id, &att, locally_orphaned).await;
     }
 
-    // Broadcast so currently-connected members invalidate their cache and apply
-    // the redaction immediately, without waiting for a poll. Non-fatal — ingest
-    // of the redaction envelope is the durable path.
+    // A hint only; ingesting the redaction envelope is the durable path.
     let (mls_group_id, is_channel) = resolve_mls_group(state, &conversation_id).await?;
     let (channel_arg, dm_arg) = if is_channel {
         (Some(conversation_id.as_str()), None)
@@ -360,9 +242,7 @@ pub async fn delete_message(
     Ok(())
 }
 
-/// Resolve the MLS group backing a conversation: a channel maps to its
-/// `group_id` (all channels in a group share one MLS group); a DM's MLS group is
-/// keyed by the conversation id itself. Returns `(mls_group_id, is_channel)`.
+/// Returns `(mls_group_id, is_channel)` for a conversation.
 async fn resolve_mls_group(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -374,12 +254,8 @@ async fn resolve_mls_group(
     ))
 }
 
-/// Test-only: send a redaction as an ARBITRARY caller, bypassing the
-/// self-sender gate in [`delete_message`]. Lets the flows suite prove the
-/// security invariant that a recipient rejects a redaction whose
-/// MLS-authenticated author is NOT the target message's author (a member cannot
-/// redact another member's message). Not reachable in production — the real
-/// `delete_message` routes a non-author to the admin-authorized path.
+/// Test-only: send a redaction as any caller, bypassing [`delete_message`]'s
+/// author gate, to prove recipients reject a redaction from a non-author.
 #[cfg(feature = "test-harness")]
 pub async fn send_redaction_as(
     state: &Arc<AppState>,
@@ -390,14 +266,8 @@ pub async fn send_redaction_as(
     send_redaction_message(state, conversation_id, target_message_id, user_id).await
 }
 
-/// Test-only: publish an edit envelope for `target_message_id` as an ARBITRARY
-/// caller, bypassing the author self-gate in [`edit_message`] (which only edits a
-/// message the caller sent and has locally). Lets the flows suite prove the
-/// client-side edit-author enforcement (#607): a recipient must REJECT an edit
-/// whose MLS-authenticated author is NOT the target message's author. Not
-/// reachable in production — the real `edit_message` edits only the caller's own
-/// message, and the DS now membership-gates (no longer author-gates) the write,
-/// so this models a member forging an edit for someone else's message.
+/// Test-only: publish an edit as any caller, bypassing [`edit_message`]'s author
+/// gate, to prove recipients reject an edit from a non-author (#607).
 #[cfg(feature = "test-harness")]
 pub async fn edit_message_as(
     state: &Arc<AppState>,
@@ -409,8 +279,6 @@ pub async fn edit_message_as(
     let envelope_id = Ulid::new().to_string();
     let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
 
-    // Catch up (welcomes + interleaved) so the edit is sealed at the current
-    // epoch — identical pre-op catch-up to `edit_message` / `send_redaction_message`.
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
@@ -427,9 +295,8 @@ pub async fn edit_message_as(
         crate::diag!("[messages] edit_message_as: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
-    // Repair the local group if it is missing. Asked as "is there a group?", not
-    // "can I encrypt?" — a failed encrypt now also means "a commit is staged"
-    // (#1079), which must not trigger a rejoin.
+    // Asked as "is there a group?", not "can I encrypt?": a failed encrypt can
+    // also mean a staged commit (#1079), which must not trigger a rejoin.
     let needs_repair = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -441,10 +308,8 @@ pub async fn edit_message_as(
 
     let plaintext = super::framing::pad(new_content.as_bytes());
     let sealed = {
-        // #1079: serialize behind any committer on this device before sealing —
-        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
-        // self_update's order) and dropped with this block, before the post's
-        // own catch-up can want it.
+        // Group lock before `local_db`, dropped before the post's own catch-up
+        // (#1079, `seal::seal_under_lock`).
         let mls_guard = state.mls_group_lock(&mls_group_id).await;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
@@ -452,14 +317,12 @@ pub async fn edit_message_as(
         super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
-    // The target's deletion capability (#1086) — this write replaces any pending
-    // edit of the target, which is a delete.
+    // Replacing a pending edit is a delete, so it needs the capability (#1086).
     let delete_token =
         super::delete_capability::envelope_delete_token(state, target_message_id).await;
 
-    // Edit envelopes are NOT sealed (the DS membership-gates the write on the
-    // authenticated writer, so `sender_id` binds to the caller); the recipient's
-    // author check reads the MLS credential, not this column.
+    // Edit envelopes are not sealed; the recipient's author check reads the MLS
+    // credential, not `sender_id`.
     super::seal::post_resealing(
         state,
         super::seal::Target {
@@ -488,15 +351,9 @@ pub async fn edit_message_as(
     Ok(())
 }
 
-/// Send an E2EE "delete for everyone" redaction for `target_message_id`: an MLS
-/// application message whose plaintext is a `0xF6` redaction frame (see
-/// [`super::framing::pad_redaction`]). It rides the ordinary send path — a
-/// `type='message'` envelope on `/v1/messages/send` — so it inherits MLS
-/// encryption, per-conversation watermarks, envelope GC, and offline delivery
-/// with no schema, DS, or migration change. Recipients recognise the frame in
-/// [`super::ingest`] and soft-delete the target only if the redaction's
-/// MLS-authenticated author matches the target's author. It is a control
-/// message: no local `message` row is written for it on either side.
+/// Send an E2EE redaction ([`super::framing::pad_redaction`]) as an ordinary
+/// message envelope. Recipients apply it only if its MLS-authenticated author
+/// is the target's author; no local `message` row is written for it.
 async fn send_redaction_message(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -506,10 +363,8 @@ async fn send_redaction_message(
     let envelope_id = Ulid::new().to_string();
     let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
 
-    // Catch up MLS before encrypting so the redaction is sealed at the current
-    // epoch (recipients at head can decrypt it) and so an un-ingested
-    // current-epoch inbound message is not stranded when this device advances
-    // (issue #440) — identical to the send/edit pre-op catch-up.
+    // Catch up first: seal at the current epoch, and do not strand an
+    // un-ingested current-epoch message when this device advances (#440).
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
@@ -526,8 +381,6 @@ async fn send_redaction_message(
         crate::diag!("[messages] send_redaction: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
-    // Encrypt the redaction frame. Repair the local group via external-join if
-    // it is missing (a wiped local DB), mirroring `edit_message`.
     let needs_repair = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -539,10 +392,8 @@ async fn send_redaction_message(
 
     let plaintext = super::framing::pad_redaction(target_message_id);
     let sealed = {
-        // #1079: serialize behind any committer on this device before sealing —
-        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
-        // self_update's order) and dropped with this block, before the post's
-        // own catch-up can want it.
+        // Group lock before `local_db`, dropped before the post's own catch-up
+        // (#1079, `seal::seal_under_lock`).
         let mls_guard = state.mls_group_lock(&mls_group_id).await;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
@@ -550,17 +401,11 @@ async fn send_redaction_message(
         super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
-    // The redaction envelope carries a deletion capability like every other
-    // envelope this client writes (#1086) — uniform rather than a per-type
-    // carve-out. Deleting a redaction would stop a recipient ever soft-deleting
-    // the message it redacts, which is the same class of attack.
+    // Deleting a redaction would undo it, so it carries a capability too (#1086).
     let delete_token_hash =
         super::delete_capability::envelope_delete_token_hash(state, &envelope_id).await;
 
-    // Blind the envelope sender exactly like a normal send — sealing is
-    // UNCONDITIONAL (#607). The true author is the MLS credential inside the
-    // ciphertext, which is what the recipient's redaction-authorization check
-    // reads; the stored `sender_id` is always the non-identifying sentinel.
+    // Sealed like every send (#607); recipients authorize on the MLS credential.
     super::seal::post_resealing(
         state,
         super::seal::Target {
@@ -576,15 +421,12 @@ async fn send_redaction_message(
             conversation_id: conversation_id.to_string(),
             sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
             ciphertext: sealed.wire(),
-            // A redaction is not a reply.
             reply_to_id: None,
             sent_at: sealed.sent_at.clone(),
             sealed: 1,
             generation: Some(sealed.generation),
             epoch: Some(sealed.epoch),
-            // A redaction wakes nobody: the tombstone is applied on the next
-            // ingest, and pushing "you have a new message" for a deletion would be
-            // both wrong and a notification the user cannot act on (#987).
+            // A redaction wakes nobody (#987).
             push_to: None,
             push_mentions: None,
             delete_token_hash: delete_token_hash.clone(),
@@ -603,9 +445,8 @@ pub(crate) struct AttachmentRef {
     pub(crate) r2_key: String,
 }
 
-/// Parse the `_att` array out of a message's local decrypted content and
-/// return the (content_hash, r2_key) pairs. Returns an empty Vec for plain
-/// text messages, malformed JSON, or any missing fields.
+/// The `_att` refs in a message's decrypted content; empty for plain text or
+/// anything malformed.
 pub(crate) fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
     if !raw.starts_with('{') {
         return Vec::new();
@@ -628,20 +469,14 @@ pub(crate) fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
         .collect()
 }
 
-/// True when a message's plaintext `content` carries attachment refs (a valid
-/// `_att` array) rather than being plain text. Size-padding (issue #331 v2,
-/// `docs/metadata-minimization-design.md` §4.1) is scoped to TEXT envelopes
-/// only — an attachment blob's size is inherent and R2 dedup depends on it — so
-/// the send/edit path leaves attachment envelopes unpadded.
+/// True when `content` is an attachment envelope, which is sent unpadded
+/// (#331, see `framing`).
 pub(crate) fn is_attachment_content(content: &str) -> bool {
     !parse_attachment_refs(content).is_empty()
 }
 
-/// Pair every attachment with whether the local ref-count pass flagged it
-/// orphaned. `orphaned` is the subset returned by `filter_orphaned_locally*`
-/// (attachments no remaining local message references); membership is matched on
-/// `content_hash`. The flag only decides whether it is worth ATTEMPTING the R2
-/// delete — the reference release runs for every attachment regardless (#690).
+/// Pair each attachment with whether the local pass found it orphaned. The flag
+/// only decides whether to attempt the R2 delete (#690).
 fn mark_locally_orphaned(
     all: Vec<AttachmentRef>,
     orphaned: &[AttachmentRef],
@@ -656,10 +491,7 @@ fn mark_locally_orphaned(
         .collect()
 }
 
-/// Return the subset of the given attachments that are not referenced by any
-/// of the user's other non-deleted local messages. Scans the sender's local
-/// message cache only — cross-user references are invisible because
-/// attachment metadata lives inside the MLS-encrypted payload.
+/// The candidates no other non-deleted local message of `user_id` references.
 fn filter_orphaned_locally(
     conn: &rusqlite::Connection,
     user_id: &str,
@@ -686,12 +518,8 @@ fn filter_orphaned_locally(
         .collect())
 }
 
-/// Same as `filter_orphaned_locally` but scans every non-deleted local
-/// message regardless of sender. Used by admin-delete: the admin may
-/// themselves have re-sent the same attachment, or someone else's message
-/// in the admin's local cache may still reference the same hash. Cross-user
-/// references on remote devices remain invisible here; the DS's derived
-/// reference count is what actually gates collection.
+/// [`filter_orphaned_locally`] over every sender (admin-delete). Only a cheap
+/// first pass; the DS reference count gates collection.
 fn filter_orphaned_locally_all(
     conn: &rusqlite::Connection,
     candidates: &[AttachmentRef],
@@ -717,18 +545,9 @@ fn filter_orphaned_locally_all(
         .collect())
 }
 
-/// Register a server-side reference for each attachment carried by `content`,
-/// keyed by the sending message's id (#690). Called on the send path so the DS
-/// can reference-count the `attachment_object` row: it refuses to collect that
-/// row — or its R2 object — while ANY message still references the object.
-///
-/// Best-effort: a failure here NEVER fails the send. The envelope is already the
-/// durable delivery; a missing reference only risks the pre-#690 status quo for
-/// this one object (it could be collected early if every OTHER reference is
-/// released), so this is never worse than before server-side counting existed.
-///
-/// Returns how many declarations failed, so the backfill below can tell a
-/// finished pass from one to try again.
+/// Declare a DS reference for each attachment in `content` (#690) so the object
+/// is not collected while this message exists. Best-effort, never fails the
+/// send; returns how many declarations failed.
 pub(crate) async fn register_attachment_refs(
     state: &Arc<AppState>,
     message_id: &str,
@@ -739,10 +558,8 @@ pub(crate) async fn register_attachment_refs(
         return 0;
     }
     let mut failed = 0;
-    // The envelope is sealed, so its `sender_id` names no one: the DS binds the
-    // declaration to its author through the envelope's deletion capability
-    // instead. Without it every declaration is refused (403) and the object is
-    // left collectable by the next delete of the same bytes anywhere.
+    // The envelope is sealed, so the DS binds the declaration to its author by
+    // the deletion capability; without it every declaration is refused.
     let delete_token = super::delete_capability::envelope_delete_token(state, message_id).await;
     for att in refs {
         let body = pollis_api::messages::AttachmentRegisterBody::ForMessage {
@@ -764,23 +581,13 @@ pub(crate) async fn register_attachment_refs(
 
 const ATTACHMENT_REF_BACKFILL_KEY: &str = "attachment_ref_backfill";
 
-/// Unlocks a backfill pass may take before it stops trying. A message whose
-/// envelope is gone (deleted, or collected under #720) is refused for good, so
-/// a pass that still has failures cannot tell "DS not deployed yet" from
-/// "nothing left to declare"; three tries covers the first without retrying
-/// the second forever.
+/// A message whose envelope is gone is refused for good, so a pass cannot tell
+/// "DS not deployed yet" from "nothing left"; a few tries covers the first.
 const ATTACHMENT_REF_BACKFILL_TRIES: u32 = 3;
 
-/// Re-declare the attachment references of this account's own sent messages
-/// (#1330), once per device, after unlock.
-///
-/// Until #1330 every sealed send's declaration was refused, so no attachment
-/// sent before it is counted on the DS and any delete of the same bytes could
-/// collect it. The author's devices still hold those messages and the account
-/// key that proves authorship, so they can declare the references now. The DS
-/// insert is idempotent, a sibling device repeating the pass is harmless, and a
-/// failure costs only what the user already had. Runs in the background so an
-/// unlock never waits on it.
+/// Re-declare the attachment references of this account's own sent messages,
+/// once per device, in the background after unlock (#1330). Idempotent on the
+/// DS.
 pub(crate) fn spawn_attachment_ref_backfill(state: &Arc<AppState>, user_id: &str) {
     let state = state.clone();
     let user_id = user_id.to_string();
@@ -865,35 +672,18 @@ pub(crate) fn spawn_attachment_ref_backfill(state: &Arc<AppState>, user_id: &str
     });
 }
 
-/// Trigger server-side collection of a deleted message's attachment, and — when
-/// the client's local view suggests it may now be orphaned — try to collect the
-/// R2 object. Best-effort on both: failures are logged, never bubbled.
+/// Ask the DS to collect a deleted message's attachment row, and when
+/// `locally_orphaned` also try the R2 delete. Best-effort; failures are logged.
 ///
-/// The reference itself is already released at this point: the DS derives the
-/// reference count from message-envelope existence (#690), and this delete's
-/// `/v1/messages/delete` (issued earlier in `delete_message`) removed the
-/// envelope, so the reference stopped counting the moment the message went. This
-/// `/v1/attachments/delete` call therefore does not release anything — it asks
-/// the DS to COLLECT the shared `attachment_object` row, which it does only when
-/// NO still-existing message references the hash. A hash another conversation
-/// still references survives; the client's local view is not assumed complete.
-///
-/// `locally_orphaned` is a cheap first pass over THIS device's other non-deleted
-/// messages: `true` means nothing local still references the hash, so it is worth
-/// attempting the R2 delete. It only saves a pointless round trip — it is not
-/// trusted for correctness. The DS `/v1/r2/presign` gate is the authority and
-/// refuses to mint a `delete` while a cross-conversation reference the client
-/// cannot see still exists, so a refused delete (surfacing here as a logged
-/// error) is the expected, benign outcome that keeps the shared object alive.
+/// The reference was already released when the envelope was deleted (#690).
+/// The DS collects only when no message references the hash, and its presign
+/// gate refuses an R2 delete while one does, so a logged refusal is benign.
 async fn cleanup_attachment(
     state: &Arc<AppState>,
     message_id: &str,
     att: &AttachmentRef,
     locally_orphaned: bool,
 ) {
-    // DS seam: ask the DS to conditionally collect the shared dedup row (the
-    // reference was already released by deleting the message envelope above).
-    // Best-effort — failures are logged, never bubbled.
     let remote_result = async {
         let body = pollis_api::messages::AttachmentDeleteBody {
             content_hash: att.content_hash.clone(),
@@ -911,8 +701,7 @@ async fn cleanup_attachment(
     }
 
     if !locally_orphaned {
-        // Still referenced by another local message — the DS gate would refuse
-        // the R2 delete anyway, so skip the round trip.
+        // The DS gate would refuse the R2 delete anyway.
         return;
     }
 
@@ -924,19 +713,9 @@ async fn cleanup_attachment(
     }
 }
 
-/// Edit a message through the edit outbox (#1555).
-///
-/// The edit is stored FIRST, before any network work, and the sender's
-/// `message` row is left exactly as every other member holds it; the row takes
-/// the new text only once the DS holds the edit envelope
-/// ([`super::edit_outbox`]). Until then every read shows the pending text with
-/// an `edit_state`. A failed attempt leaves the edit queued — `failed`, or
-/// `rejected` when no retry can fix it — and returns the error; the outbox
-/// drain (after unlock, on reconnect, on resume) delivers it later.
-///
-/// The edit envelope uses type='edit' with target_message_id pointing at the
-/// original message. A DELETE+INSERT replaces any prior pending edit, so Turso
-/// never holds more than one edit per message per conversation.
+/// Edit a message through the edit outbox (#1555): stored first, the `message`
+/// row updated only once the DS holds the edit ([`super::edit_outbox`]). A
+/// failed attempt stays queued and the error is returned.
 pub async fn edit_message(
     conversation_id: String,
     message_id: String,
@@ -957,8 +736,7 @@ pub async fn edit_message(
             &new_content,
         )?;
     }
-    // Test-harness only: the process dies with the edit stored and nothing
-    // posted (#1555) — the drain after restart must deliver it everywhere.
+    // Test harness: die with the edit stored and nothing posted (#1555).
     if super::send::test_hooks::take(super::send::test_hooks::Crash::EditAfterEnqueue) {
         return Err(super::send::test_hooks::simulated_crash());
     }
@@ -981,19 +759,14 @@ pub(super) async fn post_edit(
         content: new_content,
     } = edit;
 
-    // Resolve the MLS group for this conversation (channel → group_id, DM →
-    // conversation_id). Not (or no longer) a member: no attempt will ever get
-    // further, so say so in a way the outbox records as `rejected`.
+    // Not a member: no retry can help, so the outbox records `rejected`.
     let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
     if !resolved.authorized {
         return Err(super::outbox::not_a_member());
     }
     let mls_group_id = resolved.mls_group_id;
 
-    // Catch up MLS state before encrypting. Without this, an edit can be
-    // emitted at a stale epoch — recipients at the current epoch will fail
-    // to decrypt it. send_message does the same two-step catch-up here
-    // (poll_mls_welcomes + catch-up). See issue #371 scenario 2.
+    // Catch up first or the edit may be sealed at a stale epoch (#371).
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
@@ -1004,12 +777,9 @@ pub(super) async fn post_edit(
             }
         }
     }
-    // Use the INTERLEAVED ingesting catch-up (not the commit-only
-    // `process_pending_commits_inner`): editing advances this device to head, and
-    // with `max_past_epochs = 0` a current-epoch inbound message we haven't
-    // fetched yet would be stranded when we advance past its epoch (issue #440,
-    // the committer strand). Safe here — this holds no MLS group lock, so the
-    // catch-up re-acquiring it cannot deadlock.
+    // The interleaved (ingesting) catch-up, not commit-only, so advancing does
+    // not strand an unfetched current-epoch message (#440). No group lock is
+    // held here, so it cannot deadlock.
     if let Err(e) =
         super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
     {
@@ -1022,17 +792,11 @@ pub(super) async fn post_edit(
         !crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
     };
     if needs_repair {
-        // Local MLS state is missing (e.g. a local DB wipe). Rejoin THIS device
-        // from the group's published GroupInfo — the same non-destructive
-        // recovery process_pending_commits uses. We must NEVER nuke the shared
-        // commit log to repair one device: deleting canonical history destroys
-        // every member's ability to decrypt past messages and can fork the
-        // group. See docs/mls-reconcile-hardening.md (INV-1/INV-4).
+        // Rejoin this device via GroupInfo; never repair by touching the shared
+        // commit log (docs/mls-reconcile-hardening.md INV-1/INV-4).
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
     }
 
-    // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
-    // pad TEXT edits to a size bucket; leave attachment edits unpadded.
     let plaintext: Vec<u8> = if is_attachment_content(new_content) {
         new_content.as_bytes().to_vec()
     } else {
@@ -1040,10 +804,8 @@ pub(super) async fn post_edit(
     };
 
     let sealed = {
-        // #1079: serialize behind any committer on this device before sealing —
-        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
-        // self_update's order) and dropped with this block, before the post's
-        // own catch-up can want it.
+        // Group lock before `local_db`, dropped before the post's own catch-up
+        // (#1079, `seal::seal_under_lock`).
         let mls_guard = state.mls_group_lock(&mls_group_id).await;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
@@ -1051,16 +813,13 @@ pub(super) async fn post_edit(
         super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
     };
 
-    // Replacing the pending edit is a delete, so it needs the target's deletion
-    // capability (#1086) — the same proof a self-delete presents, and the reason
-    // one member cannot clobber another author's unfetched edit.
+    // Replacing a pending edit is a delete, so it needs the capability (#1086);
+    // this is what stops a member clobbering another author's unfetched edit.
     let delete_token =
         super::delete_capability::envelope_delete_token(state, message_id).await;
 
-    // Replace any existing edit envelope for this message with the new one
-    // (DELETE + INSERT, single transaction on the DS side) — including this
-    // very envelope, if an earlier attempt landed unseen. Re-sealed at the new
-    // epoch if a commit landed since our catch-up (#1041).
+    // The DS replaces any pending edit, including this envelope if an earlier
+    // attempt landed unseen; re-sealed if a commit landed since catch-up (#1041).
     let sealed = super::seal::post_resealing(
         state,
         super::seal::Target {
@@ -1086,21 +845,18 @@ pub(super) async fn post_edit(
     )
     .await?;
 
-    // Test-harness only: the DS holds the edit and this device has not
-    // recorded that (#1555) — the retry must converge, not fork.
+    // Test harness: the DS holds the edit but this device has not recorded it.
     if super::send::test_hooks::take(super::send::test_hooks::Crash::EditAfterPost) {
         return Err(super::send::test_hooks::simulated_crash());
     }
 
-    // Delivered: the row takes the new text now, and only now.
     {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
         super::edit_outbox::confirm_edit_on(db.conn(), edit, &sealed.sent_at)?;
     }
 
-    // Notify recipients via LiveKit so they invalidate their cache immediately.
-    // Non-fatal — errors are logged, not returned.
+    // A hint only; errors are logged.
     let is_channel = mls_group_id != *conversation_id;
     let room_id = mls_group_id;
     if is_channel {

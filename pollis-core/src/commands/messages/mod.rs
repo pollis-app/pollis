@@ -23,15 +23,12 @@ mod types;
 // function Kani proves.
 pub mod watermark;
 
-/// The `sent_at` stamp for a `message_envelope` row this device writes: the one
-/// place its format is decided.
+/// The `sent_at` stamp for a `message_envelope` row this device writes.
 ///
 /// The column is compared lexically and holds both client and DS stamps.
-/// `to_rfc3339()` (AutoSi) never truncates: a fraction-less stamp means
-/// `.000000000`, so lexical order equals chronological order and matches the
-/// DS's `SecondsFormat::Nanos`. Truncation would mis-sort the timeline (local
-/// pagination compares these lexically); since #1087 it no longer loses
-/// messages.
+/// `to_rfc3339()` (AutoSi) never truncates and a fraction-less stamp means
+/// `.000000000`, so lexical order is chronological and matches the DS's
+/// `SecondsFormat::Nanos`.
 pub(crate) fn envelope_sent_at() -> String {
     stamp_envelope_sent_at(chrono::Utc::now())
 }

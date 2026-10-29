@@ -256,9 +256,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::mls::poll_mls_welcomes(&state()?, user_id).await?;
             ok(())
         }
-        // #1571: mobile's half of desktop's sweep backstop — re-add a device
-        // missing from a conversation's tree (or evict a stale leaf). Run after
-        // the app's landing / resume ingest pass.
+        // Mobile's half of desktop's sweep backstop (#1571), run after the
+        // landing / resume ingest pass.
         "reconcile_backstop_all" => {
             let user_id: String = arg(&args, "userId")?;
             ok(crate::commands::mls::reconcile_backstop_all(&state()?, &user_id).await?)
@@ -1149,7 +1148,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let group_id: String = arg(&args, "groupId")?;
             let shortcode: String = arg(&args, "shortcode")?;
             let path: String = arg(&args, "path")?;
-            // Expo hands out `file://` URIs; the Rust side reads a bare path.
             let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
             ok(emoji::upload_group_emoji(group_id, shortcode, path, &state()?).await?)
         }
@@ -1189,7 +1187,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let path: String = arg(&args, "path")?;
             let filename: String = arg(&args, "filename")?;
             let content_type: String = arg(&args, "contentType")?;
-            // Expo pickers hand out `file://` URIs; strip to a bare path.
             let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
             ok(crate::commands::r2::upload_media(path, filename, content_type, &state()?)
                 .await?)

@@ -8,9 +8,7 @@ use crate::state::AppState;
 /// One row from `message_envelope`:
 /// `(id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type, seq)`.
 ///
-/// `seq` is the DS-assigned delivery position (#1087) — the cursor, the fetch
-/// order and what retention compares against. `sent_at` is display metadata and
-/// is carried only so the legacy `last_fetched_at` column can still be filled.
+/// `seq` is the cursor (#1087); `sent_at` only fills the legacy `last_fetched_at`.
 type EnvelopeRow = (
     String,
     String,
@@ -29,67 +27,46 @@ type PerConversation = Vec<(String, Vec<EnvelopeRow>)>;
 /// [`PerConversation`], same shape: `arrival[ci][ei]` is `per_conv[ci].1[ei]`'s.
 type Arrival = Vec<Vec<Option<i64>>>;
 
-/// Whether a delete tombstone's redaction is done on this device, or must be
-/// retried on a later pass (#693 / #661 WS1). Consumed by
-/// [`ingest_group_envelopes_interleaved`] to choose the tombstone's `EnvKind`
-/// (`Delete` vs `DeletePending`) and thus whether the watermark advances past it.
+/// Whether a delete tombstone is done on this device or must hold the cursor
+/// below it for a later pass (#693).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DeleteResolution {
-    /// Terminally handled — the cursor may advance past the tombstone. Covers:
-    /// the redaction was applied now; it was already applied (idempotent
-    /// re-application); or the target is a message this device will never receive
-    /// (a pre-join loss), so the redaction is vacuously satisfied.
+    /// Applied now, already applied, or the target will never arrive (pre-join).
     Handled,
-    /// Not done, but still applicable on a later pass — the cursor must stop below
-    /// the tombstone so the next fetch re-applies it. Covers: a transient local-DB
-    /// error, or the target has not been ingested yet (still awaiting decryption).
+    /// A transient DB error, or the target is not ingested yet.
     Pending,
 }
 
-/// What one conversation's pass through [`ingest_group_envelopes_interleaved`]
-/// produced: how far its watermark may advance, and which inbound messages this
-/// device newly decrypted (the batch a DM acknowledges with one delivery
-/// receipt, #857).
+/// One conversation's result from [`ingest_group_envelopes_interleaved`].
 struct ConvIngest {
     conversation_id: String,
-    /// The cursor this device may advance to: `(seq, sent_at)` of the highest
-    /// envelope it has HANDLED (#1087).
-    ///
-    /// Ordered by `seq` — the DS-assigned delivery position, which is unique per
-    /// conversation — so the tuple's second element never affects the
-    /// comparison. It rides along only to fill the legacy `last_fetched_at`
-    /// column, which nothing routes on any more.
+    /// `(seq, sent_at)` of the highest handled envelope; ordered by `seq` alone
+    /// (#1087).
     watermark: Option<(i64, String)>,
-    /// Ids of messages persisted for the FIRST time on this pass, authored by
-    /// someone else. Empty for group channels, which never emit receipts.
+    /// Others' messages persisted for the first time on this pass, for the DM
+    /// delivery receipt (#857). Empty for group channels.
     newly_delivered: Vec<String>,
 }
 
 /// What one [`decrypt_and_persist_one`] attempt came to (#1312).
 #[derive(Debug, PartialEq, Eq)]
 enum Ingested {
-    /// Opened — or already held, or nothing to open. Carries the message id
-    /// when this persisted a NEW inbound DM message (the receipt batch, #857).
+    /// Opened, already held, or nothing to open; the id when a new inbound DM
+    /// message was persisted (#857).
     Opened(Option<String>),
-    /// The bytes would not open at the epoch they claim. Unless the envelope is
-    /// this device's own, what it carried is gone for good once the cursor
-    /// passes it. Carries why (#1520), for the `[loss]` line.
+    /// Would not open at its claimed epoch; lost once the cursor passes it.
     Failed(crate::commands::mls::DecryptFailure),
 }
 
-/// The last failure reason logged per envelope id (#1520), so a decrypt failure
-/// is logged the first time it happens and again only if its reason changes —
-/// not on every ingest pass that retries the same envelope.
+/// Last failure reason logged per envelope id, so a retried failure is logged
+/// again only when its reason changes (#1520).
 static LOGGED_FAILURES: std::sync::Mutex<
     Option<HashMap<String, crate::commands::mls::DecryptFailureKind>>,
 > = std::sync::Mutex::new(None);
 
-/// Past this many remembered envelopes the memory is cleared rather than
-/// grown: the worst case is one repeated line per envelope, not a leak.
+/// Cleared rather than grown past this: the worst case is a repeated line.
 const LOGGED_FAILURES_CAP: usize = 4096;
 
-/// Whether this failure of envelope `id` is new to this process — never seen,
-/// or seen with a different reason. Records it either way.
 fn first_sighting(id: &str, kind: crate::commands::mls::DecryptFailureKind) -> bool {
     let Ok(mut guard) = LOGGED_FAILURES.lock() else {
         return true;
@@ -105,8 +82,8 @@ fn first_sighting(id: &str, kind: crate::commands::mls::DecryptFailureKind) -> b
     true
 }
 
-/// Log a decrypt failure as it happens (#1520), once per envelope and reason.
-/// Ids, positions and the failing step only — never content or key material.
+/// Log a decrypt failure once per envelope and reason (#1520). Ids, positions
+/// and the failing step only — never content or key material.
 fn note_decrypt_failure(
     conversation_id: &str,
     env_type: &str,
@@ -119,79 +96,40 @@ fn note_decrypt_failure(
     Ingested::Failed(*why)
 }
 
-/// Decide a delete tombstone's fate from its redaction outcome. Pure so the
-/// edge-case matrix is unit-testable offline (`delete_resolution_tests`) without
-/// a DB:
-///   * `applied_rows` — `None` if the redaction `UPDATE` errored (transient →
-///     retry), else `Some(n)` rows redacted now.
-///   * `target_present` — a `message` row with this id exists locally (redacted
-///     or not). Only consulted on the zero-row path.
-///   * `target_awaiting_ingest` — the target's envelope is still in this
-///     conversation's fetch set at an epoch the replay has not reached, i.e.
-///     absent *because we have not caught up yet* (retry) rather than absent
-///     *because it is a pre-join message we will never receive* (terminal).
-///
-/// A tombstone that can never be applied on this device (target permanently
-/// absent) has a DEFINED terminal state — `Handled` — and is NOT silently
-/// consumed while still applicable: the only silent advance is over a target we
-/// provably will never receive, which is an accepted loss (a message sent before
-/// we joined the MLS tree). Ordering is a second guard: the target message is
-/// always stamped below its tombstone, so an awaiting target already holds the
-/// cursor below itself — this predicate makes that intent explicit rather than
-/// emergent.
+/// Decide a delete tombstone's fate from its redaction outcome. `applied_rows`
+/// is `None` when the `UPDATE` errored; `target_present` means a local row
+/// exists (redacted or not); `target_awaiting_ingest` means its envelope is in
+/// this fetch at an epoch the replay has not reached. The only silent advance
+/// is over a target this device provably never receives (pre-join).
 fn resolve_delete(
     applied_rows: Option<usize>,
     target_present: bool,
     target_awaiting_ingest: bool,
 ) -> DeleteResolution {
     match applied_rows {
-        // The redaction UPDATE errored — treat as transient and retry. A truly
-        // permanent local-DB fault (corruption / disk-full) wedges far more than
-        // one tombstone and is out of scope; holding the cursor is the safe choice
-        // over silently dropping the redaction.
+        // Holding the cursor beats silently dropping the redaction.
         None => DeleteResolution::Pending,
-        // Rows redacted now — applied.
         Some(n) if n >= 1 => DeleteResolution::Handled,
-        // Zero rows: nothing un-redacted matched.
         Some(_) => {
             if target_present {
-                // The row exists but was already redacted — idempotent, handled.
                 DeleteResolution::Handled
             } else if target_awaiting_ingest {
-                // Absent only because we have not decrypted the target yet.
                 DeleteResolution::Pending
             } else {
-                // Absent for good — a pre-join message we will never receive. The
-                // redaction is vacuously satisfied; retrying forever can't help.
                 DeleteResolution::Handled
             }
         }
     }
 }
 
-/// Pull new envelopes for a channel from remote, decrypt, and persist into the
-/// local `message` table (the authoritative history for this device).
-///
-/// Opening ANY channel catches up the WHOLE MLS group — every sibling channel —
-/// via [`catch_up_mls_group_interleaved`]. Because all of a group's channels
-/// share ONE MLS group (`mls_group_id == group_id`) while message ingest is
-/// per-conversation, advancing the shared local group for one channel could
-/// otherwise leap past an epoch at which a *sibling* channel holds an
-/// un-ingested message — and with `max_past_epochs = 0` that message's keys are
-/// then gone forever (the cross-channel strand). Catching up at MLS-group
-/// granularity makes that invalid state unrepresentable: the shared group never
-/// advances past an epoch without first decrypting every bound conversation's
-/// messages sealed at it.
+/// Pull, decrypt and persist a channel's new envelopes. Catches up the whole MLS
+/// group (every sibling channel) via [`catch_up_mls_group_interleaved`].
 pub async fn ingest_channel_envelopes_inner(
     state: &Arc<AppState>,
     user_id: &str,
     channel_id: &str,
 ) -> Result<()> {
-    // Single round-trip: resolve mls_group_id AND confirm membership. Answers
-    // `authorized: false` when the channel is absent or the user is not a
-    // member, and we short-circuit so the read path falls back to whatever is
-    // local — the same short-circuit the membership-joined SELECT gave by
-    // returning no row.
+    // Not a member: the read path falls back to what is local.
     let resolved =
         crate::commands::ds_reads::catch_up(state, channel_id, false, false).await?;
     if !resolved.authorized {
@@ -201,52 +139,27 @@ pub async fn ingest_channel_envelopes_inner(
 
     let device_id = state.device_id.lock().await.clone();
 
-    // Drain welcomes first so a just-joined member has a local group before the
-    // commit replay runs. Commit replay + decryption are driven by the
-    // group-level interleaved catch-up below, NOT here.
+    // Welcomes first, so a just-joined member has a group before the replay.
     if let Some(ref did) = device_id {
         if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
             crate::diag!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
         }
     }
 
-    // Catch up the whole group (all sibling channels) in one epoch-stepped pass.
     catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
 }
 
-/// Group-level interleaved catch-up: advance the SHARED MLS group for
-/// `mls_group_id` to head while decrypting EVERY bound conversation's messages
-/// at each epoch BEFORE the group advances past it. This is THE catch-up entry
-/// point — channel ingest, DM ingest, the cold-launch sweep, and the realtime
-/// membership signal all route through it.
+/// The catch-up entry point: advance the shared MLS group to head, decrypting
+/// every bound conversation's envelopes at each epoch before the group leaves
+/// it (`max_past_epochs = 0`). See `.codesight/wiki/mls.md` (group-level
+/// interleaved catch-up).
 ///
-/// ## Why group-level (the cross-channel / sweep / realtime strand)
-///
-/// One MLS group backs ALL of a group's channels (`mls_group_id == group_id`),
-/// but message ingest is per-conversation. A per-channel catch-up advances the
-/// shared local group for one channel's epochs only, so it can leap past an
-/// epoch at which a *sibling* channel — or, on the cold-launch sweep / realtime
-/// commit-only paths, the very same channel — holds an un-ingested message.
-/// With `max_past_epochs = 0` the ratchet keys for that epoch are then discarded
-/// and the message is PERMANENTLY LOST, violating the core invariant that a
-/// current member reads every message sent while they were a member.
-///
-/// The fix drives the commit replay ONCE for the shared group and, at each epoch
-/// the replay reaches, decrypts the envelopes sealed at that epoch across ALL
-/// bound conversations — before the next commit advances past it:
 /// ```text
 ///   decrypt (any conversation) envelopes whose MLS epoch == initial_epoch
 ///   for each pending commit in epoch order:
 ///       apply the commit            (shared group advances to the next epoch)
 ///       decrypt (any conversation) envelopes whose MLS epoch == the new epoch
 /// ```
-/// Each envelope's epoch is read by PARSING it (not inferred from `sent_at`).
-///
-/// The commit replay runs even when there are zero envelopes, so the sweep's
-/// cold-launch guarantee (advance every group to head, issue #371) is preserved
-/// — interleaved ingest advances to head too, just also decrypting en route.
-/// Steady state is cheap: per-conversation watermarks make repeat catch-ups
-/// return zero envelopes, and enumerating the conversations is one small query.
 pub async fn catch_up_mls_group_interleaved(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -263,28 +176,16 @@ pub async fn catch_up_mls_group_interleaved(
         }
     };
     let held_before = held(state).await;
-    // Boxed: `catch_up_once` is the largest future on the receive path, and
-    // this wrapper awaits it twice; inline, both copies sat in every caller's
-    // state machine (#1571 overflowed a 2 MiB test-thread stack that way).
+    // Boxed: inline, both awaits of this large future sat in every caller's
+    // state machine and overflowed a 2 MiB stack (#1571).
     Box::pin(catch_up_once(state, mls_group_id, user_id)).await?;
-    // A pass that started with no group can only JOIN (a Welcome, or an
-    // external join at the head): with no group there was nothing to replay
-    // or decrypt, so every envelope it fetched was left for a later pass. Run
-    // that pass now (#1571), once, so the conversation the user just opened
-    // shows what it holds — including the placeholders for what this device
-    // missed — instead of an empty view until the next wake-up.
+    // A pass that started with no group only joined and decrypted nothing, so
+    // run the decrypting pass now instead of at the next wake-up (#1571).
     if !held_before && held(state).await {
         Box::pin(catch_up_once(state, mls_group_id, user_id)).await?;
-        // A device that has just joined is, at that moment, the member most
-        // likely to be online and least likely to have looked at the tree: run
-        // the re-add backstop once, now (#1571). In the incident the user's new
-        // desktop external-joined the DM seconds after it was created, while the
-        // creator's add of the user's OLDER desktop lost its race — and nothing
-        // on the new desktop ever re-added it, because its only backstop was the
-        // cold-launch sweep and the app stayed open for thirteen hours. Same
-        // user or not makes no difference to the rule (`desired_set`); what was
-        // missing was a trigger. Boxed: reconcile's lost-race converge re-enters
-        // this catch-up (with a group held, so it does not come back here).
+        // A just-joined device is the member most likely online: run the re-add
+        // backstop now (#1571). Boxed: reconcile re-enters this catch-up (with a
+        // group held, so not this branch).
         if let Err(e) = Box::pin(crate::commands::mls::reconcile_backstop_one(
             state,
             mls_group_id,
@@ -303,26 +204,16 @@ async fn catch_up_once(
     mls_group_id: &str,
     user_id: &str,
 ) -> Result<()> {
-    // ONE request for a chain that used to be four dependent ones: enumerate the
-    // conversations bound to this MLS group (a DM is its own single
-    // conversation; a group is every one of its channels), and pull each one's
-    // un-ingested envelopes — strictly past THAT conversation's own watermark
-    // for this device — in the same answer. The composite
-    // `(conversation_id, sent_at, id)` ordering is preserved server-side, which
-    // is what lets one result set be partitioned into the same per-conversation
-    // lists the per-channel loop used to build.
-    //
-    // #875 removed the query-per-channel; #987 removes the round trip per step.
+    // One request: the group's conversations and each one's envelopes past its
+    // own watermark for this device.
     let resolved =
         crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?;
     if !resolved.authorized {
-        // Not a member (any more). The direct read reached the same state as an
-        // empty conversation list and did nothing; so does this.
         return Ok(());
     }
     let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
-    // The log head the DS read BEFORE it scanned the envelopes (#1041): the
-    // replay below must not apply a commit at or beyond it. See `ReplayBound`.
+    // The log head read before the envelope scan; the replay stops short of it
+    // (#1041, `ReplayBound`).
     let bound = resolved
         .head
         .map(|h| crate::commands::mls::ReplayBound {
@@ -332,24 +223,8 @@ async fn catch_up_once(
 
     let device_id = state.device_id.lock().await.clone();
 
-    // Pull un-ingested envelopes for every bound conversation in ONE query
-    // (strictly past THAT conversation's own watermark), then group per
-    // conversation so each watermark still advances independently. Steady state
-    // returns zero rows across the board.
-    //
-    // #875: this was a query PER CHANNEL. `conversation_ids` is every channel of
-    // the group, and this function is the central receive path — every outbound
-    // message, every realtime hint, every sweep and every welcome runs it — so
-    // sending one message in a 20-channel group cost 20 sequential Turso round
-    // trips before anything else could happen. The correlated watermark subquery
-    // is unchanged: it keys off the row's own `conversation_id`, so it still
-    // resolves per conversation rather than group-wide.
     let (per_conv, arrival) = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
 
-    // Drive the shared group's replay once, decrypting each conversation's
-    // envelopes as the group reaches their epoch. Returns the per-conversation
-    // watermark each device may advance to, plus the messages newly decrypted on
-    // this pass (the delivery-receipt batch).
     let results: Vec<ConvIngest> = ingest_group_envelopes_interleaved(
         state,
         user_id,
@@ -361,12 +236,8 @@ async fn catch_up_once(
     )
     .await?;
 
-    // Advance each conversation's watermark through the Delivery Service (best
-    // effort — DS failures are logged and ignored). Envelope GC is NOT fired from
-    // here any more (#689): the trigger moved server-side to the DS's own sweep
-    // (`pollis-delivery` `sweep_envelope_gc`), so a conversation whose members all
-    // go quiet is still collected and a chatty one no longer runs GC on every
-    // ingest. This path only reports the watermark that GC reads.
+    // Best effort. Envelope GC runs in the DS's own sweep (#689); this only
+    // reports the watermark it reads.
     for res in &results {
         let cid = &res.conversation_id;
         if let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) {
@@ -374,8 +245,6 @@ async fn catch_up_once(
                 conversation_id: cid.clone(),
                 user_id: Some(user_id.to_string()),
                 device_id: did.clone(),
-                // The cursor (#1087). `last_fetched_at` rides along for the
-                // legacy column only; delivery and retention read `last_seq`.
                 last_seq: Some(*seq),
                 last_fetched_at: sent_at.clone(),
             };
@@ -387,16 +256,9 @@ async fn catch_up_once(
         }
     }
 
-    // Delivery receipts (#857): this device fetched and DECRYPTED these
-    // messages, which is precisely what "delivered" means — a statement about a
-    // device, never about a human having seen anything. One batched control
-    // frame per conversation covers a whole catch-up burst.
-    //
-    // `emit_receipt` re-checks both gates (DMs only, and the sending-side
-    // opt-out), so this call site cannot widen the feature's scope by mistake;
-    // the `is_dm` short-circuit here just avoids a pointless round-trip for the
-    // group-channel case. Best-effort — a receipt that fails to send must never
-    // fail an ingest pass, because the message itself already landed.
+    // Delivery receipts (#857): "delivered" means this device decrypted it.
+    // `emit_receipt` re-checks the DM-only and opt-out gates; `is_dm` here only
+    // skips a round trip.
     if is_dm {
         emit_delivered_batches(
             state,
@@ -410,17 +272,10 @@ async fn catch_up_once(
     Ok(())
 }
 
-/// Bucket one catch-up's envelopes per bound conversation, in the order the
-/// conversations were listed.
-///
-/// The `ORDER BY conversation_id, seq` the DS applies is what lets one result
-/// set be partitioned into the same per-conversation lists a per-channel loop
-/// would build: within a conversation the order is byte-for-byte what it was.
-///
-/// Alongside, each envelope's group-wide `EnvelopeWire::arrival` position, in
-/// the same shape (`arrival[ci][ei]` belongs to `per_conv[ci].1[ei]`): the
-/// per-conversation lists are the cursor's order, not the order to DECRYPT in —
-/// see [`into_sealing_order`].
+/// Bucket one catch-up's envelopes per bound conversation (each in the DS's
+/// `seq` order), with each envelope's group-wide arrival position alongside.
+/// Bucket order is the cursor's order, not the decrypt order
+/// ([`into_sealing_order`]).
 pub(super) fn partition_envelopes(
     conversation_ids: Vec<String>,
     envelopes: Vec<pollis_api::directory::EnvelopeWire>,
@@ -430,8 +285,6 @@ pub(super) fn partition_envelopes(
         .map(|cid| (cid.clone(), Vec::new()))
         .collect();
     let mut arrival: Vec<Vec<Option<i64>>> = vec![Vec::new(); conversation_ids.len()];
-    // Index by conversation id so a row lands in the right bucket regardless
-    // of the order the ids were listed in.
     let slot: HashMap<&str, usize> = conversation_ids
         .iter()
         .enumerate()
@@ -450,40 +303,24 @@ pub(super) fn partition_envelopes(
             env.target_message_id,
             env.sent_at,
             env.kind,
-            // A row the DS wrote always carries one; 0 is the fail-safe for a
-            // row that somehow does not, since the cursor then never advances
-            // past it rather than skipping it.
+            // 0 fails safe: the cursor never advances past it.
             env.seq.unwrap_or(0),
         ));
     }
     (per_conv, arrival)
 }
 
-/// Put one epoch's run of envelopes — drawn from EVERY conversation of the
-/// group — into the order the DS accepted them, which is the order their
-/// senders sealed them in.
-///
-/// All of a group's channels share one MLS group, so one sender's ratchet
-/// generations run across all of them: a message in #a, six in #b, then one
-/// more in #a are generations 0, 1-6, 7. openmls keeps only the last 5 skipped
-/// generations of a sender (`out_of_order_tolerance`); once it has opened a
-/// generation, anything more than 5 below it is "too distant in the past" and
-/// can never be opened. The run used to go conversation by conversation, so a
-/// device that caught a group up in one pass after a member had interleaved
-/// channels opened #a's generation 7 first and then lost #b's 1 and 2 — while a
-/// member who read along live, in arrival order, lost nothing.
-///
-/// A stable sort on the DS's group-wide position. Within one conversation that
-/// order IS `seq` order (both are assigned in the transaction that inserts the
-/// row), so each conversation's own order is untouched. An older DS sends no
-/// position; every key is then `None` and the run stays as it was.
+/// Order one epoch's run (from every conversation of the group) as its senders
+/// sealed it: a sender's ratchet generations span all channels and openmls's
+/// `out_of_order_tolerance` is bounded (see `.codesight/wiki/mls.md`). A stable
+/// sort, so each conversation's own order holds; an older DS sends no position
+/// and the run is unchanged.
 pub(super) fn into_sealing_order(run: &mut [(usize, usize)], arrival: &[Vec<Option<i64>>]) {
     run.sort_by_key(|&(ci, ei)| arrival.get(ci).and_then(|a| a.get(ei)).copied().flatten());
 }
 
-/// Emit one delivery receipt per conversation for the messages a pass newly
-/// persisted (#857). Best-effort — a receipt that fails to send must never fail
-/// the ingest that already landed the message.
+/// One delivery receipt per conversation (#857). Best-effort: never fails the
+/// ingest that already landed the message.
 async fn emit_delivered_batches<'a>(
     state: &Arc<AppState>,
     batches: impl Iterator<Item = (&'a str, &'a [String])>,
@@ -506,9 +343,8 @@ pub(crate) struct SweptEnvelopes {
 }
 
 impl SweptEnvelopes {
-    /// Send the delivery receipts for what the sweep persisted. Deferred to
-    /// after the merge because a receipt is itself an MLS send, and encrypting
-    /// merges any staged commit first — before the committer has finalized it.
+    /// Deferred to after the merge: a receipt is an MLS send, and encrypting
+    /// merges any staged commit before the committer has finalized it.
     pub(crate) async fn emit_receipts(self, state: &Arc<AppState>) {
         if !self.is_dm {
             return;
@@ -523,26 +359,12 @@ impl SweptEnvelopes {
     }
 }
 
-/// The committer's sweep (#1041): after a staged commit has WON its epoch on
-/// the log and BEFORE it is merged locally, decrypt every envelope sealed at the
-/// epoch the commit is about to leave.
+/// The committer's pre-merge sweep (#1041): once a staged commit has won its
+/// epoch, decrypt every envelope sealed at the epoch it is about to leave.
 ///
-/// A commit merges by discarding the keys of the epoch it leaves
-/// (`max_past_epochs = 0`). Envelopes sealed at that epoch by other members are
-/// still decryptable by everyone else — they were sealed at the head — but the
-/// committer's own catch-up ran BEFORE its commit was accepted, so any envelope
-/// posted in between is one the committer never fetched and, once merged, never
-/// can. This sweep is the second read that closes that window, and the DS's
-/// epoch gate is the other half: an envelope that lands at this epoch either
-/// landed before the commit was accepted — and is in this fetch — or after,
-/// in which case the DS refuses it and its sender re-seals at the next epoch.
-///
-/// Must run under the conversation's MLS lock (the caller holds it) and with
-/// the won commit still STAGED: the group is at the sealed epoch until the
-/// merge, and openmls decrypts application messages against a group that holds
-/// its own pending commit. No watermark is advanced here — the next ingest pass
-/// finds these envelopes already persisted (`decrypt_and_persist_one` dedupes)
-/// and moves the cursor past them by epoch.
+/// Must run under the conversation's MLS lock with the commit still staged. No
+/// watermark advances here; the next pass dedupes these. See
+/// `.codesight/wiki/mls.md` (committer pre-merge sweep).
 pub(crate) async fn sweep_current_epoch(
     state: &Arc<AppState>,
     mls_group_id: &str,
@@ -569,8 +391,7 @@ pub(crate) async fn sweep_current_epoch(
         return Ok(swept);
     };
     let at = decryptor.lineage();
-    // Every conversation's envelopes sealed at `at`, decrypted as ONE run in the
-    // order they were sealed — the catch-up hook's rule (`into_sealing_order`).
+    // One run across conversations, in sealing order (`into_sealing_order`).
     let mut run: Vec<(usize, usize)> = Vec::new();
     let mut decoded: HashMap<(usize, usize), Vec<u8>> = HashMap::new();
     for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
@@ -620,64 +441,26 @@ pub(crate) async fn sweep_current_epoch(
     Ok(swept)
 }
 
-/// Core of [`catch_up_mls_group_interleaved`]: drive the shared MLS group's
-/// commit replay ONCE, decrypting the envelopes (from ANY bound conversation)
-/// sealed at each epoch while the group is still AT that epoch, and compute the
-/// watermark each conversation may independently advance to.
-///
-/// ## Watermark (per conversation)
-///
-/// For each conversation, returns the sent_at its watermark should advance to:
-/// the max over the contiguous (sent_at-ordered) prefix of THAT conversation's
-/// envelopes that are definitively handled, stopping STRICTLY BEFORE the first
-/// one that must be retried later. "Handled" = decrypted this pass, OR
-/// permanently undeliverable to us (an unreachable pre-join epoch, or unparseable
-/// bytes), OR an epoch-independent tombstone. "Retry later" = an MLS epoch beyond
-/// the highest epoch this pass reached (`max_fired_epoch`) — the commit that
-/// would let us decrypt it hasn't arrived yet. `max_fired_epoch` is group-wide:
-/// all bound conversations share the one MLS group, so "have we reached this
-/// envelope's epoch yet?" is answered by the single shared replay. Stopping
-/// before such an envelope (rather than taking a global max) is what guarantees
-/// an undecryptable-for-now message is re-fetched on a later pass instead of
-/// being skipped. Pre-join messages do NOT stop the watermark; the Delivery
-/// Service's envelope GC is the backstop that removes them from the fetch set.
+/// Core of [`catch_up_mls_group_interleaved`]: one commit replay for the shared
+/// group, decrypting each epoch's envelopes while the group is at it, then each
+/// conversation's watermark — the handled prefix, stopping before the first
+/// envelope at an epoch the replay has not reached ([`super::watermark`]).
 async fn ingest_group_envelopes_interleaved(
     state: &Arc<AppState>,
     user_id: &str,
     mls_group_id: &str,
     per_conv: &[(String, Vec<EnvelopeRow>)],
-    // `arrival[ci][ei]`: the DS's group-wide position of `per_conv[ci].1[ei]`
-    // (see `partition_envelopes`), which orders each epoch's decrypt run.
     arrival: &[Vec<Option<i64>>],
-    // Whether this MLS group backs a DM. Receipts (#857) are DMs-only, so this
-    // gates both recording an inbound receipt frame and collecting the
-    // delivered batch.
+    // Receipts (#857) are DMs-only, on both the recording and emitting side.
     is_dm: bool,
-    // The log head read before the envelope fetch (#1041); the replay stops
-    // short of it. `None` replays to head.
+    // `None` replays to head (#1041).
     bound: Option<crate::commands::mls::ReplayBound>,
 ) -> Result<Vec<ConvIngest>> {
-    // Pre-parse each message/edit envelope's MLS position across ALL bound
-    // conversations (delete/unknown carry none) and index `(conv_idx, env_idx)`
-    // by position so the per-epoch hook decrypts exactly the ones sealed at the
-    // point the replay just reached, regardless of which conversation they're in.
-    //
-    // The position is the `(generation, epoch)` PAIR, not the epoch (#454 P4).
-    // A migrated conversation restarts at epoch 0 in the next generation, so
-    // keying on the epoch alone would collide envelopes from two different
-    // lineages — sealed under different suites and different key schedules — into
-    // one bucket, and hand the successor group ciphertext only the retired group
-    // could ever open.
+    // Keyed on `(generation, epoch)`, not the epoch: a migrated conversation
+    // restarts at epoch 0 in the next generation (#454).
     let mut by_epoch: HashMap<(i64, u64), Vec<(usize, usize)>> = HashMap::new();
-    // epoch_of[ci][ei] mirrors per_conv[ci].1[ei]'s parsed position.
     let mut epoch_of: Vec<Vec<Option<(i64, u64)>>> = Vec::with_capacity(per_conv.len());
-    // The hex-decoded ciphertext of every envelope that HAS a position, kept
-    // from this pass rather than decoded a second time in the hook (#875). The
-    // decode is a per-envelope allocation and parse of an ~1KB hex string, and
-    // it used to happen twice for every message and edit on every pass — once
-    // here to read the lineage, then again inside `decrypt_and_persist_one` on
-    // the identical string. Keying on `(ci, ei)` means only envelopes that
-    // actually reached this map are held, and they are dropped with it.
+    // Decoded once here and reused by the hook (#875).
     let mut decoded: HashMap<(usize, usize), Vec<u8>> = HashMap::new();
     for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
         let mut this: Vec<Option<(i64, u64)>> = Vec::with_capacity(envs.len());
@@ -695,8 +478,6 @@ async fn ingest_group_envelopes_interleaved(
             this.push(epoch);
             if let Some(e) = epoch {
                 by_epoch.entry(e).or_default().push((ci, ei));
-                // Only reachable when `bytes` is `Some` — `envelope_lineage`
-                // parses those very bytes.
                 if let Some(b) = bytes {
                     decoded.insert((ci, ei), b);
                 }
@@ -704,59 +485,40 @@ async fn ingest_group_envelopes_interleaved(
         }
         epoch_of.push(this);
     }
-    // Each epoch's run is decrypted in the order its envelopes were sealed, not
-    // conversation by conversation — the loss `into_sealing_order` describes.
     for run in by_epoch.values_mut() {
         into_sealing_order(run, arrival);
     }
 
-    // Drive the commit replay, decrypting each epoch's messages/edits (any
-    // conversation) as the shared group reaches it. `max_fired_epoch` records the
-    // highest epoch the replay actually reached — the watermark's "have we caught
-    // up to it yet?" boundary. Scoped so the hook's borrows end before the
-    // watermark loop. Runs even with zero envelopes so the group still advances
-    // to head (the cold-launch sweep guarantee).
+    // Runs even with zero envelopes, so the group still reaches head (#371).
     let mut max_fired_epoch: Option<(i64, u64)> = None;
-    // Where the replay started — the epoch the local group was already at — and
-    // every position it reached, so an envelope below the start (never
-    // attempted: its keys were gone before this pass) is told apart from one
-    // attempted and failed (#1312).
+    // Tells an envelope never attempted (below the start) from one attempted
+    // and failed (#1312).
     let mut first_fired_epoch: Option<(i64, u64)> = None;
     let mut fired: HashSet<(i64, u64)> = HashSet::new();
     let mut failed: HashMap<(usize, usize), crate::commands::mls::DecryptFailure> =
         HashMap::new();
-    // Per-conversation batch of messages newly persisted on this pass — the
-    // delivery receipts (#857) this device owes once the replay is done.
     let mut newly_delivered: Vec<Vec<String>> = vec![Vec::new(); per_conv.len()];
     {
         let mut on_epoch = |conn: &rusqlite::Connection, generation: i64, epoch: u64| {
-            // Lexicographic on `(generation, epoch)`: a successor lineage restarts
-            // at epoch 0, numerically BELOW the retired lineage's last epoch, so a
-            // scalar max would run backwards across a migration.
+            // Lexicographic: a successor lineage restarts at epoch 0, so a scalar
+            // max would run backwards across a migration.
             let key = (generation, epoch);
             max_fired_epoch = Some(max_fired_epoch.map_or(key, |m| m.max(key)));
             first_fired_epoch.get_or_insert(key);
             fired.insert(key);
             if let Some(indices) = by_epoch.get(&key) {
-                // One group load for the whole epoch's run (#875). Every
-                // envelope in `indices` is sealed at the epoch the replay has
-                // just reached, so they all decrypt against the same key
-                // schedule — the reason a single `MlsDecryptor` is valid here
-                // and only here. It is dropped at the end of this hook, before
-                // the replay applies the commit that moves the group on.
+                // One group load per epoch run (#875): valid only because every
+                // envelope here is at the epoch just reached, and dropped before
+                // the replay applies the next commit.
                 let Some(mut decryptor) =
                     crate::commands::mls::MlsDecryptor::open(conn, mls_group_id)
                 else {
-                    // No local group: nothing at this epoch is decryptable.
-                    // The epoch counts as reached, so the cursor passes these
-                    // like any per-envelope failure — and like one, they are
-                    // recorded as failed (#1312).
+                    // The epoch counts as reached, so these are failures (#1312).
                     let why = crate::commands::mls::DecryptFailure::no_local_group();
                     failed.extend(indices.iter().map(|&at| (at, why)));
                     return;
                 };
                 for &(ci, ei) in indices {
-                    // Present for every index in `by_epoch` by construction.
                     let Some(bytes) = decoded.get(&(ci, ei)) else {
                         continue;
                     };
@@ -793,20 +555,9 @@ async fn ingest_group_envelopes_interleaved(
         }
     }
 
-    // Apply the epoch-independent envelopes (admin-issued delete tombstones)
-    // across all conversations after decryption, so a tombstone whose target was
-    // just decrypted this pass still lands. The ciphertext is empty — there is
-    // nothing to decrypt.
-    //
-    // The redaction's OUTCOME decides whether the tombstone is consumed (#693 /
-    // #661 WS1). A tombstone whose `UPDATE` did not take effect but still can on a
-    // later pass — the target message has not been ingested yet, or a transient
-    // local-DB error — is recorded in `pending_deletes` and re-classified to
-    // `EnvKind::DeletePending` below, so the watermark holds strictly below it and
-    // the next fetch re-applies it (mirroring the undecryptable-message retry
-    // path). A tombstone whose redaction landed, was already applied, or targets a
-    // message this device will never receive (a pre-join loss) is terminally
-    // handled and the cursor advances past it. See `resolve_delete`.
+    // Admin delete tombstones, applied after decryption so a target decrypted
+    // this pass still lands. One that may still apply later holds the cursor
+    // (`resolve_delete`, #693).
     let mut pending_deletes: HashSet<(usize, usize)> = HashSet::new();
     {
         let guard = state.local_db.lock().await;
@@ -818,23 +569,16 @@ async fn ingest_group_envelopes_interleaved(
                 if env_type != "delete" {
                     continue;
                 }
-                // A tombstone with no target cannot redact anything — there is
-                // nothing to apply and nothing a retry could fix. Terminally
-                // handled: leave it to advance the cursor.
+                // No target: nothing a retry could fix, so it is handled.
                 let Some(tid) = target_id.as_ref() else {
                     continue;
                 };
                 let now = chrono::Utc::now().to_rfc3339();
-                // `None` = the redaction UPDATE errored (treated as transient →
-                // retry). `Some(n)` = n rows redacted now.
                 let applied_rows: Option<usize> = db
                     .conn()
                     .execute(super::outbox::SOFT_DELETE_SQL, rusqlite::params![now, tid])
                     .ok();
-                // Only meaningful on the zero-row path: does a row with this id
-                // exist at all (already redacted → present; genuinely absent →
-                // not)? Skip the query when the UPDATE already told us (>=1 row
-                // matched ⇒ present; error ⇒ Pending regardless).
+                // Only consulted on the zero-row path.
                 let target_present = if applied_rows == Some(0) {
                     db.conn()
                         .query_row(
@@ -849,12 +593,7 @@ async fn ingest_group_envelopes_interleaved(
                 } else {
                     true
                 };
-                // Is the target still awaiting ingest in THIS conversation's fetch
-                // set — a message/edit at an epoch the replay has not reached? That
-                // is "absent because we have not caught up yet" (must retry), as
-                // distinct from "absent because it is a pre-join message we will
-                // never receive" (terminal). Uses the same `is_handled` the
-                // watermark does, over the target envelope's parsed epoch.
+                // Same `is_handled` the watermark uses.
                 let target_awaiting = envs.iter().enumerate().any(|(ej, e)| {
                     &e.0 == tid
                         && !super::watermark::is_handled(
@@ -872,30 +611,14 @@ async fn ingest_group_envelopes_interleaved(
         }
     }
 
-    // Compute each conversation's watermark independently over its own
-    // envelopes, delegating to the PROVEN pure function (Kani P1/P2/P3 in
-    // `super::watermark`) — the "is this handled / how far may the cursor
-    // advance" decision is the message-delivery safety property, so the runtime
-    // path goes through the verified function, not a copy. Build the
-    // `((seq, sent_at), EnvKind, Option<epoch>)` view from the existing envelope
-    // rows + pre-parsed `epoch_of`.
-    //
-    // The cursor key is the tuple, and its ORDER is the sequence alone: `seq` is
-    // the DS-assigned delivery position and is unique per conversation, so the
-    // `sent_at` beside it never decides a comparison (#1087). It rides along
-    // purely so the report can still fill the legacy `last_fetched_at` column.
-    //
-    // `next_watermark` is generic over the key precisely so this swap needed no
-    // change to the Kani-proved logic — only the type flowing through it.
+    // Through the Kani-proved `watermark::next_watermark`, never a copy: it is
+    // the delivery safety property. Key order is `seq` alone (#1087).
     let mut out: Vec<ConvIngest> = Vec::with_capacity(per_conv.len());
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
         let items: Vec<super::watermark::EnvView<(i64, String), (i64, u64)>> = envs
             .iter()
             .enumerate()
             .map(|(ei, env)| {
-                // A tombstone whose redaction did not take effect this pass is
-                // held back as `DeletePending` (not `Delete`) so the cursor stops
-                // strictly below it — the fix for #693 / #661 WS1.
                 let kind = if env.6 == "delete" && pending_deletes.contains(&(ci, ei)) {
                     super::watermark::EnvKind::DeletePending
                 } else {
@@ -959,8 +682,8 @@ fn record_losses(
     replay: Replay<'_>,
 ) {
     let lineage = replay.reached.0;
-    // A lineage held since before #1312 has no recorded join. Its floor is
-    // where this first look at it started (see `loss::fallback_floor`).
+    // No recorded join: the floor is where this first look started
+    // (`loss::fallback_floor`).
     if crate::commands::mls::first_join(conn, mls_group_id, lineage).is_none() {
         let start_epoch = if replay.start.0 == lineage { replay.start.1 } else { 0 };
         crate::commands::mls::record_first_join(
@@ -987,16 +710,13 @@ fn record_losses(
             };
             let attempted = replay.fired.contains(&sealed_at);
             let why = replay.failed.get(&(ci, ei));
-            // Opened (or a control frame, or already held).
             if attempted && why.is_none() {
                 continue;
             }
             if super::loss::has_real_row(conn, id) || super::loss::is_known_envelope(conn, id) {
                 continue;
             }
-            // Sealed at an epoch this device had been removed from: never
-            // addressed to it — the "while you were out" half of the accepted
-            // pre-join loss, reached before any re-add moves the floor (#1524).
+            // Sealed while this device was removed: never addressed to it (#1524).
             if why.is_some_and(|w| w.kind == crate::commands::mls::DecryptFailureKind::Evicted) {
                 removed += 1;
                 continue;
@@ -1004,10 +724,8 @@ fn record_losses(
             let floor = crate::commands::mls::first_join(conn, mls_group_id, sealed_at.0);
             let reason = match super::loss::classify(sealed_at, lineage, floor, attempted) {
                 Some(reason) => reason,
-                // Below the floor: sent before this device held the group. That
-                // is the accepted loss for a new device or for anything sent
-                // before its user joined — but NOT for a device that was
-                // registered all along and was left out of the tree (#1571).
+                // Below the floor: an accepted loss, unless the device was
+                // registered all along and left out of the tree (#1571).
                 None => {
                     let entitled = crate::commands::mls::entitled_since(conn, mls_group_id, sealed_at.0);
                     if !super::loss::sealed_while_entitled(floor, entitled, sealed_at.1, sent_at) {
@@ -1034,7 +752,6 @@ fn record_losses(
                     continue;
                 }
             };
-            // `failed: secret reuse (...)` — the openmls step that refused it (#1520).
             let label = match why {
                 Some(why) => format!("{}: {why}", reason.as_str()),
                 None => reason.as_str().to_string(),
@@ -1067,31 +784,12 @@ fn record_losses(
     }
 }
 
-/// Decrypt one `message` or `edit` envelope at the group's CURRENT epoch and
-/// persist it. Invoked by [`ingest_group_envelopes_interleaved`]'s per-epoch
-/// hook, so the caller has already positioned the local group at this envelope's
-/// epoch.
-/// Infallible: a failed decrypt or a transient DB error simply leaves nothing
-/// persisted (the envelope stays in `message_envelope` for a later retry), the
-/// same outcome the watermark logic accounts for.
+/// Decrypt one `message` or `edit` envelope at the group's current epoch and
+/// persist it. Only a new inbound DM message yields an id (what a receipt
+/// acknowledges); control frames never do, so a receipt never triggers one.
 ///
-/// Returns the message id when this call persisted a NEW inbound message in a
-/// DM — i.e. exactly what a delivery receipt (#857) acknowledges. `None` for
-/// everything else: our own messages, re-ingested duplicates, edits, tombstones,
-/// group channels, and control frames (which are never themselves acknowledged,
-/// so a receipt can never trigger a receipt).
-///
-/// ## The decrypt and its row are one transaction (#1524)
-///
-/// `process_message` persists the ratchet step that spends the envelope's key
-/// before it returns ([`crate::commands::mls::MlsDecryptor`]), so a process
-/// that died between it and the row insert used to leave the key gone and no
-/// row: the next fetch hit `SecretReuse`, and a message this device had fully
-/// received was a placeholder. Both writes now sit inside one savepoint on the
-/// connection the provider writes through. A death before the release rolls
-/// the ratchet step back with the missing row, and the envelope opens on the
-/// next pass. Nothing between the two writes awaits, so only a process death
-/// (or a panic) can split them.
+/// The ratchet step and the row share one savepoint, so a process death between
+/// them cannot spend the key without storing the message (#1524).
 fn decrypt_and_persist_one(
     conn: &rusqlite::Connection,
     decryptor: &mut crate::commands::mls::MlsDecryptor<'_>,
@@ -1107,10 +805,8 @@ fn decrypt_and_persist_one(
     out
 }
 
-/// The savepoint [`decrypt_and_persist_one`] holds across one envelope. Rolled
-/// back unless released — on an unwind, and, the case it exists for, never
-/// released at all when the process dies, which SQLite rolls back on the next
-/// open.
+/// The per-envelope savepoint: rolled back unless released, including by SQLite
+/// on the next open after a process death.
 struct OneEnvelope<'c> {
     conn: Option<&'c rusqlite::Connection>,
 }
@@ -1121,8 +817,7 @@ impl<'c> OneEnvelope<'c> {
     fn begin(conn: &'c rusqlite::Connection) -> Self {
         match conn.execute_batch(Self::SAVEPOINT) {
             Ok(()) => Self { conn: Some(conn) },
-            // Not fatal: the envelope is still opened, only without the
-            // guarantee — what every pass did before #1524.
+            // Not fatal: the envelope still opens, without the guarantee.
             Err(e) => {
                 crate::diag!("[ingest] could not open the per-envelope savepoint: {e}");
                 Self { conn: None }
@@ -1150,48 +845,33 @@ impl Drop for OneEnvelope<'_> {
 /// The body of [`decrypt_and_persist_one`], inside its savepoint.
 fn open_and_persist(
     conn: &rusqlite::Connection,
-    // The epoch's already-loaded group (#875). Taken rather than re-derived so
-    // a run of envelopes at one epoch costs one group load, not one per message.
     decryptor: &mut crate::commands::mls::MlsDecryptor<'_>,
     conversation_id: &str,
     env: &EnvelopeRow,
-    // The envelope's already-hex-decoded ciphertext (#875). Decoded once by the
-    // caller's lineage pre-parse; decoding it again here was ~1KB of hex parsed
-    // twice for every message and edit on every ingest pass.
     bytes: &[u8],
     user_id: &str,
     is_dm: bool,
 ) -> Ingested {
-    // `sender_id` (the server-writable envelope column) is intentionally NOT
-    // read for attribution — the sender is taken from the MLS credential inside
-    // the ciphertext (sealed sender, `docs/metadata-minimization-design.md` §2).
+    // Attribution comes from the MLS credential, never the server-writable
+    // `sender_id` (sealed sender, `docs/metadata-minimization-design.md` §2).
     let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type, _seq) = env;
     match env_type.as_str() {
         "message" => {
-            // A placeholder (#1312) does not count: if this ever opens after
-            // all, the real message replaces it.
+            // A placeholder (#1312) does not count; the real message replaces it.
             if super::loss::has_real_row(conn, id) {
                 return Ingested::Opened(None);
             }
-            // Attribute from the MLS-authenticated credential inside the
-            // ciphertext, NOT the server-writable `message_envelope.sender_id`
-            // tuple field (which may be a blinded sentinel under sealed sender).
-            // See `docs/metadata-minimization-design.md` §2.
             let (plain, cred_sender) = match decryptor.decrypt(bytes) {
                 Ok(opened) => opened,
-                // Whether this is a loss is decided once the cursor's position
-                // is known (`record_losses`), not here; why it failed is logged
-                // now (#1520).
+                // Whether it is a loss is decided in `record_losses`.
                 Err(why) => return note_decrypt_failure(conversation_id, env_type, id, &why),
             };
-            // Test-harness only: the process dies with the key spent and the
-            // row not yet written (#1524).
+            // Test harness: die with the key spent and no row (#1524).
             if super::send::test_hooks::take(super::send::test_hooks::Crash::AfterDecrypt) {
                 super::send::test_hooks::die();
             }
-            // Whatever it turns out to be, it opened. A control frame leaves no
-            // row: remember it opened, and drop any placeholder standing in
-            // for it.
+            // A control frame leaves no row: record that it opened and drop any
+            // placeholder for it.
             if !matches!(super::framing::classify(&plain), super::framing::Frame::Text { .. }) {
                 super::loss::record_opened_envelope(conn, id);
                 let _ = conn.execute(
@@ -1200,16 +880,9 @@ fn open_and_persist(
                 );
             }
             match super::framing::classify(&plain) {
-                // "Delete for everyone" (E2EE redaction). Honor it ONLY when the
-                // redaction's MLS-authenticated author (`cred_sender`) is the
-                // SAME as the target message's author (its stored `sender_id`,
-                // itself the MLS credential recorded at ingest). This makes the
-                // invariant cryptographic: neither the server nor another member
-                // can redact a message they did not author — a mismatched or
-                // unknown target is silently ignored. Admin moderation uses the
-                // separate server-issued `type='delete'` tombstone instead. The
-                // redaction is a control message and is NEVER stored as a
-                // visible `message` row.
+                // Honored only when the redaction's MLS-authenticated author is
+                // the target's stored author, so neither the server nor another
+                // member can redact someone else's message.
                 super::framing::Frame::Redaction(target_message_id) => {
                     let author: Option<String> = conn
                         .query_row(
@@ -1228,17 +901,9 @@ fn open_and_persist(
                         );
                     }
                 }
-                // Ordinary text / attachment message. Strip size padding (issue
-                // #331 v2, §4.1) — a no-op for legacy unpadded sends and for
-                // attachment envelopes, so old and new clients interoperate.
-                // `thread_id` (#825) rides inside the ciphertext as a trailer on
-                // this same frame, so it is recovered here and nowhere else —
-                // the DS and Turso never see it. `None` for every unthreaded
-                // send and for every message from a threads-unaware client.
                 super::framing::Frame::Text { text, thread_id } => {
                     if let Ok(text) = String::from_utf8(text) {
-                        // Replaces a placeholder for the same id (#1312), never
-                        // a real row.
+                        // Replaces a placeholder (#1312), never a real row.
                         let inserted = conn.execute(
                             "INSERT INTO message
                              (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
@@ -1251,10 +916,8 @@ fn open_and_persist(
                              WHERE message.undecryptable IS NOT NULL",
                             rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at],
                         );
-                        // The key is spent either way (the savepoint is still
-                        // released: rolling back would only re-open the same
-                        // write failure). A row that would not store is a
-                        // loss to record, not an envelope opened (#1524).
+                        // The savepoint is still released (a rollback would only
+                        // repeat the write failure); this is a loss (#1524).
                         let inserted = match inserted {
                             Ok(n) => n,
                             Err(e) => {
@@ -1266,39 +929,22 @@ fn open_and_persist(
                                 });
                             }
                         };
-                        // Delivered (#857) means exactly this: the envelope was
-                        // fetched AND decrypted AND stored, here, now. Only a
-                        // DM, only someone else's message, and only the first
-                        // time — a re-ingest returns early above, so a message
-                        // is never acknowledged twice.
+                        // Delivered (#857): stored for the first time, in a DM,
+                        // from someone else.
                         if inserted > 0 && is_dm && cred_sender != user_id {
                             return Ingested::Opened(Some(id.clone()));
                         }
                     }
                 }
-                // A delivery/read receipt from another member (#857). It is a
-                // CONTROL message: no `message` row is ever written for it, on
-                // either side, so it can never be rendered and — crucially —
-                // never itself acknowledged. That is what keeps two clients from
-                // ping-ponging receipts forever.
+                // A receipt (#857) writes no `message` row, so it is never
+                // itself acknowledged and two clients cannot ping-pong.
                 super::framing::Frame::Receipt { kind, at, message_ids } => {
-                    // Our own receipt, echoed back to us from the conversation
-                    // we posted it to. Nothing to learn from it.
                     if cred_sender == user_id {
                         return Ingested::Opened(None);
                     }
-                    // `is_dm` is passed through to the recorder rather than
-                    // checked here: #857 excludes group channels on the
-                    // recording side as well as the emitting side, and putting
-                    // that decision in `receipts_permitted` keeps it one
-                    // testable predicate instead of two call sites that have to
-                    // agree. A receipt frame that somehow reaches a group
-                    // channel is therefore dropped, not honoured.
-                    //
-                    // `cred_sender` is the MLS-authenticated author of the
-                    // frame, so a member can only ever record a receipt in their
-                    // OWN name — neither the server nor another member can
-                    // forge "carol read this".
+                    // Recorded under the MLS-authenticated author, so no one can
+                    // forge another member's receipt. The DM-only gate lives in
+                    // `receipts_permitted`.
                     for target in &message_ids {
                         super::receipts::record_receipt(
                             conn,
@@ -1314,14 +960,9 @@ fn open_and_persist(
         }
         "edit" => {
             if let Some(tid) = target_id.as_ref() {
-                // Honor the edit ONLY when its MLS-authenticated author
-                // (`cred_sender`) equals the target message's stored author. This
-                // MIRRORS the Redaction branch and is the client-side enforcement
-                // that REPLACES the DS author check dropped under Solution A
-                // (#607): the DS now accepts an edit envelope from any member, so
-                // authorship is proven here, cryptographically — neither the
-                // server nor another member can edit a message they did not write.
-                // A mismatched or unknown-target edit is silently dropped.
+                // Honored only when its MLS-authenticated author is the target's
+                // stored author: the DS accepts an edit from any member, so
+                // authorship is enforced here (#607).
                 let (plain, cred_sender) = match decryptor.decrypt(bytes) {
                     Ok(opened) => opened,
                     Err(why) => {
@@ -1342,7 +983,6 @@ fn open_and_persist(
                 if author.as_deref() != Some(cred_sender.as_str()) {
                     return Ingested::Opened(None);
                 }
-                // Strip size padding (§4.1); no-op for legacy/unpadded edits.
                 if let Ok(text) = String::from_utf8(super::framing::strip(&plain)) {
                     let now = chrono::Utc::now().to_rfc3339();
                     let _ = conn.execute(
@@ -1355,14 +995,10 @@ fn open_and_persist(
         }
         _ => {}
     }
-    // Only the "persisted a new inbound DM message" path above returns an id;
-    // every other outcome is nothing to acknowledge.
     Ingested::Opened(None)
 }
 
-/// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints
-/// and channel-focus pre-warm paths that want to persist new envelopes without
-/// reading a page.
+/// Ingest a channel without reading a page (realtime hints, focus pre-warm).
 pub async fn ingest_channel_envelopes(
     user_id: String,
     channel_id: String,
@@ -1371,16 +1007,14 @@ pub async fn ingest_channel_envelopes(
     ingest_channel_envelopes_inner(state, &user_id, &channel_id).await
 }
 
-/// Pull new envelopes for a DM from remote, decrypt, and persist into the local
-/// `message` table. DM MLS group is keyed by conversation_id directly.
+/// Pull, decrypt and persist a DM's new envelopes; its MLS group id is the
+/// conversation id.
 pub async fn ingest_dm_envelopes_inner(
     state: &Arc<AppState>,
     user_id: &str,
     dm_channel_id: &str,
 ) -> Result<()> {
-    // Membership and the peer list in one request. The envelopes are NOT
-    // fetched here: the group-level catch-up below runs its own pass, and
-    // pulling them twice would double the transfer for nothing.
+    // Membership and peers only; the catch-up below fetches the envelopes.
     let resolved =
         crate::commands::ds_reads::catch_up(state, dm_channel_id, false, true).await?;
     if !resolved.authorized {
@@ -1395,11 +1029,8 @@ pub async fn ingest_dm_envelopes_inner(
         }
     }
 
-    // Re-verify each peer's `account_id_pub` against the local TOFU pin on
-    // every ingest. If a server-side swap or peer account reset has changed
-    // the key, this emits a `KeyChanged` realtime event so the conversation
-    // gets an inline banner (Signal-style) the moment we observe the change,
-    // not only when the user opens the peer's profile.
+    // Re-check each peer's key against the TOFU pin on every ingest, so a
+    // changed key shows its banner as soon as it is observed.
     let peer_ids: Vec<String> = resolved
         .dm
         .map(|dm| {
@@ -1410,20 +1041,11 @@ pub async fn ingest_dm_envelopes_inner(
                 .collect()
         })
         .unwrap_or_default();
-    // Batched (#875): one Turso query for the whole peer set instead of one per
-    // peer. Identical semantics — `batch_check_and_pin_account_keys` pins new
-    // peers, updates and un-verifies a changed pin, and emits the same
-    // `KeyChanged` event — and it is what `mls::reconcile` already uses. This
-    // runs on EVERY ingest pass, so for a multi-party DM it was a round trip per
-    // peer per realtime hint.
     if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(state, &peer_ids).await
     {
         crate::diag!("[ingest] batch_check_and_pin_account_keys for {dm_channel_id}: {e}");
     }
 
-    // A DM's MLS group backs exactly one conversation (mls_group_id ==
-    // dm_channel_id), so the group-level catch-up degenerates to the single-
-    // conversation case — same interleaved decrypt + watermark + GC path.
     catch_up_mls_group_interleaved(state, dm_channel_id, user_id).await
 }
 
@@ -1438,8 +1060,6 @@ pub async fn ingest_dm_envelopes(
 
 #[cfg(test)]
 mod sealing_order_tests {
-    //! An epoch's decrypt run follows the DS's group-wide arrival order, keeps
-    //! each conversation's own order, and is untouched by an older DS.
     use super::into_sealing_order;
 
     #[test]
@@ -1466,8 +1086,6 @@ mod sealing_order_tests {
 
 #[cfg(test)]
 mod failure_log_tests {
-    //! #1520: a decrypt failure is logged when it first happens, and again only
-    //! when its reason changes — not on every retry pass of the same envelope.
     use super::first_sighting;
     use crate::commands::mls::DecryptFailureKind as K;
 
@@ -1484,16 +1102,10 @@ mod failure_log_tests {
 
 #[cfg(test)]
 mod delete_resolution_tests {
-    //! #693 / #661 (WS1): the redaction-outcome → tombstone-fate decision, the
-    //! fix for a delete that was consumed-and-lost when its `UPDATE` matched zero
-    //! rows or errored. These pin the full edge-case matrix the reviewer called
-    //! out — applied, already-redacted, transient error, and the two flavours of
-    //! "target absent" that MUST be distinguished (not-caught-up vs pre-join). The
-    //! complementary watermark half is `watermark::delete_consumption_tests`.
+    //! The watermark half is `watermark::delete_consumption_tests`.
 
     use super::{resolve_delete, DeleteResolution};
 
-    /// The redaction matched a live row this pass — done.
     #[test]
     fn applied_now_is_handled() {
         assert_eq!(
@@ -1502,8 +1114,6 @@ mod delete_resolution_tests {
         );
     }
 
-    /// Zero rows but the row exists (already redacted on a prior pass) — idempotent
-    /// re-application is handled, NOT a zero-row failure that wedges the cursor.
     #[test]
     fn already_redacted_is_handled() {
         assert_eq!(
@@ -1512,9 +1122,6 @@ mod delete_resolution_tests {
         );
     }
 
-    /// Zero rows, no local row, but the target is still awaiting ingest (an
-    /// unreached epoch in this fetch set) — absent because we have not caught up
-    /// yet, so retry rather than consume.
     #[test]
     fn absent_but_awaiting_ingest_is_pending() {
         assert_eq!(
@@ -1523,10 +1130,6 @@ mod delete_resolution_tests {
         );
     }
 
-    /// Zero rows, no local row, and the target is NOT awaiting ingest — a pre-join
-    /// message this device will never receive. Terminal: the redaction is
-    /// vacuously satisfied and retrying forever cannot help, so it is handled (and
-    /// does NOT spin).
     #[test]
     fn absent_pre_join_is_handled_terminally() {
         assert_eq!(
@@ -1535,8 +1138,6 @@ mod delete_resolution_tests {
         );
     }
 
-    /// The redaction UPDATE errored (a transient local-DB fault) — retry, never
-    /// silently consume. Holds regardless of the (unknown) target state.
     #[test]
     fn transient_db_error_is_pending() {
         assert_eq!(resolve_delete(None, false, false), DeleteResolution::Pending);

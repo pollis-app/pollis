@@ -1,39 +1,13 @@
-//! Making a lost message visible (#1312).
+//! Making a lost message visible (#1312): when the ingest cursor moves past a
+//! message envelope this device was entitled to read and never did, a
+//! placeholder row (`message.undecryptable` = the [`Reason`]) is written in its
+//! place. See `.codesight/wiki/mls.md` → "Lost messages are visible".
 //!
-//! Under `max_past_epochs = 0` an envelope this device did not decrypt while
-//! its group sat at the envelope's epoch can never be decrypted here again. The
-//! ingest cursor still has to move past it — holding it would wedge the
-//! conversation forever — and before #1312 that is all that happened: no row,
-//! no log line. A loss was invisible by construction, so nobody could tell a
-//! lost message from one that was never sent.
-//!
-//! Now, when the cursor moves past a message envelope this device was ENTITLED
-//! to read and never did, a placeholder row is written (`message.undecryptable`
-//! = the [`Reason`]) and the conversation shows it in place.
-//!
-//! "Entitled" excludes exactly two cases, and nothing else (and the first is
-//! narrowed by #1571, see [`sealed_while_entitled`]):
-//!
-//! * **Before this device was in the tree.** An envelope sealed below the epoch
-//!   this device was added at ([`crate::commands::mls::first_join`]) is the loss
-//!   `CLAUDE.md` accepts (a message sent before you joined the MLS tree) — on a
-//!   first join, and equally for the gap while a removed member was out. A
-//!   recovery rebuild does not move that floor. A lineage with no recorded join
-//!   — one this device joined before #1312 shipped — gets its floor from the
-//!   first catch-up that sees it ([`fallback_floor`]).
-//! * **Envelopes this device already accounted for.** Sealed sender leaves
-//!   nothing on an envelope that says who sent it, and MLS cannot decrypt a
-//!   message for the leaf that sealed it, so every receipt and delete notice
-//!   this device posted comes back through the fetch looking undecryptable.
-//!   Nor can a message be decrypted twice, and an envelope past one that is not
-//!   readable yet is fetched again on the next pass; a text message has its row
-//!   to show for the first time, a control frame or edit has none.
-//!   [`record_own_envelope`] and [`record_opened_envelope`] keep that list.
-//!
-//! An envelope can hold a control frame (a receipt, a delete) rather than text;
-//! nothing outside the ciphertext says which. A placeholder therefore claims
-//! only that *something sent here* could not be read on this device — which is
-//! true either way, and is why a lost edit or delete is logged, not shown.
+//! Not entitled: envelopes sealed before this device joined the tree (accepted
+//! loss 1, narrowed by [`sealed_while_entitled`]), and envelopes it already
+//! accounted for ([`record_own_envelope`], [`record_opened_envelope`]). Nothing
+//! outside the ciphertext says whether an envelope held text or a control frame,
+//! so a placeholder claims only that *something sent here* could not be read.
 
 use rusqlite::OptionalExtension;
 
@@ -109,7 +83,7 @@ pub(crate) fn classify(
 ///   before the user joined — loss #1 — and stays silent too.
 ///
 /// `sent_at` is the sender's stamp, the only time an envelope carries; an
-/// unreadable one answers `false`, the silent pre-#1571 pass.
+/// unreadable one answers `false`.
 pub(crate) fn sealed_while_entitled(
     floor: Option<u64>,
     entitled: Option<crate::commands::mls::Entitlement>,

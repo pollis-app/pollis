@@ -133,7 +133,6 @@ pub(super) async fn post_resealing<B: ClientRequest>(
             super::loss::record_own_envelope(db.conn(), envelope_id);
         }
     }
-    // Test harness: park a sender between seal and post (#1041).
     #[cfg(feature = "test-harness")]
     crate::commands::mls::rendezvous::park(
         crate::commands::mls::rendezvous::Point::EnvelopeBeforePost,

@@ -1,33 +1,16 @@
-//! The durable outbox for edits (#1555).
+//! The durable outbox for edits (#1555); schema in
+//! `.codesight/wiki/database.md` → `outbox_edit`.
 //!
-//! Before #1555 an edit rewrote the sender's local `message` row and only then
-//! posted the edit envelope, outside the outbox that sends go through (#1335).
-//! A process killed between the two left the sender's copy showing the edited
-//! text while every other member kept the original, with no retry and nothing
-//! marking the edit unsent.
+//! An edit is stored in `outbox_edit` before any network work and the `message`
+//! row is left alone; only once the DS holds the envelope does one transaction
+//! write the text to the row and drop the entry. Until then reads overlay the
+//! pending text ([`overlay_pending_edits`]), and the same drain as unsent
+//! messages (`outbox::flush_outbox`) redelivers it.
 //!
-//! Now an edit is stored in `outbox_edit` FIRST, before any network work, and
-//! the `message` row is left alone. Delivery seals and posts the stored edit;
-//! only once the DS holds the envelope does one transaction write the new text
-//! to the row and delete the outbox entry. Until then every read shows the
-//! pending text over the row with an `edit_state` (see
-//! [`overlay_pending_edits`]), so the editor sees what they typed and a failed
-//! edit is labelled — the same contract an unsent message has.
-//!
-//! An unconfirmed edit is delivered again by the same drain as unsent messages
-//! (`outbox::flush_outbox` — after unlock, on reconnect, on resume) and by
-//! `retry_message` naming the edited message. One edit per target: a newer
-//! edit replaces an unconfirmed older one, as the DS replaces a target's
-//! pending edit envelope.
-//!
-//! **Idempotency.** Every attempt at one edit posts under the same envelope id.
-//! The DS's edit write replaces the target's pending edit envelope (this one,
-//! if an earlier attempt landed unseen) with the new one, and both carry the
-//! same text, so a member who opened the first sees nothing change. Within
-//! this process one attempt per target runs at a time (the outbox lock, keyed
-//! by target), and confirming is conditional on the envelope id, so an attempt
-//! at an older edit that finishes after a newer edit was stored never
-//! overwrites it.
+//! **Idempotency.** Every attempt at one edit posts under the same envelope id,
+//! which the DS's edit write replaces in place. One attempt per target runs at a
+//! time (the outbox lock), and confirming is conditional on the envelope id, so
+//! a late attempt at an older edit never overwrites a newer one.
 
 use std::sync::Arc;
 
@@ -358,9 +341,8 @@ mod tests {
         }
     }
 
-    /// The whole fix in one assertion: storing an edit leaves the message row
-    /// exactly as every other member holds it. A process that dies now shows
-    /// the original text everywhere, and the edit is still queued.
+    /// Storing an edit leaves the message row as every other member holds it,
+    /// so a process that dies now shows the original text everywhere.
     #[test]
     fn storing_an_edit_does_not_touch_the_row() {
         let db = LocalDb::open_in_memory().unwrap();

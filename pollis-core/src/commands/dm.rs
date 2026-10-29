@@ -28,7 +28,6 @@ pub struct DmChannelMember {
     pub accepted_at: Option<String>,
 }
 
-/// Wire to domain for one DM channel, shared by every path.
 fn dm_from_wire(d: pollis_api::directory::DmChannelWire) -> DmChannel {
     DmChannel {
         id: d.id,
@@ -60,15 +59,11 @@ pub async fn create_dm_channel(
         return Err(Error::Other(anyhow::anyhow!("cannot create a DM with only yourself")));
     }
 
-    // The block check and the 2-person dedupe happen inside the DS write (#987), so
-    // "one DM per pair" holds even when two devices create it at once. 3+ member
-    // DMs are never deduped.
-
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    // The DS writes channel, memberships and watermark seeds in one transaction,
-    // re-checks blocks, dedupes a pair, and returns the DM either way.
+    // The DS checks blocks and dedupes a 2-person DM inside its write (#987), so
+    // "one DM per pair" holds under concurrent creates; 3+ member DMs never dedupe.
     let body = pollis_api::profile::CreateDmBody {
         id: id.clone(),
         creator_id: creator_id.clone(),
@@ -250,13 +245,9 @@ pub async fn accept_dm_request(
     // #1410: the accepter's other devices still list this as a request until told.
     notify_own_devices_of_dm(state, &user_id, &dm_channel_id, "accept_dm_request").await;
 
-    // #1571: accepting is the moment this user's device first acts in the DM.
-    // Catch it up (joining it if it holds no group yet) and run the re-add
-    // backstop, so the accepter's OTHER devices — which a creator's add may have
-    // missed — are put in the tree now, from whichever device accepted, rather
-    // than when each one next opens the DM and joins at the head. Best-effort:
-    // the accept itself has already landed.
-    // Both boxed: large futures, kept off the caller's stack.
+    // Catch up and run the re-add backstop now, so the accepter's other devices a
+    // creator's add missed join the tree before they next open the DM (#1571).
+    // Best-effort: the accept has landed. Boxed: large futures.
     if let Err(e) = Box::pin(crate::commands::messages::catch_up_mls_group_interleaved(
         state,
         &dm_channel_id,
@@ -331,7 +322,6 @@ pub async fn remove_user_from_dm_channel(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &dm_channel_id, &requester_id,
     ).await {
@@ -346,8 +336,7 @@ pub async fn leave_dm_channel(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // The DS deletes the membership and tears down an emptied DM in one
-    // transaction.
+    // The DS also tears down an emptied DM, in the same transaction.
     let body = pollis_api::profile::LeaveDmBody {
         dm_channel_id: dm_channel_id.clone(),
         user_id,

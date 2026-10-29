@@ -734,12 +734,9 @@ mod tests {
         LocalDb::open_in_memory().expect("in-memory db")
     }
 
-    /// At-rest encryption (`docs/security-whitepaper.md` §7) assumes the linked
-    /// `sqlite3_*` symbols are SQLCipher's. If another sqlite3 wins them,
-    /// `PRAGMA key` is silently ignored and the file is plaintext. Only
-    /// SQLCipher knows `PRAGMA cipher_version`, and since #992 the answer must
-    /// be the same on every platform, with no `cfg` exception.
-    /// [`the_local_database_file_is_encrypted_at_rest`] checks the bytes.
+    /// At-rest encryption assumes the linked `sqlite3_*` symbols are SQLCipher's;
+    /// if another sqlite3 wins them, `PRAGMA key` is silently ignored. Must hold
+    /// on every platform (#992).
     #[test]
     fn sqlcipher_is_the_sqlite_we_actually_linked() {
         let conn = Connection::open_in_memory().expect("open");
@@ -809,9 +806,8 @@ mod tests {
         );
     }
 
-    /// These go through [`LocalDb::open_for_user`], the path the app uses, so a
-    /// test connection cannot be keyed while the real one is bare.
-    /// `set_data_dir` is process-global: one scratch dir, separated by user id.
+    /// Tests open through [`LocalDb::open_for_user`], the app's path. `set_data_dir`
+    /// is process-global: one scratch dir, separated by user id.
     fn scratch_data_dir() -> &'static std::path::Path {
         static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
         let dir = DIR.get_or_init(|| {
@@ -1032,7 +1028,6 @@ mod tests {
         add_missing_columns(&conn).expect("additive columns");
         apply_local_schema(&conn).expect("schema batch");
 
-        // History survived.
         let (content, thread_id): (String, Option<String>) = conn
             .query_row(
                 "SELECT content, thread_id FROM message WHERE id = 'old1'",
@@ -1267,7 +1262,6 @@ mod tests {
         let conn = db.conn();
         insert_message(conn, "old", "datetime('now','-1000 days')");
 
-        // Unset retention defaults to 0 (Forever).
         assert_eq!(get_message_retention_days(conn).unwrap(), 0);
         assert_eq!(evict_old_messages(conn).unwrap(), 0);
         assert_eq!(message_ids(conn), vec!["old".to_string()]);
@@ -1332,10 +1326,8 @@ mod tests {
         .expect("insert message");
     }
 
-    /// The index cannot drift: after every shape of write `message` admits
-    /// (insert, edit, soft delete, moderator delete, retention eviction), FTS5
-    /// is consistent and holds exactly the rows it should. Triggers maintain it,
-    /// so a future write path cannot skip it.
+    /// After every write shape `message` admits, FTS5 is consistent and holds
+    /// exactly the rows it should; triggers maintain it.
     #[test]
     fn the_search_index_cannot_drift() {
         let db = db();
@@ -1530,8 +1522,7 @@ mod tests {
         assert_eq!(hits, 1);
     }
 
-    /// End to end: proves the scalar function is registered on the connection
-    /// the triggers run on.
+    /// Proves the scalar function is registered on the triggers' connection.
     #[test]
     fn the_indexed_body_is_the_transformed_one() {
         let db = db();
@@ -1777,11 +1768,10 @@ mod tests {
         format!("interop-row-{id:03}-{}", "ab".repeat(96))
     }
 
-    /// Regenerates the cross-provider fixtures `pollis-sqlcipher/tests/sqlcipher.rs`
-    /// reads. They must come from a different implementation (here, SQLCipher
-    /// over system OpenSSL / CommonCrypto), since a provider reading its own
-    /// output would agree with itself even when wrong. Hence not on Windows,
-    /// where `pollis-core` links `pollis-sqlcipher` itself.
+    /// Regenerates the fixtures `pollis-sqlcipher/tests/sqlcipher.rs` reads. They
+    /// must come from a different implementation (SQLCipher over OpenSSL /
+    /// CommonCrypto), since a provider reading its own output agrees with itself
+    /// even when wrong; hence not on Windows.
     ///
     /// ```text
     /// cargo test -p pollis-core --lib --no-default-features \

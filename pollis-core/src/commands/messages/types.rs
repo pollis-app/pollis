@@ -66,10 +66,8 @@ pub struct ChannelMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_state: Option<String>,
     /// The edit outbox (#1555): set on this device's own message while an edit
-    /// of it is stored but not yet confirmed by the DS — `content` is then the
-    /// edited text. Same values as `send_state`: `pending` (drawn as an
-    /// ordinary edit), `failed` / `rejected` (labelled as not sent). Omitted
-    /// from the JSON when `None`.
+    /// the DS has not confirmed is stored; `content` is then the edited text.
+    /// Same values as `send_state`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_state: Option<String>,
 }
@@ -162,7 +160,7 @@ pub struct SearchCorpus {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchPage {
     pub results: Vec<SearchResult>,
-    /// Total hits, not just this page (cheap: ~1.4 ms even for a common term).
+    /// Total hits, not just this page.
     pub total: i64,
     pub next_cursor: Option<SearchCursor>,
     /// The ordering actually applied, which the caller may not have specified.
