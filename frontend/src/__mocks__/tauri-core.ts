@@ -294,6 +294,11 @@ interface MockStore {
    */
   mutedChannels: string[];
   /**
+   * The account's security-event log (#1548), any order — `list_security_events`
+   * sorts it `(created_at DESC, id DESC)` and serves keyset pages from it.
+   */
+  securityEvents: MockSecurityEvent[];
+  /**
    * What `plugin:notification|is_permission_granted` answers. Off by default,
    * as a fresh install is; a spec that counts OS notifications preloads
    * `notificationPermission: true`.
@@ -421,6 +426,7 @@ const store: MockStore = {
       : preload.exportSavePath,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  securityEvents: (preload.securityEvents as MockSecurityEvent[] | undefined) ?? [],
   notificationPermission: preload.notificationPermission === true,
 };
 
@@ -537,6 +543,48 @@ function nowIso(): string {
 interface MessageCursor {
   sent_at: string;
   id: string;
+}
+
+interface MockSecurityEvent {
+  id: string;
+  kind: string;
+  device_id: string | null;
+  created_at: string;
+  metadata: string | null;
+}
+
+interface SecurityEventCursor {
+  created_at: string;
+  id: string;
+}
+
+/**
+ * One keyset page of the security-event log, the way the DS answers
+ * `/v1/read/security-events` (#1548): newest first with `id` as the tiebreak,
+ * optionally narrowed to `kinds`, strictly older than `before`, and a
+ * `next_cursor` only when a row exists past the page.
+ */
+function securityEventsPage(
+  limit: number | null | undefined,
+  before: SecurityEventCursor | null | undefined,
+  kinds: string[] | null | undefined,
+): { events: MockSecurityEvent[]; next_cursor: SecurityEventCursor | null } {
+  const size = Math.min(Math.max(limit ?? 100, 1), 500);
+  const cmp = (a: SecurityEventCursor, b: SecurityEventCursor) =>
+    a.created_at === b.created_at
+      ? a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      : a.created_at < b.created_at ? -1 : 1;
+  const matching = [...store.securityEvents]
+    .filter((e) => !kinds || kinds.length === 0 || kinds.includes(e.kind))
+    .filter((e) => !before || cmp(e, before) < 0)
+    .sort((a, b) => cmp(b, a));
+  const events = matching.slice(0, size);
+  const last = events[events.length - 1];
+  return {
+    events,
+    next_cursor:
+      matching.length > size && last ? { created_at: last.created_at, id: last.id } : null,
+  };
 }
 
 /**
@@ -1059,13 +1107,19 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_devices':
     case 'list_user_devices':
     case 'list_blocked_users':
-    case 'list_security_events':
     case 'get_pinned_messages':
       return [];
 
     // The approving device's view of open enrollment requests. Note what is
     // NOT here: a verification code (#1096). The approver types the code shown
     // on the new device, so there is nothing for this list to pre-fill with.
+    case 'list_security_events':
+      return securityEventsPage(
+        args.limit as number | null | undefined,
+        args.before as SecurityEventCursor | null | undefined,
+        args.kinds as string[] | null | undefined,
+      );
+
     case 'list_pending_enrollment_requests':
       return store.pendingEnrollments.map((e) => ({
         request_id: e.request_id,

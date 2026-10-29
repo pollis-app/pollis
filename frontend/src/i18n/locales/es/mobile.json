@@ -360,6 +360,7 @@
       "preferencesSub": "Tema, densidad, comportamiento",
       "savedSub": "Mensajes guardados",
       "securitySub": "Claves, dispositivos, cerrar sesión",
+      "securityEventsSub": "Dispositivos, claves y cambios de cuenta",
       "signingOut": "Cerrando sesión…",
       "userSettingsSub": "Nombre preferido, nombre de usuario, correo",
       "customAccent": "Personalizado",
@@ -437,7 +438,6 @@
       "reject": "Rechazar",
       "rejectA11y": "Rechazar el registro",
       "safetyHeading": "Seguridad",
-      "showOlderA11y": "Mostrar eventos anteriores",
       "thisDevice": "{{name}} · este dispositivo",
       "blockedUsers": "Usuarios bloqueados"
     },

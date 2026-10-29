@@ -243,7 +243,6 @@
     "eventsDescription": "每当有设备被添加到你的账户、有设备注册被拒绝，或你的身份被重置，都会记录在这里。如果你怀疑有人访问过你的账户，请检查这里。",
     "eventsLoadFailed": "加载安全事件失败",
     "eventsEmpty": "还没有记录到安全事件。",
-    "eventsShowOlder_other": "显示更早的事件（还有 {{count}} 条）",
     "mediaHeading": "媒体权限",
     "mediaCamera": "摄像头",
     "mediaMicrophone": "麦克风",
@@ -281,7 +280,17 @@
     "deleteConfirmLabel": "输入 {{word}} 以确认",
     "deleteAccountButton": "删除我的账户",
     "deletingAccount": "正在删除账户…",
-    "deleteAccountFailed": "删除账户失败"
+    "deleteAccountFailed": "删除账户失败",
+    "eventRecoveryBlobFetchedHeading": "已开始恢复账户",
+    "eventRecoveryBlobFetchedDetail": "有设备使用你的邮箱验证码登录，并下载了账户的加密备份，以便用安全密钥恢复账户。没有该密钥就无法打开这份备份。",
+    "eventsViewAll": "查看全部",
+    "eventsFilterAria": "筛选安全事件",
+    "eventsFilterAll": "全部",
+    "eventsFilterDevices": "设备",
+    "eventsFilterIdentity": "身份与密钥",
+    "eventsFilterAccount": "账户",
+    "eventsEmptyFiltered": "还没有这类事件。",
+    "eventsLoadMore": "加载更早的事件"
   },
   "keyChange": {
     "heading": "安全号码已更改",

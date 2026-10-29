@@ -509,17 +509,22 @@ pub(crate) async fn recovery_blob(
     }
 }
 
-/// The account's own security-event log, most recent first.
+/// One keyset page of the account's own security-event log, most recent first
+/// (#1548). `before`/`kinds` unset = the pre-#1548 body, byte for byte.
 pub(crate) async fn security_events(
     state: &Arc<AppState>,
     user_id: &str,
     limit: i64,
-) -> Result<Vec<ar::SecurityEventRow>> {
+    before: Option<ar::SecurityEventCursor>,
+    kinds: Option<Vec<String>>,
+) -> Result<ar::SecurityEventsResponse> {
     let body = ar::SecurityEventsBody {
         user_id: Some(user_id.to_string()),
         limit: Some(limit),
+        before,
+        kinds,
     };
-    Ok(ds_post_json(state, &body).await?.events)
+    ds_post_json(state, &body).await
 }
 
 // ── Read cursors (#844) ──────────────────────────────────────────────────────

@@ -17,7 +17,8 @@
     "dmAvatarAlt": "Avatar de {{name}}",
     "close": "Cerrar la barra lateral ({{shortcut}})",
     "resize": "Redimensionar la barra lateral (arrastra; doble clic para restablecer)",
-    "vault": "Baúl"
+    "vault": "Baúl",
+    "securityEvents": "Eventos de seguridad"
   },
   "profile": {
     "you": "Tú",
@@ -56,7 +57,8 @@
     "joinAGroup": "Unirse a un grupo",
     "search": "Buscar",
     "searchButton": "Buscar ({{shortcut}})",
-    "settings": "Ajustes"
+    "settings": "Ajustes",
+    "securityEvents": "Eventos de seguridad"
   },
   "statusBar": {
     "groupsUnread_one": "Mensajes de grupo sin leer: {{count}}",

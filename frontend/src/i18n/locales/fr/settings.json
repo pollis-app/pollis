@@ -248,8 +248,6 @@
     "eventsDescription": "Chaque ajout d'un appareil à votre compte, chaque enrôlement refusé et chaque réinitialisation de votre identité apparaissent ici. Consultez-les si vous soupçonnez un accès non autorisé à votre compte.",
     "eventsLoadFailed": "Échec du chargement des événements de sécurité",
     "eventsEmpty": "Aucun événement de sécurité enregistré pour l'instant.",
-    "eventsShowOlder_one": "Afficher les événements plus anciens ({{count}} de plus)",
-    "eventsShowOlder_other": "Afficher les événements plus anciens ({{count}} de plus)",
     "mediaHeading": "Autorisations média",
     "mediaCamera": "Caméra",
     "mediaMicrophone": "Microphone",
@@ -294,7 +292,17 @@
     "deleteConfirmLabel": "Saisissez {{word}} pour confirmer",
     "deleteAccountButton": "Supprimer mon compte",
     "deletingAccount": "Suppression du compte…",
-    "deleteAccountFailed": "Échec de la suppression du compte"
+    "deleteAccountFailed": "Échec de la suppression du compte",
+    "eventRecoveryBlobFetchedHeading": "Récupération du compte lancée",
+    "eventRecoveryBlobFetchedDetail": "Un appareil s'est connecté avec votre code e-mail et a téléchargé la sauvegarde chiffrée de votre compte pour la récupérer avec votre Clé secrète. La sauvegarde ne peut pas être ouverte sans cette clé.",
+    "eventsViewAll": "Tout afficher",
+    "eventsFilterAria": "Filtrer les événements de sécurité",
+    "eventsFilterAll": "Tous",
+    "eventsFilterDevices": "Appareils",
+    "eventsFilterIdentity": "Identité et clés",
+    "eventsFilterAccount": "Compte",
+    "eventsEmptyFiltered": "Aucun événement de ce type pour l'instant.",
+    "eventsLoadMore": "Charger les événements plus anciens"
   },
   "keyChange": {
     "heading": "Numéro de sécurité modifié",

@@ -21,6 +21,8 @@
     "voiceKeywords": "الميكروفون السماعة الصوت كتم الضوضاء إلغاء الصدى الانضمام التلقائي الكاميرا الفيديو المعاينة الأذونات microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "الأمان",
     "securityKeywords": "سجل التدقيق الأجهزة مفتاح الهوية التدوير الكاميرا الميكروفون الشاشة الأذونات الإبطال الخصوصية الوصول audit log devices identity key rotation camera microphone screen permission permissions revoke privacy access",
+    "securityEventsName": "أحداث الأمان",
+    "securityEventsKeywords": "أحداث الأمان سجل تدقيق سجل الأجهزة مسجلة ملغاة مرفوضة الهوية المفتاح السري الاستعادة البريد تغيير",
     "shortcutsName": "اختصارات المفاتيح",
     "shortcutsKeywords": "اختصارات المفاتيح لوحة المفاتيح مفاتيح سريعة key bindings keyboard shortcuts hotkeys keybindings cmd ctrl",
     "updateName": "تحديث البرنامج",

@@ -21,6 +21,8 @@
     "voiceKeywords": "语音 视频 麦克风 扬声器 音频 噪音抑制 回声消除 自动加入 摄像头 预览 权限 microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "安全",
     "securityKeywords": "安全 审计日志 设备 身份密钥 轮换 摄像头 麦克风 屏幕 权限 撤销 隐私 访问 audit log devices identity key rotation camera microphone screen permission permissions revoke privacy access",
+    "securityEventsName": "安全事件",
+    "securityEventsKeywords": "安全事件 审计 日志 历史 设备 注册 撤销 拒绝 身份 安全密钥 恢复 邮箱 更改",
     "shortcutsName": "快捷键",
     "shortcutsKeywords": "快捷键 键位 键盘 热键 组合键 key bindings keyboard shortcuts hotkeys keybindings cmd ctrl",
     "updateName": "软件更新",

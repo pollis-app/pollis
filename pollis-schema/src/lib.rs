@@ -317,6 +317,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "push_handle_dismissed",
         include_str!("../migrations/000040_push_handle_dismissed.sql"),
     ),
+    (
+        41,
+        "security_event_keyset",
+        include_str!("../migrations/000041_security_event_keyset.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

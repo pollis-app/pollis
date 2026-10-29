@@ -18,7 +18,8 @@
     "close": "Close sidebar ({{shortcut}})",
     "resize": "Resize sidebar (drag; double-click to reset)",
     "searchMessages": "Search Messages",
-    "vault": "Vault"
+    "vault": "Vault",
+    "securityEvents": "Security Events"
   },
   "profile": {
     "you": "You",
@@ -57,7 +58,8 @@
     "joinAGroup": "Join a Group",
     "search": "Search",
     "searchButton": "Search ({{shortcut}})",
-    "settings": "Settings"
+    "settings": "Settings",
+    "securityEvents": "Security Events"
   },
   "statusBar": {
     "groupsUnread_one": "Unread group messages: {{count}}",
