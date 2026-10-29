@@ -4,9 +4,10 @@
 // `actions`, not a new layout.
 //
 // Each button is a 30pt disc inside the pill; the hit slop takes every
-// target to 44pt. No borders in any state: the pill is the background
-// surface over the media, a `selected` button (a toggle that is on) the
-// accent fill with the background-coloured glyph.
+// target to 44pt. No borders in any state: the pill (the background colour,
+// over the media) is the only surface; a button fills only while pressed, or
+// while `selected` (a toggle that is on: accent fill, background-coloured
+// glyph).
 
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
@@ -70,7 +71,7 @@ export function AttachmentToolbar({
                 ? semantic.accent
                 : pressed
                   ? semantic.high
-                  : semantic.raised,
+                  : "transparent",
             })}
           >
             {action.icon(on ? semantic.onAccent : semantic.text)}
