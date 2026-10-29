@@ -1,9 +1,7 @@
 // Generated shim file. Each #[tauri::command] forwards to
 // pollis_core::commands::relay_serving::*. Edit pollis-core, not here.
-//
-// The one thing that is NOT a forward is the status sink: pollis-core stays
-// Tauri-runtime-free (`pollis_core::sink::EventSink`), so the adapter that turns
-// a pushed status into a global `AppHandle::emit` lives on this side.
+// Not a forward: the status sink adapter, since pollis-core stays
+// Tauri-runtime-free.
 
 #![allow(unused_imports)]
 use std::sync::Arc;
@@ -12,12 +10,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use crate::error::Result;
-// The glob is the ONLY import from this module. Naming anything from it a
-// second time makes that private import shadow the public re-export, so the
-// name silently stops being visible to callers of this shim — the bug that
-// once hid RELAY_SERVING_EVENT (the constant the renderer's event name must
-// match) and, until clippy was armed (#912), was still hiding
-// `set_status_sink`. The glob already puts both in scope here.
+// Must stay the ONLY import from this module: naming anything from it again
+// shadows the public re-export and hides it from callers (#912).
 pub use pollis_core::commands::relay_serving::*;
 use pollis_core::net::peer::{RelayServingConfig, RelayServingStatus};
 use pollis_core::sink::EventSink;
@@ -32,12 +26,8 @@ pub async fn set_relay_serving(config: RelayServingConfig) -> Result<RelayServin
     pollis_core::commands::relay_serving::set_relay_serving(config).await
 }
 
-/// Pushes the status to every window as the global `relay-serving-status` event.
-///
-/// Gated on the native shell: `AppHandle` defaults to the `Wry` runtime, which a
-/// headless (`--no-default-features`) build does not compile. The two commands
-/// above stay ungated — they work fine with no sink, the UI just falls back to
-/// reading the status on mount.
+/// Pushes the status to every window as the global `relay-serving-status`
+/// event. Native shell only (`AppHandle` defaults to `Wry`).
 #[cfg(feature = "native-shell")]
 struct AppHandleSink(AppHandle);
 
@@ -50,9 +40,8 @@ impl EventSink<RelayServingStatus> for AppHandleSink {
     }
 }
 
-/// Wire the status event to the app handle. Called once during setup — without
-/// it the status line only refreshes when the Preferences component remounts,
-/// since CLAUDE.md bans polling it.
+/// Wire the status event to the app handle; without it the status line only
+/// refreshes on remount (no polling).
 #[cfg(feature = "native-shell")]
 pub fn install_status_sink(app: AppHandle) {
     set_status_sink(Arc::new(AppHandleSink(app)));

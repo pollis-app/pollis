@@ -57,9 +57,8 @@ pub async fn start_screen_share(
     max_framerate: Option<u32>,
     with_audio: Option<bool>,
 ) -> Result<()> {
-    // `Option<bool>` rather than `bool` so a renderer that predates shared
-    // audio — or any caller that simply omits the argument — still
-    // deserializes into a video-only share instead of failing the invoke.
+    // `Option` so a caller that omits it (an older renderer) gets a video-only
+    // share instead of a failed invoke.
     pollis_core::commands::screenshare::start_screen_share(
         &state,
         selection,

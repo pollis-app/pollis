@@ -19,8 +19,6 @@ pub async fn list_group_emoji(group_id: String, requester_id: String, state: Sta
     pollis_core::commands::emoji::list_group_emoji(group_id, requester_id, &state).await
 }
 
-// `path` is read off the disk and published to a public bucket, so it has to be
-// a file the user picked or dropped — see `crate::pathscope`.
 #[tauri::command]
 pub async fn upload_group_emoji(group_id: String, shortcode: String, path: String, scope: State<'_, PathScope>, state: State<'_, Arc<AppState>>) -> Result<CustomEmoji> {
     scope.require(std::path::Path::new(&path), "upload_group_emoji")?;

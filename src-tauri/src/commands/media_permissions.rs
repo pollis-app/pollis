@@ -1,60 +1,37 @@
-//! Media permissions — OS-level camera / microphone / screen-share access.
+//! OS-level camera / microphone / screen-share permissions. Not a shim over
+//! `pollis-core`: OS privacy grants are a shell-runtime concern.
 //!
-//! Unlike the other command modules this one is NOT a thin shim over
-//! `pollis-core`: querying and clearing OS privacy grants is inherently a
-//! shell-runtime concern (TCC on macOS, the ConsentStore registry on Windows,
-//! the `ms-settings:` deep-links, the app bundle identifier), so it lives
-//! entirely in `src-tauri` — the same rationale as `install_kind.rs` / `tray.rs`.
-//!
-//! Honest, per-OS behaviour:
-//!   - **macOS** — live status via `AVCaptureDevice::authorizationStatusForMediaType`
-//!     (camera + mic) and `CGPreflightScreenCaptureAccess()` (screen). "Revoke
-//!     now" spawns `tccutil reset <Service> <bundle-id>`, which *clears* the
-//!     saved grant so macOS re-prompts on next use (it does NOT set a permanent
-//!     deny).
-//!   - **Linux** — there is no TCC-equivalent standing grant; access is brokered
-//!     per session (PipeWire portal / device nodes). Status is reported as
-//!     `PerSession` and "Revoke now" is a no-op success with an explanatory note.
-//!   - **Windows** — status is read from the privacy ConsentStore registry
-//!     (`…\CapabilityAccessManager\ConsentStore\{webcam,microphone}`, NonPackaged
-//!     subkey, `Value` = `Allow`/`Deny`). Screen capture has no ConsentStore
-//!     entry → `Unsupported`. "Revoke now" opens the `ms-settings:` privacy
-//!     deep-link rather than programmatically flipping the grant.
-//!
-//! The module is only compiled with the native shell (`native-shell`); the
-//! headless test harness never exercises it.
+//! macOS reads TCC status and "revoke" runs `tccutil reset`, which clears the
+//! grant (re-prompt on next use), not a permanent deny. Linux has no standing
+//! grant (`PerSession`). Windows reads the ConsentStore registry and "revoke"
+//! opens the `ms-settings:` page.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
-// `AppHandle::config()` (used to read the bundle identifier for `tccutil`) is
-// provided by the Manager trait. Only the macOS branches call it.
+// For `AppHandle::config()` (bundle identifier); macOS only.
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 
 use crate::state::AppState;
 use std::sync::Arc;
 
-/// Whether the OS currently grants Pollis access to a given media device.
-///
-/// Mirrors the TypeScript `PermissionState` union — keep them in sync.
+/// Whether the OS grants Pollis access to a media device. Mirrors the
+/// TypeScript `PermissionState` union.
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PermissionState {
-    /// Access is granted right now.
     Granted,
-    /// Access has been explicitly denied (or is restricted by policy).
+    /// Denied, or restricted by policy.
     Denied,
-    /// The user has never been asked; the OS will prompt on first use.
+    /// Never asked; the OS prompts on first use.
     NotDetermined,
-    /// No standing grant exists — access is brokered per session (Linux).
+    /// Access is brokered per session (Linux).
     PerSession,
-    /// This platform exposes no queryable permission for this device.
     Unsupported,
 }
 
-/// Snapshot of the three media permissions, queried at runtime.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaPermissions {
@@ -63,9 +40,7 @@ pub struct MediaPermissions {
     pub screen: PermissionState,
 }
 
-/// Result of a "Revoke now" request. `applied` is true only when Pollis
-/// actually changed OS state (macOS `tccutil reset`); Linux/Windows return
-/// `false` with a `note` explaining why.
+/// `applied` is true only when Pollis actually changed OS state (macOS).
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RevokeResult {
@@ -73,23 +48,17 @@ pub struct RevokeResult {
     pub note: Option<String>,
 }
 
-/// Managed state holding the "revoke on quit" preference. Mirrors the
-/// `TrayState` / `tray_set_close_to_tray` pattern: the renderer pushes the
-/// pref via `set_revoke_media_on_exit`, and the `ExitRequested` hook reads
-/// the atomic synchronously at shutdown.
+/// The "revoke on quit" preference, read synchronously by the `ExitRequested`
+/// hook.
 #[derive(Default)]
 pub struct MediaPermissionsState {
     revoke_on_exit: AtomicBool,
 }
 
-/// The three media kinds, in the order the UI renders them.
 const KINDS: [&str; 3] = ["camera", "microphone", "screen"];
 
-// ── Commands ─────────────────────────────────────────────────────────────────
-
-/// Report the current OS permission for camera, microphone, and screen share.
-/// Queried live so it reflects changes the user makes in System Settings while
-/// Pollis is running (the renderer refetches on window focus).
+/// Current OS permission for camera, microphone and screen. Queried live so it
+/// reflects System Settings changes while running.
 #[tauri::command]
 pub fn get_media_permission_status() -> std::result::Result<MediaPermissions, String> {
     #[cfg(target_os = "macos")]
@@ -103,8 +72,6 @@ pub fn get_media_permission_status() -> std::result::Result<MediaPermissions, St
 
     #[cfg(target_os = "linux")]
     {
-        // No TCC-equivalent standing grant on Linux — access is brokered
-        // per session by PipeWire portals / device-node permissions.
         Ok(MediaPermissions {
             camera: PermissionState::PerSession,
             microphone: PermissionState::PerSession,
@@ -117,7 +84,6 @@ pub fn get_media_permission_status() -> std::result::Result<MediaPermissions, St
         Ok(MediaPermissions {
             camera: windows::consent_status("webcam"),
             microphone: windows::consent_status("microphone"),
-            // Screen capture has no ConsentStore entry on Windows.
             screen: PermissionState::Unsupported,
         })
     }
@@ -132,13 +98,9 @@ pub fn get_media_permission_status() -> std::result::Result<MediaPermissions, St
     }
 }
 
-/// Deep-link to the OS privacy settings for a media `kind` ("camera" /
-/// "microphone"), issue #434. An app cannot grant or revoke its own OS privacy
-/// grant — only the user can, in System Settings — so this just takes them
-/// there (same model as Discord/Zoom). Uses the URI schemes directly rather than
-/// the shell-open bridge, whose allowlist rejects `x-apple.systempreferences:` /
-/// `ms-settings:`. Linux has no per-application camera/mic model, so there is
-/// nothing to deep-link to.
+/// Deep-link to the OS privacy settings for `kind` (#434); an app cannot
+/// change its own grant. URI schemes are spawned directly because the
+/// shell-open allowlist rejects them.
 #[tauri::command]
 pub fn open_privacy_settings(kind: String) -> std::result::Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -162,7 +124,6 @@ pub fn open_privacy_settings(kind: String) -> std::result::Result<(), String> {
             "microphone" => "ms-settings:privacy-microphone",
             other => return Err(format!("unknown media kind: {other}")),
         };
-        // `cmd /C start "" <uri>` resolves the ms-settings: URI via the shell.
         std::process::Command::new("cmd")
             .args(["/C", "start", "", uri])
             .spawn()
@@ -176,17 +137,14 @@ pub fn open_privacy_settings(kind: String) -> std::result::Result<(), String> {
     }
 }
 
-/// Revoke the OS permission(s) for the given kinds ("camera"/"microphone"/
-/// "screen"). Always tears down any active capture first so we never leave a
-/// live camera/screen-share running against a permission we just cleared.
+/// Revoke the OS permission(s) for `kinds`, tearing down active capture first
+/// so nothing keeps running against a cleared grant.
 #[tauri::command]
 pub async fn revoke_media_permissions(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     kinds: Vec<String>,
 ) -> std::result::Result<RevokeResult, String> {
-    // Stop anything currently capturing before touching the grant. Both are
-    // idempotent no-ops when nothing is active.
     let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
     let _ = pollis_core::commands::camera::stop_camera(&state).await;
 
@@ -195,8 +153,6 @@ pub async fn revoke_media_permissions(
         let bundle_id = app.config().identifier.clone();
         for kind in &kinds {
             if let Some(service) = macos::tcc_service(kind) {
-                // `tccutil reset` CLEARS the saved grant — macOS re-prompts on
-                // next use. It does not set a permanent deny.
                 let _ = std::process::Command::new("tccutil")
                     .arg("reset")
                     .arg(service)
@@ -255,17 +211,14 @@ pub async fn revoke_media_permissions(
     }
 }
 
-/// Store the "revoke system permissions when Pollis quits" preference so the
-/// `ExitRequested` hook can act on it synchronously at shutdown. Mirrors
-/// `tray_set_close_to_tray`.
+/// Store the "revoke system permissions when Pollis quits" preference.
 #[tauri::command]
 pub fn set_revoke_media_on_exit(state: State<'_, MediaPermissionsState>, enabled: bool) {
     state.revoke_on_exit.store(enabled, Ordering::Relaxed);
 }
 
-/// Called from the `ExitRequested` hook. If the user opted in, best-effort
-/// clear the macOS TCC grants for all three kinds. Reads the atomic
-/// synchronously — no async prefs fetch at exit. No-op on Linux/Windows.
+/// Called from `ExitRequested`: if opted in, best-effort clear the macOS TCC
+/// grants. No-op elsewhere.
 pub fn revoke_on_exit_if_enabled(app: &AppHandle, state: &MediaPermissionsState) {
     if !state.revoke_on_exit.load(Ordering::Relaxed) {
         return;
@@ -289,16 +242,13 @@ pub fn revoke_on_exit_if_enabled(app: &AppHandle, state: &MediaPermissionsState)
     }
 }
 
-// ── macOS backend ────────────────────────────────────────────────────────────
-
 #[cfg(target_os = "macos")]
 mod macos {
     use super::PermissionState;
     use cocoa::base::id;
     use objc::{class, msg_send, sel, sel_impl};
 
-    // AVAuthorizationStatus (NSInteger). Mirrors the mapping used in
-    // pollis-capture-macos/src/camera.rs.
+    // AVAuthorizationStatus values, as in pollis-capture-macos/src/camera.rs.
     const AV_NOT_DETERMINED: isize = 0;
     const AV_RESTRICTED: isize = 1;
     const AV_DENIED: isize = 2;
@@ -306,14 +256,12 @@ mod macos {
 
     #[link(name = "AVFoundation", kind = "framework")]
     extern "C" {
-        // AVMediaType constants are NSString globals.
         static AVMediaTypeVideo: id;
         static AVMediaTypeAudio: id;
     }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
-        // true = the app already has Screen Recording permission.
         fn CGPreflightScreenCaptureAccess() -> bool;
     }
 
@@ -322,7 +270,6 @@ mod macos {
             unsafe { msg_send![class!(AVCaptureDevice), authorizationStatusForMediaType: media_type] };
         match status {
             AV_AUTHORIZED => PermissionState::Granted,
-            // Restricted (MDM/parental controls) is a denial from the user's POV.
             AV_DENIED | AV_RESTRICTED => PermissionState::Denied,
             AV_NOT_DETERMINED => PermissionState::NotDetermined,
             _ => PermissionState::NotDetermined,
@@ -345,7 +292,6 @@ mod macos {
         }
     }
 
-    /// Map a UI kind onto the `tccutil` service name.
     pub fn tcc_service(kind: &str) -> Option<&'static str> {
         match kind {
             "camera" => Some("Camera"),
@@ -355,8 +301,6 @@ mod macos {
         }
     }
 }
-
-// ── Windows backend ──────────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 mod windows {
@@ -369,9 +313,8 @@ mod windows {
     const CONSENT_BASE: &str =
         "Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore";
 
-    /// Read the privacy ConsentStore verdict for a device ("webcam"/"microphone").
-    /// NonPackaged (desktop) apps are governed by the NonPackaged subkey; fall
-    /// back to the device root for the global default.
+    /// ConsentStore verdict for "webcam"/"microphone": the NonPackaged
+    /// (desktop app) subkey, falling back to the device root default.
     pub fn consent_status(device: &str) -> PermissionState {
         let non_packaged = format!("{CONSENT_BASE}\\{device}\\NonPackaged");
         let root = format!("{CONSENT_BASE}\\{device}");
@@ -383,12 +326,10 @@ mod windows {
         }
     }
 
-    /// The `ms-settings:` privacy deep-link for a UI kind.
     pub fn ms_settings_url(kind: &str) -> Option<&'static str> {
         match kind {
             "camera" => Some("ms-settings:privacy-webcam"),
             "microphone" => Some("ms-settings:privacy-microphone"),
-            // No privacy page for screen capture.
             _ => None,
         }
     }

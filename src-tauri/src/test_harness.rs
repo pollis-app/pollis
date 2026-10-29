@@ -1,13 +1,6 @@
-//! Integration-test harness. Lets a test binary spin up N headless
-//! "clients", each backed by a real [`tauri::App`] running on the
-//! [`MockRuntime`], sharing a single test Turso database but isolated by
-//! per-client [`InMemoryKeystore`]s.
-//!
-//! Gated on `feature = "test-harness"` so production builds don't pay for
-//! this code.
-//!
-//! See `tests/flows.rs` for the orchestration layer (`TestWorld`,
-//! `TestClient`) and scenario tests.
+//! Integration-test harness: N headless clients, each a real [`tauri::App`]
+//! on [`MockRuntime`] with its own [`InMemoryKeystore`]. Orchestration lives
+//! in `tests/flows.rs`.
 
 use std::sync::Arc;
 
@@ -18,16 +11,9 @@ use tauri::{App, WebviewWindow, WebviewWindowBuilder};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// Build a headless tauri app that has the full production command surface
-/// registered and the given `AppState` managed. Each client in a multi-client
-/// test owns a distinct `App<MockRuntime>` and therefore a distinct `AppState`
-/// (distinct keystore, distinct `device_id`, distinct local DB handle). Since
-/// #987 they share no database handle at all — there is none to share: each
-/// reaches the same in-process Delivery Service over HTTP, exactly as a shipped
-/// client reaches the real one.
-///
-/// The returned `App` is NOT `run()` — tests drive commands directly via
-/// [`invoke`] / [`invoke_unit`].
+/// Build a headless app with the production command surface and `state`
+/// managed. Clients share no DB handle; each reaches the in-process DS over
+/// HTTP like a shipped client (#987). Not `run()`; drive it via [`invoke`].
 pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, WebviewWindow<MockRuntime>)> {
     let app = mock_builder()
         .invoke_handler(tauri::generate_handler![
@@ -109,10 +95,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::groups::delete_channel,
             crate::commands::groups::set_member_role,
             crate::commands::groups::search_group_by_slug,
-            // #917: the emoji LIST is members-only while the emoji RENDER path
-            // deliberately is not (#848). Both are registered here so the
-            // integration suite can hold that pair apart — the guard and the
-            // thing the guard must not break are only meaningful together.
+            // #917: the emoji list is members-only while the render path is
+            // not (#848); both registered so the suite can hold them apart.
             crate::commands::emoji::list_group_emoji,
             crate::commands::emoji::list_usable_emoji,
             crate::commands::emoji::get_emoji_url,
@@ -135,23 +119,18 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::bookmarks::resolve_message_permalink,
             crate::commands::export::export_archive,
             crate::commands::export::fetch_export_attachments,
-            // The other two commands that take a filesystem path off the IPC.
-            // Registered so `tests/flows/security.rs` can prove all four refuse
-            // a path the user never chose (`crate::pathscope`).
+            // Path-taking shims, so `tests/flows/security.rs` can prove all
+            // four refuse a path the user never chose.
             crate::commands::r2::upload_media,
             crate::commands::emoji::upload_group_emoji,
-            // The view / save half of the media path, for the vault soak suite
-            // (#1491, `tests/vault_soak.rs`), which drives a Vault file through
-            // upload, render, save and delete against real object storage.
+            // For the vault soak suite (#1491).
             crate::commands::r2::get_media_url,
             crate::commands::r2::save_media_to_path,
-            // Pinned messages (#99)
             crate::commands::pinned_messages::pin_message,
             crate::commands::pinned_messages::unpin_message,
             crate::commands::pinned_messages::list_pinned_messages,
-            // Attachment key ring probe (#1382)
+            // Attachment key ring probe (#1382).
             crate::commands::file_keys::test_file_key_version,
-            // Vault (#107)
             crate::commands::vault::get_vault_messages,
             crate::commands::vault::send_vault_message,
             crate::commands::vault::edit_vault_message,
@@ -160,15 +139,14 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::vault::search_vault_messages,
             crate::commands::messages::list_messages,
             crate::commands::messages::send_message,
-            // Durable outbox (#1335)
+            // Durable outbox (#1335).
             crate::commands::messages::new_message_id,
             crate::commands::messages::retry_message,
             crate::commands::messages::discard_unsent_message,
             crate::commands::messages::flush_outbox,
             crate::commands::messages::get_channel_messages,
             crate::commands::messages::get_dm_messages,
-            // The realtime-hint ingest the renderer fires on a `new_message`
-            // wake-up, so flows can drive exactly the live receive path.
+            // Realtime-hint ingest, so flows can drive the live receive path.
             crate::commands::messages::ingest_channel_envelopes,
             crate::commands::messages::ingest_dm_envelopes,
             crate::commands::messages::read_channel_messages,
@@ -197,9 +175,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::overlay::set_overlay_mode,
         ])
         .manage(state)
-        // Empty, exactly as a freshly-launched app is: the harness drives no
-        // file picker, so the four path-taking shims must refuse every path.
-        // `tests/flows/security.rs` asserts that.
+        // Empty, as at fresh launch: the harness drives no picker, so the
+        // path-taking shims must refuse every path.
         .manage(crate::pathscope::PathScope::default())
         .build(mock_context(noop_assets()))
         .map_err(|e| Error::Other(anyhow::anyhow!("build mock app: {e}")))?;
@@ -211,11 +188,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
     Ok((app, webview))
 }
 
-/// Dispatch an IPC message through the webview's command pipeline and
-/// deserialize the result. Runs on a blocking thread because
-/// [`tauri::test::get_ipc_response`] uses an `std::sync::mpsc` channel —
-/// inside a tokio runtime we hand it off to `spawn_blocking` so it can't
-/// starve the reactor.
+/// Dispatch an IPC message and deserialize the result. On `spawn_blocking`
+/// because [`tauri::test::get_ipc_response`] blocks on a std mpsc channel.
 pub async fn invoke<T>(
     webview: &WebviewWindow<MockRuntime>,
     cmd: &str,
@@ -264,47 +238,32 @@ pub async fn invoke_unit(
     cmd: &str,
     args: serde_json::Value,
 ) -> std::result::Result<(), String> {
-    // Unit commands return `null` in the JSON pipeline; deserialize through
-    // `serde_json::Value` first and ignore the value.
+    // Unit commands return `null`.
     let _: serde_json::Value = invoke(webview, cmd, args).await?;
     Ok(())
 }
-
-// ── Schema bootstrap ────────────────────────────────────────────────────────
-//
-// The test Turso instance starts empty. Apply the canonical baseline (which
-// captures the full current schema) on first run, and stamp
-// `schema_migrations` so the DB looks adopted.
 
 use pollis_core::db::{
     BASELINE_SQL as BASELINE, LOG_DB_SCHEMA, POST_BASELINE_LOG_MIGRATIONS, POST_BASELINE_MIGRATIONS,
 };
 
-/// The three MLS control-plane tables that live ONLY on the commit-log DB.
-/// They are created by the main-DB baseline (for old shipped clients), then
-/// dropped from the main test DB by [`drop_log_tables_from_main`] so that — as
-/// in #420 production — a stray main-side read/write of them fails loudly
-/// instead of silently succeeding on a shared file.
+/// MLS control-plane tables that live only on the commit-log DB. Dropped from
+/// the main test DB (as in production, #420) so a misrouted query fails loudly.
 pub const LOG_TABLES: [&str; 3] = ["mls_commit_log", "mls_welcome", "mls_group_info"];
 
-/// Apply the commit-log DB schema (the three MLS control-plane tables) to a
-/// genuinely separate libsql file. Idempotent (`CREATE TABLE IF NOT EXISTS`).
+/// Apply the commit-log DB schema to a separate libsql file. Idempotent.
 pub async fn bootstrap_log_schema(conn: &libsql::Connection) -> Result<()> {
     run_sql_script(conn, LOG_DB_SCHEMA, "log-db schema").await?;
-    // Post-baseline log-DB migrations (mirrors db-apply.sh's second apply). The
-    // log DB is fresh per test run and each migration is idempotent
-    // (CREATE ... IF NOT EXISTS + a dedupe DELETE that's a no-op on empty data),
-    // so applying them unconditionally matches the prod schema without gating.
+    // Fresh per run and each migration is idempotent, so apply unconditionally
+    // (mirrors db-apply.sh's second apply).
     for (_version, description, sql) in POST_BASELINE_LOG_MIGRATIONS {
         run_sql_script(conn, sql, &format!("log migration {description}")).await?;
     }
     Ok(())
 }
 
-/// Drop the three MLS control-plane tables from the MAIN test DB. The baseline
-/// creates them (they still ship in the main schema for old clients), but in
-/// the split-DB harness they must live ONLY on the log DB so a misrouted query
-/// — a `log_db` table read on the main connection — fails with "no such table".
+/// Drop [`LOG_TABLES`] from the main test DB so a misrouted query fails with
+/// "no such table".
 pub async fn drop_log_tables_from_main(conn: &libsql::Connection) -> Result<()> {
     for t in LOG_TABLES {
         conn.execute(&format!("DROP TABLE IF EXISTS {t}"), ())
@@ -314,11 +273,9 @@ pub async fn drop_log_tables_from_main(conn: &libsql::Connection) -> Result<()> 
     Ok(())
 }
 
-/// Apply the baseline schema to the shared test DB if it hasn't been applied
-/// yet. Idempotent: safe to call on every test run.
+/// Apply the baseline and post-baseline migrations if missing. Idempotent.
 pub async fn bootstrap_schema(conn: &libsql::Connection) -> Result<()> {
-    // `users` is created by the baseline and never dropped — use it as a
-    // marker for "baseline already applied."
+    // `users` is never dropped, so it marks "baseline applied".
     let has_baseline = conn
         .query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
@@ -353,8 +310,6 @@ pub async fn bootstrap_schema(conn: &libsql::Connection) -> Result<()> {
     .await
     .map_err(|e| Error::Other(anyhow::anyhow!("stamp baseline: {e}")))?;
 
-    // Apply post-baseline migrations the harness knows about. Each migration
-    // is gated on schema_migrations so reruns are no-ops.
     for (version, description, sql) in POST_BASELINE_MIGRATIONS {
         let already = conn
             .query(
@@ -385,11 +340,8 @@ pub async fn bootstrap_schema(conn: &libsql::Connection) -> Result<()> {
     Ok(())
 }
 
-/// Execute each statement in `sql`. Uses a small state machine to split on
-/// `;` correctly — the naive `str::split(';')` mis-handles `;` inside `--`
-/// comments ("R2 object; no per-user rows here.") and `;` inside string
-/// literals (`INSERT ... VALUES (9, 'a; b')`), both of which appear in our
-/// migrations.
+/// Execute each statement in `sql`, split by [`split_sql_statements`], which
+/// handles `;` inside `--` comments and string literals.
 async fn run_sql_script(conn: &libsql::Connection, sql: &str, label: &str) -> Result<()> {
     for stmt in split_sql_statements(sql) {
         conn.execute(&stmt, ())
@@ -406,13 +358,8 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 
     while let Some(c) = chars.next() {
         match c {
-            // `--` line comment: skip to end of line.
             '-' if chars.peek() == Some(&'-') => {
                 chars.next();
-                // `by_ref()` so the outer loop resumes from where this stops —
-                // the same semantics as the `while let` this replaces, which
-                // clippy rejects (`while_let_on_iterator`) under `-D warnings`
-                // whenever the crate is built with `test-harness`.
                 for next in chars.by_ref() {
                     if next == '\n' {
                         current.push('\n');
@@ -420,8 +367,7 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                     }
                 }
             }
-            // String literal: copy through the closing quote, honoring `''`
-            // escapes so embedded `;` stays part of the statement.
+            // String literal, honoring `''` escapes.
             '\'' => {
                 current.push(c);
                 while let Some(inner) = chars.next() {
@@ -436,10 +382,8 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                 }
             }
             ';' => {
-                // A `CREATE TRIGGER` body carries its own statement-terminating
-                // `;` (`BEGIN <stmt>; END`). Those inner `;` are NOT statement
-                // boundaries — the trigger ends only at the `;` after its `END`.
-                // Keep accumulating until the trimmed text ends with `END`.
+                // A trigger body's inner `;` (`BEGIN <stmt>; END`) are not
+                // boundaries; it ends at the `;` after `END`.
                 let upper = current.trim().to_ascii_uppercase();
                 if upper.starts_with("CREATE TRIGGER") && !upper.ends_with("END") {
                     current.push(c);
@@ -462,24 +406,11 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
-/// Reset every row in the shared test-Turso database so the next test starts
-/// from a blank slate. Preserves the `schema_migrations` table so the DB
-/// doesn't look un-migrated after a wipe.
-///
-/// The order matters: child tables come before parent tables so FK cascades
-/// don't fire redundantly, and we rely on CASCADE rather than a transaction.
-///
-/// Takes bare connections since #987: the harness's "remote" is a local libsql
-/// file owned by the in-process DS, so the reconnect-on-transient-error dance
-/// this used to do — a defence against Turso tearing an idle TCP connection
-/// down mid-run — has nothing left to defend against.
+/// Delete every row in the remote test DBs, keeping `schema_migrations`.
+/// Child tables first; relies on CASCADE rather than a transaction.
 pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) -> Result<()> {
-    // MAIN DB: tables that reference others first, then roots. The list covers
-    // the base schema + every table added by migrations 000001–000015. The
-    // three MLS control-plane tables (`mls_commit_log`, `mls_welcome`,
-    // `mls_group_info`) are deliberately ABSENT — they live only on the log DB
-    // now (dropped from main by `drop_log_tables_from_main`), so a DELETE here
-    // would itself be a "no such table" failure. They're wiped on `log` below.
+    // Children before roots. [`LOG_TABLES`] are absent: they exist only on the
+    // log DB.
     let main_tables = [
         "message_reaction",
         "group_invite",
@@ -495,8 +426,6 @@ pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) 
         "security_event",
         "account_recovery",
         "user_device",
-        // Pinned messages (#99) + vault (#107): refs before the rows they
-        // hang off, ciphertext tables before their conversations/users.
         "pinned_message",
         "pin_keystate",
         "vault_attachment_ref",
@@ -509,16 +438,12 @@ pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) 
     ];
     wipe_tables(remote, &main_tables).await?;
 
-    // LOG DB: the three MLS control-plane tables live here and ONLY here, plus
-    // the per-device retention high-water (`mls_commit_since`, #539).
     wipe_tables(log, &LOG_TABLES).await?;
     wipe_tables(log, &["mls_commit_since"]).await?;
 
     Ok(())
 }
 
-/// DELETE every row from `tables` on `conn`. Shared by the main- and log-DB
-/// wipes.
 async fn wipe_tables(conn: &libsql::Connection, tables: &[&str]) -> Result<()> {
     for t in tables {
         conn.execute(&format!("DELETE FROM {t}"), ())

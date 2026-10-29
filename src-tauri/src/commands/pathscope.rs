@@ -1,16 +1,7 @@
-//! The renderer's only route to a file dialog.
-//!
-//! `plugin:dialog|open` and `plugin:dialog|save` used to be reachable straight
-//! from the webview (`dialog:default` in `capabilities/default.json`). They are
-//! not any more, and these two commands replace them: they drive the SAME
-//! `tauri-plugin-dialog` picker, but from Rust, so the chosen path is recorded
-//! in [`PathScope`] before it is handed to the renderer. That ordering is the
-//! whole point — see `crate::pathscope` for why a "register this path for me"
-//! command would have been worthless.
-//!
-//! The argument and return shapes match the plugin's own commands so
-//! `frontend/src/bridge/dialog.ts` keeps the signature its call sites already
-//! use.
+//! The renderer's only route to a file dialog: the `tauri-plugin-dialog`
+//! picker driven from Rust, so the chosen path is recorded in [`PathScope`]
+//! before the renderer sees it. Shapes match the plugin's own commands so
+//! `frontend/src/bridge/dialog.ts` keeps its signature.
 
 use std::path::PathBuf;
 
@@ -50,11 +41,7 @@ pub struct SaveDialogOptions {
     pub filters: Vec<DialogFilter>,
 }
 
-/// Everything the renderer picked, plus the grant it now holds.
-///
-/// Recording happens here rather than in the caller so there is exactly one
-/// place a picker result becomes an allowed path, and it is the place that
-/// produced it.
+/// The one place a picker result becomes an allowed path.
 fn grant<R: tauri::Runtime>(app: &AppHandle<R>, path: &PathBuf, directory: bool) {
     let scope = app.state::<PathScope>();
     if directory {
@@ -62,10 +49,8 @@ fn grant<R: tauri::Runtime>(app: &AppHandle<R>, path: &PathBuf, directory: bool)
     } else {
         scope.remember_file(path);
     }
-    // The fs plugin keeps its own runtime allowlist, and `plugin:dialog|open`
-    // used to extend it on our behalf. It no longer runs, so the read the
-    // renderer does next (an image preview via `readFile`) needs the grant
-    // made here instead.
+    // The fs plugin keeps its own allowlist; the renderer's next read (an
+    // image preview via `readFile`) needs it.
     if let Some(fs) = app.try_fs_scope() {
         let _ = if directory {
             fs.allow_directory(path, true)
@@ -82,12 +67,8 @@ fn into_paths(picked: Vec<FilePath>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Open the OS file/folder picker. Returns the chosen absolute paths, or an
-/// empty vec if the user cancelled.
-///
-/// Always a list, even for a single pick: the renderer's `dialogOpen` already
-/// normalizes `string | string[] | null`, and one shape here means one code
-/// path recording the grants.
+/// Open the OS file/folder picker. Returns the chosen paths (empty on cancel);
+/// always a list so one code path records the grants.
 #[tauri::command]
 pub async fn pick_open_paths<R: tauri::Runtime>(
     app: AppHandle<R>,
@@ -105,9 +86,8 @@ pub async fn pick_open_paths<R: tauri::Runtime>(
         builder = builder.add_filter(&filter.name, &extensions);
     }
 
-    // The callback form, not `blocking_*`: the blocking helpers deadlock when
-    // they land on the main thread, and a tauri command has no say in which
-    // thread it runs on.
+    // Callback form, not `blocking_*`: those deadlock on the main thread, and
+    // a command can't choose its thread.
     let (tx, rx) = tokio::sync::oneshot::channel();
     match (options.directory, options.multiple) {
         (true, true) => builder.pick_folders(move |r| {
@@ -135,8 +115,7 @@ pub async fn pick_open_paths<R: tauri::Runtime>(
         .collect())
 }
 
-/// Open the OS save panel. Returns the chosen absolute path, or `None` on
-/// cancel.
+/// Open the OS save panel. `None` on cancel.
 #[tauri::command]
 pub async fn pick_save_path<R: tauri::Runtime>(
     app: AppHandle<R>,
@@ -148,8 +127,8 @@ pub async fn pick_save_path<R: tauri::Runtime>(
     }
     if let Some(default_path) = &options.default_path {
         let path = std::path::Path::new(default_path);
-        // Tauri's own save command splits a `defaultPath` the same way: a bare
-        // file name seeds the field, a full path also seeds the directory.
+        // Same split as Tauri's own save command: the name seeds the field,
+        // the parent seeds the directory.
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             builder = builder.set_file_name(name);
         }
