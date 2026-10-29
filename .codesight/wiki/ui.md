@@ -673,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**167 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**169 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -786,12 +786,13 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ResultThumbnails** — `frontend/src/components/Search/ResultThumbnails.tsx`
 - **SearchView** — props: onOpenResult, onOpenRetentionSettings, initialQuery — `frontend/src/components/Search/SearchView.tsx`
 
-### `components/Security` (4)
+### `components/Security` (5)
 
 - **AccountKeyAuditLine** — props: status, detail, testId — `frontend/src/components/Security/AccountKeyAuditLine.tsx`
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **ExportArchiveButton** — `frontend/src/components/Security/ExportArchiveButton.tsx`
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
+- **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 
 ### `components/ui` (30)
 
@@ -842,7 +843,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (52)
+### `pages` (53)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -886,7 +887,8 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SavedPage** — `frontend/src/pages/SavedPage.tsx`
 - **SearchGroupPage** — `frontend/src/pages/SearchGroupPage.tsx`
 - **SearchPage** — `frontend/src/pages/Search.tsx`
-- **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`. Also carries the **Terminal** switch: the in-app terminal pane spawns the user's login shell, so it ships OFF and this is where it is turned on. The switch only writes the preference — the authority is Rust's device-local `device-settings.json` (`pollis-core/src/commands/terminal_gate.rs`), which `terminal_open` reads on every call, so a renderer that never touched this page still cannot start a shell. Absent or unparseable file reads as off. Desktop only — mobile has no terminal pane.
+- **SecurityEventsPage** — `frontend/src/pages/SecurityEventsPage.tsx`, route `/security/events` (#1548). The whole security-event log: keyset pages via `useSecurityEventPages` (`hooks/queries/useSecurityEvents.ts`), the next one fetched when the sentinel under the list nears the viewport (or its "Load older events" button), and All / Devices / Identity & keys / Account filter buttons (`aria-pressed`); while a new filter's first page is in flight the old rows stay, dimmed, `data-stale="true"`. Rows are `components/Security/SecurityEventRow`. Mobile twin: `mobile/app/self/security-events.tsx` (a `FlatList` with `onEndReached`, `Chip` filters).
+- **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`. Shows only the newest three security events (`useSecurityEventsPreview`, asks the DS for three) and a "View all" button to **SecurityEventsPage** (#1548); mobile's `self/security` does the same with a `row-security-events-all` row. Also carries the **Terminal** switch: the in-app terminal pane spawns the user's login shell, so it ships OFF and this is where it is turned on. The switch only writes the preference — the authority is Rust's device-local `device-settings.json` (`pollis-core/src/commands/terminal_gate.rs`), which `terminal_open` reads on every call, so a renderer that never touched this page still cannot start a shell. Absent or unparseable file reads as off. Desktop only — mobile has no terminal pane.
 - **SettingsHubPage** — `frontend/src/pages/SettingsHub.tsx`
 - **SettingsPage** — `frontend/src/pages/SettingsPage.tsx`
 - **StartDM** — props: onSuccess — `frontend/src/pages/StartDM.tsx`

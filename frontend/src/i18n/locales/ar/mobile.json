@@ -396,6 +396,7 @@
       "preferencesSub": "السمة، الكثافة، السلوك",
       "savedSub": "الرسائل المحفوظة",
       "securitySub": "المفاتيح، الأجهزة، تسجيل الخروج",
+      "securityEventsSub": "الأجهزة والمفاتيح وتغييرات الحساب",
       "signingOut": "جارٍ تسجيل الخروج…",
       "userSettingsSub": "اسم العرض، اسم المستخدم، البريد الإلكتروني",
       "customAccent": "مخصص",
@@ -489,7 +490,6 @@
       "reject": "رفض",
       "rejectA11y": "رفض التسجيل",
       "safetyHeading": "السلامة",
-      "showOlderA11y": "عرض الأحداث الأقدم",
       "thisDevice": "{{name}} · هذا الجهاز",
       "blockedUsers": "المستخدمون المحظورون"
     },

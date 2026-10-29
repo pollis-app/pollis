@@ -20,7 +20,6 @@ import { ChoiceChip } from "../../components/self/ChoiceChip";
 import { confirmSignOut } from "../../components/self/confirmSignOut";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
-import i18n, { activeLocale } from "../../i18n";
 import {
   useUserDevices,
   useRevokeDevice,
@@ -28,9 +27,10 @@ import {
   usePendingEnrollmentRequests,
   useApproveEnrollment,
   useRejectEnrollment,
-  useSecurityEvents,
-  type SecurityEvent,
+  useSecurityEventsPreview,
 } from "../../hooks/queries";
+import { SecurityEventRow } from "../../components/self/SecurityEventRow";
+import { formatRelative } from "../../lib/relativeTime";
 import {
   AUTO_LOCK_OPTIONS_MINUTES,
   autoLockLabel,
@@ -41,160 +41,6 @@ import { ExportArchive } from "../../components/ExportArchive";
 import { SAS_LENGTH, normalizeSasInput } from "../../lib/enrollmentSas";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
-
-function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) {
-    return iso;
-  }
-  const diffMs = Date.now() - d.getTime();
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) {
-    return i18n.t("mobile:self.security.justNow");
-  }
-  const min = Math.floor(sec / 60);
-  if (min < 60) {
-    return i18n.t("mobile:self.security.minutesAgo", { count: min });
-  }
-  const hr = Math.floor(min / 60);
-  if (hr < 48) {
-    return i18n.t("mobile:self.security.hoursAgo", { count: hr });
-  }
-  const day = Math.floor(hr / 24);
-  if (day < 30) {
-    return i18n.t("mobile:self.security.daysAgo", { count: day });
-  }
-  return d.toLocaleDateString(activeLocale(), {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function shortId(id: string): string {
-  if (id.length <= 10) {
-    return id;
-  }
-  return `${id.slice(0, 6)}…${id.slice(-4)}`;
-}
-
-// The two addresses in an `email_changed` row's metadata, or null when the row
-// does not carry the expected JSON object. Never throws — the metadata column
-// is free-form, and a row from another build must render with vaguer copy
-// rather than crash the screen.
-function parseEmailChangeMetadata(
-  metadata: string | null | undefined,
-): { from: string; to: string } | null {
-  if (!metadata) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(metadata);
-    if (parsed && typeof parsed === "object") {
-      const { from, to } = parsed as { from?: unknown; to?: unknown };
-      if (typeof from === "string" && typeof to === "string") {
-        return { from, to };
-      }
-    }
-  } catch {
-    // Not JSON. Fall through to the unknown-shape copy.
-  }
-  return null;
-}
-
-// Human-readable summary per `security_event.kind` — mirrors desktop's
-// SecurityPage `describe()`. Unknown kinds fall through to the raw string so
-// new event types are never silently dropped.
-function describeEvent(event: SecurityEvent): {
-  heading: string;
-  detail: string;
-} {
-  switch (event.kind) {
-    case "device_enrolled":
-      return {
-        heading: i18n.t("settings:security.eventDeviceEnrolledHeading"),
-        detail: event.device_id
-          ? i18n.t("settings:security.eventDeviceEnrolledDetail", {
-              device: shortId(event.device_id),
-            })
-          : i18n.t("settings:security.eventDeviceEnrolledDetailUnknown"),
-      };
-    case "device_rejected":
-      return {
-        heading: i18n.t("settings:security.eventDeviceRejectedHeading"),
-        detail: event.device_id
-          ? i18n.t("settings:security.eventDeviceRejectedDetail", {
-              device: shortId(event.device_id),
-            })
-          : i18n.t("settings:security.eventDeviceRejectedDetailUnknown"),
-      };
-    case "device_revoked": {
-      if (!event.device_id) {
-        return {
-          heading: i18n.t("settings:security.eventDeviceRevokedHeading"),
-          detail: i18n.t("settings:security.eventDeviceRevokedDetailUnknown"),
-        };
-      }
-      // `name=<device name>` when the revoked row carried one (#947). This
-      // event is the last place the revoked device's name is readable — the
-      // device row itself is deleted on revoke.
-      const name = event.metadata?.startsWith("name=")
-        ? event.metadata.slice("name=".length)
-        : null;
-      return {
-        heading: i18n.t("settings:security.eventDeviceRevokedHeading"),
-        detail: name
-          ? i18n.t("settings:security.eventDeviceRevokedDetailNamed", {
-              name,
-              device: shortId(event.device_id),
-            })
-          : i18n.t("settings:security.eventDeviceRevokedDetail", {
-              device: shortId(event.device_id),
-            }),
-      };
-    }
-    case "identity_reset":
-      return {
-        heading: i18n.t("settings:security.eventIdentityResetHeading"),
-        detail: i18n.t("settings:security.eventIdentityResetDetail"),
-      };
-    case "identity_rotated":
-      // DS-authored, inside the rotation transaction. `credential=session` is
-      // the pre-enrollment soft reset (email code only — the DS also wiped
-      // memberships and other devices); `credential=signature` is a rotation
-      // from an enrolled device.
-      return {
-        heading: i18n.t("settings:security.eventIdentityRotatedHeading"),
-        detail: event.metadata?.includes("credential=session")
-          ? i18n.t("settings:security.eventIdentityRotatedDetailSession")
-          : i18n.t("settings:security.eventIdentityRotatedDetailSignature"),
-      };
-    case "secret_key_rotated":
-      return {
-        heading: i18n.t("settings:security.eventSecretKeyRotatedHeading"),
-        detail: i18n.t("settings:security.eventSecretKeyRotatedDetail"),
-      };
-    case "email_changed": {
-      // DS-authored as part of the change (#1161), so a client cannot suppress
-      // it by omitting a call. Metadata is `{"from":"…","to":"…"}`.
-      const addresses = parseEmailChangeMetadata(event.metadata);
-      return {
-        heading: i18n.t("settings:security.eventEmailChangedHeading"),
-        detail: addresses
-          ? i18n.t("settings:security.eventEmailChangedDetail", addresses)
-          : i18n.t("settings:security.eventEmailChangedDetailUnknown"),
-      };
-    }
-    default:
-      return {
-        heading: event.kind,
-        detail: event.metadata ?? "",
-      };
-  }
-}
-
-// How many events to render before "Show older events" — the fetch is capped
-// at 100 newest-first in the hook, so this is a display slice, not a query.
-const SECURITY_EVENTS_PAGE_SIZE = 20;
 
 export default function Security() {
   useThemeRerender();
@@ -221,8 +67,11 @@ export default function Security() {
   const { fontScale } = useWindowDimensions();
   const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
-  const { data: events = [], isError: eventsError } = useSecurityEvents();
-  const [visibleEvents, setVisibleEvents] = useState(SECURITY_EVENTS_PAGE_SIZE);
+  const {
+    data: events = [],
+    isError: eventsError,
+    isPending: eventsLoading,
+  } = useSecurityEventsPreview();
 
   const onRevoke = (deviceId: string) => {
     if (confirmRevoke !== deviceId) {
@@ -398,50 +247,23 @@ export default function Security() {
         {/* ── Part 2: what has happened to the account ── */}
         <View style={sectionGap} onLayout={sectionLayout("events")}>
           <Group title={t("security.eventsHeading")}>
-            {events.slice(0, visibleEvents).map((ev) => {
-              const { heading, detail } = describeEvent(ev);
-              const when = formatRelative(ev.created_at);
-              return (
-                <View
-                  key={ev.id}
-                  testID={`row-security-event-${ev.id}`}
-                  accessible
-                  accessibilityLabel={[heading, when, detail].filter(Boolean).join(", ")}
-                  style={{
-                    paddingHorizontal: space.xxl,
-                    paddingVertical: space.md,
-                    gap: 2,
-                    minHeight: 52,
-                    justifyContent: "center",
-                  }}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: space.sm }}>
-                    <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 16, color: semantic.text }}>
-                      {heading}
-                    </Text>
-                    <Text style={ty.meta}>{when}</Text>
-                  </View>
-                  {detail ? <Text style={ty.secondary}>{detail}</Text> : null}
-                </View>
-              );
-            })}
+            {/* Only the newest few (#1548): the DS is asked for exactly that
+                many, and the whole log is its own screen. */}
+            {events.map((ev) => (
+              <SecurityEventRow key={ev.id} event={ev} />
+            ))}
+            {events.length > 0 ? (
+              <ListRow
+                testID="row-security-events-all"
+                name={t("security.eventsViewAll")}
+                chevron
+                onPress={() => router.push("/self/security-events")}
+              />
+            ) : null}
           </Group>
           {eventsError ? <ErrorText>{t("security.eventsLoadFailed")}</ErrorText> : null}
-          {!eventsError && events.length === 0 ? (
+          {!eventsError && !eventsLoading && events.length === 0 ? (
             <Note>{t("mobile:self.security.eventsEmpty")}</Note>
-          ) : null}
-          {events.length > visibleEvents ? (
-            <View style={{ alignItems: "flex-start" }}>
-              <Button
-                testID="btn-show-older-events"
-                accessibilityLabel={t("mobile:self.security.showOlderA11y")}
-                onPress={() => setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)}
-              >
-                {t("security.eventsShowOlder", {
-                  count: events.length - visibleEvents,
-                })}
-              </Button>
-            </View>
           ) : null}
         </View>
 

@@ -159,6 +159,14 @@ export default function Search() {
         s: t("mobile:self.hub.securitySub"),
         to: "/self/security" as const,
       },
+      // The full security-event log (#1548), desktop's /security/events.
+      {
+        id: "security-events",
+        n: t("search:pages.securityEventsName"),
+        s: t("mobile:self.hub.securityEventsSub"),
+        k: t("search:pages.securityEventsKeywords"),
+        to: "/self/security-events" as const,
+      },
       {
         id: "saved",
         n: t("saved:page.title"),

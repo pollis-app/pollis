@@ -131,6 +131,10 @@ function useBreadcrumbTrail(): Segment[] {
     } else if (pathname === "/security") {
       out.push({ label: t("breadcrumb.account"), to: "/settings" });
       out.push({ label: t("breadcrumb.security"), to: "/security" });
+    } else if (pathname === "/security/events") {
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.security"), to: "/security" });
+      out.push({ label: t("breadcrumb.securityEvents"), to: "/security/events" });
     } else if (pathname === "/voice-settings") {
       out.push({ label: t("breadcrumb.account"), to: "/settings" });
       out.push({ label: t("breadcrumb.voiceSettings"), to: "/voice-settings" });

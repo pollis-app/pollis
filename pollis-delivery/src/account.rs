@@ -372,12 +372,15 @@ const SECURITY_EVENT_WINDOW_SECS: i64 = 3600;
 /// Client-reported security events one account may append per
 /// [`SECURITY_EVENT_WINDOW_SECS`].
 ///
-/// `/v1/read/security-events` serves `ORDER BY created_at DESC LIMIT n` with `n`
-/// clamped to 500 and no cursor, so the audit log is a FIXED-SIZE WINDOW onto the
-/// newest rows. Appending is otherwise unbounded, which makes eviction an
-/// available move: a device that has just done something the log records can bury
-/// it under hundreds of rows of its own and the user, reading their own log, sees
-/// only the flood. Evidence that a caller can push out of view is not evidence.
+/// `/v1/read/security-events` was `ORDER BY created_at DESC LIMIT n` with `n`
+/// clamped to 500 and no cursor, so the audit log was a FIXED-SIZE WINDOW onto the
+/// newest rows. It now pages by keyset cursor (#1548), but a human still reads
+/// newest-first and stops scrolling long before the bottom, and the Security
+/// page shows only the latest three. Appending is otherwise unbounded, which makes
+/// burial an available move: a device that has just done something the log
+/// records can bury it under hundreds of rows of its own and the user, reading
+/// their own log, sees only the flood. Evidence that a caller can push out of view
+/// is not evidence.
 ///
 /// Sixty an hour is far above what a client produces — the shipped events are
 /// enrollment approvals, identity rotations and key changes, a handful a week —

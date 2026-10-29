@@ -351,6 +351,7 @@
       "preferencesSub": "主题、密度、行为",
       "savedSub": "收藏的消息",
       "securitySub": "密钥、设备、退出登录",
+      "securityEventsSub": "设备、密钥和账户变更",
       "signingOut": "正在退出登录…",
       "userSettingsSub": "显示名称、用户名、邮箱",
       "customAccent": "自定义",
@@ -424,7 +425,6 @@
       "reject": "拒绝",
       "rejectA11y": "拒绝设备注册",
       "safetyHeading": "安全",
-      "showOlderA11y": "显示更早的事件",
       "thisDevice": "{{name}} · 此设备",
       "blockedUsers": "已屏蔽的用户"
     },

@@ -21,6 +21,8 @@
     "voiceKeywords": "мікрофон динамік звук аудіо шумозаглушення відлуння луна камера вебкамера відео перегляд дозволи voice audio mic camera video",
     "securityName": "Безпека",
     "securityKeywords": "журнал подій пристрої ключ ідентичності зміна ключа камера мікрофон екран дозвіл дозволи відкликати приватність доступ security devices key permissions",
+    "securityEventsName": "Події безпеки",
+    "securityEventsKeywords": "події безпеки журнал аудит історія пристрої додано відкликано відхилено особа секретний ключ відновлення пошта змінено",
     "shortcutsName": "Комбінації клавіш",
     "shortcutsKeywords": "комбінації клавіші клавіатура гарячі клавіші прив'язки cmd ctrl shortcuts keybindings",
     "updateName": "Оновлення програми",

@@ -88,8 +88,10 @@ disabled until armed) — assert the disabled state only; never run the actual
 deletion against a shared seed account. It also covers auto-lock (#899):
 select a window via `chip-autolock-1`, tap `row-lock-now`, assert the PIN
 unlock screen appears, unlock with the fixed PIN, and assert the app restores
-to Security. The screen further surfaces the security-event audit list
-(`row-security-event-*`, `btn-show-older-events`).
+to Security. The screen further surfaces the newest three security events
+(`row-security-event-*`) and `row-security-events-all`, which opens the paged,
+filterable log (`self/security-events`, covered by the `security-events` flow,
+#1548).
 
 Chat-parity additions (2026-08 stack) extend the `messaging` flow family:
 load-older paging, reaction pills + emoji picker (incl. custom group emoji +

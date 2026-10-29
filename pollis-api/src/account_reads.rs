@@ -392,7 +392,12 @@ pub struct AccountProbeResponse {
 
 // ── POST /v1/read/security-events ────────────────────────────────────────────
 
-/// The caller's own security-event log, most recent first.
+/// The caller's own security-event log, most recent first, one keyset page at a
+/// time (#1548).
+///
+/// `before` and `kinds` are optional and skipped when unset, so a body without
+/// them is byte-identical to the pre-#1548 body and gets the pre-#1548 answer:
+/// the newest `limit` rows of every kind.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityEventsBody {
     #[serde(default)]
@@ -401,11 +406,37 @@ pub struct SecurityEventsBody {
     /// so a body cannot ask for the whole table.
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Return only rows strictly older than this `(created_at, id)` — the
+    /// previous page's `next_cursor`. `None` = start at the newest row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<SecurityEventCursor>,
+    /// Return only these `kind`s. `None` or empty = every kind. At most
+    /// [`SECURITY_EVENTS_MAX_KINDS`]; a longer list is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kinds: Option<Vec<String>>,
+}
+
+/// The most `kinds` one [`SecurityEventsBody`] may name. Far above the handful
+/// of kinds that exist; it bounds the bound-parameter count, nothing else.
+pub const SECURITY_EVENTS_MAX_KINDS: usize = 32;
+
+/// A keyset position in the security-event log: the `(created_at, id)` of the
+/// last row a page returned. `id` is the tiebreak, so rows written in the same
+/// second are each served exactly once across a page boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecurityEventCursor {
+    pub created_at: String,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityEventsResponse {
     pub events: Vec<SecurityEventRow>,
+    /// Where the next page starts, or `None` when this page reached the oldest
+    /// matching row. Omitted from the JSON when `None`; a pre-#1548 client
+    /// ignores it either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<SecurityEventCursor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

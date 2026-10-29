@@ -684,9 +684,10 @@ async fn b_cannot_write_or_read_as_security_events() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// **L3 — flooding evicts evidence.** `/v1/read/security-events` is
+/// **L3 — flooding evicts evidence.** `/v1/read/security-events` was
 /// `ORDER BY created_at DESC LIMIT n` with `n` clamped to 500 and no cursor, so
-/// the log is a fixed-size window onto the newest rows. Appending was unbounded,
+/// the log was a fixed-size window onto the newest rows (it pages by cursor since
+/// #1548, but a flood still buries evidence below the fold). Appending was unbounded,
 /// which made eviction an available move for a device that had just done
 /// something the log records. The append is now budgeted per account per hour.
 #[tokio::test(flavor = "multi_thread")]

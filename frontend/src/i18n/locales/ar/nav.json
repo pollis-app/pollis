@@ -17,7 +17,8 @@
     "dmAvatarAlt": "الصورة الرمزية لـ {{name}}",
     "close": "إغلاق الشريط الجانبي ({{shortcut}})",
     "resize": "تغيير عرض الشريط الجانبي (اسحب؛ نقر مزدوج لإعادة الضبط)",
-    "vault": "الخزنة"
+    "vault": "الخزنة",
+    "securityEvents": "أحداث الأمان"
   },
   "profile": {
     "you": "أنت",
@@ -56,7 +57,8 @@
     "joinAGroup": "الانضمام إلى مجموعة",
     "search": "بحث",
     "searchButton": "بحث ({{shortcut}})",
-    "settings": "الإعدادات"
+    "settings": "الإعدادات",
+    "securityEvents": "أحداث الأمان"
   },
   "statusBar": {
     "groupsUnread_zero": "رسائل المجموعات غير المقروءة: {{count}}",
