@@ -89,6 +89,7 @@ fn the_join_path_does_not_await_a_ds_read_per_participant() {
         let trimmed = line.trim();
 
         if in_participant_loop && trimmed.contains(".await") {
+            // `ds_` is the DS client; `lookup_` goes through it.
             if trimmed.contains("ds_") || trimmed.contains("lookup_") {
                 offenders.push(trimmed.to_string());
             }
