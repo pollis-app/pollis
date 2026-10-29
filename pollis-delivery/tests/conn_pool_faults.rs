@@ -18,8 +18,13 @@ use pollis_delivery::error::{is_transient_db_error, AppError};
 mod hrana_double;
 use hrana_double::{remote_db, start_double};
 
+/// The fault counter is process-wide, so the tests in this binary must not
+/// overlap: one test's fault would discard the other's checked-out connection.
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn a_connection_whose_stream_died_is_not_parked_again() {
+    let _serial = SERIAL.lock().await;
     let (double, url) = start_double().await;
     let db = remote_db(&url).await;
 
@@ -59,6 +64,7 @@ async fn a_connection_whose_stream_died_is_not_parked_again() {
 /// released before it is reused as normal.
 #[tokio::test]
 async fn a_connection_released_before_a_fault_is_still_reused() {
+    let _serial = SERIAL.lock().await;
     let (double, url) = start_double().await;
     let db = remote_db(&url).await;
 
