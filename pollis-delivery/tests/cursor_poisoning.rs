@@ -1,30 +1,4 @@
-//! Delivery-cursor poisoning. Drives the real `pollis_delivery` write handlers
-//! against a local libsql DB, exactly as the DS runs them in production.
-//!
-//! `message_envelope.sent_at` and `conversation_watermark.last_fetched_at` are
-//! the delivery cursor: ingest fetches `sent_at > last_fetched_at`, the
-//! watermark is monotone and never rewinds, and envelope GC deletes
-//! `sent_at < MIN(last_fetched_at)`. Both values are chosen by the CLIENT, and
-//! until the bound these tests pin the DS stored them verbatim. Two attacks
-//! followed:
-//!
-//!   * **A member posts `sent_at = "9999-…"`.** Every recipient fetches it (it
-//!     sorts above every cursor), reports a cursor of `9999-…`, and from then on
-//!     receives nothing in that conversation — and once every live device has
-//!     reported, the next GC sweep deletes every envelope, fetched or not.
-//!   * **A non-member forges a watermark.** `advance_watermark` had no
-//!     membership check and took `device_id` from the body. GC joins the real
-//!     roster and ignored the row, but the tombstone floor did not: the next
-//!     admin delete was stamped `9999-…000000001`, every device that applied it
-//!     adopted that as its cursor, and the same blackout + GC followed —
-//!     triggered from OUTSIDE the conversation.
-//!
-//! Neither is one of the three losses `CLAUDE.md` permits. The fix is one
-//! admission rule at the chokepoint (`check_cursor_stamp`: canonical UTC
-//! RFC 3339, no further ahead of the DS clock than the signature window), a
-//! membership + signing-device gate on `advance_watermark`, and a floor that
-//! reads only the member-device roster. Each test here fails against the
-//! pre-fix code.
+//! Delivery-cursor poisoning, against the real write handlers and a local libsql DB.
 
 use pollis_delivery::db::Db;
 use pollis_delivery::messages::{
@@ -34,29 +8,22 @@ use pollis_delivery::messages::{
 };
 use pollis_delivery::writes::WriteOutcome;
 
-/// A capability hash whose preimage is known (#1135): every new envelope must
-/// carry one, and a fixture that later edits or deletes the row needs the token.
-/// `base64(SHA-256("fixture-capability"))`.
+/// A capability hash with known preimage (#1135): `base64(SHA-256("fixture-capability"))`.
 const FIXTURE_CAPABILITY_HASH: &str = "MB8lyVjsEQamFuSzLTRZBVKGFQQ8nXoBjHFF7kvNuAo=";
-/// The preimage of [`FIXTURE_CAPABILITY_HASH`].
 const FIXTURE_CAPABILITY_TOKEN: &str = "fixture-capability";
 
 mod common;
 
 const POISON: &str = "9999-12-31T23:59:59.000000000+00:00";
 
-/// A staleness window wide enough that nothing here is excluded for dormancy —
-/// these tests are about the cursor value, not device liveness (#720).
-/// The DS's own default (12 months, #1486), so the suite runs the window an
-/// unconfigured deployment gets.
+/// The DS default window (#1486): nothing here is excluded for dormancy.
 const STALE: &str = pollis_delivery::messages::DEFAULT_WATERMARK_STALE_MODIFIER;
 
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
     pollis_schema::apply::single_db(&conn).await.expect("schema");
-    // Channel `c1` of group `g1`: alice (admin, device a1) and bob (device b1).
-    // mallory has an account and a device but is NOT a member.
+    // Channel `c1` of group `g1`: alice (a1) and bob (b1); mallory is not a member.
     conn.execute_batch(
         "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
          INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');
@@ -71,7 +38,6 @@ async fn fresh() -> common::TempDb {
     db
 }
 
-/// A client stamp `minutes` from the DS's now (negative = past).
 fn client_stamp(minutes: i64) -> String {
     (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
 }
@@ -103,8 +69,7 @@ fn edit(envelope_id: &str, target: &str, sent_at: &str) -> EditMessageBody {
         sent_at: sent_at.to_string(),
         generation: None,
         epoch: None,
-        // The target carries a capability (#1135), and an edit replaces its
-        // pending edit — a delete — so the token has to be presented.
+        // The target has a capability (#1135), so the token must be presented.
         delete_token: Some(FIXTURE_CAPABILITY_TOKEN.to_string()),
     }
 }
@@ -151,7 +116,6 @@ async fn envelope_ids(db: &Db) -> Vec<String> {
     out
 }
 
-/// `(user_id, device_id, last_fetched_at)` for every watermark row of `c1`.
 async fn watermark_rows(db: &Db) -> Vec<(String, String, String)> {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -177,12 +141,7 @@ fn is_invalid(outcome: &WriteOutcome) -> bool {
     matches!(outcome, WriteOutcome::Invalid(_))
 }
 
-// ── (1) a far-future `sent_at` is refused, on send and on edit ───────────────
-
-/// **The `sent_at` poisoning regression test.** bob (a member, authenticated)
-/// posts an otherwise well-formed envelope stamped in year 9999. It must not be
-/// stored: stored, it is the cursor every recipient adopts, after which
-/// `sent_at > cursor` matches nothing for them ever again.
+/// A far-future `sent_at` must not be stored: every recipient would adopt it as cursor.
 #[tokio::test]
 async fn a_member_cannot_store_an_envelope_stamped_in_the_far_future() {
     let db = fresh().await;
@@ -197,8 +156,7 @@ async fn a_member_cannot_store_an_envelope_stamped_in_the_far_future() {
         "nothing may be stored for a refused send"
     );
 
-    // The same value one skew-window past now is refused too — the bound is the
-    // signature window, not "this millennium".
+    // The bound is the signature window, not "this millennium".
     let just_past = (chrono::Utc::now() + chrono::Duration::seconds(CURSOR_STAMP_SKEW_SECS + 60))
         .to_rfc3339();
     let out = apply_send_message(&conn, Some("bob"), &send("m-ahead", &just_past))
@@ -206,8 +164,6 @@ async fn a_member_cannot_store_an_envelope_stamped_in_the_far_future() {
         .unwrap();
     assert!(is_invalid(&out), "{just_past} must be refused, got {out:?}");
 
-    // …while an honest client clock slightly ahead of the DS is admitted, as is
-    // every stamp at or behind it.
     let slightly_ahead = client_stamp(1);
     let out = apply_send_message(&conn, Some("bob"), &send("m-ok-ahead", &slightly_ahead))
         .await
@@ -225,9 +181,7 @@ async fn a_member_cannot_store_an_envelope_stamped_in_the_far_future() {
     );
 }
 
-/// Every envelope-inserting path with a client stamp is bounded: an edit with a
-/// poisoned `sent_at` is refused, AND — because the check runs before the
-/// transaction — the author's pending edit it would have replaced survives.
+/// The check runs before the transaction, so the pending edit survives.
 #[tokio::test]
 async fn an_edit_stamped_in_the_far_future_is_refused_and_replaces_nothing() {
     let db = fresh().await;
@@ -253,17 +207,12 @@ async fn an_edit_stamped_in_the_far_future_is_refused_and_replaces_nothing() {
         vec!["e1".to_string(), "m1".to_string()],
         "the refused edit stored nothing and bob's pending edit is still there"
     );
-    // A malformed stamp is refused on the same path.
     let out = apply_edit_message(&conn, Some("alice"), &edit("e-bad", "m1", "not-a-time"))
         .await
         .unwrap();
     assert!(is_invalid(&out), "{out:?}");
 }
 
-// ── (2) `advance_watermark` is gated on membership, device and value ─────────
-
-/// A non-member cannot write a watermark row under a conversation, however
-/// honest the value. Pre-fix this was a 200 and a stored row.
 #[tokio::test]
 async fn a_non_member_cannot_advance_a_watermark() {
     let db = fresh().await;
@@ -279,9 +228,7 @@ async fn a_non_member_cannot_advance_a_watermark() {
     assert!(watermark_rows(&db).await.is_empty(), "no row for a non-member");
 }
 
-/// The device half is bound to the signing device: a member naming another
-/// device — its own second device, or someone else's — is refused, and the row
-/// that lands carries the SIGNED device id.
+/// The row carries the signed device id; naming another device is refused.
 #[tokio::test]
 async fn the_watermark_device_is_bound_to_the_signing_device() {
     let db = fresh().await;
@@ -308,9 +255,7 @@ async fn the_watermark_device_is_bound_to_the_signing_device() {
     );
 }
 
-/// A member cannot park its own cursor in the far future either: the value is
-/// bounded regardless of who reports it. Pre-fix the monotone `MAX` adopted it
-/// and nothing could ever bring it back.
+/// A member's own far-future cursor is bounded too: the monotone `MAX` never rewinds.
 #[tokio::test]
 async fn a_far_future_cursor_is_refused_even_from_a_member() {
     let db = fresh().await;
@@ -326,8 +271,7 @@ async fn a_far_future_cursor_is_refused_even_from_a_member() {
     for bad in [
         POISON.to_string(),
         (chrono::Utc::now() + chrono::Duration::seconds(CURSOR_STAMP_SKEW_SECS + 60)).to_rfc3339(),
-        // SQLite's shape — parses as a date to a human, sorts below every RFC
-        // 3339 stamp (#908); a cursor in it would silently mean "consumed nothing".
+        // SQLite's shape sorts below every RFC 3339 stamp (#908).
         "2026-01-01 00:00:00".to_string(),
     ] {
         let out = apply_advance_watermark(&conn, Some(("bob", "b1")), &watermark("bob", "b1", &bad))
@@ -342,13 +286,7 @@ async fn a_far_future_cursor_is_refused_even_from_a_member() {
     );
 }
 
-// ── (3) the tombstone floor reads only the member-device roster ──────────────
-
-/// **The tombstone-floor poisoning regression test.** A `9999-…` watermark row
-/// exists for `c1` under a non-member (written directly — the endpoint refuses
-/// it now, so this is the defence-in-depth layer). alice admin-deletes bob's
-/// message. The tombstone must be stamped at wall-clock now, not one nanosecond
-/// past year 9999: every device applying it adopts its `sent_at` as its cursor.
+/// A forged `9999-…` row must not lift the tombstone stamp past wall-clock now.
 #[tokio::test]
 async fn a_non_members_watermark_row_does_not_floor_the_admin_tombstone() {
     let db = fresh().await;
@@ -357,7 +295,6 @@ async fn a_non_members_watermark_row_does_not_floor_the_admin_tombstone() {
         apply_send_message(&conn, Some("bob"), &send("m1", &client_stamp(-10))).await.unwrap(),
         WriteOutcome::Ok
     ));
-    // Both real member devices have fetched m1.
     for (u, d) in [("alice", "a1"), ("bob", "b1")] {
         assert!(matches!(
             apply_advance_watermark(&conn, Some((u, d)), &watermark(u, d, &client_stamp(-10)))
@@ -366,7 +303,6 @@ async fn a_non_members_watermark_row_does_not_floor_the_admin_tombstone() {
             WriteOutcome::Ok
         ));
     }
-    // The forged row, planted around the endpoint.
     conn.execute(
         "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
          VALUES ('c1', 'mallory', 'm1', ?1)",
@@ -404,8 +340,7 @@ async fn a_non_members_watermark_row_does_not_floor_the_admin_tombstone() {
         stamps[0]
     );
 
-    // And the sweep-side consequence the attack aimed for cannot follow: with
-    // the honest devices' cursors behind the tombstone, GC keeps it.
+    // With honest cursors behind the tombstone, GC keeps it.
     let out = apply_envelope_gc(
         &conn,
         Some("alice"),

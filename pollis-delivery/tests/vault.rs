@@ -1,19 +1,5 @@
 //! The Vault (#107) — what the DS may and may not do with entries it cannot
 //! read, and how vault attachment references hold shared objects alive.
-//!
-//! The same four properties as `read_cursor_sync.rs`, per entry instead of
-//! per account — byte-exact custody, ownership, bounds, absence-is-empty —
-//! plus the two vault-specific ones:
-//!
-//!   * **Cross-user id collision is a permission problem.** The upsert's
-//!     conflict target is the bare primary key, so the owner predicate on the
-//!     update arm is the only thing standing between "same ULID" and "silent
-//!     cross-user overwrite". It answers Forbidden, never success.
-//!   * **A vault reference is a live reference.** An attachment object whose
-//!     only reference is a vault entry must survive the collect that
-//!     `/v1/attachments/delete` runs — and become collectable the moment the
-//!     entry is deleted. A personal drive that loses files whenever a
-//!     stranger deletes a same-hash attachment is not storage.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -106,8 +92,6 @@ async fn object_exists(db: &common::TempDb, hash: &str) -> bool {
     rows.next().await.unwrap().is_some()
 }
 
-// ── Custody + ownership ──────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn an_entry_comes_back_byte_for_byte() {
     let db = fresh().await;
@@ -124,8 +108,7 @@ async fn an_entry_comes_back_byte_for_byte() {
     assert_eq!(resp.messages[0].created_at, "2026-01-01T00:00:00Z");
 }
 
-/// An edit rewrites the blob but keeps `created_at` — the entry must not jump
-/// position in the list because it was edited.
+/// An edit rewrites the blob but keeps `created_at`.
 #[tokio::test]
 async fn a_resave_replaces_the_blob_and_keeps_created_at() {
     let db = fresh().await;
@@ -148,10 +131,7 @@ async fn a_resave_replaces_the_blob_and_keeps_created_at() {
     );
 }
 
-/// Both apps render "(edited)" when `updated_at != created_at`. A row that was
-/// only ever created must therefore read back with the two EQUAL — the column
-/// default (`datetime('now')`, a different format and clock) used to make
-/// every synced entry look edited (#1316). A rewrite still stamps a new value.
+/// A never-edited row reads back with `updated_at == created_at` (#1316).
 #[tokio::test]
 async fn an_unedited_entry_reads_back_with_updated_at_equal_to_created_at() {
     let db = fresh().await;
@@ -172,10 +152,7 @@ async fn an_unedited_entry_reads_back_with_updated_at_equal_to_created_at() {
     );
 }
 
-/// #1497: a save is resent after a connection failure (`DsRequest::IDEMPOTENT`),
-/// so the DS may see the same bytes twice. The repeat must be a no-op — the
-/// entry must not come back "(edited)" because the network hiccuped — while
-/// the attachment references stay exactly the declared set.
+/// #1497: a resent identical save is a no-op and does not mark the entry edited.
 #[tokio::test]
 async fn a_byte_identical_resave_is_a_no_op() {
     let db = fresh().await;
@@ -198,8 +175,6 @@ async fn a_byte_identical_resave_is_a_no_op() {
     assert_eq!(ref_count(&db, "v1").await, 1);
 }
 
-/// The issue's own shape: one entry carrying twelve images is inside every
-/// bound the DS sets on a save.
 #[tokio::test]
 async fn an_entry_with_twelve_attachments_is_accepted() {
     let db = fresh().await;
@@ -213,8 +188,6 @@ async fn an_entry_with_twelve_attachments_is_accepted() {
     assert_eq!(ref_count(&db, "v12").await, 12);
 }
 
-/// The cross-user overwrite: mallory saves under alice's ULID. The row must
-/// stand untouched and the answer must be Forbidden.
 #[tokio::test]
 async fn a_colliding_id_cannot_overwrite_another_users_entry() {
     let db = fresh().await;
@@ -234,8 +207,6 @@ async fn a_colliding_id_cannot_overwrite_another_users_entry() {
     assert!(read_vault(&db, "mallory").await.messages.is_empty());
 }
 
-/// You save only your OWN vault: a signed identity that differs from the
-/// body's owner is refused.
 #[tokio::test]
 async fn one_account_cannot_write_into_anothers_vault() {
     let db = fresh().await;
@@ -247,8 +218,7 @@ async fn one_account_cannot_write_into_anothers_vault() {
     assert!(read_vault(&db, "alice").await.messages.is_empty());
 }
 
-/// Deleting someone else's entry is a no-op — the owner predicate is in the
-/// DELETE itself.
+/// Deleting someone else's entry is a no-op.
 #[tokio::test]
 async fn a_delete_is_owner_bound() {
     let db = fresh().await;
@@ -271,7 +241,6 @@ async fn a_delete_is_owner_bound() {
     assert_eq!(ref_count(&db, "v1").await, 1, "the refs must survive a stranger's delete");
 }
 
-/// Bounds: the envelope is validated even though the contents cannot be.
 #[tokio::test]
 async fn a_malformed_envelope_is_a_client_error() {
     let db = fresh().await;
@@ -310,11 +279,7 @@ async fn an_empty_vault_reads_as_an_empty_list() {
     assert!(read_vault(&db, "alice").await.messages.is_empty());
 }
 
-// ── Attachment reference liveness ────────────────────────────────────────────
-
-/// THE STORAGE-SERVICE PROPERTY: an object whose only reference is a vault
-/// entry survives the unreferenced-object collect; deleting the entry
-/// releases it.
+/// An object whose only reference is a vault entry survives the collect.
 #[tokio::test]
 async fn a_vault_reference_keeps_the_shared_object_alive() {
     let db = fresh().await;
@@ -330,8 +295,6 @@ async fn a_vault_reference_keeps_the_shared_object_alive() {
         .await
         .unwrap();
 
-    // Anyone may run the collect (that is its contract) — the vault ref must
-    // hold the object.
     apply_delete_attachment(
         &conn,
         Some("stranger"),
@@ -347,7 +310,6 @@ async fn a_vault_reference_keeps_the_shared_object_alive() {
         "an object referenced only by a vault entry was collected — the vault lost a file"
     );
 
-    // Delete the entry: refs go with it, and the object becomes collectable.
     apply_delete_vault_message(
         &conn,
         Some("alice"),
@@ -375,8 +337,7 @@ async fn a_vault_reference_keeps_the_shared_object_alive() {
     );
 }
 
-/// A re-save REPLACES the reference set: an edit that drops a file releases
-/// it.
+/// A re-save replaces the reference set.
 #[tokio::test]
 async fn a_resave_replaces_the_reference_set() {
     let db = fresh().await;
@@ -392,8 +353,6 @@ async fn a_resave_replaces_the_reference_set() {
     assert_eq!(ref_count(&db, "v1").await, 0, "the dropped file must be released");
 }
 
-/// A refused save (cross-user collision) must not touch the standing entry's
-/// references either.
 #[tokio::test]
 async fn a_forbidden_save_leaves_the_references_alone() {
     let db = fresh().await;

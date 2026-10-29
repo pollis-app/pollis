@@ -1,11 +1,4 @@
-//! Server-side OTP + bootstrap (Goal B #419, Slice 0), driven through the real
-//! axum router with `tower::oneshot` against a local libsql DB.
-//!
-//! Slice 0 has no client seam yet, so these exercise the DS directly: the full
-//! request-otp → verify-otp → establish-identity → register-device →
-//! publish-device-cert happy path, plus the security properties — OTP lockout,
-//! single-use, the establish-identity CAS (no overwrite), session→user binding,
-//! and the cert-validity gate.
+//! Server-side OTP + bootstrap (#419 Slice 0), driven through the real router.
 
 use std::sync::Arc;
 
@@ -34,12 +27,10 @@ fn gen_key() -> SigningKey<MlDsa44> {
     SigningKey::<MlDsa44>::from_seed(&s.into())
 }
 
-/// The public half of an account key, as the wire carries it.
 fn pub_of(k: &SigningKey<MlDsa44>) -> Vec<u8> {
     k.verifying_key().encode().to_vec()
 }
 
-/// Sign a device cert exactly as a client would.
 fn sign_cert(
     account: &SigningKey<MlDsa44>,
     device_id: &str,
@@ -55,7 +46,6 @@ fn sign_cert(
     account.sign(&payload).encode().to_vec()
 }
 
-/// A device's two leaf public keys: the classic 32-byte one and an ML-DSA-44 one.
 fn device_pubs() -> ([u8; 32], Vec<u8>) {
     let mut ed_pub = [0u8; 32];
     OsRng.fill_bytes(&mut ed_pub);
@@ -68,9 +58,7 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// A state whose OTP `DEV_OTP` is the fixed code below — no email send, no
-/// throttle. The OTP/session stores are Arc-shared, so cloning the state for each
-/// request preserves them.
+/// `DEV_OTP` fixed, no email or throttle; the stores are Arc-shared across clones.
 fn dev_state(db: Arc<Db>) -> AppState {
     AppState::new(db, false).with_otp_config(OtpConfig {
         resend_api_key: None,
@@ -115,8 +103,7 @@ async fn send(
     (status, val)
 }
 
-/// Like [`send`], but stamps a `CF-Connecting-IP` header so the per-IP rate
-/// limiter (#345) sees a specific client IP.
+/// Like [`send`], with a `CF-Connecting-IP` header for the per-IP limiter (#345).
 async fn send_ip(
     state: &AppState,
     path: &str,
@@ -141,9 +128,7 @@ async fn send_ip(
     (status, val)
 }
 
-// #345: request-otp is per-IP rate limited (email-bomb / mass-enumeration
-// defense), and the throttle is scoped to the client IP — a different IP is
-// unaffected, and a 429 leaks nothing about account existence.
+// #345: request-otp is rate limited per client IP, and a 429 leaks no account existence.
 #[tokio::test(flavor = "multi_thread")]
 async fn request_otp_is_ip_rate_limited() {
     let db = fresh_db().await;
@@ -153,7 +138,6 @@ async fn request_otp_is_ip_rate_limited() {
             dev_otp: Some(DEV_CODE.to_string()),
             ttl_secs: 600,
             session_ttl_secs: 600,
-            // No per-email throttle, so only the per-IP limit is under test.
             resend_throttle_secs: 0,
             max_attempts: 5,
             ..OtpConfig::default()
@@ -168,7 +152,6 @@ async fn request_otp_is_ip_rate_limited() {
             ..RateLimitConfig::default()
         });
 
-    // First two requests from one IP pass; the third is throttled.
     for _ in 0..2 {
         let (s, _) =
             send_ip(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "a@x.com" }), "203.0.113.1").await;
@@ -182,14 +165,12 @@ async fn request_otp_is_ip_rate_limited() {
         "the 3rd request from the same IP is throttled"
     );
 
-    // A different client IP has its own budget — the limit is per-IP, not global.
     let (s, _) =
         send_ip(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "a@x.com" }), "203.0.113.2").await;
     assert_eq!(s, StatusCode::OK, "a different IP is unaffected");
 }
 
-// #345: every DS response carries the baseline security headers — including the
-// rate-limiter's own 429 (which proves the header middleware wraps the limiter).
+// #345: the baseline security headers are on every response, the limiter's 429 included.
 #[tokio::test(flavor = "multi_thread")]
 async fn security_headers_on_every_response_including_429() {
     let db = fresh_db().await;
@@ -236,20 +217,15 @@ async fn security_headers_on_every_response_including_429() {
         );
     };
 
-    // First request (200) carries the headers.
     let (s, h) = hit(&state, "198.51.100.5").await;
     assert_eq!(s, StatusCode::OK);
     assert_headers(&h);
 
-    // Second request from the same IP is rate-limited (429) — and STILL carries the
-    // headers, proving the header middleware wraps the rate limiter.
     let (s, h) = hit(&state, "198.51.100.5").await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
     assert_headers(&h);
 }
 
-/// Run request-otp + verify-otp for `email`/`device_id`, returning the verify-otp
-/// JSON (carries `user_id` + `session_token`).
 async fn login(state: &AppState, email: &str, device_id: &str) -> serde_json::Value {
     let (s, _) = send(state, "/v1/auth/request-otp", serde_json::json!({ "email": email }), None).await;
     assert_eq!(s, StatusCode::OK, "request-otp should always 200");
@@ -274,8 +250,6 @@ async fn account_pub(db: &Db, user_id: &str) -> Option<Vec<u8>> {
     row.get::<Option<Vec<u8>>>(0).unwrap()
 }
 
-// ── 1. Full happy path ───────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn full_bootstrap_happy_path() {
     let db = fresh_db().await;
@@ -288,7 +262,6 @@ async fn full_bootstrap_happy_path() {
     let user_id = v["user_id"].as_str().unwrap().to_string();
     let token = v["session_token"].as_str().unwrap().to_string();
 
-    // establish-identity
     let account = gen_key();
     let account_pub_b = pub_of(&account);
     let (s, _) = send(
@@ -306,7 +279,6 @@ async fn full_bootstrap_happy_path() {
     assert_eq!(s, StatusCode::OK, "establish-identity should succeed");
     assert_eq!(account_pub(&db, &user_id).await.unwrap(), account_pub_b.to_vec());
 
-    // register-device
     let (s, _) = send(
         &state,
         "/v1/auth/register-device",
@@ -316,7 +288,6 @@ async fn full_bootstrap_happy_path() {
     .await;
     assert_eq!(s, StatusCode::OK, "register-device should succeed");
 
-    // publish-device-cert (valid cert signed by the account key)
     let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
     let cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
@@ -336,7 +307,6 @@ async fn full_bootstrap_happy_path() {
     .await;
     assert_eq!(s, StatusCode::OK, "publish-device-cert should succeed");
 
-    // The pivot landed: mls_signature_pub is now set, and the session is spent.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT mls_signature_pub FROM user_device WHERE device_id = ?1", libsql::params![device_id])
@@ -345,7 +315,6 @@ async fn full_bootstrap_happy_path() {
     let stored: Vec<u8> = rows.next().await.unwrap().unwrap().get::<Option<Vec<u8>>>(0).unwrap().unwrap();
     assert_eq!(stored, mls_pub.to_vec());
 
-    // Session invalidated on success — a replay is now unauthorized.
     let (s, _) = send(
         &state,
         "/v1/auth/register-device",
@@ -356,8 +325,6 @@ async fn full_bootstrap_happy_path() {
     assert_eq!(s, StatusCode::UNAUTHORIZED, "session must be spent after cert publish");
 }
 
-// ── 2. OTP lockout (the bug fix) ─────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn otp_lockout_after_six_wrong() {
     let db = fresh_db().await;
@@ -366,7 +333,6 @@ async fn otp_lockout_after_six_wrong() {
     let (s, _) = send(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "b@x.com" }), None).await;
     assert_eq!(s, StatusCode::OK);
 
-    // 5 wrong guesses → 401 invalid.
     for _ in 0..5 {
         let (s, _) = send(
             &state,
@@ -377,7 +343,6 @@ async fn otp_lockout_after_six_wrong() {
         .await;
         assert_eq!(s, StatusCode::UNAUTHORIZED);
     }
-    // 6th wrong → locked out (429) and the code is deleted.
     let (s, _) = send(
         &state,
         "/v1/auth/verify-otp",
@@ -387,7 +352,6 @@ async fn otp_lockout_after_six_wrong() {
     .await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
 
-    // The correct code no longer works after lockout.
     let (s, _) = send(
         &state,
         "/v1/auth/verify-otp",
@@ -397,8 +361,6 @@ async fn otp_lockout_after_six_wrong() {
     .await;
     assert_ne!(s, StatusCode::OK, "correct code must fail once locked out");
 }
-
-// ── 3. Single-use ────────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn otp_is_single_use() {
@@ -415,7 +377,6 @@ async fn otp_is_single_use() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // Replaying the same correct code fails — it was consumed.
     let (s, _) = send(
         &state,
         "/v1/auth/verify-otp",
@@ -425,8 +386,6 @@ async fn otp_is_single_use() {
     .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "a verified code can't be replayed");
 }
-
-// ── 4. establish-identity CAS — never overwrite ──────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn establish_identity_is_cas_no_overwrite() {
@@ -459,8 +418,7 @@ async fn establish_identity_is_cas_no_overwrite() {
     let (s, _) = establish(first.to_vec(), token.clone()).await;
     assert_eq!(s, StatusCode::OK);
 
-    // A second establish (e.g. a re-login trying to replace the account key) must
-    // 409 and leave account_id_pub unchanged.
+    // A second establish must 409 and leave account_id_pub unchanged.
     let second = pub_of(&gen_key());
     let (s, _) = establish(second.to_vec(), token.clone()).await;
     assert_eq!(s, StatusCode::CONFLICT, "second establish must conflict");
@@ -471,22 +429,18 @@ async fn establish_identity_is_cas_no_overwrite() {
     );
 }
 
-// ── 5. Session→user binding ──────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn session_binds_user_and_device() {
     let db = fresh_db().await;
     let state = dev_state(Arc::clone(&db));
 
-    // Two distinct accounts.
     let a = login(&state, "a2@x.com", "dev-a").await;
     let b = login(&state, "b2@x.com", "dev-b").await;
     let a_id = a["user_id"].as_str().unwrap().to_string();
     let b_id = b["user_id"].as_str().unwrap().to_string();
     let a_token = a["session_token"].as_str().unwrap().to_string();
 
-    // establish-identity with A's token writes A's row only — there is no body
-    // user_id to point at B, and the write is bound to the session user.
+    // No body user_id to point at B: the write is bound to the session user.
     let apub = pub_of(&gen_key());
     let (s, _) = send(
         &state,
@@ -504,8 +458,7 @@ async fn session_binds_user_and_device() {
     assert_eq!(account_pub(&db, &a_id).await.unwrap(), apub.to_vec());
     assert!(account_pub(&db, &b_id).await.is_none(), "B's identity must be untouched");
 
-    // register-device with A's token but B's device_id → 403 (the session is
-    // bound to A's device dev-a).
+    // The session is bound to A's device, so B's device_id is 403.
     let (s, _) = send(
         &state,
         "/v1/auth/register-device",
@@ -516,8 +469,6 @@ async fn session_binds_user_and_device() {
     assert_eq!(s, StatusCode::FORBIDDEN, "a token can only register its own device");
 }
 
-// ── 6. Cert-validity gate ────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_cert_rejects_wrong_account_key() {
     let db = fresh_db().await;
@@ -527,7 +478,6 @@ async fn publish_cert_rejects_wrong_account_key() {
     let v = login(&state, "e@x.com", device_id).await;
     let token = v["session_token"].as_str().unwrap().to_string();
 
-    // Establish identity under the legit account key.
     let account = gen_key();
     send(
         &state,
@@ -552,7 +502,6 @@ async fn publish_cert_rejects_wrong_account_key() {
     let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
 
-    // A cert signed by an ATTACKER key (not the account key) must be rejected.
     let attacker = gen_key();
     let bad_cert = sign_cert(&attacker, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
@@ -571,7 +520,7 @@ async fn publish_cert_rejects_wrong_account_key() {
     .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "cert not signed by the account key must be rejected");
 
-    // The session is NOT spent on a rejected cert — a valid cert still works.
+    // A rejected cert does not spend the session.
     let good_cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
         &state,
@@ -590,12 +539,7 @@ async fn publish_cert_rejects_wrong_account_key() {
     assert_eq!(s, StatusCode::OK, "a valid cert must be accepted");
 }
 
-// ── 7. Subsequent device — cert-validity ALONE (no session) ──────────────────
-
-/// Establish an account identity under `account` and register `device_id`, both
-/// using the session minted by re-login. Returns once the device row exists but
-/// has NO cert yet — the state a subsequent device is in just before its first
-/// cert publish.
+/// Register `device_id` under `account` via re-login, leaving it with no cert yet.
 async fn setup_registered_device(
     state: &AppState,
     email: &str,
@@ -642,8 +586,7 @@ async fn publish_cert_validity_alone_no_session() {
     let issued_at: u64 = 1_700_000_000;
     let cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
 
-    // No session header — the cert (signed by the established account key) is the
-    // ONLY proof. user_id comes from the body.
+    // No session: the cert chained to the account key is the only proof.
     let (s, _) = send(
         &state,
         "/v1/auth/publish-device-cert",
@@ -665,7 +608,6 @@ async fn publish_cert_validity_alone_no_session() {
         "a valid cert with no session must be accepted (cert-validity gate)"
     );
 
-    // The pivot landed.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
@@ -697,9 +639,7 @@ async fn publish_cert_validity_alone_rejects_wrong_account_key() {
     let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
 
-    // A cert signed by an ATTACKER key, no session — must be rejected. This is
-    // the load-bearing property: cert-validity-alone never accepts a cert that
-    // doesn't chain to the account's stored account_id_pub.
+    // Cert-validity alone never accepts a cert that doesn't chain to `account_id_pub`.
     let attacker = gen_key();
     let bad_cert = sign_cert(&attacker, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
@@ -723,7 +663,6 @@ async fn publish_cert_validity_alone_rejects_wrong_account_key() {
         "a cert not signed by the account key must be rejected with no session"
     );
 
-    // No session AND no body user_id → unauthorized (nothing to bind the user).
     let (s, _) = send(
         &state,
         "/v1/auth/publish-device-cert",
@@ -745,8 +684,6 @@ async fn publish_cert_validity_alone_rejects_wrong_account_key() {
     );
 }
 
-// ── 8. Enrollment request — session-gated, binds user from session ───────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn enrollment_request_is_session_gated_and_binds_user() {
     let db = fresh_db().await;
@@ -765,7 +702,6 @@ async fn enrollment_request_is_session_gated_and_binds_user() {
         "expires_at": "2026-06-27T00:10:00Z",
     });
 
-    // No session → unauthorized.
     let (s, _) = send(&state, "/v1/auth/enrollment-request", req_body.clone(), None).await;
     assert_eq!(
         s,
@@ -773,7 +709,6 @@ async fn enrollment_request_is_session_gated_and_binds_user() {
         "enrollment-request must be session-gated"
     );
 
-    // With the session → 200, and the row is bound to the session's user + device.
     let (s, _) = send(&state, "/v1/auth/enrollment-request", req_body, Some(&token)).await;
     assert_eq!(s, StatusCode::OK, "enrollment-request with session should 200");
 
@@ -794,21 +729,7 @@ async fn enrollment_request_is_session_gated_and_binds_user() {
     assert_eq!(row_status, "pending");
 }
 
-/// A REPEATED enrollment request is not a server fault.
-///
-/// `device_enrollment_request.id` is a CLIENT-chosen `request_id`, and the
-/// handler inserted it with a bare `INSERT`, so submitting the same id twice hit
-/// `UNIQUE constraint failed: device_enrollment_request.id` and fell out as a
-/// 500 (found by an OWASP ZAP sweep against a local DS). A 500 says "the service
-/// is broken" about a request that is merely repeated — it is the wrong answer
-/// for the honest retry a flaky network produces, and a free way to fill the
-/// DS's error log.
-///
-/// The caller resubmitting its OWN request gets its 200 back, idempotently; a
-/// caller naming somebody else's request id gets a typed 409. Neither is a 500,
-/// and neither overwrites the stored row — it carries the verification code an
-/// approving device compares against, so a second caller replacing it in place
-/// is how an approval gets steered onto the wrong device.
+/// A repeated enrollment request id is 200 for its owner, a typed 409 for others; never 500 or overwrite.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_duplicate_enrollment_request_is_not_a_500() {
     let db = fresh_db().await;
@@ -837,7 +758,6 @@ async fn a_duplicate_enrollment_request_is_not_a_500() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // Same session, same id — the retry.
     let (s, _) = send(
         &state,
         "/v1/auth/enrollment-request",
@@ -851,7 +771,6 @@ async fn a_duplicate_enrollment_request_is_not_a_500() {
         "a client's own resubmit must be idempotent, not a 500"
     );
 
-    // Somebody else naming the same id — refused, typed.
     let bob = login(&state, "dup-b@x.com", "dev-b").await;
     let bob_token = bob["session_token"].as_str().unwrap().to_string();
     let (s, json) = send(
@@ -868,7 +787,6 @@ async fn a_duplicate_enrollment_request_is_not_a_500() {
     );
     assert_eq!(json["error"], "request_id_taken");
 
-    // Through all of it the stored row is untouched: same owner, same code.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
@@ -886,14 +804,7 @@ async fn a_duplicate_enrollment_request_is_not_a_500() {
     );
 }
 
-/// #1092: a device that has only registered is a GHOST — it proved it holds an
-/// OTP session, nothing more. A sibling still has to approve it, and it may
-/// never publish a cert at all. Seeding its watermarks at register-device meant
-/// such a device pinned envelope retention for the whole #720 staleness window,
-/// holding other members' mail on a device that never enrolled.
-///
-/// Watermarks are therefore seeded at the cert-publish PIVOT. Both halves are
-/// asserted here through the real endpoints.
+/// #1092: watermarks are seeded at cert publish, not register, so ghost devices pin nothing.
 #[tokio::test]
 async fn watermarks_are_seeded_at_cert_publish_not_at_register() {
     let db = fresh_db().await;
@@ -904,7 +815,6 @@ async fn watermarks_are_seeded_at_cert_publish_not_at_register() {
     let user_id = v["user_id"].as_str().unwrap().to_string();
     let token = v["session_token"].as_str().unwrap().to_string();
 
-    // Put the account in a conversation, so there is something to seed.
     {
         let conn = db.conn().await.unwrap();
         conn.execute_batch(
@@ -965,7 +875,6 @@ async fn watermarks_are_seeded_at_cert_publish_not_at_register() {
         "a registered-but-unenrolled device must pin nothing"
     );
 
-    // The pivot: publish a valid cert.
     let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
     let cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
@@ -992,11 +901,7 @@ async fn watermarks_are_seeded_at_cert_publish_not_at_register() {
     );
 }
 
-/// #1092, second half: `device_id` is the primary key of `user_device`, so a
-/// colliding id may belong to another account. The upsert's conflict branch is
-/// bound to the owner, so a session holder cannot reach into a stranger's row —
-/// bumping its `last_seen` would keep a dormant device of theirs pinning
-/// retention.
+/// #1092: the register upsert is owner-bound, so a colliding device id can't touch another's row.
 #[tokio::test]
 async fn registering_cannot_touch_another_users_device_row() {
     let db = fresh_db().await;
@@ -1010,7 +915,6 @@ async fn registering_cannot_touch_another_users_device_row() {
     .await
     .unwrap();
 
-    // Mallory registers the same device id.
     pollis_delivery::bootstrap::apply_register_device(&conn, "mallory", "shared-dev", "Mallory")
         .await
         .expect("the upsert must not error, it must simply not apply");

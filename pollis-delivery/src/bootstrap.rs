@@ -9,9 +9,7 @@
 //!     `mls_signature_pub` (the column the device-signature gate verifies
 //!     against), gated by session AND cert-validity.
 //!
-//! `user_id` is ALWAYS bound from the session record, never the body — the same
-//! "actor can't write as someone else" property the device-signature path gets
-//! from `resolve_actor`. All three land on the MAIN DB (`state.db`).
+//! `user_id` is ALWAYS bound from the session record, never the body.
 
 use axum::{
     body::Bytes,
@@ -28,15 +26,10 @@ use crate::writes::bad_request;
 use crate::AppState;
 use crate::util::b64_decode;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::bootstrap::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api`, shared with pollis-core; re-exported here.
 pub use pollis_api::bootstrap::*;
 
-/// The shared `{"status":"ok"}`, generic over the endpoint (#922) so each of
-/// this module's four handlers names the row it is answering for.
+/// The shared `{"status":"ok"}`, generic over the endpoint (#922).
 fn ok_status<B>() -> Response
 where
     B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
@@ -61,15 +54,7 @@ fn internal(e: anyhow::Error) -> Response {
         .into_response()
 }
 
-// ── POST /v1/auth/establish-identity ─────────────────────────────────────────
-
-/// POST /v1/auth/establish-identity — version-1 account-identity establishment,
-/// session-gated, signup-only. ONE transaction: a CAS `UPDATE users … WHERE id =
-/// :session AND account_id_pub IS NULL` (0 rows ⇒ 409, an existing identity is
-/// NEVER overwritten — reset has its own CAS-guarded path), plus the
-/// `account_key_log` v1 append and the `account_recovery` insert. Mirrors
-/// the writes pollis-core's `account_identity::generate_account_identity` used
-/// to perform directly (removed in #910 — this endpoint is now the only path).
+/// POST /v1/auth/establish-identity — session-gated; ONE transaction, a CAS never overwriting an identity.
 pub async fn establish_identity(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -115,10 +100,7 @@ pub enum EstablishOutcome {
     Conflict,
 }
 
-/// Version-1 account-identity establishment in ONE transaction (CAS UPDATE +
-/// `account_key_log` v1 + `account_recovery`). Extracted from the handler so the
-/// in-process integration harness drives the identical writes against the shared
-/// main DB. `user_id` is the session-bound caller, never a body field.
+/// Version-1 identity establishment in ONE transaction; `user_id` is the session-bound caller.
 pub async fn apply_establish_identity(
     conn: &libsql::Connection,
     user_id: &str,
@@ -129,9 +111,7 @@ pub async fn apply_establish_identity(
 ) -> anyhow::Result<EstablishOutcome> {
     let tx = conn.transaction().await?;
 
-    // CAS: claim the identity only if none is set. 0 rows ⇒ already established ⇒
-    // conflict. This is the invariant that makes "a re-login overwrites the
-    // account key" unrepresentable.
+    // CAS: claim the identity only if none is set, so a re-login can never overwrite the account key.
     let affected = tx
         .execute(
             "UPDATE users SET account_id_pub = ?1, identity_version = 1 \
@@ -163,11 +143,7 @@ pub async fn apply_establish_identity(
     Ok(EstablishOutcome::Applied)
 }
 
-// ── POST /v1/auth/register-device ────────────────────────────────────────────
-
-/// POST /v1/auth/register-device — INSERT the device row (COALESCE-preserving any
-/// existing name) + seed conversation watermarks, all bound to the session's
-/// `user_id`. Mirrors pollis-core `auth::register_device`'s remote writes.
+/// POST /v1/auth/register-device — INSERT the device row, bound to the session's `user_id`.
 pub async fn register_device(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -201,11 +177,7 @@ pub async fn register_device(
     };
     match apply_register_device(&conn, &claims.user_id, &device_id, &device_name).await {
         Ok(()) => {
-            // The row was just (re)created. Nothing stale can be cached for it —
-            // negatives are never cached and the upsert leaves the key columns
-            // alone — but a device id can be re-registered after a logout DELETE,
-            // so evict to keep "any write to `user_device` evicts" a rule with no
-            // exceptions rather than a case analysis (#658).
+            // Evict anyway, so every `user_device` write evicts, no exceptions (#658).
             state
                 .device_keys
                 .invalidate_device(&claims.user_id, &device_id);
@@ -215,27 +187,16 @@ pub async fn register_device(
     }
 }
 
-/// INSERT the device row (COALESCE-preserving any existing name), bound to the
-/// session's `user_id`. Extracted from the handler so the in-process integration
-/// harness drives the identical write against the shared main DB.
+/// INSERT the device row (keeping any existing name), bound to the session's `user_id`.
 ///
-/// #1092: this deliberately does NOT seed conversation watermarks. A device that
-/// registers has only proved it holds an OTP session — a sibling still has to
-/// approve it, and it may never publish a cert at all. Seeding here made such a
-/// never-enrolled ghost pin envelope retention for the whole #720 staleness
-/// window. Seeding now happens at [`apply_publish_device_cert`], the pivot where
-/// the device becomes real.
+/// #1092: no watermark seeding here; an unapproved ghost would pin retention.
 pub async fn apply_register_device(
     conn: &libsql::Connection,
     user_id: &str,
     device_id: &str,
     device_name: &str,
 ) -> anyhow::Result<()> {
-    // `device_id` is the primary key, so a colliding id may belong to ANOTHER
-    // account. Without the `WHERE`, any session holder could bump `last_seen` on
-    // a stranger's device row — enough to keep a dormant device of theirs
-    // pinning retention (#1092). Binding the conflict branch to the owner makes
-    // the upsert a no-op against someone else's row instead.
+    // `device_id` may be another account's; the `WHERE` makes the upsert a no-op there (#1092).
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
          ON CONFLICT(device_id) DO UPDATE SET \
@@ -251,25 +212,9 @@ pub async fn apply_register_device(
 /// Seed watermark rows for every conversation `user_id` already belongs to, so a
 /// newly enrolled device does not retroactively block envelope cleanup.
 ///
-/// `INSERT OR IGNORE` — mirrors auth.rs. `reported_at = datetime('now')` marks
-/// the device LIVE as of enrollment: it pins for the #720 staleness window from
-/// here, then — if it never opens the app again — stops pinning. Seeding it (not
-/// NULL) is what makes the dormancy bound actually bite for a device that
-/// installs, joins and vanishes.
+/// `reported_at = datetime('now')` marks the device LIVE, so the #720 dormancy bound bites.
 ///
-/// The seeded cursor is `conversation_seq.next_seq` — the conversation's current
-/// high-water mark, i.e. "this device has consumed the backlog" (#1087). Seeding
-/// it is what stops a newly enrolled device pinning every envelope ever sent
-/// from being collected, and what stops it re-fetching them.
-///
-/// `COALESCE(..., 0)` covers a conversation nobody has posted in: there is no
-/// counter row yet, and 0 is below the first sequence that will ever be handed
-/// out, so the device correctly receives whatever comes next.
-///
-/// `last_fetched_at` is still seeded — the column is NOT NULL and is carried as
-/// legacy metadata — from `seeded_watermark_cursor` (RFC 3339). `reported_at`
-/// stays `datetime('now')` because it is compared against `datetime('now', ?)`.
-/// See #908.
+/// The cursor is `conversation_seq.next_seq`: the device has consumed the backlog (#1087).
 ///
 /// Called at cert publish, not at register — see [`apply_register_device`].
 pub async fn seed_conversation_watermarks(
@@ -303,23 +248,10 @@ pub async fn seed_conversation_watermarks(
     Ok(())
 }
 
-// ── POST /v1/auth/publish-device-cert ────────────────────────────────────────
-
-/// POST /v1/auth/publish-device-cert — the PIVOT write. DUAL gate, in both cases
-/// the cert's ML-DSA-44 signature is re-verified against the account's stored
-/// `account_id_pub` (a 409 if no identity is established yet) before the
-/// `user_device` cert columns are populated:
+/// POST /v1/auth/publish-device-cert — the PIVOT; the cert is always re-verified, under one of:
 ///
-///   (a) **session + cert-validity** — first-device signup. `user_id`/`device_id`
-///       are bound from the session (never the body); the session is invalidated
-///       on success (single-use through the pivot).
-///   (b) **cert-validity ALONE** — a subsequent device (sibling-approval
-///       enrollment / Secret-Key recovery) whose session may have expired while
-///       it waited for approval. No session header: `user_id`/`device_id` come
-///       from the body and the cert verification IS the authentication. This is
-///       strictly STRONGER than a bearer session — forging it needs the account
-///       private key — and `apply_publish_device_cert` still requires a
-///       pre-existing `user_device` row and never fails open.
+///   (a) **session + cert-validity** — first-device signup; ids from the session, then spent.
+///   (b) **cert-validity ALONE** — a later device whose session expired; ids from the body.
 ///
 /// Mirrors pollis-core `mls::device::ensure_device_cert`'s write.
 pub async fn publish_device_cert(
@@ -350,17 +282,11 @@ pub async fn publish_device_cert(
     }
     let issued_at = parsed.cert_issued_at as u64;
 
-    // Pick the gate: a live session (gate a) takes precedence; otherwise fall
-    // back to cert-validity-alone with the body `user_id` (gate b). A token that
-    // is present but expired/unknown does NOT resolve, so it cleanly falls
-    // through to (b) — which is exactly the "session outlived by slow approval"
-    // case the subsequent-device path is built for.
+    // A live session takes gate (a); an absent or dead token falls through to (b).
     let session_token = crate::session::session_token(&headers)
         .filter(|t| !t.is_empty())
         .map(|t| t.to_string());
-    // Gate (a) is first-device signup, so it takes an OTP session only. A
-    // device-link session (#1207) falls through to gate (b), cert-validity
-    // alone — strictly stronger, and the gate every subsequent device uses.
+    // Gate (a) takes an OTP session only; a device-link session falls through to (b).
     let session_claims = session_token
         .as_ref()
         .and_then(|t| state.sessions.resolve(t, now))
@@ -403,15 +329,11 @@ pub async fn publish_device_cert(
     .await
     {
         Ok(PublishCertOutcome::Applied) => {
-            // Single-use through the pivot: invalidate the bootstrap session if
-            // one was used (gate a). Gate (b) had no session to spend.
+            // Single-use through the pivot (gate a).
             if let Some(token) = invalidate_token {
                 state.sessions.invalidate(&token);
             }
-            // This is the ONE write that rewrites `mls_signature_pub_pq` on a
-            // live row, so a cached key for this device is now the WRONG key and
-            // the device's new signatures would be rejected until the TTL lapsed
-            // (#658). Evict so the next request re-reads the key just written.
+            // This rewrites `mls_signature_pub_pq`, so evict the cached key (#658).
             state.device_keys.invalidate_device(&user_id, &device_id);
             ok_status::<PublishCertBody>()
         }
@@ -435,11 +357,7 @@ pub enum PublishCertOutcome {
     DeviceNotRegistered,
 }
 
-/// The PIVOT write: verify the cert chains to the account's `account_id_pub`
-/// (the cert-validity gate) then populate the `user_device` cert columns +
-/// `mls_signature_pub`. Extracted from the handler so the in-process integration
-/// harness drives the identical verify + write against the shared main DB.
-/// Does NOT touch the session — the caller invalidates it on `Applied`.
+/// The PIVOT write: verify the cert, then fill the `user_device` cert columns. Session untouched.
 // The full cert-publication tuple as it arrives on the wire; the handler and the
 // integration harness must both pass exactly this, so it stays flat.
 #[allow(clippy::too_many_arguments)]
@@ -509,24 +427,13 @@ pub async fn apply_publish_device_cert(
         return Ok(PublishCertOutcome::DeviceNotRegistered);
     }
 
-    // #1092: THIS is where a device becomes real, so this is where it starts
-    // pinning envelope retention. Doing it at register-device meant a device that
-    // never got approved — or never came back — still held mail for the whole
-    // staleness window.
+    // #1092: here the device becomes real, so here it starts pinning retention.
     seed_conversation_watermarks(conn, user_id, device_id).await?;
 
     Ok(PublishCertOutcome::Applied)
 }
 
-// ── POST /v1/auth/enrollment-request ─────────────────────────────────────────
-
-/// POST /v1/auth/enrollment-request — INSERT a pending `device_enrollment_request`
-/// for the session's user + device. SESSION-gated because the requesting device
-/// is pre-credential (its `mls_signature_pub` is still NULL, so it cannot
-/// device-sign). `user_id` and `new_device_id` are bound from the session, NEVER
-/// the body — a token can only file an enrollment request for ITS OWN account +
-/// device. Mirrors pollis-core `device_enrollment::start_device_enrollment`'s
-/// remote write.
+/// POST /v1/auth/enrollment-request — SESSION-gated (pre-credential); ids bound from the session.
 pub async fn enrollment_request(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -546,13 +453,8 @@ pub async fn enrollment_request(
         Err(_) => return bad_request("invalid new_device_ephemeral_pub"),
     };
 
-    // QR device link (#1207): a device-link session files exactly the request
-    // its link expects, carrying the tag the approver will verify; an OTP
-    // session never carries one. Either mismatch is a malformed request.
-    //
-    // A v2 offer session (#1361) files a request with NO tag: its approver
-    // checks the request's key against the one it read off the QR. A tag there
-    // is as malformed as a missing one on a v1 link.
+    // QR device link (#1207): a device-link session carries its link's tag; an OTP session never does.
+    // A v2 offer session (#1361) carries NO tag.
     let link: Option<(String, Option<String>)> = match (&claims.scope, &parsed.link_tag) {
         (SessionScope::DeviceLink { link_id }, Some(tag)) if !tag.is_empty() => {
             Some((link_id.clone(), Some(tag.clone())))
@@ -585,31 +487,18 @@ pub async fn enrollment_request(
     )
     .await
     {
-        // A resubmit of the caller's OWN request is the same request; answer it
-        // the same way and re-emit the nudge, since the reason to retry is
-        // usually that the first notification was missed.
+        // A resubmit of the caller's OWN request is answered the same, re-emitting the nudge.
         Ok(EnrollmentRequestOutcome::Created | EnrollmentRequestOutcome::Duplicate) => {
-            // Attach the request to its link so the device showing the QR sees
-            // it. Only the claiming device can, once; a resubmit finds it
-            // already attached, which is fine.
+            // Attach the request to its link so the device showing the QR sees it.
             if let Some((link_id, tag)) = &link {
                 let now = crate::util::now_unix();
                 if !state.links.record_request(link_id, &claims.device_id, &parsed.request_id, tag.as_deref(), now) {
                     tracing::info!("enrollment-request: link {link_id} not attachable (expired or already attached)");
                 }
             }
-            // Notify the user's already-enrolled devices via their inbox room.
-            // The requesting device can't send this itself — it is
-            // pre-enrollment (no signing credential, local DB closed), so its
-            // client-side device-signed send-data fails with "not signed in".
-            // The DS holds the LiveKit admin secret, so it emits the nudge here.
-            // Best-effort: a miss is covered by the sibling's login-time
-            // `list_pending_enrollment_requests` poll.
+            // Nudge enrolled devices via the inbox; the requester can't (pre-credential). Best-effort.
             let inbox = format!("inbox-{}", claims.user_id);
-            // `link_id` (#1207) tells clients this request belongs to a QR
-            // link: the device showing that QR approves it on the link tag,
-            // and no device should pop the typed-code approval for it — the
-            // phone shows no code to type.
+            // `link_id` (#1207): approved on the link tag, so no typed-code prompt.
             let link_id = link.as_ref().map(|(id, _)| id.clone());
             let event = serde_json::json!({
                 "type": "enrollment_requested",
@@ -629,30 +518,17 @@ pub async fn enrollment_request(
 }
 
 /// What a `POST /v1/auth/enrollment-request` did.
-///
-/// The row is keyed on a CLIENT-CHOSEN `request_id`, so a second submit of the
-/// same id is a normal thing to see and used to be an unhandled
-/// `UNIQUE constraint failed` — a 500, which says "the service is broken" about
-/// a request that is merely repeated, and hands an unauthenticated-ish caller a
-/// cheap way to make the DS log errors. It is now two distinct, typed answers.
 #[derive(Debug, PartialEq, Eq)]
 pub enum EnrollmentRequestOutcome {
     /// The row was inserted.
     Created,
-    /// The id already names THIS session's own pending request — the client
-    /// retried. Idempotent: nothing is rewritten, and the caller gets its 200.
+    /// The id names THIS session's own pending request: a retry, answered 200.
     Duplicate,
-    /// The id already names somebody else's request (or the same user's other
-    /// device). Refused with 409 rather than overwriting: the row carries the
-    /// verification code an approving device compares against, so letting a
-    /// second caller replace it in place is how an approval gets steered onto
-    /// the wrong device.
+    /// The id names someone else's request: 409, as the row holds the verification code.
     Conflict,
 }
 
-/// INSERT the pending enrollment request, `user_id` + `new_device_id` bound to
-/// the session caller. Extracted from the handler so the in-process integration
-/// harness drives the identical write against the shared main DB.
+/// INSERT the pending enrollment request, bound to the session caller.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_enrollment_request(
     conn: &libsql::Connection,
@@ -664,10 +540,7 @@ pub async fn apply_enrollment_request(
     created_at: &str,
     expires_at: &str,
 ) -> anyhow::Result<EnrollmentRequestOutcome> {
-    // `OR IGNORE` rather than a bare INSERT: the primary key is a client-chosen
-    // id, so a duplicate is a client retry, not a service fault. The conflict is
-    // then RESOLVED by reading the row that won — never by overwriting it, since
-    // it holds the verification code the approving device compares against.
+    // `OR IGNORE`: a duplicate client-chosen id is resolved by reading the winner, never overwritten.
     let inserted = conn
         .execute(
             "INSERT OR IGNORE INTO device_enrollment_request \
@@ -700,9 +573,7 @@ pub async fn apply_enrollment_request(
         None => None,
     };
     Ok(match owner {
-        // The row vanished between the INSERT and the read (an expiry sweep, a
-        // teardown). Nothing was written and nothing is owned; refuse rather
-        // than claim success for a request that does not exist.
+        // The row vanished since the INSERT; refuse.
         None => EnrollmentRequestOutcome::Conflict,
         Some((owner_user, owner_device)) => {
             if owner_user == user_id && owner_device == new_device_id {

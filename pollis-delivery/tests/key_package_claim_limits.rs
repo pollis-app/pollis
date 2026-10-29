@@ -1,38 +1,12 @@
-//! `POST /v1/key-packages/claim` used to be unlimited on purpose, and the
-//! comment said so: "KP exhaustion — a hostile peer draining a target's pool by
-//! claiming repeatedly — is a known concern tracked for #419, but is
-//! deliberately NOT rate-limited here."
-//!
-//! It is the whole attack. A claim is a ONE-WAY flip of `claimed`: the package
-//! is spent whether or not the claimer ever builds an Add. So one authenticated
-//! account could loop until a target's pool was empty, and a device with no
-//! unclaimed package cannot be added to a group at all — a stranger holds an
-//! arbitrary user out of every conversation they are invited to, and the
-//! packages do not come back.
-//!
-//! Three things now cost a claim: the claimer must be allowed to reach the
-//! target at all, it is counted against a durable per-pair and per-target budget
-//! read from the database (so a rolling deploy does not hand out a fresh
-//! allowance), and only SUCCESSFUL claims are counted (charging for an empty pool
-//! would let a target's own exhaustion lock out the honest adders retrying behind
-//! it).
-//!
-//! Every test below fails against the pre-fix handler.
+//! `POST /v1/key-packages/claim` limits: a claim spends a package, so unlimited claims drain a pool.
 
 use pollis_delivery::devices::{apply_claim_key_package, ClaimKeyPackageBody, ClaimOutcome};
 
 mod common;
 
-/// MLS code point of the current suite, as the DS defaults an untagged claim.
 use pollis_delivery::devices::CIPHERSUITE_PQ;
 
-/// A fixture with `alice`, `bob` and `mallory` all in one group.
-///
-/// A claim now requires a SHARED CONVERSATION, not merely the absence of a block
-/// (see `devices::may_claim_from`) — every real claim path writes the roster row
-/// before reconciling the MLS tree to it, so this is the state every honest
-/// claim is made in. The budget tests below are about what a co-member can do;
-/// `a_stranger_cannot_touch_a_pool_at_all` covers the other side.
+/// `alice`, `bob` and `mallory` in one group: a claim needs a shared conversation.
 async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("kp-limits.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap())
@@ -42,7 +16,6 @@ async fn fresh() -> common::TempDb {
     db
 }
 
-/// Put every one of `users` in the group `group_id`.
 async fn co_members(db: &common::TempDb, group_id: &str, users: &[&str]) {
     let conn = db.conn().await.unwrap();
     for u in users {
@@ -55,7 +28,6 @@ async fn co_members(db: &common::TempDb, group_id: &str, users: &[&str]) {
     }
 }
 
-/// Publish `count` unclaimed packages for `(user, device)`.
 async fn publish(db: &common::TempDb, user: &str, device: &str, count: usize) {
     let conn = db.conn().await.unwrap();
     for i in 0..count {
@@ -95,7 +67,6 @@ async fn block(db: &common::TempDb, blocker: &str, blocked: &str) {
         .unwrap();
 }
 
-/// How many claims are on record for a pair.
 async fn recorded(db: &common::TempDb, claimer: &str, target: &str) -> i64 {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -109,8 +80,7 @@ async fn recorded(db: &common::TempDb, claimer: &str, target: &str) -> i64 {
     rows.next().await.unwrap().unwrap().get(0).unwrap()
 }
 
-/// THE DRAIN. Claiming in a loop stops paying out long before a real pool is
-/// gone, and the refusal is distinguishable from an empty pool.
+/// Claiming in a loop stops paying out long before a real pool is gone.
 #[tokio::test]
 async fn one_account_cannot_drain_a_targets_pool() {
     let db = fresh().await;
@@ -139,7 +109,6 @@ async fn one_account_cannot_drain_a_targets_pool() {
         "the loop drained the whole pool: {claimed} packages taken"
     );
 
-    // The pool still has packages for an honest adder — the point of the bound.
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package WHERE user_id = 'bob' AND claimed = 0",
@@ -151,8 +120,6 @@ async fn one_account_cannot_drain_a_targets_pool() {
     assert!(left > 0, "bob must still be addable");
 }
 
-/// A normal add is nowhere near the bound: one claim per device, a handful of
-/// devices, repeated for every conversation.
 #[tokio::test]
 async fn an_ordinary_run_of_adds_is_unaffected() {
     let db = fresh().await;
@@ -170,8 +137,7 @@ async fn an_ordinary_run_of_adds_is_unaffected() {
     }
 }
 
-/// Each pair has its OWN budget, so one exhausted claimer cannot lock everybody
-/// else out of a popular account.
+/// Each pair has its own budget.
 #[tokio::test]
 async fn one_claimers_budget_is_not_another_claimers() {
     let db = fresh().await;
@@ -194,9 +160,7 @@ async fn one_claimers_budget_is_not_another_claimers() {
     );
 }
 
-/// A claim against an EMPTY pool is not charged. Otherwise a target whose pool
-/// has run dry would see the honest adders retrying behind it burn their budgets
-/// and be locked out once it replenishes.
+/// A claim against an empty pool is not charged, or retrying adders burn their budgets.
 #[tokio::test]
 async fn an_empty_pool_costs_the_claimer_nothing() {
     let db = fresh().await;
@@ -221,8 +185,6 @@ async fn an_empty_pool_costs_the_claimer_nothing() {
     ));
 }
 
-/// Blocked in either direction is the one relationship state where draining a
-/// pool is pure harassment and there is no legitimate add to protect.
 #[tokio::test]
 async fn a_blocked_pair_cannot_claim_in_either_direction() {
     let db = fresh().await;
@@ -249,18 +211,13 @@ async fn a_blocked_pair_cannot_claim_in_either_direction() {
     assert_eq!(recorded(&db, "mallory", "bob").await, 0);
 }
 
-/// **L3.** The budget was 60 per pair per hour against a pool of FIVE, so it
-/// bound nothing: any unblocked stranger could empty a device's pool in five
-/// requests and hold that device out of every new conversation until it next
-/// came online. The gate is now a relationship — a shared conversation — and a
-/// stranger cannot take even the first package.
+/// L3: the gate is a shared conversation; a stranger cannot take even the first package.
 #[tokio::test]
 async fn a_stranger_cannot_touch_a_pool_at_all() {
     let db = fresh().await;
     publish(&db, "bob", "b1", 5).await;
     let conn = db.conn().await.unwrap();
 
-    // `stranger` is in no conversation with bob, and has blocked nobody.
     assert!(
         matches!(
             apply_claim_key_package(&conn, Some("stranger"), &claim("bob", "b1"))
@@ -272,9 +229,7 @@ async fn a_stranger_cannot_touch_a_pool_at_all() {
     );
     assert_eq!(recorded(&db, "stranger", "bob").await, 0);
 
-    // The pool is untouched, so bob is still addable. Scoped so the read
-    // statement is finalized before the write below — an open cursor pins this
-    // connection's snapshot and would hide it.
+    // Scoped so the read is finalized before the write: an open cursor pins the snapshot.
     {
         let mut rows = conn
             .query(
@@ -287,8 +242,6 @@ async fn a_stranger_cannot_touch_a_pool_at_all() {
         assert_eq!(left, 5, "a refused claim must spend nothing");
     }
 
-    // The moment they share a conversation — which every real add path writes
-    // BEFORE reconciling the MLS tree — the claim goes through.
     co_members(&db, "new-grp", &["stranger", "bob"]).await;
     let out = apply_claim_key_package(&conn, Some("stranger"), &claim("bob", "b1"))
         .await
@@ -296,19 +249,13 @@ async fn a_stranger_cannot_touch_a_pool_at_all() {
     assert!(matches!(out, ClaimOutcome::Claimed { .. }), "got {out:?}");
 }
 
-/// The gate is the DESIRED roster, so a PENDING INVITEE is claimable. This is
-/// the shape `send_group_invite` produces: `/v1/invites/create` writes the
-/// pending `group_invite` row and the inviter reconciles immediately, claiming
-/// the invitee's KeyPackage so their Welcome is staged before they accept. A
-/// gate that demanded `group_member` would 403 there and break every invite.
+/// The gate is the desired roster, so a pending invitee is claimable (`send_group_invite`).
 #[tokio::test]
 async fn a_pending_invitee_is_claimable_by_the_inviter() {
     let db = fresh().await;
     publish(&db, "newcomer", "n1", 5).await;
     let conn = db.conn().await.unwrap();
 
-    // Alice is an admin of a group; `newcomer` has been invited but has not
-    // accepted, so there is no `group_member` row for them.
     co_members(&db, "alice-grp", &["alice"]).await;
     conn.execute(
         "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) \
@@ -324,10 +271,7 @@ async fn a_pending_invitee_is_claimable_by_the_inviter() {
     assert!(matches!(out, ClaimOutcome::Claimed { .. }), "got {out:?}");
 }
 
-/// A DM is the other shape membership takes, and is what the "anybody may start
-/// a conversation with anybody" path produces: `/v1/dm/create` writes both
-/// `dm_channel_member` rows in one transaction before the client reconciles, so
-/// a first-contact DM still claims.
+/// `/v1/dm/create` writes both member rows before reconcile, so a first-contact DM claims.
 #[tokio::test]
 async fn a_dm_counts_as_a_shared_conversation() {
     let db = fresh().await;
@@ -352,8 +296,6 @@ async fn a_dm_counts_as_a_shared_conversation() {
     ));
 }
 
-/// Adding your own second device claims from your own pool, and must never be
-/// gated by a relationship check.
 #[tokio::test]
 async fn a_user_may_always_claim_from_its_own_pool() {
     let db = fresh().await;
@@ -368,10 +310,7 @@ async fn a_user_may_always_claim_from_its_own_pool() {
     ));
 }
 
-/// The budget is DURABLE — counted from the table, not from a process-local
-/// map — so a DS restart does not hand an attacker a fresh allowance. Modelled
-/// by re-reading through a brand-new connection, which is all a restarted
-/// instance has.
+/// The budget is durable (read from the table), so a restart grants no fresh allowance.
 #[tokio::test]
 async fn the_budget_survives_a_restart() {
     let db = fresh().await;
@@ -387,7 +326,6 @@ async fn the_budget_survives_a_restart() {
         ) {}
     }
 
-    // A "new instance": a fresh connection with no memory of the spree.
     let restarted = db.conn().await.unwrap();
     assert!(
         matches!(

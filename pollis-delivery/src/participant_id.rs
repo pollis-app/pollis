@@ -1,47 +1,17 @@
 //! Pseudonymous LiveKit participant identities (#836).
 //!
-//! The sibling of [`crate::room_id`], and the half it deliberately left behind.
-//!
-//! #828/#835 stopped LiveKit being able to name a room. It did nothing about
-//! *who is in it*: participant identity was still the raw `{user_id}:{device_id}`
-//! (`voice-` / `:view` variants per kind), so the SFU operator kept a list of
-//! which Pollis accounts share a room — and, because a user carries the same
-//! identity into every room they join, could stitch those lists into the social
-//! graph by co-membership. Opaque room names do not help against that: you do
-//! not need to know a room is "#design" to learn that A, B and C talk.
+//! Raw `{user_id}:{device_id}` identities let the SFU cluster the social graph by co-membership.
 //!
 //! Every identity is now `{prefix}{base64url(siv ‖ ct ‖ tag)}`, keyed per
 //! LOGICAL ROOM. Two rooms give the same user two unrelated identities.
 //!
-//! ## Why encryption and not a MAC
+//! Encrypted, not a MAC: identities must resolve back to users with no candidate list.
 //!
-//! [`crate::room_id`] is a one-way HMAC because nothing ever needs to invert it:
-//! the room travels inside the JWT grant and no client reads it back. Identity is
-//! different — it is *matched against*. The voice roster, the speaking
-//! indicators, presence and the self-hear filter all have to get from a
-//! participant identity back to a Pollis user.
-//!
-//! A MAC would force the resolver to guess: enumerate every candidate
-//! `(user, device)` pair, derive, and compare. That works only where the
-//! candidate set is known and current, and it is neither for `call-<ulid>` rooms
-//! (no membership rows exist — the ULID *is* the capability) nor for a device
-//! enrolled since the resolver last synced. So the identity is *encrypted*
-//! rather than hashed, and [`resolve_participant`] recovers the user with no
-//! candidate list at all.
-//!
-//! ## Where the key lives — still server-only
-//!
-//! Clients resolve by asking the DS (`POST /v1/livekit/identities`), which
-//! answers only for rooms the caller is already authorized to join. No client
-//! holds the key, which is the same property #828 protected and for the same
-//! reason: a key shipped in a release binary can be extracted, and one that
-//! resolves identities in *every* room would hand the whole graph back.
+//! Only the DS holds the key; clients resolve via `POST /v1/livekit/identities`.
 //!
 //! ## Construction
 //!
-//! Deterministic authenticated encryption in the SIV shape, built from
-//! HMAC-SHA256 only (no new dependency; the same primitive already keying
-//! [`crate::room_id`]):
+//! Deterministic SIV-shaped AEAD from HMAC-SHA256 only:
 //!
 //! ```text
 //! root  = HMAC(api_secret, LABEL ‖ len(room) ‖ room)      # per logical room
@@ -53,53 +23,11 @@
 //! tag   = HMAC(k_tag, kind ‖ siv ‖ ct)[..4]
 //! ```
 //!
-//! The synthetic IV is what makes it deterministic *without* the catastrophe of
-//! a reused nonce: `siv` is a PRF of the plaintext plus the device, so equal
-//! inputs give one stable identity and unequal inputs never share a keystream.
-//! Folding `device_id` into `siv` — rather than into the ciphertext — is what
-//! keeps a user's two devices distinct on the SFU (#140) without spending wire
-//! length on a second identifier the client has no use for.
+//! `siv` is a PRF of plaintext + device: equal inputs, one identity; unequal, never a shared keystream.
 //!
-//! `tag` is not load-bearing for confidentiality; it exists so a fabricated
-//! identity from a hostile SFU is *rejected* rather than decrypted into a
-//! plausible-looking garbage user id that then gets used as a database key.
+//! `tag` makes a hostile SFU's fabricated identity fail to resolve.
 //!
-//! ## What this buys, stated exactly
-//!
-//! After this change the SFU sees, per participant, an opaque 53-character
-//! string whose only structure is a 2-character capability prefix. It CANNOT:
-//!
-//!   - map a participant to a Pollis account, username, or device;
-//!   - tell that a participant in room A is the same person as one in room B —
-//!     which is precisely the co-membership clustering #836 was filed for;
-//!   - tell that two rooms have overlapping membership at all.
-//!
-//! It still CAN:
-//!
-//!   - see how many participants share a room, and their traffic patterns;
-//!   - recognise a returning participant **within one room**, because — exactly
-//!     as with room names in #828 — these are stable pseudonyms, not unlinkable
-//!     ones. For 1:1 calls that is already per-call: `call-<ulid>` rooms are
-//!     ephemeral, so a fresh room key means a fresh identity every call. For a
-//!     persistent voice channel it is not, and the SFU can count "this opaque
-//!     participant joined this opaque room 14 times".
-//!
-//! Closing that last gap needs a per-call epoch in the key. The only epoch the
-//! DS could observe without inventing state is the LiveKit room's creation time,
-//! which costs a `ListRooms` round trip on the join hot path and, worse, breaks
-//! LiveKit's duplicate-identity eviction: a mid-call reconnect that lands on a
-//! new epoch leaves the stale participant to time out beside the new one — a
-//! duplicate tile where today there is none. That is an availability/UX trade
-//! that wants its own decision, so it is *not* taken here, matching the same
-//! call made for room names in #828.
-//!
-//! ## Keying
-//!
-//! Derived from `LIVEKIT_API_SECRET` under its own domain-separation label, for
-//! the reason given in [`crate::room_id`]: rotating it re-keys identities, and
-//! rotation already invalidates every outstanding LiveKit token, so clients
-//! re-request one and pick up the new scheme in a round trip they were making
-//! anyway.
+//! The SFU still sees room sizes, and a returning participant within one room (stable pseudonyms).
 
 use base64::Engine;
 use hmac::{Hmac, Mac};
@@ -112,39 +40,25 @@ type HmacSha256 = Hmac<Sha256>;
 /// secret. Distinct labels keep the two derivations from ever colliding.
 const PARTICIPANT_LABEL: &[u8] = b"pollis-livekit-participant-pseudonym-v1";
 
-/// Synthetic-IV width in bytes. 64 bits of PRF output over
-/// `(kind, user_id, device_id)`: a collision would make two of one user's
-/// devices share an identity and evict each other on the SFU, which at 2^-64 per
-/// pair is not a failure mode worth spending wire length on.
+/// Synthetic-IV width in bytes; a 2^-64 collision would only make two devices evict each other.
 const SIV_LEN: usize = 8;
 
-/// Authentication-tag width in bytes. Deliberately short: the tag only has to
-/// make a hostile SFU's fabricated identity fail to resolve, and 2^-32 forgery
-/// odds per attempt does that. It is not protecting confidentiality — the
-/// keystream is.
+/// Authentication-tag width in bytes; 2^-32 forgery odds suffice to reject fabrications.
 const TAG_LEN: usize = 4;
 
-/// The capability class of a participant. This is the ONE thing that stays
-/// legible to LiveKit, encoded as the identity's 2-character prefix, because
-/// both ends have to route on it: the `view` variant is filtered out of rosters
-/// and tile grids, and voice participants share a room with the data-only
-/// realtime connections of the same conversation.
-///
-/// Capability was already visible before this change (`voice-` prefix, `:view`
-/// suffix); nothing new is disclosed by keeping it.
+/// The capability class, the ONE thing legible to LiveKit (a 2-char prefix): both ends route on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParticipantKind {
-    /// Data-only realtime / inbox connection. Was `{user}:{device}`.
+    /// Data-only realtime / inbox connection.
     Realtime,
-    /// Voice participant. Was `voice-{user}:{device}`.
+    /// Voice participant.
     Voice,
-    /// Screenshare-receive client; no data channel. Was `{user}:{device}:view`.
+    /// Screenshare-receive client; no data channel.
     View,
 }
 
 impl ParticipantKind {
-    /// Parse the `kind` field of a token request. Unknown/absent → `Realtime`,
-    /// matching the endpoint's pre-existing default.
+    /// Parse the `kind` field of a token request; unknown/absent → `Realtime`.
     pub fn from_wire(kind: Option<&str>) -> Self {
         match kind {
             Some("voice") => Self::Voice,
@@ -172,9 +86,7 @@ impl ParticipantKind {
         }
     }
 
-    /// Domain-separating byte mixed into `siv` and `tag`, so one user's voice
-    /// and realtime identities in a room are independent strings rather than
-    /// obvious re-prefixings of each other.
+    /// Mixed into `siv` and `tag` so a user's kinds aren't re-prefixings of each other.
     fn label(self) -> u8 {
         match self {
             Self::Realtime => 1,
@@ -196,17 +108,13 @@ fn mac(key: &[u8], parts: &[&[u8]]) -> [u8; 32] {
     m.finalize().into_bytes().into()
 }
 
-/// Length-prefix a field so no two distinct `(user, device)` splits can produce
-/// the same MAC input by concatenation — the same guard `room_id` applies to the
-/// logical room name.
+/// Length-prefix a field so distinct `(user, device)` splits can't share a MAC input.
 fn lp(out: &mut Vec<u8>, field: &[u8]) {
     out.extend_from_slice(&(field.len() as u64).to_be_bytes());
     out.extend_from_slice(field);
 }
 
-/// Per-logical-room key material. Scoping here is what makes identities
-/// unlinkable ACROSS rooms: the same user in two rooms shares no key, so nothing
-/// relates their two identities.
+/// Per-logical-room keys: what makes identities unlinkable ACROSS rooms.
 fn room_keys(api_secret: &str, logical_room: &str) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let mut input = Vec::with_capacity(PARTICIPANT_LABEL.len() + 8 + logical_room.len());
     input.extend_from_slice(PARTICIPANT_LABEL);
@@ -235,13 +143,7 @@ fn keystream(k_enc: &[u8; 32], siv: &[u8], len: usize) -> Vec<u8> {
 /// Build the opaque identity LiveKit sees for `(user_id, device_id)` in
 /// `logical_room`.
 ///
-/// `device_id` may be empty — the legacy no-device path — in which case the
-/// identity is still stable and still resolves, it just does not distinguish
-/// devices (there is only one to distinguish).
-///
-/// Deterministic: the same inputs always give the same identity for a given
-/// secret, which is what lets a reconnect land on the participant LiveKit
-/// already knows instead of doubling it.
+/// `device_id` may be empty (legacy); the identity then just doesn't tell devices apart.
 pub fn participant_pseudonym(
     api_secret: &str,
     logical_room: &str,
@@ -275,10 +177,7 @@ pub fn participant_pseudonym(
 
 /// Recover `(user_id, kind)` from an identity minted for `logical_room`.
 ///
-/// `None` for anything this key did not produce: an internal participant, a
-/// truncated or re-prefixed string, an identity from a different room, or a
-/// forgery. Callers treat `None` as "not a Pollis user" and leave the
-/// participant unattributed rather than guessing.
+/// `None` for anything this key did not produce; callers leave it unattributed.
 pub fn resolve_participant(
     api_secret: &str,
     logical_room: &str,
@@ -411,8 +310,7 @@ mod tests {
         assert_ne!(v(ROOM, "ab", "c"), v(ROOM, "a", "bc"));
     }
 
-    /// Rotating the LiveKit API secret re-keys identities — the documented,
-    /// self-healing consequence it shares with room names.
+    /// Rotating the LiveKit API secret re-keys identities.
     #[test]
     fn rekeys_with_the_secret() {
         assert_ne!(

@@ -1,18 +1,6 @@
 //! #679 — a revoked device must not count as registered.
 //!
-//! These tests moved here from `pollis-core/tests/revoked_device_reconcile.rs`
-//! in #987, along with the query they cover: the client no longer holds a
-//! database credential, so `registered_devices` is now
-//! `POST /v1/read/registered-devices` and the predicate that decides whether a
-//! tombstoned device is "registered" lives in this crate.
-//!
-//! What is being protected has not changed. `revoke_device` TOMBSTONES the row
-//! (`revoked_at`) rather than deleting it, precisely so other members can tell
-//! "revoked, drop the rejoin" from "not replicated yet, retry" — so the
-//! revocation must be excluded by the PREDICATE, never by the row's absence.
-//! Before the #679 fix the query returned both devices, which left the revoked
-//! leaf in `desired` and therefore out of `to_remove`: the revoked device kept
-//! its leaf and went on decrypting.
+//! Revocation tombstones the row, so it must be excluded by the predicate, not absence.
 
 use std::collections::HashSet;
 
@@ -20,16 +8,12 @@ use pollis_delivery::account_reads::registered_device_pairs;
 
 mod common;
 
-/// The `user_device` shape the query reads, including the #372 tombstone column
-/// added by migration 000004. Seeds against the SHIPPED schema rather than a
-/// hand-rolled table (#875), so a migration that changes the column set breaks
-/// these tests rather than sliding past them.
+/// Seeds against the shipped schema (#875) so column changes break these tests.
 async fn db_with_devices(rows: &[(&str, &str, Option<&str>)]) -> common::TempDb {
     let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.expect("conn");
     pollis_schema::apply::single_db(&conn).await.expect("schema");
     for (user_id, _, _) in rows {
-        // `user_device.user_id` is a real foreign key; give each device an owner.
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, username) VALUES (?1, ?1 || '@x', ?1)",
             libsql::params![user_id.to_string()],
@@ -63,11 +47,7 @@ async fn registered(db: &common::TempDb, roster: &[&str]) -> HashSet<(String, St
         .collect()
 }
 
-/// The #679 regression itself. The same fixture is the revoke-then-re-enrol
-/// shape (formerly `reenrolled_device_replaces_the_revoked_one`): the
-/// replacement device is a NEW `device_id`, so the old leaf must be droppable
-/// while the new one is admitted — getting this backwards would lock a user out
-/// of their own re-enrolled device.
+/// Re-enrolment is a new `device_id`: the old leaf is droppable, the new one admitted.
 #[tokio::test]
 async fn revoked_device_is_not_registered() {
     let db = db_with_devices(&[
@@ -90,8 +70,6 @@ async fn revoked_device_is_not_registered() {
     assert_eq!(got.len(), 1, "exactly the live device; got {got:?}");
 }
 
-/// Revocation is per-device, not per-user: tombstoning one device must not
-/// evict its owner's other devices, and must not spare other users'.
 #[tokio::test]
 async fn mixed_users_yield_only_live_devices() {
     let db = db_with_devices(&[
@@ -100,7 +78,6 @@ async fn mixed_users_yield_only_live_devices() {
         ("alice", "a-dead", Some("2026-07-30 12:00:00")),
         ("bob", "b-dead", Some("2026-07-30 12:00:00")),
         ("carol", "c-live", None),
-        // Not on the roster at all — must never appear.
         ("dave", "d-live", None),
     ])
     .await;
@@ -114,8 +91,7 @@ async fn mixed_users_yield_only_live_devices() {
     assert_eq!(got, want, "only live devices of rostered users");
 }
 
-/// A user whose every device is revoked contributes nothing — but is not an
-/// error. Reconcile must then treat all of their leaves as removable.
+/// A user with every device revoked contributes nothing, without error.
 #[tokio::test]
 async fn fully_revoked_user_contributes_no_devices() {
     let db = db_with_devices(&[
@@ -131,11 +107,7 @@ async fn fully_revoked_user_contributes_no_devices() {
     );
 }
 
-/// The ids are BOUND, not interpolated. Previously they were spliced into the
-/// SQL behind a character filter that silently *mangled* anything else — a
-/// user_id containing a quote became a different id, so the query answered a
-/// question nobody asked. Binding makes it match exactly or not at all, which is
-/// what makes the `revoked_at IS NULL` predicate trustworthy.
+/// The ids are bound, not interpolated, so they match exactly or not at all.
 #[tokio::test]
 async fn ids_are_bound_not_interpolated() {
     let weird = "alice' OR '1'='1";
@@ -156,8 +128,7 @@ async fn ids_are_bound_not_interpolated() {
     );
 }
 
-/// An empty roster must not build `IN ()` (a syntax error) nor fall through to
-/// an unfiltered scan that would report every device in the table.
+/// An empty roster must not build `IN ()` nor fall through to an unfiltered scan.
 #[tokio::test]
 async fn empty_roster_short_circuits() {
     let db = db_with_devices(&[("alice", "a1", None)]).await;

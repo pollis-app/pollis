@@ -1,26 +1,5 @@
 //! Pinned messages (#99) — what the DS may and may not do with the pin rows
 //! and the wrapped pin-key state.
-//!
-//! The design's server-side obligations, each with a test:
-//!
-//!   * **Byte-exact custody.** Pin ciphertext and the wrapped `Kpin` come back
-//!     bit for bit — the DS holds keys to neither and must not touch either.
-//!   * **Mint is insert-only.** A second mint is refused whatever its epoch,
-//!     because accepting it would replace a `Kpin` pins may already be sealed
-//!     under — a key fork, the one unrecoverable state.
-//!   * **Re-wrap is monotone.** `(generation, epoch)` compared
-//!     lexicographically, exactly like `mls_group_info`: a stale wrap can
-//!     never roll the row back to an epoch a removed member could still
-//!     derive, and a suite migration's successor lineage (epoch restarts at
-//!     0) is not stranded.
-//!   * **Membership is the gate.** Non-members can neither write nor read —
-//!     pins are conversation furniture, and even the undecryptable blobs leak
-//!     activity if served to strangers.
-//!   * **Pinning is idempotent.** Two pins of one message are one pin.
-//!
-//! `apply_*` drives the write rules; the real router (auth off, so the
-//! membership gate is exercised on the claimed body user) drives the reads —
-//! the same split as `read_cursor_sync.rs`.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -52,8 +31,7 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-/// Stands in for AES-GCM output: not UTF-8, not JSON — a handler that parses
-/// it fails here rather than in production.
+/// Stands in for AES-GCM output: not UTF-8, not JSON.
 const CIPHERTEXT: &[u8] = &[
     0xF5, 0x00, 0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF, 0x91, 0x7A, 0x00, 0x00, 0xC3, 0x28,
 ];
@@ -69,12 +47,7 @@ async fn seed_member(db: &common::TempDb, conversation_id: &str, user_id: &str) 
     .unwrap();
 }
 
-/// Give `conv` a commit log whose head in `generation` is `head_epoch`, so a
-/// keystate naming that epoch is at or below the head.
-///
-/// The keystate CAS is ceilinged at the commit log (a member must not be able to
-/// freeze the row at an epoch nobody can ever exceed), so a test that re-wraps at
-/// epoch 7 has to be a test about a conversation that actually reached epoch 7.
+/// Give `conv` a commit log whose head in `generation` is `head_epoch` (the keystate CAS ceiling).
 async fn seed_head(db: &common::TempDb, conv: &str, generation: i64, head_epoch: i64) {
     let conn = db.conn().await.unwrap();
     for epoch in 0..head_epoch {
@@ -157,11 +130,7 @@ async fn read_pins(db: &common::TempDb, conv: &str, actor: &str) -> (StatusCode,
     (status, Some(serde_json::from_slice(&bytes).unwrap()))
 }
 
-// ── Keystate: mint + CAS ─────────────────────────────────────────────────────
-
-/// A mint is insert-only: the second mint LOSES even at a newer epoch. This is
-/// the fork-prevention property — the loser must adopt the stored key, never
-/// replace one that pins may already be sealed under.
+/// A second mint loses even at a newer epoch: the loser adopts, never forks the key.
 #[tokio::test]
 async fn a_second_mint_is_refused_even_at_a_newer_epoch() {
     let db = fresh().await;
@@ -175,7 +144,6 @@ async fn a_second_mint_is_refused_even_at_a_newer_epoch() {
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: true }));
 
-    // Bob mints too — different key material, HIGHER epoch. Must lose.
     let mut second = keystate("conv1", "bob", 0, 5, true);
     second.wrapped_kpin = b64(&[0xCD; 48]);
     let out = apply_upsert_keystate(&conn, &conn, Some("bob"), &second).await.unwrap();
@@ -190,7 +158,6 @@ async fn a_second_mint_is_refused_even_at_a_newer_epoch() {
     assert_eq!(ks.epoch, 4);
 }
 
-/// Re-wraps are monotone on the (generation, epoch) pair, lexicographically.
 #[tokio::test]
 async fn rewrap_is_lexicographically_monotone() {
     let db = fresh().await;
@@ -201,13 +168,11 @@ async fn rewrap_is_lexicographically_monotone() {
         .await
         .unwrap();
 
-    // Forward: accepted.
     let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 7, false))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: true }));
 
-    // Stale: refused, row keeps epoch 7.
     let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 5, false))
         .await
         .unwrap();
@@ -215,16 +180,12 @@ async fn rewrap_is_lexicographically_monotone() {
     let (_, resp) = read_keystate(&db, "conv1", "alice").await;
     assert_eq!(resp.unwrap().keystate.unwrap().epoch, 7);
 
-    // Equal: refused (an idempotent retry has nothing to do — the row already
-    // carries a wrap the current exporter opens).
     let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 0, 7, false))
         .await
         .unwrap();
     assert!(matches!(out, KeystateOutcome::Ok { updated: false }));
 
-    // Successor lineage at epoch 0 — NUMERICALLY below 7 — must win, or a
-    // suite migration strands the keystate forever. The lineage has to have been
-    // OPENED for a wrap to name it, which is what the opening commit does.
+    // A successor lineage at epoch 0 must win, or a suite migration strands the keystate.
     seed_head(&db, "conv1", 1, 1).await;
     let out = apply_upsert_keystate(&conn, &conn, Some("alice"), &keystate("conv1", "alice", 1, 0, false))
         .await
@@ -235,7 +196,6 @@ async fn rewrap_is_lexicographically_monotone() {
     assert_eq!((ks.generation, ks.epoch), (1, 0));
 }
 
-/// Non-members can neither mint nor re-wrap.
 #[tokio::test]
 async fn a_non_member_cannot_touch_the_keystate() {
     let db = fresh().await;
@@ -254,7 +214,6 @@ async fn a_non_member_cannot_touch_the_keystate() {
     assert!(resp.unwrap().keystate.is_none(), "nothing may have been written");
 }
 
-/// The wrap envelope is validated even though its contents cannot be.
 #[tokio::test]
 async fn a_malformed_keystate_envelope_is_a_client_error() {
     let db = fresh().await;
@@ -283,9 +242,6 @@ async fn a_malformed_keystate_envelope_is_a_client_error() {
     ));
 }
 
-// ── Pins ─────────────────────────────────────────────────────────────────────
-
-/// Custody: the pin ciphertext comes back byte for byte, newest first.
 #[tokio::test]
 async fn pin_ciphertext_round_trips_byte_for_byte() {
     let db = fresh().await;
@@ -304,7 +260,6 @@ async fn pin_ciphertext_round_trips_byte_for_byte() {
     assert_eq!(pins[0].pinned_by, "alice");
 }
 
-/// Two pins of one message are one pin — first writer keeps the row.
 #[tokio::test]
 async fn pinning_twice_keeps_the_first_pin() {
     let db = fresh().await;
@@ -326,8 +281,6 @@ async fn pinning_twice_keeps_the_first_pin() {
     assert_eq!(pins[0].encrypted_content, b64(CIPHERTEXT));
 }
 
-/// Membership gates pinning and unpinning; any member (not just the pinner)
-/// may unpin.
 #[tokio::test]
 async fn membership_gates_writes_and_any_member_may_unpin() {
     let db = fresh().await;
@@ -361,7 +314,6 @@ async fn membership_gates_writes_and_any_member_may_unpin() {
     .unwrap();
     assert!(matches!(out, WriteOutcome::Forbidden));
 
-    // Bob did not pin it; Slack's model says he may still unpin it.
     let out = apply_unpin_message(
         &conn,
         Some("bob"),
@@ -378,7 +330,7 @@ async fn membership_gates_writes_and_any_member_may_unpin() {
     assert!(resp.unwrap().pins.is_empty());
 }
 
-/// Non-members get a 403 from both reads — even ciphertext leaks activity.
+/// Non-members get a 403 from both reads: even ciphertext leaks activity.
 #[tokio::test]
 async fn reads_are_membership_gated() {
     let db = fresh().await;
@@ -398,7 +350,6 @@ async fn reads_are_membership_gated() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// No keystate is `keystate: None` — a pre-#99 conversation, not an error.
 #[tokio::test]
 async fn a_conversation_without_a_key_reads_as_none() {
     let db = fresh().await;

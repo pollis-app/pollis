@@ -1,40 +1,13 @@
 //! Per-client-IP rate limiting for the unauthenticated signup-OTP endpoints
 //! (`request-otp` / `verify-otp`).
 //!
-//! The per-EMAIL throttle + lockout in [`crate::otp`] stops abuse of a *single*
-//! address, but nothing stopped one client from spraying `request-otp` across
-//! thousands of addresses (email-bombing arbitrary mailboxes, burning Resend
-//! quota/reputation) or `verify-otp` across many addresses (cross-email
-//! guessing). This adds the per-IP throttle the OTP bootstrap design always
-//! called for (`docs/otp-server-bootstrap-design.md`: "Per-email resend
-//! throttle + IP throttle").
+//! Per-email limits in [`crate::otp`] can't stop one client spraying many addresses; this is per IP.
 //!
-//! **Store:** in-memory fixed-window counters (the DS is single-container, same
-//! as the OTP/session stores). Behind [`RateLimiter`] so a scaled-out DS can
-//! swap it for a shared store without touching the handlers. Reusable beyond the
-//! OTP endpoints — `check` is keyed by a tier plus a client identity.
+//! **Store:** in-memory fixed windows (single container), keyed by tier plus client identity.
 //!
-//! **Client identity:** the DS sits behind Cloudflare and serves plain HTTP, so
-//! the socket peer is the proxy, not the client. In production the container
-//! never sees a client IP at all: the Worker's Durable Object
-//! (`worker/index.ts`) deletes every IP-bearing header and sends
-//! `X-Pollis-Client-Bucket` — a keyed hash of the IP under a key only it holds —
-//! which a client cannot set (the object deletes any inbound copy). Without the
-//! Worker (local runs, tests) the DS falls back to `CF-Connecting-IP`, then the
-//! first `X-Forwarded-For` hop; requests with none of these share one bucket so
-//! the limiter is still exercised rather than silently disabled.
+//! **Client identity:** the Worker's `X-Pollis-Client-Bucket`; without the Worker, the client IP.
 //!
-//! **The IP is never a key.** The limiter needs to tell clients APART, not to
-//! know who they are, so the map holds `{tier}:{h}` where `h` is the first 16
-//! bytes of HMAC-SHA256 over the client identity above (the Worker's bucket, or
-//! in a local run the IP) under a 32-byte key drawn from the OS CSPRNG when the
-//! [`RateLimiter`] is built. That key lives only in this process's
-//! memory — it is not logged, persisted or configurable — so a memory dump or a
-//! debug print of the map yields per-process pseudonyms that cannot be reversed
-//! by enumerating the IPv4 space, and that stop meaning anything at the next
-//! restart. [`ClientKey`] is the only thing [`RateLimiter::check`] accepts, and
-//! the only way to build one is [`RateLimiter::client_key`], which hashes — so a
-//! raw IP cannot reach the map by construction.
+//! **The IP is never a key:** the map holds a per-process HMAC, via [`RateLimiter::client_key`] only.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -66,41 +39,23 @@ pub struct RateLimitConfig {
     pub verify_otp_max: u32,
     /// `verify-otp` window length, seconds.
     pub verify_otp_window_secs: u64,
-    /// Max other (authenticated) write calls per IP per window — a generous
-    /// backstop against a flood from one client; device-signed writes are already
-    /// credential-gated, so this only catches egregious volume.
+    /// Max other (authenticated) write calls per IP per window; a flood backstop.
     pub write_max: u32,
     /// Authenticated-write window length, seconds.
     pub write_window_secs: u64,
-    /// Max invite-link redemption attempts per IP per window (#847). The
-    /// generic `write` tier is 1200/60s — fine as a flood backstop, useless as a
-    /// brute-force bound on a join code, so redemption gets its own tier.
+    /// Max invite-link redemption attempts per IP per window (#847).
     pub invite_redeem_max: u32,
     /// Invite-link redemption window length, seconds.
     pub invite_redeem_window_secs: u64,
-    /// Max READ calls per IP per window (#987). Every read is a POST — the
-    /// canonical signing message excludes the query string, so a signed GET's
-    /// parameters would be unauthenticated — which means reads would otherwise
-    /// spend the `write` budget. A cold launch legitimately issues dozens of
-    /// them in a second, so reads get their own, larger allowance rather than
-    /// competing with sends for one.
+    /// Max READ calls per IP per window (#987); reads are POSTs, so they'd otherwise spend `write`.
     pub read_max: u32,
     /// Read window length, seconds.
     pub read_window_secs: u64,
-    /// Max slug lookups and account probes per IP per window (#987). These two
-    /// are the only endpoints whose INPUT is guessable — a group name and, for
-    /// an unauthenticated caller, nothing at all — so the generic backstop is
-    /// the wrong bound for them, exactly as it was for invite redemption.
+    /// Max slug lookups and account probes per IP per window (#987): guessable inputs.
     pub probe_max: u32,
     /// Probe window length, seconds.
     pub probe_window_secs: u64,
-    /// Max GET calls per IP per window. `/health` and `/version` are exempt (a
-    /// load balancer and the deploy tripwire poll them, and an unreachable
-    /// health check is an outage); everything else answered over GET is an
-    /// operator endpoint behind a bearer token, and a bearer token is a thing
-    /// that gets GUESSED. GETs used to be exempt wholesale, which was defensible
-    /// only while the one substantial GET was an open read; there is no longer
-    /// one of those.
+    /// Max GET calls per IP per window; `/health` and `/version` are exempt, the rest is bearer-gated.
     pub get_max: u32,
     /// GET window length, seconds.
     pub get_window_secs: u64,
@@ -117,24 +72,16 @@ impl Default for RateLimitConfig {
             verify_otp_window_secs: 600,
             write_max: 1200,
             write_window_secs: 60,
-            // A real user redeems a link once. 20 attempts per 10 minutes from
-            // one IP is generous for retries and typos, and far below anything
-            // that resembles a search.
+            // A real user redeems a link once; 20 per 10 minutes covers typos.
             invite_redeem_max: 20,
             invite_redeem_window_secs: 600,
-            // A cold launch is one bootstrap plus a conversation-state batch
-            // plus a catch-up per open conversation; a busy session adds a few
-            // per interaction. 3000/60s is far above that and far below a scrape.
+            // Far above a cold launch's reads, far below a scrape.
             read_max: 3000,
             read_window_secs: 60,
-            // A real user looks up a handful of slugs, and probes their own
-            // account id once per launch. 60 per 10 minutes covers retries and
-            // multi-account installs without resembling a search.
+            // Covers retries and multi-account installs without resembling a search.
             probe_max: 60,
             probe_window_secs: 600,
-            // An operator scraper polls metrics on the order of once a minute
-            // and a human reads /v1/config by hand. 120 per 10 minutes is far
-            // above both and far below a token search.
+            // Far above a metrics scraper, far below a token search.
             get_max: 120,
             get_window_secs: 600,
         }
@@ -201,9 +148,7 @@ fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
     std::env::var(key).ok().and_then(|s| s.parse().ok())
 }
 
-/// A tier's `RL_*_MAX`: a number, or `off` for [`UNLIMITED`]. Dev sets the OTP
-/// tiers `off` (the e2e suites sign up a fresh account per flow from one
-/// machine); prod sets no `RL_*` at all, so it keeps the [`Default`] limits.
+/// A tier's `RL_*_MAX`: a number, or `off` for [`UNLIMITED`] (dev's OTP tiers).
 fn env_max(key: &str) -> Option<u32> {
     let raw = std::env::var(key).ok()?;
     parse_max(&raw)
@@ -240,18 +185,13 @@ struct Window {
     window_start: u64,
     /// The window length this key is counted over, carried on the entry.
     ///
-    /// One map serves all six tiers and their windows differ by an order of
-    /// magnitude (60s for `write`/`read`, 600s for the OTP, invite-redeem and
-    /// probe tiers), so the pruner cannot use the calling tier's window to judge
-    /// somebody else's entry — see [`RateLimiter::check`].
+    /// One map serves every tier, so the pruner judges each entry by its own window.
     window_secs: u64,
 }
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Bytes of the HMAC output kept in a [`ClientKey`]. 128 bits makes a collision
-/// between two clients (which would merely share a budget) negligible while
-/// halving what each entry stores.
+/// Bytes of the HMAC output kept in a [`ClientKey`] (128 bits).
 const CLIENT_HASH_BYTES: usize = 16;
 
 /// Bytes of the HMAC kept in an ops-log email tag ([`RateLimiter::email_tag`]).
@@ -264,32 +204,22 @@ pub(crate) const OTP_REQUEST_TIER: &str = "otp_request";
 /// A rate-limit bucket: a tier name plus a keyed, per-process hash of the client
 /// IP — `{tier}:{hex(HMAC-SHA256(process_key, ip)[..16])}`.
 ///
-/// The field is private and the only constructor is [`RateLimiter::client_key`],
-/// so a `ClientKey` holding a raw IP cannot exist. `Debug` is safe to derive for
-/// the same reason: there is nothing in here but the tier and the pseudonym.
+/// The only constructor is [`RateLimiter::client_key`], so a raw IP can't get in.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ClientKey(String);
 
 impl ClientKey {
-    /// The pseudonym half of the key — the hex HMAC, without the tier prefix.
-    /// The HMAC covers only the client identity, so the same client has the same
-    /// pseudonym in every tier, which is what lets the dev ops log
-    /// ([`crate::ops_log`]) correlate one client across endpoints. It is the
-    /// same per-process keyed hash the map already holds: no new identifier.
+    /// The pseudonym half of the key; the same in every tier, so the ops log can correlate.
     pub(crate) fn pseudonym(&self) -> &str {
         self.0.split_once(':').map_or(self.0.as_str(), |(_, h)| h)
     }
 }
 
-/// In-memory per-key fixed-window rate limiter. `Clone` is shallow (shared
-/// `Arc`s) so it rides on the `Clone` `AppState`, and every clone hashes with the
-/// same process key and counts into the same map.
+/// In-memory per-key fixed-window rate limiter; clones share the key and the map.
 #[derive(Clone)]
 pub struct RateLimiter {
     inner: Arc<Mutex<HashMap<ClientKey, Window>>>,
-    /// HMAC-SHA256 already keyed with this limiter's 32 random bytes. The raw
-    /// key is not kept anywhere else; cloning the keyed state per lookup avoids
-    /// re-running the key schedule on every request.
+    /// HMAC-SHA256 keyed with this limiter's 32 random bytes, kept nowhere else.
     mac: Arc<HmacSha256>,
 }
 
@@ -305,9 +235,7 @@ impl Default for RateLimiter {
 const PRUNE_THRESHOLD: usize = 10_000;
 
 impl RateLimiter {
-    /// A fresh limiter with an empty map and a fresh random hashing key. Each
-    /// instance's key is independent, so the same IP hashes differently in two
-    /// limiters (and therefore across restarts).
+    /// A fresh limiter with a fresh random key, so hashes differ across limiters and restarts.
     pub fn new() -> Self {
         let mut key = [0u8; 32];
         OsRng.fill_bytes(&mut key);
@@ -321,10 +249,7 @@ impl RateLimiter {
         }
     }
 
-    /// The bucket for the request's client in `tier`. The public way to build a
-    /// [`ClientKey`]: the client IP is read from `headers` and hashed in the same
-    /// expression, so the raw IP never leaves this module — not to the
-    /// middleware, not to a handler, not to a log line.
+    /// The bucket for the request's client in `tier`; the IP is hashed in the same expression.
     pub fn client_key(&self, tier: &str, headers: &HeaderMap) -> ClientKey {
         self.key_for_ip(tier, client_identity(headers))
     }
@@ -338,12 +263,7 @@ impl RateLimiter {
         ClientKey(format!("{tier}:{}", hex::encode(&digest[..CLIENT_HASH_BYTES])))
     }
 
-    /// A short keyed tag for a normalized email address, for the dev ops log
-    /// ([`crate::ops_log`]): it tells "the same address again" (a retry loop)
-    /// apart from "a fresh address every time" (an e2e suite) without holding the
-    /// address. Same per-process key as the client pseudonyms, domain-separated
-    /// so an email and a client identity can never produce the same tag, and
-    /// meaningless after a restart.
+    /// A short keyed tag for a normalized email (ops log), domain-separated from client pseudonyms.
     pub(crate) fn email_tag(&self, normalized_email: &str) -> String {
         let mut mac = (*self.mac).clone();
         mac.update(b"ops-email\0");
@@ -352,10 +272,7 @@ impl RateLimiter {
         hex::encode(&digest[..EMAIL_TAG_BYTES])
     }
 
-    /// Record one hit for `key` and report whether it is within `max` per
-    /// `window_secs`. Fixed window: the first hit starts a window; once the
-    /// window elapses the counter resets. A key over its limit stays [`Limited`]
-    /// until its window rolls over.
+    /// Record one hit for `key`; fixed window, so an over-limit key stays [`Limited`] until rollover.
     ///
     /// [`Limited`]: RateLimitOutcome::Limited
     pub fn check(&self, key: &ClientKey, max: u32, window_secs: u64, now: u64) -> RateLimitOutcome {
@@ -363,22 +280,10 @@ impl RateLimiter {
 
         if guard.len() > PRUNE_THRESHOLD {
             // Judge every entry by ITS OWN window, not the caller's.
-            //
-            // This used to prune with `window_secs` — the window of whichever
-            // tier happened to trip the threshold. One map holds all six tiers,
-            // so a `write` call (60s) would evict live 600s entries: an OTP
-            // attempt counter that was 90 seconds into its ten-minute window
-            // simply vanished, and the next attempt started from zero. That is a
-            // rate-limit reset on the brute-force-sensitive tier, triggered by
-            // unrelated traffic on a busy server.
             guard.retain(|_, w| now.saturating_sub(w.window_start) < w.window_secs);
         }
 
-        // Probed before `entry`, deliberately: `entry` takes an OWNED key, so
-        // every request would clone a `ClientKey` the map almost always already
-        // holds, and then drop it. Two hash lookups on the hit
-        // path are cheaper than one heap allocation on every request the DS
-        // serves.
+        // Probed before `entry` to avoid cloning a `ClientKey` on every request.
         if !guard.contains_key(key) {
             guard.insert(
                 key.clone(),
@@ -390,9 +295,7 @@ impl RateLimiter {
             );
         }
         let win = guard.get_mut(key).expect("inserted above when absent");
-        // A key's tier is fixed by its call site, but keep the stored span in
-        // step with the caller so a re-tuned limit takes effect on the next hit
-        // rather than at the next eviction.
+        // Keep the stored span in step, so a re-tuned limit applies on the next hit.
         win.window_secs = window_secs;
         if now.saturating_sub(win.window_start) >= window_secs {
             win.count = 0;
@@ -411,10 +314,7 @@ impl RateLimiter {
 /// Durable Object after it deletes every IP header; never client-controlled.
 const CLIENT_BUCKET_HEADER: &str = "x-pollis-client-bucket";
 
-/// The client identity for rate-limit keying — PRIVATE, and its only caller
-/// hashes the result immediately ([`RateLimiter::client_key`]). Prefers the
-/// Worker's bucket (production: the only identity the container receives), and
-/// only without it — a local run with no Worker in front — the client IP.
+/// The client identity for keying: the Worker's bucket, else the IP. Its only caller hashes it.
 fn client_identity(headers: &HeaderMap) -> &str {
     if let Some(bucket) = header_str(headers, CLIENT_BUCKET_HEADER) {
         return bucket;
@@ -422,10 +322,7 @@ fn client_identity(headers: &HeaderMap) -> &str {
     client_ip(headers)
 }
 
-/// The client IP, for a DS running without the Worker in front. Prefers
-/// `CF-Connecting-IP`, then the first `X-Forwarded-For` hop. Absent both,
-/// returns a shared sentinel so the limiter is still exercised rather than
-/// bypassed.
+/// The client IP without the Worker: `CF-Connecting-IP`, the first XFF hop, else a sentinel.
 fn client_ip(headers: &HeaderMap) -> &str {
     if let Some(ip) = header_str(headers, "cf-connecting-ip") {
         return ip;
@@ -459,23 +356,14 @@ pub fn too_many_requests() -> Response {
         .into_response()
 }
 
-/// Pick the rate-limit tier for a request, or `None` to exempt it. One place
-/// decides policy for the whole service, so no handler re-implements throttling.
-/// Reads (`GET`) and the health/version probes are exempt (cheap, idempotent,
-/// and DDoS-fronted by Cloudflare); the unauthenticated OTP endpoints get tight
-/// limits (the cheap-abuse surface); every other write gets a generous backstop.
+/// Pick the rate-limit tier for a request, or `None` to exempt it; the one place policy lives.
 fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'static str, u32, u64)> {
     if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
-        // The liveness probes stay exempt: a rate-limited health check reads as
-        // an outage to whatever is watching it, and neither answer discloses
-        // anything worth grinding for.
+        // Liveness probes stay exempt: a throttled health check reads as an outage.
         if path == "/health" || path == "/version" {
             return None;
         }
-        // Everything else served over GET is operator surface gated by a static
-        // bearer token (`/v1/config`, `/v1/retention/metrics`). A static secret
-        // with no bound on attempts is a secret being guessed, so the GET verb
-        // gets a tier rather than a blanket exemption.
+        // Other GETs are bearer-token operator surface, so they get an attempt bound.
         return Some(("get", cfg.get_max, cfg.get_window_secs));
     }
     match path {
@@ -492,42 +380,24 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         | "/v1/link/claim" => {
             Some(("otp_verify", cfg.verify_otp_max, cfg.verify_otp_window_secs))
         }
-        // #847 — its own tier, keyed per IP. The durable per-USER bound lives in
-        // `groups::apply_redeem_invite_link`; this one sheds volume, that one
-        // survives a restart and an IP rotation.
+        // #847: sheds volume; the durable per-USER bound is `groups::apply_redeem_invite_link`.
         "/v1/invite-links/redeem" => Some((
             "invite_redeem",
             cfg.invite_redeem_max,
             cfg.invite_redeem_window_secs,
         )),
-        // #987 — the two guessable-input reads. `group-by-slug` is deliberately
-        // not membership-gated (gating it would remove the join flow, not
-        // tighten it), and `account-probe` is deliberately unauthenticated (it
-        // runs before any credential exists). Both therefore need a bound that
-        // is about GUESSING, which the generic write backstop is not.
-        //
-        // `/v1/invites/create` joins them: it is a WRITE, but its input is a
-        // username-or-email typed by a human and its answer distinguishes "no
-        // such user" from every other outcome. Anyone can make a group and be its
-        // admin, so any account could walk the username and email space at the
-        // generic write rate. The guessable input, not the verb, is what decides
-        // the tier.
-        // `/v1/link/offer` (#1361) is pre-credential and holds memory until it
-        // lapses, so it is bounded per client like the guessable-input probes;
-        // a screen re-offering every two minutes stays far under it.
+        // #987: guessable-input reads (`group-by-slug`, `account-probe`) need a guessing bound.
+        // `/v1/invites/create` too: its username-or-email input is guessable.
+        // `/v1/link/offer` (#1361): pre-credential, and holds memory until it lapses.
         "/v1/directory/group-by-slug"
         | "/v1/auth/account-probe"
         | "/v1/invites/create"
         | "/v1/link/offer" => {
             Some(("probe", cfg.probe_max, cfg.probe_window_secs))
         }
-        // Every other read (#987). They are POSTs, so without this they would
-        // spend the write budget — and a cold launch issues far more reads than
-        // a user ever issues writes.
-        // `/v1/link/status` is polled by the device showing a QR (#1207): a
-        // read, not a write, whatever its path family.
-        // `/v1/link/poll-offer` (#1361) is the new device's wait on its QR; its
-        // secret is 32 random bytes, so the bound is about volume, not guessing.
+        // Every other read (#987); a cold launch issues far more reads than writes.
+        // `/v1/link/status` (#1207) is a QR poll, so a read.
+        // `/v1/link/poll-offer` (#1361): a 32-byte secret, so the bound is volume.
         "/v1/link/status" | "/v1/link/poll-offer" => Some(("read", cfg.read_max, cfg.read_window_secs)),
         p if is_read_path(p) => Some(("read", cfg.read_max, cfg.read_window_secs)),
         _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
@@ -536,10 +406,7 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
 
 /// Whether a path is one of the #987 read endpoints.
 ///
-/// Prefix-matched on the three families the reads live under, so a new read
-/// endpoint lands in the read tier by construction rather than by remembering to
-/// list it here — and a new WRITE cannot accidentally land there, because writes
-/// do not live under these prefixes.
+/// Prefix-matched, so a new read lands here by construction and a write cannot.
 fn is_read_path(path: &str) -> bool {
     path.starts_with("/v1/read/")
         || path.starts_with("/v1/directory/")
@@ -549,11 +416,7 @@ fn is_read_path(path: &str) -> bool {
         || path == "/v1/messages/lookup"
 }
 
-/// Axum middleware: per-IP rate limiting for the whole service, keyed by
-/// `{tier}:{keyed hash of ip}` (see [`ClientKey`]) so each tier has its own
-/// budget and the raw IP is never stored. Runs before the handler and
-/// short-circuits to 429 when a client exceeds its tier. Replaces per-handler
-/// checks so throttling lives in exactly one place (#345).
+/// Axum middleware: per-IP rate limiting for the whole service, keyed by [`ClientKey`] (#345).
 pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
     if let Some((tier, max, window)) = classify(req.method(), req.uri().path(), &state.ratelimit_config)
     {
@@ -562,11 +425,7 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
             .ratelimit
             .check(&key, max, window, crate::util::now_unix())
             == RateLimitOutcome::Limited;
-        // Dev-only observation (`POLLIS_DS_OPS_LOG`, see `ops_log.rs`). It only
-        // RECORDS: the limit was decided on the line above, and `observe` answers
-        // with the same 429 or the same handler response. `ops_log` is `None`
-        // unless that variable is set, and only `wrangler.dev.jsonc` sets it, so
-        // in production this branch does not exist at runtime.
+        // Dev-only observation (`ops_log.rs`); it only RECORDS the decision above.
         if let Some(ops) = state.ops_log.as_ref() {
             if limited || tier == OTP_REQUEST_TIER {
                 return crate::ops_log::observe(ops, &state.ratelimit, tier, &key, limited, req, next)
@@ -611,17 +470,6 @@ mod tests {
     }
 
     /// The pruner must judge each entry by its OWN window.
-    ///
-    /// One map serves all six tiers, and their windows differ by an order of
-    /// magnitude. The prune used the CALLING tier's window, so a `write` call
-    /// (60s) crossing the threshold evicted live 600s entries — an OTP attempt
-    /// counter part-way through its ten-minute window vanished, and the next
-    /// attempt started from zero. A rate-limit reset on the brute-force tier,
-    /// caused by unrelated traffic.
-    ///
-    /// Reproduced here at the smallest scale that trips it: an OTP key counted
-    /// to its limit, the map pushed past `PRUNE_THRESHOLD` with filler, then a
-    /// short-window call to force the prune.
     #[test]
     fn a_short_window_prune_does_not_evict_a_live_long_window() {
         const OTP_WINDOW: u64 = 600;
@@ -674,20 +522,13 @@ mod tests {
         assert_eq!(tier("/v1/welcomes/fetch"), Some("read"));
         assert_eq!(tier("/v1/directory/group-by-slug"), Some("probe"));
         assert_eq!(tier("/v1/auth/account-probe"), Some("probe"));
-        // A WRITE whose input is guessable belongs in the probe tier too: the
-        // invite resolver takes a username-or-email and answers "no such user"
-        // distinguishably, and anybody can be an admin of a group they made, so
-        // at the write rate it walked the identifier space (L3).
+        // A guessable-input WRITE belongs in the probe tier too (L3).
         assert_eq!(tier("/v1/invites/create"), Some("probe"));
     }
 
     /// GETs are no longer exempt wholesale.
     ///
-    /// The exemption was written when the one substantial GET was an open,
-    /// side-effect-free read of the commit log. That route is retired, and what
-    /// is left over GET is operator surface behind a STATIC bearer token — the
-    /// exact shape that needs an attempt bound. The two liveness probes stay
-    /// exempt, deliberately: throttling a health check manufactures an outage.
+    /// What's left over GET is behind a STATIC bearer token; the liveness probes stay exempt.
     #[test]
     fn get_routes_are_limited_except_the_liveness_probes() {
         let cfg = RateLimitConfig::default();
@@ -743,9 +584,7 @@ mod tests {
         assert_eq!(rl.check(&k, 3, 60, 1061), RateLimitOutcome::Allowed);
     }
 
-    /// Limiting is still per IP after hashing: one IP over its budget does not
-    /// throttle another, and the SAME IP looked up afresh from headers (as the
-    /// middleware does on every request) lands in the same, exhausted bucket.
+    /// Limiting is still per IP after hashing.
     #[test]
     fn limiting_is_still_per_ip() {
         let rl = RateLimiter::default();
@@ -773,10 +612,7 @@ mod tests {
         );
     }
 
-    /// No plain IP is ever readable from the limiter's memory. Drive hits through
-    /// the same header path the middleware uses and inspect every stored key —
-    /// the tier prefix survives, the IP (v4, v6 or the sentinel) does not, and
-    /// neither does it in the key's `Debug` form.
+    /// No plain IP is ever readable from the limiter's memory, nor from a key's `Debug`.
     #[test]
     fn stored_keys_never_contain_the_ip() {
         let rl = RateLimiter::default();
@@ -815,9 +651,7 @@ mod tests {
         assert_ne!(rl.key_for_ip("t", "203.0.113.7"), rl.key_for_ip("t", "203.0.113.8"));
     }
 
-    /// The hashing key is per instance (i.e. per process): the same IP hashes to
-    /// unrelated pseudonyms in two limiters, so a key seen in one process's
-    /// memory says nothing about any other, and none survive a restart.
+    /// The hashing key is per instance: one IP hashes differently in two limiters.
     #[test]
     fn different_limiters_hash_the_same_ip_differently() {
         let a = RateLimiter::new();
@@ -863,9 +697,7 @@ mod tests {
         assert_eq!(client_ip(&h), "203.0.113.7");
     }
 
-    /// Behind the Worker the container receives no IP, only the bucket — and
-    /// the bucket wins over any IP header that does arrive, so a local-run
-    /// fallback can never take precedence over the edge's answer.
+    /// Behind the Worker only the bucket arrives, and it wins over any IP header.
     #[test]
     fn the_worker_bucket_is_the_identity_when_present() {
         let mut h = HeaderMap::new();

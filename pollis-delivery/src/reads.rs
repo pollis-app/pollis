@@ -1,29 +1,11 @@
 //! The MLS control plane's READ half (#987).
 //!
-//! Until this module the client answered these questions itself, with a
-//! whole-database read token baked into the shipped binary. Moving them here
-//! removes that credential — and, more importantly, restores two guarantees that
-//! a client holding its own connection could keep only by accident:
+//! Moving these behind the DS removed the client's read token and restores two guarantees:
 //!
-//! 1. **One snapshot per answer.** [`conversation_state`] reads the published
-//!    GroupInfo, the pending-Welcome flag, the lineage heads and the commit batch
-//!    inside ONE transaction. Split across two round trips, a device can observe
-//!    a GroupInfo without the Welcome that `submit_commit` wrote atomically
-//!    beside it, external-join while its own Welcome is inbound, and strand
-//!    itself permanently. See `pollis_api::reads` for the full argument.
-//! 2. **No torn commit batch.** The batch is verified contiguous
-//!    ([`pollis_api::reads::check_contiguous`]) before it is served, because the
-//!    client's response to a hole is to DELETE its MLS crypto state.
-//!    `pruned_below` is what keeps a legitimate retention prune (#539)
-//!    distinguishable from a torn read.
+//! 1. **One snapshot per answer.** [`conversation_state`] reads it all in ONE transaction.
+//! 2. **No torn commit batch** ([`pollis_api::reads::check_contiguous`]); see `pruned_below` (#539).
 //!
-//! Both endpoints are POST with signed bodies, never GET: the canonical signing
-//! message covers the path WITHOUT its query string, so a signed
-//! `GET …?since=N` carries unauthenticated parameters — the #681 shape, where an
-//! unauthenticated `GET /v1/commits?user_id&device_id` was a remote commit-log
-//! wipe. GETs are also exempt from rate limiting and absent from
-//! `pollis_api::ENDPOINTS`, so a GET read endpoint would be invisible to the
-//! route-coverage test that exists to catch exactly this omission.
+//! POST with signed bodies, never GET: signing excludes the query string (#681).
 
 use axum::{
     extract::State,
@@ -40,32 +22,17 @@ use crate::util::{BIND_CHUNK, b64, placeholders};
 pub use pollis_api::reads::*;
 
 /// Cap on how many conversations one [`conversation_state`] call may ask about.
-///
-/// The batch exists so a 20-group cold launch is one round trip instead of
-/// twenty (#987 §5); it is not an invitation to scan the whole log DB in one
-/// request. A caller with more conversations than this pages — every entry is
-/// independent, so paging costs correctness nothing (unlike splitting ONE
-/// conversation's snapshot, which is the thing this endpoint exists to prevent).
 pub const MAX_QUERIES: usize = 64;
 
 /// The authenticated `(user_id, device_id)` a read is answered for.
 ///
-/// Both halves come from the VERIFIED signature when auth is on — never from the
-/// body — because the Welcome lookup is device-scoped and a body-supplied
-/// `device_id` would let any authenticated user drain another device's Welcome
-/// queue. On the no-auth path they come from the body, which is what that path
-/// means.
-/// `pub` so `tests/conversation_snapshot.rs` can drive [`snapshot`] directly.
-/// Constructing one is not authority — the handler still derives both halves
-/// from a verified signature; this type only carries the result.
+/// Both halves come from the VERIFIED signature (the Welcome queue is device-scoped).
 pub struct Reader {
     pub user_id: String,
     pub device_id: String,
 }
 
-/// [`reader`] for the sibling read modules — the reads that are scoped to a
-/// DEVICE, not just a user (the key-package pool this device owns, the Welcome
-/// queue addressed to it). Same gate, exported so there is one of it.
+/// [`reader`] for the sibling device-scoped read modules.
 // The `Err` IS the response returned to the client, as elsewhere in this crate.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn reader_identity(
@@ -76,9 +43,6 @@ pub(crate) async fn reader_identity(
 }
 
 /// Authenticate a read and resolve the reader identity.
-///
-/// Mirrors `report_commit_since`'s gate: `verify_request_identity_cached` when
-/// auth is enforced (both halves signature-bound), body fields when it is not.
 // The `Err` IS the response returned to the client, as elsewhere in this crate.
 #[allow(clippy::result_large_err)]
 async fn reader(
@@ -116,11 +80,7 @@ async fn reader(
 
 /// Authenticate a read that needs only the USER half of the identity.
 ///
-/// The device-scoped reads use [`reader`]; this is for the many that answer for
-/// a user regardless of which of their devices asked. Same gate, same
-/// no-auth-path contract: with auth on, the id comes from the verified
-/// signature and a body that names a DIFFERENT user is a 403 rather than a
-/// silently-ignored field.
+/// With auth on, a body naming a DIFFERENT user is a 403.
 // The `Err` IS the response returned to the client, as elsewhere in this crate.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn authed_user(
@@ -157,17 +117,11 @@ pub(crate) async fn authed_user(
     }
 }
 
-// ── POST /v1/mls/conversation-state ──────────────────────────────────────────
-
 /// POST `/v1/mls/conversation-state` — every input the client's MLS replay and
 /// join-recovery paths need, batched across conversations, each conversation
 /// answered from ONE log-DB read transaction.
 ///
-/// Authorization is per entry (`authorized: false`), not per request: a sweep
-/// naming one conversation the caller has since been removed from must not blind
-/// it to the other nineteen. Non-membership therefore looks exactly like "no
-/// state", which is also what it means — a removed member has no business
-/// learning a group's head epoch.
+/// Authorized per entry: non-membership looks like "no state", so one removal can't blind a sweep.
 pub async fn conversation_state(
     State(state): State<AppState>,
     req: RawRequest,
@@ -190,9 +144,7 @@ pub async fn conversation_state(
 
     let mut states = Vec::with_capacity(parsed.queries.len());
     for q in &parsed.queries {
-        // Membership is the authorization gate AND one of the answers. It is read
-        // once, on the main DB, and reported as `is_member` so the client's
-        // fail-CLOSED external-join gate has an input rather than a guess.
+        // Membership is the gate AND an answer (`is_member`) for the client's fail-closed join gate.
         let member = is_member(&main, &q.conversation_id, &who.user_id).await;
         let authorized = matches!(member, Ok(true));
         if !authorized {
@@ -208,10 +160,7 @@ pub async fn conversation_state(
                 hole: None,
                 pruned_below: None,
                 commit_at_epoch: None,
-                // A confirmed non-member is `Some(false)`; a FAILED read is
-                // `None`. The client fails closed on both, but only one of them
-                // is a fact, and conflating them would hide a sick main DB
-                // behind a stream of plausible "you were removed" verdicts.
+                // A FAILED read is `None`, not `Some(false)`: never fake "you were removed".
                 is_member: member.as_ref().ok().copied(),
                 device_registered: None,
                 device_registered_at: None,
@@ -224,9 +173,7 @@ pub async fn conversation_state(
             .await
             .ok();
         let mut st = snapshot(&log, q, &who, registered).await?;
-        // #1571, main DB, best-effort: `None` only keeps the client on its
-        // pre-#1571 behaviour (a late join stays silent), so a failed read must
-        // never fail the snapshot the replay depends on.
+        // #1571, best-effort: `None` only keeps the client on pre-#1571 behaviour.
         st.device_registered_at = device_registered_at(&main, &who.user_id, &who.device_id)
             .await
             .ok()
@@ -235,12 +182,7 @@ pub async fn conversation_state(
             .await
             .ok()
             .flatten();
-        // Cross-signing inputs for the adds this batch carries, fetched ONCE per
-        // batch instead of once per add-carrying commit. Deliberately after the
-        // log-DB transaction closed: these rows live on the MAIN DB, so they were
-        // never part of that snapshot and pretending otherwise would be a lie in
-        // the type. Nothing pairs them with a log-DB fact — the client's
-        // verification is a signature check over the cert chain, not a race.
+        // Cross-signing inputs, once per batch, from the MAIN DB after the log-DB transaction.
         st.added_identities = added_identities(&main, &st.commits).await?;
         states.push(st);
     }
@@ -252,22 +194,9 @@ pub async fn conversation_state(
 
 /// One conversation's log-DB snapshot, read inside ONE transaction.
 ///
-/// The transaction is the entire point. `submit_commit` writes the commit, its
-/// GroupInfo and its Welcomes in one `IMMEDIATE` transaction, so a reader inside
-/// a single transaction that observes the GroupInfo necessarily observes the
-/// Welcome — which is what makes the client's `ExternalJoin ⟹ !welcome_pending`
-/// gate meaningful rather than vacuous. `head`, `head_generation` and `commits`
-/// share it for the same reason from the other direction: the client treats a
-/// commit batch that skips an epoch as a permanent gap and deletes its MLS state.
+/// The point: seeing the GroupInfo implies seeing its Welcome, and no phantom epoch gaps.
 ///
-/// Deliberately NOT modelled on the retired `GET /v1/commits/:conversation_id`
-/// handler, which ran three separate queries on a bare connection — and served
-/// them to anybody who could name a conversation id. Extending that shape onto
-/// the hot join path is the bug this avoids; it is now the only shape there is.
-///
-/// `pub` for `tests/conversation_snapshot.rs`, which asserts both properties
-/// above directly — the atomicity one under concurrency, where only a caller
-/// racing a writer can observe a tear at all (#987 P9/P10).
+/// `pub` for `tests/conversation_snapshot.rs`.
 pub async fn snapshot(
     log: &Connection,
     q: &ConversationStateQuery,
@@ -282,10 +211,7 @@ pub async fn snapshot(
 
     let group_info = read_group_info(&tx, &q.conversation_id, q.want_group_info_blob).await?;
 
-    // Read AFTER the GroupInfo, inside the same transaction — the ordering the
-    // client's source comment demands ("Welcome check evaluated at or after the
-    // GroupInfo read"). Inside one transaction the two are the same instant
-    // anyway; the order is kept so the code still reads as the argument it is.
+    // Read AFTER the GroupInfo, inside the same transaction.
     let welcome_pending =
         welcome_pending(&tx, &q.conversation_id, &who.user_id, &who.device_id).await?;
 
@@ -308,20 +234,7 @@ pub async fn snapshot(
     tx.commit().await?;
 
     // Report a hole; do NOT refuse to serve the batch.
-    //
-    // The client's response to a hole is `forget_local_mls_group_at` — it
-    // deletes the device's MLS crypto state for that group — which reads like
-    // something to prevent and is in fact the RECOVERY: the device cannot
-    // advance a local group across an epoch that does not exist, so it drops it
-    // and external-joins onto the head. Erroring here instead would leave a
-    // genuinely damaged conversation permanently unreadable, with every read
-    // failing forever and no path back.
-    //
-    // What #987 fixed is the PHANTOM hole: `commits`, `head` and `pruned_below`
-    // used to come off separate statements, so a batch read at one instant could
-    // disagree with a head read at another and manufacture a gap the log never
-    // had — sending the client into that destructive recovery for nothing. They
-    // now share the transaction above, so a reported hole is real.
+    // A hole makes the client drop the group and rejoin; one transaction makes every hole real.
     let hole = check_contiguous(&commits).err();
     if let Some(h) = hole {
         tracing::warn!(
@@ -355,10 +268,7 @@ pub async fn snapshot(
     })
 }
 
-/// The published GroupInfo's `(generation, epoch)` head, plus its bytes when the
-/// caller asked for them. The blob carries the whole ratchet tree — hundreds of
-/// KB for a large roster — so the durability backstop, which only compares heads,
-/// does not pay for it.
+/// The GroupInfo head, plus its bytes only when asked (they hold the whole tree).
 async fn read_group_info(
     tx: &Connection,
     conversation_id: &str,
@@ -385,9 +295,7 @@ async fn read_group_info(
 
 /// Whether an undelivered Welcome for THIS user+device targets the conversation.
 ///
-/// Mirrors `poll_mls_welcomes_inner`'s selection exactly, legacy
-/// `recipient_device_id IS NULL` rows included — the two must agree, or the gate
-/// suppresses an external join for a Welcome the drain will never hand back.
+/// Must match `poll_mls_welcomes_inner`'s selection (legacy NULL rows included).
 async fn welcome_pending(
     tx: &Connection,
     conversation_id: &str,
@@ -412,11 +320,7 @@ async fn welcome_pending(
 
 /// The lowest epoch still retained in a lineage, or `None` when it has no rows.
 ///
-/// This is the whole of `pruned_below`: a batch that starts above what the caller
-/// asked for is either a retention prune (#539) — where the client SHOULD drop
-/// its local group and rejoin — or a torn read, where doing so destroys data.
-/// Reading the floor in the same transaction as the batch is what tells them
-/// apart.
+/// This is `pruned_below`: it tells a retention prune (#539) from a torn read.
 async fn min_epoch_in(
     tx: &Connection,
     conversation_id: &str,
@@ -437,9 +341,7 @@ async fn min_epoch_in(
 /// The canonical commit bytes at one epoch — the input to the client's
 /// ambiguous-failure resolution (`invariants::resolve`).
 ///
-/// An INPUT, never a verdict: the adopt/rollback decision stays in the
-/// Kani-proved pure function on the client. A DS that answered "adopt" would
-/// silently delete a machine-checked proof.
+/// An INPUT, never a verdict: the decision stays in the Kani-proved client function.
 async fn commit_at(
     tx: &Connection,
     conversation_id: &str,
@@ -463,26 +365,13 @@ async fn commit_at(
 /// names: the user's `account_id_pub` and the `user_device` rows for the devices
 /// those commits added.
 ///
-/// INPUTS ONLY. `IdentityDirectory::leaf_verdict` — the check that decides Certified /
-/// Unverifiable / Uncertified — stays on the client, because it is a signature check
-/// over a chain rooted in the user's own identity key and the DS is explicitly
-/// not trusted to evaluate it. A device with no row is simply absent from
-/// `devices`, which is how the client still reaches `Unverifiable`.
+/// INPUTS ONLY: `IdentityDirectory::leaf_verdict` stays on the client.
 async fn added_identities(
     main: &Connection,
     commits: &[pollis_api::commit::CommitWire],
 ) -> Result<Vec<AddedIdentity>, AppError> {
-    // Group the added device ids by the user each add names. A user can appear
-    // in several commits of one batch (a multi-device add is one commit per
-    // device on some paths), so the ids accumulate rather than replace.
-    //
-    // `added_user_id` is a CSV too: one reconcile commit adds every missing
-    // device of every roster user at once (group creation with several
-    // invitees is the common case), and the committer names ALL of them so the
-    // replaying client can verify every leaf the commit adds. It used to name
-    // only the first, which left the other users' leaves unverifiable. The ids
-    // are a HINT about which rows to prefetch — the client derives the leaves
-    // it verifies from the commit's own Add proposals, never from these columns.
+    // Group the added device ids per user; ids accumulate across commits.
+    // `added_user_id` is a CSV (one commit can add many users); only a prefetch HINT.
     let mut wanted: Vec<(String, Vec<String>)> = Vec::new();
     for c in commits {
         let Some(users) = c.added_user_id.as_deref() else {
@@ -526,11 +415,7 @@ async fn added_identities(
 /// The cross-signing inputs for a whole roster: each user's `account_id_pub`
 /// and EVERY `user_device` row they have, revoked rows included.
 ///
-/// Serves `POST /v1/read/roster-identities`, the committer-side half of leaf
-/// cross-signing. Unlike [`added_identities`] it takes no device-id hint — the
-/// committer checks every leaf it is about to add or retain, so it needs the
-/// user's full device set. Revoked rows are kept because "revoked" is a verdict
-/// the client acts on and "absent" is not.
+/// No device hint: the committer checks every leaf. Revoked rows kept, as "revoked" is a verdict.
 pub async fn roster_identities(
     main: &Connection,
     user_ids: &[String],
@@ -595,9 +480,7 @@ pub async fn account_id_pub(main: &Connection, user_id: &str) -> anyhow::Result<
 
 /// The cross-signing columns of the named devices, for one user.
 ///
-/// Only rows that EXIST come back. Chunked so a large add cannot exceed SQLite's
-/// bound-parameter limit, and bound by position — a device id is caller-supplied
-/// and never goes near string-built SQL.
+/// Only existing rows come back; chunked and bound by position.
 pub async fn device_cert_rows(
     main: &Connection,
     user_id: &str,
@@ -640,10 +523,7 @@ pub async fn device_cert_rows(
 /// Is this device still registered (not revoked)? The main-DB half of the
 /// client's external-join gate.
 ///
-/// Reported separately from `is_member` and as an `Option`, because the two gates
-/// have opposite consequences: a wrong `false` here delays a legitimate device's
-/// recovery, a wrong `true` lets a revoked device climb back into a group. The
-/// client keeps both biases at its own call sites.
+/// An `Option`, apart from `is_member`: wrong answers here and there cost opposite things.
 pub async fn device_registered(
     main: &Connection,
     user_id: &str,
@@ -706,14 +586,9 @@ pub async fn member_since(
     })
 }
 
-// ── POST /v1/welcomes/fetch ──────────────────────────────────────────────────
-
 /// POST `/v1/welcomes/fetch` — drain this device's undelivered Welcomes.
 ///
-/// The read counterpart of `POST /v1/welcomes/ack`, and device-scoped from the
-/// VERIFIED signature: a body-supplied `device_id` would let any authenticated
-/// user read another of their devices' Welcome queue, and (worse) let a
-/// non-recipient learn that a Welcome exists at all.
+/// Device-scoped from the VERIFIED signature, never the body.
 pub async fn fetch_welcomes(
     State(state): State<AppState>,
     req: RawRequest,
@@ -727,9 +602,7 @@ pub async fn fetch_welcomes(
             Ok(r) => r,
             Err(resp) => return Ok(resp),
         };
-    // A body that names a DIFFERENT recipient than the signature is a 403, not a
-    // silently-ignored field: the client sends `user_id` for the no-auth path,
-    // and "ignored when auth is on" must not shade into "accepted".
+    // A body naming a DIFFERENT recipient is a 403, not an ignored field.
     if let Some(u) = parsed.user_id.as_deref() {
         if state.require_auth && u != who.user_id {
             return Ok(AuthRejection::Forbidden.into_response());
@@ -739,13 +612,8 @@ pub async fn fetch_welcomes(
     let conn = state.log_db.conn().await?;
     let welcomes = pending_welcomes(&conn, &who.user_id, &who.device_id).await?;
 
-    // #1412: the signing device's own pool size, when asked. Best-effort by
-    // design: the drain is the payload and must never fail on this, and `None`
-    // only sends the client back to its pre-#1412 refill rule. Scoped to the
-    // VERIFIED device, like the drain itself.
-    //
-    // #1571: and whether it holds a last-resort package in that suite, read in
-    // the same breath and on the same best-effort terms.
+    // #1412: this device's pool size, best-effort (the drain must never fail on it).
+    // #1571: plus whether it holds a last-resort package.
     let (unclaimed_key_packages, has_last_resort_key_package) =
         match parsed.count_key_packages_in_suite {
             Some(suite) => {
@@ -786,21 +654,13 @@ pub async fn fetch_welcomes(
     }))
 }
 
-/// The undelivered Welcomes for one `(user, device)`, oldest first — byte-for-
-/// byte the selection `poll_mls_welcomes_inner` used to run against its own
-/// connection, legacy device-agnostic rows included.
-///
-/// `pub` so the integration harness drives the same query the handler does
-/// rather than a copy of it.
+/// The undelivered Welcomes for one `(user, device)`, oldest first, legacy rows included.
 pub async fn pending_welcomes(
     log: &Connection,
     user_id: &str,
     device_id: &str,
 ) -> anyhow::Result<Vec<PendingWelcome>> {
-    // `conversation_id` rides along so the client can bind the blob to the row
-    // it arrived on (C1's client half — see `PendingWelcome::conversation_id`).
-    // The column was always there; it simply was not returned, which left the
-    // client with nothing to compare the Welcome's embedded `GroupId` against.
+    // `conversation_id` lets the client bind the blob to its row (C1).
     let mut rows = log
         .query(
             "SELECT id, welcome_data, conversation_id FROM mls_welcome \
@@ -830,9 +690,7 @@ mod added_identities_tests {
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        // Production is Turso, where foreign-key enforcement is off; libsql's
-        // LOCAL backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has.
+        // Turso has FK enforcement off; match it.
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn.execute_batch(
@@ -861,11 +719,7 @@ mod added_identities_tests {
         }
     }
 
-    /// The #1080 shape: ONE commit adds devices of TWO users — a device
-    /// enrolment coinciding with an invite, or a suite migration re-adding the
-    /// whole roster. Both users' cross-signing inputs must be folded in, or the
-    /// replaying client reaches `Unverifiable` for the one that was left out and
-    /// runs a pointless eviction reconcile.
+    /// #1080: ONE commit adds devices of TWO users; both must be folded in.
     #[tokio::test]
     async fn a_multi_user_add_prefetches_every_named_user() {
         let c = conn().await;
@@ -877,9 +731,7 @@ mod added_identities_tests {
         users.sort();
         assert_eq!(users, vec!["alice", "bob"]);
 
-        // Each user carries their own root key and only their own device rows —
-        // the device-id list is a hint shared across users, so the per-user query
-        // has to filter it rather than hand Bob's row to Alice.
+        // Each user gets only their own device rows.
         for identity in &out {
             assert!(
                 identity.account_id_pub.is_some(),
@@ -922,9 +774,7 @@ mod added_identities_tests {
         assert!(out.iter().any(|i| i.user_id == "bob"));
     }
 
-    /// A NULL or empty hint prefetches nothing and must not error: the client
-    /// still verifies off the commit's own Add proposals, so this degrades to a
-    /// round trip, never to a wrong verdict.
+    /// A NULL or empty hint prefetches nothing and must not error.
     #[tokio::test]
     async fn an_absent_hint_prefetches_nothing() {
         let c = conn().await;

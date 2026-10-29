@@ -1,12 +1,4 @@
 //! Abuse reports and account suspension (#1213).
-//!
-//! The invariants, each proven where it is enforced:
-//!   - a report holds ids and a reason only (the table has no content column);
-//!   - you cannot report yourself, file as someone else, use a reason outside
-//!     the set, give a message without its conversation, or point at a
-//!     conversation you are not in;
-//!   - one account cannot flood the operator (a rolling daily cap);
-//!   - a suspended account authenticates nothing, from any device.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -62,7 +54,6 @@ async fn a_report_stores_ids_and_a_reason_and_nothing_else() {
     let outcome = apply_report_user(&conn, Some("alice"), &body("alice", "bob")).await.unwrap();
     assert!(matches!(outcome, ReportOutcome::Stored { prior_reports_against: 0, .. }));
 
-    // The table's columns are the whole of what a report can hold.
     let mut cols = Vec::new();
     let mut rows = conn.query("PRAGMA table_info(user_report)", ()).await.unwrap();
     while let Some(r) = rows.next().await.unwrap() {
@@ -185,14 +176,11 @@ async fn one_account_cannot_flood_the_operator() {
         apply_report_user(&conn, Some("alice"), &body("alice", "bob")).await.unwrap(),
         ReportOutcome::RateLimited
     );
-    // The cap is per reporter: someone else can still report.
     assert!(matches!(
         apply_report_user(&conn, Some("carol"), &body("carol", "bob")).await.unwrap(),
         ReportOutcome::Stored { prior_reports_against: 1, .. }
     ));
 }
-
-// ── Over HTTP, with auth enforced ────────────────────────────────────────────
 
 fn signing_key() -> SigningKey<MlDsa44> {
     let mut seed = [0u8; 32];
@@ -279,7 +267,6 @@ async fn a_suspended_account_authenticates_nothing_from_any_device() {
         );
     }
 
-    // Lifting the suspension (deleting the row) restores access.
     db.conn()
         .await
         .unwrap()

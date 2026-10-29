@@ -1,15 +1,7 @@
 /*
- * worker/dev-gate.ts — only our own clients reach the dev Delivery Service
- * (#1242).
+ * worker/dev-gate.ts — the dev Delivery Service gate (#1242).
  *
- * Pinned: an unset mode means no gate at all (prod); `report` forwards every
- * request and counts it; `enforce` 404s a missing or wrong key and forwards a
- * right one; /health and /version are always answered; `off` checks nothing;
- * a typo'd mode falls back to `report`, never to enforce; a rotation accepts
- * every listed key; /__gate needs the operator bearer and returns only counts
- * keyed by verdict × path class × UA family (no address, no per-request
- * record); prod's wrangler config binds neither the mode nor the key; and
- * index.ts runs the gate before the container forward and strips the key.
+ * Pinned: modes, exempt paths, rotation, /__gate counts, prod config, index.ts ordering.
  *
  *   node --test pollis-delivery/worker-tests/*.test.ts   (or `pnpm test:worker` in pollis-delivery/)
  */
@@ -171,8 +163,6 @@ test("path classes and UA families are coarse", () => {
   assert.equal(uaFamily("okhttp/4.12.0"), "mobile-http");
   assert.equal(uaFamily("python-requests/2.32"), "other");
 });
-
-// ── Config pins ───────────────────────────────────────────────────────────────
 
 function jsonc(path: string): Record<string, unknown> {
   const raw = readFileSync(path, "utf8");

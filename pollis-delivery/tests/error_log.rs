@@ -1,9 +1,4 @@
 //! #1305 — the DS's failed-request log (`error_log.rs`, migration 000035).
-//!
-//! Pins the three promises it makes: it records a failed request with the
-//! client's request id and the cause behind a 5xx; it can never name a user
-//! (the table refuses identifying shapes, and text is scrubbed); and it stays
-//! tight — 72 hours and 500 rows, enforced by the table's own trigger.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -67,7 +62,6 @@ async fn get_errors(state: &AppState, token: Option<&str>) -> (StatusCode, serde
     (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
 }
 
-/// **Tight:** never more than 500 rows, whatever writes them.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_table_keeps_at_most_500_rows() {
     let db = schema_db().await;
@@ -77,7 +71,6 @@ async fn the_table_keeps_at_most_500_rows() {
     assert_eq!(count(&db).await, 500);
 }
 
-/// **Short:** a row older than 72 hours is gone by the next insert.
 #[tokio::test(flavor = "multi_thread")]
 async fn rows_older_than_72_hours_are_dropped_on_insert() {
     let db = schema_db().await;
@@ -86,8 +79,6 @@ async fn rows_older_than_72_hours_are_dropped_on_insert() {
     assert_eq!(count(&db).await, 1);
 }
 
-/// **No user:** the table itself refuses a request id that could carry data, a
-/// raw path, a success status, and unbounded text.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_table_refuses_identifying_or_unbounded_values() {
     let db = schema_db().await;
@@ -105,9 +96,6 @@ async fn the_table_refuses_identifying_or_unbounded_values() {
     assert_eq!(count(&db).await, 0);
 }
 
-/// The real router: a failed request lands with its request id, the matched
-/// route and the response's `error`, and the operator endpoint serves it only
-/// behind the token.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_request_is_recorded_and_served_behind_the_token() {
     let db = schema_db().await;
@@ -141,7 +129,7 @@ async fn a_failed_request_is_recorded_and_served_behind_the_token() {
 
     let (status, json) = get_errors(&state, Some("op-token")).await;
     assert_eq!(status, StatusCode::OK);
-    // Newest first; the wrong-token 401 above is itself a failed request.
+    // The wrong-token 401 above is itself a failed request.
     let errors = json["errors"].as_array().unwrap();
     let row = errors
         .iter()
@@ -152,8 +140,6 @@ async fn a_failed_request_is_recorded_and_served_behind_the_token() {
     assert_eq!(row["error"], "invalid body");
 }
 
-/// A 5xx says only "internal error" on the wire; the row carries the cause the
-/// handler logged — scrubbed.
 #[tokio::test]
 async fn the_cause_behind_a_5xx_is_captured_and_scrubbed() {
     use tracing_subscriber::prelude::*;

@@ -1,17 +1,4 @@
 //! `POST /v1/livekit/send-data` target authorization + sender stamping.
-//!
-//! The endpoint used to accept any room from any signed device and forward the
-//! caller's JSON verbatim under the DS's room-admin token, while the client
-//! dispatcher trusted identity fields inside that JSON. So any account could
-//! ring any user's devices "from" anyone, raise the enrollment-approval prompt
-//! on a stranger's screen, or storm an inbox with refetch nudges — blocks
-//! never consulted.
-//!
-//! These tests drive the real router with device-signed requests against a
-//! local libsql DB and a fake LiveKit Twirp endpoint that records every
-//! `SendData` body, so both halves are pinned: what is REFUSED never reaches
-//! LiveKit at all, and what is allowed reaches it with the verified signer
-//! stamped in and the client's claimed identity gone.
 
 use std::sync::{Arc, Mutex};
 
@@ -32,8 +19,6 @@ use tower::ServiceExt as _;
 mod common;
 
 const PATH: &str = "/v1/livekit/send-data";
-
-// ── Fixtures ─────────────────────────────────────────────────────────────────
 
 fn gen_signing_key() -> SigningKey<MlDsa44> {
     let mut seed = [0u8; 32];
@@ -57,7 +42,6 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// A user with a live device whose key signs this test's requests.
 struct Actor {
     user_id: String,
     device_id: String,
@@ -124,9 +108,7 @@ async fn seed_group(db: &Db, group: &str, members: &[&str]) {
     }
 }
 
-/// A DM channel between `a` and `b`. `b_accepted` models whether `b` has
-/// accepted `a`'s DM request yet — the difference between a request badge and
-/// a consented conversation.
+/// `b_accepted`: whether `b` accepted `a`'s DM request yet.
 async fn seed_dm(db: &Db, dm: &str, a: &str, b: &str, b_accepted: bool) {
     let conn = db.conn().await.unwrap();
     seed_user(db, a).await;
@@ -196,8 +178,7 @@ fn signed_send(actor: &Actor, room: &str, payload: serde_json::Value) -> Request
         .unwrap()
 }
 
-/// A stand-in LiveKit Twirp server that records every `SendData` body it is
-/// handed. Returns the `ws://` URL the broker config wants plus the recorder.
+/// A stand-in LiveKit recording every `SendData` body; returns its `ws://` URL.
 async fn fake_livekit() -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
     let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
@@ -228,7 +209,6 @@ fn livekit_broker(url: &str) -> BrokerConfig {
     }
 }
 
-/// Decode the payload LiveKit would have broadcast from a recorded `SendData`.
 fn broadcast_payload(recorded: &serde_json::Value) -> serde_json::Value {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(recorded["data"].as_str().expect("data field"))
@@ -269,10 +249,7 @@ fn call_invite_forged(as_whom: &str) -> serde_json::Value {
     })
 }
 
-// ── Refusals — nothing reaches LiveKit ───────────────────────────────────────
-
-/// A stranger (no shared conversation) cannot push anything into a victim's
-/// inbox. This is the spoofed-ring / prompt-spam primitive.
+/// A stranger cannot push into a victim's inbox (spoofed ring / prompt spam).
 #[tokio::test]
 async fn a_stranger_cannot_reach_another_users_inbox() {
     let db = fresh_db().await;
@@ -296,8 +273,7 @@ async fn a_stranger_cannot_reach_another_users_inbox() {
     assert!(h.seen.lock().unwrap().is_empty(), "a refused send must never reach LiveKit");
 }
 
-/// A shared DM does not survive a block: once either side has blocked the other,
-/// the inbox is closed in both directions.
+/// A block closes the inbox in both directions.
 #[tokio::test]
 async fn a_blocked_dm_peer_cannot_reach_the_inbox() {
     let db = fresh_db().await;
@@ -311,8 +287,7 @@ async fn a_blocked_dm_peer_cannot_reach_the_inbox() {
     assert!(h.seen.lock().unwrap().is_empty());
 }
 
-/// A DM request the peer has not accepted is enough for the request badge
-/// (`dm_created`) but not to ring their devices (`call_invite`).
+/// An unaccepted DM request allows `dm_created` but not `call_invite`.
 #[tokio::test]
 async fn a_pending_dm_request_cannot_ring_but_can_badge() {
     let db = fresh_db().await;
@@ -341,7 +316,6 @@ async fn a_pending_dm_request_cannot_ring_but_can_badge() {
     assert_eq!(payload["sender_username"], "alice-name");
 }
 
-/// A conversation room is reachable by its members only.
 #[tokio::test]
 async fn a_non_member_cannot_push_into_a_conversation_room() {
     let db = fresh_db().await;
@@ -362,9 +336,7 @@ async fn a_non_member_cannot_push_into_a_conversation_room() {
     assert!(h.seen.lock().unwrap().is_empty());
 }
 
-/// `enrollment_requested` is what the DS itself emits when a new device asks
-/// to be approved; a client publishing it is a prompt-takeover attack, even
-/// against its own inbox and even from a legitimate DM peer.
+/// Only the DS emits `enrollment_requested`; a client sending it is a prompt takeover.
 #[tokio::test]
 async fn enrollment_requested_is_never_client_publishable() {
     let db = fresh_db().await;
@@ -382,7 +354,6 @@ async fn enrollment_requested_is_never_client_publishable() {
         let status = send(&h, signed_send(&peer, room, forged.clone())).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "room {room}");
     }
-    // And any type outside the client allowlist is refused the same way.
     let status = send(
         &h,
         signed_send(&peer, "inbox-alice", serde_json::json!({ "type": "made_up" })),
@@ -392,11 +363,7 @@ async fn enrollment_requested_is_never_client_publishable() {
     assert!(h.seen.lock().unwrap().is_empty());
 }
 
-// ── Allowed — and the payload names the SIGNER, not whoever the body claimed ──
-
-/// The legitimate 1:1 call: an accepted DM peer rings the other side. What
-/// LiveKit broadcasts names the verified caller; the forged `caller_id` /
-/// `caller_username` the client sent are gone.
+/// Broadcasts name the verified caller; the forged caller fields are gone.
 #[tokio::test]
 async fn a_dm_peer_can_ring_and_the_stamped_caller_is_the_signer() {
     let db = fresh_db().await;
@@ -415,7 +382,6 @@ async fn a_dm_peer_can_ring_and_the_stamped_caller_is_the_signer() {
     assert_eq!(payload["room_name"], "call-c1");
     assert_eq!(payload["sender_id"], "alice");
     assert_eq!(payload["sender_username"], "alice-name");
-    // The legacy per-type keys are re-stamped with the SAME verified values.
     assert_eq!(payload["caller_id"], "alice");
     assert_eq!(payload["caller_username"], "alice-name");
     let text = payload.to_string();
@@ -425,9 +391,7 @@ async fn a_dm_peer_can_ring_and_the_stamped_caller_is_the_signer() {
     assert_ne!(seen[0]["room"], "inbox-bob");
 }
 
-/// Group members share an inbox relationship too, and a group invite ping has
-/// its inviter AND group name resolved server-side — the client's strings for
-/// both are discarded.
+/// A group invite's inviter and group name are resolved server-side.
 #[tokio::test]
 async fn a_group_invite_ping_names_the_real_inviter_and_group() {
     let db = fresh_db().await;
@@ -473,9 +437,7 @@ async fn a_group_invite_ping_names_the_real_inviter_and_group() {
     assert!(!text.contains("Payroll"), "{text}");
 }
 
-/// A member may nudge the shared room — but a shared-room broadcast stays
-/// routing-only (§5): the DS strips the client's identity fields and stamps
-/// nothing in their place.
+/// A shared-room broadcast stays routing-only (§5): identity fields stripped.
 #[tokio::test]
 async fn a_member_room_nudge_carries_no_identity_at_all() {
     let db = fresh_db().await;
@@ -518,8 +480,7 @@ async fn a_member_room_nudge_carries_no_identity_at_all() {
     }
 }
 
-/// Your own inbox is always yours: the multi-device nudges (`device_revoked`,
-/// `call_canceled` fan-out) need no relationship with anyone.
+/// Your own inbox needs no relationship with anyone.
 #[tokio::test]
 async fn own_inbox_is_always_reachable() {
     let db = fresh_db().await;
@@ -537,9 +498,8 @@ async fn own_inbox_is_always_reachable() {
     assert_eq!(payload, serde_json::json!({ "type": "device_revoked" }));
 }
 
-// ── #1337: an empty room is "nothing to notify", not a 502 ──────────────────
+// #1337: an empty room is "nothing to notify", not a 502
 
-/// A stand-in LiveKit whose `SendData` always answers `status` with `body`.
 async fn livekit_answering(status: StatusCode, body: &'static str) -> String {
     let app = Router::new().route(
         "/twirp/livekit.RoomService/SendData",
@@ -559,8 +519,6 @@ async fn livekit_answering(status: StatusCode, body: &'static str) -> String {
     format!("ws://{addr}")
 }
 
-/// A member nudging their own group's room, against a LiveKit that answers
-/// `status` / `body`. Returns the endpoint's status.
 async fn nudge_against(status: StatusCode, body: &'static str) -> StatusCode {
     let db = fresh_db().await;
     let member = seed_actor(&db, "alice").await;
@@ -580,9 +538,7 @@ async fn nudge_against(status: StatusCode, body: &'static str) -> StatusCode {
     status
 }
 
-/// LiveKit's answer for a room nobody has joined. Every send from a client
-/// whose peers are all offline or media-off (the CLI) hit this and logged
-/// `ds_livekit_send_data 502`.
+/// LiveKit's answer for a room nobody has joined.
 const NO_ROOM: &str = r#"{"code":"unavailable","msg":"no response from servers"}"#;
 
 #[tokio::test]
@@ -593,8 +549,7 @@ async fn an_empty_room_is_nothing_to_notify_not_a_bad_gateway() {
     );
 }
 
-/// Only that exact answer is forgiven. A node that is genuinely unavailable
-/// says something else, and a real LiveKit failure must still read as one.
+/// Only that exact answer is forgiven; a real LiveKit failure still reads as one.
 #[tokio::test]
 async fn a_real_livekit_failure_is_still_a_bad_gateway() {
     let draining = r#"{"code":"unavailable","msg":"node is draining"}"#;
@@ -613,16 +568,13 @@ async fn a_real_livekit_failure_is_still_a_bad_gateway() {
     );
 }
 
-/// The classifier itself, case by case.
 #[test]
 fn the_empty_room_classifier_is_narrow() {
     use pollis_delivery::broker::send_data_room_is_empty;
 
     assert!(send_data_room_is_empty(StatusCode::SERVICE_UNAVAILABLE, NO_ROOM));
-    // Wrong status for the same body.
     assert!(!send_data_room_is_empty(StatusCode::BAD_GATEWAY, NO_ROOM));
     assert!(!send_data_room_is_empty(StatusCode::INTERNAL_SERVER_ERROR, NO_ROOM));
-    // Same status, other Twirp errors.
     assert!(!send_data_room_is_empty(
         StatusCode::SERVICE_UNAVAILABLE,
         r#"{"code":"unavailable","msg":"node is draining"}"#
@@ -631,7 +583,6 @@ fn the_empty_room_classifier_is_narrow() {
         StatusCode::SERVICE_UNAVAILABLE,
         r#"{"code":"internal","msg":"no response from servers"}"#
     ));
-    // Not a Twirp body at all.
     assert!(!send_data_room_is_empty(StatusCode::SERVICE_UNAVAILABLE, ""));
     assert!(!send_data_room_is_empty(
         StatusCode::SERVICE_UNAVAILABLE,

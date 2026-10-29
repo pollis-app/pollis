@@ -1,15 +1,4 @@
-//! #1506 — the group member page's "Invited" section: the pending-invite list
-//! (`POST /v1/directory/group` with `want_invites`) and `POST /v1/invites/revoke`.
-//!
-//! Revoke authz is re-derived from the invite row: the member who sent it, or an
-//! admin of THAT group. Everyone else — a plain member, an outsider, an admin of
-//! another group, the invitee — is refused, and the row survives. A revoke also
-//! has to take the invitee out of the desired MLS roster, which counts pending
-//! invitees as present; otherwise the revoker's reconcile would keep their
-//! leaves in the tree.
-//!
-//! Driven at the `apply_*` level against a local libsql DB, mirroring
-//! `join_requests.rs`.
+//! #1506 — pending-invite list and invite revoke; revoke authz is re-derived from the invite row.
 
 use pollis_delivery::directory::{desired_roster, group_invites};
 use pollis_delivery::groups::{apply_revoke_invite, RevokeInviteBody};
@@ -31,9 +20,7 @@ async fn fresh() -> common::TempDb {
     let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
     pollis_schema::apply::single_db(&conn).await.expect("schema");
-    // INVITER was an admin when they sent the invite (the DS requires it) and
-    // has since been demoted to a plain member: the inviter keeps the right to
-    // withdraw their own invite.
+    // The inviter, since demoted, may still withdraw their own invite.
     conn.execute_batch(
         "INSERT INTO users (id, email, username) VALUES \
            ('admin-1','admin@x','admin'),('inviter-1','inviter@x','inviter'),\
@@ -157,7 +144,6 @@ async fn an_inviter_who_left_the_group_may_not_revoke() {
 async fn a_signer_cannot_revoke_as_someone_else() {
     let db = fresh().await;
     let conn = db.conn().await.unwrap();
-    // A plain member signs, naming the admin as the actor.
     let outcome = apply_revoke_invite(&conn, Some(MEMBER), &revoke(ADMIN))
         .await
         .expect("apply");

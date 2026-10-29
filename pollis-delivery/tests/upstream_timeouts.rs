@@ -1,24 +1,7 @@
 //! #913 — every outbound HTTP call the DS makes has a deadline.
 //!
-//! The DS calls out to three upstreams: LiveKit (Twirp `SendData` /
-//! `ListParticipants`), Resend (the sign-in OTP email) and the Turso Platform API
-//! (minting a short-TTL read-only DB token). None of them had a timeout, and
-//! `reqwest`'s default is *no* timeout — so an upstream that completes the TCP
-//! handshake and then never sends a response byte pinned the axum handler that
-//! called it for as long as it cared to hold the socket. Since #875 those calls
-//! share one pooled `reqwest::Client`, so a hung upstream also sat on that pool's
-//! connections; the damage was never confined to the one unlucky request.
-//!
-//! The failure mode is specifically a **black hole**, not a refused connection: a
-//! refusal returns an error immediately and was always handled. So the double
-//! below accepts the connection, reads the request, and then simply never
-//! answers — the one case that used to hang forever.
-//!
-//! `ListParticipants` is the leg driven end-to-end here because it is the only
-//! one whose upstream URL is configurable (`LIVEKIT_URL`): Resend and the Turso
-//! Platform API are hardcoded hostnames. The deadline itself lives on
-//! `util::Upstream` and is shared by all three, so the table test below is what
-//! covers the other two.
+//! The failure mode is a black hole (accept, read, never answer), not a refused connection.
+//! Only `ListParticipants` has a configurable URL; the table test covers the other upstreams.
 
 use std::time::{Duration, Instant};
 
@@ -32,8 +15,7 @@ use tower::ServiceExt as _;
 
 mod common;
 
-/// An upstream that accepts connections and never replies. Sockets are parked in
-/// a `Vec` so nothing closes them and turns the hang into a clean EOF.
+/// Accepts and never replies; sockets are parked so nothing turns the hang into EOF.
 async fn black_hole() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -65,12 +47,7 @@ fn livekit_broker(url: &str) -> BrokerConfig {
     }
 }
 
-/// The defect, end to end: a LiveKit that never answers must produce a response
-/// the client can act on, not a socket that hangs until something else gives up.
-///
-/// Against the pre-#913 code this test does not fail with a wrong status — it
-/// **never returns**, which is exactly the complaint. The outer `timeout` is what
-/// turns that hang into a reported failure.
+/// A LiveKit that never answers must still produce a response; pre-#913 this never returns.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
     let url = black_hole().await;
@@ -88,8 +65,7 @@ async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
 
     let started = Instant::now();
     let resp = tokio::time::timeout(
-        // Generously past the 5s LiveKit deadline. Blowing THIS budget is the
-        // pre-fix behaviour: no deadline at all, so the handler waits forever.
+        // Generously past the 5s LiveKit deadline.
         Duration::from_secs(30),
         build_router_with_state(state).oneshot(req),
     )
@@ -127,9 +103,7 @@ async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
     );
 }
 
-/// The deadline is a property of the upstream, and every upstream has one. A
-/// variant added later with no timeout — or with a zero/absurd one — is the way
-/// this regresses without any handler changing. Guard.
+/// Every upstream variant must carry a sane deadline.
 #[test]
 fn every_upstream_declares_a_sane_deadline() {
     for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::ExpoPush] {
@@ -148,11 +122,7 @@ fn every_upstream_declares_a_sane_deadline() {
     }
 }
 
-/// The structural half of the fix. `util::http_client` is private, so the only
-/// way to make an outbound request is `util::http_post`, which cannot be called
-/// without naming an [`Upstream`] and therefore a deadline. That holds only while
-/// nobody reaches for `reqwest` directly — which is a grep, because no type
-/// signature can express it.
+/// Only `util::http_post` may make outbound requests, so nobody may reach for `reqwest` directly.
 #[test]
 fn no_delivery_source_builds_its_own_http_client() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -169,13 +139,11 @@ fn no_delivery_source_builds_its_own_http_client() {
                 continue;
             }
             let rel = path.strip_prefix(root).expect("under manifest").to_path_buf();
-            // `util.rs` owns the client — that is the whole point.
             if rel == std::path::Path::new("src/util.rs") {
                 continue;
             }
             let text = std::fs::read_to_string(&path).expect("read source");
             for (i, line) in text.lines().enumerate() {
-                // Comments may discuss it; code may not construct it.
                 if line.trim_start().starts_with("//") {
                     continue;
                 }

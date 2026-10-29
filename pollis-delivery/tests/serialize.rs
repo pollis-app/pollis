@@ -1,11 +1,6 @@
 //! Delivery Service serialization invariants, against a real (local) libsql DB:
 //! at most one commit per epoch (no fork), only head-extending commits accepted
 //! (no gap), and concurrent submitters yield exactly one winner.
-//!
-//! Under suite generations (#454 P4) the same invariants hold one key wider, on
-//! `(generation, epoch)`: a successor lineage may open at epoch 0, but only as
-//! the immediate successor of the head generation and only when the migrator
-//! correctly names the head it closes.
 
 use std::sync::Arc;
 
@@ -18,14 +13,7 @@ use pollis_delivery::db::Db;
 
 mod common;
 
-/// Drive the real `submit_commit` on a single-database fixture (main DB == log
-/// DB, exactly as the DS runs when no separate commit-log database is
-/// configured) and assert the CAS path was reached.
-///
-/// A `Forbidden`/`Invalid` verdict is the Welcome-authorization refusal added
-/// for C1; the serialization tests are about the epoch CAS, so any of those here
-/// is a test bug and panics loudly. The tests that EXERCISE the refusal match on
-/// [`SubmitVerdict`] directly.
+/// Drive the real `submit_commit` on a single-DB fixture; a Welcome-authz refusal panics.
 async fn submit(
     conn: &libsql::Connection,
     body: &SubmitBody,
@@ -56,8 +44,7 @@ fn body(conv: &str, epoch: i64, sender: &str) -> SubmitBody {
     }
 }
 
-/// A migration submission: the opening commit of `generation`, which must be
-/// epoch 0 and must name the head it closes on `generation - 1`.
+/// The opening commit of `generation`: epoch 0, naming the head it closes.
 fn migration_body(conv: &str, generation: i64, closes_epoch: Option<i64>, sender: &str) -> SubmitBody {
     SubmitBody {
         generation,
@@ -67,8 +54,7 @@ fn migration_body(conv: &str, generation: i64, closes_epoch: Option<i64>, sender
     }
 }
 
-/// Like [`body`] but carries a single Welcome to `welcome_recipient`, so a test
-/// can poison that recipient and drive the Welcome insert to fail.
+/// Like [`body`] with one Welcome, so a test can poison its insert.
 fn body_with_welcome(conv: &str, epoch: i64, sender: &str, welcome_recipient: &str) -> SubmitBody {
     SubmitBody {
         welcomes: vec![WelcomeBody {
@@ -80,8 +66,6 @@ fn body_with_welcome(conv: &str, epoch: i64, sender: &str, welcome_recipient: &s
     }
 }
 
-/// COUNT(*) of `table` scoped to a conversation — small helper so the atomicity
-/// assertions read cleanly.
 async fn count_for_conv(db: &Db, table: &str, conv: &str) -> i64 {
     let conn = db.conn().await.unwrap();
     let sql = format!("SELECT COUNT(*) FROM {table} WHERE conversation_id = ?1");
@@ -89,11 +73,7 @@ async fn count_for_conv(db: &Db, table: &str, conv: &str) -> i64 {
     rows.next().await.unwrap().unwrap().get(0).unwrap()
 }
 
-/// Put `users` in `conversation_id`'s roster (as a group), with `role`.
-///
-/// Every Welcome the submit bundle writes is now checked against the roster
-/// (C1), so a test that carries a Welcome has to say who is actually in the
-/// conversation — which is the point: a Welcome to a non-member is refused.
+/// Put `users` in the roster: every bundled Welcome is checked against it (C1).
 async fn seed_members(conn: &libsql::Connection, conversation_id: &str, users: &[(&str, &str)]) {
     for (user, role) in users {
         conn.execute(
@@ -111,26 +91,19 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// The CAS against the REAL schema — `fresh_db` applies the single-DB scripts,
-/// so the log DB's 000005 I1 triggers are installed — which also proves the CAS
-/// and the `BEFORE INSERT` trigger coexist: legitimate head-appends are Accepted
-/// (the trigger never spuriously aborts one) and stale / forward-gap submits are
-/// Rejected by the CAS's WHERE, producing no row for the trigger to see.
+/// The CAS coexists with the 000005 `BEFORE INSERT` trigger: no spurious aborts.
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_head_rejects_stale_and_gap() {
     let db = fresh_db().await;
     let conn = db.conn().await.unwrap();
     let c = "conv1";
 
-    // Empty group: head is 0. A commit from epoch 0 wins.
     match submit(&conn, &body(c, 0, "alice")).await.unwrap() {
         SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 0),
         other => panic!("expected Accepted, got {other:?}"),
     }
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 1);
 
-    // A second commit ALSO from epoch 0 is stale → rejected, head is 1, and it
-    // gets back the commit it's missing.
     match submit(&conn, &body(c, 0, "bob")).await.unwrap() {
         SubmitResponse::Rejected { head, missing, .. } => {
             assert_eq!(head, 1);
@@ -140,20 +113,17 @@ async fn accepts_head_rejects_stale_and_gap() {
         other => panic!("expected Rejected, got {other:?}"),
     }
 
-    // A commit from the head (epoch 1) wins.
     match submit(&conn, &body(c, 1, "alice")).await.unwrap() {
         SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 1),
         other => panic!("expected Accepted, got {other:?}"),
     }
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 2);
 
-    // A forward gap (epoch 5 when head is 2) is rejected — no gap can be created.
     match submit(&conn, &body(c, 5, "alice")).await.unwrap() {
         SubmitResponse::Rejected { head, .. } => assert_eq!(head, 2),
         other => panic!("expected Rejected, got {other:?}"),
     }
 
-    // The log is contiguous: epochs 0, 1.
     let commits = fetch_commits(&conn, c, 0, 0).await.unwrap();
     let epochs: Vec<i64> = commits.iter().map(|c| c.epoch).collect();
     assert_eq!(epochs, vec![0, 1]);
@@ -164,16 +134,12 @@ async fn concurrent_submitters_yield_exactly_one_winner() {
     let db = fresh_db().await;
     let c = "race";
 
-    // 8 clients all submit a commit from epoch 0 at once. Exactly one may win.
     let mut handles = Vec::new();
     for i in 0..8 {
         let db = Arc::clone(&db);
         handles.push(tokio::spawn(async move {
             let conn = db.conn().await.unwrap();
-            // busy_timeout is per-connection: each writer waits for the local
-            // file lock instead of erroring (a local-file test artifact; Turso
-            // serializes writes server-side). The conditional INSERT still
-            // decides exactly one winner.
+            // busy_timeout is per-connection: a local-file artifact; Turso serializes server-side.
             conn.execute_batch("PRAGMA busy_timeout=10000;").await.unwrap();
             let sender = format!("client{i}");
             submit(&conn, &body(c, 0, &sender)).await.unwrap()
@@ -198,19 +164,13 @@ async fn concurrent_submitters_yield_exactly_one_winner() {
     assert_eq!(accepted, 1, "exactly one commit may win the epoch — no fork");
     assert_eq!(rejected, 7);
 
-    // And the log has exactly one commit at epoch 0.
     let conn = db.conn().await.unwrap();
     let commits = fetch_commits(&conn, c, 0, 0).await.unwrap();
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0].epoch, 0);
 }
 
-// ── Atomicity of the submit bundle (issue #430 P0) ───────────────────────────
-
-/// The commit + GroupInfo + Welcome(s) for one submit are a single transaction:
-/// if the Welcome insert fails, the WHOLE bundle rolls back — no commit row and
-/// no GroupInfo row is left behind. (Before P0 these were three separate
-/// non-transactional writes, so a partial write was possible.)
+/// The submit bundle is one transaction: a failed Welcome rolls back everything (#430 P0).
 #[tokio::test(flavor = "multi_thread")]
 async fn welcome_failure_rolls_back_commit_and_group_info() {
     let db = fresh_db().await;
@@ -218,15 +178,7 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
     let c = "atomic";
     seed_members(&conn, c, &[("alice", "member"), ("BOOM", "member")]).await;
 
-    // Poison the LAST write of the submit bundle so a Welcome to 'BOOM' aborts.
-    //
-    // #875: this used to `DROP TABLE mls_welcome` and recreate it with a CHECK.
-    // The replacement was copied from a pre-#454 shape and had no `generation`
-    // column — but `submit_commit`'s Welcome INSERT writes `generation`, so what
-    // actually failed was "no such column", not the poison CHECK. The rollback
-    // was real; the reason was not the one the test names, and any change to the
-    // CHECK would have gone unnoticed. A trigger injects the failure without
-    // replacing the shipped table, so the abort is the one we asked for.
+    // A trigger injects the failure without replacing the shipped table (#875).
     conn.execute_batch(
         "CREATE TRIGGER poison_welcome_to_boom \
            BEFORE INSERT ON mls_welcome \
@@ -236,13 +188,9 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
     .await
     .expect("install the poison trigger");
 
-    // The commit would win epoch 0 and the GroupInfo would be published — but the
-    // poisoned Welcome insert fails, so the whole bundle must roll back.
     let res = submit(&conn, &body_with_welcome(c, 0, "alice", "BOOM")).await;
     assert!(res.is_err(), "poisoned Welcome must surface an error");
 
-    // Full rollback: head is still 0 (no commit persisted), and neither the
-    // commit log, the GroupInfo, nor the Welcome retained anything.
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 0, "no commit persisted");
     assert!(
         fetch_commits(&conn, c, 0, 0).await.unwrap().is_empty(),
@@ -259,8 +207,6 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
         "no Welcome row persisted"
     );
 
-    // The group is left in a clean state: a well-formed resubmit at head 0 now
-    // succeeds (the failed submit left no partial state to trip over).
     match submit(&conn, &body(c, 0, "alice")).await.unwrap() {
         SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 0),
         other => panic!("expected Accepted after rollback, got {other:?}"),
@@ -268,10 +214,7 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 1);
 }
 
-/// A re-sent Welcome for the same (conversation, recipient, device) is
-/// idempotent (issue #430 P2): the second submit's inline Welcome insert updates
-/// the existing row in place instead of erroring on the UNIQUE tuple or stacking
-/// a duplicate row.
+/// A re-sent Welcome for the same tuple updates in place (#430 P2).
 #[tokio::test(flavor = "multi_thread")]
 async fn duplicate_welcome_insert_is_idempotent() {
     let db = fresh_db().await;
@@ -279,7 +222,6 @@ async fn duplicate_welcome_insert_is_idempotent() {
     let c = "dupe";
     seed_members(&conn, c, &[("sender", "member"), ("alice", "member")]).await;
 
-    // A commit at head 0 carrying a Welcome to alice/dev1 wins and inserts it.
     match submit(&conn, &body_with_welcome(c, 0, "sender", "alice"))
         .await
         .unwrap()
@@ -289,9 +231,6 @@ async fn duplicate_welcome_insert_is_idempotent() {
     }
     assert_eq!(count_for_conv(&db, "mls_welcome", c).await, 1);
 
-    // A second commit at the new head (epoch 1) carries the SAME recipient/device
-    // Welcome. Its inline insert conflicts on the UNIQUE tuple and updates in
-    // place — no error, still exactly one Welcome row.
     match submit(&conn, &body_with_welcome(c, 1, "sender", "alice"))
         .await
         .unwrap()
@@ -306,17 +245,13 @@ async fn duplicate_welcome_insert_is_idempotent() {
     );
 }
 
-/// The inline GroupInfo write in the submit bundle obeys the SAME epoch-monotone
-/// guard as the standalone `/v1/group-info` upsert: an accepted commit whose
-/// resulting-epoch GroupInfo is OLDER than what's already published must not
-/// regress it.
+/// The inline GroupInfo write is epoch-monotone like `/v1/group-info`.
 #[tokio::test(flavor = "multi_thread")]
 async fn inline_group_info_write_is_epoch_monotone() {
     let db = fresh_db().await;
     let conn = db.conn().await.unwrap();
     let c = "monotone";
 
-    // A newer GroupInfo (epoch 100) is already published out of band.
     conn.execute(
         "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
          VALUES (?1, ?2, ?3, ?4)",
@@ -325,9 +260,6 @@ async fn inline_group_info_write_is_epoch_monotone() {
     .await
     .unwrap();
 
-    // A commit accepted at head 0 carries a GroupInfo at resulting epoch 1. The
-    // commit still lands, but the inline write must NOT regress the stored
-    // GroupInfo from epoch 100 down to 1.
     match submit(&conn, &body(c, 0, "alice")).await.unwrap() {
         SubmitResponse::Accepted { epoch, .. } => assert_eq!(epoch, 0),
         other => panic!("expected Accepted, got {other:?}"),
@@ -348,18 +280,13 @@ async fn inline_group_info_write_is_epoch_monotone() {
     );
 }
 
-// ─── Suite generations (#454 P4) ─────────────────────────────────────────────
-
-/// The migration accept rule, end to end against the real conditional INSERT.
-/// Opening the successor lineage requires all three of: epoch 0, the IMMEDIATE
-/// next generation, and a correct `closes_epoch` naming the head being closed.
+/// Opening a successor needs epoch 0, the next generation, and the correct `closes_epoch`.
 #[tokio::test(flavor = "multi_thread")]
 async fn opening_a_generation_requires_naming_the_closed_head() {
     let db = fresh_db().await;
     let conn = db.conn().await.unwrap();
     let c = "conv-mig";
 
-    // Generation 0 runs to head 2.
     for e in 0..2 {
         assert!(matches!(
             submit(&conn, &body(c, e, "alice")).await.unwrap(),
@@ -368,8 +295,7 @@ async fn opening_a_generation_requires_naming_the_closed_head() {
     }
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 2);
 
-    // Naming the WRONG closed head is rejected — this is the stale-migrator case,
-    // where a commit landed on generation 0 after the migrator read the roster.
+    // The stale-migrator case: a commit landed after the migrator read the roster.
     match submit(&conn, &migration_body(c, 1, Some(1), "alice")).await.unwrap() {
         SubmitResponse::Rejected { head, head_generation, .. } => {
             assert_eq!(head, 0, "generation 1 does not exist yet, so its head is 0");
@@ -378,24 +304,20 @@ async fn opening_a_generation_requires_naming_the_closed_head() {
         other => panic!("expected Rejected, got {other:?}"),
     }
 
-    // Omitting `closes_epoch` entirely is rejected too — a missing name must not
-    // read as "closes epoch NULL" and compare away to an accidental accept.
+    // A missing `closes_epoch` must not compare away to an accept.
     assert!(matches!(
         submit(&conn, &migration_body(c, 1, None, "alice")).await.unwrap(),
         SubmitResponse::Rejected { .. }
     ));
 
-    // Skipping a generation is rejected: 2 is not the immediate successor of 0.
     assert!(matches!(
         submit(&conn, &migration_body(c, 2, Some(2), "alice")).await.unwrap(),
         SubmitResponse::Rejected { .. }
     ));
 
-    // Nothing above wrote anything.
     assert_eq!(head_generation(&conn, c).await.unwrap(), 0);
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 2);
 
-    // Correctly naming the closed head opens the successor lineage at epoch 0.
     match submit(&conn, &migration_body(c, 1, Some(2), "alice")).await.unwrap() {
         SubmitResponse::Accepted { generation, epoch } => {
             assert_eq!((generation, epoch), (1, 0));
@@ -404,14 +326,10 @@ async fn opening_a_generation_requires_naming_the_closed_head() {
     }
     assert_eq!(head_generation(&conn, c).await.unwrap(), 1);
     assert_eq!(head_epoch_in(&conn, c, 1).await.unwrap(), 1);
-    // The retired lineage's head is untouched — its history is still readable.
     assert_eq!(head_epoch_in(&conn, c, 0).await.unwrap(), 2);
 }
 
-/// A generation can never be opened twice: the second migrator re-evaluates
-/// `MAX(generation)`, sees it already advanced, and matches neither accept
-/// branch. Two devices deciding to migrate at the same head cannot fork the
-/// conversation into two successor groups.
+/// A generation can never be opened twice, so migrators cannot fork the conversation.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_generation_can_only_be_opened_once() {
     let db = fresh_db().await;
@@ -421,7 +339,6 @@ async fn a_generation_can_only_be_opened_once() {
     submit(&conn, &body(c, 0, "alice")).await.unwrap();
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 1);
 
-    // Both migrators observed head (generation 0, epoch 1) andnamed it correctly.
     assert!(matches!(
         submit(&conn, &migration_body(c, 1, Some(1), "alice")).await.unwrap(),
         SubmitResponse::Accepted { generation: 1, epoch: 0 }
@@ -436,14 +353,10 @@ async fn a_generation_can_only_be_opened_once() {
         other => panic!("expected Rejected, got {other:?}"),
     }
 
-    // Exactly one opening commit exists.
     assert_eq!(fetch_commits(&conn, c, 1, 0).await.unwrap().len(), 1);
 }
 
-/// A device still on the retired lineage cannot append to it — the old head is
-/// closed the instant the successor opens. Its rejection carries the OLD
-/// lineage's head (what it must finish draining) plus `head_generation`, which is
-/// how it learns a successor exists at all.
+/// The retired lineage is closed; the rejection reports `head_generation`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_closed_lineage_rejects_further_commits() {
     let db = fresh_db().await;
@@ -453,7 +366,6 @@ async fn a_closed_lineage_rejects_further_commits() {
     submit(&conn, &body(c, 0, "alice")).await.unwrap();
     submit(&conn, &migration_body(c, 1, Some(1), "alice")).await.unwrap();
 
-    // Bob, still classic, tries to commit at what he believes is the head.
     match submit(&conn, &body(c, 1, "bob")).await.unwrap() {
         SubmitResponse::Rejected { head, head_generation, missing } => {
             assert_eq!(head, 1, "generation 0's head, the lineage bob is in");
@@ -467,27 +379,22 @@ async fn a_closed_lineage_rejects_further_commits() {
         other => panic!("expected Rejected, got {other:?}"),
     }
 
-    // And the retired lineage did not grow.
     assert_eq!(fetch_commits(&conn, c, 0, 0).await.unwrap().len(), 1);
 }
 
-/// The successor's GroupInfo replaces the retired lineage's even though its epoch
-/// is NUMERICALLY LOWER. An epoch-only monotone guard would reject it and strand
-/// every externally-joining device on the retired suite.
+/// A successor's GroupInfo replaces the retired one despite a lower epoch.
 #[tokio::test(flavor = "multi_thread")]
 async fn successor_group_info_replaces_a_numerically_higher_epoch() {
     let db = fresh_db().await;
     let conn = db.conn().await.unwrap();
     let c = "conv-mig4";
 
-    // Generation 0 runs to head 5, publishing GroupInfo at epoch 5.
     for e in 0..5 {
         submit(&conn, &body(c, e, "alice")).await.unwrap();
     }
     let (gen, epoch) = published_group_info(&db, c).await;
     assert_eq!((gen, epoch), (0, 5));
 
-    // The migration publishes GroupInfo at generation 1, epoch 1.
     submit(&conn, &migration_body(c, 1, Some(5), "alice")).await.unwrap();
     let (gen, epoch) = published_group_info(&db, c).await;
     assert_eq!(
@@ -497,7 +404,6 @@ async fn successor_group_info_replaces_a_numerically_higher_epoch() {
     );
 }
 
-/// The published `(generation, epoch)` for a conversation.
 async fn published_group_info(db: &Db, conv: &str) -> (i64, i64) {
     let conn = db.conn().await.unwrap();
     let mut rows = conn

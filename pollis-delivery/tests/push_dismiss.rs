@@ -1,11 +1,4 @@
 //! #1508: a read clears its notifications on every device.
-//!
-//! The rules themselves — only the reader's own handles, only for the
-//! conversations read, only those minted before the read, only once — and the
-//! silent push's shape and coalescing are pinned next to the code in
-//! `src/push.rs`. This file drives the two endpoints through the real router,
-//! so the wire bodies, the routing and the request caps are what a client
-//! actually meets.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -25,9 +18,7 @@ async fn fixture() -> (axum::Router, common::TempDb) {
     pollis_schema::apply::single_db(&db.conn().await.unwrap())
         .await
         .expect("schema");
-    // Auth off: the actor is the body's `user_id`, exactly as a signed request
-    // whose signer matches it. Owner scoping is what is under test here; the
-    // signature gate is common to every device-signed endpoint.
+    // Auth off: the actor is the body's `user_id`; owner scoping is under test.
     (build_router_with_state(AppState::new(db.arc(), false)), db)
 }
 
@@ -73,7 +64,6 @@ async fn reading_a_conversation_dismisses_its_notifications_once() {
         .await
         .unwrap();
 
-    // Someone else naming alice's conversation dismisses nothing of hers.
     let (status, json) = post(&app, &dismiss("mallory", &[("conv-1", 0)])).await;
     assert_eq!(status, StatusCode::OK);
     let resp: DismissPushResponse = serde_json::from_value(json).unwrap();
@@ -84,7 +74,6 @@ async fn reading_a_conversation_dismisses_its_notifications_once() {
     let resp: DismissPushResponse = serde_json::from_value(json).unwrap();
     assert_eq!(resp.dismissed, 1);
 
-    // Again: nothing outstanding, so nothing to push.
     let (_, json) = post(&app, &dismiss("alice", &[("conv-1", 0)])).await;
     assert_eq!(serde_json::from_value::<DismissPushResponse>(json).unwrap().dismissed, 0);
 
@@ -107,14 +96,12 @@ async fn reading_a_conversation_dismisses_its_notifications_once() {
     assert!(resp.dismissed.is_empty());
 }
 
-/// A message that arrived after the read keeps its notification.
 #[tokio::test]
 async fn a_notification_newer_than_the_read_survives() {
     let (app, db) = fixture().await;
     let conn = db.conn().await.unwrap();
     let h = mint_push_handles(&conn, &["alice".to_string()], "conv-1", "dm").await["alice"].clone();
 
-    // Read a minute ago, reported only now (a slow or offline client).
     let (_, json) = post(&app, &dismiss("alice", &[("conv-1", 60)])).await;
     assert_eq!(serde_json::from_value::<DismissPushResponse>(json).unwrap().dismissed, 0);
     let (_, json) = post(
@@ -149,10 +136,7 @@ async fn oversized_requests_are_refused() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-/// An older client never calls these; a newer client against an older DS
-/// gets a 404 it treats as best-effort. Pin that the bodies stay tolerant of
-/// a missing field in the answer, so a future response change cannot break a
-/// shipped client's parse.
+/// Response bodies must tolerate a missing field so shipped clients keep parsing.
 #[test]
 fn responses_parse_from_an_empty_object() {
     assert_eq!(

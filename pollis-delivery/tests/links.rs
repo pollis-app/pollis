@@ -1,12 +1,4 @@
-//! QR device links over HTTP (#1207), with auth ENFORCED — the invariants that
-//! make a photographed QR worth nothing beyond enrolling one device:
-//!
-//! - a claim mints a session that the OTP-only gates refuse: the pre-enrollment
-//!   soft reset (`rotate-identity`), reset-and-recover, establish-identity;
-//! - that session CAN register the claiming device and file its enrollment
-//!   request, and the request must carry a link tag (and an OTP session's must
-//!   not);
-//! - a link is single use and binds to the account that created it.
+//! QR device links (#1207): a claimed link's session can only enroll one device.
 //!
 //! The refused endpoints are sent an empty body on purpose: past the gate an
 //! empty body is a 400, so "OTP session → 400, link session → 401" proves the
@@ -64,9 +56,7 @@ async fn send(state: &AppState, path: &str, body: serde_json::Value, session: Op
     (status, val)
 }
 
-/// Create an open link the way `/v1/link/create` would after verifying the
-/// creator's device signature (signing is exercised elsewhere; the store is
-/// what this file is about), and return the claim secret.
+/// Create an open link as `/v1/link/create` would, and return the claim secret.
 fn open_link(state: &AppState, link_id: &str) -> [u8; 32] {
     let claim = [42u8; 32];
     let verifier: [u8; 32] = Sha256::digest(claim).into();
@@ -162,11 +152,10 @@ async fn a_link_session_registers_its_device_and_files_a_tagged_request() {
     assert_eq!(st.device_name.as_deref(), Some("Pixel 9"));
 }
 
-// ── v2: the new device shows the QR (#1361) ──────────────────────────────────
+// v2: the new device shows the QR (#1361)
 
 const DESKTOP: &str = "desktop-device-1";
 
-/// Offer a code the way the new device does (pre-credential, over HTTP).
 async fn offer(state: &AppState, link_id: &str, poll_secret: &[u8; 32]) -> StatusCode {
     let verifier: [u8; 32] = Sha256::digest(poll_secret).into();
     let (status, _) = send(
@@ -195,14 +184,12 @@ async fn an_offer_yields_one_enrollment_only_session_after_it_is_accepted() {
     let secret = [3u8; 32];
     assert_eq!(offer(&state, "offer-a", &secret).await, StatusCode::OK);
 
-    // Nobody has scanned it: waiting, and a wrong secret is the generic 401.
     let (waiting, body) = poll(&state, "offer-a", &secret).await;
     assert_eq!(waiting, StatusCode::OK);
     assert!(body["session"].is_null());
     let (guess, _) = poll(&state, "offer-a", &[4u8; 32]).await;
     assert_eq!(guess, StatusCode::UNAUTHORIZED);
 
-    // The scanner's device-signed accept (signing is exercised elsewhere).
     assert!(matches!(
         state.links.accept("offer-a", USER, pollis_delivery::util::now_unix()),
         pollis_delivery::links::AcceptOutcome::Accepted { .. }
@@ -215,16 +202,13 @@ async fn an_offer_yields_one_enrollment_only_session_after_it_is_accepted() {
     assert_eq!(ok, StatusCode::OK);
     assert_eq!(body["session"]["user_id"], USER);
     let session = body["session"]["session_token"].as_str().unwrap().to_string();
-    // Delivered once.
     let (again, _) = poll(&state, "offer-a", &secret).await;
     assert_eq!(again, StatusCode::UNAUTHORIZED);
 
-    // Enrollment-only: the OTP-only gates refuse it…
     for path in ["/v1/account/rotate-identity", "/v1/account/reset-recover", "/v1/auth/establish-identity"] {
         let (status, _) = send(&state, path, serde_json::json!({}), Some(&session)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}: a device-offer session must be refused at the gate");
     }
-    // …and it registers its device and files a request WITHOUT a tag.
     let (reg, _) = send(
         &state,
         "/v1/auth/register-device",
@@ -256,7 +240,6 @@ async fn an_offer_yields_one_enrollment_only_session_after_it_is_accepted() {
     assert_eq!(st.state, pollis_delivery::links::LinkState::Requested);
     assert_eq!(st.request_id.as_deref(), Some("req-v2"));
     assert_eq!(st.link_tag, None);
-    // Kept out of the typed-code approval list.
     assert!(state.links.bound_request_ids(USER, pollis_delivery::util::now_unix()).contains("req-v2"));
 }
 
@@ -265,7 +248,6 @@ async fn an_offer_id_cannot_be_reused_while_live() {
     let (_db, state) = fresh_state().await;
     assert_eq!(offer(&state, "offer-b", &[1u8; 32]).await, StatusCode::OK);
     assert_eq!(offer(&state, "offer-b", &[2u8; 32]).await, StatusCode::TOO_MANY_REQUESTS);
-    // The original secret still governs it.
     let (st, _) = poll(&state, "offer-b", &[2u8; 32]).await;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
 }

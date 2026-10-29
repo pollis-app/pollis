@@ -1,9 +1,4 @@
-//! Per-channel mute (#1431): who may write a mute row, what the read returns,
-//! and that a mute never outlives the membership it was set under.
-//!
-//! The push half — a muted member is skipped for chatter and `@all` but woken
-//! by a direct `@username` — is pinned next to the fan-out it governs, in
-//! `push::tests::a_muted_member_is_pushed_only_when_mentioned_by_name`.
+//! Per-channel mute (#1431); the push half is pinned in `push::tests`.
 
 use libsql::Connection;
 use pollis_api::groups::{LeaveGroupBody, RemoveMemberBody};
@@ -62,7 +57,6 @@ async fn mute_and_unmute_are_idempotent_and_read_back() {
     }
     assert_eq!(rows(&c).await, 1, "muting twice is one row");
     assert_eq!(mutes(&c, "bob").await, vec!["ch1".to_string()]);
-    // Per account: alice's view is untouched by bob's mute.
     assert_eq!(list_channel_mutes(&c, "alice").await.unwrap(), ChannelMutesResponse::default());
 
     for _ in 0..2 {
@@ -73,18 +67,15 @@ async fn mute_and_unmute_are_idempotent_and_read_back() {
     assert!(mutes(&c, "bob").await.is_empty());
 }
 
-/// A mute row can only ever name a channel its owner is in: not someone
-/// else's account, not a channel outside their groups, not a DM, not a group.
+/// A mute row can only ever name a channel its owner is in.
 #[tokio::test]
 async fn a_mute_cannot_be_written_for_anything_but_your_own_channel() {
     let c = conn().await;
     // Signed as bob, claiming to be alice.
     let o = apply_set_channel_mute(&c, Some("bob"), &body("alice", "ch1", true)).await.unwrap();
     assert!(matches!(o, WriteOutcome::Forbidden));
-    // carol is not in the group.
     let o = apply_set_channel_mute(&c, Some("carol"), &body("carol", "ch1", true)).await.unwrap();
     assert!(matches!(o, WriteOutcome::Forbidden));
-    // A DM is personal and always notifies; a group id is not a channel.
     for id in ["dm1", "g1", "nope"] {
         let o = apply_set_channel_mute(&c, Some("alice"), &body("alice", id, true)).await.unwrap();
         assert!(matches!(o, WriteOutcome::Forbidden), "{id} must not be mutable");
@@ -112,7 +103,6 @@ async fn leaving_or_being_removed_drops_the_groups_mutes() {
     assert!(mutes(&c, "bob").await.is_empty(), "the leaver's mutes go");
     assert_eq!(mutes(&c, "alice").await.len(), 2, "another member's mutes stay");
 
-    // Rejoin, mute, get removed by the admin.
     c.execute(
         "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')",
         (),

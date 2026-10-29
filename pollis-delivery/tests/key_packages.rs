@@ -1,22 +1,5 @@
 //! Key-package CLAIM endpoint invariants, against a real (local) libsql DB.
-//!
-//! The claim (`POST /v1/key-packages/claim`, `apply_claim_key_package`) flips one
-//! of a TARGET user's published `mls_key_package` rows to `claimed = 1` and hands
-//! the caller its TLS bytes, so an MLS Add commit can be built for that device.
-//! It is the read-only-client replacement (Goal B #419, blocker C1) for the
-//! direct `UPDATE … RETURNING` the client used to run.
-//!
-//! Coverage: a valid claim returns the right bytes (device-scoped and
-//! user-scoped), concurrent claims of a single-package pool yield exactly one
-//! winner — the rest see no package (never a double-claim) — and pools in
-//! different suites never contaminate each other (#454 P1b).
-//!
-//! #669 left only one suite in production, but the `ciphersuite` column and its
-//! scoping stay: a group persisted under an older code point can only be added
-//! to with a package in *that* suite, and `CS_PQ`'s code point is provisional.
-//! So the cross-suite tests below use [`CIPHERSUITE_LEGACY`], which is no longer
-//! a suite the fleet speaks — it stands in for "some suite that is not the
-//! current one", which is the case the column exists to handle.
+//! The `ciphersuite` column stays (#669), so cross-suite tests use [`CIPHERSUITE_LEGACY`].
 
 use std::sync::Arc;
 
@@ -30,19 +13,11 @@ use pollis_delivery::writes::WriteOutcome;
 
 mod common;
 
-/// MLS code point `0x0001` — the suite Pollis shipped before #454, retired by
-/// #669. Defined here rather than in the DS because the DS has no reason to name
-/// it any more; the tests do, as a concrete "not the current suite".
+/// MLS code point `0x0001`, retired by #669: a concrete "not the current suite".
 const CIPHERSUITE_LEGACY: i64 = 0x0001;
 
 
-/// `alice` and `bob` in one group.
-///
-/// A claim requires a SHARED CONVERSATION as well as the absence of a block
-/// (`devices::may_claim_from`) — every real claim path writes the roster row
-/// before reconciling the MLS tree to it — so the mechanics tested here are
-/// exercised in the state they actually run in. `key_package_claim_limits.rs`
-/// owns the gate itself.
+/// `alice` and `bob` in one group: a claim requires a shared conversation.
 async fn fresh_db() -> common::TempDb {
     let db = common::TempDb::open("kp.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
@@ -58,9 +33,7 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// Insert one unclaimed key package in the current suite — an ordinary package
-/// as a shipped client publishes it. `created_at` is supplied explicitly so the
-/// claim's `ORDER BY created_at ASC` is deterministic across rows.
+/// One unclaimed current-suite package; explicit `created_at` makes claim order deterministic.
 async fn insert_kp(
     db: &Db,
     ref_hash: &str,
@@ -81,9 +54,7 @@ async fn insert_kp(
     .await;
 }
 
-/// Insert one unclaimed key package, optionally naming its ciphersuite. `None`
-/// omits the column entirely — the pre-#454 INSERT, which must take the column
-/// default from migration `000010`.
+/// `None` omits the column: the pre-#454 INSERT, taking the `000010` default.
 async fn insert_kp_in_suite(
     db: &Db,
     ref_hash: &str,
@@ -136,7 +107,6 @@ fn device_body(user_id: &str, device_id: &str) -> ClaimKeyPackageBody {
     }
 }
 
-/// The same claim, but naming a suite explicitly.
 fn device_body_in_suite(user_id: &str, device_id: &str, suite: i64) -> ClaimKeyPackageBody {
     ClaimKeyPackageBody {
         target_user_id: user_id.to_string(),
@@ -151,7 +121,6 @@ async fn claim_returns_the_right_bytes_then_exhausts() {
     insert_kp(&db, "ref-a", "bob", "dev1", b"kp-bytes-a", "2024-01-01 00:00:00").await;
     let conn = db.conn().await.unwrap();
 
-    // Device-scoped claim returns the published bytes.
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             assert_eq!(ref_hash, "ref-a");
@@ -163,7 +132,6 @@ async fn claim_returns_the_right_bytes_then_exhausts() {
         }
     }
 
-    // The pool is now empty for that device → the next claim sees no package.
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::NoKeyPackage => {}
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
@@ -176,13 +144,11 @@ async fn claim_returns_the_right_bytes_then_exhausts() {
 #[tokio::test(flavor = "multi_thread")]
 async fn claim_is_oldest_first_and_device_scoped() {
     let db = fresh_db().await;
-    // Two devices for the same user; for dev1, two packages of differing age.
     insert_kp(&db, "ref-old", "bob", "dev1", b"old", "2024-01-01 00:00:00").await;
     insert_kp(&db, "ref-new", "bob", "dev1", b"new", "2024-02-01 00:00:00").await;
     insert_kp(&db, "ref-d2", "bob", "dev2", b"d2", "2024-01-01 00:00:00").await;
     let conn = db.conn().await.unwrap();
 
-    // Oldest unclaimed package for dev1 wins.
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             assert_eq!(ref_hash, "ref-old");
@@ -194,15 +160,12 @@ async fn claim_is_oldest_first_and_device_scoped() {
         }
     }
 
-    // dev2's package is untouched by a dev1 claim — device scoping holds.
     let user_scoped = ClaimKeyPackageBody {
         target_user_id: "bob".into(),
         target_device_id: None,
         ciphersuite: None,
     };
-    // A user-scoped claim (no device) now picks the oldest remaining of ANY
-    // device: ref-new and ref-d2 share a timestamp, so just assert it is one of
-    // them and is non-empty.
+    // ref-new and ref-d2 share a timestamp, so either may win.
     match apply_claim_key_package(&conn, Some("alice"), &user_scoped).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, .. } => {
             assert!(ref_hash == "ref-new" || ref_hash == "ref-d2", "got {ref_hash}");
@@ -217,21 +180,14 @@ async fn claim_is_oldest_first_and_device_scoped() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     let db = fresh_db().await;
-    // A single unclaimed package for (bob, dev1).
     insert_kp(&db, "ref-solo", "bob", "dev1", b"the-only-kp", "2024-01-01 00:00:00").await;
 
-    // 8 claimers race for the one package. The atomic `WHERE claimed = 0`
-    // single-row UPDATE guarantees exactly one observes the bytes; the rest see
-    // none — never a double-claim.
     let mut handles = Vec::new();
     for _ in 0..8 {
         let db = Arc::clone(&db);
         handles.push(tokio::spawn(async move {
             let conn = db.conn().await.unwrap();
-            // busy_timeout is per-connection: each writer waits for the local
-            // file lock instead of erroring (a local-file test artifact; Turso
-            // serializes writes server-side). The conditional UPDATE still
-            // decides exactly one winner.
+            // busy_timeout is per-connection: a local-file artifact; Turso serializes server-side.
             conn.execute_batch("PRAGMA busy_timeout=10000;").await.unwrap();
             apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap()
         }));
@@ -256,7 +212,6 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     assert_eq!(claimed, 1, "exactly one claimer may win the single package");
     assert_eq!(none, 7, "every other claimer must see no package — no double-claim");
 
-    // The row is marked claimed exactly once.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
@@ -269,10 +224,7 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     assert_eq!(row.get::<i64>(0).unwrap(), 1);
 }
 
-// ── #454 P1b: pools in different suites are disjoint ─────────────────────────
-
-/// Publish one package for `(user, device)`, optionally naming its suite —
-/// `None` reproduces exactly what every currently deployed client sends.
+/// `None` reproduces what every deployed client sends.
 async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: Option<i64>) {
     let conn = db.conn().await.unwrap();
     use base64::Engine as _;
@@ -292,7 +244,6 @@ async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: O
     }
 }
 
-/// Register a device row, so `pq_capable` has somewhere it *could* be flipped.
 async fn insert_device(db: &Db, user: &str, device: &str) {
     db.conn().await
         .unwrap()
@@ -304,7 +255,6 @@ async fn insert_device(db: &Db, user: &str, device: &str) {
         .unwrap();
 }
 
-/// Read a device's retired `pq_capable` flag.
 async fn pq_capable(db: &Db, user: &str, device: &str) -> i64 {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -317,7 +267,6 @@ async fn pq_capable(db: &Db, user: &str, device: &str) -> i64 {
     rows.next().await.unwrap().expect("device row").get::<i64>(0).unwrap()
 }
 
-/// Count a device's unclaimed packages in one suite.
 async fn unclaimed_in_suite(db: &Db, user: &str, device: &str, suite: i64) -> i64 {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -331,7 +280,6 @@ async fn unclaimed_in_suite(db: &Db, user: &str, device: &str, suite: i64) -> i6
     rows.next().await.unwrap().expect("count row").get::<i64>(0).unwrap()
 }
 
-/// A replenish body publishing `refs` in one suite (the client's rotation shape).
 fn replenish_body(user: &str, device: &str, suite: i64, refs: &[&str]) -> ReplenishKeyPackagesBody {
     use base64::Engine as _;
     ReplenishKeyPackagesBody {
@@ -361,15 +309,7 @@ async fn stored_suite(db: &Db, ref_hash: &str) -> i64 {
     rows.next().await.unwrap().expect("row exists").get::<i64>(0).unwrap()
 }
 
-/// A publish that names no suite lands on the CURRENT suite, and a claim that
-/// names no suite finds it.
-///
-/// #454 read an absent field as classic, because the clients that omitted it
-/// predated the hybrid suite. #669 inverts that: there is one suite left, so an
-/// omitted field can only mean "the one everybody is on". The alternative —
-/// defaulting to a retired code point — would file every untagged publish into a
-/// pool nothing will ever claim from, which is a device that silently cannot be
-/// added to any group.
+/// An untagged publish and claim mean the current suite (#669), never a retired code point.
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
     let db = fresh_db().await;
@@ -386,15 +326,7 @@ async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
     }
 }
 
-/// A row written the pre-#454 way — no `ciphersuite` in the INSERT at all —
-/// takes the column DEFAULT, which is `1`, and is therefore NOT in the current
-/// suite.
-///
-/// This is the trap the DS must never fall into: the column default and the
-/// current suite disagree, and they have to, because a `DEFAULT` change is a
-/// tightening migration the shipped app cannot take. Every write path therefore
-/// names the suite explicitly rather than letting the default decide — pinned
-/// here by showing the defaulted row is reachable ONLY as the legacy suite.
+/// The column default (`1`) is not the current suite, so every write path names the suite.
 #[tokio::test(flavor = "multi_thread")]
 async fn rows_written_without_the_column_take_the_schema_default_not_the_current_suite() {
     let db = fresh_db().await;
@@ -421,11 +353,7 @@ async fn rows_written_without_the_column_take_the_schema_default_not_the_current
     }
 }
 
-/// Asking for a suite the target has no package in is the ORDINARY
-/// no-package-available outcome — not an error, and above all not a package from
-/// another suite. #454 P4 leans on this to keep "a post-quantum group cannot
-/// contain a member who is not" unrepresentable: the add path simply finds
-/// nothing and reports the device skipped.
+/// No package in the asked suite is ordinary absence, never another suite's package.
 #[tokio::test(flavor = "multi_thread")]
 async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
     let db = fresh_db().await;
@@ -445,7 +373,6 @@ async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
         }
     }
 
-    // …and the off-suite package is untouched by that failed claim.
     match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
@@ -458,11 +385,7 @@ async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
     }
 }
 
-/// With pools in BOTH suites published for one device, each claim draws from its
-/// own pool and leaves the other intact. This is the real point of the column:
-/// two suites coexisting on one device without cross-contamination in either
-/// direction — the state a device is in for exactly as long as a code-point
-/// migration takes.
+/// Two pools on one device stay disjoint in both directions.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_two_suite_pools_do_not_contaminate_each_other() {
     let db = fresh_db().await;
@@ -471,7 +394,6 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
     assert_eq!(stored_suite(&db, "ref-pq").await, CIPHERSUITE_PQ);
     let conn = db.conn().await.unwrap();
 
-    // A suite-less claim means the current suite, so it must draw the PQ one.
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-pq"),
         ClaimOutcome::NoKeyPackage => panic!("the PQ pool must serve a suite-less claim"),
@@ -480,7 +402,6 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
         }
     }
 
-    // The legacy pool is untouched by it.
     match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
@@ -492,7 +413,6 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
         }
     }
 
-    // Both pools are now drained; neither claim resurrects the other's package.
     let conn = db.conn().await.unwrap();
     assert!(matches!(
         apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
@@ -506,26 +426,13 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
     ));
 }
 
-// ── #669: pq_capable is retired; per-suite rotation is not ───────────────────
-
-/// **`pq_capable` is dead, and publishing must not resurrect it.**
-///
-/// #454 had the DS derive the flag from what actually landed in
-/// `mls_key_package`, so it could answer "may this conversation be born hybrid?"
-/// without trusting a client assertion. #669 deleted every reader of that
-/// question — there is one suite, so the answer is always yes — and deleting the
-/// readers while leaving the writer would be worse than useless: a column that
-/// looks maintained, is not, and invites the next person to read it.
-///
-/// The column itself stays (migration `000010`; a DROP needs a multi-release
-/// dance and buys nothing). What must not stay is a write to it.
+/// `pq_capable` is retired (#669): publishing must not write it.
 #[tokio::test(flavor = "multi_thread")]
 async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
     let db = fresh_db().await;
     insert_device(&db, "bob", "dev1").await;
     assert_eq!(pq_capable(&db, "bob", "dev1").await, 0, "a fresh device row defaults to 0");
 
-    // The publish that used to flip it.
     publish_one(&db, "bob", "dev1", "ref-pq", Some(CIPHERSUITE_PQ)).await;
     assert_eq!(
         pq_capable(&db, "bob", "dev1").await,
@@ -533,7 +440,6 @@ async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
         "a PQ publish must no longer touch the retired flag"
     );
 
-    // Nor does the rotation path, which carried its own copy of the write.
     let conn = db.conn().await.unwrap();
     apply_replenish_key_packages(
         &conn,
@@ -549,20 +455,12 @@ async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
     );
 }
 
-/// A rotation (`replenish`) of ONE suite must leave the OTHER suite's pool
-/// intact. The DS scopes its DELETE to the suites present in the request.
-///
-/// #669 leaves the client rotating a single pool, so in the steady state this
-/// scoping has nothing to protect — which is exactly why it is worth pinning.
-/// The moment `CS_PQ`'s provisional code point moves, a device is briefly in two
-/// pools at once, and a rotation of the new one that silently drained the old
-/// one would strand every group not yet migrated.
+/// A rotation of one suite leaves the other pool intact, for code-point migrations.
 #[tokio::test(flavor = "multi_thread")]
 async fn rotating_one_suite_leaves_the_other_pool_intact() {
     let db = fresh_db().await;
     insert_device(&db, "bob", "dev1").await;
 
-    // Seed both pools via replenish.
     let conn = db.conn().await.unwrap();
     apply_replenish_key_packages(
         &conn,
@@ -581,7 +479,6 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
     assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_LEGACY).await, 2);
     assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_PQ).await, 2);
 
-    // Rotate ONLY the legacy pool. The PQ pool must survive untouched.
     apply_replenish_key_packages(
         &conn,
         Some("bob"),
@@ -600,7 +497,6 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
         "a legacy rotation must NOT drain the PQ pool"
     );
 
-    // The old legacy refs are gone (rotated out); the PQ refs remain.
     assert_eq!(stored_suite(&db, "h1").await, CIPHERSUITE_PQ);
     let conn = db.conn().await.unwrap();
     let mut rows = conn

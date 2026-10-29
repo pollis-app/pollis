@@ -1,26 +1,4 @@
 //! Email-shaped username squatting — the invariant, at every layer it lives.
-//!
-//! The DS used to write any string as a `username` (only `UNIQUE` applied) and
-//! resolve "who is `alice@corp.com`" with `WHERE username = ?1 OR email = ?1`,
-//! first row wins. SQLite scans the `username` index term first, so an account
-//! that had set its username to a victim's email address was what every invite
-//! and DM-start for that address resolved to, whether or not the victim had an
-//! account yet — and the MLS Add faithfully admitted the squatter.
-//!
-//! Three layers now refuse that, and each has a test here that fails if that
-//! layer is removed:
-//!
-//!   * the profile endpoint — `apply_update_profile` refuses a username outside
-//!     `^[a-z0-9_.-]{3,32}$` with a 400, `@` included;
-//!   * the database — migration `000021`'s triggers refuse an `@` in a username
-//!     on INSERT and UPDATE with no pollis-delivery code in the path;
-//!   * the resolvers — `directory::user_by_identifier` (behind
-//!     `/v1/directory/users` and `apply_create_invite`) matches an identifier
-//!     that contains `@` against `email` ONLY, so even a legacy squatter row
-//!     that predates the trigger can never be what an email resolves to.
-//!
-//! Driven at the `apply_*` level against a local libsql DB, mirroring
-//! `join_requests.rs`.
 
 use pollis_delivery::db::Db;
 use pollis_delivery::directory::user_by_identifier;
@@ -76,10 +54,7 @@ fn profile(user_id: &str, username: Option<&str>, preferred_name: Option<&str>) 
     }
 }
 
-// ── Layer 1: the profile endpoint ────────────────────────────────────────────
-
-/// The attack's first move, refused at the door: setting one's username to
-/// someone's email address is a 400, and the row is untouched.
+/// Setting one's username to someone's email address is a 400; the row is untouched.
 #[tokio::test]
 async fn a_username_containing_an_at_sign_is_refused_by_the_profile_endpoint() {
     let db = fresh().await;
@@ -96,8 +71,6 @@ async fn a_username_containing_an_at_sign_is_refused_by_the_profile_endpoint() {
     assert_eq!(username_of(&db, ADMIN).await, "admin", "the row must be untouched");
 }
 
-/// The whole character rule, not just `@`: anything outside
-/// `^[a-z0-9_.-]{3,32}$` is refused, and a conforming rename lands.
 #[tokio::test]
 async fn a_username_outside_the_character_rule_is_refused_and_a_conforming_one_lands() {
     let db = fresh().await;
@@ -126,10 +99,7 @@ async fn a_username_outside_the_character_rule_is_refused_and_a_conforming_one_l
     assert_eq!(username_of(&db, ADMIN).await, "admin.new-1_x");
 }
 
-/// Both clients re-send the current username on every save. An account whose
-/// default name predates the rule (`Legacy_7XK2`: upper-case ULID suffix) must
-/// still be able to save its display name — an unchanged username introduces no
-/// new state. The carve-out never covers `@`.
+/// A legacy unchanged username (`Legacy_7XK2`) may be re-sent; the carve-out never covers `@`.
 #[tokio::test]
 async fn an_unchanged_legacy_username_still_saves_but_never_one_with_an_at_sign() {
     let db = fresh().await;
@@ -151,8 +121,7 @@ async fn an_unchanged_legacy_username_still_saves_but_never_one_with_an_at_sign(
     .expect("apply");
     assert!(matches!(outcome, ProfileOutcome::Ok), "an unchanged legacy name must pass, got {outcome:?}");
 
-    // A legacy row holding an `@` (written before 000021) gets no such pass —
-    // and the refusal is a 400 from the DS, not the trigger's abort as a 500.
+    // A legacy `@` row gets no pass, and the refusal is a 400, not the trigger's 500.
     drop_username_triggers(&conn).await;
     conn.execute(
         "INSERT INTO users (id, email, username) VALUES ('squat-1','squat@x','someone@corp.com')",
@@ -173,10 +142,7 @@ async fn an_unchanged_legacy_username_still_saves_but_never_one_with_an_at_sign(
     );
 }
 
-// ── Layer 2: the database ────────────────────────────────────────────────────
-
-/// With no pollis-delivery code in the path, the schema itself refuses an `@`
-/// in a username on both INSERT and UPDATE (migration `000021`).
+/// With no DS code in the path, the schema refuses an `@` on INSERT and UPDATE (`000021`).
 #[tokio::test]
 async fn the_database_refuses_an_at_sign_in_a_username_without_the_ds() {
     let db = fresh().await;
@@ -199,9 +165,7 @@ async fn the_database_refuses_an_at_sign_in_a_username_without_the_ds() {
     assert!(updated.is_err(), "UPDATE to an email-shaped username must be refused by the trigger");
     assert_eq!(username_of(&db, ADMIN).await, "admin");
 
-    // The same COALESCE the profile endpoint issues, leaving a conforming
-    // username in place, is not caught by the trigger — it is a validator on
-    // the value, not a lock on the column.
+    // The trigger validates the value; it is not a lock on the column.
     conn.execute(
         "UPDATE users SET username = COALESCE(NULL, username), preferred_name = 'A' WHERE id = 'admin-1'",
         (),
@@ -210,11 +174,7 @@ async fn the_database_refuses_an_at_sign_in_a_username_without_the_ds() {
     .expect("an unchanged conforming username must still save");
 }
 
-// ── Layer 3: the resolvers ───────────────────────────────────────────────────
-
-/// Legacy data: rows written before `000021` existed. The triggers are dropped
-/// so the squatter row can exist at all, which is exactly the state the
-/// resolvers must be safe against.
+/// Drop the triggers so a pre-`000021` squatter row can exist.
 async fn drop_username_triggers(conn: &libsql::Connection) {
     conn.execute_batch(
         "DROP TRIGGER users_username_no_at_insert; DROP TRIGGER users_username_no_at_update;",
@@ -223,10 +183,7 @@ async fn drop_username_triggers(conn: &libsql::Connection) {
     .expect("drop triggers");
 }
 
-/// The finding's exact reproduction: the victim's row exists FIRST, then a
-/// squatter whose username equals the victim's email. The old
-/// `username = ?1 OR email = ?1` returned the squatter; an invite for the
-/// email must resolve to the account whose EMAIL it is.
+/// Victim's row first, then a squatter whose username is her email: the invite resolves to her.
 #[tokio::test]
 async fn an_invite_for_an_email_resolves_to_the_account_with_that_email_not_a_squatted_username() {
     let db = fresh().await;
@@ -268,11 +225,7 @@ async fn an_invite_for_an_email_resolves_to_the_account_with_that_email_not_a_sq
     assert_eq!(stored, VICTIM, "the stored invite row must name the victim, not the squatter");
 }
 
-/// **L3 — the block edge.** `apply_create_invite` answered a blocked invitee
-/// with its own `Blocked` outcome, which told the inviter that THIS SPECIFIC
-/// account had blocked them: the one fact a block exists to withhold, and one
-/// the blocked party could re-probe whenever they liked. It now answers exactly
-/// as a missing user does, so the two are indistinguishable.
+/// A blocked invitee answers exactly as a missing user, so the block is not revealed.
 #[tokio::test]
 async fn a_block_is_indistinguishable_from_no_such_user() {
     let db = fresh().await;
@@ -304,7 +257,6 @@ async fn a_block_is_indistinguishable_from_no_such_user() {
     );
     assert!(matches!(absent, InviteOutcome::NoSuchUser), "got {absent:?}");
 
-    // And no invite row was written for the blocked pair.
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM group_invite WHERE invitee_id = ?1",
@@ -316,8 +268,6 @@ async fn a_block_is_indistinguishable_from_no_such_user() {
     assert_eq!(n, 0);
 }
 
-/// The control: with no block in place the same invite is Created, so the test
-/// above is not satisfied by refusing everything.
 #[tokio::test]
 async fn an_unblocked_invite_is_still_created() {
     let db = fresh().await;
@@ -337,9 +287,7 @@ async fn an_unblocked_invite_is_still_created() {
     assert!(matches!(outcome, InviteOutcome::Created { .. }), "got {outcome:?}");
 }
 
-/// The directory lookup (behind `/v1/directory/users`, hence the client's
-/// DM-start `search_user_by_username`) dispatches on `@`: an email matches
-/// `email` only, a username matches `username` only.
+/// The directory lookup dispatches on `@`: email matches `email` only, else `username` only.
 #[tokio::test]
 async fn the_directory_lookup_matches_an_email_against_email_only_and_a_username_against_username_only() {
     let db = fresh().await;
@@ -362,14 +310,9 @@ async fn the_directory_lookup_matches_an_email_against_email_only_and_a_username
     let by_username = user_by_identifier(&conn, "victim_1234").await.expect("lookup");
     assert_eq!(by_username.as_ref().map(|u| u.id.as_str()), Some(VICTIM));
 
-    // The squatter's own (legacy) username is email-shaped, so it is now
-    // unreachable as a username — the identifier goes to the email column,
-    // which nobody's row satisfies but the victim's.
     let squatter_by_own_name = user_by_identifier(&conn, "victim@corp.com").await.expect("lookup");
     assert_ne!(squatter_by_own_name.as_ref().map(|u| u.id.as_str()), Some(MALLORY));
 
-    // Their email still resolves them — the squatter is reachable, just not
-    // as the victim.
     let squatter_by_email = user_by_identifier(&conn, "mallory@x").await.expect("lookup");
     assert_eq!(squatter_by_email.as_ref().map(|u| u.id.as_str()), Some(MALLORY));
 

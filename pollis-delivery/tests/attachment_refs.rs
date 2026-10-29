@@ -1,49 +1,4 @@
-//! Server-side attachment reference counting (#690, resolving the second
-//! `TODO(#419)`).
-//!
-//! Attachments are convergently encrypted and deduped by `content_hash`: one
-//! `attachment_object` row and one R2 blob back EVERY message that carries the
-//! same file, across conversations and users. The old delete was unconditional —
-//! deleting one referencing message removed the shared row (and R2 object) out
-//! from under every other, 404'ing their attachment.
-//!
-//! The count is **derived**: a `(content_hash, message_id)` row in
-//! `attachment_ref` only counts while a `message_envelope` with that id still
-//! exists (see `messages::object_is_referenced`). So releasing a reference is not
-//! an action any endpoint performs — it is the deletion of the message envelope,
-//! through the already-authorized delete/GC paths. These tests pin the fix:
-//!
-//!   * `stranding_cannot_happen` — two conversations reference one hash; deleting
-//!     the first message keeps the object alive for the second, and only the
-//!     second's delete collects it (the Definition-of-Done scenario).
-//!   * `a_forged_attachment_delete_cannot_release_a_live_reference` (#690
-//!     Blocking 1) — an unauthorized `/v1/attachments/delete` naming another
-//!     member's still-live message must NOT strand the object. **FAILS against
-//!     the pre-change code**, which deleted the `attachment_ref` row here and then
-//!     collected the object.
-//!   * `a_reference_cannot_outlive_its_message` (#690 Blocking 2, apply level) —
-//!     deleting the envelope makes the object collectable with no attachment-side
-//!     call at all. (The GC-path proof lives in `messages.rs`, where the roster
-//!     fixtures are — it drives the real `sweep_envelope_gc`.)
-//!   * `r2_presign_delete_is_refused_while_referenced` — the R2 chokepoint: the
-//!     real `/v1/r2/presign` handler refuses to mint a `delete` for an object
-//!     that still has a live reference, and mints one once the last is gone.
-//!   * `a_second_senders_attachment_survives_the_first_senders_delete` — the
-//!     same rule with two ACCOUNTS rather than two conversations, and the one
-//!     that pins the removal of migration 000031's uploader exemption: the
-//!     first sender's delete must not destroy bytes a second account's live
-//!     message carries, in Turso or in R2. **Fails against that exemption**,
-//!     which let the recorded uploader collect the row and mint the R2 delete
-//!     over another account's reference.
-//!   * `a_reference_cannot_be_declared_for_another_users_message` (#1161 M5,
-//!     fixed in #1165) — a declaration naming a message the caller does not own
-//!     is refused. That binding is what the M5 finding actually required, and it
-//!     stays.
-//!   * plus the legacy/backfill and idempotency edges.
-//!
-//! Driven against a local libsql DB exactly as the DS runs, mirroring
-//! `envelope_retention.rs` (apply-fn level) and `auth.rs` (real router via
-//! `tower::oneshot`).
+//! Server-side attachment reference counting (#690).
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -67,16 +22,11 @@ async fn fresh() -> common::TempDb {
     db
 }
 
-/// Insert the message envelope `msg` (the thing that makes a declaration count).
 async fn add_envelope(db: &Db, msg: &str) {
     db.conn().await
         .unwrap()
         .execute(
-            // Every NOT NULL column is supplied. The old fixture inserted `id`
-            // alone under `OR IGNORE`, which against the real schema is not an
-            // insert at all — the constraint violation is swallowed and the
-            // envelope never exists, so the reference the test is about would
-            // never be held.
+            // Every NOT NULL column is supplied, or `OR IGNORE` silently inserts nothing.
             "INSERT OR IGNORE INTO message_envelope \
                (id, conversation_id, sender_id, ciphertext, sent_at) \
              VALUES (?1, 'conv', 'sender', 'ct', '2026-01-01T00:00:00Z')",
@@ -86,9 +36,7 @@ async fn add_envelope(db: &Db, msg: &str) {
         .unwrap();
 }
 
-/// Delete the message envelope `msg` — the ONLY way a reference is released. This
-/// is what `/v1/messages/delete`, envelope GC, retention, and account/group
-/// teardown each do to the envelope.
+/// The only way a reference is released.
 async fn delete_envelope(db: &Db, msg: &str) {
     db.conn().await
         .unwrap()
@@ -100,8 +48,6 @@ async fn delete_envelope(db: &Db, msg: &str) {
         .unwrap();
 }
 
-/// Register attachment `hash` (at R2 key `key`) as referenced by message `msg`,
-/// creating the envelope so the declaration actually counts.
 async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
     add_envelope(db, msg).await;
     let body = AttachmentRegisterBody::ForMessage {
@@ -116,8 +62,6 @@ async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
-/// The message-delete path: remove the envelope (releases the reference), then
-/// call `/v1/attachments/delete` to conditionally collect the shared object.
 async fn release_ref(db: &Db, hash: &str, msg: &str) {
     delete_envelope(db, msg).await;
     let body = AttachmentDeleteBody {
@@ -146,16 +90,7 @@ async fn referenced(db: &Db, hash: &str) -> bool {
     object_is_referenced(&db.conn().await.unwrap(), hash).await.unwrap()
 }
 
-// ── The stranding invariant ───────────────────────────────────────────────────
-
-/// Two conversations reference the same convergent file. Deleting the first's
-/// message must NOT collect the shared object; only deleting the last reference
-/// does. This is the Definition-of-Done scenario.
-///
-/// **Fails against the original unconditional delete.** That delete ran
-/// `DELETE FROM attachment_object WHERE content_hash = ?` with no predicate, so
-/// the assertion "the object survives the first delete" (`object_exists` == true
-/// below) was false — the row was gone and conversation Q's attachment 404'd.
+/// Deleting the first referencing message must not collect the shared object.
 #[tokio::test]
 async fn stranding_cannot_happen() {
     let db = fresh().await;
@@ -198,9 +133,7 @@ async fn stranding_cannot_happen() {
     );
 }
 
-/// Registration is idempotent: a retried send (same `content_hash`, same
-/// `message_id`) must not double-count, or a single delete could never bring the
-/// count to zero.
+/// A double-count would keep a single delete from reaching zero.
 #[tokio::test]
 async fn registration_is_idempotent() {
     let db = fresh().await;
@@ -215,27 +148,14 @@ async fn registration_is_idempotent() {
     );
 }
 
-// ── Blocking 1: releasing a reference is not an unauthorized action ────────────
-
-/// The deliberate-strand attack this ticket exists to eliminate: an authenticated
-/// device POSTs `/v1/attachments/delete` with a `(content_hash, message_id)` it
-/// does not own, while that message is still LIVE. It must NOT release anything —
-/// the object stays referenced and present.
-///
-/// **Fails against the pre-change code**, which deleted `attachment_ref
-/// (content_hash, message_id)` in `apply_delete_attachment` and then collected the
-/// now-unreferenced object. Here the endpoint no longer touches `attachment_ref`;
-/// release is the deletion of the envelope, which this forged call cannot do.
+/// A forged delete naming another's live message must release nothing.
 #[tokio::test]
 async fn a_forged_attachment_delete_cannot_release_a_live_reference() {
     let db = fresh().await;
     let hash = "victimhash";
-    // A victim in some other conversation sent a message carrying the file.
     register_ref(&db, hash, "media/victimhash/pic.enc", "m_victim").await;
 
-    // An attacker who is not authorized to delete m_victim calls the delete
-    // endpoint naming it. `_authed` is unused by design — this proves the endpoint
-    // is not the release chokepoint, so no authz on it can be the fix.
+    // `_authed` is unused: release happens via the envelope, not this endpoint.
     let out = apply_delete_attachment(
         &db.conn().await.unwrap(),
         Some("attacker"),
@@ -257,17 +177,7 @@ async fn a_forged_attachment_delete_cannot_release_a_live_reference() {
     );
 }
 
-// ── Blocking 2: a reference cannot outlive its message (apply level) ───────────
-
-/// Deleting the envelope releases the reference by itself — no
-/// `/v1/attachments/delete` needed for the release. Once it is gone the object is
-/// collectable, closing the "reference outlives the message forever" leak.
-///
-/// The GC-path proof (driving the real `sweep_envelope_gc`) lives in `messages.rs`
-/// where the watermark roster fixtures are; this pins the underlying property at
-/// the apply level. **Fails against the pre-change code**, whose
-/// `object_is_referenced` read the raw `attachment_ref` row and so stayed `true`
-/// after the message was gone.
+/// Deleting the envelope alone releases the reference (GC path is tested in `messages.rs`).
 #[tokio::test]
 async fn a_reference_cannot_outlive_its_message() {
     let db = fresh().await;
@@ -275,8 +185,6 @@ async fn a_reference_cannot_outlive_its_message() {
     register_ref(&db, hash, "media/gone/f.enc", "m1").await;
     assert!(referenced(&db, hash).await, "referenced while m1 lives");
 
-    // The message is deleted/GC'd — nothing releases the attachment reference
-    // explicitly.
     delete_envelope(&db, "m1").await;
     assert!(
         !referenced(&db, hash).await,
@@ -284,7 +192,6 @@ async fn a_reference_cannot_outlive_its_message() {
          not outlive its message (#690 Blocking 2)"
     );
 
-    // The object is now collectable by the ordinary conditional collect.
     apply_delete_attachment(
         &db.conn().await.unwrap(),
         Some("u1"),
@@ -295,17 +202,12 @@ async fn a_reference_cannot_outlive_its_message() {
     assert!(!object_exists(&db, hash).await, "the orphaned object is collectable");
 }
 
-/// A pre-#690 client sends no `message_id` on delete. It releases nothing, but
-/// the collect is STILL conditional — so it can no longer strand a hash a newer
-/// client referenced. A legacy zero-reference object it deletes is collected
-/// exactly as before (no worse than today).
+/// A pre-#690 delete with no `message_id` releases nothing and stays conditional.
 #[tokio::test]
 async fn old_client_delete_cannot_strand_a_referenced_object() {
     let db = fresh().await;
-    // A newer client referenced this hash for its (live) message.
     register_ref(&db, "h", "media/h/f.enc", "m_new").await;
 
-    // An old client (no message_id) tries to delete the object unconditionally.
     let out = apply_delete_attachment(
         &db.conn().await.unwrap(),
         Some("u2"),
@@ -320,7 +222,6 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
          client still references — the conditional predicate protects it (#690)"
     );
 
-    // A legacy object with no references at all is collectable, as before.
     db.conn().await
         .unwrap()
         .execute(
@@ -342,11 +243,7 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
     );
 }
 
-// ── The R2 presign delete gate (through the real router) ──────────────────────
-
-/// An R2 config whose secrets are present so `broker.r2_ready()` is `Some` and
-/// the presign handler proceeds to the reference gate. The signature these mint
-/// is never used — the test only asserts the gate's allow/refuse decision.
+/// Secrets present so the handler reaches the reference gate; signatures go unused.
 fn r2_broker() -> pollis_delivery::broker::BrokerConfig {
     pollis_delivery::broker::BrokerConfig {
         r2_endpoint: Some("https://acct.r2.cloudflarestorage.com".into()),
@@ -369,10 +266,7 @@ async fn presign_delete(router: &axum::Router, key: &str) -> StatusCode {
     router.clone().oneshot(req).await.unwrap().status()
 }
 
-/// The R2 chokepoint: the DS must refuse to mint a `delete` presign for an object
-/// that still has a reference, and mint one once the last reference is released.
-/// A refcount that protects the Turso row but lets the client blow away the R2
-/// object is not a fix (#690).
+/// A refcount that guards the row but not the R2 object is no fix (#690).
 #[tokio::test]
 async fn r2_presign_delete_is_refused_while_referenced() {
     let db = fresh().await;
@@ -380,8 +274,6 @@ async fn r2_presign_delete_is_refused_while_referenced() {
     register_ref(&db, "hhhh", key, "m_p").await;
     register_ref(&db, "hhhh", key, "m_q").await;
 
-    // Auth OFF (no signing needed); broker configured so the handler reaches the
-    // gate rather than 503'ing.
     let state = AppState::new(Arc::clone(&db), false).with_broker_config(r2_broker());
     let router = build_router_with_state(state);
 
@@ -391,7 +283,6 @@ async fn r2_presign_delete_is_refused_while_referenced() {
         "a delete presign must be REFUSED while a reference remains"
     );
 
-    // Release one of the two references — one still remains, still refused.
     release_ref(&db, "hhhh", "m_p").await;
     assert_eq!(
         presign_delete(&router, key).await,
@@ -399,7 +290,6 @@ async fn r2_presign_delete_is_refused_while_referenced() {
         "still refused while conversation Q's reference remains"
     );
 
-    // Release the last reference — the object is now collectable, gate opens.
     release_ref(&db, "hhhh", "m_q").await;
     assert_eq!(
         presign_delete(&router, key).await,
@@ -408,9 +298,7 @@ async fn r2_presign_delete_is_refused_while_referenced() {
     );
 }
 
-/// A non-media key (no `media/<hash>/…` shape) carries no reference-counted
-/// object, so the delete gate passes it through — avatar/icon cleanup must keep
-/// working.
+/// Non-media keys pass the gate so avatar/icon cleanup keeps working.
 #[tokio::test]
 async fn r2_presign_delete_passes_non_media_keys() {
     let db = fresh().await;
@@ -423,15 +311,7 @@ async fn r2_presign_delete_passes_non_media_keys() {
     );
 }
 
-/// `get` is never reference-gated: a referenced object must stay freely
-/// fetchable by everyone holding it.
-///
-/// `put` USED to be ungated too, and that was the bug. These objects are a
-/// global convergent dedup, so one `media/<hash>/…` key is shared by every
-/// conversation holding that attachment — an ungated `put` let any
-/// authenticated user overwrite anyone else's. The AEAD key is derived from the
-/// content hash, which every recipient knows, so the replacement decrypted
-/// cleanly and recipients rendered chosen plaintext as genuine.
+/// `put` is gated: keys are shared via convergent dedup and the AEAD key derives from the hash.
 #[tokio::test]
 async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
     let db = fresh().await;
@@ -443,7 +323,6 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
     let presign = |op: &'static str, key: String| {
         let router = router.clone();
         async move {
-            // Every `put` now declares a bounded length; `get` ignores the field.
             let body = serde_json::json!({
                 "operation": op,
                 "key": key,
@@ -478,10 +357,7 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
          the attachment-substitution attack"
     );
 
-    // The legitimate upload still works: a hash nobody references yet. Without
-    // this the gate could be "refuse every put" and the assertion above would
-    // still pass, while breaking all uploads. The key is the content-addressed
-    // shape every upload since #762 writes — a `put` may only name one of those.
+    // Proves the gate isn't "refuse every put".
     let fresh_hash = "c".repeat(64);
     let put_new = presign("put", format!("media/{fresh_hash}.enc")).await;
     assert_eq!(
@@ -491,21 +367,11 @@ async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
     );
 }
 
-// ── M5: a reference is bound to the message's author ─────────────────────────
-
-/// **M5.** `/v1/attachments/register` took the authenticated user and discarded
-/// it, so a `(content_hash, message_id)` declaration could name ANY message. A
-/// reference pins the shared R2 blob against collection and, through
-/// `/v1/r2/presign`'s delete gate, decides whether the UPLOADER may hard-delete
-/// their own bytes — so an ungated declaration is a write into somebody else's
-/// retention decision.
-///
-/// The declaration is now bound to `message_envelope.sender_id`.
+/// M5: a declaration is bound to `message_envelope.sender_id`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reference_cannot_be_declared_for_another_users_message() {
     let db = fresh().await;
     let hash = "f".repeat(64);
-    // The envelope fixture's author is `sender`.
     add_envelope(&db, "m-owned-by-sender").await;
 
     let body = AttachmentRegisterBody::ForMessage {
@@ -530,7 +396,6 @@ async fn a_reference_cannot_be_declared_for_another_users_message() {
         "a refused registration writes nothing at all"
     );
 
-    // The author's own declaration for the same message still lands.
     let out = apply_register_attachment(&db.conn().await.unwrap(), Some("sender"), &body)
         .await
         .unwrap();
@@ -538,9 +403,6 @@ async fn a_reference_cannot_be_declared_for_another_users_message() {
     assert!(referenced(&db, &hash).await);
 }
 
-/// A declaration naming a message that does not exist is refused too, rather
-/// than left as an inert row: there is no message to declare an attachment for,
-/// and the row would only be reaped later by the GC sweep.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reference_cannot_be_declared_for_a_message_that_does_not_exist() {
     let db = fresh().await;
@@ -558,12 +420,7 @@ async fn a_reference_cannot_be_declared_for_a_message_that_does_not_exist() {
     assert!(!referenced(&db, &hash).await);
 }
 
-/// The SEALED envelope — the only kind a current client writes. Its `sender_id`
-/// is the sentinel `"sealed"`, which names no account, so binding by name alone
-/// refused every real declaration: no attachment was ever counted, and every
-/// object stayed collectable by the next delete of the same bytes anywhere. The
-/// author proves itself with the envelope's deletion capability instead
-/// (#1086); a missing or wrong token is still refused, so the M5 binding holds.
+/// Sealed envelopes name no sender, so the author proves itself with the delete token (#1086).
 #[tokio::test(flavor = "multi_thread")]
 async fn the_author_of_a_sealed_message_declares_its_reference_with_the_capability() {
     use base64::Engine as _;
@@ -612,9 +469,7 @@ async fn the_author_of_a_sealed_message_declares_its_reference_with_the_capabili
     );
 }
 
-/// The capability travels as an optional field, so the body an older client
-/// sends — no `delete_token` — still parses as a send-path registration, and the
-/// new field is left off the wire when there is none to send.
+/// Older clients omit `delete_token`; it is skipped on the wire when absent.
 #[test]
 fn the_capability_is_optional_on_the_wire() {
     let old: AttachmentRegisterBody =
@@ -625,9 +480,7 @@ fn the_capability_is_optional_on_the_wire() {
     assert!(!json.contains("delete_token"), "{json}");
 }
 
-/// The upload-time, messageless registration stays open to any authenticated
-/// device: the object row is convergent — identical bytes for every uploader —
-/// and carries no reference, so there is nothing to bind it to.
+/// A messageless registration carries no reference, so any device may make it.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_object_only_registration_stays_ungated() {
     let db = fresh().await;
@@ -647,10 +500,6 @@ async fn an_object_only_registration_stays_ungated() {
     );
 }
 
-// ── One blob, many owners: the reference count is the whole rule ──────────────
-
-/// Insert an envelope authored by `sender` — the fixture `add_envelope` always
-/// writes `'sender'`, and these tests need two different authors.
 async fn add_envelope_from(db: &Db, msg: &str, sender: &str) {
     db.conn().await
         .unwrap()
@@ -664,8 +513,6 @@ async fn add_envelope_from(db: &Db, msg: &str, sender: &str) {
         .unwrap();
 }
 
-/// `register_ref` for an explicit actor: creates the actor's envelope, then
-/// registers the `(hash, message)` declaration as that actor.
 async fn register_ref_as(db: &Db, hash: &str, key: &str, msg: &str, actor: &str) {
     add_envelope_from(db, msg, actor).await;
     let body = AttachmentRegisterBody::ForMessage {
@@ -680,7 +527,6 @@ async fn register_ref_as(db: &Db, hash: &str, key: &str, msg: &str, actor: &str)
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
-/// `/v1/attachments/delete` as `actor` — the conditional collect.
 async fn collect_as(db: &Db, hash: &str, actor: &str) {
     let out = apply_delete_attachment(
         &db.conn().await.unwrap(),
@@ -692,7 +538,6 @@ async fn collect_as(db: &Db, hash: &str, actor: &str) {
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
-/// The `delete` presign decision for `key` as `user`, through the real handler.
 async fn presign_delete_as(router: &axum::Router, key: &str, user: &str) -> StatusCode {
     let body = serde_json::json!({ "operation": "delete", "key": key, "user_id": user });
     let req = Request::builder()
@@ -704,30 +549,16 @@ async fn presign_delete_as(router: &axum::Router, key: &str, user: &str) -> Stat
     router.clone().oneshot(req).await.unwrap().status()
 }
 
-/// **The decisive test.** Two accounts independently send the SAME bytes, which
-/// convergent encryption dedups onto one `attachment_object` row and one R2
-/// blob. The first sender deletes their message and asks for the object to be
-/// collected. The second account's attachment must still resolve: the Turso row
-/// survives AND the R2 object survives (no `delete` presign is minted for it,
-/// by anyone).
-///
-/// **Fails against migration 000031's uploader exemption**, which let the
-/// recorded `uploaded_by` account collect the row and mint the R2 delete over
-/// another account's live reference — one user deleting their file broke
-/// another user's message, in a conversation they cannot see.
+/// Two accounts dedup onto one blob; the first sender's delete must leave both row and R2 object.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_senders_attachment_survives_the_first_senders_delete() {
     let db = fresh().await;
     let hash = "a".repeat(64);
     let key = format!("media/{hash}.enc");
 
-    // Alice uploads and sends the file; Bob independently sends the same bytes,
-    // which dedup onto Alice's object rather than uploading a second blob.
     register_ref_as(&db, &hash, &key, "m-alice", "alice").await;
     register_ref_as(&db, &hash, &key, "m-bob", "bob").await;
 
-    // Alice deletes her message (releasing her reference) and asks the DS to
-    // collect the object.
     delete_envelope(&db, "m-alice").await;
     collect_as(&db, &hash, "alice").await;
 
@@ -741,7 +572,6 @@ async fn a_second_senders_attachment_survives_the_first_senders_delete() {
         "bob's reference is live, so the object is still referenced"
     );
 
-    // The R2 blob is the other half, and the same rule decides it.
     let state = AppState::new(Arc::clone(&db), false).with_broker_config(r2_broker());
     let router = build_router_with_state(state);
     for user in ["alice", "bob", "carol"] {
@@ -753,8 +583,6 @@ async fn a_second_senders_attachment_survives_the_first_senders_delete() {
         );
     }
 
-    // Bob deletes his message too. With no reference left the object is
-    // collectable and the R2 gate opens, for whoever asks.
     delete_envelope(&db, "m-bob").await;
     assert_eq!(
         presign_delete_as(&router, &key, "alice").await,
@@ -765,9 +593,6 @@ async fn a_second_senders_attachment_survives_the_first_senders_delete() {
     assert!(!object_exists(&db, &hash).await, "the unreferenced object is collected");
 }
 
-/// The same predicate governs every caller, so no actor can reach past a live
-/// reference: not the account that first uploaded the bytes, not a referrer, not
-/// a stranger, not the no-auth harness path.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_live_reference_blocks_every_actor() {
     let db = fresh().await;
@@ -797,8 +622,6 @@ async fn a_live_reference_blocks_every_actor() {
     assert!(object_exists(&db, &hash).await, "the no-auth path keeps the same rule");
 }
 
-/// A sender's own second message blocks their delete exactly as anybody else's
-/// would — the rule counts references, not accounts.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_senders_own_second_message_still_blocks_their_delete() {
     let db = fresh().await;
@@ -820,10 +643,7 @@ async fn a_senders_own_second_message_still_blocks_their_delete() {
     assert!(!object_exists(&db, &hash).await, "with her last reference gone it collects");
 }
 
-/// Migration 000031's attribution columns are DEAD (migration 000032): nothing
-/// writes them, because nothing may read them. A value in either one would be an
-/// at-rest identity linkage with no consumer — and, worse, the raw material for
-/// re-introducing an identity-dependent delete rule.
+/// Migration 000031's attribution columns are dead (000032): never written.
 #[tokio::test(flavor = "multi_thread")]
 async fn registration_records_no_ownership_attribution() {
     let db = fresh().await;
@@ -845,10 +665,7 @@ async fn registration_records_no_ownership_attribution() {
     assert_eq!(row.get::<i64>(1).unwrap(), 0, "no registrar is recorded");
 }
 
-/// A PUT is gated by the same predicate for the same reason a DELETE is:
-/// substituting bytes under a live shared object is something no account may do,
-/// first uploader included, because every recipient derives the AEAD key from
-/// the hash and chosen bytes would decrypt cleanly for all of them.
+/// No account, first uploader included, may substitute bytes under a live object.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_put_substitution_gate_binds_the_first_uploader_too() {
     let db = fresh().await;

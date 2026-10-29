@@ -1,13 +1,4 @@
-//! Email-change OTP endpoints (Goal B #419 final piece), driven through the real
-//! axum router with `tower::oneshot` against a local libsql DB.
-//!
-//! Unlike the signup bootstrap (OTP-session-gated), these are DEVICE-SIGNED: the
-//! user is already authenticated, so each request carries the four `X-Pollis-*`
-//! signature headers and is verified against the seeded `user_device`
-//! `mls_signature_pub_pq`. The OTP only proves control of the NEW mailbox.
-//!
-//! Coverage: the happy path, OTP wrong-code lockout, and the cross-user binding
-//! (a different signed user can't consume someone else's pending change).
+//! Email-change OTP endpoints (#419): device-signed; the OTP only proves the new mailbox.
 
 use std::sync::Arc;
 
@@ -44,8 +35,7 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// State with auth ENFORCED (these endpoints are device-signed) and a fixed
-/// DEV_OTP so the email-change code is deterministic with no email send.
+/// Auth enforced, with a fixed DEV_OTP so codes are deterministic.
 fn dev_state(db: Arc<Db>) -> AppState {
     AppState::new(db, true).with_otp_config(OtpConfig {
         resend_api_key: None,
@@ -58,7 +48,6 @@ fn dev_state(db: Arc<Db>) -> AppState {
     })
 }
 
-/// Seed a `users` row + a live device with `vk` as its signing key.
 async fn seed_user(db: &Db, user_id: &str, email: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
     let conn = db.conn().await.unwrap();
     conn.execute(
@@ -91,7 +80,6 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
-/// Build a device-signed POST for `path` with `body`.
 fn signed_request(
     path: &str,
     user_id: &str,
@@ -130,20 +118,7 @@ async fn send_signed(
     status
 }
 
-// ── 1. Happy path, and the change is not silent (L3) ─────────────────────────
-
-/// **L3.** The OTP proves control of the NEW mailbox and the device signature
-/// proves the current account — but a stolen unlocked device satisfies both, and
-/// the change used to leave no trace: the old address was never told and nothing
-/// in the app recorded it, so the account's recovery address could be moved
-/// silently.
-///
-/// The DS now writes the audit row itself, so a client cannot suppress it by
-/// omitting a call, and it names the address that was left.
-///
-/// Also the happy path (formerly `email_change_happy_path`, the identical
-/// request + verify): request-email-change-otp answers 200, the correct codes
-/// swap `users.email`.
+/// L3: the DS writes the audit row itself, naming the address left, so a client cannot suppress it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_completed_email_change_is_recorded_against_the_account() {
     let db = fresh_db().await;
@@ -194,9 +169,7 @@ async fn a_completed_email_change_is_recorded_against_the_account() {
     assert_eq!(parsed["to"], new_email);
 }
 
-/// The other half: a REFUSED change writes no audit row, so the log records what
-/// happened rather than what was attempted through this endpoint (wrong-code
-/// attempts are the OTP store's business, not the account log's).
+/// A refused change writes no audit row.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_email_change_records_nothing() {
     let db = fresh_db().await;
@@ -234,18 +207,7 @@ async fn a_refused_email_change_records_nothing() {
     assert_eq!(email_of(&db, "alice").await, "alice@x.com");
 }
 
-// ── 1c. The CURRENT address has to approve the change (#1161) ────────────────
-
-/// **#1161.** The device signature proves the account and the new-address code
-/// proves the new mailbox — and a borrowed or stolen unlocked device satisfies
-/// BOTH: it signs because the keystore is unlocked, and it receives the
-/// new-address code because the attacker chose the destination. Nothing in the
-/// flow ever asked the mailbox that actually owns the account. So the account's
-/// recovery address could be moved by whoever picked up the device, with the
-/// real owner finding out only from the notice sent afterwards.
-///
-/// A second code, to the address being LEFT, is what turns that into a change
-/// the owner has to approve. FAILS before the change: the swap goes through.
+/// #1161: a stolen unlocked device satisfies signature and new-address code; the old address must approve.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_email_change_without_the_current_address_code_is_refused() {
     let db = fresh_db().await;
@@ -264,8 +226,6 @@ async fn an_email_change_without_the_current_address_code_is_refused() {
     )
     .await;
 
-    // Everything the old flow required, and nothing more: a valid signature and
-    // the code from the mailbox the attacker chose.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -282,8 +242,6 @@ async fn an_email_change_without_the_current_address_code_is_refused() {
     );
     assert_eq!(email_of(&db, "alice").await, "alice@x.com", "the address must not move");
 
-    // An empty string is not an answer either — it is the same omission with a
-    // key present.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -296,7 +254,6 @@ async fn an_email_change_without_the_current_address_code_is_refused() {
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     assert_eq!(email_of(&db, "alice").await, "alice@x.com");
 
-    // And the control: with the current address's code, the same request lands.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -310,10 +267,7 @@ async fn an_email_change_without_the_current_address_code_is_refused() {
     assert_eq!(email_of(&db, "alice").await, new_email);
 }
 
-/// A WRONG current-address code is refused the same way, and — because the
-/// current-address challenge is checked FIRST — it does not burn an attempt
-/// against the new address's counter, so the legitimate owner's retry is not
-/// spent by somebody else's guessing.
+/// The current-address code is checked first, so wrong guesses don't burn the new address's budget.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_wrong_current_address_code_is_refused_and_spends_no_new_address_attempt() {
     let db = fresh_db().await;
@@ -332,7 +286,6 @@ async fn a_wrong_current_address_code_is_refused_and_spends_no_new_address_attem
     )
     .await;
 
-    // More wrong current-address guesses than the new address's attempt budget.
     for _ in 0..8 {
         let s = send_signed(
             &state,
@@ -351,7 +304,6 @@ async fn a_wrong_current_address_code_is_refused_and_spends_no_new_address_attem
         assert_eq!(email_of(&db, "alice").await, "alice@x.com");
     }
 
-    // The audit log records nothing: no change happened.
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT COUNT(*) FROM security_event WHERE user_id = 'alice'", ())
@@ -360,8 +312,6 @@ async fn a_wrong_current_address_code_is_refused_and_spends_no_new_address_attem
     let n: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
     assert_eq!(n, 0);
 }
-
-// ── 2. Wrong-code lockout ─────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn email_change_wrong_code_lockout() {
@@ -382,7 +332,6 @@ async fn email_change_wrong_code_lockout() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // 5 wrong guesses → 401 invalid.
     for _ in 0..5 {
         let s = send_signed(
             &state,
@@ -395,7 +344,6 @@ async fn email_change_wrong_code_lockout() {
         .await;
         assert_eq!(s, StatusCode::UNAUTHORIZED);
     }
-    // 6th wrong → locked out (429) and the code is deleted.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -407,7 +355,6 @@ async fn email_change_wrong_code_lockout() {
     .await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
 
-    // The correct code no longer works, and the email was never changed.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -421,8 +368,6 @@ async fn email_change_wrong_code_lockout() {
     assert_eq!(email_of(&db, "alice").await, "alice@x.com", "email must be unchanged");
 }
 
-// ── 3. Cross-user binding ─────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread")]
 async fn email_change_rejects_cross_user() {
     let db = fresh_db().await;
@@ -434,7 +379,6 @@ async fn email_change_rejects_cross_user() {
 
     let new_email = "alice-new@x.com";
 
-    // Alice requests the change → DS records (alice → new_email).
     let s = send_signed(
         &state,
         "/v1/auth/request-email-change-otp",
@@ -446,9 +390,7 @@ async fn email_change_rejects_cross_user() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // Bob — a DIFFERENT signed user — tries to consume it WITH the correct code.
-    // The requester binding rejects it (403) before the OTP is even checked, so
-    // alice's code stays valid.
+    // The requester binding rejects bob (403) before the OTP is checked, so alice's code stays valid.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",
@@ -459,11 +401,9 @@ async fn email_change_rejects_cross_user() {
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "a different signed user must be refused");
-    // Neither account's email moved.
     assert_eq!(email_of(&db, "alice").await, "alice@x.com");
     assert_eq!(email_of(&db, "bob").await, "bob@x.com");
 
-    // Alice's correct code still works — bob's attempt didn't burn it.
     let s = send_signed(
         &state,
         "/v1/auth/verify-email-change",

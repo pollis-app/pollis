@@ -1,15 +1,5 @@
 //! #1089: the directory identifier lookup is an email→identity oracle, bounded
 //! per user per day.
-//!
-//! `/v1/directory/users` resolves an `identifier` — a username or an EMAIL — to
-//! an account id, username and avatar for any authenticated caller. Without a
-//! bound, one throwaway account turns a mailing list into a list of which
-//! addresses have Pollis accounts and under what name.
-//!
-//! The per-IP middleware tier sheds floods, but an attacker rotates IPs, so the
-//! bound that binds is keyed on the authenticated user and read from the
-//! database — restart-proof and shared across container instances. Same
-//! reasoning the invite-redemption limit already writes down.
 
 use pollis_delivery::directory::{charge_identifier_lookup, IDENTIFIER_LOOKUPS_PER_DAY};
 
@@ -39,8 +29,7 @@ async fn lookups_are_allowed_up_to_the_cap_then_refused() {
     );
 }
 
-/// A refused attempt still costs. Otherwise the cap is a speed bump: an attacker
-/// that ignores the 429 gets an unlimited oracle at one lookup per request.
+/// A refused attempt still costs, or the cap is only a speed bump.
 #[tokio::test]
 async fn refused_attempts_still_consume_budget() {
     let db = fresh().await;
@@ -67,8 +56,6 @@ async fn refused_attempts_still_consume_budget() {
     );
 }
 
-/// The budget is per user, so one account burning its allowance cannot deny the
-/// directory to everyone else.
 #[tokio::test]
 async fn the_budget_is_per_user() {
     let db = fresh().await;
@@ -87,13 +74,11 @@ async fn the_budget_is_per_user() {
     );
 }
 
-/// And it is per UTC day: yesterday's exhaustion does not carry over.
 #[tokio::test]
 async fn the_budget_resets_on_a_new_day() {
     let db = fresh().await;
     let conn = db.conn().await.unwrap();
 
-    // Pre-load yesterday at the cap, the way an exhausted day looks on disk.
     conn.execute(
         "INSERT INTO directory_lookup_budget (user_id, day, lookups) \
          VALUES ('alice', strftime('%Y-%m-%d','now','-1 day'), ?1)",

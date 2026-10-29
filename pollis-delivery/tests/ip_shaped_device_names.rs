@@ -1,10 +1,4 @@
 //! No client IP may be readable in a stored device name or security-log note.
-//!
-//! Shipped desktop builds named a device `"{hostname} ({os})"`, and a hostname
-//! can embed the machine's IP (`ip-10-0-0-12`). Two halves are pinned here:
-//! migration 000034 scrubs rows written before the fix, and the DS write paths
-//! redact any IP-shaped token a still-shipped client sends — redact, not refuse,
-//! because those clients' writes must keep succeeding.
 
 use pollis_api::account::SecurityEventBody;
 use pollis_delivery::account::apply_record_security_event;
@@ -14,8 +8,7 @@ mod common;
 
 const SCRUB: &str = include_str!("../../pollis-schema/migrations/000034_scrub_ip_shaped_device_names.sql");
 
-/// A DB at the schema just BEFORE the scrub, so it can be seeded with the rows
-/// old clients wrote and the migration run against them.
+/// A DB at the schema just before the scrub.
 async fn pre_scrub_db() -> common::TempDb {
     let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
@@ -71,7 +64,6 @@ async fn the_scrub_replaces_ip_shaped_names_and_leaves_ordinary_ones() {
     }
 
     conn.execute_batch(SCRUB).await.expect("scrub");
-    // Idempotent: a second run changes nothing.
     conn.execute_batch(SCRUB).await.expect("scrub again");
 
     for (id, before, want) in names {

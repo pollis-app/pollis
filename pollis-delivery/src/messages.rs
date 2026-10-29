@@ -1,76 +1,20 @@
 //! Domain A — message envelopes, edits/deletes, reactions, watermarks, and
-//! attachment dedup rows. The **reference vertical slice** for Goal B (#419):
-//! every later write-domain (B/C/D) copies the shape established here.
+//! attachment dedup rows (#419).
 //!
-//! ## The per-domain convention (copy this)
-//!
-//!   - **Bodies** — one `#[derive(Deserialize)] *Body` per endpoint. Binary
-//!     fields are base64 (STANDARD); everything else is plain JSON. (Domain A
-//!     has no binary fields — `ciphertext` is already the `"mls:<hex>"` text the
-//!     client stores, and content hashes / R2 keys are text.)
-//!   - **Pure conn-level fns** — `apply_*` functions take a bare
-//!     [`Connection`], the authenticated user (`Option<&str>`; `None` only on
-//!     the no-auth path), and a parsed `*Body`. They embed BOTH the
-//!     authorization decision AND the write, returning [`WriteOutcome`]. Putting
-//!     authz inside the pure fn (rather than the axum handler, as `writes.rs`
-//!     does) is deliberate: it makes the in-process test harness exercise the
-//!     *exact* same authz the production handler runs, with zero duplication —
-//!     both call sites are reduced to `gate → parse → apply → map outcome`.
-//!   - **axum handlers** — `(State, RawRequest) -> Response`, all identical in
-//!     shape. They [`crate::writes::gate_and_parse`] (shared auth over the raw
-//!     body, then deserialize), call the matching `apply_*`, and map the outcome
-//!     to 200 / 403 / 400 / 500.
-//!
-//! ## Where the writes land
-//!
-//! Every domain-A table lives in the **MAIN DB** (`state.db`), NOT the commit-log
-//! DB — these are message-delivery rows, not MLS control-plane rows. So all
-//! `apply_*` fns run on the main connection.
+//! Every domain-A table lives in the **MAIN DB**.
 //!
 //! ## Authorization (the security core)
 //!
 //! `gate` proves *which user* signed the request; each `apply_*` then proves the
 //! user is *allowed* to make that specific write:
-//!   - send / edit / delete: the user is a current member of the conversation
-//!     (reusing [`crate::writes::is_member`]). Authorship is NOT checked here
-//!     (Solution A, #607): under unconditional sealed sender the stored
-//!     `sender_id` is a blinded sentinel, so the DS cannot prove who authored a
-//!     message. Edit/self-delete are membership-gated only; the author check that
-//!     used to live here is enforced CLIENT-side on ingest (the edit/redaction's
-//!     MLS-authenticated credential must equal the target's author). Admin-delete
-//!     still additionally requires the user be a group admin of the channel's
-//!     owning group (a permission check, not an author check).
+//!   - send / edit / delete: membership only; authorship is checked CLIENT-side (#607). Admin-delete also needs group admin.
 //!   - reactions: the user is a member, and may only write/remove their OWN
 //!     reaction (`user_id` is bound to the authenticated user).
-//!   - watermark: the row is per `(conversation, user, device)`; the user may
-//!     only advance their own — both halves of the key are bound to the signing
-//!     device, the user must be a current member, and the cursor value itself
-//!     is admitted only through [`check_cursor_stamp`] (as is every `sent_at`
-//!     a send or edit carries): canonical UTC RFC 3339, no further ahead of
-//!     the DS clock than the signature window already allows.
-//!   - envelope GC: the deletion *decision* is many-member correct regardless of
-//!     who triggers it — bounded by the MIN watermark over the whole current
-//!     member-device roster, and by device liveness (#720: a device silent past
-//!     N months stops pinning), but never by wall-clock message age (invariant
-//!     I3). The *trigger* is the DS-internal sweep [`sweep_envelope_gc`] (#689),
-//!     not a member's ingest path; the per-conversation [`apply_envelope_gc`]
-//!     endpoint runs the same watermark-gated cleanup for one conversation on
-//!     demand.
-//!   - attachment references (#690): releasing a reference is NOT a gated
-//!     endpoint at all — the reference count is DERIVED from envelope existence
-//!     (`attachment_ref ⋈ message_envelope`, see [`live_ref_exists`]), so the
-//!     only way to release one is to delete its message envelope through the
-//!     already-authorized delete/GC/teardown paths above. `/v1/attachments/
-//!     register` additionally binds each declaration to the named message's
-//!     author (#1165) — its `sender_id`, or for a sealed envelope its deletion
-//!     capability — so you cannot declare a reference for somebody else's
-//!     message; `/v1/attachments/delete` need only prove a real device,
-//!     because it merely collects an already-unreferenced object — for every
-//!     caller alike, uploader included.
+//!   - watermark: own `(user, device)` only, as a member; the cursor passes [`check_cursor_stamp`].
+//!   - envelope GC: MIN watermark over live member devices (#720), never message age (I3); see [`sweep_envelope_gc`].
+//!   - attachment refs (#690): derived from envelope existence ([`live_ref_exists`]); register binds to the author (#1165).
 //!
-//! On the no-auth path (`authed == None`, only reachable when the DS runs with
-//! `POLLIS_DS_REQUIRE_AUTH` off) the membership/identity checks are skipped and
-//! the actor comes from the body — mirroring `commit::submit` and `writes.rs`.
+//! With `authed == None` (auth off) the membership/identity checks are skipped.
 
 use axum::{
     extract::State,
@@ -91,64 +35,16 @@ use crate::writes::{
 };
 use crate::AppState;
 
-// The request bodies for this module's endpoints live in `pollis-api`, the
-// crate pollis-core builds its requests from — one declaration, both ends, so
-// a client field that does not exist here is a compile error rather than a
-// silently-absent JSON key. Re-exported so `pollis_delivery::messages::*Body`
-// keeps resolving for handlers, tests and the flows harness.
+// Request bodies live in `pollis-api`, shared with pollis-core.
 pub use pollis_api::messages::*;
 
-// ── Envelope GC SQL ──────────────────────────────────────────────────────────
+// Envelope GC: delete only `sent_at` below the MIN `last_fetched_at` over LIVE member devices, never by age (I3).
 //
-// Envelope cleanup is gated on the DELIVERY WATERMARK: a row is deleted only when
-// its `sent_at` sits strictly below the MINIMUM `last_fetched_at` over every
-// current member device of the conversation that is still LIVE. Retention is
-// bounded by the slowest LIVE member device — never by wall-clock message age.
-// This is invariant I3 ("no TTL") in `docs/backend-core-invariants.md`.
+// Never add a time-based or other delivery-blind gate here: age is not evidence of delivery (F3).
 //
-// There used to be a second, OR'd arm: `sent_at < datetime('now', '-30 days')`.
-// Because it was OR'd it deleted ON ITS OWN, without consulting a single
-// watermark — so encrypted mail that no recipient device had ever collected was
-// destroyed 30 days after it was sent, and a device offline for longer than that
-// silently and permanently lost messages. That is failure mode F3, and it broke
-// the product's headline guarantee (a member receives every message sent while
-// they were a member; the only acceptable losses are pre-join history and a
-// brand-new empty device). The arm is gone. Do not reintroduce a time-based — or
-// any other delivery-blind — deletion gate here: age is not evidence of delivery.
+// #720: a device whose last REPORT (`reported_at`, not a cursor) is older than `?2` stops pinning.
 //
-// ## The device-liveness bound (#720, WS1)
-//
-// Without more, a device that installs, joins a busy group and never opens the
-// app again pins that conversation's envelopes forever: its `last_fetched_at`
-// never advances, so it holds `MIN(cw)` down indefinitely. #720 bounds this by
-// LIVENESS — a member device that has not REPORTED a watermark in N months stops
-// counting toward the gate (the `?2` staleness arm below; N is the `?2` modifier,
-// set to 12 months in both deployed environments — see
-// `DEFAULT_WATERMARK_STALE_MODIFIER`). It mirrors the revoked-device exclusion (#685): a
-// stale device is filtered out of the roster the gate measures against, exactly
-// as a revoked one is.
-//
-// The bound is on the device's own LAST REPORT (`cw.reported_at`, a wall-clock
-// timestamp the DS stamps on every watermark write), NEVER on `last_fetched_at`
-// (a message-cursor value) or the envelope's `sent_at`. That distinction is the
-// whole point: a device that reported yesterday pins EVERY envelope below its
-// cursor no matter how old the envelope is (anti-F3). Reusing `last_fetched_at`
-// or `sent_at` for staleness would resurrect F3 — a live device in a quiet
-// conversation legitimately carries an old cursor without being dormant.
-//
-// This makes envelope retention bounded by member watermarks AND by device
-// liveness — a strictly SMALLER bound than the commit log's, whose stale-device
-// case is instead handled by its Tier-2 hard cap (`commit::prune_floor`). The
-// consequence is a THIRD accepted loss (beyond pre-join history and a new empty
-// device): a device dormant past N months that returns may find gaps. This is a
-// deliberate storage/correctness trade, gated behind a conservative N; see
-// invariant I3 and `docs/metadata-retention-policy.md` §1.
-//
-// It fails CLOSED on `reported_at IS NULL`: a device with NO watermark row (a
-// LEFT JOIN miss — brand-new, never synced) and a pre-migration row whose
-// `reported_at` was never stamped both read NULL and are KEPT in the roster (they
-// pin), because unknown report time is not evidence of dormancy. Only a device
-// with a KNOWN report time older than the window is excluded.
+// Fails CLOSED on `reported_at IS NULL`: unknown report time is not dormancy.
 //
 // What remains fails CLOSED on every edge:
 //   * `COUNT(ud.device_id) = COUNT(cw.last_fetched_at)` — every current member
@@ -162,35 +58,9 @@ pub use pollis_api::messages::*;
 //     `MIN(...) = NULL` over zero rows, so the CASE again returns NULL. A roster
 //     that resolves to nobody is not evidence that everybody collected.
 //
-// The member-device roster is filtered by `ud.revoked_at IS NULL` (#685): a
-// revoked device can never rejoin the MLS tree (I5), so it must not count toward
-// the roster the watermark gate is measured against — otherwise it holds the
-// floor down forever. Without the filter a revoked device wedges cleanup in
-// either direction: its stale `last_fetched_at` pins `MIN(cw)` to a dead cursor,
-// or its missing row breaks the "every device reported" check and disables
-// pruning outright. This mirrors `commit::current_member_devices`, which excludes
-// revoked devices from the commit-log retention floor for the same reason — keep
-// the two rosters in agreement (I5).
+// Revoked devices are excluded (#685, I5), matching `commit::current_member_devices`.
 //
-// ## Why the roster lives in a macro (#722)
-//
-// The roster — "which member devices does the watermark gate measure against" —
-// is the SAME rule in three places: these two DELETEs and
-// [`crate::commit::current_member_devices`]. Nothing structural forces them to
-// agree, and a divergence is an I5 violation surfacing as dropped mail (a roster
-// too small deletes what a device still needs) or wedged retention (a roster too
-// large never clears). So the join chain each DELETE aggregates over is factored
-// out into a macro expanding to a string literal, and `concat!`-ed back into the
-// statement — the SQL the DS executes is byte-for-byte what it always was, but
-// the *roster half* of it now has exactly one definition that the parity test in
-// `roster_parity_tests` can SELECT from directly. Editing the roster inside the
-// DELETE now necessarily edits what the test reads, so any drift away from the
-// Rust roster shows up as a red test rather than as silent divergence.
-//
-// The fragments deliberately include the `LEFT JOIN conversation_watermark`: it
-// is what `COUNT(ud.device_id)` is counted over, so `SELECT ud.device_id` +
-// fragment is *precisely* the row set the gate aggregates — including any
-// accidental fan-out — not a paraphrase of it.
+// The roster lives in a macro (#722) so `roster_parity_tests` SELECTs exactly what the DELETEs aggregate.
 
 /// The channel roster: every non-revoked device of every member of the group
 /// that owns channel `?1`, LEFT JOINed to that device's watermark for `?1`.
@@ -220,27 +90,9 @@ macro_rules! dm_member_device_rows {
     };
 }
 
-// ## The `?2` device-liveness (staleness) arm, and why it lives OUTSIDE the macro
+// The `?2` staleness arm sits OUTSIDE the roster macro, for parity (I5).
 //
-// The staleness filter (`cw.reported_at IS NULL OR cw.reported_at >=
-// datetime('now', ?2)`) is appended to each DELETE *around* the shared roster
-// fragment, NOT inside it. This is deliberate and load-bearing for the I5 roster
-// parity (see `roster_parity_tests`): the roster macro is the ONE definition of
-// "which member devices exist" shared with `commit::current_member_devices`, and
-// the commit log applies NO liveness bound (it uses its own Tier-2 hard cap). If
-// staleness went inside the macro, the envelope roster and the commit roster
-// would diverge and the parity test would (correctly) fail. Keeping it outside
-// leaves the shared roster byte-for-byte identical — the parity SELECTs read the
-// pure roster — while the envelope DELETE applies liveness as an ADDITIONAL,
-// envelope-only filter on top of that roster. The channel fragment has no `WHERE`
-// so the arm opens one; the DM fragment already ends in `WHERE dcm.dm_channel_id
-// = ?1` so the arm is `AND`-ed onto it.
-//
-// `?2` is a SQLite datetime modifier (e.g. `'-12 months'`), computed in Rust from
-// config (`watermark_stale_modifier`). Both the sweep and the per-conversation
-// endpoint bind the same value through the one chokepoint
-// `cleanup_conversation_envelopes`, so the two GC paths can never apply different
-// predicates (#720 checkbox 3).
+// `?2` is a SQLite datetime modifier, bound only via `cleanup_conversation_envelopes` (#720).
 
 const CLEANUP_CHANNEL_ENVELOPES: &str = concat!(
     "\
@@ -276,28 +128,17 @@ DELETE FROM message_envelope
      )"
 );
 
-// ── Device-liveness (staleness) window (#720) ────────────────────────────────
-
 /// The staleness window when `POLLIS_DS_WATERMARK_STALE_MONTHS` is unset, as a
 /// SQLite `datetime()` modifier: a member device that has not reported a
 /// watermark in this long stops pinning envelope retention.
 ///
-/// This equals the documented policy, **12 months**, decided 2026-08-04
-/// (rationale in `docs/metadata-retention-policy.md` §1), so the policy holds
-/// without configuration — a self-hosted DS or a test rig that omits the var
-/// gets the same bound as the deployed environments (#1486). Both
-/// `wrangler.{dev,prod}.jsonc` still set it explicitly. N governs the third
-/// accepted message loss, so changing it is a product decision disclosed to
-/// users, not a tuning knob.
+/// The documented policy, 12 months (#1486); changing it is a product decision, not a tuning knob.
 pub const DEFAULT_WATERMARK_STALE_MODIFIER: &str = "-12 months";
 
 /// The configured device-staleness window as a SQLite `datetime()` modifier,
 /// bound as `?2` into the `CLEANUP_*` predicates.
 ///
-/// `POLLIS_DS_WATERMARK_STALE_MONTHS` = N months (default 12). `0` DISABLES the
-/// bound — it returns a window so far in the past (`-1000 years`) that no device
-/// is ever stale, restoring the pre-#720 "watermark-only" behaviour without a
-/// second SQL path. An unparseable value falls back to the default.
+/// `POLLIS_DS_WATERMARK_STALE_MONTHS` = N months (default 12); `0` disables it; garbage falls back.
 pub fn watermark_stale_modifier() -> String {
     stale_modifier_from(std::env::var("POLLIS_DS_WATERMARK_STALE_MONTHS").ok().as_deref())
 }
@@ -318,24 +159,13 @@ pub const DEFAULT_GC_SWEEP_SECS: u64 = 3600;
 /// The envelope-GC cadence the sweep loop **actually binds**, in seconds; `0`
 /// disables the sweep.
 ///
-/// Lives here, next to [`watermark_stale_modifier`], for the same reason: it is
-/// read by both the loop that uses it and `GET /v1/config`, which reports it, and
-/// those two must never be able to disagree. Reporting the raw environment string
-/// instead let the endpoint answer `"1h"` while the sweep ran at 3600 — a
-/// configured-not-effective answer, which is precisely the failure /v1/config
-/// exists to make impossible (#760).
-///
-/// An unparseable value falls back rather than failing, and the fallback is what
-/// gets reported, so a typo is visible as "the default is running" rather than
-/// silently believed.
+/// Shared with `GET /v1/config` so the reported value is the effective one (#760).
 pub fn gc_sweep_secs() -> u64 {
     std::env::var("POLLIS_DS_GC_SWEEP_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_GC_SWEEP_SECS)
 }
-
-// ── Retention growth metrics (#720 checkbox 1) ───────────────────────────────
 
 /// Identity-free growth metrics for `message_envelope`, computed by the sweep and
 /// served on `GET /v1/retention/metrics`. Deliberately holds NO conversation id
@@ -360,8 +190,6 @@ pub struct RetentionSnapshot {
 /// it after each run; `GET /v1/retention/metrics` reads it. `None` until the
 /// first sweep completes.
 pub type RetentionMetricsHandle = std::sync::Arc<std::sync::Mutex<Option<RetentionSnapshot>>>;
-
-// ── Shared authz helpers ─────────────────────────────────────────────────────
 
 /// The conversation a message belongs to, resolved from any envelope carrying
 /// its id (used to membership-gate reactions, which only know `message_id`).
@@ -405,18 +233,7 @@ async fn channel_group_role(
 
 /// A DS-issued timestamp for the textual `sent_at` / `created_at` columns.
 ///
-/// These columns are compared **lexically** — the message watermark advances on
-/// `sent_at > cursor` — so a DS timestamp has to sort correctly against the
-/// client-issued ones it shares a column with. Clients write
-/// `chrono::Utc::now().to_rfc3339()`, which carries sub-second digits, so the DS
-/// must emit them too: an earlier hand-rolled whole-second formatter produced
-/// `…T09:00:00+00:00`, which sorts BELOW `…T09:00:00.123456789+00:00` because
-/// `'+'` (0x2B) < `'.'` (0x2E). An admin delete tombstone written in the same
-/// wall-clock second as the message it redacts therefore landed under every
-/// recipient's watermark and was never fetched — the delete silently did
-/// nothing. Always emitting nanoseconds restores the ordering (a shorter
-/// fraction is a prefix of a longer one, so lexical order matches chronological
-/// order across both precisions).
+/// Lexically compared against client stamps, so always emit nanoseconds (`'+'` < `'.'`).
 pub(crate) fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, false)
 }
@@ -426,66 +243,16 @@ pub(crate) fn now_rfc3339() -> String {
 /// registration ([`crate::bootstrap`]), DM creation and DM member-add
 /// ([`crate::profile`]), group join ([`crate::groups`]) — goes through here.
 ///
-/// This is the DS's counterpart to `pollis_core::commands::messages::
-/// envelope_sent_at`, and it exists for the same reason: the format is the
-/// correctness property, so it belongs to one function rather than to five call
-/// sites that each look like an innocent "now".
+/// Lexically compared against RFC 3339 `sent_at`; SQLite's `datetime('now')` sorts below all of them.
 ///
-/// **The bug it replaces.** Those five sites wrote SQLite's `datetime('now')`,
-/// which formats as `YYYY-MM-DD HH:MM:SS`. `last_fetched_at` is compared
-/// **lexically** against `message_envelope.sent_at`, which is RFC 3339 from every
-/// other writer — and a space (0x20) sorts below a `T` (0x54), so a seeded
-/// watermark compared as **older than every real timestamp that has ever
-/// existed**, in any year. The seed's stated purpose is "this device has already
-/// consumed everything up to now, so pre-join messages do not pin envelope
-/// retention"; what it actually said was "this device has consumed nothing".
-///
-/// It was fail-safe, which is why nothing broke: the GC gate takes
-/// `MIN(last_fetched_at)` over member devices, so an artificially-low seed
-/// over-pins and under-collects. Envelopes were retained longer than intended,
-/// never dropped. But a seed that means the opposite of its comment is one
-/// refactor away from being load-bearing, and the same string is the
-/// [`TOMBSTONE_FLOOR`] input, where "greatest cursor any recipient could hold"
-/// silently stopped counting seeded rows.
-///
-/// **Not to be used for `reported_at`**, which is the deliberate exception: that
-/// column is compared against `datetime('now', ?)` (see
-/// [`CLEANUP_CHANNEL_ENVELOPES`]),
-/// so it must stay in SQLite's own format. Two columns of one table in two
-/// formats looks like an oversight and is not — each matches what it is compared
-/// against, which is the only thing that decides a text timestamp's format.
+/// **Not for `reported_at`**, which is compared against `datetime('now', ?)` and keeps SQLite's format.
 pub(crate) fn seeded_watermark_cursor() -> String {
     now_rfc3339()
 }
 
-// ── Client-supplied cursor stamps are BOUNDED, not trusted ───────────────────
+// Client cursor stamps are BOUNDED: a `9999-…` one blacked out a chat.
 //
-// `message_envelope.sent_at` and `conversation_watermark.last_fetched_at` are
-// both written from values the CLIENT chose, and both are load-bearing for
-// delivery: the fetch is `sent_at > last_fetched_at`, the watermark is monotone
-// (`MAX`) and never rewinds, and envelope GC deletes `sent_at <
-// MIN(last_fetched_at)`. Until this bound existed the DS stored either string
-// verbatim, so ONE member posting `sent_at = "9999-…"` was enough to black out a
-// conversation for everyone: every recipient fetched it (it sorts above every
-// cursor), reported a cursor of `9999-…`, and from then on `sent_at > cursor`
-// matched nothing — and once every live device had reported it, the next GC
-// sweep deleted every envelope in the conversation, fetched or not. The same
-// blackout was reachable from OUTSIDE the conversation through a forged
-// watermark row (see [`TOMBSTONE_FLOOR`]). Neither is one of the three losses
-// `CLAUDE.md` permits, and undoing either needed operator surgery on
-// `conversation_watermark`.
-//
-// The value stays client-chosen — the sender's own local copy carries the same
-// stamp, and cross-device read cursors compare against it (#844), so the DS
-// re-stamping it would make one message sort differently on the sender's device
-// than on everyone else's. What the DS enforces instead is that the value is
-// one it could have produced itself: a canonical UTC RFC 3339 stamp no further
-// ahead of the DS clock than the request-signature window already tolerates.
-// That is exactly the set of strings whose lexical order matches chronological
-// order across every writer of these columns (see [`now_rfc3339`]), and a
-// bound the honest client already meets — its `sent_at` is stamped BEFORE the
-// request is signed, and a signature more than [`CURSOR_STAMP_SKEW_SECS`]
-// ahead of the DS clock is already refused by `auth`.
+// Kept client-chosen (#844) but must be canonical UTC RFC 3339, at most [`CURSOR_STAMP_SKEW_SECS`] ahead.
 
 /// How far ahead of the DS clock a client-chosen `sent_at` /
 /// `last_fetched_at` may sit. The request-signature replay window
@@ -505,17 +272,9 @@ pub enum StampRejection {
     InFuture,
 }
 
-/// The one admission check for a client-chosen `sent_at` or `last_fetched_at`
-/// (see the block comment above). `now` is injected so the boundary is testable
-/// at chosen instants; the handlers pass `chrono::Utc::now()`.
+/// The one admission check for a client-chosen `sent_at` or `last_fetched_at`; `now` is injected.
 ///
-/// Canonical means: `value` parses as RFC 3339 with a UTC offset AND re-renders
-/// byte-for-byte as `chrono`'s UTC formatting at one of its four fraction widths
-/// — the set `pollis_core::commands::messages::envelope_sent_at` (`AutoSi`) and
-/// [`now_rfc3339`] (`Nanos`) between them produce. `Z` suffixes, non-zero
-/// offsets, lowercase `t`, a space separator, truncated or padded fractions,
-/// and SQLite's `YYYY-MM-DD HH:MM:SS` all fail it: each parses (or nearly does)
-/// yet sorts somewhere other than where its instant belongs.
+/// Canonical = re-renders byte-for-byte as chrono UTC at 0/3/6/9 fraction digits; anything else mis-sorts.
 pub fn check_cursor_stamp(
     value: &str,
     now: chrono::DateTime<chrono::Utc>,
@@ -570,28 +329,6 @@ fn admit_last_fetched_at(value: &str) -> Result<(), WriteOutcome> {
     }
 }
 
-// ── The tombstone `sent_at` floor — REMOVED (#1087) ──────────────────────────
-//
-// A DS-stamped tombstone used to need a computed `sent_at`, strictly above the
-// greatest cursor any recipient could already hold, because ingest selected
-// `sent_at > last_fetched_at` and the two stamps came from different clocks with
-// different precisions. A whole-second DS stamp sorts BELOW a sub-second client
-// stamp inside the same second (`+` 0x2B < `.` 0x2E), so the delete was buried
-// under the message it redacted and no recipient ever applied it. #692 then
-// found that a GC-pruned conversation lost the envelope side of the floor and
-// fell back to wall-clock `now`, reintroducing the clock dependency the guard
-// existed to remove; the floor became the greater of the envelope and watermark
-// sides.
-//
-// All of that was the cost of ordering by a lexically-compared string that two
-// different clocks wrote. With a DS-assigned sequence a tombstone simply takes
-// `MAX(seq)+1`, which is above every recipient's cursor by construction — so
-// `TOMBSTONE_FLOOR`, `tombstone_floor` and `sent_at_after` are gone, along with
-// the class of bug they patched. `sent_at` is display metadata now and nothing
-// routes on it.
-
-// ── POST /v1/messages/send ───────────────────────────────────────────────────
-
 pub async fn send_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -605,14 +342,7 @@ pub async fn send_message(
     let (outcome, replayed) =
         send_envelope_once(&conn, &log, authed.as_deref(), &parsed).await?;
 
-    // Wake the recipients, AFTER the envelope has landed and only if it did
-    // (#987). Best-effort and detached: a push that fails must never fail a send
-    // that already succeeded, and the sender must not wait on Expo.
-    //
-    // The sender is taken from the AUTHENTICATED user, never from the body:
-    // under sealed sender (#331) `body.sender_id` is a blinded sentinel, so
-    // using it would exclude nobody and push the sender their own message.
-    // A replay (#1335) already woke them the first time.
+    // Best-effort push AFTER the envelope lands (#987); sender from the AUTHENTICATED user (#331); not on replay (#1335).
     if matches!(outcome, WriteOutcome::Ok) && !replayed {
         if let Some(audience) =
             crate::push::PushAudience::from_send(parsed.push_to.clone(), parsed.push_mentions.clone())
@@ -646,17 +376,7 @@ pub async fn send_message(
 /// INSERT a `type='message'` envelope (the send). Authz: the authenticated user
 /// is a current member of the conversation.
 ///
-/// Sender binding depends on sealing (issue #331,
-/// `docs/metadata-minimization-design.md` §2):
-///   - **Unsealed** (`sealed = 0`): unchanged — a signed request may only send as
-///     itself, so the stored `sender_id` is bound to the authenticated user via
-///     [`resolve_actor`].
-///   - **Sealed** (`sealed = 1`): the body's `sender_id` is a non-identifying
-///     sentinel, deliberately NOT the authenticated user, so the
-///     "send-as-yourself" equality check is relaxed and the sentinel is persisted
-///     as-is. Membership authz is UNCHANGED — we still verify the *authenticated*
-///     user is a member; sealing only blinds the stored sender column, it does
-///     not weaken who is allowed to write.
+/// Unsealed: `sender_id` is bound to the signer. Sealed (#331): a blinded sentinel is stored; membership still checked.
 pub async fn apply_send_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -677,8 +397,6 @@ pub async fn apply_send_message(
             }
         }
     } else {
-        // Unsealed: bind the stored sender to the actor and require a signed
-        // request to send only as itself.
         match resolve_actor(authed, body.sender_id.as_deref()) {
             Ok(s) => (s.clone(), s),
             Err(o) => return Ok(o),
@@ -692,16 +410,7 @@ pub async fn apply_send_message(
     if let Err(refused) = admit_sent_at(&body.sent_at) {
         return Ok(refused);
     }
-    // Every NEW envelope must carry a deletion capability (#1135). #1086 could
-    // only enforce it for rows that HAD one, because no shipped client produced
-    // one yet — so anything a pre-#1086 client wrote landed with NULL and kept
-    // the membership-only check, leaving the original hole open: any member
-    // could remove any member's not-yet-fetched envelope.
-    //
-    // The NULL fallback stays for rows that already exist (they age out under
-    // the #720 retention bound). This only closes the door on new ones, now
-    // that clients producing a capability are the floor — #1086 shipped in
-    // v1.12.0.
+    // Every NEW envelope must carry a deletion capability (#1135); old NULL rows age out (#720).
     //
     // `Invalid`, not `Forbidden`: the caller is entitled to send, the body is
     // what is not admissible.
@@ -710,17 +419,12 @@ pub async fn apply_send_message(
             "delete_token_hash is required on every new envelope",
         ));
     }
-    // The sequence allocation and the row must land together — see
-    // `insert_envelope_with_seq`. Edit and delete already run in a transaction;
-    // the send path needs its own.
+    // Sequence allocation and row land together (see `insert_envelope_with_seq`).
     let tx = conn.transaction().await?;
     insert_envelope_with_seq(
         &tx,
         &body.conversation_id,
-        // The per-envelope deletion capability (#1086), stored as the client sent
-        // it — the DS never computes it and cannot: it is an HMAC under a key only
-        // the author's devices hold. Absent (an older client) → NULL, and deletes
-        // of this row fall back to the pre-#1086 membership check.
+        // Deletion capability (#1086): an HMAC only the author's devices can compute; stored as sent.
         "id, sender_id, ciphertext, reply_to_id, sent_at, sealed, delete_token_hash",
         "?3, ?4, ?5, ?6, ?7, ?8, ?9",
         vec![
@@ -738,8 +442,6 @@ pub async fn apply_send_message(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/messages/edit ───────────────────────────────────────────────────
-
 pub async fn edit_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -755,29 +457,11 @@ pub async fn edit_message(
     )
 }
 
-// ── The epoch gate (#1041) ───────────────────────────────────────────────────
+// Epoch gate (#1041): an envelope at a closed epoch is refused (409).
 //
-// An application envelope is decryptable only by members AT the epoch it was
-// sealed at (`max_past_epochs = 0` on the client). If a commit lands between a
-// sender's catch-up and its post, the envelope arrives sealed at an epoch every
-// member has left or is about to leave: recipients that already merged the
-// commit have thrown the keys away, and the committer's own merge advanced
-// past it before it could fetch. The message is silently lost — not one of the
-// three accepted losses.
+// The assertion is optional on the wire: older clients are admitted ungated.
 //
-// So the DS refuses to KEEP an envelope whose asserted `(generation, epoch)` is
-// no longer the commit log's head, answering 409 `epoch_behind` with the head
-// so the sender can catch up, re-seal, and post again. The assertion is
-// optional on the wire (an older client sends none and is admitted ungated);
-// every client this repo ships asserts.
-//
-// Insert-then-verify, not lock-then-insert. The envelope and the commit log
-// live on two handles (`state.db` / `state.log_db`) that may be two databases
-// in a deployed environment, so there is no transaction spanning both. Instead
-// the envelope is inserted first and the head read second; if the head has
-// moved the row is deleted again and the post refused. Race against a
-// concurrent commit CAS (`commit::submit`), which appends the commit BEFORE its
-// winner sweeps the envelopes of the epoch it closes:
+// Insert-then-verify (two DBs, no spanning tx): insert, read the head, delete + 409 if it moved. Vs a CAS:
 //   - CAS before our head read → we see the new head → delete + 409 → the
 //     sender re-seals at the new epoch. Nothing at the old epoch remains.
 //   - CAS after our head read → the row was already visible when the CAS
@@ -869,29 +553,11 @@ pub async fn send_envelope(
 /// DS already holds — `true` means nothing was written, and the handler must
 /// not push the recipients a second time.
 ///
-/// A replay is the client's durable outbox at work (#1335): a sender that died
-/// after its post landed but before it recorded that, re-posting the same
-/// message under the same id after the next unlock. The id is the envelope's
-/// primary key, so before this the re-post failed on the constraint (a 500)
-/// and the outbox would have marked a DELIVERED message failed forever. It is
-/// answered as success instead, without touching the stored row — the
-/// re-post's ciphertext is a fresh seal of the same plaintext, and recipients
-/// already have (or will fetch) the first one.
+/// A replay is the durable outbox re-posting the same id (#1335): answered as success, row untouched.
 ///
-/// Checked BEFORE the epoch gate on purpose: a replay sealed at an old epoch
-/// is still a replay, and `apply_at_head`'s post-check deletes the row `id`
-/// names when the head moved — which, for a replay, would be the already
-/// delivered envelope.
+/// Checked BEFORE the epoch gate, whose post-check would delete the delivered row.
 ///
-/// **One post per envelope id at a time.** The epoch gate is insert-then-verify:
-/// a post's row is visible before its post-check, and the post-check may still
-/// delete it. A retry that looked in that window would find the row, answer
-/// "replay, delivered" — and then lose it to the first post's clean-up, whose
-/// own client has already given up. So every post of an id holds that id's
-/// lock across the replay check AND the whole gated write: a retry waits for
-/// the first post to settle and then sees either the surviving row (a real
-/// replay) or no row (and writes its own). The DS runs as one instance, so a
-/// process-local lock covers every post; after a restart nothing is mid-write.
+/// **One post per envelope id at a time**: the id lock spans the replay check and the gated write.
 pub async fn send_envelope_once(
     main: &Connection,
     log: &Connection,
@@ -917,19 +583,9 @@ pub async fn send_envelope_once(
 /// `Some(outcome)` when `body.id` is already a stored envelope, `None` for a
 /// new one.
 ///
-/// A replay is answered `Ok` only when it is provably the SAME message from the
-/// SAME author: the stored row is a `message` in this conversation and its
-/// deletion-capability hash equals the one this body carries. That hash is an
-/// HMAC of the id under a key only the author's devices hold (#1086), so it is
-/// identical on every retry and impossible for anyone else to produce — which
-/// is what lets a replay be answered without consulting CURRENT membership: a
-/// sender removed after a delivered-but-unrecorded post was a member when it
-/// landed, and their retry must settle rather than fail forever.
+/// `Ok` only for the SAME message from the SAME author (matching #1086 hash), not current membership.
 ///
-/// Anything else — another conversation's id, a non-message envelope, a hash
-/// that does not match, a row with no hash — is answered `Forbidden`, the same
-/// answer a non-member gets, so the response reveals neither that the id
-/// exists nor where.
+/// Anything else is `Forbidden`, as for a non-member, so the id's existence leaks nothing.
 async fn replayed_send(
     main: &Connection,
     body: &SendMessageBody,
@@ -1025,16 +681,6 @@ pub async fn edit_envelope(
 
 /// Replace the single pending edit envelope (DELETE prior + INSERT new) in one
 /// transaction. Authz: the editor is a current member of the conversation.
-///
-/// Authorship is NOT checked here (Solution A, #607): under unconditional sealed
-/// sender the stored `sender_id` is always a blinded sentinel, so the DS cannot
-/// verify the editor authored the target — and it deliberately does not try. The
-/// edit's content only ever lands on a recipient whose ingest
-/// (`pollis_core::commands::messages::ingest`) confirms the edit's
-/// MLS-authenticated author (the credential inside the ciphertext) equals the
-/// target message's author; a non-author's edit envelope is accepted for storage
-/// here but dropped, cryptographically, on ingest. The DS's job is reduced to the
-/// membership gate: only a member may write an edit envelope to the conversation.
 pub async fn apply_edit_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -1055,21 +701,7 @@ pub async fn apply_edit_message(
     // An edit REPLACES the target's pending edit, so it is a delete, so it needs
     // the target's capability (#1086).
     //
-    // This narrows Solution A (#607), which had the DS accept an edit envelope
-    // from any member and left authorship to the recipient's ingest check. That
-    // was the only option while the DS could not tell an author from anyone
-    // else — but it meant any member could clobber another author's
-    // not-yet-fetched edit, and `idx_envelope_one_edit_per_message` (a partial
-    // UNIQUE on `(conversation_id, target_message_id)`) makes that unavoidable
-    // rather than incidental: one pending edit per message is a schema rule, so
-    // accepting a second one MUST remove the first. "Accept but do not clobber"
-    // is not a state this table can hold.
-    //
-    // Checking the capability does not undo what #607 bought. The DS still
-    // cannot tell whose envelope this is — it verifies possession of a secret,
-    // not an identity, so nothing is de-anonymized. The ingest-side author check
-    // stays exactly as it was, as defence in depth against a legacy row whose
-    // capability is NULL.
+    // One pending edit per message is a schema rule, so accepting one MUST remove the last; ingest's author check stays.
     //
     // Checked before the transaction opens, so a refusal removes nothing.
     if check_delete_capability(
@@ -1083,10 +715,7 @@ pub async fn apply_edit_message(
     {
         return Ok(WriteOutcome::Forbidden);
     }
-    // Read the capability the new edit will carry BEFORE the transaction opens.
-    // The DELETE below removes the edit this one replaces, and the fallback path
-    // reads that very row — on the same connection, so it would see the deleted
-    // state and inherit NULL.
+    // Read BEFORE the tx: the DELETE below removes the row the fallback reads.
     let inherited_capability =
         edit_capability_hash(conn, &body.conversation_id, &body.target_message_id).await?;
     let tx = conn.transaction().await?;
@@ -1117,8 +746,6 @@ pub async fn apply_edit_message(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/messages/delete ─────────────────────────────────────────────────
-
 pub async fn delete_message(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1144,8 +771,7 @@ pub(crate) const FIXTURE_CAPABILITY_TOKEN: &str = "fixture-capability";
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum DeleteCapability {
     /// The row carries no capability — written by a client that predates #1086,
-    /// or already gone. The caller falls back to the membership check that was
-    /// the whole authorization before.
+    /// or already gone: the caller falls back to the membership check.
     NotRequired,
     /// The presented token hashes to the stored value.
     Proved,
@@ -1155,15 +781,9 @@ pub(crate) enum DeleteCapability {
 
 /// Check `token` against the capability stored on `message_id`.
 ///
-/// Sealed sender means the DS cannot tell whose envelope a row is, so it cannot
-/// decide who may delete it. It does not try: the sender stored
-/// `SHA-256(token)` when the envelope was written, and this compares a hash. The
-/// DS can neither compute a token (it is an HMAC under a key only the author's
-/// devices hold) nor replay the stored value as one.
+/// Sealed sender hides authorship; the DS only compares `SHA-256(token)` with the stored hash.
 ///
-/// Scoped to `conversation_id` for the same reason every other statement here
-/// is: the caller's authorization was checked against that id, so the lookup
-/// must be too.
+/// Scoped to `conversation_id`, the id the caller was authorized against.
 pub(crate) async fn check_delete_capability(
     conn: &Connection,
     conversation_id: &str,
@@ -1182,18 +802,9 @@ pub(crate) async fn check_delete_capability(
     let stored: Option<String> = match rows.next().await? {
         // A row with no hash: the legacy path.
         Some(row) => row.get::<Option<String>>(0).ok().flatten(),
-        // The target row is GONE — but a delete/edit of it also removes the
-        // PENDING EDIT that names it, and that envelope outlives its target
-        // (envelope GC collects each row on its own watermark, and an edit is
-        // written later than what it edits, so the original goes first). With no
-        // row to read a hash from this used to answer `NotRequired`, and any
-        // member could then drop another author's pending edit uncontested — the
-        // exact loss #1086 exists to prevent, just with an extra step (L3).
+        // Target GONE: its pending edit outlives it, so without this any member could drop that edit (L3).
         //
-        // The edit INHERITED the target's capability precisely so it could stand
-        // in for it, so read it from there instead. `None` (no edit either, or a
-        // legacy edit carrying no hash) is still `NotRequired`: there is then
-        // nothing to remove, or nothing to prove.
+        // The edit inherited the target's capability; `None` there is still `NotRequired`.
         None => {
             drop(rows);
             pending_edit_capability_hash(conn, conversation_id, message_id).await?
@@ -1241,14 +852,9 @@ async fn pending_edit_capability_hash(
 
 /// The capability hash stored on `message_id`, for an edit envelope to inherit.
 ///
-/// An edit is a replaceable envelope: the next edit deletes it. Copying the
-/// TARGET's hash onto it means that next edit proves the same thing — authorship
-/// of the original — rather than needing a capability of the edit's own, which
-/// the DS could not check against anything.
+/// Copying the TARGET's hash lets the next edit prove authorship of the original.
 ///
-/// Falls back to the capability already carried by the edit this one REPLACES.
-/// Otherwise an edit written after the original was collected would inherit
-/// `NULL` and hand the whole chain back to the legacy no-capability path (L3).
+/// Falls back to the replaced edit's hash, else a post-GC edit would inherit `NULL` (L3).
 async fn edit_capability_hash(
     conn: &Connection,
     conversation_id: &str,
@@ -1274,22 +880,9 @@ async fn edit_capability_hash(
 
 /// Take the next delivery sequence for `conversation_id` (#1087).
 ///
-/// One atomic statement against `conversation_seq`, which is the ONLY durable
-/// high-water mark. The obvious alternative — `MAX(seq)+1` over
-/// `message_envelope` — is wrong for a reason that is easy to miss and produces
-/// silent message loss:
+/// Uses `conversation_seq`, never `MAX(seq)+1`: GC empties rows, which would reissue seqs below every cursor (#692).
 ///
-/// envelope GC **deletes rows**. Once every member device has read past
-/// everything the conversation is emptied, `MAX(seq)` goes NULL, and the next
-/// envelope is assigned 1 again — at or below every device's existing cursor, so
-/// `seq > last_seq` never selects it and it reaches nobody. That is the #692
-/// shape reappearing inside the design meant to retire it;
-/// `envelope_retention::a_tombstone_outranks_surviving_cursors_after_gc_emptied_the_conversation`
-/// is the test that catches it.
-///
-/// So the counter outlives the rows it numbers. GC never touches this table;
-/// only conversation teardown removes a row, and the cursors pointing into it go
-/// at the same time.
+/// GC never touches the counter; only conversation teardown does.
 async fn next_delivery_seq(conn: &Connection, conversation_id: &str) -> anyhow::Result<i64> {
     let mut rows = conn
         .query(
@@ -1313,21 +906,7 @@ async fn next_delivery_seq(conn: &Connection, conversation_id: &str) -> anyhow::
 /// compares against, so a writer that skipped it would create an envelope
 /// delivered to nobody and collected by nothing.
 ///
-/// **Takes a `Transaction`, not a `Connection`, and that is the whole point.**
-/// Allocating the sequence and inserting the row are two statements; if another
-/// writer can slip between them, it allocates `N+1` and makes that row visible
-/// while `N` is still missing. A recipient fetching `seq > last_seq` in that
-/// window sees `N+1`, advances its cursor to it, and envelope `N` lands
-/// *below every cursor* — delivered to nobody and collected by GC. That is a
-/// fourth acceptable-loss mode, which we do not get to add.
-///
-/// Under SQLite/libsql a transaction whose first statement is a write holds the
-/// write lock to commit, so writers serialise and the gap is never observable.
-/// Requiring the transaction in the *type* is what stops a future caller from
-/// re-opening the window by passing a bare autocommit connection.
-///
-/// A rolled-back insert un-does the counter bump too, so there is not even a
-/// burned sequence; `idx_envelope_conv_seq` remains the backstop.
+/// **Takes a `Transaction`**: a writer between allocate and insert would make `N+1` visible before `N`, losing `N`.
 ///
 /// `columns` names the columns AFTER `conversation_id` and `seq`; `placeholders`
 /// supplies them starting at `?3`, and `params` binds them in that order.
@@ -1352,23 +931,11 @@ async fn insert_envelope_with_seq(
 }
 
 /// Delete a message. Two branches, chosen by the client's `msg_sender_id` hint
-/// (Solution A, #607): under unconditional sealed sender the stored `sender_id`
-/// is always a blinded sentinel, so the DS can no longer derive who authored the
-/// message — it trusts the client to say whether this is a self-delete.
+/// (#607): sealed sender means the DS cannot derive authorship.
 ///
-/// **Self-branch** (`msg_sender_id == actor`): gated on **membership** only.
-/// Removes the original envelope (unscoped — a sealed row has no matchable
-/// sender) and any pending edit; writes **no** tombstone. A non-author member can
-/// thus remove a not-yet-fetched envelope (an accepted availability trade, #607),
-/// but cannot forge a *delete appearance*: making other members drop an
-/// already-fetched copy requires either a valid E2EE redaction (honored on ingest
-/// only when its MLS-authenticated author matches the target's author) or an
-/// admin tombstone (below) — neither of which a non-author can produce.
+/// **Self-branch** (`msg_sender_id == actor`): membership (+ capability); removes envelope and pending edit, no tombstone.
 ///
-/// **Admin-branch** (`msg_sender_id != actor`): the actor must be a group admin
-/// of the channel (a re-derived permission check, not an author check). Removes
-/// the envelope + pending edit and writes a `type='delete'` tombstone so every
-/// member soft-deletes on next ingest. Server-authorized moderation.
+/// **Admin-branch**: a re-derived group admin; also writes a `type='delete'` tombstone.
 pub async fn apply_delete_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -1379,25 +946,14 @@ pub async fn apply_delete_message(
         Err(o) => return Ok(o),
     };
 
-    // Branch selection comes from the client's hint — the DS cannot re-derive
-    // authorship from the (sealed) envelope. Self-branch when the hint names the
-    // actor as the author; admin-branch otherwise.
     let is_self_delete = body.msg_sender_id.as_deref() == Some(actor.as_str());
 
     if is_self_delete {
-        // Self-branch authz is membership: any member may remove an envelope
-        // they claim to have authored (authorship itself is enforced
-        // client-side on ingest, never here). Skipped on the no-auth path.
+        // Self-branch authz is membership; skipped on the no-auth path.
         if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
             return Ok(WriteOutcome::Forbidden);
         }
-        // ...and, since #1086, PROOF rather than a claim. Membership alone let
-        // any member remove any envelope in the conversation before slower
-        // recipients fetched it — a fourth message loss on top of the three
-        // CLAUDE.md allows, and the only attacker-controlled one. A row written
-        // before capabilities existed still takes the membership-only path;
-        // requiring one outright waits for clients that produce one to reach the
-        // fleet.
+        // ...and, since #1086, capability PROOF; legacy rows keep the membership-only path.
         if check_delete_capability(
             conn,
             &body.conversation_id,
@@ -1409,12 +965,7 @@ pub async fn apply_delete_message(
         {
             return Ok(WriteOutcome::Forbidden);
         }
-        // Both deletes are SCOPED to the conversation that was just authorised.
-        // Without `AND conversation_id`, authz reads one attacker-supplied field
-        // (`conversation_id`) while the delete acts on a second, independent one
-        // (`message_id`) — so membership of any conversation, including a DM with
-        // yourself, authorised deleting any envelope in the deployment. Clients
-        // hold a whole-DB read-only Turso token, so the ids are enumerable.
+        // SCOPED to the authorized conversation, or membership anywhere would authorize deleting any envelope.
         let tx = conn.transaction().await?;
         tx.execute(
             "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
@@ -1441,21 +992,9 @@ pub async fn apply_delete_message(
     }
 
     let tombstone_id = Ulid::new().to_string();
-    // #1087: no floor arithmetic any more. A tombstone takes the next delivery
-    // sequence like every other envelope, and `MAX(seq)+1` is above every
-    // recipient's cursor by construction — that is the whole point of an
-    // assigned sequence. `sent_at` is display metadata here, so plain `now` is
-    // correct and cannot bury anything.
-    //
-    // What this replaces: the tombstone used to be stamped `sent_at_after(now,
-    // tombstone_floor(..))`, because a whole-second DS stamp sorts BELOW a
-    // sub-second client stamp inside the same second (`+` 0x2B < `.` 0x2E) and
-    // silently buried the delete under the message it redacted. That was a
-    // lexical-format accident, and an integer has no format to get wrong.
+    // #1087: a tombstone takes the next seq, above every cursor; `sent_at` is display-only.
     let now = now_rfc3339();
-    // Scoped for the same reason as the self-branch above: the admin check is
-    // against `conversation_id`, so the delete must be too, or an admin of any
-    // one group could remove envelopes from every other conversation.
+    // Scoped like the self-branch, or one group's admin could delete anywhere.
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
@@ -1485,8 +1024,6 @@ pub async fn apply_delete_message(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/reactions/add  &  /v1/reactions/remove ──────────────────────────
-
 pub async fn add_reaction(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1514,38 +1051,18 @@ pub async fn remove_reaction(
 /// Resolve the conversation a reaction is to be gated against, and refuse if it
 /// cannot be established (#1161).
 ///
-/// Reactions are membership-gated through the reacted-to message's envelope.
-/// That was the whole gate, and it had a hole the size of the feature: envelope
-/// GC (#689) collects a row as soon as every member device has fetched it, so
-/// for anything but a very recent message `conversation_for_message` answers
-/// `None` — and the gate was SKIPPED in exactly that case. Any authenticated
-/// account that knew a message id could write a `message_reaction` row against
-/// it. The skip was not careless; refusing outright would break reacting to an
-/// older message, which is an ordinary thing to do, and there was nothing else
-/// to check against.
+/// Envelope GC (#689) collects rows fast, so gating only on the envelope used to skip the check.
 ///
-/// There is now: `ReactionBody.conversation_id`, which the client fills from its
-/// own decrypted local copy of the message. So:
+/// `ReactionBody.conversation_id` (from the client's local copy) fills the gap:
 ///
 ///   * envelope present → its `conversation_id` is authoritative, and a body
 ///     that declares a DIFFERENT one is a lie, refused rather than ignored (it
 ///     would otherwise ask the membership question about a conversation the
 ///     actor is in, on behalf of a message in one they are not);
 ///   * envelope gone, body declares one → gate on that;
-///   * neither → refuse. Treating a missing declaration as "unknown, therefore
-///     allowed" would close nothing at all, since the attacker composes the body
-///     and would simply omit the field. A client that predates the field loses
-///     the ability to react to messages whose envelope has been collected, and
-///     gets a 403 rather than a silent no-op; that is the fail-closed direction.
+///   * neither → refuse (fail closed; the attacker composes the body).
 ///
-/// `is_member`, not the wider `in_desired_roster` that #1161 put on the Welcome
-/// and KeyPackage gates. That widening exists for the invite handshake — an
-/// invitee's devices are Welcomed BEFORE they accept, so those two gates have to
-/// count pending invitees or the shipped invite flow refuses itself. A reaction
-/// has no such pre-acceptance step: it is ordinary in-conversation activity, and
-/// the envelope-present path has always used `is_member`. Using the wider
-/// predicate here would loosen an existing gate rather than repair a missing
-/// one.
+/// `is_member`, not `in_desired_roster`: reactions have no pre-acceptance step.
 async fn reaction_conversation(
     conn: &Connection,
     body: &ReactionBody,
@@ -1559,9 +1076,7 @@ async fn reaction_conversation(
     }
 }
 
-/// A reaction is membership-gated against [`reaction_conversation`] — the
-/// envelope's conversation when the envelope survives, the body's declared one
-/// when GC has collected it, and a refusal when neither is available.
+/// A reaction is membership-gated against [`reaction_conversation`].
 pub async fn apply_add_reaction(
     conn: &Connection,
     authed: Option<&str>,
@@ -1580,10 +1095,7 @@ pub async fn apply_add_reaction(
             return Ok(WriteOutcome::Forbidden);
         }
     }
-    // The row records the conversation it was gated against (#1433): the read
-    // gate needs it once envelope GC has collected the message. A repeat add of
-    // a row that predates the column stamps it — it is the actor's own row and
-    // the actor has just passed the gate for this conversation.
+    // Records the gated conversation (#1433) for the read gate after GC.
     let id = Ulid::new().to_string();
     let now = now_rfc3339();
     conn.execute(
@@ -1607,17 +1119,9 @@ pub async fn apply_remove_reaction(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
-    // A user may only ever remove their OWN reaction — the DELETE is scoped to
-    // `user_id = :user`, so even without a membership lookup it cannot touch
-    // anyone else's row. We still membership-gate when determinable.
+    // The DELETE is scoped to `user_id = :user`, so it can never touch another's row.
     //
-    // Unlike the add path (#1161) this one does NOT fail closed on an
-    // unresolvable conversation. The add gate had to, because it WRITES a row
-    // and the skip was what let a non-member write one; removal can only ever
-    // unwrite a row the actor already got past the add gate to create, so an
-    // unresolvable conversation grants nothing here. Refusing would instead
-    // strand an un-react on a message whose envelope has been collected and
-    // whose local copy this device has since evicted.
+    // Unlike add (#1161) this does not fail closed: removal unwrites only the actor's own row.
     if authed.is_some() {
         if let Some(conv) = reaction_conversation(conn, body).await? {
             if !is_member(conn, &conv, &user).await? {
@@ -1632,8 +1136,6 @@ pub async fn apply_remove_reaction(
     .await?;
     Ok(WriteOutcome::Ok)
 }
-
-// ── POST /v1/watermarks/advance ──────────────────────────────────────────────
 
 pub async fn advance_watermark(
     State(state): State<AppState>,
@@ -1650,33 +1152,9 @@ pub async fn advance_watermark(
     outcome_response::<WatermarkBody>(apply_advance_watermark(&conn, identity, &parsed).await?)
 }
 
-/// Monotone UPSERT of a `(conversation, user, device)` watermark. Authz: the row
-/// belongs to the actor — BOTH halves of the key are bound to the verified
-/// signature (`user_id` via [`resolve_actor`], `device_id` to the signing
-/// device) — and the actor is a current member of the conversation. The value
-/// itself is admitted only through [`check_cursor_stamp`]: a cursor is what
-/// every later fetch and the GC floor read, so a far-future or malformed one
-/// is refused rather than stored (see the block comment above that function
-/// for the blackout it prevents).
+/// Monotone UPSERT of the signer's own `(conversation, user, device)` watermark, as a member, via [`check_cursor_stamp`].
 ///
-/// Membership is checked on the SIGNED user, on every call. Without it any
-/// account could write a row under any conversation id, and although GC joins
-/// the real roster, the tombstone floor used not to — which turned a stray row
-/// into a conversation-wide blackout after one admin delete. Rows for
-/// conversations the actor does not belong to are now unwritable, so the
-/// floor's roster join is defence in depth rather than the only defence.
-///
-/// `reported_at` is server-stamped to `datetime('now')` on BOTH insert and
-/// update — this is the wall-clock "device liveness" signal the envelope-GC
-/// staleness bound reads (#720). It is stamped UNCONDITIONALLY, even when the
-/// monotone `last_fetched_at` guard keeps the cursor where it is: a device that
-/// re-reports the same cursor is still LIVE, and a live device must keep pinning.
-/// This is also what makes the bound reversible — a dormant device that comes
-/// back and reports refreshes `reported_at` to now and immediately counts again.
-/// `reported_at` is a distinct column from `last_fetched_at` on purpose: the
-/// cursor is a message timestamp (it may legitimately be old for a live device in
-/// a quiet conversation), while liveness is when the DS last heard from the
-/// device — conflating them would resurrect F3.
+/// `reported_at` is stamped on EVERY report (#720 liveness), apart from the cursor so a quiet live device still pins.
 pub async fn apply_advance_watermark(
     conn: &Connection,
     authed: Option<(&str, &str)>,
@@ -1709,17 +1187,9 @@ pub async fn apply_advance_watermark(
     if let Err(refused) = admit_last_fetched_at(&body.last_fetched_at) {
         return Ok(refused);
     }
-    // A cursor that runs backwards is the whole hazard, so both columns take
-    // `MAX(existing, reported)` and neither can rewind. `last_seq` is the one
-    // delivery and retention read (#1087); `last_fetched_at` is carried for one
-    // release so a device that reports only the old cursor still pins its
-    // envelopes — the GC floor requires a `last_seq` from EVERY member device
-    // before it collects anything, so a device reporting only the legacy value
-    // holds the conversation rather than being counted as caught up.
+    // Both columns take `MAX(existing, reported)`; `last_seq` is what delivery and retention read (#1087).
     //
-    // A negative `last_seq` is refused rather than clamped: sequences start at 1,
-    // so it can only be a client bug or a probe, and silently coercing it would
-    // hide both.
+    // A negative `last_seq` is a bug or probe: refuse, don't clamp.
     if body.last_seq.is_some_and(|s| s < 0) {
         return Ok(WriteOutcome::Invalid("last_seq must not be negative"));
     }
@@ -1743,8 +1213,6 @@ pub async fn apply_advance_watermark(
     Ok(WriteOutcome::Ok)
 }
 
-// ── POST /v1/envelopes/gc ────────────────────────────────────────────────────
-
 pub async fn envelope_gc(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1761,21 +1229,7 @@ pub async fn envelope_gc(
 /// Run the watermark-gated envelope GC for a SINGLE conversation on demand.
 /// Authz: the actor is a current member (skipped on the no-auth path).
 ///
-/// The deletion predicate is bounded by the SLOWEST current *live* member device
-/// and by nothing else — see the [`CLEANUP_CHANNEL_ENVELOPES`] block comment. The
-/// 30-day TTL that used to be OR'd into it is gone (invariant I3, failure mode
-/// F3): an envelope no live member device has collected is retained however old
-/// it is. `stale` is the device-liveness window (`?2`, #720) — the SAME value the
-/// sweep passes, threaded here so the two paths cannot apply different predicates.
-///
-/// Because the predicate consults the WHOLE current member-device roster, the
-/// *decision* is the same no matter who fires it — so a single eager device can
-/// never delete another device's mail, whatever the trigger.
-///
-/// This is the per-conversation form. The GC *trigger* is now the DS-internal
-/// sweep [`sweep_envelope_gc`] (#689): GC no longer rides a member's ingest path,
-/// so a conversation whose members all went quiet is still collected. Both share
-/// the one cleanup chokepoint [`cleanup_conversation_envelopes`].
+/// Same predicate and `stale` window as [`sweep_envelope_gc`], via [`cleanup_conversation_envelopes`].
 pub async fn apply_envelope_gc(
     conn: &Connection,
     authed: Option<&str>,
@@ -1825,22 +1279,11 @@ pub struct SweepReport {
     pub metrics: RetentionSnapshot,
 }
 
-// ── Aged-out records (#762) ──────────────────────────────────────────────────
-//
-// Three tables inherited "indefinite" retention — not because anyone chose it,
-// but because nothing ever deleted from them. #720 set the shape for fixing that:
-// pick N, write down why, disclose it, and configure it explicitly rather than
-// leaning on a code default.
-//
-// These run on the SAME sweep as envelope GC rather than as a second task, so
-// there is one schedule to reason about and one place that can fail.
+// Aged-out records (#762): run on the same sweep as envelope GC.
 
 /// Days a `security_event` row is retained. Default 90.
 ///
-/// It is a per-user, timestamped, device-attributed audit trail — precisely the
-/// record a privacy-first product should age out. 90 days is long enough to
-/// investigate an incident someone noticed late, short enough that it is not a
-/// standing longitudinal profile of when each user changed devices.
+/// A per-user audit trail: long enough for a late investigation, not a standing profile.
 ///
 /// `0` disables the bound (retain forever), for an operator who would rather keep
 /// the trail than bound it.
@@ -1853,11 +1296,7 @@ pub fn security_event_retention_days() -> u32 {
 
 /// Days an unrefreshed `push_token` row is retained. Default 180.
 ///
-/// A token for an uninstalled app otherwise persists until the account is
-/// deleted. Clients re-register on every launch, so `updated_at` tracks liveness
-/// directly and a live device refreshes long before this. Six months is
-/// deliberately generous: a reaped token means a missed notification until the
-/// next launch re-registers it, which is a nuisance, not data loss.
+/// Clients re-register on launch, so `updated_at` tracks liveness; a reaped token costs one missed push.
 ///
 /// `0` disables the reap.
 pub fn push_token_retention_days() -> u32 {
@@ -1871,19 +1310,12 @@ pub fn push_token_retention_days() -> u32 {
 /// `push_token` rows unrefreshed for longer than [`push_token_retention_days`].
 /// Returns `(security_events_deleted, push_tokens_deleted)`.
 ///
-/// Both are keyed on the row's own timestamp, which is safe here in a way it is
-/// NOT for envelopes: an envelope's age says nothing about whether its recipient
-/// collected it (that is why #688 removed the envelope TTL), whereas an audit
-/// record's age *is* the thing being bounded, and a push token's `updated_at` is
-/// its own liveness signal.
+/// Age-keyed is safe here, unlike envelopes: the age is what's bounded.
 ///
 /// **`conversation_watermark` is deliberately NOT reaped here** — see the module
 /// docs and `docs/metadata-retention-policy.md`.
 ///
-/// The windows are PARAMETERS, not globals read in here: `main` resolves them from
-/// the environment once at startup. Reading env inside the sweep would force every
-/// test to mutate process-wide state, which races the other tests in the same
-/// binary — the bounds are configuration, and configuration belongs at the edge.
+/// Windows are parameters resolved once in `main`, so tests needn't mutate env.
 pub async fn sweep_aged_records(
     conn: &Connection,
     sec_days: u32,
@@ -1919,21 +1351,8 @@ pub async fn sweep_aged_records(
 /// visited plus the identity-free growth metrics gathered on the SAME walk (#720
 /// checkbox 1), so no second full scan is needed to emit them.
 ///
-/// This replaces the old trigger — "whichever member device happens to ingest
-/// calls `/v1/envelopes/gc`" — which never fired for a conversation whose members
-/// all went quiet and fired far more often than needed for a chatty one. Nothing
-/// about *which rows qualify* changes here beyond the #720 liveness bound;
-/// retention stays bounded by the slowest LIVE member device (invariant I3), only
-/// *what drives* GC moves off the member ingest path.
-///
-/// A conversation is a DM iff its id appears in `dm_channel_member` (mirroring
-/// [`is_member`]); every other id is a group/channel. Running the wrong predicate
-/// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
-/// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
-/// can never over-delete.
+/// DM iff the id is in `dm_channel_member`; a misclassified id matches no roster and deletes nothing.
 pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result<SweepReport> {
-    // Only conversations that still hold envelopes are worth visiting; steady
-    // state this set is small.
     let mut conversations: Vec<String> = Vec::new();
     {
         let mut rows = conn
@@ -1943,10 +1362,7 @@ pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result
             conversations.push(row.get::<String>(0)?);
         }
     }
-    // Growth metrics accumulated on the SAME per-conversation walk that runs
-    // cleanup — no second full scan (#720 checkbox 1). Post-cleanup counts, so
-    // they reflect what actually survives GC. Deliberately identity-free: the
-    // worst offender is tracked by its shape (count + oldest), never its id.
+    // Identity-free metrics on the same walk, post-cleanup (#720).
     let mut metrics = RetentionSnapshot::default();
     for conversation_id in &conversations {
         let is_dm = {
@@ -1982,13 +1398,7 @@ pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result
             }
         }
     }
-    // Reap dead attachment reference declarations (#690, Blocking 2). Envelopes
-    // deleted just above (and by every other deleter) already stopped counting
-    // toward `object_is_referenced` — the count is derived — so this changes NO
-    // deletion decision; it only clears the now-orphaned `attachment_ref` rows so
-    // the table stays bounded, and reclaims forged declarations whose `message_id`
-    // never named a real envelope. Runs unconditionally: even a fully-pruned DB
-    // (the loop visited nothing) may hold such orphans.
+    // Reap orphaned `attachment_ref` rows (#690): hygiene only, as the count is derived.
     conn.execute(REAP_ORPHANED_ATTACHMENT_REFS_SQL, ()).await?;
     conn.execute(REAP_ORPHANED_VAULT_REFS_SQL, ()).await?;
     Ok(SweepReport {
@@ -2008,52 +1418,13 @@ fn min_opt(a: Option<String>, b: Option<String>) -> Option<String> {
     }
 }
 
-// ── POST /v1/attachments/register  &  /v1/attachments/delete ─────────────────
-
-// ── The reference count is DERIVED, not maintained (#690) ─────────────────────
+// The attachment reference count is DERIVED (#690): a declaration counts only while its envelope exists,
 //
-// A `(content_hash, message_id)` row in `attachment_ref` is a client DECLARATION
-// — "message M carries the file with this hash" — but it only COUNTS while the
-// message it names still exists, i.e. while a `message_envelope` row carries that
-// id. The live count is therefore `attachment_ref` JOINed to `message_envelope`,
-// never the raw `attachment_ref` rows.
+// so every envelope delete releases it, and releasing needs no authz of its own.
 //
-// This is what makes the two blocking properties true by construction rather than
-// by discipline:
+// Forged/orphaned declarations are inert, and reaped by [`sweep_envelope_gc`].
 //
-//   * **A reference cannot outlive its message (Blocking 2).** EVERY path that
-//     deletes an envelope — self/admin delete (`apply_delete_message`), the
-//     watermark-gated GC sweep (#689, `cleanup_conversation_envelopes`), the
-//     retention sweep (#720), account teardown (`account.rs`), group/profile
-//     teardown (`groups.rs`/`profile.rs`), even a test harness — drops the join
-//     partner and so releases the reference FOR FREE. Nothing has to remember to
-//     release; release is the disappearance of the envelope, not a step any of
-//     those N deleters performs. That is the #691 ELECTRON lesson applied: don't
-//     ask three-plus deleters to each remember the same cleanup — make the
-//     invariant derive so the next deleter cannot forget it.
-//
-//   * **Releasing a reference is not an unauthorized action (Blocking 1).**
-//     Because the count is derived from envelope existence, the ONLY way to drop
-//     it is to delete the envelope — which already goes through the
-//     membership-gated (self) / admin-gated (moderation) `/v1/messages/delete`,
-//     the server-internal sweeps, or account/group teardown. `/v1/attachments/
-//     delete` no longer mutates `attachment_ref` at all (see
-//     [`apply_delete_attachment`]), so a forged call naming another member's
-//     `message_id` cannot strand anything: the referencing envelope still exists,
-//     so the object stays referenced. The attack is removed structurally, not
-//     access-checked.
-//
-// A declaration whose `message_id` names an envelope that never existed (a forged
-// register) or has already gone simply never counts — it is inert, and reaped in
-// bulk by [`sweep_envelope_gc`] so `attachment_ref` stays bounded.
-//
-// The second leg is the VAULT's (#107): a `vault_attachment_ref` row joined to a
-// live `vault_message` keeps the object alive by exactly the same construction —
-// the reference derives from the entry's existence, `/v1/vault/save` replaces the
-// set on every save, and `/v1/vault/delete` drops it with the entry. Without this
-// leg, a file that lives only in someone's vault counts as unreferenced the
-// moment any client's cleanup pass looks at its hash, and a personal "cloud
-// drive" that silently loses files is not one.
+// The vault leg (#107): a `vault_attachment_ref` on a live `vault_message` counts the same way.
 macro_rules! live_ref_exists {
     () => {
         "(EXISTS (SELECT 1 FROM attachment_ref ar \
@@ -2070,26 +1441,20 @@ macro_rules! live_ref_exists {
 const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
 
 /// Collect the shared dedup row iff NO live reference remains. One predicate, no
-/// Rust-side count — the row cannot go while a referencing envelope survives even
-/// under concurrent deletes (CLAUDE.md "invalid states unrepresentable").
+/// Rust-side count, so it holds under concurrent deletes.
 const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
     "DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT ",
     live_ref_exists!()
 );
 
 /// Reap declaration rows whose message envelope is gone (GC'd, deleted, aged out,
-/// or a forged id that never had an envelope). Pure storage hygiene: the count is
-/// already correct without it (see [`live_ref_exists`]); this only keeps
-/// `attachment_ref` from accumulating dead rows as envelopes churn, and turns a
-/// forged/orphaned declaration from merely inert into actually reclaimed.
+/// or a forged id). Hygiene only: the count is already correct (see [`live_ref_exists`]).
 const REAP_ORPHANED_ATTACHMENT_REFS_SQL: &str = "\
 DELETE FROM attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM message_envelope me WHERE me.id = attachment_ref.message_id)";
 
 /// The vault leg of the same hygiene: reap reference rows whose vault entry is
-/// gone. `/v1/vault/delete` already removes them inline, so this only catches
-/// rows orphaned by account teardown or a crash between the two deletes — the
-/// liveness predicate is correct either way.
+/// gone (teardown or a crash); `/v1/vault/delete` already removes them inline.
 const REAP_ORPHANED_VAULT_REFS_SQL: &str = "\
 DELETE FROM vault_attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
@@ -2097,21 +1462,9 @@ DELETE FROM vault_attachment_ref \
 /// True when `message_id` names a STILL-EXISTING envelope the caller provably
 /// wrote.
 ///
-/// Both halves matter. Existence alone was the pre-#690 story and is what made a
-/// forged reference merely inert rather than refused; authorship is what binds
-/// the declaration to an account. A deleted or GC'd envelope answers `false`,
-/// which is correct — there is no message left to declare an attachment for.
+/// A deleted or GC'd envelope answers `false`.
 ///
-/// Authorship is proved one of two ways. An unsealed envelope names its sender,
-/// so `sender_id == user_id` is the proof. Every envelope a current client
-/// writes is SEALED (#331), though: its `sender_id` is the sentinel `"sealed"`,
-/// which names no account — so the name check alone refused every real
-/// declaration, no message's attachment was ever counted, and each object stayed
-/// collectable by the next delete of the same bytes anywhere. For a sealed
-/// envelope the proof is its own deletion capability (#1086): only its author
-/// can produce the preimage of `delete_token_hash`, and checking it identifies
-/// no one. A sealed envelope with no stored hash (written before #1086) offers
-/// nothing to prove against and is refused, as before.
+/// Unsealed: `sender_id == user_id`. Sealed (#331): its deletion capability (#1086); no stored hash → refused.
 async fn envelope_is_authored_by(
     conn: &Connection,
     message_id: &str,
@@ -2183,82 +1536,35 @@ pub async fn delete_attachment(
 ///
 /// ## Authz
 ///
-/// The OBJECT row is content-addressed and identical for every uploader, so any
-/// authenticated device may register one; there is no conversation context at
-/// upload time and nothing finer to gate on.
+/// The OBJECT row is content-addressed, so any authenticated device may register one.
 ///
-/// The REFERENCE row is different, and used to be ungated — the handler took
-/// `_authed` and discarded it. A reference pins a shared R2 blob against
-/// collection (see [`live_ref_exists`]), so an ungated declaration is a write
-/// into somebody else's retention decision. A reference is therefore bound to
-/// the account that owns the message it names (#1165, #1161 M5): the
-/// actor must be the `message_envelope.sender_id` of `message_id`, or — for a
-/// sealed envelope, whose `sender_id` names no one — present that envelope's
-/// deletion capability (see [`envelope_is_authored_by`]). Declaring
-/// "this file belongs to somebody else's message" is not a claim any account
-/// other than that message's author can make.
-///
-/// The old defence was that a forged reference is *inert* — it counts only while
-/// an envelope with that id exists, and the forger does not control that. True
-/// for an id they do not own; useless for an id they do, which is the shape the
-/// attack actually takes. Binding the declaration is what removes the class:
-/// afterwards every `attachment_ref` row joined to a live envelope was written
-/// by that envelope's own author, so the liveness predicate can no longer be
-/// satisfied by an unrelated account's forgery.
-///
-/// A member of a conversation can still pin a hash they legitimately received
-/// onto their OWN live message, and that is indistinguishable server-side from
-/// an honest re-send — so it is not refused, and it needs no answer. Under a
-/// plain reference count the two acts have the same effect and neither denies
-/// anyone anything: whoever uploaded the bytes still drops their own reference
-/// by deleting their own message, and the object outlives them only while some
-/// other account's live message legitimately carries that file. Migration
-/// 000031 briefly gave the first uploader a delete that ignored other accounts'
-/// references; that was a mistake (one account deleting its file broke
-/// another's message) and it is gone — nothing here records who uploaded or who
-/// declared.
+/// The REFERENCE row pins a shared blob, so it is bound to the message's author (#1165, [`envelope_is_authored_by`]).
 ///
 /// Skipped when `authed` is `None`: the no-auth (harness/dev) path has no actor
 /// to bind to, exactly as the membership gates elsewhere in this module are.
 ///
-/// The object INSERT stays `OR IGNORE` (a retried registration of the same
-/// object writes the same row). The reference INSERT is likewise `OR IGNORE`: the PK
-/// `(content_hash, message_id)` makes a retried send idempotent rather than
-/// double-counting. Registering the reference here (rather than at upload) is
-/// deliberate — a file is uploaded once but referenced by every message that
-/// carries it, and the count must track messages, not uploads.
+/// Both INSERTs are `OR IGNORE`; the count tracks messages, not uploads.
 pub async fn apply_register_attachment(
     conn: &Connection,
     authed: Option<&str>,
     body: &AttachmentRegisterBody,
 ) -> anyhow::Result<WriteOutcome> {
-    // Decided BEFORE the transaction opens, so a refused registration writes
-    // nothing at all — not even the (harmless) object row, which would otherwise
-    // let a refused caller confirm the shape of the refusal.
+    // Decided BEFORE the tx, so a refusal writes nothing.
     if let (Some(actor), Some(message_id)) = (authed, body.message_id()) {
         if !envelope_is_authored_by(conn, message_id, actor, body.delete_token()).await? {
             return Ok(WriteOutcome::Forbidden);
         }
     }
     let tx = conn.transaction().await?;
-    // No uploader is recorded. The object's lifetime is decided entirely by
-    // whether a live message still references it, never by who put the bytes
-    // there, so an uploader column would be an at-rest identity linkage with no
-    // consumer — `attachment_object.uploaded_by` is dead (migration 000032).
+    // No uploader recorded: lifetime depends only on live references (000032).
     tx.execute(
         "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
         libsql::params![body.content_hash().to_string(), body.r2_key().to_string()],
     )
     .await?;
-    // The reference row exists only on the send path, which is now a distinct
-    // VARIANT rather than a `Some` (#925) — so "registered an attachment for a
-    // message but recorded no reference to it" is not a state a caller can
-    // construct.
+    // The reference exists only on the send variant (#925).
     if let Some(message_id) = body.message_id() {
-        // No registrar is recorded either. Every predicate counts references,
-        // not registrars: one live reference blocks collection for everybody,
-        // so there is no question whose answer depends on who declared it —
-        // `attachment_ref.registered_by` is dead (migration 000032).
+        // No registrar recorded either (000032).
         tx.execute(
             "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
             libsql::params![body.content_hash().to_string(), message_id.to_string()],
@@ -2274,58 +1580,20 @@ pub async fn apply_register_attachment(
 /// deliberately, because this endpoint performs no destructive act that the
 /// reference count did not already permit, for any caller.
 ///
-/// It does NOT release a reference. Releasing is not an action of this endpoint
-/// (Blocking 1): a reference is released only by deleting the message envelope
-/// that declared it, and the count is DERIVED from envelope existence (see
-/// [`live_ref_exists`]). The client still calls this after a message-delete
-/// (having already deleted the envelope via `/v1/messages/delete`) to trigger the
-/// collection, and `message_id` is retained in the body for wire-compat, but it
-/// is intentionally UNUSED: a forged call naming another member's message cannot
-/// strand anything, because that member's envelope still exists and so the object
-/// stays referenced. The old code deleted `attachment_ref (content_hash,
-/// message_id)` here, which is exactly the deliberate-strand path this revision
-/// closes.
+/// It does NOT release a reference (Blocking 1); `message_id` is kept for wire-compat but UNUSED.
 ///
-/// The collect is a SINGLE conditional `DELETE`: the object goes iff no live
-/// reference remains for the hash, for ANY caller. One predicate, no Rust-side
-/// count and no identity in it, so the row cannot be removed while a
-/// referencing envelope survives even under concurrent deletes (CLAUDE.md
-/// "invalid states unrepresentable"). Collecting the row also clears the
-/// declarations naming it — see [`clear_declarations`] — as those now point at
-/// bytes the service does not hold.
-///
-/// Migration 000031 carved out an exemption here: the recorded uploader could
-/// collect an object other accounts' live messages still referenced. That was
-/// wrong. One blob backs every copy of the same bytes, so "the uploader wins"
-/// means one user deleting their file silently breaks another user's message —
-/// a storage optimisation leaking onto users. The exemption is removed and the
-/// derived count is the whole rule again.
+/// One identity-free conditional `DELETE`; collecting also runs [`clear_declarations`].
 ///
 /// The R2 object is gated separately and by the SAME evidence: `/v1/r2/presign`
 /// refuses to mint a `delete` while [`object_is_referenced`] holds
 /// (`broker.rs`). Turso row and R2 blob are collected by one predicate, so
 /// neither can outlive the other and the two cannot disagree.
-///
-/// Legacy / pre-#690 rows and messageless hashes have no live reference, so the
-/// predicate treats them as collectable — today's behaviour, no worse. Any send
-/// from an updated client re-references the hash (with a live envelope) and
-/// promotes it to counted protection.
 pub async fn apply_delete_attachment(
     conn: &Connection,
     _authed: Option<&str>,
     body: &AttachmentDeleteBody,
 ) -> anyhow::Result<WriteOutcome> {
-    // Collect only. No unconditional `attachment_ref` mutation — release happens
-    // when the envelope is deleted (authorized), not here. The one exception is
-    // below, and it is a consequence of the collect rather than a release: once
-    // the object row is gone, every declaration naming it points at bytes the
-    // service no longer holds.
-    //
-    // The collect is a SINGLE conditional `DELETE` — the row goes iff no live
-    // reference remains, evaluated by SQLite in the same statement, so a
-    // concurrent reference cannot slip in between the test and the removal. The
-    // actor is not part of the predicate: no account, uploader included, may
-    // reach past a reference another account's live message holds.
+    // Collect only; the identity-free conditional DELETE is atomic against a concurrent reference.
     let collected = conn
         .execute(
             COLLECT_UNREFERENCED_OBJECT_SQL,
@@ -2340,11 +1608,7 @@ pub async fn apply_delete_attachment(
 
 /// Drop every declaration naming `content_hash`, message-side and vault-side.
 ///
-/// Called only after the `attachment_object` row is actually collected. A
-/// declaration for an object the service no longer stores is not a reference to
-/// anything: leaving it would make [`object_is_referenced`] keep answering
-/// `true` for bytes that are gone, which pins nothing but does refuse the
-/// content-addressed PUT that would restore them.
+/// Only after the object row is collected: stale declarations would refuse the PUT that restores it.
 async fn clear_declarations(conn: &Connection, content_hash: &str) -> anyhow::Result<()> {
     conn.execute(
         "DELETE FROM attachment_ref WHERE content_hash = ?1",
@@ -2362,13 +1626,7 @@ async fn clear_declarations(conn: &Connection, content_hash: &str) -> anyhow::Re
 /// True when at least one STILL-EXISTING message references the attachment
 /// object `content_hash` (#690) — the count derived by joining
 /// `attachment_ref` to `message_envelope` (see [`live_ref_exists`]), never the
-/// raw declaration rows. The single source of truth for BOTH the counted Turso
-/// collect in [`apply_delete_attachment`] and the R2 `delete`-presign gate in
-/// [`crate::broker::r2_presign`]: an object may be collected — in Turso or in R2
-/// — only when this returns `false`. Collecting the R2 blob out from under a live
-/// reference would 404 that attachment for every conversation still holding it.
-/// A reference whose message has been GC'd/deleted/aged-out — or never existed —
-/// does not keep this `true`, so the object cannot be pinned forever.
+/// raw declaration rows. Gates both the Turso collect and the R2 `delete` presign.
 pub async fn object_is_referenced(conn: &Connection, content_hash: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
@@ -2394,11 +1652,7 @@ mod timestamp_tests {
     }
 
     /// The regression: a DS timestamp must sort ABOVE a client timestamp taken
-    /// earlier in the same wall-clock second. The old whole-second formatter
-    /// emitted `…:20+00:00`, and `'+'` (0x2B) < `'.'` (0x2E), so it sorted
-    /// BELOW `…:20.000000001+00:00` — an admin tombstone written in the same
-    /// second as the message it redacts fell under every recipient's watermark
-    /// and was never fetched, so the delete silently did nothing.
+    /// earlier in the same wall-clock second (`'+'` < `'.'`).
     #[test]
     fn a_ds_stamp_sorts_above_a_client_stamp_from_the_same_second() {
         let client = client_stamp(1);
@@ -2447,43 +1701,21 @@ mod gc_sql_tests {
     //! The envelope-GC cleanup SQL, driven directly against a real (in-memory)
     //! libsql DB. Two invariants are encoded here.
     //!
-    //! **I3 — retention is bounded by the slowest member device, never a TTL.**
-    //! The `no_ttl_*` tests below construct exactly the state the deleted 30-day
-    //! TTL destroyed (failure mode F3): an envelope FAR older than 30 days that a
-    //! current member device has not collected. It must survive. Ages are written
-    //! as explicit `datetime('now', '-N days')` offsets, so "well over 30 days" is
-    //! a property of the fixture rather than of when the suite happens to run.
+    //! **I3**: an envelope far older than 30 days that a member has not collected must survive.
     //!
-    //! **#685 — a REVOKED device must not wedge deletion.** A revoked device can
-    //! never rejoin the tree, so it must not count toward the roster the watermark
-    //! gate is measured against. Both wedge modes are covered for each
-    //! conversation shape:
-    //!   * **stale watermark row present** — the revoked device's old
-    //!     `last_fetched_at` pins `MIN(cw)` down, so an envelope above the LIVE
-    //!     device's cursor is (wrongly) kept.
-    //!   * **no watermark row at all** — the revoked device has no `cw` row, so
-    //!     `COUNT(ud) != COUNT(cw)` and the CASE returns NULL, disabling the
-    //!     watermark gate entirely.
-    //!
-    //! All timestamps use SQLite's `datetime()` format on BOTH `sent_at` and
-    //! `last_fetched_at` so the lexical comparison the gate performs is
-    //! unambiguous.
+    //! **#685**: a revoked device (stale row or no row) must not wedge deletion.
 
     use super::*;
 
 
     /// A staleness window wide enough that none of the legacy fixtures (which seed
-    /// `reported_at = NULL`, i.e. "report time unknown" → treated as live) are ever
-    /// excluded — so the pre-#720 behaviour they pin is exactly preserved. The
-    /// #720 tests set `reported_at` explicitly and probe across this boundary.
+    /// `reported_at = NULL`) are ever excluded.
     const TEST_STALE: &str = "-6 months";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        // Production Turso has FKs off; libsql's local backend turns them on.
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn
@@ -2509,10 +1741,6 @@ mod gc_sql_tests {
     /// Seed a watermark row whose cursor is the delivery sequence `seq` (#1087).
     /// `reported_at` is left NULL — "report time unknown", treated as live — so
     /// these fixtures keep their pre-#720 meaning.
-    ///
-    /// `last_fetched_at` is still written, because the column is NOT NULL and is
-    /// carried as display/legacy metadata; its VALUE is irrelevant to every
-    /// assertion below, which is precisely the change #1087 makes.
     async fn seed_watermark(conn: &Connection, conv: &str, user: &str, device: &str, seq: i64) {
         conn.execute(
             "INSERT INTO conversation_watermark \
@@ -2525,10 +1753,7 @@ mod gc_sql_tests {
     }
 
     /// Seed a watermark row with BOTH the delivery cursor (`last_seq`) and the
-    /// wall-clock report time (`reported_at`). The two are deliberately of
-    /// different KINDS, which is the #720 distinction made structural: `seq` is
-    /// how far the device has read (a position), `reported` is when the DS last
-    /// heard from it (a time). Conflating them would resurrect F3.
+    /// wall-clock report time (`reported_at`): a position and a time, kept distinct (#720).
     async fn seed_watermark_reported(
         conn: &Connection,
         conv: &str,
@@ -2553,9 +1778,7 @@ mod gc_sql_tests {
         .unwrap();
     }
 
-    /// Insert one envelope at delivery sequence `seq`. Its `sent_at` is plain
-    /// `now` — nothing routes on it since #1087, and writing an offset here would
-    /// suggest otherwise.
+    /// Insert one envelope at delivery sequence `seq`.
     async fn add_envelope(conn: &Connection, id: &str, conv: &str, seq: i64) {
         conn.execute(
             "INSERT INTO message_envelope \
@@ -2565,9 +1788,7 @@ mod gc_sql_tests {
         )
         .await
         .unwrap();
-        // Keep the durable counter consistent with the row, as
-        // `insert_envelope_with_seq` does. A fixture that inserts an envelope
-        // without advancing `conversation_seq` is not simulating the DS.
+        // Keep `conversation_seq` consistent, as `insert_envelope_with_seq` does.
         conn.execute(
             "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
              ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
@@ -2588,15 +1809,11 @@ mod gc_sql_tests {
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
     }
 
-    // ── Channel ──────────────────────────────────────────────────────────────
-
     async fn channel_fixture(conn: &Connection) {
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice')", ())
             .await
             .unwrap();
-        // Registry claim first: 000017's guard triggers refuse a channels row
-        // whose id the `conversation` registry did not grant (#948), so every
-        // fixture seeds the way production acquires a row.
+        // Registry claim first: 000017's guard triggers refuse unclaimed rows (#948).
         conn.execute_batch(
             "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
              INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
@@ -2651,8 +1868,6 @@ mod gc_sql_tests {
         );
     }
 
-    // ── DM ───────────────────────────────────────────────────────────────────
-
     async fn dm_fixture(conn: &Connection) {
         conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('d1', 'alice', 'creator')", ())
             .await
@@ -2696,15 +1911,9 @@ mod gc_sql_tests {
         );
     }
 
-    // ── I3 — no TTL: age alone never deletes ─────────────────────────────────
-
     /// **The regression test for F3.** A LIVE member device whose cursor sits
     /// below an envelope must keep that envelope alive no matter how old it is.
-    /// The fixture is deliberately extreme — the envelope is 400 days old, more
-    /// than 13× the deleted 30-day TTL — so the assertion cannot pass by accident
-    /// of when the suite runs. Under the old `sent_at < datetime('now','-30 days')
-    /// OR ...` predicate the TTL arm alone deleted this row and the recipient
-    /// permanently lost the message.
+    /// The envelope is 400 days old, far past the deleted 30-day TTL (F3).
     #[tokio::test]
     async fn no_ttl_channel_uncollected_ancient_envelope_survives() {
         let conn = conn().await;
@@ -2781,8 +1990,6 @@ mod gc_sql_tests {
         );
     }
 
-    // ── The positive leg: deletion still happens ─────────────────────────────
-
     /// GC is not simply disabled: once EVERY current member device has collected
     /// past an envelope, it goes — including one far younger than the old TTL, so
     /// this cannot be passing via the deleted arm.
@@ -2843,14 +2050,8 @@ mod gc_sql_tests {
         );
     }
 
-    // ── Conservative edges ───────────────────────────────────────────────────
-
     /// A conversation with ZERO current member devices deletes NOTHING. The
-    /// aggregate degenerates to `COUNT 0 = COUNT 0` with `MIN(...) = NULL` over
-    /// zero rows, so the CASE returns NULL and `sent_at < NULL` is NULL. Pinned as
-    /// a test because the alternative reading of an empty roster — "everybody has
-    /// collected, delete it all" — is exactly the unbounded delete this ticket
-    /// removes.
+    /// aggregate yields NULL; an empty roster is not "everybody collected".
     #[tokio::test]
     async fn an_empty_member_device_set_deletes_nothing() {
         let conn = conn().await;
@@ -2906,21 +2107,14 @@ mod gc_sql_tests {
         );
     }
 
-    // ── The server-side sweep is the trigger (#689) ──────────────────────────
-
     /// The GC trigger is a DS-internal sweep, not a member's ingest path. With NO
     /// member calling the per-conversation endpoint, one sweep collects every
-    /// conversation whose devices have all caught up — a channel AND a DM (proving
-    /// it classifies both predicates) — while sparing one with an uncollected
-    /// recipient. On the old trigger nothing drives GC when no member ingests, so
-    /// the quiet-but-collected conversations would survive.
+    /// conversation whose devices have caught up (a channel AND a DM) and spares an uncollected one.
     #[tokio::test]
     async fn sweep_collects_quiet_conversations_without_any_ingest() {
         let conn = conn().await;
 
-        // A channel whose one member device has caught up. Distinct users per
-        // conversation: `user_device` is global, so a member's device in one
-        // conversation counts toward every conversation they belong to.
+        // Distinct users per conversation: `user_device` is global.
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a1", false).await;
         seed_watermark(&conn, "c1", "alice", "a1", 10).await;
@@ -2966,18 +2160,11 @@ mod gc_sql_tests {
         assert_eq!(report.metrics.largest_conversation_envelopes, 1, "worst offender holds one");
     }
 
-    // ── The #720 device-liveness bound ───────────────────────────────────────
-    //
-    // Each test below FAILS against the pre-#720 code (no `reported_at`, no
-    // staleness arm) by asserting a COLLECTION the watermark-only predicate never
-    // performs — confirmed by removing the `?2` arm from `CLEANUP_*`, which leaves
-    // the dormant device pinning and flips the survivor count back to 1.
+    // #720 device-liveness bound: each test asserts a collection the pre-#720 predicate never performs.
 
     /// A dormant device — one that reported a watermark long ago and then went
     /// silent — stops pinning after the staleness window: its envelope is
-    /// collected once every LIVE device has read past it. Pre-#720 (bob still in
-    /// the roster with his ancient cursor) `MIN(cw) = bob` sits below the envelope
-    /// and it is retained forever; this asserts the opposite.
+    /// collected once every LIVE device has read past it.
     #[tokio::test]
     async fn channel_dormant_device_stops_pinning_after_the_bound() {
         let conn = conn().await;
@@ -3009,12 +2196,6 @@ mod gc_sql_tests {
     /// envelope is: liveness is `reported_at`, never the message's age or the
     /// cursor's age. Both legs share one fixture and differ ONLY in `reported_at`,
     /// so the outcome provably pivots on liveness alone.
-    ///
-    /// Leg 2 (dormant) is what fails against pre-#720 code — it asserts the ancient
-    /// envelope IS collected once the blocker is stale. Leg 1 (live) is the F3
-    /// guard: a naive staleness keyed on `last_fetched_at` (the cursor, 500 days
-    /// old here) or on `sent_at` (400 days old) would wrongly collect it; keying on
-    /// `reported_at` (1 day old) keeps it.
     #[tokio::test]
     async fn channel_recent_report_pins_ancient_envelope_but_dormant_does_not() {
         // Leg 1 — bob reported yesterday, cursor and envelope both ancient: PINS.
@@ -3093,9 +2274,7 @@ mod gc_sql_tests {
     }
 
     /// Whole-roster dormancy must not manufacture an empty roster that deletes:
-    /// when EVERY device is stale the roster is empty, and — exactly like the
-    /// all-revoked case — an empty roster deletes nothing (`MIN` over zero rows is
-    /// NULL). A dead conversation retains its (bounded) envelopes; it is not wiped.
+    /// when EVERY device is stale, the empty roster deletes nothing.
     #[tokio::test]
     async fn an_all_stale_roster_deletes_nothing() {
         let conn = conn().await;
@@ -3138,8 +2317,6 @@ mod gc_sql_tests {
         );
     }
 
-    // ── #690 — the GC path releases attachment references (Blocking 2) ────────
-
     /// Insert an attachment object + a `(content_hash, message_id)`
     /// declaration keyed to `msg`.
     async fn add_attachment(conn: &Connection, hash: &str, msg: &str) {
@@ -3173,10 +2350,6 @@ mod gc_sql_tests {
     /// and the orphaned declaration row is reaped so `attachment_ref` stays
     /// bounded. Without this the reference outlived its message forever and pinned
     /// the object + R2 blob — the #690 Blocking 2 storage leak.
-    ///
-    /// **Fails against the pre-change code:** `object_is_referenced` read the raw
-    /// `attachment_ref` row (still present after GC) and `sweep_envelope_gc` never
-    /// reaped, so the object stayed pinned and referenced for the hash forever.
     #[tokio::test]
     async fn gc_releases_a_swept_messages_attachment_reference() {
         let conn = conn().await;
@@ -3210,10 +2383,6 @@ mod gc_sql_tests {
     /// A forged-add reference — a `register` for a `message_id` that never had an
     /// envelope, the residue of the Blocking 1 attack — is never counted, and is
     /// reclaimed by the sweep rather than pinning the object forever.
-    ///
-    /// **Fails against the pre-change code**, where the raw row made
-    /// `object_is_referenced` true with no envelope ever behind it, and no sweep
-    /// reaped it: an attacker could pin any object permanently.
     #[tokio::test]
     async fn a_reference_to_a_nonexistent_message_is_never_counted_and_is_reaped() {
         let conn = conn().await;
@@ -3238,12 +2407,7 @@ mod gc_sql_tests {
 mod roster_parity_tests {
     //! **I5 — the three rosters must agree (#722).**
     //!
-    //! "Which member devices count toward retention" is one rule with three
-    //! implementations: [`CLEANUP_CHANNEL_ENVELOPES`], [`CLEANUP_DM_ENVELOPES`]
-    //! (envelope GC, SQL) and [`crate::commit::current_member_devices`]
-    //! (commit-log retention floor, Rust). #685/#686 brought them into agreement
-    //! on revoked devices; nothing structural keeps them there. A divergence is
-    //! not cosmetic:
+    //! Envelope GC's SQL rosters and [`crate::commit::current_member_devices`] are one rule in three places.
     //!
     //!   * SQL roster **narrower** than the Rust one → envelope GC deletes mail a
     //!     device the commit log still serves has not collected (loss, F3-shaped).
@@ -3251,29 +2415,7 @@ mod roster_parity_tests {
     //!     watermark floor down forever and envelopes never clear (stuck
     //!     retention).
     //!
-    //! ## How this test avoids being a restatement of the SQL
-    //!
-    //! The cleanup SQL embeds its roster inside a DELETE, so it cannot be read
-    //! back directly. Rather than hand-copy an "equivalent" SELECT here — which
-    //! would only ever prove *this file* agrees with *this file*, and would sit
-    //! there passing while the DELETE drifted — the join chain is factored out of
-    //! the DELETE into `channel_member_device_rows!` / `dm_member_device_rows!`
-    //! and `concat!`-ed back in. The statements the DS executes are unchanged
-    //! byte-for-byte (`the_extraction_did_not_change_the_cleanup_sql` pins that),
-    //! and the SELECTs below are built from the SAME macro the DELETE is. There
-    //! is exactly one copy of the roster SQL in the crate.
-    //!
-    //! So the drift this catches is the drift that matters: change the roster on
-    //! either side — the JOIN inside the DELETE, or the query in
-    //! `current_member_devices` — and the two sides disagree here. The expected
-    //! rosters are additionally spelled out literally, so a change applied
-    //! symmetrically to *both* implementations still fails rather than silently
-    //! redefining the invariant.
-    //!
-    //! [`the_roster_is_what_the_delete_actually_gates_on`] closes the remaining
-    //! gap between "the fragment" and "the statement": it proves the deletion
-    //! outcome flips exactly on the watermark of a device the fragment lists, and
-    //! does not move for devices it excludes.
+    //! The SELECTs below reuse the DELETE's own roster macros; expected rosters are spelled out literally.
 
     use super::*;
     use crate::commit::current_member_devices;
@@ -3297,9 +2439,7 @@ mod roster_parity_tests {
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        // Production Turso has FKs off; libsql's local backend turns them on.
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn
@@ -3339,9 +2479,7 @@ mod roster_parity_tests {
         )
         .await
         .unwrap();
-        // Keep the durable counter consistent with the row, as
-        // `insert_envelope_with_seq` does. A fixture that inserts an envelope
-        // without advancing `conversation_seq` is not simulating the DS.
+        // Keep `conversation_seq` consistent, as `insert_envelope_with_seq` does.
         conn.execute(
             "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
              ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
@@ -3398,9 +2536,6 @@ mod roster_parity_tests {
     ///     through `conversation_watermark` instead of through membership would
     ///     be caught).
     ///   * `eve` — a member of a DIFFERENT group/DM, to pin conversation scoping.
-    ///
-    /// Watermarks are seeded only where a test needs them; membership and
-    /// devices are the shared part.
     async fn fixture(conn: &Connection) {
         // Registry claims first — 000017's guard triggers refuse unclaimed rows.
         exec(conn, "INSERT INTO conversation (id, kind) VALUES ('c-main', 'channel')").await;
@@ -3440,9 +2575,7 @@ mod roster_parity_tests {
     }
 
     /// The devices the fixture's rosters must resolve to, for BOTH conversation
-    /// shapes. Spelled out rather than derived, so a change made symmetrically to
-    /// the SQL and the Rust roster still fails here instead of quietly
-    /// redefining the invariant.
+    /// shapes, spelled out so a symmetric change still fails.
     const EXPECTED: [&str; 4] = ["alice-1", "bob-live", "bob-silent", "dave-1"];
 
     fn expected() -> Vec<String> {
@@ -3463,8 +2596,6 @@ mod roster_parity_tests {
         watermark(conn, conv, "carol", "carol-old-2", 1).await;
         watermark(conn, conv, "mallory", "mallory-1", 1).await;
     }
-
-    // ── The parity assertions ────────────────────────────────────────────────
 
     #[tokio::test]
     async fn channel_sql_and_rust_rosters_agree() {
@@ -3509,8 +2640,6 @@ mod roster_parity_tests {
     }
 
     /// Scoping: the roster of a sibling conversation is its own, on both paths.
-    /// A roster that leaked across conversations would delete one channel's mail
-    /// on another channel's watermarks.
     #[tokio::test]
     async fn a_sibling_conversation_resolves_its_own_roster_on_both_paths() {
         let conn = conn().await;
@@ -3532,11 +2661,7 @@ mod roster_parity_tests {
     }
 
     /// A member whose devices are ALL revoked, alone in the conversation: both
-    /// paths must return the EMPTY roster. This is the case where disagreeing is
-    /// most expensive — an empty roster disables envelope GC (conservative), but
-    /// on the commit-log side it removes Tier-1's lower bound, so the two sides
-    /// answering differently means one of them is acting on a device the other
-    /// considers gone.
+    /// paths must return the EMPTY roster.
     #[tokio::test]
     async fn an_all_revoked_member_yields_the_empty_roster_on_both_paths() {
         let conn = conn().await;
@@ -3580,12 +2705,8 @@ mod roster_parity_tests {
         assert!(rust_roster(&conn, "ghost").await.is_empty());
     }
 
-    // ── The fragment really is the statement ─────────────────────────────────
-
     /// Factoring the roster out of the DELETE must not have changed the SQL the
-    /// DS executes. Pinned against the literal statements as they stood before
-    /// the extraction, so the "safe, non-behavioural refactor" claim is checked
-    /// rather than asserted.
+    /// DS executes; pinned against the pre-extraction literal statements.
     #[test]
     fn the_extraction_did_not_change_the_cleanup_sql() {
         assert_eq!(
@@ -3635,12 +2756,6 @@ DELETE FROM message_envelope
     /// The parity above compares a FRAGMENT of the DELETE against the Rust
     /// roster; this ties that fragment to the DELETE's observable behaviour, so a
     /// roster condition smuggled in ELSEWHERE in the statement cannot hide.
-    ///
-    /// Every device the fragment lists gets a recent cursor and every device it
-    /// excludes an ancient one, so an envelope in between is deleted. Then ONE
-    /// listed device — and only that one — is moved below the envelope, and the
-    /// envelope must survive: the outcome pivots on exactly the roster the
-    /// fragment reports.
     #[tokio::test]
     async fn the_roster_is_what_the_delete_actually_gates_on() {
         for (conv, sql, select) in [
@@ -3662,8 +2777,7 @@ DELETE FROM message_envelope
             watermark(&caught_up, conv, "carol", "carol-old-2", 1).await;
             watermark(&caught_up, conv, "mallory", "mallory-1", 1).await;
             envelope(&caught_up, "e1", conv, 2).await;
-            // The `watermark` helper leaves `reported_at` NULL (live), so the #720
-            // staleness arm excludes no one here — this test isolates the roster.
+            // `reported_at` NULL (live), so this isolates the roster.
             caught_up
                 .execute(sql, libsql::params![conv.to_string(), "-6 months".to_string()])
                 .await
@@ -3680,9 +2794,7 @@ DELETE FROM message_envelope
             fixture(&held).await;
             for d in &roster {
                 let user = d.split('-').next().unwrap().to_string();
-                // `bob-silent` is BELOW the envelope's sequence (2); everyone
-                // else is above it. The envelope must survive on his account
-                // alone.
+                // Only `bob-silent` is below the envelope's seq (2).
                 let cursor = if d.as_str() == "bob-silent" { 1 } else { 4 };
                 watermark(&held, conv, &user, d, cursor).await;
             }
@@ -3706,47 +2818,11 @@ DELETE FROM message_envelope
 
 #[cfg(test)]
 mod admin_delete_visibility_tests {
-    //! #693 / #661 — WS1: does the admin-delete tombstone reliably reach a
-    //! caught-up recipient? This module isolates and RULES OUT the issue's
-    //! candidate 1 (a read-after-write / `sent_at`-ordering visibility gap
-    //! between the DS write connection and the recipient's read connection) at
-    //! the envelope/watermark/tombstone layer, using the REAL DS write code
-    //! (`apply_send_message`, `apply_advance_watermark`, `apply_delete_message`)
-    //! and the EXACT fetch SQL that `pollis_core::commands::messages::ingest`
-    //! runs.
+    //! #693 / #661: the admin-delete tombstone always reaches a caught-up recipient, at the envelope layer.
     //!
-    //! ## The scenario (`sealed_admin_delete_of_other_member_works`, stripped of MLS)
+    //! Two connections of ONE shared `Database` model the flows harness's single `Db`.
     //!
-    //! bob sends; carol fetches (so she holds a copy) and reports her watermark;
-    //! alice admin-deletes bob's message (envelope removed + `type='delete'`
-    //! tombstone written); carol fetches again. The flaky assertion is that
-    //! carol's second fetch *sees the tombstone*. Here we drive exactly that
-    //! envelope/watermark/tombstone dance and assert carol's second fetch returns
-    //! the tombstone — across every `sent_at` shape a client clock can produce,
-    //! and across TWO DISTINCT CONNECTIONS of one shared libsql `Database`.
-    //!
-    //! ## Why two connections of one `Database` is the faithful model
-    //!
-    //! In the flows harness the in-process DS holds ONE `Db` — an `Arc`-shared
-    //! libsql `Database` on ONE local WAL file (`harness.rs`; a second `Database`
-    //! on the same file would NOT see the writer's rows promptly). Since #987 the
-    //! clients hold no handle at all: their reads are signed POSTs served by that
-    //! same `Db`. Every `Db::conn()` is a pooled `db.connect()` on the shared
-    //! handle, so the write connection and the connection serving carol's read are
-    //! two connections of ONE `Database` — which is precisely what these tests
-    //! use. If libsql gave no read-your-writes guarantee across such connections,
-    //! the tombstone SELECT below would intermittently miss the just-written row;
-    //! it never does.
-    //!
-    //! ## What this proves (and what it therefore leaves)
-    //!
-    //! The tombstone is ALWAYS written and ALWAYS visible to carol's next fetch at
-    //! this layer. So #661's residual flake is NOT "the tombstone is never
-    //! written / sorts under carol's watermark / isn't yet visible on her
-    //! connection". By elimination it lives DOWNSTREAM, in the client's
-    //! *application* of the fetched tombstone (`ingest.rs`) — candidate 2,
-    //! "fetched but not applied". See the self-diagnosing instrumentation added to
-    //! the flows test itself, which reports which case a live failure was.
+    //! So #661's residual flake lives downstream, in the client's application of the tombstone.
 
     use super::*;
     use tempfile::TempDir;
@@ -3754,9 +2830,7 @@ mod admin_delete_visibility_tests {
 
     /// The exact shape a CLIENT writes for `sent_at`
     /// (`chrono::Utc::now().to_rfc3339()`, i.e. `SecondsFormat::AutoSi`), at a
-    /// fixed instant plus `nanos`. AutoSi trims to 0/3/6/9 fraction digits, so
-    /// `nanos == 0` yields a whole-second stamp with NO fraction — the shape whose
-    /// `'+' < '.'` ordering was the #692 regression.
+    /// fixed instant plus `nanos` (0/3/6/9 fraction digits).
     fn client_stamp(secs: i64, nanos: u32) -> String {
         chrono::DateTime::from_timestamp(secs, nanos)
             .expect("valid instant")
@@ -3764,9 +2838,7 @@ mod admin_delete_visibility_tests {
     }
 
     /// One shared libsql `Database` on a WAL file — the faithful model of the
-    /// single `Db` the flows harness hands to its in-process DS. Returns the
-    /// tempdir (kept alive) so callers can open as many independent connections
-    /// on it as they like.
+    /// single `Db` the flows harness hands to its in-process DS.
     async fn shared_db() -> (TempDir, libsql::Database) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("main.db");
@@ -3774,9 +2846,7 @@ mod admin_delete_visibility_tests {
         {
             let conn = db.connect().expect("connect");
             conn.query("PRAGMA journal_mode=WAL", ()).await.expect("wal");
-            // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+            // Production Turso has FKs off; libsql's local backend turns them on.
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         }
@@ -3793,11 +2863,7 @@ mod admin_delete_visibility_tests {
         user_id: &str,
         device_id: &str,
     ) -> Vec<(String, String, Option<String>)> {
-        // The PRODUCTION fetch, not a copy of its predicate. This used to
-        // reimplement `sent_at > last_fetched_at` inline, and a copy of the
-        // delivery rule is exactly the thing that drifts: when #1087 moved the
-        // cursor to `seq`, this helper kept fetching by timestamp and the tests
-        // failed for a reason that had nothing to do with what they assert.
+        // The PRODUCTION fetch, never a copy of its predicate (a copy drifted at #1087).
         crate::directory::envelopes_for_device(conn, conversation_id, user_id, device_id)
             .await
             .expect("ingest fetch")
@@ -3853,10 +2919,7 @@ mod admin_delete_visibility_tests {
     }
 
     /// Drive the full #661 envelope-layer dance for a given client `sent_at`
-    /// shape and assert carol's SECOND fetch sees the admin tombstone. The writes
-    /// go through one connection and carol's reads through a DIFFERENT connection
-    /// of the same `Database`, so a read-after-write gap (candidate 1) would show
-    /// up as a missing tombstone here.
+    /// shape and assert carol's SECOND fetch, on another connection, sees the admin tombstone.
     async fn assert_tombstone_reaches_carol(msg_sent_at: &str) {
         let (_dir, db) = shared_db().await;
         // Two distinct connections on the SHARED handle: `w` stands in for the
@@ -3867,8 +2930,7 @@ mod admin_delete_visibility_tests {
         let conv = "chan-general";
         let msg_id = "msg-bobs-post";
 
-        // bob sends (sealed sentinel sender, no-auth path — the envelope columns
-        // are what matter here, not the auth gate).
+        // bob sends (sealed sentinel sender, no-auth path).
         apply_send_message(
             &w,
             None,
@@ -3880,8 +2942,7 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: msg_sent_at.to_string(),
                 sealed: 1,
-                // Unasserted lineage: these tests are about envelope columns,
-                // not the epoch gate (which has its own tests below).
+                // Unasserted lineage; the epoch gate has its own tests.
                 generation: None,
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
@@ -3893,9 +2954,7 @@ mod admin_delete_visibility_tests {
         .await
         .expect("send");
 
-        // carol's FIRST fetch (read connection) sees bob's message, then reports
-        // her watermark exactly as ingest does: advanced to the message's
-        // `sent_at` (the max over her handled prefix).
+        // carol's FIRST fetch sees bob's message; she reports her watermark as ingest does.
         let first = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
         assert_eq!(
             first.len(),
@@ -3930,10 +2989,7 @@ mod admin_delete_visibility_tests {
         .await
         .expect("alice watermark");
 
-        // alice (admin) deletes bob's message: envelope removed + tombstone
-        // written. `msg_sender_id = "bob" != actor = "alice"` selects the admin
-        // branch; the no-auth path skips the admin role re-check (not what we're
-        // testing here). This runs the real `tombstone_floor` / `sent_at_after`.
+        // alice admin-deletes (`msg_sender_id != actor` selects the admin branch; no-auth skips the role check).
         let outcome = apply_delete_message(
             &w,
             None,
@@ -3949,8 +3005,7 @@ mod admin_delete_visibility_tests {
         .expect("admin delete");
         assert!(matches!(outcome, WriteOutcome::Ok), "admin delete must succeed");
 
-        // carol's SECOND fetch (read connection again) MUST see the tombstone.
-        // This is the assertion that flakes in #661 — proven deterministic here.
+        // carol's SECOND fetch MUST see the tombstone (the #661 flake).
         let second = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
         let tombstones: Vec<_> = second
             .iter()
@@ -3972,10 +3027,7 @@ mod admin_delete_visibility_tests {
         );
     }
 
-    /// A whole second in the DS's near future — far enough ahead that a test
-    /// running for a while stays "ahead" (so `sent_at_after` takes its floor
-    /// branch), yet inside the [`CURSOR_STAMP_SKEW_SECS`] window a client stamp
-    /// must sit within to be admitted at all.
+    /// A whole second in the DS's near future, inside [`CURSOR_STAMP_SKEW_SECS`].
     fn base_second_ahead() -> i64 {
         chrono::Utc::now().timestamp() + CURSOR_STAMP_SKEW_SECS / 2
     }
@@ -3991,10 +3043,7 @@ mod admin_delete_visibility_tests {
         for nanos in [0u32, 1_000_000, 1_001_000, 1_001_001, 999_999_999] {
             assert_tombstone_reaches_carol(&client_stamp(base, nanos)).await;
         }
-        // Client clock running AHEAD of the DS wall clock (by as much as the
-        // stamp bound admits): the message — and so carol's watermark — sit in
-        // the DS's future. `sent_at_after`'s floor is what keeps the tombstone
-        // above them.
+        // Client clock AHEAD of the DS, as far as the stamp bound admits.
         let ahead = (chrono::Utc::now() + chrono::Duration::seconds(CURSOR_STAMP_SKEW_SECS - 30))
             .to_rfc3339();
         assert_tombstone_reaches_carol(&ahead).await;
@@ -4004,36 +3053,7 @@ mod admin_delete_visibility_tests {
     /// tombstone tests above do not reach: after a DS tombstone lands, does a
     /// message the CLIENT stamps next still get fetched?
     ///
-    /// It is the case a "whole-second stamps sort below fractional ones" reading
-    /// predicts will break. `chrono::Utc::now().to_rfc3339()` (AutoSi) emits NO
-    /// fraction when the instant's nanoseconds are exactly zero, so a client that
-    /// sends on a second boundary writes `…T08:00:01+00:00` while the DS tombstone
-    /// one nanosecond earlier is `…T08:00:00.999999999+00:00`. If those sorted the
-    /// wrong way round the message would land UNDER the recipient's watermark
-    /// (advanced to the tombstone) and `sent_at > last_fetched_at` would skip it
-    /// permanently — a silently dropped message, which is not one of the three
-    /// losses `CLAUDE.md` permits.
-    ///
-    /// They sort the right way round, and for a reason worth stating: AutoSi never
-    /// TRUNCATES, it only omits a fraction that is genuinely zero. A stamp with no
-    /// fraction therefore denotes `.000000000` — the EARLIEST instant of its
-    /// second — so sorting below every fractional stamp in that same second is
-    /// correct, and `'+' < '.'` is what produces it. (The #692 bug was a
-    /// hand-rolled formatter that truncated a real fraction away; that is a
-    /// different thing, and `now_rfc3339` is what fixed it.)
-    ///
-    /// **Since #1087 this is pinned by construction rather than by arithmetic.**
-    /// The delivery cursor is a DS-assigned sequence, so a tombstone gets
-    /// `MAX(seq)+1` and outranks every recipient's cursor no matter how the two
-    /// clocks compare. The test keeps the adversarial stamp shape — a client
-    /// message at `.999999999` and a tombstone whose `sent_at` sorts BELOW it —
-    /// and asserts the tombstone is delivered anyway. That is the strongest form
-    /// of the property: the bug is not avoided, it is unrepresentable.
-    ///
-    /// The client half — that pollis-core never starts truncating a real
-    /// fraction, which would corrupt DISPLAY order — is pinned in
-    /// `pollis_core::commands::messages::sent_at_format_tests`, which this crate
-    /// cannot reach.
+    /// **Since #1087 a tombstone takes `MAX(seq)+1`**, so it is delivered even when its `sent_at` sorts below.
     #[tokio::test]
     async fn a_zero_nanosecond_client_message_still_outsorts_the_preceding_tombstone() {
         let (_dir, db) = shared_db().await;
@@ -4043,8 +3063,7 @@ mod admin_delete_visibility_tests {
         let base = base_second_ahead();
         let conv = "chan-general";
 
-        // An existing message at `…:00.999999999` — the highest fraction there
-        // is, so `sent_at_after` must roll the tombstone into the NEXT second.
+        // An existing message at `…:00.999999999`, the highest fraction there is.
         apply_send_message(
             &w,
             None,
@@ -4056,8 +3075,7 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: client_stamp(base, 999_999_999),
                 sealed: 1,
-                // Unasserted lineage: these tests are about envelope columns,
-                // not the epoch gate (which has its own tests below).
+                // Unasserted lineage; the epoch gate has its own tests.
                 generation: None,
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
@@ -4070,9 +3088,6 @@ mod admin_delete_visibility_tests {
         .expect("send");
 
         // Carol catches up and reports her watermark, then alice admin-deletes.
-        // Both stamps are ahead of the DS clock, so the delete takes
-        // `sent_at_after`'s floor branch and the tombstone is stamped exactly one
-        // nanosecond past the highest thing in the conversation.
         assert_eq!(ingest_fetch(&carol, conv, "carol", "carol-dev").await.len(), 1);
         apply_advance_watermark(
             &w,
@@ -4118,10 +3133,7 @@ mod admin_delete_visibility_tests {
                 .expect("tombstone sent_at");
             rows.next().await.expect("row").expect("row").get(0).expect("sent_at")
         };
-        // #1087: the tombstone's `sent_at` is now plain `now` and is allowed to
-        // sort BELOW the message it redacts — that is the whole point. What
-        // matters is its SEQUENCE, which is `MAX(seq)+1` by construction and so
-        // is above every recipient's cursor no matter what the clocks did.
+        // #1087: the tombstone's SEQUENCE, not its `sent_at`, puts it above every cursor.
         let (tomb_seq, msg_seq): (i64, Option<i64>) = {
             let mut rows = w
                 .query(
@@ -4143,10 +3155,7 @@ mod admin_delete_visibility_tests {
             tomb_seq > 0,
             "the tombstone must carry a delivery sequence, got {tomb_seq}"
         );
-        // And the adversarial stamp ordering the old floor guard existed to
-        // paper over is now simply irrelevant: carol fetched the tombstone above
-        // (or the `expect` would have fired) even though its `sent_at`
-        // ({cursor}) sorts BELOW her reported `last_fetched_at`.
+        // Carol fetched it even though its `sent_at` ({cursor}) sorts BELOW her `last_fetched_at`.
         let _ = &cursor;
         apply_advance_watermark(
             &w,
@@ -4162,14 +3171,7 @@ mod admin_delete_visibility_tests {
         .await
         .expect("carol watermark 2");
 
-        // Now the client sends with a stamp that sorts BELOW the tombstone's —
-        // a fraction-less stamp from an EARLIER second, which is what a client
-        // clock running behind the DS produces. Under the timestamp cursor this
-        // message was unreachable; under a sequence it is simply the next one.
-        // Deliberately far in the past and fraction-less — the shape a client
-        // whose clock is wrong produces, and unambiguously below the tombstone's
-        // `now`. The DS bounds `sent_at` against the FUTURE only, so this is
-        // admissible, and since #1087 it is also harmless.
+        // A fraction-less stamp far in the past, below the tombstone's `now`: admissible and, since #1087, harmless.
         let boundary = "2020-01-01T00:00:00+00:00".to_string();
         assert!(
             !boundary.contains('.'),
@@ -4186,8 +3188,7 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: boundary.clone(),
                 sealed: 1,
-                // Unasserted lineage: these tests are about envelope columns,
-                // not the epoch gate (which has its own tests below).
+                // Unasserted lineage; the epoch gate has its own tests.
                 generation: None,
                 epoch: None,
                 // No push from a unit test — these assert envelope columns.
@@ -4198,13 +3199,7 @@ mod admin_delete_visibility_tests {
         )
         .await
         .expect("send after tombstone");
-        // The strongest form of the property, and the one #1087 buys. Under the
-        // old design delivery turned on `boundary > cursor` — a LEXICAL compare
-        // between two clocks' stamps — so a message whose stamp happened to sort
-        // below the preceding tombstone was buried under every recipient's
-        // watermark and silently lost. Assert here that it is delivered even
-        // when it sorts BELOW, because the cursor is a sequence and the stamp is
-        // decoration.
+        // Delivered even though it sorts BELOW: the cursor is a sequence, the stamp decoration (#1087).
         assert!(
             boundary < cursor,
             "premise: this message's stamp ({boundary}) must sort BELOW the \
@@ -4221,13 +3216,7 @@ mod admin_delete_visibility_tests {
     }
 
     /// The candidate-1 primitive in isolation: a row written on one connection of
-    /// a shared libsql `Database` is IMMEDIATELY visible on another connection of
-    /// the same handle — the read-your-writes guarantee the flows harness leans on
-    /// (since #987 the clients hold no handle at all — every read is a POST the
-    /// DS answers from that one `Database`, which only strengthens this). A second,
-    /// INDEPENDENT `Database` opened on the same file is NOT guaranteed to see it
-    /// promptly — which is exactly why the harness shares one handle rather than
-    /// opening a second, and why candidate 1 cannot occur in that harness.
+    /// a shared `Database` is IMMEDIATELY visible on another connection of it (a second `Database` need not be).
     #[tokio::test]
     async fn read_your_writes_holds_across_connections_of_one_shared_database() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4237,9 +3226,7 @@ mod admin_delete_visibility_tests {
         {
             let c = db.connect().expect("connect");
             c.query("PRAGMA journal_mode=WAL", ()).await.expect("wal");
-            // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+            // Production Turso has FKs off; libsql's local backend turns them on.
         c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&c).await.expect("schema");
         }
@@ -4282,14 +3269,7 @@ mod delete_scope_tests {
     //! `/v1/messages/delete` must only ever touch the conversation it authorised
     //! against.
     //!
-    //! The bug these pin: authz read `body.conversation_id` while the DELETE
-    //! acted on `body.message_id` — two independent, attacker-supplied fields
-    //! with nothing tying them together. Membership of ANY conversation (a DM
-    //! with yourself qualifies) therefore authorised deleting ANY envelope in
-    //! the deployment, on both the self and admin branches. Every client holds a
-    //! whole-DB read-only Turso token, so the ids are enumerable. That is
-    //! undelivered mail destroyed for everyone — invariant I3 and "messages must
-    //! work", from an ordinary account.
+    //! The bug: authz read `conversation_id` while the DELETE acted on an unrelated `message_id`.
     //!
     //! Both tests assert the VICTIM row survives. Asserting only that the call
     //! returns Ok would pass against the vulnerable code.
@@ -4301,9 +3281,7 @@ mod delete_scope_tests {
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let c = db.connect().unwrap();
-        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-        // backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        // Production Turso has FKs off; libsql's local backend turns them on.
         c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&c).await.expect("schema");
         c
@@ -4670,9 +3648,7 @@ mod epoch_gate_tests {
 
     /// The race the per-id lock closes: a retry must not answer "replay" while
     /// the first post can still be rolled back by its own epoch post-check.
-    /// Holding the id's lock stands in for that post mid-write; its row
-    /// vanishing stands in for the post-check deleting it. The retry, released
-    /// only then, must write its own envelope — not report the vanished one.
+    /// Holding the id's lock simulates that post mid-write; the retry must write its own envelope.
     #[tokio::test]
     async fn a_retry_waits_for_the_first_post_to_settle() {
         let c = conn().await;
@@ -4840,9 +3816,7 @@ mod cursor_stamp_tests {
 
     /// Strings that parse (or nearly parse) as a time but whose lexical position
     /// is not their instant's — each would let a cursor sort away from where it
-    /// belongs. Includes a non-zero offset that denotes a PAST instant yet sorts
-    /// twelve hours into the future, which the chronological bound alone would
-    /// have admitted.
+    /// belongs, incl. a non-zero offset (past instant, future-sorting string).
     #[test]
     fn refuses_every_non_canonical_shape() {
         let now = at(1_800_000_000, 0);
@@ -4893,9 +3867,7 @@ mod delete_capability_tests_support {
     pub(super) async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        // Production is Turso, where foreign-key enforcement is off; libsql's
-        // LOCAL backend turns it ON by default, so say so explicitly rather than
-        // inherit a constraint no deploy has.
+        // Production Turso has FKs off; libsql's local backend turns them on.
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn.execute_batch(
@@ -4909,9 +3881,7 @@ mod delete_capability_tests_support {
         conn
     }
 
-    /// Stand-in for what the author's devices derive. The DS never computes
-    /// this — it only ever hashes what it is handed — so a fixed string is a
-    /// faithful stand-in for an HMAC it cannot produce.
+    /// Stand-in for the author's HMAC; the DS only ever hashes what it is handed.
     pub(super) const TOKEN: &str = "the-authors-capability";
 
     pub(super) fn hash_of(token: &str) -> String {
@@ -4923,12 +3893,7 @@ mod delete_capability_tests_support {
     /// Write an envelope the way a **pre-#1135 client** did: no capability at
     /// all, NULL `delete_token_hash`.
     ///
-    /// A direct insert rather than a `send`, because since #1135 the send
-    /// endpoint REFUSES a body without a capability — so the only way such a
-    /// row exists now is that it predates the gate. That is exactly the
-    /// population the legacy fallback still has to serve, and testing it
-    /// through an endpoint that can no longer produce it would quietly assert
-    /// nothing (a missing row also reads `NotRequired`).
+    /// A direct insert: since #1135 the send endpoint refuses such a body.
     pub(super) async fn insert_pre_1135_envelope(conn: &Connection, id: &str) {
         let seq = next_delivery_seq(conn, "c1").await.unwrap();
         conn.execute(
@@ -4970,8 +3935,7 @@ mod delete_capability_tests {
         DeleteMessageBody {
             message_id: id.to_string(),
             conversation_id: "c1".to_string(),
-            // The self-branch hint: the caller claims to be the author. Before
-            // #1086 that claim WAS the authorization.
+            // The self-branch hint: the caller claims to be the author.
             msg_sender_id: Some(actor.to_string()),
             actor_id: Some(actor.to_string()),
             delete_token,
@@ -4991,10 +3955,7 @@ mod delete_capability_tests {
     }
 
     /// **The attack.** Bob is a member of the conversation, so the pre-#1086
-    /// membership check passed and his `msg_sender_id == bob` hint selected the
-    /// self-branch. Sealed sender means the DS cannot see that the envelope is
-    /// Alice's — so he could delete it, with no tombstone, before slower
-    /// recipients ever fetched it. He cannot compute Alice's capability.
+    /// membership and self-branch checks passed; he cannot compute Alice's capability.
     #[tokio::test]
     async fn a_member_cannot_delete_another_members_envelope() {
         let c = conn().await;
@@ -5065,9 +4026,7 @@ mod delete_capability_tests {
     }
 
     /// The rollout path: a row written before capabilities existed has a NULL
-    /// hash and keeps the old membership-only behaviour, because the DS cannot
-    /// demand a capability for an envelope no client produced one for. This is
-    /// the deliberate gap the follow-up closes once clients have shipped.
+    /// hash and keeps the membership-only behaviour.
     #[tokio::test]
     async fn an_envelope_from_an_older_client_keeps_the_legacy_path() {
         let c = conn().await;
@@ -5084,11 +4043,6 @@ mod delete_capability_tests {
     /// separate row that names the message it edits, and envelope GC collects
     /// each row on its own watermark — so the ORIGINAL goes first (it is older)
     /// and the pending edit is left behind.
-    ///
-    /// The capability check reads the hash off the target row. With the target
-    /// collected there was no row to read, the check answered `NotRequired`, and
-    /// any member could then drop another author's pending edit uncontested —
-    /// the exact loss the capability exists to prevent, reached by waiting.
     ///
     /// The edit INHERITED the target's hash, so it is read from there now.
     #[tokio::test]
@@ -5224,11 +4178,6 @@ mod delete_capability_tests {
 
     /// #1135: a send with no capability is refused outright, so no NEW envelope
     /// can land on the legacy path.
-    ///
-    /// Without this, a client that simply omits the field gets the pre-#1086
-    /// behaviour back on demand — any member able to remove any member's
-    /// not-yet-fetched envelope — which would make the capability optional in
-    /// the only sense that matters to an attacker.
     #[tokio::test]
     async fn a_send_without_a_capability_is_refused() {
         let c = conn().await;
@@ -5344,10 +4293,7 @@ mod edit_capability_tests {
 
     /// The clobber. `idx_envelope_one_edit_per_message` allows exactly one
     /// pending edit per message, so accepting Bob's MUST remove Alice's — there
-    /// is no "accept but do not clobber" state. Bob's edit is therefore refused,
-    /// which narrows #607's "the DS accepts any member's edit" for edits only.
-    /// Nothing is de-anonymized by it: the DS checks possession of a secret, not
-    /// an identity.
+    /// is no "accept but do not clobber" state, so Bob's edit is refused.
     #[tokio::test]
     async fn a_member_cannot_clobber_another_authors_pending_edit() {
         let c = conn().await;
@@ -5488,12 +4434,7 @@ mod delivery_sequence_tests {
 
     /// The counter bump and the envelope row must become visible together.
     ///
-    /// Regression for the allocate/insert gap: while a send was mid-flight the
-    /// sequence bump used to commit on its own, so a concurrent writer could
-    /// take `N+1` and publish *that* row first. A recipient fetching
-    /// `seq > last_seq` in the window would see `N+1`, advance its cursor onto
-    /// it, and envelope `N` would land below every cursor — delivered to nobody
-    /// and then collected. This asserts a reader mid-send sees neither half.
+    /// Otherwise a concurrent `N+1` could publish first and strand `N` below every cursor.
     #[tokio::test]
     async fn an_in_flight_send_never_exposes_a_sequence_without_its_envelope() {
         let dir = tempfile::tempdir().unwrap();
@@ -5580,17 +4521,7 @@ mod delivery_sequence_tests {
 
     /// **The bug the counter table exists to prevent.**
     ///
-    /// The obvious implementation is `MAX(seq)+1` over `message_envelope`. But
-    /// envelope GC DELETES rows: once every member device has read past
-    /// everything the conversation is emptied, `MAX(seq)` goes NULL, and the next
-    /// envelope is assigned 1 again — at or below every device's cursor, so
-    /// `seq > last_seq` never selects it and it is delivered to NOBODY.
-    ///
-    /// That is the #692 shape reappearing inside the design meant to retire it,
-    /// and it is invisible unless a test empties a conversation and then posts
-    /// into it. `conversation_seq` is not pruned by GC, which is what makes the
-    /// sequence monotone for the conversation's lifetime rather than for the
-    /// lifetime of its surviving rows.
+    /// `MAX(seq)+1` would reissue seq 1 after GC empties a conversation, below every cursor.
     #[tokio::test]
     async fn a_sequence_is_never_reused_after_gc_empties_the_conversation() {
         let c = conn().await;
@@ -5598,11 +4529,7 @@ mod delivery_sequence_tests {
         let first = seq_of(&c, "m1").await.expect("assigned");
 
         // The only member device reads past it, so the real cleanup collects it.
-        // The legacy cursor column is written the way production writes it — an
-        // RFC 3339 stamp from the chokepoint, not `datetime('now')`. Nothing
-        // reads it any more, but a fixture that writes the wrong FORMAT there is
-        // the thing `watermark_seed_format` exists to catch, and a test that
-        // trips its own tripwire teaches nobody anything.
+        // The legacy cursor column uses the production RFC 3339 format (`watermark_seed_format`).
         c.execute(
             "INSERT INTO conversation_watermark \
                  (conversation_id, user_id, device_id, last_fetched_at, last_seq, reported_at) \
@@ -5677,9 +4604,7 @@ mod delivery_sequence_tests {
                 sent_at: chrono::Utc::now().to_rfc3339(),
                 generation: None,
                 epoch: None,
-                // The target now carries a capability (#1135), and an edit
-                // replaces its pending edit — which is a delete — so the edit
-                // has to present the preimage.
+                // The target has a capability (#1135); replacing its edit is a delete, so present the preimage.
                 delete_token: Some(FIXTURE_CAPABILITY_TOKEN.to_string()),
             },
         )
@@ -5711,8 +4636,7 @@ mod delivery_sequence_backfill_tests {
     /// inserted with `seq` NULL, exactly as they exist before the migration, and
     /// the migration's own statements are then applied.
     ///
-    /// Driven by running the REAL migration SQL, not a re-typed copy — a
-    /// hand-rolled backfill in a test proves nothing about the one that ships.
+    /// Runs the REAL migration SQL, not a re-typed copy.
     async fn migrated(rows: &[(&str, &str, &str)], cursors: &[(&str, &str)]) -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
@@ -5859,18 +4783,9 @@ mod envelope_insert_site_tests {
     /// Every envelope must carry a delivery sequence, and the only way to be
     /// sure is for every write to go through the one function that assigns one.
     ///
-    /// An envelope written without a `seq` is invisible: the fetch predicate is
-    /// `seq > last_seq`, and `NULL > n` is NULL, so no recipient ever selects it
-    /// — and the GC floor `seq <= MIN(last_seq)` never collects it either. It
-    /// would sit in the table forever, delivered to nobody. That failure is
-    /// silent at every layer, which is exactly the kind that needs a tripwire
-    /// rather than a convention.
+    /// A seq-less envelope is silently never fetched nor collected (`NULL > n`).
     ///
-    /// A source-shape guard, not a proof: it reads production code only (test
-    /// modules seed rows directly on purpose, and keep `conversation_seq` in
-    /// step themselves), and it cannot see an INSERT built somewhere exotic. It
-    /// closes the case that actually happens — someone adds a fourth envelope
-    /// kind next to the three that exist and copies the wrong neighbour.
+    /// A source-shape guard over production code only, not a proof.
     #[test]
     fn every_envelope_insert_goes_through_the_sequence_chokepoint() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -5994,17 +4909,7 @@ mod reaction_membership_tests {
     //! A reaction must be membership-gated even when the envelope is gone
     //! (#1161).
     //!
-    //! The gate resolved the conversation from `message_envelope`, and envelope
-    //! GC (#689) collects that row as soon as every member device has fetched
-    //! it — so for anything but a very recent message there was nothing to
-    //! resolve, and the check was SKIPPED. That is the common case, not an edge:
-    //! any authenticated account holding a message id could write a reaction row
-    //! against a conversation it has never been in.
-    //!
-    //! `ReactionBody.conversation_id` closes it, and the tests pin all three
-    //! arms: the declared conversation is gated, a declaration that contradicts
-    //! a surviving envelope is refused, and a request that declares nothing at
-    //! all against a collected envelope is refused rather than waved through.
+    //! The tests pin all three arms of the `ReactionBody.conversation_id` gate.
 
     use super::*;
     use libsql::Connection;
@@ -6109,10 +5014,7 @@ mod reaction_membership_tests {
     }
 
     /// A surviving envelope stays authoritative, and a body that names a
-    /// DIFFERENT conversation is refused rather than ignored. Ignoring it would
-    /// be safe here but silently accepting it would not be: the membership
-    /// question has to be asked about the conversation the message is actually
-    /// in.
+    /// DIFFERENT conversation is refused rather than ignored.
     #[tokio::test]
     async fn a_declaration_that_contradicts_the_envelope_is_refused() {
         let c = conn().await;

@@ -1,17 +1,7 @@
 //! No plain client IP may be readable anywhere the DS controls — not in a log
 //! line, a trace span, an error, a response, or the rate limiter's memory.
 //!
-//! The limiter hashes the IP under a per-process key before it is stored
-//! (`ratelimit.rs`, unit-tested there). This file guards everything AROUND it by
-//! reading the source, because the ways an IP leaks are one careless line each:
-//! a `tracing::info!("{headers:?}")`, a `TraceLayer` that records request
-//! headers, `ConnectInfo<SocketAddr>` threaded into a handler, a `console.log`
-//! in the Worker, or Workers Logs switched on in a wrangler config.
-//!
-//! Each rule below fails with the offending file and line. If a rule fires on
-//! something legitimate, the fix is to route it through `ratelimit.rs` (the one
-//! place allowed to read the IP, and it hashes in the same expression), not to
-//! loosen the rule.
+//! If a rule fires on something legitimate, route it through `ratelimit.rs`; don't loosen it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,7 +25,6 @@ const FORBIDDEN_APIS: &[&str] = &[
     "remote_addr",
 ];
 
-/// Macros whose arguments end up in a log, a panic message or stdout.
 const LOGGING_MACROS: &[&str] = &[
     "trace!", "debug!", "info!", "warn!", "error!", "event!", "span!",
     "info_span!", "debug_span!", "trace_span!", "warn_span!", "error_span!",
@@ -65,15 +54,13 @@ fn code_lines(src: &str) -> impl Iterator<Item = (usize, &str)> {
         .filter(|(_, l)| !l.trim_start().starts_with("//"))
 }
 
-/// The text of every logging-macro invocation, from the macro name to the
-/// statement's closing `;` (so multi-line arguments are included).
+/// Each logging-macro invocation's text, through its closing `;`.
 fn logging_invocations(src: &str) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     for mac in LOGGING_MACROS {
         let mut from = 0;
         while let Some(off) = src[from..].find(mac) {
             let start = from + off;
-            // Skip `foo_info!` style lookalikes and comment-only lines.
             let preceded_by_ident = src[..start]
                 .chars()
                 .next_back()
@@ -104,8 +91,7 @@ fn only_the_rate_limiter_reads_ip_headers() {
         for (n, line) in code_lines(&src) {
             let lower = line.to_ascii_lowercase();
             for h in IP_HEADERS {
-                // `forwarded` alone is too common a word; match it only as a
-                // quoted header name.
+                // `forwarded` alone is too common; match it only as a quoted header name.
                 let needle = if *h == "forwarded" { "\"forwarded\"" } else { h };
                 if lower.contains(needle) {
                     violations.push(format!("{}:{n}: names IP header {h}", file.display()));
@@ -166,9 +152,7 @@ fn nothing_logs_request_headers() {
     );
 }
 
-/// The Worker is the one place a client IP legitimately arrives, so it must
-/// strip it: every IP-bearing header in `CLIENT_IP_HEADERS` (deleted before the
-/// request reaches the container) and nothing logged on the way.
+/// The Worker must strip every IP-bearing header and log nothing on the way.
 #[test]
 fn the_worker_strips_every_ip_header_and_logs_nothing() {
     let src = fs::read_to_string(crate_dir().join("worker/index.ts")).expect("read worker/index.ts");
@@ -201,11 +185,7 @@ fn the_worker_strips_every_ip_header_and_logs_nothing() {
     assert!(violations.is_empty(), "the Worker logs:\n{}", violations.join("\n"));
 }
 
-/// Workers Logs (`observability`) records each invocation's request — headers
-/// and the `cf` object, i.e. the client IP — readable by any account member in
-/// the dashboard; Logpush exports the same to a sink. Both must be off,
-/// explicitly, in every environment, so a dashboard toggle or a changed
-/// wrangler default cannot turn them on behind the config's back.
+/// Workers Logs and Logpush record the client IP: both must be explicitly off everywhere.
 #[test]
 fn workers_logs_and_logpush_are_off_in_every_environment() {
     for env in ["dev", "prod"] {

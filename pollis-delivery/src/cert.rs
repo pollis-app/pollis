@@ -1,24 +1,9 @@
 //! Device-certificate verification — a thin `bool`-returning wrapper over the
 //! shared [`pollis_device_cert`] primitive.
 //!
-//! The first device-cert publish (`POST /v1/auth/publish-device-cert`) is the
-//! PIVOT write that establishes the very `mls_signature_pub` the device-signature
-//! gate ([`crate::auth`]) verifies against — so it cannot be device-signed. Its
-//! gate is instead **OTP-session + cert-validity**: the DS re-verifies the cert's
-//! ML-DSA-44 signature against the account's stored `account_id_pub` here,
-//! exactly as every other client does before accepting a device into an MLS
-//! group.
-//!
-//! This used to be a hand-copied port of the payload layout, kept in sync with
-//! pollis-core by comment alone. It is now a delegation: the cert format lives in
-//! exactly one crate, which both the client that mints certs and the two servers
-//! that verify them depend on, so the layout cannot drift. (No crate cycle —
-//! `pollis-device-cert` has no dependency on either side.)
+//! The first cert publish cannot be device-signed, so it is gated by OTP session + this cert check.
 
-/// Verify a device cert against a user's published `account_id_pub`. Returns
-/// `true` iff the ML-DSA-44 signature is valid over the canonical payload
-/// binding BOTH of the device's leaf signing keys. Any malformed input (wrong
-/// key/sig length, over-long field) is `false` — we never accept on error.
+/// Verify a device cert against a user's published `account_id_pub`; malformed input is `false`.
 pub fn verify_device_cert(
     account_id_pub: &[u8],
     device_id: &str,
@@ -52,8 +37,6 @@ mod tests {
         SigningKey::<MlDsa44>::from_seed(&s.into())
     }
 
-    /// The two leaf keys the cert binds: a 32-byte classic one and a real
-    /// ML-DSA-44 verifying key.
     fn device_pubs() -> ([u8; 32], Vec<u8>) {
         let mut ed_pub = [0u8; 32];
         OsRng.fill_bytes(&mut ed_pub);

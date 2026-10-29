@@ -1,41 +1,12 @@
 //! #908 — a seeded watermark must mean what its comment says it means.
-//!
-//! `conversation_watermark.last_fetched_at` is a **message cursor**, compared
-//! **lexically** against `message_envelope.sent_at`: envelope GC deletes rows
-//! below `MIN(last_fetched_at)` over the member devices, and ingest fetches
-//! `sent_at > last_fetched_at`. Every other writer of that column puts RFC 3339
-//! in it — clients via `pollis_core::commands::messages::envelope_sent_at`, the
-//! DS via `messages::now_rfc3339`.
-//!
-//! The three server-side *seed* paths did not. They wrote SQLite's
-//! `datetime('now')`, i.e. `YYYY-MM-DD HH:MM:SS`, and a space (0x20) sorts below
-//! a `T` (0x54). So for any envelope sharing the seed's calendar day the seeded
-//! cursor compared as **older** — the exact opposite of the "this device has
-//! already consumed everything up to now" the seed exists to express.
-//!
-//! It was fail-safe (over-pin, under-collect: envelopes were kept, never lost),
-//! which is why it went unnoticed. The tests below are about the seed doing its
-//! job, not about damage.
-//!
-//! The pre-existing GC unit tests could not have caught this: they seed BOTH
-//! sides of the comparison with `datetime('now', …)`, so they are internally
-//! consistent in a format production never mixes. These drive a REAL seed path
-//! against a REAL envelope stamp.
+//! `last_fetched_at` is compared lexically with RFC 3339 `sent_at`, so seeds must be RFC 3339.
 
 
 use libsql::Connection;
 
 mod common;
 
-/// A day is the resolution at which the defect bites: the space-vs-`T`
-/// comparison only decides anything once the `YYYY-MM-DD` prefix matches, so an
-/// envelope from a *previous* day sorts below the seed either way and proves
-/// nothing.
-///
-/// Hence the **start of the current UTC day** rather than a relative offset like
-/// "an hour ago": an offset straddles midnight, and a test that silently stops
-/// exercising the defect for one hour in every twenty-four is worse than no test.
-/// This instant is always earlier than now and always shares now's `YYYY-MM-DD`.
+/// Start of the current UTC day: same `YYYY-MM-DD` as now, so the space-vs-`T` compare bites.
 fn earlier_today() -> chrono::DateTime<chrono::Utc> {
     chrono::Utc::now()
         .date_naive()
@@ -56,8 +27,6 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// One user, one group, one channel, and one envelope sent at the start of the
-/// current UTC day — earlier than, and on the same day as, the registration below.
 async fn seed_channel_with_an_envelope_from_earlier_today(conn: &Connection) -> String {
     conn.execute(
         "INSERT INTO users (id, email, username) VALUES ('alice', 'a@example.com', 'alice')",
@@ -89,10 +58,7 @@ async fn seed_channel_with_an_envelope_from_earlier_today(conn: &Connection) -> 
     )
     .await
     .expect("envelope");
-    // The durable counter has to agree with the row, exactly as
-    // `insert_envelope_with_seq` keeps it (#1087) — a fixture that writes an
-    // envelope without advancing it is not simulating the DS, and the seed this
-    // test asserts on reads `conversation_seq`, not `MAX(seq)`.
+    // Advance `conversation_seq` as `insert_envelope_with_seq` does (#1087); the seed reads it.
     conn.execute(
         "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES ('c1', 1)",
         (),
@@ -119,19 +85,14 @@ async fn seeded_cursor(conn: &Connection) -> String {
         .expect("text cursor")
 }
 
-/// The defect at the value level, through the real `POST /v1/auth/register-device`
-/// implementation: the cursor it seeds must sort ABOVE an envelope sent earlier
-/// the same day. Against `datetime('now')` it sorts below, because
-/// `"2026-08-17 09:00:00" < "2026-08-17T08:00:00.0+00:00"`.
+/// The seeded cursor must sort above an envelope sent earlier the same day.
 #[tokio::test]
 async fn a_seeded_cursor_outsorts_an_envelope_from_earlier_the_same_day() {
     let db = fresh_db().await;
     let conn = db.conn().await.expect("checkout");
     let envelope_sent_at = seed_channel_with_an_envelope_from_earlier_today(&conn).await;
 
-    // The real flow is two writes: register-device creates the row, and cert
-    // publish is what seeds the watermarks (#1092). Drive both, so this models a
-    // device that actually finished enrolling.
+    // register-device creates the row; cert publish seeds the watermarks (#1092).
     pollis_delivery::bootstrap::apply_register_device(&conn, "alice", "dev-new", "New")
         .await
         .expect("register device");
@@ -146,9 +107,7 @@ async fn a_seeded_cursor_outsorts_an_envelope_from_earlier_the_same_day() {
          the whole claim the seed makes. Seeded {cursor:?}, envelope {envelope_sent_at:?}"
     );
 
-    // The negative control, so this is about the ORDERING RULE and not about two
-    // strings happening to differ: what `datetime('now')` would have written for
-    // this very instant. It loses to the envelope, which is the defect.
+    // Negative control: what `datetime('now')` would have written loses to the envelope.
     let sqlite_shaped = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
     assert!(
         sqlite_shaped < envelope_sent_at,
@@ -157,19 +116,13 @@ async fn a_seeded_cursor_outsorts_an_envelope_from_earlier_the_same_day() {
     );
 }
 
-/// …and what that value is FOR: the envelope-GC gate. A device that registers
-/// into a conversation is declaring it has consumed the backlog, so the backlog
-/// stops being pinned on its behalf and becomes collectable. With the
-/// `datetime('now')` seed the sweep kept it forever.
+/// A registering device has consumed the backlog, so it becomes collectable.
 #[tokio::test]
 async fn a_freshly_registered_device_stops_pinning_the_backlog() {
     let db = fresh_db().await;
     let conn = db.conn().await.expect("checkout");
     seed_channel_with_an_envelope_from_earlier_today(&conn).await;
 
-    // The real flow is two writes: register-device creates the row, and cert
-    // publish is what seeds the watermarks (#1092). Drive both, so this models a
-    // device that actually finished enrolling.
     pollis_delivery::bootstrap::apply_register_device(&conn, "alice", "dev-new", "New")
         .await
         .expect("register device");
@@ -204,11 +157,7 @@ async fn a_freshly_registered_device_stops_pinning_the_backlog() {
     );
 }
 
-/// The chokepoint stays a chokepoint. `datetime('now')` is correct for
-/// `reported_at` (compared against `datetime('now', ?)`) and wrong for
-/// `last_fetched_at` (compared against RFC 3339 `sent_at`), and the two sit side
-/// by side in the same five INSERTs — which is exactly how the wrong one gets
-/// copied into a sixth. A grep, because no type distinguishes two TEXT columns.
+/// `datetime('now')` is right for `reported_at`, wrong for `last_fetched_at`; grep keeps them apart.
 #[test]
 fn no_seed_writes_a_sqlite_datetime_into_the_cursor_column() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -226,11 +175,7 @@ fn no_seed_writes_a_sqlite_datetime_into_the_cursor_column() {
             }
             let raw = std::fs::read_to_string(&path).expect("read source");
             let rel = path.strip_prefix(root).expect("under manifest").to_path_buf();
-            // CODE ONLY. Line comments are stripped first, because this scan
-            // matches on bare words — a paragraph explaining why a reader does
-            // NOT seed a watermark contains every trigger word, and flagging it
-            // is exactly how a tripwire stops being read (#1087 tripped this by
-            // documenting the cursor change next to the fetch).
+            // Code only: comments explaining the rule contain every trigger word (#1087).
             let text: String = raw
                 .lines()
                 .map(|l| match l.find("//") {
@@ -239,22 +184,17 @@ fn no_seed_writes_a_sqlite_datetime_into_the_cursor_column() {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            // Statements are written across several lines, so normalise the file
-            // to one line and look at each INSERT into the table as a whole.
             let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
             for stmt in flat.split("INSERT ").skip(1) {
                 if !stmt.contains("conversation_watermark") {
                     continue;
                 }
-                // The column list ends at the closing paren; the values follow.
                 let Some((columns, values)) = stmt.split_once(')') else {
                     continue;
                 };
                 if !columns.contains("last_fetched_at") {
                     continue;
                 }
-                // `datetime('now'` anywhere before `reported_at`'s value means the
-                // cursor is being written in SQLite's format.
                 let cursor_region = values.split("reported_at").next().unwrap_or(values);
                 let head = cursor_region.split("ON CONFLICT").next().unwrap_or(cursor_region);
                 let cursor_slot = head.split("datetime('now')").collect::<Vec<_>>();
@@ -266,15 +206,7 @@ fn no_seed_writes_a_sqlite_datetime_into_the_cursor_column() {
                     ));
                 }
             }
-            // The direct form: a Rust-side seed that stopped using the chokepoint.
-            //
-            // Gated on the file actually INSERTing into the table (#987). Since
-            // the read migration a module can name both `conversation_watermark`
-            // and `last_fetched_at` while only ever SELECTing them — the
-            // envelope fetch correlates on the watermark to answer "strictly past
-            // THAT conversation's cursor". A reader has no cursor to format, so
-            // flagging it would make this tripwire cry wolf, which is how a
-            // tripwire stops being read.
+            // A Rust-side seed bypassing the chokepoint; gated on INSERTs, since readers name the column too (#987).
             let inserts_watermarks = flat
                 .split("INSERT ")
                 .skip(1)

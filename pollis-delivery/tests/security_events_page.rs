@@ -1,7 +1,4 @@
 //! #1548: `/v1/read/security-events` pages by keyset cursor and filters by kind.
-//!
-//! Driven through the real router at the real schema, so the wire body, the
-//! clamp and the migration's indexes are what a client actually meets.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -30,8 +27,7 @@ async fn fixture() -> (axum::Router, common::TempDb) {
         )
         .await
         .unwrap();
-    // Auth off: the actor is the body's `user_id`. Owner scoping under real
-    // signatures is pinned in `cross_account_authz.rs`.
+    // Auth off; owner scoping under real signatures is in `cross_account_authz.rs`.
     (build_router_with_state(AppState::new(db.arc(), false)), db)
 }
 
@@ -82,10 +78,7 @@ fn ids(resp: &SecurityEventsResponse) -> Vec<String> {
     resp.events.iter().map(|e| e.id.clone()).collect()
 }
 
-/// Walking the whole log two rows at a time returns every row exactly once, in
-/// `(created_at DESC, id DESC)` order — including a run of five rows that share
-/// one `created_at`, which is the case a `created_at`-only cursor gets wrong
-/// (it would skip or repeat whichever rows straddle a page boundary).
+/// Pages over five rows sharing one `created_at`, which a created_at-only cursor gets wrong.
 #[tokio::test]
 async fn the_cursor_is_stable_across_rows_with_equal_created_at() {
     let (app, db) = fixture().await;
@@ -95,7 +88,6 @@ async fn the_cursor_is_stable_across_rows_with_equal_created_at() {
     }
     seed(&db, "alice", "z-new", "device_revoked", "2026-10-02 08:00:00").await;
     seed(&db, "alice", "a-old", "email_changed", "2026-09-30 08:00:00").await;
-    // Another account's rows must never appear on alice's pages.
     seed(&db, "bob", "e3b", "device_enrolled", same).await;
 
     let mut seen = Vec::new();
@@ -120,8 +112,7 @@ async fn the_cursor_is_stable_across_rows_with_equal_created_at() {
     assert_eq!(pages, 4);
 }
 
-/// The last page carries no cursor, even when it ends exactly on the limit —
-/// the DS looks one row past the page rather than guessing from a full page.
+/// The last page carries no cursor, even when it ends exactly on the limit.
 #[tokio::test]
 async fn an_exactly_full_last_page_has_no_next_cursor() {
     let (app, db) = fixture().await;
@@ -132,7 +123,6 @@ async fn an_exactly_full_last_page_has_no_next_cursor() {
     assert!(resp.next_cursor.is_none());
 }
 
-/// `kinds` narrows the log, and the cursor keeps working inside the filter.
 #[tokio::test]
 async fn the_kind_filter_returns_only_those_kinds_and_pages_within_them() {
     let (app, db) = fixture().await;
@@ -153,11 +143,9 @@ async fn the_kind_filter_returns_only_those_kinds_and_pages_within_them() {
     let keys = page(&app, 50, None, Some(vec!["identity_rotated", "recovery_blob_fetched"])).await;
     assert_eq!(ids(&keys), ["r1", "i1"]);
 
-    // An empty list is "every kind", not "no kind".
     let all = page(&app, 50, None, Some(vec![])).await;
     assert_eq!(all.events.len(), 6);
 
-    // Too many kinds is a 400, not a statement SQLite refuses to prepare.
     let many: Vec<String> = (0..=SECURITY_EVENTS_MAX_KINDS).map(|i| format!("k{i}")).collect();
     let (status, _) = post_raw(
         &app,
@@ -167,7 +155,6 @@ async fn the_kind_filter_returns_only_those_kinds_and_pages_within_them() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-/// `limit` is clamped to `1..=500` server-side whatever the body asks for.
 #[tokio::test]
 async fn the_limit_is_clamped() {
     let (app, db) = fixture().await;
@@ -194,10 +181,7 @@ async fn the_limit_is_clamped() {
     assert_eq!(negative.events.len(), 1);
 }
 
-/// A pre-#1548 client sends `{user_id, limit}` (or less) and parses
-/// `{events}`. It must get the same rows as before — the newest `limit`, every
-/// kind — and the body a new client builds without a cursor or filter must be
-/// byte-identical to the old one.
+/// A pre-#1548 client's body and parse still work, byte-identically.
 #[tokio::test]
 async fn an_old_client_body_gets_the_old_answer() {
     let (app, db) = fixture().await;
@@ -210,18 +194,15 @@ async fn an_old_client_body_gets_the_old_answer() {
     let events = json["events"].as_array().unwrap();
     let got: Vec<&str> = events.iter().map(|e| e["id"].as_str().unwrap()).collect();
     assert_eq!(got, ["ev-4", "ev-3", "ev-2"]);
-    // Every field the old row type read is still there, with the old names.
     for key in ["id", "kind", "device_id", "created_at", "metadata"] {
         assert!(events[0].as_object().unwrap().contains_key(key), "missing {key}");
     }
 
-    // No `limit` either: the old default of 100, so all five rows and no cursor.
     let (status, json) = post_raw(&app, &serde_json::json!({ "user_id": "alice" })).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["events"].as_array().unwrap().len(), 5);
     assert!(json.get("next_cursor").is_none());
 
-    // The new client's first-page body serializes to exactly the old shape.
     let body = SecurityEventsBody {
         user_id: Some("alice".into()),
         limit: Some(3),
@@ -234,7 +215,6 @@ async fn an_old_client_body_gets_the_old_answer() {
     );
 }
 
-/// The page query is an index search on the new indexes, not a scan plus sort.
 #[tokio::test]
 async fn the_page_query_is_served_by_the_new_indexes() {
     let (_app, db) = fixture().await;

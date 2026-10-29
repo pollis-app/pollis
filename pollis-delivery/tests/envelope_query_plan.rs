@@ -1,28 +1,11 @@
 //! The envelope fetch must use `sent_at` as an index RANGE, not read the
 //! conversation and filter.
 //!
-//! This is a cost test, and cost is invisible to every other kind of test. The
-//! query it guards was correct before and after the regression it exists to
-//! catch: #875 batched N per-channel fetches into one and, in doing so, turned a
-//! bound `?1` watermark into a subquery correlated on
-//! `message_envelope.conversation_id`. Correlating strips the planner's ability
-//! to bound `sent_at`, because the comparison value is not known until the outer
-//! row exists — so "is there anything new?" started reading every retained
-//! envelope in the conversation and discarding all of them.
-//!
-//! Nothing failed. The rows returned were identical, every test passed, and the
-//! only symptom was billed Turso rows growing with history on the path every
-//! client takes on every channel open and every realtime hint.
-//!
-//! So the assertion is on the PLAN, which is the only artefact that distinguishes
-//! the two forms. `SEARCH … (conversation_id=? AND sent_at>?)` is the fix;
-//! `CORRELATED SCALAR SUBQUERY` is the defect.
+//! `SEARCH … (conversation_id=? AND sent_at>?)` is the fix; a correlated subquery is the defect (#875).
 
 mod common;
 
-/// The two tables this query touches, at the REAL schema with the REAL indexes —
-/// the plan is a property of the indexes, so a hand-rolled fixture that omitted
-/// one would prove nothing.
+/// The real schema and indexes: the plan is a property of the indexes.
 async fn db() -> common::TempDb {
     let db = common::TempDb::open("plan.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap())
@@ -31,7 +14,6 @@ async fn db() -> common::TempDb {
     db
 }
 
-/// `EXPLAIN QUERY PLAN`, flattened to one string.
 async fn plan(db: &common::TempDb, sql: &str) -> String {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
@@ -45,16 +27,13 @@ async fn plan(db: &common::TempDb, sql: &str) -> String {
     out.join(" | ")
 }
 
-/// The shape `fetch_envelopes` builds, for two conversations.
 const FIXED: &str = "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
      target_message_id, sent_at, type \
      FROM message_envelope \
      WHERE (conversation_id = ?1 AND sent_at > ?2) OR (conversation_id = ?3 AND sent_at > ?4) \
      ORDER BY conversation_id ASC, sent_at ASC, id ASC";
 
-/// The pre-#1049 form, kept as the negative control: if this ever plans the same
-/// as `FIXED`, the assertion below has stopped discriminating and the guard is
-/// worthless.
+/// The pre-#1049 form, the negative control.
 const CORRELATED: &str = "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
      target_message_id, sent_at, type \
      FROM message_envelope \
@@ -87,9 +66,6 @@ async fn the_correlated_form_is_still_measurably_worse() {
     let db = db().await;
     let correlated = plan(&db, CORRELATED).await;
 
-    // The control. If SQLite ever learns to bound `sent_at` through a
-    // correlation, the test above stops proving anything and should be revisited
-    // rather than silently passing for the wrong reason.
     assert!(
         correlated.contains("CORRELATED") && !correlated.contains("sent_at>?"),
         "the correlated form now plans as well as the bound one — this guard's \

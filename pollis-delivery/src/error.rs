@@ -1,18 +1,7 @@
-//! HTTP error mapping. Any internal failure becomes a 500 with a terse JSON
-//! body; the logged detail stays server-side. (A rejected commit is NOT an
-//! error — it's a normal 409 response carrying the head + missing commits.)
-//! A transient database failure — the connection to Turso dropped, an expired
-//! hrana stream, `SQLITE_BUSY` — is a 503 `{"error":"unavailable"}` instead
-//! (#1500): nothing about the request was wrong, and the same request may
-//! succeed a moment later.
+//! HTTP error mapping. Any internal failure becomes a 500 with a terse JSON body.
+//! A transient database failure is a 503 `{"error":"unavailable"}` instead (#1500).
 //!
-//! [`AuthRejection`] is the one *expected* refusal: a write that failed
-//! device-certificate-signature auth. It maps to 401 (couldn't prove which
-//! device/user signed) or 403 (proved identity, but `sender_id` doesn't match
-//! the authenticated user). We never fail open — every verification error on
-//! the auth path is a refusal, never acceptance. A database error while looking
-//! up the device's key is a refusal too, but a 503, not a 401: the DS could not
-//! check the signature, which says nothing about whether it was valid.
+//! [`AuthRejection`] is the one *expected* refusal; it never fails open.
 
 use axum::{
     http::StatusCode,
@@ -20,9 +9,7 @@ use axum::{
     Json,
 };
 
-/// `Debug` is derived so tests can `.expect(...)` on a `Result<_, AppError>`.
-/// It forwards to `anyhow::Error`'s, which prints the whole cause chain — the
-/// only rendering worth having when a test reports one.
+/// `Debug` forwards to `anyhow::Error`'s, which prints the whole cause chain.
 #[derive(Debug)]
 pub struct AppError(pub anyhow::Error);
 
@@ -48,16 +35,13 @@ where
 {
     fn from(err: E) -> Self {
         let err = err.into();
-        // Here rather than in `into_response`: `?` converts while the handler's
-        // connections are still checked out, so the pool hears about the fault
-        // before they are released.
+        // Here, not in `into_response`: the pool must hear of the fault before connections are released.
         note_transient(&err);
         Self(err)
     }
 }
 
-/// 503 `{"error":"unavailable"}`: the DS could not reach its database. Says
-/// "try again", never "you are not signed in".
+/// 503 `{"error":"unavailable"}`: "try again", never "you are not signed in".
 fn unavailable() -> Response {
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -67,19 +51,14 @@ fn unavailable() -> Response {
         .into_response()
 }
 
-/// Whether `err` is a database failure that says nothing about the request: the
-/// connection to Turso dropped or timed out, the hrana stream had expired, or
-/// the database was busy. Anything else — a constraint, a bad column, SQL that
-/// does not parse — is a real 500.
+/// Whether `err` is a database failure that says nothing about the request.
 pub fn is_transient_db_error(err: &anyhow::Error) -> bool {
     err.chain()
         .filter_map(|cause| cause.downcast_ref::<libsql::Error>())
         .any(is_transient_libsql_error)
 }
 
-/// [`is_transient_db_error`], and when it is one, tell the connection pool so
-/// that no connection checked out right now is reused
-/// ([`crate::db::note_transport_fault`]).
+/// [`is_transient_db_error`], also telling the pool not to reuse checked-out connections.
 pub fn note_transient(err: &anyhow::Error) -> bool {
     let transient = is_transient_db_error(err);
     if transient {
@@ -98,10 +77,7 @@ fn is_transient_libsql_error(err: &libsql::Error) -> bool {
         libsql::Error::SqliteFailure(code, _) | libsql::Error::RemoteSqliteFailure(code, _, _) => {
             matches!(code & 0xff, SQLITE_BUSY | SQLITE_LOCKED)
         }
-        // libsql's hrana error type is private, so its rendering is all there is
-        // to go on: `http error` is the transport (a dropped or timed-out
-        // connection), `api error` a non-2xx answer from Turso, `stream error`
-        // a statement the database refused.
+        // libsql's hrana error type is private, so its rendering is all there is to go on.
         libsql::Error::Hrana(inner) => {
             let text = inner.to_string();
             text.starts_with("http error")
@@ -118,35 +94,22 @@ fn is_transient_libsql_error(err: &libsql::Error) -> bool {
 
 /// A write rejected by device-certificate-signature auth.
 ///
-/// `Unauthorized` (401): the request couldn't be tied to a known device key —
-/// missing headers, bad timestamp (replay window), unknown/revoked device, or
-/// an invalid signature. Also the catch-all for any non-database error on the
-/// auth path, so we never fail open.
+/// `Unauthorized` (401): not tied to a live device key; also the catch-all, so never fail open.
 ///
-/// `Forbidden` (403): the signature verified for `(user_id, device_id)`, but
-/// the commit's `sender_id` is some *other* user — a validly-signed request
-/// trying to write as someone else.
+/// `Forbidden` (403): the signature verified, but `sender_id` is another user.
 ///
-/// `Unavailable` (503): the device's key could not be read because the database
-/// failed. Still a refusal — the request is not authenticated — but one the
-/// client treats as "try again", not "signed out" (#1500).
+/// `Unavailable` (503): the key lookup failed on the database (#1500).
 #[derive(Debug, PartialEq, Eq)]
 pub enum AuthRejection {
     Unauthorized,
     Forbidden,
-    /// The request is signed by the device's own key, and that device has been
-    /// revoked (#1338). Told apart from [`AuthRejection::Unauthorized`] so the
-    /// device can sign itself out instead of retrying forever. Only a holder of
-    /// the revoked device's private key can earn this answer, so it tells the
-    /// caller nothing it could not already infer; an unknown device or a bad
-    /// signature still gets the bare `unauthorized`.
+    /// Signed by a revoked device's own key (#1338), so it can sign out instead of retrying.
     DeviceRevoked,
     /// The device-key lookup failed on the database (#1500).
     Unavailable,
 }
 
-/// Response header carried by a [`AuthRejection::DeviceRevoked`] answer, so a
-/// client can recognise it without reading (and consuming) the body.
+/// Header on a [`AuthRejection::DeviceRevoked`] answer, readable without the body.
 pub const AUTH_ERROR_HEADER: &str = "x-pollis-auth-error";
 
 impl IntoResponse for AuthRejection {

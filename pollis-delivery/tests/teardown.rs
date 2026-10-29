@@ -1,20 +1,5 @@
 //! Account and group teardown actually removes everything.
-//!
-//! The bug these tests exist for: the remote schema decorates nearly every child
-//! table with `ON DELETE CASCADE`, and production Turso runs with
-//! `foreign_keys=OFF`, so none of it ever fired. `DELETE FROM users` removed one
-//! row and left the device roster, DM membership, invites, recovery blob and
-//! security-event log in place — while `docs/metadata-retention-policy.md` told
-//! users they were gone.
-//!
-//! Every fixture here runs with `PRAGMA foreign_keys=OFF`, which is production
-//! parity: if these tests passed only because SQLite cascaded for them, they
-//! would be testing SQLite rather than the delivery service.
-//!
-//! Coverage is enumerated, not sampled. `every_user_scoped_table_is_accounted_for`
-//! reads the live schema and fails when a table naming a user is in neither the
-//! purge list nor the documented exemption list, so the next table added cannot
-//! be silently forgotten the way these were.
+//! Production Turso runs `foreign_keys=OFF`, so the schema's `ON DELETE CASCADE` never fires.
 
 use libsql::Connection;
 use pollis_delivery::account::{apply_delete_account, apply_reset_recover};
@@ -27,10 +12,7 @@ use pollis_delivery::writes::WriteOutcome;
 use pollis_api::account::DeleteAccountBody;
 use pollis_api::groups::DeleteGroupBody;
 
-/// Every (table, column) pair in the remote schema that names a user. Written
-/// out rather than derived so that a reviewer can check the list against the
-/// migrations by eye — `every_user_scoped_table_is_accounted_for` then proves
-/// the list is complete against the live schema.
+/// Every user-naming (table, column), written out for review; the coverage test proves it complete.
 const USER_COLUMNS: &[(&str, &str)] = &[
     ("account_recovery", "user_id"),
     ("channel_mute", "user_id"),
@@ -66,7 +48,6 @@ const USER_COLUMNS: &[(&str, &str)] = &[
     ("users", "id"),
 ];
 
-/// Every (table, column) pair that names a group.
 const GROUP_COLUMNS: &[(&str, &str)] = &[
     ("channels", "group_id"),
     ("group_emoji", "group_id"),
@@ -80,7 +61,7 @@ const GROUP_COLUMNS: &[(&str, &str)] = &[
 async fn conn() -> Connection {
     let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
     let c = db.connect().unwrap();
-    // Production parity — see the module docs.
+    // Production parity.
     c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
     pollis_schema::apply::single_db(&c).await.unwrap();
     c
@@ -106,12 +87,7 @@ async fn count(c: &Connection, table: &str) -> i64 {
     rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
 }
 
-/// Seed one row in every user-scoped table for `u`, plus the conversations they
-/// belong to. `solo` controls whether the group and DM created for this user are
-/// theirs alone (so teardown destroys them) or shared with `peer`.
-///
-/// Ids are namespaced by `u`, which is what makes the isolation tests meaningful:
-/// two users seeded this way share no row.
+/// Seed every user-scoped table for `u` (ids namespaced by `u`); `solo` decides sharing with `peer`.
 async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     exec(c, &format!(
         "INSERT INTO users (id, email, username, account_id_pub) \
@@ -150,14 +126,12 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
         "INSERT INTO mls_key_package (ref_hash, user_id, key_package) \
          VALUES ('{u}_kp', '{u}', X'01')"
     )).await;
-    // Blocks in both directions, so a delete keyed on only one side is caught.
     exec(c, &format!(
         "INSERT INTO user_block (blocker_id, blocked_id) VALUES ('{u}', '{u}_stranger')"
     )).await;
     exec(c, &format!(
         "INSERT INTO user_block (blocker_id, blocked_id) VALUES ('{u}_stranger2', '{u}')"
     )).await;
-    // Reports in both directions and a suspension (#1213).
     exec(c, &format!(
         "INSERT INTO user_report (id, reporter_id, reported_id, reason) \
          VALUES ('{u}_r1', '{u}', '{u}_stranger', 'spam')"
@@ -170,11 +144,9 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
         "INSERT INTO account_suspension (user_id, reason) VALUES ('{u}', 'test')"
     )).await;
 
-    // A group the user belongs to, with one channel carrying a message.
     let gid = format!("{u}_g");
     let cid = format!("{u}_c");
-    // Claim precedes the row it names — 000017's guard triggers refuse an
-    // unclaimed insert (#948).
+    // Claim before the row: 000017's triggers refuse an unclaimed insert (#948).
     exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{gid}', 'group')")).await;
     exec(c, &format!(
         "INSERT INTO groups (id, name, owner_id) VALUES ('{gid}', 'G', '{u}')"
@@ -186,7 +158,6 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     exec(c, &format!(
         "INSERT INTO channels (id, group_id, name) VALUES ('{cid}', '{gid}', 'general')"
     )).await;
-    // #1431: the user muted their own channel.
     exec(c, &format!(
         "INSERT INTO channel_mute (user_id, channel_id) VALUES ('{u}', '{cid}')"
     )).await;
@@ -230,7 +201,6 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
          VALUES ('{u}_ehash', 'emoji/x.webp', 'image/webp', 10)"
     )).await;
 
-    // Invites in both directions, a join request, and a link with a redemption.
     exec(c, &format!(
         "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) \
          VALUES ('{u}_inv_out', '{gid}', '{u}', '{u}_stranger')"
@@ -252,7 +222,6 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
          VALUES ('{u}_red', '{u}_link', '{u}', 1)"
     )).await;
 
-    // A DM.
     let dm = format!("{u}_dm");
     exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{dm}', 'dm')")).await;
     exec(c, &format!("INSERT INTO dm_channel (id, created_by) VALUES ('{dm}', '{u}')")).await;
@@ -262,8 +231,7 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     )).await;
 
     if !solo {
-        // A second member keeps the group and DM alive through the teardown, so
-        // the tests can tell "the actor's rows went" from "everything went".
+        // A second member keeps the group and DM alive through the teardown.
         exec(c, &format!(
             "INSERT INTO group_member (group_id, user_id, role) VALUES ('{gid}', '{peer}', 'member')"
         )).await;
@@ -274,10 +242,7 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     }
 }
 
-// ── Account deletion ─────────────────────────────────────────────────────────
-
-/// The headline property: after deleting an account, NO table names that user.
-/// Enumerated over every user-scoped column in the schema, not spot-checked.
+/// After deleting an account, no table names that user.
 #[tokio::test]
 async fn account_deletion_leaves_no_row_naming_the_user() {
     let c = conn().await;
@@ -291,8 +256,7 @@ async fn account_deletion_leaves_no_row_naming_the_user() {
     .await
     .unwrap();
     assert!(matches!(outcome, WriteOutcome::Ok));
-    // The commit-log DB is a separate connection in production; here one DB
-    // stands in for both, so run the log purge the handler would run.
+    // One DB stands in for the log DB here, so run its purge too.
     pollis_delivery::writes::purge_welcomes(&c, "victim").await.unwrap();
     pollis_delivery::teardown::purge_conversation_log(&c, &dead).await.unwrap();
 
@@ -302,15 +266,7 @@ async fn account_deletion_leaves_no_row_naming_the_user() {
     }
 }
 
-/// The same property when the user's conversations SURVIVE them — a group and a
-/// DM that still have another member in them.
-///
-/// This is the harder half: those rows cannot simply be deleted, and three of
-/// their columns (`groups.owner_id`, `dm_channel.created_by`,
-/// `dm_channel_member.added_by`) are `NOT NULL` pointers naming the departing
-/// user. They have to be handed over, and `dm_channel.created_by` is an
-/// authorization input, so leaving it dead would also wedge member removal in
-/// that DM forever.
+/// Surviving conversations need their `NOT NULL` pointers to the leaver handed over.
 #[tokio::test]
 async fn account_deletion_leaves_no_row_naming_the_user_in_surviving_conversations() {
     let c = conn().await;
@@ -329,8 +285,6 @@ async fn account_deletion_leaves_no_row_naming_the_user_in_surviving_conversatio
     pollis_delivery::teardown::purge_user_log_rows(&c, "victim").await.unwrap();
     pollis_delivery::teardown::purge_conversation_log(&c, &dead).await.unwrap();
 
-    // The conversations really did survive — otherwise this test would pass
-    // vacuously by having destroyed everything.
     assert_eq!(count_where(&c, "groups", "id", "victim_g").await, 1);
     assert_eq!(count_where(&c, "dm_channel", "id", "victim_dm").await, 1);
 
@@ -339,8 +293,6 @@ async fn account_deletion_leaves_no_row_naming_the_user_in_surviving_conversatio
         assert_eq!(n, 0, "{table}.{col} still names the deleted user ({n} rows)");
     }
 
-    // The handed-over pointers name a real remaining participant, not a
-    // placeholder.
     let mut rows = c
         .query("SELECT created_by FROM dm_channel WHERE id = 'victim_dm'", ())
         .await
@@ -349,8 +301,7 @@ async fn account_deletion_leaves_no_row_naming_the_user_in_surviving_conversatio
     assert_eq!(creator, "bystander", "DM creator must pass to a remaining member");
 }
 
-/// The exemptions are real, and deliberate: the account-key transparency log
-/// survives, because its leaves are already published and clients verify them.
+/// The account-key transparency log survives: its leaves are published.
 #[tokio::test]
 async fn account_deletion_keeps_the_append_only_transparency_log() {
     let c = conn().await;
@@ -371,16 +322,12 @@ async fn account_deletion_keeps_the_append_only_transparency_log() {
     );
 }
 
-/// A commit sitting in a SURVIVING conversation's chain is not the departing
-/// member's to remove: deleting it would leave an epoch gap that stops every
-/// remaining member from advancing. The baseline's `sender_id ... ON DELETE
-/// CASCADE` would do exactly that if foreign keys were ever switched on.
+/// A commit in a surviving conversation's chain stays, or members hit an epoch gap.
 #[tokio::test]
 async fn account_deletion_does_not_gap_a_surviving_conversations_commit_chain() {
     let c = conn().await;
     seed_user(&c, "bystander", "victim", false).await;
     seed_user(&c, "victim", "bystander", false).await;
-    // The victim commits into the bystander's still-populated conversation.
     exec(&c, "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
               VALUES ('bystander_c', 1, 'victim', X'02')").await;
 
@@ -432,15 +379,12 @@ async fn account_deletion_cannot_reach_another_account() {
             before[i]
         );
     }
-    // And their conversations are untouched.
     assert_eq!(count_where(&c, "groups", "id", "bystander_g").await, 1);
     assert_eq!(count_where(&c, "dm_channel", "id", "bystander_dm").await, 1);
     assert_eq!(count_where(&c, "channels", "id", "bystander_c").await, 1);
 }
 
-/// A shared group survives the departure, loses only the leaver's rows, and has
-/// its `owner_id` handed to the promoted admin rather than left dangling at a
-/// user who no longer exists.
+/// A shared group survives with `owner_id` handed to the promoted admin.
 #[tokio::test]
 async fn account_deletion_hands_over_a_shared_group_instead_of_destroying_it() {
     let c = conn().await;
@@ -471,8 +415,6 @@ async fn account_deletion_hands_over_a_shared_group_instead_of_destroying_it() {
     assert_eq!(role, "admin", "sole remaining member is promoted");
 }
 
-/// A DM left with nobody in it is torn down completely rather than kept as an
-/// unreachable conversation full of ciphertext.
 #[tokio::test]
 async fn account_deletion_tears_down_a_dm_it_empties() {
     let c = conn().await;
@@ -490,12 +432,7 @@ async fn account_deletion_tears_down_a_dm_it_empties() {
     assert_eq!(count(&c, "dm_channel_member").await, 0);
 }
 
-/// **L3 — two doors into one state.** `/v1/dm/leave` tore an emptied DM down;
-/// `/v1/dm/members/remove` did not, and it is reachable for the same act (a
-/// member removing THEMSELVES). So leaving a DM through the second door left an
-/// orphan `dm_channel` full of ciphertext and — because the `conversation`
-/// registry is append-only on purpose — the conversation id claimed forever by a
-/// conversation nobody is in.
+/// L3: removing yourself via `/v1/dm/members/remove` must tear down an emptied DM too.
 #[tokio::test]
 async fn self_removal_tears_down_a_dm_it_empties() {
     let c = conn().await;
@@ -526,9 +463,6 @@ async fn self_removal_tears_down_a_dm_it_empties() {
     );
 }
 
-/// The other half: a DM that still has somebody in it is NOT torn down. Without
-/// this the check above would pass just as well if the endpoint deleted every
-/// DM it touched.
 #[tokio::test]
 async fn self_removal_leaves_a_dm_that_still_has_members() {
     let c = conn().await;
@@ -556,8 +490,6 @@ async fn self_removal_leaves_a_dm_that_still_has_members() {
     );
 }
 
-/// Identity reset sheds membership and devices but is NOT deletion — the account
-/// and its own records stay.
 #[tokio::test]
 async fn identity_reset_keeps_the_account_but_sheds_membership() {
     let c = conn().await;
@@ -583,11 +515,6 @@ async fn identity_reset_keeps_the_account_but_sheds_membership() {
     assert_eq!(count_where(&c, "conversation_watermark", "user_id", "victim").await, 0);
 }
 
-// ── Group deletion ───────────────────────────────────────────────────────────
-
-/// After deleting a group, no table names it — enumerated over every
-/// group-scoped column, plus the per-conversation tables reachable through its
-/// channels.
 #[tokio::test]
 async fn group_deletion_leaves_no_row_naming_the_group() {
     let c = conn().await;
@@ -626,8 +553,7 @@ async fn group_deletion_leaves_no_row_naming_the_group() {
     }
     assert_eq!(count_where(&c, "message_reaction", "message_id", "owner_msg").await, 0);
     assert_eq!(count_where(&c, "attachment_ref", "message_id", "owner_msg").await, 0);
-    // The invite link's redemption row belongs to a user, so it survives with a
-    // blanked pointer rather than being deleted out from under them.
+    // The redemption row belongs to a user, so it survives with a blanked pointer.
     assert_eq!(count_where(&c, "group_invite_link_redemption", "id", "owner_red").await, 1);
     let mut rows = c
         .query("SELECT link_id FROM group_invite_link_redemption WHERE id = 'owner_red'", ())
@@ -637,7 +563,6 @@ async fn group_deletion_leaves_no_row_naming_the_group() {
     assert_eq!(link, None, "a redemption's dangling link_id must be nulled");
 }
 
-/// Deleting one group must not reach another group's rows.
 #[tokio::test]
 async fn group_deletion_cannot_reach_another_group() {
     let c = conn().await;
@@ -672,15 +597,11 @@ async fn group_deletion_cannot_reach_another_group() {
             before[i]
         );
     }
-    // The other group's conversation data is intact too.
     assert_eq!(count_where(&c, "message_envelope", "conversation_id", "peer_c").await, 1);
     assert_eq!(count_where(&c, "mls_commit_log", "conversation_id", "peer_c").await, 1);
     assert_eq!(count_where(&c, "conversation_watermark", "conversation_id", "peer_c").await, 1);
 }
 
-/// A non-admin cannot delete a group, so teardown can never run on someone
-/// else's authority. (The destructive path's authorization, pinned alongside the
-/// deletes it guards.)
 #[tokio::test]
 async fn group_deletion_refuses_a_non_admin() {
     let c = conn().await;
@@ -702,19 +623,11 @@ async fn group_deletion_refuses_a_non_admin() {
     assert_eq!(count_where(&c, "channels", "group_id", "owner_g").await, 1);
 }
 
-// ── Coverage: the schema cannot outgrow the teardown unnoticed ───────────────
-
-/// Read the LIVE schema and require every table naming a user to be either
-/// purged by account deletion or explicitly exempted with a reason.
-///
-/// This is the test that makes the class of bug non-recurring. Adding a table
-/// with a `user_id` and forgetting to tear it down fails here, at the point the
-/// migration lands, instead of silently retaining that user's data forever.
+/// Every table naming a user must be purged by account deletion or exempted with a reason.
 #[tokio::test]
 async fn every_user_scoped_table_is_accounted_for() {
     let c = conn().await;
 
-    // Column names that mean "this row is about a user".
     const USERISH: &[&str] = &[
         "user_id", "sender_id", "recipient_id", "blocker_id", "blocked_id",
         "inviter_id", "invitee_id", "requester_id", "created_by", "owner_id",
@@ -746,8 +659,7 @@ async fn every_user_scoped_table_is_accounted_for() {
         while let Some(r) = rows.next().await.unwrap() {
             cols.push(r.get::<String>(1).unwrap());
         }
-        // `users.id` is the anchor row, named by its primary key rather than by
-        // a *ish column.
+        // `users.id` is the anchor row, named by its primary key.
         let names_a_user =
             cols.iter().any(|col| USERISH.contains(&col.as_str())) || table == "users";
         if !names_a_user {
@@ -767,7 +679,6 @@ async fn every_user_scoped_table_is_accounted_for() {
     );
 }
 
-/// Same guarantee for conversation teardown.
 #[tokio::test]
 async fn every_conversation_scoped_table_is_accounted_for() {
     let c = conn().await;
@@ -819,8 +730,7 @@ async fn every_conversation_scoped_table_is_accounted_for() {
     );
 }
 
-/// `purge_user_rows` is idempotent — re-running it is a no-op, which is what
-/// makes a retry after a partial failure safe.
+/// `purge_user_rows` is idempotent, so a retry after partial failure is safe.
 #[tokio::test]
 async fn purging_twice_is_a_no_op() {
     let c = conn().await;

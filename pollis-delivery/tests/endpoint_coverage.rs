@@ -1,18 +1,4 @@
 //! #875 / #918 — every declared endpoint is actually routed.
-//!
-//! `pollis-api::ENDPOINTS` is the one place the write API is written down: the
-//! client posts `Body::PATH`, and this router is built from the same constant.
-//! That makes a *typo* impossible, but not an *omission* — a request type can be
-//! declared, used by `pollis-core`, and simply never routed. The client would
-//! then compile perfectly and 404 at runtime, which is precisely how
-//! `/v1/invite-links/*` reached the flows harness broken (#918).
-//!
-//! So: walk the table, hit every path, and require the router to know it. A
-//! 404 here means the endpoint exists in the type system and nowhere else.
-//!
-//! The mirror of this test lives in the `flows` harness
-//! (`src-tauri/tests/flows/harness.rs`), which asserts the same table against the
-//! in-process DS the integration suite runs against.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -21,25 +7,17 @@ use tower::ServiceExt as _;
 
 mod common;
 
-/// The router plus the fixture that owns its temp dir. The guard is returned
-/// rather than dropped here: it deletes the directory the DB lives in, so the
-/// caller has to hold it for as long as it drives the router (#942).
+/// The caller holds the fixture: dropping it deletes the DB's directory (#942).
 async fn router() -> (axum::Router, common::TempDb) {
     let db = common::TempDb::open("db.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap())
         .await
         .expect("schema");
-    // Auth OFF: this test is about ROUTING, not authorization. With auth on
-    // every probe would stop at the 401 gate, which is indistinguishable from a
-    // route that exists — and would pass even for a path that does not.
+    // Auth off: with auth on every probe stops at the 401 gate, hiding missing routes.
     (build_router_with_state(AppState::new(db.arc(), false)), db)
 }
 
-/// The treatment: every path in the shared endpoint table resolves to a handler.
-///
-/// The probe body is `{}`, which nearly every handler rejects as a bad request —
-/// that is fine and deliberate. A 400 proves a handler ran; a 404 proves none
-/// did. The assertion is only ever about the difference between those two.
+/// A 400 to the `{}` probe proves a handler ran; a 404 proves none did.
 #[tokio::test]
 async fn every_declared_endpoint_is_routed() {
     let (app, _db) = router().await;
@@ -66,12 +44,7 @@ async fn every_declared_endpoint_is_routed() {
     );
 }
 
-/// The control: the probe above can actually observe a missing route.
-///
-/// Without this, `every_declared_endpoint_is_routed` would pass just as happily
-/// against a router that answered 200 to everything, and the test would be
-/// proving nothing. A path deliberately absent from the table must come back
-/// 404 through the same probe.
+/// The control: the probe can actually observe a missing route.
 #[tokio::test]
 async fn an_unrouted_path_is_observably_404() {
     let (app, _db) = router().await;
@@ -89,63 +62,11 @@ async fn an_unrouted_path_is_observably_404() {
     );
 }
 
-/// The table is not allowed to shrink silently.
-///
-/// `ENDPOINTS` drives the client, both routers and both coverage tests, so
-/// deleting a row disables all of them at once with no failure anywhere. This
-/// pins the count: adding or removing an endpoint is then a deliberate edit here
-/// as well, not a side effect.
+/// The table must not shrink silently: removing a row disables every coverage test.
 #[test]
 fn the_endpoint_table_covers_the_whole_write_surface() {
     assert_eq!(
         pollis_api::ENDPOINTS.len(),
-        // 94 since #987 moved every client remote READ behind the DS: +8
-        // directory/conversation endpoints, +12 account/device/object reads, +2
-        // MLS control-plane reads (`/v1/mls/conversation-state`,
-        // `/v1/welcomes/fetch`), and -1 for `/v1/turso/token`, the read-only
-        // database-token mint the client no longer has any use for. That last
-        // one is the point of the migration: with no client connection left, an
-        // endpoint that hands out database credentials is pure attack surface.
-        //
-        // 96 since #844 added the encrypted read-cursor sync:
-        // `/v1/read-cursors/save` and `/v1/read/read-cursors`.
-        //
-        // 104 since #99 added pinned messages (`/v1/pins/keystate`,
-        // `/v1/pins/pin`, `/v1/pins/unpin`, `/v1/read/pin-keystate`,
-        // `/v1/read/pins`) and #107 the vault (`/v1/vault/save`,
-        // `/v1/vault/delete`, `/v1/read/vault`).
-        //
-        // 105 since leaf cross-signing moved onto the committer:
-        // `/v1/read/roster-identities` is the batched cert-material read a
-        // reconcile verifies every added and retained leaf against.
-        //
-        // 106 since #1122 stopped putting `conversationId` in the push payload:
-        // `/v1/push/resolve` trades the opaque handle for the conversation it
-        // was minted for, over the client's own authenticated channel, so
-        // Expo/APNs/FCM never see which conversation a notification is for.
-        //
-        // 109 since #1207 added QR device links: `/v1/link/create` and
-        // `/v1/link/status` (device-signed, from the device showing the QR) and
-        // `/v1/link/claim` (pre-credential; mints an enrollment-only session).
-        //
-        // 110 since #1213 added abuse reports: `/v1/reports` (device-signed;
-        // ids and a reason, never content).
-        //
-        // 113 since #1361 added the reverse QR sign-in, shown by the NEW
-        // device: `/v1/link/offer` and `/v1/link/poll-offer` (pre-credential)
-        // and `/v1/link/accept-offer` (device-signed, from the scanner).
-        //
-        // 115 since #1382 keyed attachments to an MLS-wrapped per-conversation
-        // ring: `/v1/file-keys/keystate` and `/v1/read/file-keystate`.
-        //
-        // 117 since #1431 added the per-channel mute the push fan-out reads:
-        // `/v1/channel-mutes/set` and `/v1/read/channel-mutes`.
-        //
-        // 118 since #1506 let the inviter or an admin withdraw a pending invite
-        // from the member page: `/v1/invites/revoke`.
-        // 120 since #1508 clears read notifications from every device:
-        // `/v1/push/dismiss` (a read moved the cursor) and `/v1/push/dismissed`
-        // (a phone that missed the silent push catches up on foreground).
         120,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"

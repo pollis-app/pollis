@@ -6,27 +6,14 @@
 //!   LOG_DB_URL          libsql://… for the separate commit-log DB (optional)
 //!   LOG_DB_ADMIN_TOKEN  read-write token for the commit-log DB (optional)
 //!   PORT                listen port (default 8788)
-//!   RESEND_API_KEY      Resend key for sending sign-in OTP emails (the client no
-//!                       longer ships this). Unset → OTP email is not sent.
-//!   DEV_OTP             dev/harness override — skip the email send and force this
-//!                       exact OTP code (optional).
+//!   RESEND_API_KEY      Resend key for OTP emails. Unset → OTP email is not sent.
+//!   DEV_OTP             dev/harness override: skip the email, force this OTP code (optional).
 //!   OTP_TTL_SECS        OTP lifetime in seconds (optional, default 600).
 //!   APP_REVIEW_LOGIN    `<email>:<6 digits>` — the store-review account signs in
 //!                       with this fixed code and no email is sent (optional).
-//!   EXPO_TOKEN   Expo access token the content-free push fan-out
-//!                       authenticates with (#707). Optional today; REQUIRED
-//!                       once "Enhanced Security for Push Notifications" is
-//!                       enabled on the Expo account, which rejects any
-//!                       unauthenticated send. Read by `push::expo_token`.
+//!   EXPO_TOKEN          Expo token for push fan-out (#707); required once Enhanced Security is on.
 //!
-//! `RESEND_API_KEY` / `DEV_OTP` / `OTP_TTL_SECS` / `APP_REVIEW_LOGIN` are read by
-//! `OtpConfig::from_env` inside `build_router_with_log_db`.
-//!
-//! When both `LOG_DB_URL` and `LOG_DB_ADMIN_TOKEN` are set, the MLS
-//! control-plane tables (`mls_commit_log`, `mls_group_info`, `mls_welcome`) are
-//! written to/read from that separate "commit-log" database — the DS is its
-//! sole writer. When they're absent, the DS falls back to the single `TURSO_*`
-//! database (existing single-DB deploys and the test harness are unaffected).
+//! With both `LOG_DB_*` set, the MLS control-plane tables live in that DB; else in `TURSO_*`.
 //!
 //! Terminate TLS at a reverse proxy in front (this serves plain HTTP), and run
 //! it beside the LiveKit container behind `api.pollis.com`.
@@ -68,9 +55,7 @@ async fn main() -> Result<()> {
             .context("connect to Turso")?,
     );
 
-    // Optional separate commit-log DB. When both vars are present, the DS writes
-    // the MLS control-plane tables there (it holds the read-write admin token and
-    // is the sole writer). Otherwise fall back to the single `db` above.
+    // Optional separate commit-log DB; otherwise fall back to the single `db` above.
     let log_url = std::env::var("LOG_DB_URL").ok().filter(|s| !s.is_empty());
     let log_token = std::env::var("LOG_DB_ADMIN_TOKEN")
         .ok()
@@ -90,14 +75,10 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Build the state first so the sweep and the router share one
-    // `retention_metrics` cell: the sweep writes the growth snapshot, the
-    // `/v1/retention/metrics` endpoint serves it (#720 checkbox 1).
+    // Built first so the sweep and the router share one `retention_metrics` cell (#720).
     let state = build_app_state(Arc::clone(&db), log_db);
 
-    // Detach the envelope-GC trigger from member activity (#689): a DS-internal
-    // task sweeps every conversation on a fixed cadence. Started before the
-    // router so it also runs on a scale-to-zero wake.
+    // Envelope-GC sweep (#689); started before the router so it also runs on a scale-to-zero wake.
     spawn_envelope_gc_sweep(Arc::clone(&db), state.retention_metrics.clone());
 
     let app = build_router_with_state(state);
@@ -116,24 +97,11 @@ async fn main() -> Result<()> {
 
 /// Spawn the envelope-GC sweep (#689) — the server-side GC *trigger*.
 ///
-/// Envelope GC's deletion predicate is many-member correct (bounded by the
-/// slowest member device's watermark, invariant I3), but it used to *fire* only
-/// from whichever member device happened to ingest. A conversation whose members
-/// all went quiet therefore never ran GC, and a chatty one ran it far more than
-/// needed. This sweeps every conversation with envelopes on a fixed cadence,
-/// decoupling the trigger from member activity. The predicate is untouched.
+/// Decouples GC's trigger from member activity; the deletion predicate is untouched.
 ///
-/// A timer — not an event — because the state that makes envelopes collectible
-/// (the slowest device's watermark advancing, or the roster shrinking on a
-/// revocation) can settle with no further request to hang an event on, and the
-/// quiet-conversation case has by definition no event to fire on. It runs inside
-/// the sole-writer DS process (no new infra, secrets, or routes), and because the
-/// first tick fires immediately it also catches up on every scale-to-zero wake.
-/// Cadence via `POLLIS_DS_GC_SWEEP_SECS` (default 3600); `0` disables it.
+/// A timer: collectible state can settle with no request to hook. `POLLIS_DS_GC_SWEEP_SECS`.
 ///
-/// The sweep also carries the #720 device-liveness window
-/// (`watermark_stale_modifier`) and, on the same walk, gathers the identity-free
-/// growth snapshot it stores in `metrics` and logs (#720 checkbox 1).
+/// Also carries the #720 liveness window and gathers the growth snapshot.
 fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
     let secs = gc_sweep_secs();
     if secs == 0 {
@@ -152,10 +120,7 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                     Ok(report) => {
                         emit_retention_metrics(report.visited, &report.metrics);
                         *metrics.lock().unwrap() = Some(report.metrics);
-                        // #762: aged-out audit rows and dead push tokens, on the
-                        // same schedule so there is one sweep to reason about.
-                        // A failure here must not lose the envelope-GC result
-                        // above, so it is logged rather than propagated.
+                        // #762: aged-out audit rows and dead push tokens; logged so the GC result isn't lost.
                         match pollis_delivery::messages::sweep_aged_records(
                             &conn,
                             pollis_delivery::messages::security_event_retention_days(),
@@ -168,11 +133,7 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                             Ok(_) => {}
                             Err(e) => tracing::warn!("aged-record sweep failed: {e}"),
                         }
-                        // #1122: expired push handles, on the same schedule.
-                        // These are the ONLY durable record that a notification
-                        // for a given conversation went to a given user, so the
-                        // sweep is the mitigation, not housekeeping — an unswept
-                        // table would turn a momentary fact into a permanent one.
+                        // #1122: expired push handles; the sweep is the mitigation, not housekeeping.
                         match pollis_delivery::push::sweep_push_handles(&conn).await {
                             Ok(n) if n > 0 => {
                                 tracing::info!("retention sweep: aged out {n} push_handle row(s)")
@@ -180,9 +141,7 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                             Ok(_) => {}
                             Err(e) => tracing::warn!("push-handle sweep failed: {e}"),
                         }
-                        // #1423: ask Expo for the receipts of the pushes sent
-                        // since, prune tokens it says are dead, and drop
-                        // tickets once answered or past 24 hours.
+                        // #1423: fetch Expo receipts, prune dead tokens, drop answered tickets.
                         match pollis_delivery::push::check_push_receipts(&conn).await {
                             Ok(r) if r.checked > 0 || r.expired > 0 => tracing::info!(
                                 "push receipts: {} checked ({} error), {} expired unanswered",
@@ -202,12 +161,7 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
     });
 }
 
-/// Log the identity-free growth snapshot from a sweep (#720 checkbox 1). This is
-/// the source of truth the owner scrapes; deliberately carries NO conversation or
-/// user id — only counts and the worst offender's SHAPE. Alert routing
-/// (thresholds/paging in Cloudflare/Grafana/email) is the owner's console and is
-/// out of scope: this only EMITS the numbers, on both a log line and
-/// `GET /v1/retention/metrics`.
+/// Log the identity-free growth snapshot (#720): counts only, no conversation or user id.
 fn emit_retention_metrics(visited: usize, m: &RetentionSnapshot) {
     tracing::info!(
         visited,
@@ -224,21 +178,9 @@ fn emit_retention_metrics(visited: usize, m: &RetentionSnapshot) {
 /// Resolve when the process is asked to terminate — SIGTERM (orchestrator) or
 /// SIGINT (local `ctrl_c`).
 ///
-/// Cloudflare Containers do drain-then-replace: on a deploy they SIGTERM the
-/// running instance, wait up to ~15 min for a graceful exit, then SIGKILL, then
-/// start the new one. This binary is PID 1 in the container, so with no SIGTERM
-/// handler the kernel does NOT apply the default terminate action — SIGTERM is
-/// IGNORED and the OLD instance keeps serving for the full grace window,
-/// stalling the swap (and holding the sole-writer role) for up to 15 minutes.
-/// Awaiting SIGTERM here collapses that to seconds.
+/// PID 1 in the container: without a handler SIGTERM is IGNORED for the ~15 min grace.
 ///
-/// Once a signal arrives we also arm a detached hard-exit backstop: axum's
-/// graceful drain waits for in-flight requests, and a single slow/hung request
-/// must not keep the OLD writer alive — that is exactly the stale-instance
-/// failure. Cutting an in-flight request is safe: commit writes are atomic
-/// IMMEDIATE transactions against remote Turso, so an uncommitted tx simply
-/// never commits and the client retries — no corruption (the commit-log CAS
-/// rejects any stale/out-of-order write regardless).
+/// Then a hard-exit backstop, so a hung request can't keep the old writer alive.
 #[cfg(unix)]
 async fn shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
