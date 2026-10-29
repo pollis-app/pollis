@@ -7,54 +7,33 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-// ── On-disk media cache ───────────────────────────────────────────────────
-//
-// Media is materialised on disk **encrypted at rest** under a content-
-// addressed cache (`<hash>.<ext>.enc`). The frontend never reads these
-// files directly — instead it embeds `http://127.0.0.1:<port>/<token>/<hash>`
-// URLs and the loopback media server (`crate::media_server`) decrypts on
-// demand. One URL pattern across `<img>/<audio>/<video>` and bytes never
-// touch the JSON IPC.
-//
-// Per-file key derivation: HKDF-SHA256(salt = `pollis-media-cache-v1`,
-// ikm = `db_key`, info = the object's file id bytes). Keyed by this
-// device's `db_key`, so it shares nothing with the upload-side file key
-// (`file_keys::derive_file_key`, keyed by the conversation's ring).
+// On-disk media cache: content-addressed files (`<hash>.<ext>.enc`) encrypted at
+// rest, served decrypted by the loopback media server (`crate::media_server`),
+// so bytes never cross the JSON IPC. Per-file key: HKDF-SHA256(salt
+// `pollis-media-cache-v1`, ikm `db_key`, info = file id), unrelated to the
+// upload-side file key.
 
 /// Hard cap on total cache size before LRU eviction kicks in.
 const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
 
-/// Per-file cap. Files larger than this skip the cache entirely — the
-/// caller falls back to the byte path for that one render. Bounds the
-/// worst-case eviction storm where a single huge file would push every
-/// other entry out.
+/// Per-file cap. Larger files skip the cache (the caller uses the byte path), so
+/// one huge file can't evict everything else.
 pub const MEDIA_CACHE_MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 
-/// Hard ceiling on how many bytes any single R2 download may buffer, enforced
-/// mid-transfer by [`r2_get_url`].
+/// Hard ceiling on what any single R2 download may buffer, enforced mid-transfer
+/// by [`r2_get_url`].
 ///
-/// Not a product limit — a memory-safety one. Every download here is buffered
-/// whole (an attachment is decrypted and re-hashed in memory, so it is resident
-/// twice at the peak), which means the size of a fetch is dictated by whatever
-/// the DS-chosen URL decides to send. Without a cap that is unbounded: a
-/// compromised or impersonated DS, or an R2 object that is not what its key
-/// says, can stream until the process dies, and no downstream check runs
-/// because none of them are reached. Deliberately far above any attachment this
-/// client can produce — uploads hold plaintext and ciphertext in memory too, so
-/// anything approaching this never survived its own upload.
+/// A memory-safety bound, not a product limit: downloads are buffered whole, so
+/// without it a compromised DS or a wrong R2 object could stream until the
+/// process dies. Far above anything this client can upload.
 pub const R2_MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
 
-/// Set once at app startup from the Tauri shim (`app_data_dir()`).
+/// Set once at startup from the Tauri shim.
 static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// The private temporary directory the test cache root lives in — held for the
-/// life of the process, since the root itself is a `OnceLock`.
-///
-/// A `TempDir` rather than a name under `std::env::temp_dir()`: the root's
-/// PARENT is a directory this process owns, so a test that hands the wipe a
-/// `".."` or an absolute sibling path can only ever reach into this directory,
-/// never into the shared temp dir (or anything else on the machine) — even if
-/// the guards it is testing were broken.
+/// The private temp dir holding the test cache root, for the life of the process.
+/// A `TempDir` so a test handing the wipe `".."` or a sibling path can only reach
+/// into a directory this process owns, even with the guards broken.
 #[cfg(test)]
 static TEST_CACHE_TEMP: OnceLock<tempfile::TempDir> = OnceLock::new();
 
@@ -65,11 +44,8 @@ pub(crate) fn test_cache_temp() -> &'static Path {
         .path()
 }
 
-/// The one cache root every test in this binary shares.
-///
-/// [`MEDIA_CACHE_DIR`] is a `OnceLock` — production installs it once at
-/// startup — so a test cannot have a root of its own. Tests scope themselves by
-/// using their own user directory underneath this one instead.
+/// The one cache root every test shares ([`MEDIA_CACHE_DIR`] is a `OnceLock`);
+/// tests scope themselves by user directory.
 #[cfg(test)]
 pub(crate) fn test_cache_root() -> &'static Path {
     let root = MEDIA_CACHE_DIR.get_or_init(|| test_cache_temp().join("media-cache"));
@@ -77,12 +53,9 @@ pub(crate) fn test_cache_root() -> &'static Path {
     root
 }
 
-/// Per-user scope for the cache. Two clients on the same machine each have
-/// their own `db_key`; without per-user scoping they'd share `MEDIA_CACHE_DIR`
-/// and try (and fail) to decrypt each other's entries — 500 from the media
-/// server. Set after sign-in via `set_cache_user(Some(user_id))`, cleared on
-/// logout via `set_cache_user(None)`. The pre-signin window falls back to a
-/// shared "_anon" bucket.
+/// Per-user cache scope: each user has their own `db_key`, so a shared directory
+/// would fail to decrypt the other's entries. Set after sign-in, cleared on
+/// logout; `_anon` before sign-in.
 static CURRENT_CACHE_USER: StdMutex<Option<String>> = StdMutex::new(None);
 
 pub fn set_cache_user(user_id: Option<&str>) {
@@ -91,18 +64,15 @@ pub fn set_cache_user(user_id: Option<&str>) {
     }
 }
 
-/// Per-hash locks so concurrent callers for the same content_hash share one
-/// download instead of racing to write the same file. The outer mutex guards
-/// the map; the inner `Arc<TokioMutex>` is the actual gate.
+/// Per-hash locks so concurrent callers for one hash share one download.
 static IN_FLIGHT: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
 
 fn in_flight() -> &'static StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
     IN_FLIGHT.get_or_init(|| StdMutex::new(HashMap::new()))
 }
 
-/// Initialise the on-disk media cache directory. Must be called once during
-/// app setup (the Tauri shim plumbs in `app_data_dir().join("media-cache")`).
-/// Idempotent: subsequent calls are ignored.
+/// Initialise the media cache directory, once, at app setup. Later calls are
+/// ignored.
 pub fn set_media_cache_dir(path: PathBuf) {
     let _ = MEDIA_CACHE_DIR.set(path);
 }
@@ -123,38 +93,27 @@ fn media_cache_dir() -> Result<PathBuf> {
     Ok(path)
 }
 
-/// `<root>/<user>` — the ONLY way a user id becomes a cache directory.
+/// `<root>/<user>`, the only way a user id becomes a cache directory.
 ///
-/// `Path::join` with an absolute right-hand side replaces the base and `..`
-/// walks out of it, and the id arrives from the Delivery Service (`verify-otp`)
-/// by way of `accounts.json`. `commands::auth` rejects a malformed one at that
-/// chokepoint; this is the same check at the join, so an id that is not one
-/// plain path component never becomes a path at all and nothing below — the
-/// wipe, the cap sweep, the `create_dir_all` + chmod — can be pointed outside
-/// the root. `None` means "this user has no cache directory", which every
-/// caller already handles as "nothing there".
+/// The id originates from the DS, and `join` with an absolute path or `..` escapes
+/// the root, so anything not a single safe path component yields `None` ("no
+/// cache directory") and can never become a path for the wipe or cap sweep.
 fn user_cache_dir(root: &Path, user: &str) -> Option<PathBuf> {
     if !crate::util::is_safe_id(user) {
         return None;
     }
     let path = root.join(user);
-    // `is_safe_id` rules out separators, so this cannot fail; it is the
-    // structural statement of what the charset check is for.
     if path.parent() != Some(root) {
         return None;
     }
     Some(path)
 }
 
-/// Where `dir` sits relative to the cache root, as the filesystem sees it —
-/// after resolving `..` and symlinks on both sides. Both paths have to exist to
-/// be canonicalized; a `dir` that does not exist holds nothing to delete or
-/// evict, so `Outside` is the right answer for it too.
+/// Where `dir` sits relative to the cache root after canonicalizing both. A
+/// missing `dir` holds nothing, so `Outside` is right for it too.
 #[derive(Debug, PartialEq, Eq)]
 enum CacheRootRelation {
-    /// `dir` IS the root.
     Root,
-    /// `dir` is a strict descendant of the root.
     Inside,
     /// Anything else, including "cannot tell".
     Outside,
@@ -173,8 +132,7 @@ fn relation_to_cache_root(root: &Path, dir: &Path) -> CacheRootRelation {
     }
 }
 
-/// Map a MIME type to a file extension. Falls back to `bin`. Kept small —
-/// we only need extensions for the media types Pollis actually renders.
+/// MIME type to file extension for the types Pollis renders; `bin` otherwise.
 pub(crate) fn ext_for_content_type(ct: &str) -> &'static str {
     match ct {
         "image/png" => "png",
@@ -196,22 +154,16 @@ pub(crate) fn ext_for_content_type(ct: &str) -> &'static str {
     }
 }
 
-/// `pub(crate)` so `commands::emoji` writes custom-emoji bytes into the SAME
-/// on-disk cache under the same naming scheme. That is what lets the loopback
-/// media server serve an emoji with no changes at all — it resolves
-/// `/{token}/{hash}` by scanning for `<hash>.<ext>.enc`, and does not care which
-/// subsystem put the file there.
+/// Also used by `commands::emoji`, so emoji land in the same cache and the media
+/// server serves them unchanged.
 pub(crate) fn cache_file_path(content_hash: &str, content_type: &str) -> Result<PathBuf> {
     let dir = media_cache_dir()?;
     let ext = ext_for_content_type(content_type);
     Ok(dir.join(format!("{content_hash}.{ext}.enc")))
 }
 
-/// Map a file extension back to a Content-Type for the HTTP server's
-/// response headers. Inverse of `ext_for_content_type`. Mismatches (e.g.
-/// the cache was populated under one MIME and the request supplies
-/// another) fall back to `application/octet-stream`; the browser
-/// usually sniffs anyway.
+/// Extension back to Content-Type for the media server; unknown is
+/// `application/octet-stream`.
 pub fn content_type_for_ext(ext: &str) -> &'static str {
     match ext {
         "png" => "image/png",
@@ -233,19 +185,14 @@ pub fn content_type_for_ext(ext: &str) -> &'static str {
     }
 }
 
-/// Locate the encrypted cache file for a given content hash. Returns the
-/// path and the inner extension (between `<hash>.` and `.enc`) so the
-/// caller can derive a Content-Type. `None` if no file with this hash
-/// exists in the cache.
+/// The encrypted cache file for `content_hash` and its inner extension, if any.
 pub fn find_cached_file(content_hash: &str) -> Option<(PathBuf, String)> {
     let dir = media_cache_dir().ok()?;
     find_cached_file_in(&dir, content_hash)
 }
 
-/// [`find_cached_file`] for a NAMED user rather than the ambient one — the same
-/// decoupling [`CacheScope::User`] gives the wipe (#1000). The export (#856)
-/// runs under the unlock's `user_id` and must never read another user's
-/// directory, nor `_anon` because the ambient user happened to be unset.
+/// [`find_cached_file`] for a named user rather than the ambient one (#1000). The
+/// export (#856) must never read another user's directory or `_anon`.
 pub(crate) fn find_cached_file_for_user(user_id: &str, content_hash: &str) -> Option<(PathBuf, String)> {
     let root = MEDIA_CACHE_DIR.get()?;
     find_cached_file_in(&user_cache_dir(root, user_id)?, content_hash)
@@ -263,22 +210,15 @@ fn find_cached_file_in(dir: &Path, content_hash: &str) -> Option<(PathBuf, Strin
         if !name.starts_with(&prefix) || !name.ends_with(".enc") {
             continue;
         }
-        // Strip prefix + trailing `.enc` to get the inner extension.
         let inner = name[prefix.len()..name.len() - ".enc".len()].to_string();
         return Some((path, inner));
     }
     None
 }
 
-/// Remove `user_id`'s cached copy of `content_hash`, if it has one — for a file
-/// whose last reference this user just deleted, so its cache entry does not sit
-/// on disk until eviction or sign-out (#1491). The cached bytes are encrypted at
-/// rest; this is about a deleted file no longer existing anywhere, not about
-/// plaintext.
-///
-/// The hash is a file id (64 hex) or a content digest; anything else names no
-/// cache file and is ignored, so a malformed reference cannot be turned into a
-/// pattern that matches some other entry.
+/// Remove `user_id`'s cached copy of a file whose last reference they just
+/// deleted (#1491). Only a 64-hex hash is accepted, so a malformed reference
+/// can't become a pattern matching another entry.
 pub(crate) fn evict_cached_file_for_user(user_id: &str, content_hash: &str) {
     if content_hash.len() != 64 || !content_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         return;
@@ -296,13 +236,8 @@ pub(crate) fn evict_cached_file_for_user(user_id: &str, content_hash: &str) {
     }
 }
 
-/// Counts every full walk of the media-cache directory.
-///
-/// Exists so "this code path does not stat the whole cache" can be asserted as
-/// a number rather than timed (#930). Test-only; there is no counter in a
-/// release build. Bumped by the three functions that enumerate the whole
-/// directory — `enforce_cache_cap_to`, `cache_total_bytes`, `clear_media_cache`
-/// — and not by `find_cached_file`, which short-circuits on its first match.
+/// Counts full walks of the media-cache directory (test-only), so "this path
+/// doesn't stat the whole cache" is asserted as a number (#930).
 #[cfg(any(test, feature = "test-harness"))]
 static CACHE_DIR_WALKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -312,36 +247,27 @@ pub fn cache_dir_walks() -> u64 {
     CACHE_DIR_WALKS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Called at the top of every function that enumerates the cache directory.
 #[inline]
 fn note_cache_dir_walk() {
     #[cfg(any(test, feature = "test-harness"))]
     CACHE_DIR_WALKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Stat every file in the cache; if total size exceeds the cap, delete by
-/// oldest mtime first until we're under.
+/// Evict oldest-mtime files until the cache is under its cap.
 ///
-/// **Driven by cache mutation, never by the UI (#930).** Every path that adds
-/// bytes to the cache calls this immediately after its write, which is what
-/// makes the cap hold and is also what catches files copied in from outside or
-/// mtime-tampered. It used to be called on window focus as well: that walked
-/// the entire directory on every alt-tab, scaling with the size of the cache
-/// rather than with anything the user had done — and after #874 removed the
-/// other focus-time costs it was the only work left there. A cache nobody is
-/// writing to cannot grow, so there is nothing for a focus event to find.
+/// Called by every path that adds bytes to the cache, never by the UI (#930): a
+/// cache nobody writes to can't grow, and a sweep on every window focus scaled
+/// with the cache size.
 fn enforce_cache_cap(dir: &Path) {
     enforce_cache_cap_to(dir, MEDIA_CACHE_MAX_BYTES);
 }
 
-/// Lower-bound variant: shrink the cache to at most `target_bytes` by
-/// evicting oldest entries first. Used both by the regular cap-enforcer
-/// and by the pre-write headroom check in `get_media_url`.
+/// Shrink the cache to at most `target_bytes`, oldest first. Also the pre-write
+/// headroom check in `get_media_url`.
 fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     note_cache_dir_walk();
-    // Eviction deletes files. Only a per-user directory under the cache root
-    // is ever a legitimate target — the root itself holds directories, and
-    // anything else is a path this module must not have been handed.
+    // Eviction deletes files: only a per-user directory under the root is a valid
+    // target.
     let Some(root) = MEDIA_CACHE_DIR.get() else {
         return;
     };
@@ -357,7 +283,6 @@ fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     let mut total: u64 = 0;
     for entry in entries.flatten() {
         let path = entry.path();
-        // Ignore in-progress writes.
         if path.extension().is_some_and(|e| e == "tmp") {
             continue;
         }
@@ -378,7 +303,6 @@ fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
         return;
     }
 
-    // Oldest first.
     files.sort_by_key(|(_, _, mtime)| *mtime);
     for (path, size, _) in files {
         if total <= target_bytes {
@@ -390,14 +314,10 @@ fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     }
 }
 
-// There is deliberately no `enforce_cache_cap_now()` (#930). It existed only
-// so `src-tauri`'s `WindowEvent::Focused(true)` arm could re-run the sweep;
-// see `enforce_cache_cap` above for why focus is the wrong trigger. Adding a
-// public entry point back would re-open that door — the cap belongs to the
-// write path.
+// No public `enforce_cache_cap_now()` on purpose (#930): the cap belongs to the
+// write path, not to focus events.
 
-/// Sum of all cached file sizes. Used to gate downloads against the cap
-/// *before* writing new bytes, so the cache never peaks above the cap.
+/// Total cached bytes, so downloads are gated against the cap before writing.
 pub fn cache_total_bytes() -> u64 {
     note_cache_dir_walk();
     let dir = match media_cache_dir() {
@@ -421,47 +341,34 @@ pub fn cache_total_bytes() -> u64 {
 
 /// Which slice of the media cache a wipe covers.
 ///
-/// The scope is a PARAMETER, and that is the whole point. The wipe used to read
-/// [`CURRENT_CACHE_USER`] itself, so which directory it hit depended on where in
-/// a lifecycle sequence the caller happened to sit — and every caller sat on the
-/// wrong side of it. `logout` called it after `unload_user_db` (which clears the
-/// ambient user), and both PIN paths called it before the load that sets one, so
-/// all three resolved `media-cache/_anon/`, an empty directory, and left the real
-/// `media-cache/<user_id>/` untouched. Naming the user at the call site makes the
-/// ordering unable to matter.
+/// A parameter on purpose (#1000): reading the ambient [`CURRENT_CACHE_USER`] made
+/// the target depend on call order, and every caller ended up wiping the empty
+/// `_anon` directory instead of the user's.
 #[derive(Clone, Copy, Debug)]
 pub enum CacheScope<'a> {
-    /// One user's cache directory. What logout and both unlock paths want: this
-    /// person's decrypted media stops being on disk, and a second client signed
-    /// in as somebody else on the same machine keeps its own.
+    /// One user's cache directory (logout, both unlock paths); other users on the
+    /// machine keep theirs.
     User(&'a str),
-    /// The whole cache root — every user's directory and the pre-sign-in `_anon`
-    /// bucket. "Wipe this computer", and logout when the accounts index is too
-    /// corrupt to say who was signed in.
+    /// The whole root, every user's directory and `_anon`: "wipe this computer", and
+    /// logout when the accounts index can't say who was signed in.
     Everything,
 }
 
-/// Wipe the media cache, so decrypted media doesn't sit on disk past the session
-/// that fetched it. The cache root itself stays, so a subsequent sign-in doesn't
-/// have to re-create it.
-///
-/// Resolves the root directly rather than through `media_cache_dir()`: that
-/// helper appends the ambient user, which is the coupling [`CacheScope`] exists
-/// to remove.
+/// Wipe the media cache so decrypted media doesn't outlive its session. The root
+/// stays. Resolves the root directly, since `media_cache_dir()` appends the
+/// ambient user.
 pub fn clear_media_cache(scope: CacheScope<'_>) {
     note_cache_dir_walk();
     let root = match MEDIA_CACHE_DIR.get() {
         Some(r) => r,
-        // No cache root was ever installed (pollis-tui, headless, tests), so
-        // there is nothing on disk to wipe.
+        // No cache root was installed (TUI, headless, tests).
         None => return,
     };
     match scope {
         CacheScope::User(user_id) => {
-            // An id that is not one plain path component names no cache
-            // directory, so there is nothing to wipe. Joining it anyway is how
-            // a DS-chosen `"/home/alice"` used to become the target: `join`
-            // with an absolute component REPLACES the root.
+            // An id that isn't one plain path component names no directory; joining it
+            // anyway (an absolute `"/home/alice"` replaces the root) is how a DS-chosen id
+            // used to become the target.
             if let Some(dir) = user_cache_dir(root, user_id) {
                 remove_dir_contents(root, &dir);
             }
@@ -470,13 +377,9 @@ pub fn clear_media_cache(scope: CacheScope<'_>) {
     }
 }
 
-/// Empty a directory of both files and subdirectories, keeping the directory.
-///
-/// Refuses any `dir` that does not resolve to the cache `root` or a directory
-/// under it. `remove_dir_all` is the most destructive call in the client, and
-/// the callers above build `dir` from data that was, at some point, chosen by a
-/// server — so the proof that it is inside the root is made here, at the
-/// deletion, rather than trusted from the call site.
+/// Empty a directory, keeping it. Refuses any `dir` not resolving to the root or
+/// under it: `remove_dir_all` is the most destructive call in the client and
+/// `dir` derives from server-chosen data, so the check lives at the deletion.
 fn remove_dir_contents(root: &Path, dir: &Path) {
     if relation_to_cache_root(root, dir) == CacheRootRelation::Outside {
         return;
@@ -487,8 +390,7 @@ fn remove_dir_contents(root: &Path, dir: &Path) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        // Under `CacheScope::Everything` the entries are the per-user
-        // directories, so a plain `remove_file` there would delete nothing.
+        // Under `Everything` the entries are per-user directories.
         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             let _ = std::fs::remove_dir_all(&path);
         } else {
@@ -496,8 +398,6 @@ fn remove_dir_contents(root: &Path, dir: &Path) {
         }
     }
 }
-
-// ── Existing commands (avatars, group icons) ───────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UploadResult {
@@ -511,9 +411,8 @@ pub async fn upload_file(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
-    // Every PUT declares its exact length now: the DS signs `content-length`
-    // into the URL, so R2 itself refuses a body of any other size. A presign
-    // with no length is permission to write an object of ANY size.
+    // Every PUT declares its exact length; the DS signs it into the URL, so R2
+    // refuses any other size.
     let put_url =
         presign_r2_with_length(state, "put", &key, Some(data.len() as u64)).await?;
     let overlay = state.overlay_handle();
@@ -528,9 +427,7 @@ pub async fn download_file(
 ) -> Result<Vec<u8>> {
     let get_url = presign_r2(state, "get", &key).await?;
     let overlay = state.overlay_handle();
-    // The public byte-returning command: this is the boundary that owes an owned
-    // `Vec`, so the conversion happens HERE rather than inside `r2_get_url`
-    // where it used to cost every caller a copy (#915).
+    // The owned `Vec` conversion happens at this public boundary (#915).
     match r2_get_url(overlay.as_deref(), &get_url, MEDIA_CACHE_MAX_FILE_BYTES).await? {
         Some(bytes) => Ok(bytes.to_vec()),
         None => Err(Error::Other(anyhow::anyhow!(
@@ -539,27 +436,13 @@ pub async fn download_file(
     }
 }
 
-// ── Public objects (avatars, group icons) ─────────────────────────────────
-//
-// Avatars and group icons are stored in the CLEAR — they are public profile
-// decoration, not message content. What they are not is stable: an avatar used
-// to live at `avatars/{user_id}` and be overwritten in place, and a mutable key
-// is precisely what makes a local cache unrepresentable-correctly. There is no
-// way to know a cached copy is current without fetching it, so the client
-// fetched every avatar again on every launch — as a JSON array of integers
-// through the IPC, roughly three bytes on the wire per byte of image.
-//
-// So the key carries the hash of its own bytes. That makes the object
-// immutable: a new avatar is a new key, which the profile row already
-// publishes, so every viewer picks it up by normal cache invalidation and the
-// on-disk copy of the old one is simply never asked for again. It also makes
-// the integrity check free — the key IS the expected digest, exactly as
-// custom emoji work (`commands::emoji::get_emoji_url`).
+// Avatars and group icons are public decoration, stored in the clear under a
+// content-addressed key (`{prefix}/{sha256}.{ext}`). That makes each object
+// immutable, so it can be cached locally, and makes the integrity check free:
+// the key is the expected digest.
 
-/// Upload a public object under a content-addressed key `{prefix}/{sha256}.{ext}`.
-///
-/// Returns the key so the caller can persist it (profile row, group row); the
-/// bytes are reachable afterwards through [`get_public_file_url`].
+/// Upload a public object under `{prefix}/{sha256}.{ext}`; returns the key for
+/// the caller to persist.
 pub async fn upload_public_file(
     prefix: String,
     data: Vec<u8>,
@@ -585,12 +468,8 @@ pub async fn upload_public_file(
     Ok(UploadResult { key, url })
 }
 
-/// The sha256 a content-addressed public key commits to, plus its extension.
-///
-/// `None` for a LEGACY key (`avatars/{user_id}`, `group-icons/{id}/{ts}-{name}`)
-/// written before objects were content-addressed. Those cannot be cached — the
-/// bytes behind them can change without the key changing — so the caller falls
-/// back to the byte path for them instead of serving a copy it cannot verify.
+/// The sha256 and extension a content-addressed public key commits to. `None`
+/// for a legacy mutable key, which can't be cached safely.
 fn public_key_digest(key: &str) -> Option<(String, String)> {
     let name = key.rsplit('/').next()?;
     let (hash, ext) = name.rsplit_once('.')?;
@@ -600,13 +479,9 @@ fn public_key_digest(key: &str) -> Option<(String, String)> {
     Some((hash.to_string(), ext.to_string()))
 }
 
-/// Resolve a public object to a loopback HTTP URL the webview can use directly
-/// as `<img src>`, caching the bytes on disk encrypted at rest.
-///
-/// Returns `""` (the same empty-string sentinel [`get_media_url`] uses) when
-/// this object cannot be served that way — a legacy non-content-addressed key,
-/// or a media server that isn't up yet. The frontend falls back to the byte
-/// path for those, which is what every caller did before #874.
+/// Resolve a public object to a loopback URL for `<img src>`, caching it
+/// encrypted at rest. `""` when it can't be served that way (legacy key, media
+/// server not up); the frontend then uses the byte path.
 pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<String> {
     let Some((content_hash, ext)) = public_key_digest(&key) else {
         return Ok(String::new());
@@ -619,8 +494,6 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
     };
     let url = format!("http://127.0.0.1:{port}/{token}/{content_hash}");
 
-    // Cache hit needs nothing else — the cached file's own extension is what
-    // the media server serves it with.
     if find_cached_file(&content_hash).is_some() {
         return Ok(url);
     }
@@ -630,18 +503,14 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
 
     let get_url = presign_r2(state, "get", &key).await?;
     let overlay = state.overlay_handle();
-    // Over the per-file cap → the empty-string sentinel, exactly as before; the
-    // difference is that the transfer is now ABORTED at the cap instead of being
-    // read in full and then measured.
+    // Over the per-file cap: the empty-string sentinel, with the transfer aborted
+    // at the cap.
     let Some(bytes) = r2_get_url(overlay.as_deref(), &get_url, MEDIA_CACHE_MAX_FILE_BYTES).await?
     else {
         return Ok(String::new());
     };
 
-    // The key is the address; verify the bytes ARE their address. Public
-    // objects are stored unencrypted, so nothing else attests to them — a
-    // substituted or corrupted object would otherwise be cached and rendered
-    // as genuine, and then kept.
+    // Public objects are unencrypted, so the hash check is the only attestation.
     let actual = hex::encode(sha256_bytes(&bytes));
     if actual != content_hash {
         return Err(Error::Other(anyhow::anyhow!(
@@ -661,16 +530,14 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
             }
         }
     };
-    // `Vec::from` moves the `Bytes` allocation when it uniquely owns one, so the
-    // plaintext is not copied on the way into the in-place encryption (#915).
+    // `Vec::from` moves a uniquely-owned `Bytes` allocation (#915).
     let encrypted = cache_encrypt(Vec::from(bytes), &db_key, content_hash.as_bytes())?;
 
     let dir = media_cache_dir()?;
     crate::private_fs::create_dir_all(&dir)
         .map_err(|e| Error::Other(anyhow::anyhow!("create cache dir: {e}")))?;
 
-    // Atomic write, mirroring `get_media_url`: a half-written cache file would
-    // be served as a corrupt image rather than re-fetched.
+    // Atomic write: a half-written cache file would be served as a corrupt image.
     let mut tmp = target.clone();
     let final_ext = target.extension().and_then(|s| s.to_str()).unwrap_or("enc");
     tmp.set_extension(format!("{final_ext}.tmp"));
@@ -686,21 +553,11 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
     Ok(url)
 }
 
-// ── Media upload (sealed under a key only members can reach, #1382) ───────
-//
-// A file is sealed under `file_keys::derive_file_key(ring key, file_id)`,
-// where `file_id` is 32 random bytes and the ring key is either the newest key
-// of the conversation's MLS-wrapped ring or the account's Vault file root. The
-// object lives at `media/{hex file_id}.enc`. Nothing the DS or R2 holds — the
-// object name, `attachment_object`, `attachment_ref` — is key material: the
-// file id is the HKDF salt, and the ring key never leaves members' devices
-// unwrapped. The plaintext SHA-256 travels only inside the MLS-encrypted
-// attachment reference and is checked after decrypt.
-//
-// This replaced convergent encryption (key = HKDF(SHA-256(plaintext)), object
-// named by that hash), under which anyone holding the bucket or the DS
-// database could decrypt every attachment. There is no fallback to it: a
-// reference without a key version is refused.
+// Media upload (#1382): a file is sealed under
+// `file_keys::derive_file_key(ring key, random file_id)` and stored at
+// `media/{hex file_id}.enc`. Nothing the DS or R2 holds is key material; the
+// plaintext SHA-256 travels only inside the MLS-encrypted reference and is
+// checked after decrypt. There is no fallback to the retired convergent scheme.
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MediaUploadResult {
@@ -709,45 +566,38 @@ pub struct MediaUploadResult {
     pub filename: String,
     pub content_type: String,
     pub size_bytes: usize,
-    /// The object's random 32-byte file id, hex. Named `content_hash` because
-    /// that is the `_att` wire field (`hash`) every client already parses and
-    /// keys its caches by; it is NOT derived from the content.
+    /// The object's random file id, hex. Named for the `_att` `hash` wire field; NOT
+    /// derived from the content.
     pub content_hash: String,
     /// Which ring key sealed the file (`0` for a Vault file).
     pub key_version: i64,
-    /// SHA-256 of the plaintext, hex. Carried only inside the encrypted
-    /// reference; never sent to the DS.
+    /// SHA-256 of the plaintext, hex; only ever inside the encrypted reference.
     pub sha256: String,
     pub blurhash: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
 }
 
-/// Which key an existing attachment is sealed under — what a download needs
-/// besides the object's name. Built from the attachment reference and the
-/// conversation the reference was found in.
+/// Which key an existing attachment is sealed under.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AttachmentKeyScope {
-    /// A channel or DM attachment: ring key `key_version` of the MLS
-    /// conversation `conversation_id` belongs to.
+    /// Ring key `key_version` of the conversation's MLS group.
     Conversation {
         conversation_id: String,
         key_version: i64,
     },
-    /// A Vault attachment, under the account's Vault file root.
+    /// Under the account's Vault file root.
     Vault,
 }
 
-/// Where a NEW upload is going, which decides the key it is sealed under.
+/// Where a new upload is going, which decides its key.
 pub(crate) enum UploadScope {
-    /// A channel or DM: the newest key of its MLS conversation's ring.
+    /// The newest key of the conversation's ring.
     Conversation(String),
-    /// The user's own Vault.
     Vault,
 }
 
-/// The ring key (and its version) a new upload to `scope` must use.
 async fn upload_ring_key(
     state: &Arc<AppState>,
     scope: &UploadScope,
@@ -766,7 +616,6 @@ async fn upload_ring_key(
     }
 }
 
-/// The ring key an existing attachment was sealed under.
 async fn download_ring_key(
     state: &Arc<AppState>,
     scope: &AttachmentKeyScope,
@@ -796,13 +645,9 @@ fn parse_hex32(what: &str, value: &str) -> Result<[u8; 32]> {
         .map_err(|_| Error::Other(anyhow::anyhow!("{what} must be 32 hex bytes")))
 }
 
-/// Where an upload's plaintext lives, and who is allowed to release it.
-///
-/// Both variants are read once and then let go before the R2 PUT (#915) — the
-/// difference is what "let go" means. `Owned` bytes belong to this call and are
-/// dropped; `Staged` bytes belong to `commands::staging`, which keeps them
-/// until the upload has actually succeeded so a failed PUT is a retry rather
-/// than a lost paste.
+/// An upload's plaintext and who may release it. Both are let go before the PUT
+/// (#915); `Staged` bytes belong to `commands::staging`, which keeps them until
+/// the upload succeeds so a failed PUT can retry.
 enum Plaintext {
     Owned(Vec<u8>),
     Staged(std::sync::Arc<zeroize::Zeroizing<Vec<u8>>>),
@@ -816,27 +661,22 @@ impl Plaintext {
         }
     }
 
-    /// Let go of this call's hold on the plaintext, so the longest step in the
-    /// function — the PUT — does not run with both buffers resident.
+    /// Drop this call's hold so the PUT doesn't run with both buffers resident.
     fn release(self) {
         drop(self);
     }
 }
 
-/// How many uploads may hold their bytes at once (#1497). Each one keeps the
-/// plaintext, its ciphertext and — for an image — the decoded pixels resident
-/// (a 12 MP photo decodes to 48 MB), and a renderer that starts every picked
-/// file at once (a 12-image Vault entry) multiplied that past what a phone
-/// will give a process. Uploads past the bound wait their turn; the R2 PUTs
-/// they would have overlapped with share one link anyway.
+/// Uploads that may hold their bytes at once (#1497): each keeps plaintext,
+/// ciphertext and decoded pixels resident, and a 12-image Vault entry started
+/// all at once exceeded what a phone allows.
 const MAX_CONCURRENT_UPLOADS: usize = 3;
 
 static UPLOAD_SLOTS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(MAX_CONCURRENT_UPLOADS);
 
-/// Wait for an upload slot; held for the upload's whole life. Taken only by
-/// the public entry points, never by [`upload_plaintext`], so it is never
-/// acquired twice by one upload.
+/// Wait for an upload slot, held for the upload's life. Taken only by the public
+/// entry points, so never twice per upload.
 async fn upload_slot() -> tokio::sync::SemaphorePermit<'static> {
     UPLOAD_SLOTS
         .acquire()
@@ -844,26 +684,18 @@ async fn upload_slot() -> tokio::sync::SemaphorePermit<'static> {
         .expect("the upload semaphore is never closed")
 }
 
-/// Upload a file to the user's Vault, sealed under the Vault file key (#1382).
-/// Chat attachments do not come through here: the durable outbox uploads
-/// them under their conversation's key ring (`upload_outbox_bytes`).
-///
-/// Reads the file from the filesystem path (no bytes over IPC), so arbitrarily
-/// large files work without memory or serialisation overhead. This is the path
-/// for a file the USER already has on disk — a picker selection or an OS drag
-/// and drop. Bytes that arrived through the webview have no path and go through
-/// [`upload_media_staged`] instead; nothing in this crate writes a file in
-/// order to have a path to pass here.
+/// Upload a file from a path the user picked (picker, OS drop) to their Vault,
+/// sealed under the Vault file key (#1382). Chat attachments go through the
+/// outbox (`upload_outbox_bytes`); webview bytes with no path go through
+/// [`upload_media_staged`].
 pub async fn upload_media(
     path: String,
     filename: String,
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
-    // Refuse an over-cap file from its metadata, BEFORE reading it.
-    // `upload_plaintext` makes the same check, but only after the whole file is
-    // resident: picking a 2 GB video would buffer 2 GB just to be told no, which
-    // on a phone is an out-of-memory kill rather than an error (#1491).
+    // Refuse an over-cap file from its metadata before reading it: buffering a 2 GB
+    // pick just to say no is an OOM kill on a phone (#1491).
     let len = tokio::fs::metadata(&path)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("stat file {path}: {e}")))?
@@ -876,19 +708,14 @@ pub async fn upload_media(
     }
 
     let _slot = upload_slot().await;
-    // Read plaintext from disk.
     let data = tokio::fs::read(&path).await
         .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
 
     upload_plaintext(Plaintext::Owned(data), filename, content_type, UploadScope::Vault, state).await
 }
 
-/// Upload an attachment the renderer staged in memory (`commands::staging`) —
-/// a paste, or a drop the webview surfaced as a `File` rather than a path.
-///
-/// The staged bytes are released here, and only on success: an upload that
-/// fails leaves them staged so the user's paste survives a retry. See
-/// `commands::staging` for why they are in memory rather than in a temp file.
+/// Upload an attachment staged in memory (`commands::staging`). The staged bytes
+/// are released only on success, so a failed upload can retry.
 pub async fn upload_media_staged(
     staged_id: String,
     filename: String,
@@ -910,9 +737,7 @@ pub async fn upload_media_staged(
     result
 }
 
-/// Upload bytes the durable outbox kept for an unsent message (#1335) — the
-/// same core as [`upload_media`], for plaintext that lives in the local
-/// SQLCipher database rather than in a file or the staging area.
+/// Upload bytes the durable outbox kept for an unsent message (#1335).
 pub(crate) async fn upload_outbox_bytes(
     data: Vec<u8>,
     filename: String,
@@ -920,11 +745,9 @@ pub(crate) async fn upload_outbox_bytes(
     conversation_id: &str,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
-    // Test-harness only: the flows world has no R2, so a test that drives an
-    // attachment send through the outbox gets the result an upload of these
-    // bytes would produce, without the PUT. The ring key is still resolved
-    // exactly as a real upload resolves it, so a send that could not get the
-    // conversation's file key fails here as it would in production.
+    // Test harness: no R2 in the flows world, so return what an upload would
+    // without the PUT. The ring key is still resolved, so a missing file key fails
+    // as in production.
     #[cfg(feature = "test-harness")]
     if crate::commands::messages::test_hooks::uploads_stubbed() {
         let (key_version, _key) =
@@ -958,24 +781,16 @@ pub(crate) async fn upload_outbox_bytes(
     .await
 }
 
-/// What [`seal_off_runtime`] derives from an upload's plaintext.
 struct Sealed {
     /// Plaintext SHA-256, hex (#879).
     sha256: String,
-    /// `(blurhash, width, height)` for an image; `None` for anything else.
     image_meta: Option<anyhow::Result<(String, u32, u32)>>,
     ciphertext: Vec<u8>,
 }
 
-/// Hash, measure and encrypt an upload's plaintext, then release it — on the
-/// blocking pool, never on an async worker (#1497).
-///
-/// This is CPU work measured in seconds for a phone photo (a 12 MP decode
-/// alone), and the bridge runtime has four workers. A multi-image Vault save
-/// used to run it inline in every upload at once, which parked every worker:
-/// the HTTP requests those workers drive stopped being polled, and connection
-/// deadlines and pooled-connection health checks fired late or not at all, so
-/// presigns failed with "error sending request" and the save with them.
+/// Hash, measure and encrypt an upload's plaintext on the blocking pool (#1497).
+/// Seconds of CPU for a phone photo; run inline across several uploads it parked
+/// every runtime worker, starving the HTTP requests they drive.
 async fn seal_off_runtime(
     data: Plaintext,
     is_image: bool,
@@ -983,21 +798,17 @@ async fn seal_off_runtime(
     enc_nonce: [u8; 12],
 ) -> Result<Sealed> {
     tokio::task::spawn_blocking(move || {
-        // The plaintext digest rides inside the encrypted reference so a
-        // recipient can confirm it got exactly the bytes the sender meant (#879).
+        // The digest rides inside the encrypted reference so the recipient can confirm
+        // the exact bytes (#879).
         let sha256 = hex::encode(sha256_bytes(data.as_slice()));
         let image_meta = if is_image {
             Some(compute_image_meta(data.as_slice()))
         } else {
             None
         };
-        // Chunked AES-256-GCM; the bytes go up via a DS-minted presigned PUT
-        // (the client holds no R2 credentials).
         let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
         drop(enc_key);
-        // Release the plaintext BEFORE the presign round trip and the upload
-        // (#915): everything derived from it was computed here, and the PUT is
-        // the longest-lived step of an upload.
+        // Release the plaintext before the presign and PUT, the longest steps (#915).
         data.release();
         Sealed {
             sha256,
@@ -1009,9 +820,8 @@ async fn seal_off_runtime(
     .map_err(|e| Error::Other(anyhow::anyhow!("upload preparation failed: {e}")))
 }
 
-/// The shared upload core: seal under a fresh per-file key from `scope`'s
-/// ring, PUT to a random object name, register the object. See the section
-/// docs above for why nothing here is derived from the content.
+/// The shared upload core: seal under a fresh per-file key from `scope`'s ring,
+/// PUT to a random object name, register the object.
 async fn upload_plaintext(
     data: Plaintext,
     filename: String,
@@ -1021,12 +831,9 @@ async fn upload_plaintext(
 ) -> Result<MediaUploadResult> {
     let size_bytes = data.as_slice().len();
 
-    // Refuse an over-cap attachment HERE, before hashing and encrypting it.
-    // The DS refuses to sign a PUT above the same bound
-    // (`pollis_api::broker::R2_MEDIA_MAX_BYTES`, one constant shared by both
-    // ends), so without this check the user waits through a full encrypt to be
-    // told no by a 400 they cannot read. The ciphertext adds a 16-byte tag per
-    // 4 MiB chunk, which the cap has room for.
+    // Refuse over-cap before encrypting; the DS refuses to sign a PUT above the
+    // same shared bound (`R2_MEDIA_MAX_BYTES`), which leaves room for the per-chunk
+    // tags.
     if size_bytes as u64 > pollis_api::broker::R2_MEDIA_MAX_BYTES {
         return Err(Error::Other(anyhow::anyhow!(
             "attachment is {size_bytes} bytes; the limit is {} bytes",
@@ -1034,12 +841,11 @@ async fn upload_plaintext(
         )));
     }
 
-    // Fetch the key FIRST: a conversation whose ring this device cannot reach
-    // yet must fail before any bytes are encrypted or uploaded.
+    // Key first: a ring this device can't reach yet must fail before any work.
     let (key_version, ring_key) = upload_ring_key(state, &scope).await?;
 
-    // A random file id names the object and salts the file key. The server
-    // learns it; that is fine, because it is not key material on its own.
+    // A random file id names the object and salts the file key; not key material on
+    // its own.
     let mut file_id = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
     let content_hash = hex::encode(file_id);
@@ -1048,7 +854,6 @@ async fn upload_plaintext(
     let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
     drop(ring_key);
 
-    // Hash, image metadata and encryption: see [`seal_off_runtime`].
     let is_image = content_type.starts_with("image/");
     let Sealed { sha256, image_meta, ciphertext } =
         seal_off_runtime(data, is_image, enc_key, enc_nonce).await?;
@@ -1067,8 +872,8 @@ async fn upload_plaintext(
     let overlay = state.overlay_handle();
     r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
 
-    // Register the object so the DS can reference-count and collect it. The
-    // send path registers the `(file id, message_id)` reference separately.
+    // Register the object for DS reference counting; the send path registers the
+    // `(file id, message_id)` reference.
     let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
         content_hash: content_hash.clone(),
         r2_key: r2_key.clone(),
@@ -1090,14 +895,8 @@ async fn upload_plaintext(
     })
 }
 
-// ── Media download (decrypt on the way out) ───────────────────────────────
-
-/// Download and decrypt a media attachment.
-///
-/// `content_hash` is the object's random file id, `sha256` the plaintext
-/// digest, and `scope` names the key it was sealed under — all three from the
-/// MLS-encrypted attachment reference, so only someone who could read that
-/// reference can ask for the right key, and only a member can then reach it.
+/// Download and decrypt a media attachment. `content_hash` (the file id),
+/// `sha256` and `scope` all come from the MLS-encrypted reference.
 pub async fn download_media(
     r2_key: String,
     content_hash: String,
@@ -1112,13 +911,10 @@ pub async fn download_media(
     let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
     drop(ring_key);
 
-    // DS-minted presigned GET — the client holds no R2 credentials. The object
-    // is ciphertext under a key the DS has never held.
     let get_url = presign_r2(state, "get", &r2_key).await?;
     let overlay = state.overlay_handle();
-    // The ciphertext is buffered whole (it has to be, to decrypt and re-hash),
-    // so the cap is what stops a DS-chosen URL from streaming until the process
-    // dies.
+    // Buffered whole to decrypt and re-hash, so the cap stops a DS-chosen URL from
+    // streaming forever.
     let ciphertext = match r2_get_url(overlay.as_deref(), &get_url, R2_MAX_DOWNLOAD_BYTES).await? {
         Some(bytes) => bytes,
         None => {
@@ -1128,15 +924,12 @@ pub async fn download_media(
         }
     };
     let plaintext = decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)?;
-    // Explicit, not incidental (#915): without this the ciphertext stays alive
-    // until the function returns, so the hash check below — and the caller's
-    // first use of the result — run with two full-size copies resident.
+    // Drop the ciphertext now so the hash check doesn't run with two full copies
+    // resident (#915).
     drop(ciphertext);
 
-    // AEAD proves the bytes were sealed by someone holding the ring key — any
-    // member. The digest from the sender's own reference proves they are the
-    // bytes THIS sender meant (#879): another member who managed to write a
-    // different payload under the same file id is refused here.
+    // AEAD proves a ring-key holder (any member) sealed it; the sender's digest
+    // proves it is the bytes they meant (#879).
     let actual = sha256_bytes(&plaintext);
     if actual != expected_sha {
         return Err(Error::Other(anyhow::anyhow!(
@@ -1147,20 +940,11 @@ pub async fn download_media(
     Ok(plaintext)
 }
 
-/// Save an attachment to a location the user picked, marked as a download.
+/// Save an attachment to a user-picked path, marked as a download so Gatekeeper
+/// and SmartScreen treat it as from the internet (`crate::downloads`).
 ///
-/// This is "save attachment as…". It replaces a renderer-side
-/// `fetch(loopbackUrl)` + `writeFile(target, bytes)`, which had two problems.
-/// The bytes made a round trip through the webview for no reason, and — the
-/// finding — the file arrived on disk with no provenance marker, so macOS
-/// Gatekeeper and Windows SmartScreen both treated an attachment a stranger
-/// sent as a file the user had made themselves. `crate::downloads` writes and
-/// marks in one call; see its module docs for why those cannot be two steps.
-///
-/// The returned string is what happened to the marker (`marked`, `unsupported`,
-/// or `failed: …`). A failed marker does NOT fail the save: the bytes are the
-/// thing the user asked for, and refusing to hand them over because an xattr
-/// call returned an error would be the wrong trade. The renderer surfaces it.
+/// Returns what happened to the marker (`marked`, `unsupported`, `failed: …`). A
+/// failed marker doesn't fail the save; the renderer surfaces it.
 pub async fn save_media_to_path(
     r2_key: String,
     content_hash: String,
@@ -1185,17 +969,9 @@ pub async fn save_media_to_path(
     })
 }
 
-/// Resolve a media attachment to a loopback HTTP URL the webview can use
-/// directly as `<img src>` / `<audio src>` / `<video src>`.
-///
-/// Caches the decrypted-then-cache-encrypted bytes on disk under a
-/// content-addressed name so subsequent calls hit the local server
-/// without touching R2 again. Bytes never cross the JSON IPC.
-///
-/// Returns `""` (empty string sentinel) for files larger than
-/// `MEDIA_CACHE_MAX_FILE_BYTES`. The frontend falls back to the byte
-/// path (`download_media` → in-memory Blob URL) for that one render so
-/// a single huge upload can't push everything else out of the cache.
+/// Resolve a media attachment to a loopback URL for `<img>`/`<audio>`/`<video>`,
+/// caching it encrypted at rest. `""` for files over
+/// `MEDIA_CACHE_MAX_FILE_BYTES`; the frontend then uses the in-memory byte path.
 pub async fn get_media_url(
     r2_key: String,
     content_hash: String,
@@ -1208,7 +984,7 @@ pub async fn get_media_url(
 
     let target = cache_file_path(&content_hash, &content_type)?;
 
-    // Fast path: already cached. Touch mtime so the LRU sees it as fresh.
+    // Cached: touch mtime for the LRU.
     if target.exists() {
         if let Ok(f) = std::fs::OpenOptions::new().write(true).open(&target) {
             let _ = f.set_modified(std::time::SystemTime::now());
@@ -1216,8 +992,7 @@ pub async fn get_media_url(
         return Ok(url);
     }
 
-    // Per-hash lock so the second waiter sees the file on disk instead
-    // of starting a redundant download.
+    // Per-hash lock so a second waiter finds the file instead of re-downloading.
     let lock = {
         let mut map = in_flight().lock().expect("in-flight map poisoned");
         map.entry(content_hash.clone())
@@ -1233,9 +1008,6 @@ pub async fn get_media_url(
 
     let bytes = download_media(r2_key, content_hash.clone(), sha256, scope, state).await?;
 
-    // Per-file cap. Files larger than MEDIA_CACHE_MAX_FILE_BYTES skip
-    // the cache entirely. Empty-string sentinel tells the frontend to
-    // fall back to the byte path which produces an in-memory blob URL.
     if bytes.len() as u64 > MEDIA_CACHE_MAX_FILE_BYTES {
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Ok(String::new());
@@ -1247,8 +1019,6 @@ pub async fn get_media_url(
         return Err(Error::Other(anyhow::anyhow!("create cache dir: {e}")));
     }
 
-    // Encrypt before writing. Per-file random nonce + AES-256-GCM under
-    // a key derived from `db_key` and the content hash.
     let db_key = {
         let guard = state.unlock.lock().await;
         match guard.as_ref() {
@@ -1261,9 +1031,8 @@ pub async fn get_media_url(
             }
         }
     };
-    // `bytes` is MOVED into the encryption (#915): it is the decrypted
-    // attachment, and holding it alongside a freshly-allocated ciphertext was
-    // the second of the three full-size copies this path used to keep alive.
+    // `bytes` moves into the encryption (#915) rather than coexisting with a fresh
+    // ciphertext.
     let encrypted = match cache_encrypt(bytes, &db_key, content_hash.as_bytes()) {
         Ok(c) => c,
         Err(e) => {
@@ -1272,15 +1041,13 @@ pub async fn get_media_url(
         }
     };
 
-    // Pre-emptive eviction: shrink the cache to (cap - new_file_size)
-    // before writing so we never temporarily peak above the cap.
+    // Evict before writing so the cache never peaks above the cap.
     let new_size = encrypted.len() as u64;
     let total = cache_total_bytes();
     if total.saturating_add(new_size) > MEDIA_CACHE_MAX_BYTES {
         enforce_cache_cap_to(&dir, MEDIA_CACHE_MAX_BYTES.saturating_sub(new_size));
     }
 
-    // Atomic write: <hash>.<ext>.enc.tmp → rename → <hash>.<ext>.enc.
     let mut tmp = target.clone();
     let final_ext = target
         .extension()
@@ -1304,26 +1071,14 @@ pub async fn get_media_url(
     Ok(url)
 }
 
-// ── Cache-at-rest crypto ──────────────────────────────────────────────────
-//
-// Files in `media-cache/` are AES-256-GCM-encrypted under a key derived
-// from the active session's `db_key` plus the content hash. Layout:
-//
-//   [12-byte random nonce][AES-256-GCM(plaintext)][16-byte tag]
-//
-// Per-file random nonce — the server reads the whole file and decrypts
-// in one shot before serving (no streaming AEAD). Total file size is
-// bounded by `MEDIA_CACHE_MAX_FILE_BYTES` (100 MiB), well below the
-// AES-GCM 64-GiB-per-key safety bound.
-//
-// Salt domain (`pollis-media-cache-v1`) and the `db_key` IKM keep this
-// apart from the upload-side file key, so a leak of one key class can't
-// be replayed against the other.
+// Cache-at-rest layout: `[12-byte random nonce][AES-256-GCM(plaintext)][16-byte
+// tag]`, under a key from `db_key` and the content hash. Decrypted whole before
+// serving; files are bounded well under the AES-GCM per-key limit. The salt
+// domain and `db_key` IKM keep it apart from the upload-side file key.
 
 const CACHE_HKDF_SALT: &[u8] = b"pollis-media-cache-v1";
 const CACHE_NONCE_LEN: usize = 12;
 
-/// Derive the per-file AES-256-GCM key for cache encryption.
 fn derive_cache_key(db_key: &[u8], info: &[u8]) -> [u8; 32] {
     use hkdf::Hkdf;
     use sha2::Sha256;
@@ -1334,29 +1089,13 @@ fn derive_cache_key(db_key: &[u8], info: &[u8]) -> [u8; 32] {
     key
 }
 
-/// Encrypt cache bytes. Output layout: `[12-byte nonce][ciphertext+tag]`.
+/// Encrypt cache bytes: `[12-byte nonce][ciphertext+tag]`.
 ///
-/// **Takes the plaintext by value and encrypts it in place (#915.)** The
-/// previous signature took `&[u8]`, produced a fresh ciphertext buffer, then
-/// copied nonce+ciphertext into a THIRD buffer — so caching a 100 MiB
-/// attachment briefly held ~300 MiB: the decrypted bytes the caller still owned,
-/// the `Vec` `encrypt` returned, and the concatenation. This reuses the caller's
-/// allocation instead: AES-GCM in place, the 16-byte tag appended, and the
-/// 12-byte nonce spliced onto the front by an in-place rotate.
-///
-/// On the real path that allocates NOTHING. `decrypt_chunked` sizes its output
-/// from the CIPHERTEXT length, so the plaintext it returns already carries spare
-/// capacity (one AEAD tag per chunk) — more than the 28 bytes needed here. A
-/// caller whose buffer is exactly full pays one reallocation, i.e. one extra
-/// copy in the worst case rather than two. Both bounds are asserted in
-/// `tests/attachment_memory.rs` against a counting allocator.
-///
-/// `pollis-core` ships to mobile via uniffi, and this is the largest single
-/// allocation the client makes — the difference between one copy and three is
-/// the difference between caching a large video and being killed for it.
-///
-/// The on-disk layout is byte-for-byte unchanged, so existing cache files (and
-/// [`cache_decrypt`]) are unaffected.
+/// Takes the plaintext by value and encrypts in place, splicing the nonce on
+/// with a rotate, so a large attachment isn't held three times (#915; asserted
+/// in `tests/attachment_memory.rs`). `decrypt_chunked`'s output already has the
+/// spare capacity, so the real path allocates nothing. This is the client's
+/// largest allocation, and mobile ships it too.
 pub fn cache_encrypt(mut plaintext: Vec<u8>, db_key: &[u8], info: &[u8]) -> Result<Vec<u8>> {
     use aes_gcm::{aead::{AeadInPlace, KeyInit}, Aes256Gcm, Key, Nonce};
     use rand::RngCore;
@@ -1366,22 +1105,18 @@ pub fn cache_encrypt(mut plaintext: Vec<u8>, db_key: &[u8], info: &[u8]) -> Resu
     let mut nonce_bytes = [0u8; CACHE_NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
 
-    // Reserve the tag AND the nonce prefix up front, so neither the in-place
-    // encryption nor the splice below can trigger a reallocation — a realloc
-    // here would copy the whole buffer and put the second copy back.
+    // Reserve tag and nonce space so nothing below reallocates.
     plaintext.reserve_exact(CACHE_NONCE_LEN + 16);
     cipher
         .encrypt_in_place(Nonce::from_slice(&nonce_bytes), &[], &mut plaintext)
         .map_err(|_| Error::Other(anyhow::anyhow!("media cache encrypt failed")))?;
 
-    // Prepend the nonce within the existing allocation: extend by 12, then
-    // rotate. `rotate_right` is an in-place memmove, not a second buffer.
+    // `rotate_right` is an in-place memmove.
     plaintext.extend_from_slice(&nonce_bytes);
     plaintext.rotate_right(CACHE_NONCE_LEN);
     Ok(plaintext)
 }
 
-/// Decrypt a cache file produced by `cache_encrypt`.
 pub fn cache_decrypt(file_bytes: &[u8], db_key: &[u8], info: &[u8]) -> Result<Vec<u8>> {
     use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
 
@@ -1396,12 +1131,7 @@ pub fn cache_decrypt(file_bytes: &[u8], db_key: &[u8], info: &[u8]) -> Result<Ve
         .map_err(|_| Error::Other(anyhow::anyhow!("media cache decrypt failed")))
 }
 
-// ── Deletion ──────────────────────────────────────────────────────────────
-
-/// Delete an R2 object by key via a DS-minted presigned DELETE. Best-effort:
-/// returns Err on network / auth failures so callers can log and continue. A 404
-/// is treated as success (the object is already gone, which is the desired end
-/// state).
+/// Delete an R2 object via a DS-minted presigned DELETE. A 404 counts as success.
 pub(crate) async fn delete_r2_object(
     state: &Arc<AppState>,
     r2_key: &str,
@@ -1411,23 +1141,17 @@ pub(crate) async fn delete_r2_object(
     r2_delete_url(overlay.as_deref(), &delete_url).await
 }
 
-// ── Crypto helpers ────────────────────────────────────────────────────────
-
-/// Chunk size for AES-256-GCM encryption. Each chunk is encrypted independently
-/// so arbitrarily large files can be processed without buffering everything.
+/// Chunk size for chunked AES-256-GCM.
 const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
-/// AES-256-GCM ciphertext overhead per chunk (authentication tag).
 const TAG_SIZE: usize = 16;
 
-/// Encrypt plaintext with chunked AES-256-GCM.
-/// Per-chunk nonce = base_nonce XOR little-endian chunk index (first 4 bytes).
-/// Output: flat concatenation of encrypted chunks (each = plaintext_chunk + 16-byte tag).
+/// Chunked AES-256-GCM: per-chunk nonce = base nonce XOR the LE chunk index
+/// (first 4 bytes). Output is each chunk's ciphertext + 16-byte tag, concatenated.
 pub(crate) fn encrypt_chunked(data: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Vec<u8> {
     use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    // Allocate enough: plaintext + one 16-byte tag per chunk.
     let n_chunks = data.len().div_ceil(CHUNK_SIZE);
     let mut out = Vec::with_capacity(data.len() + n_chunks * TAG_SIZE);
 
@@ -1446,7 +1170,6 @@ pub(crate) fn encrypt_chunked(data: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]
     out
 }
 
-/// Decrypt ciphertext produced by `encrypt_chunked`.
 pub(crate) fn decrypt_chunked(ciphertext: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> Result<Vec<u8>> {
     use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
 
@@ -1482,53 +1205,30 @@ fn compute_image_meta(data: &[u8]) -> anyhow::Result<(String, u32, u32)> {
     let img = image::load_from_memory(data)
         .map_err(|e| anyhow::anyhow!("image decode: {e}"))?;
     let (width, height) = img.dimensions();
-    // A 4x3-component blurhash is a dozen averages over the whole frame, so a
-    // thumbnail gives the same placeholder as the full image — and encoding
-    // the full image costs seconds per phone photo (12 cosine sums over 12 M
-    // pixels), which is what made a multi-image save crawl (#1497).
+    // A 4x3 blurhash from a thumbnail matches the full image's, and encoding the
+    // full frame cost seconds per phone photo (#1497).
     let small = img.thumbnail(BLURHASH_SOURCE_MAX, BLURHASH_SOURCE_MAX).to_rgba8();
     let hash = blurhash::encode(4, 3, small.width(), small.height(), small.as_raw())
         .map_err(|e| anyhow::anyhow!("blurhash: {e:?}"))?;
     Ok((hash, width, height))
 }
 
-// ── R2 via the DS secrets broker ──────────────────────────────────────────
-//
-// The client holds NO R2 credentials. Every object access goes through the
-// Delivery Service's `/v1/r2/presign` endpoint (device-signed), which returns a
-// short-lived SigV4 presigned URL; the client then does a plain, unauthenticated
-// HTTP GET/PUT/DELETE against that URL. The presigned URL is self-contained (its
-// signature lives in the query string), so no auth headers are attached here.
-// The on-device SigV4 signer this replaced held the R2 secret in the client
-// bundle — the whole point of the broker is that the secret never ships.
-// See `pollis-delivery::broker` and `docs/secrets-broker.md`.
+// The client holds no R2 credentials (`docs/secrets-broker.md`): every access
+// uses a short-lived presigned URL from the DS's device-signed
+// `/v1/r2/presign`, fetched with no auth headers.
 
-/// A presigned URL that has been checked to point at first-party R2.
+/// A presigned URL checked to point at first-party R2.
 ///
-/// The DS chooses this string, and the client then fetches it with no
-/// authentication and no further questions — so a DS that is compromised,
-/// impersonated, or simply wrong could aim the client's downloads and uploads at
-/// any host on the internet, exfiltrating a `put` body or feeding a `get` from
-/// somewhere the content-hash check is the only thing standing between the app
-/// and attacker-chosen bytes. There is nothing the client needs from that
-/// freedom: R2 is a fixed, compiled-in origin.
-///
-/// The type is the enforcement. [`r2_get_url`] / [`r2_put_url`] /
-/// [`r2_delete_url`] take a `PresignedUrl` and nothing else, and the ONLY
-/// constructor is [`PresignedUrl::parse`], so a raw DS string cannot reach a
-/// request builder without passing the origin check.
+/// The DS chooses the string and the client fetches it unauthenticated, so an
+/// unchecked URL would let a hostile DS aim uploads and downloads at any host.
+/// The only constructor is [`PresignedUrl::parse`] and the request helpers take
+/// only this type, so a raw string can't reach a request builder.
 pub(crate) struct PresignedUrl(String);
 
 impl PresignedUrl {
-    /// Accept `url` only if its origin (`scheme://host[:port]`) is one of the
-    /// configured R2 origins — `r2_endpoint` (what `/v1/r2/presign` signs
-    /// against) or `r2_public_url` (the public bucket domain).
-    ///
-    /// The comparison is on the whole origin rather than the host alone so a
-    /// plaintext `http://` URL cannot be smuggled past a configured `https://`
-    /// one: the scheme has to match too, and both configured values are `https`
-    /// in every shipped build. `parse` never *adds* an allowed origin, so a
-    /// misconfigured empty value allows nothing.
+    /// Accept `url` only if its whole origin (scheme included, so `http://` can't
+    /// pass for `https://`) is `r2_endpoint` or `r2_public_url`. An empty configured
+    /// value allows nothing.
     fn parse(url: String, config: &crate::config::Config) -> Result<Self> {
         let origin = origin_of(&url);
         let allowed = [
@@ -1548,17 +1248,16 @@ impl PresignedUrl {
     }
 }
 
-/// `scheme://host[:port]`, lowercased. `None` when either half is missing —
-/// which includes a bare path, so a relative URL can never match an origin.
+/// `scheme://host[:port]`, lowercased; `None` if either half is missing, so a
+/// relative URL never matches.
 fn origin_of(url: &str) -> Option<String> {
     let (scheme, rest) = url.split_once("://")?;
     if scheme.is_empty() {
         return None;
     }
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    // Userinfo would let `https://r2.example.com@evil.test/…` read as the
-    // configured host to a careless split; the host is what follows the last
-    // `@`, exactly as a URL parser resolves it.
+    // The host follows the last `@`, as a URL parser resolves it, so
+    // `https://r2.example.com@evil.test/` doesn't read as the R2 host.
     let host = authority.rsplit('@').next().unwrap_or("");
     if host.is_empty() {
         return None;
@@ -1570,16 +1269,10 @@ fn origin_of(url: &str) -> Option<String> {
     ))
 }
 
-/// Why an R2 configuration handed in by a host can never move a byte of media,
-/// or `None` when both values name an origin.
-///
-/// [`PresignedUrl::parse`] fails closed on an empty origin, which is right for
-/// the request — but it means a build that simply never received its R2 values
-/// boots, signs in, sends text, and then refuses every attachment, one image at
-/// a time, as "Image unavailable". The mobile bridge
-/// calls this at `init_pollis` so that build fails at launch with the missing
-/// variable named, the way desktop's `Config::from_env` already refuses to start
-/// without `R2_S3_ENDPOINT` / `R2_PUBLIC_URL`.
+/// Why a host's R2 config can never move media, or `None` if both values name an
+/// origin. The mobile bridge calls this at `init_pollis` so a build missing its
+/// R2 values fails at launch naming the variable, rather than showing every
+/// attachment as "Image unavailable".
 pub(crate) fn r2_config_problem(r2_endpoint: &str, r2_public_url: &str) -> Option<String> {
     let missing: Vec<&str> = [
         ("r2_endpoint (EXPO_PUBLIC_R2_ENDPOINT)", r2_endpoint),
@@ -1599,17 +1292,14 @@ pub(crate) fn r2_config_problem(r2_endpoint: &str, r2_public_url: &str) -> Optio
     ))
 }
 
-/// Test harness only: a presigned GET for `key`, minted by this client's own DS
-/// session exactly as a download would mint it. The vault soak suite (#1491)
-/// uses it to show that a session which never saw a deleted file cannot fetch
-/// it either.
+/// Test harness only: a presigned GET minted by this client's DS session, for the
+/// vault soak suite (#1491).
 #[cfg(feature = "test-harness")]
 pub async fn test_presign_get(state: &Arc<AppState>, key: &str) -> Result<String> {
     Ok(presign_r2(state, "get", key).await?.as_str().to_string())
 }
 
-/// Ask the DS to presign an R2 `operation` (`"get"` / `"put"` / `"delete"`) on
-/// `key` and return the ready-to-use URL. Device-signed via [`ds_post`].
+/// Ask the DS to presign an R2 `operation` (`"get"`/`"put"`/`"delete"`) on `key`.
 async fn presign_r2(
     state: &Arc<AppState>,
     operation: &str,
@@ -1618,15 +1308,9 @@ async fn presign_r2(
     presign_r2_with_length(state, operation, key, None).await
 }
 
-/// [`presign_r2`], declaring the EXACT byte count a `put` will carry. The DS
-/// signs `content-length` into the URL, so R2 itself refuses a body of any other
-/// size.
-///
-/// REQUIRED on every `put`: the DS refuses to sign one without it. A cap the
-/// client merely honours is not a cap — the DS validates a size it is told, and
-/// only R2 ever counts the bytes, so the length has to be inside the signature.
-/// `None` remains valid for `get` and `delete`, where a signed length would just
-/// make the URL unusable.
+/// [`presign_r2`] declaring the exact byte count a `put` carries; the DS signs
+/// `content-length` into the URL so R2 refuses any other size. Required on every
+/// `put`: only R2 counts the bytes, so the cap must be in the signature.
 pub(crate) async fn presign_r2_with_length(
     state: &Arc<AppState>,
     operation: &str,
@@ -1636,26 +1320,18 @@ pub(crate) async fn presign_r2_with_length(
     let body = pollis_api::broker::R2PresignBody {
         operation: operation.to_string(),
         key: key.to_string(),
-        // The DS signs only `host`; the client sets Content-Type at upload time.
+        // The DS signs only `host`; Content-Type is set at upload.
         content_type: None,
         content_length,
-        // No-auth fallback for the acting user (`broker::resolve_user`): auth on
-        // → taken from the verified signature and ignored here; auth off → this
-        // IS the identity and a body without it is a 400. Presign has no
-        // per-object authz, so this only ever satisfies the gate.
+        // No-auth fallback identity (`broker::resolve_user`); ignored when signed.
         user_id: Some(crate::commands::mls::current_user_id(state).await?),
     };
     let parsed = crate::commands::mls::ds_post_json(state, &body).await?;
     PresignedUrl::parse(parsed.url, &state.config)
 }
 
-/// As much of a failed response's body as is worth putting in an error message.
-///
-/// `resp.text()` would read all of it, and an error path is exactly where an
-/// unbounded read is easiest to overlook: the same endpoint that can stream
-/// forever on a 200 can do it on a 500, and the bytes end up in a formatted
-/// string rather than a buffer someone was watching. A kilobyte is more than
-/// enough of an S3 error document to diagnose one.
+/// At most a kilobyte of a failed response's body: an error path can stream
+/// forever just like a 200.
 async fn error_snippet(mut resp: reqwest::Response) -> String {
     const SNIPPET_MAX: usize = 1024;
     let mut buf = Vec::new();
@@ -1669,9 +1345,8 @@ async fn error_snippet(mut resp: reqwest::Response) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// PUT `data` to a presigned URL. Content-Type is set at request time (the broker
-/// signs only `host`, so it is deliberately left unsigned). Routes through the
-/// overlay when on — R2 is a first-party, allowlisted host (§14.2).
+/// PUT `data` to a presigned URL, through the overlay when on (§14.2).
+/// Content-Type is unsigned by design.
 pub(crate) async fn r2_put_url(
     overlay: Option<&pollis_relay::OverlayHandle>,
     url: &PresignedUrl,
@@ -1684,8 +1359,7 @@ pub(crate) async fn r2_put_url(
         .body(data)
         .send()
         .await
-        // `without_url`: a presigned URL is a short-lived write credential for
-        // the object, and has no business in a log a user may share.
+        // `without_url`: a presigned URL is a write credential and must not reach logs.
         .map_err(|e| e.without_url())
         .inspect_err(|e| {
             crate::diag!(
@@ -1702,21 +1376,12 @@ pub(crate) async fn r2_put_url(
     Ok(())
 }
 
-/// GET the bytes at a presigned URL, refusing to buffer more than `max_bytes`.
-/// Routes through the overlay when on.
+/// GET a presigned URL, refusing to buffer more than `max_bytes`. Through the
+/// overlay when on.
 ///
-/// `Ok(None)` means the body went over the cap and the transfer was ABORTED —
-/// not that it was read and then measured. Every caller here has a ceiling it
-/// applies to the result (the cache's per-file cap, the emoji ceiling), but
-/// applying it after `resp.bytes()` is applying it too late: the whole body is
-/// already resident by then, so a DS-chosen URL that streams forever is an OOM
-/// no downstream check can prevent. Streaming with `chunk()` and stopping at the
-/// cap is what makes the ceiling real, and dropping the response mid-body is
-/// what closes the connection.
-///
-/// Returns [`bytes::Bytes`], not `Vec<u8>` (#915) — `Bytes` derefs to `[u8]`, so
-/// readers are unchanged, and the one caller that needs an owned `Vec` converts
-/// at its own boundary rather than making every caller pay a full-size copy.
+/// `Ok(None)` means the transfer was aborted at the cap, not read and then
+/// measured: a check after `resp.bytes()` comes too late to stop a URL that
+/// streams forever. Returns `Bytes` so callers don't each pay a copy (#915).
 pub(crate) async fn r2_get_url(
     overlay: Option<&pollis_relay::OverlayHandle>,
     url: &PresignedUrl,
@@ -1731,9 +1396,8 @@ pub(crate) async fn r2_get_url(
         let body = error_snippet(resp).await;
         return Err(Error::Other(anyhow::anyhow!("R2 download failed: {} — {}", status, body)));
     }
-    // A declared length over the cap is refused before a byte of body is read.
-    // Advisory only — the checks below are what actually hold — but it saves
-    // transferring a body that was never going to be accepted.
+    // A declared length over the cap is refused up front; advisory, the loop below
+    // is what holds.
     if resp.content_length().is_some_and(|n| n > max_bytes) {
         return Ok(None);
     }
@@ -1747,8 +1411,7 @@ pub(crate) async fn r2_get_url(
     Ok(Some(buf.freeze()))
 }
 
-/// DELETE the object at a presigned URL. A 404 counts as success (already gone).
-/// Routes through the overlay when on.
+/// DELETE a presigned URL; a 404 counts as success. Through the overlay when on.
 async fn r2_delete_url(
     overlay: Option<&pollis_relay::OverlayHandle>,
     url: &PresignedUrl,
@@ -1771,9 +1434,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
 
-    /// `CACHE_DIR_WALKS` is process-global, so every test that sweeps a cache
-    /// directory has to hold this — not just the one that reads the counter,
-    /// or a concurrent sweep inflates its delta.
+    /// `CACHE_DIR_WALKS` is process-global, so every sweeping test holds this.
     static WALK_COUNTER: Mutex<()> = Mutex::new(());
 
     fn serialise_sweeps() -> std::sync::MutexGuard<'static, ()> {
@@ -1782,8 +1443,8 @@ mod tests {
 
     static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
-    /// A private per-user directory for one test, under the shared cache root
-    /// — the cap sweep refuses to evict anywhere else.
+    /// A private per-user directory under the shared root; the cap sweep refuses to
+    /// evict anywhere else.
     fn scratch_dir(tag: &str) -> PathBuf {
         let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
         let dir = test_cache_root().join(format!("r2-{tag}-{n}"));
@@ -1792,14 +1453,9 @@ mod tests {
         dir
     }
 
-    /// A directory OUTSIDE the cache root, holding a file and a populated
-    /// subdirectory — what `/home/alice` looks like to the wipe. Returns the
-    /// directory and the two paths that must still exist afterwards.
-    ///
-    /// A SIBLING of the root inside the private `test_cache_temp()`, never a
-    /// real shared directory: these tests hand the wipe paths that point at
-    /// it, and a test of a guard must not be able to do damage if the guard
-    /// is ever broken.
+    /// A directory outside the cache root with a file and a populated subdirectory,
+    /// returning the paths that must survive. Inside the private temp dir, so a
+    /// broken guard can do no real damage.
     fn outside_dir(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
         let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
         let dir = test_cache_temp().join(format!("outside-{tag}-{n}"));
@@ -1812,9 +1468,7 @@ mod tests {
         (dir, file, nested)
     }
 
-    /// Write `bytes` bytes to `<dir>/<name>`, then stamp its mtime so
-    /// "oldest first" is deterministic rather than dependent on filesystem
-    /// timestamp granularity.
+    /// Write a file with a fixed mtime so "oldest first" is deterministic.
     fn write_aged(dir: &Path, name: &str, bytes: usize, age_secs: u64) {
         let path = dir.join(name);
         std::fs::write(&path, vec![0u8; bytes]).expect("write cache file");
@@ -1827,14 +1481,12 @@ mod tests {
         f.set_modified(when).expect("set mtime");
     }
 
-    /// The cap is a real eviction, oldest first, and it leaves the newest
-    /// entries alone. This is the behaviour that has to keep working now that
-    /// the only thing driving it is a cache write (#930).
+    /// The cap evicts oldest first and stops at the target (#930).
     #[test]
     fn the_cap_evicts_oldest_first_and_stops_at_the_target() {
         let _serial = serialise_sweeps();
         let dir = scratch_dir("evict");
-        // 400 bytes total, oldest first: a=100 (oldest), b=100, c=200 (newest).
+        // 400 bytes: a=100 (oldest), b=100, c=200 (newest).
         write_aged(&dir, "a.png.enc", 100, 300);
         write_aged(&dir, "b.png.enc", 100, 200);
         write_aged(&dir, "c.png.enc", 200, 100);
@@ -1850,7 +1502,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// In-progress writes are not cache entries and must survive a sweep.
     #[test]
     fn the_cap_ignores_in_progress_writes() {
         let _serial = serialise_sweeps();
@@ -1868,9 +1519,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The counter the focus-path guard below is asserted against actually
-    /// counts. Without this, a guard reading "0 walks" would also pass if the
-    /// counter were broken and never incremented at all.
+    /// Proves the counter counts, so the "0 walks" guard can't pass on a broken
+    /// counter.
     #[test]
     fn the_walk_counter_counts_one_walk_per_sweep() {
         let _serial = serialise_sweeps();
@@ -1888,14 +1538,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// GUARD (#930): window focus must not walk the media cache.
-    ///
-    /// A source scan, because the thing being asserted is a rule about which
-    /// code may run on a UI event, and the offending call lived in a Tauri
-    /// event closure that no test can dispatch to. Paired with the counter test
-    /// above, which is what makes "does not walk" mean something: the sweep is
-    /// instrumented, so if it ever returns to the focus arm the reviewer of
-    /// that change has to delete this test to land it.
+    /// GUARD (#930): window focus must not walk the media cache. A source scan,
+    /// because the call lived in a Tauri event closure no test can dispatch.
     #[test]
     fn guard_window_focus_does_not_sweep_the_media_cache() {
         let shell = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../src-tauri/src/lib.rs"));
@@ -1903,8 +1547,6 @@ mod tests {
         let focus_arm_start = shell
             .find("tauri::WindowEvent::Focused(true)")
             .expect("the shell must still have a window-focus arm for this guard to mean anything");
-        // The focus arm runs to the next `WindowEvent` match arm; scanning to
-        // the end of the closure is enough and cannot miss a call inside it.
         let rest = &shell[focus_arm_start..];
         let focus_arm_end = rest
             .find("tauri::WindowEvent::CloseRequested")
@@ -1927,12 +1569,9 @@ mod tests {
     /// GUARD (#930): the public focus-time entry point stays deleted.
     #[test]
     fn guard_no_public_entry_point_for_a_focus_time_sweep() {
-        // Only the module itself, not this test module — the assertion message
-        // below names the symbol, and a whole-file scan would match its own
-        // text and fail forever.
+        // Scan only the module: the assertion message names the symbol.
         let source = include_str!("r2.rs");
         let module = &source[..source.find("mod tests {").unwrap_or(source.len())];
-        // Assembled rather than written out, for the same reason.
         let banned = format!("pub fn {}", "enforce_cache_cap_now");
         assert!(
             !module.contains(&banned),
@@ -1941,9 +1580,6 @@ mod tests {
         );
     }
 
-    // ── The media-cache wipe (#1000) ───────────────────────────────────────
-
-    /// Put one cache file in `<root>/<user>/` and return its path.
     fn seed_cache_entry(user: &str, name: &str) -> PathBuf {
         let dir = test_cache_root().join(user);
         crate::private_fs::create_dir_all(&dir).expect("create user cache dir");
@@ -1952,22 +1588,15 @@ mod tests {
         path
     }
 
-    /// The property the wipe never actually had: a file that was in the cache
-    /// beforehand is not there afterwards.
-    ///
-    /// It failed on every caller because the directory was resolved from
-    /// ambient state — `CURRENT_CACHE_USER`, which `unload_user_db` had already
-    /// cleared by the time logout wiped, and which the PIN paths had not yet
-    /// set. `_anon/` was empty, so the wipe reported nothing and removed
-    /// nothing. Naming the user is what fixes it, so this test names one and
-    /// deliberately points the ambient user somewhere else first.
+    /// The wipe used to resolve the ambient user, which every caller had wrong, so
+    /// it removed nothing (#1000). This names the user and points the ambient one
+    /// elsewhere first.
     #[test]
     fn wiping_one_user_removes_that_user_s_files() {
         let _serial = serialise_sweeps();
         let entry = seed_cache_entry("wipe-user-a", "aaaa.png.enc");
         assert!(entry.exists());
 
-        // The ambient user is wrong — as it is at every real call site.
         set_cache_user(None);
 
         clear_media_cache(CacheScope::User("wipe-user-a"));
@@ -1978,8 +1607,6 @@ mod tests {
         );
     }
 
-    /// And it removes only that user's files: a second client signed in as
-    /// somebody else on the same machine keeps its cache.
     #[test]
     fn wiping_one_user_leaves_another_user_s_files() {
         let _serial = serialise_sweeps();
@@ -1995,9 +1622,8 @@ mod tests {
         );
     }
 
-    /// `Everything` reaches into the per-user subdirectories. The root's own
-    /// entries are DIRECTORIES, so the old `remove_file`-per-entry loop would
-    /// have deleted nothing at all here.
+    /// `Everything` reaches into the per-user directories, which are the root's
+    /// entries.
     #[test]
     fn wiping_everything_reaches_inside_the_per_user_directories() {
         let _serial = serialise_sweeps();
@@ -2014,17 +1640,11 @@ mod tests {
         );
     }
 
-    // ── A server-chosen user id is not a path ─────────────────────────────
-    //
-    // `user_id` comes from the Delivery Service's verify-otp response and is
-    // persisted in `accounts.json`; `set_pin`, `unlock` and `logout` then pass
-    // it straight to `clear_media_cache(CacheScope::User(..))`. With
-    // `root.join(user_id)` that made the DS the author of the directory the
-    // wipe emptied: `Path::join` with an absolute component replaces the root,
-    // `..` walks out of it, and `""` names the root itself.
+    // `user_id` comes from the DS and reaches `clear_media_cache`; with
+    // `root.join(user_id)`, an absolute id replaced the root, `..` escaped it and
+    // `""` named the root itself.
 
-    /// The wipe scoped to an id that is not one plain path component deletes
-    /// nothing — not outside the root, and not the other users' caches either.
+    /// A wipe scoped to a non-plain id deletes nothing anywhere.
     #[test]
     fn a_user_id_that_is_not_a_plain_component_wipes_nothing() {
         let _serial = serialise_sweeps();
@@ -2032,12 +1652,9 @@ mod tests {
         let other = seed_cache_entry("wipe-user-f", "ffff.png.enc");
         let outside_name = outside.file_name().unwrap().to_str().unwrap().to_string();
 
-        // `root.join(abs)` == `abs`: the finding's `"/home/alice"`.
         clear_media_cache(CacheScope::User(outside.to_str().unwrap()));
-        // `root.join("../<sibling>")`: walks out of the root.
         clear_media_cache(CacheScope::User(&format!("../{outside_name}")));
         clear_media_cache(CacheScope::User(&format!("wipe-user-f/../../{outside_name}")));
-        // `root.join("")` and `root.join("..")`: the root itself and its parent.
         clear_media_cache(CacheScope::User(""));
         clear_media_cache(CacheScope::User(".."));
         clear_media_cache(CacheScope::User("."));
@@ -2051,16 +1668,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 
-    /// The deletion primitive itself refuses a directory outside the root, so
-    /// a future caller that builds its own path cannot re-open the hole.
+    /// The deletion primitive refuses anything outside the root, for future callers.
     #[test]
     fn remove_dir_contents_refuses_anything_outside_the_root() {
         let _serial = serialise_sweeps();
         let (outside, file, nested) = outside_dir("primitive");
 
         remove_dir_contents(test_cache_root(), &outside);
-        // The root's own parent (the private temp dir), which is where
-        // `root.join("..")` used to land.
         remove_dir_contents(test_cache_root(), test_cache_temp());
 
         assert!(file.exists());
@@ -2069,8 +1683,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
     }
 
-    /// Eviction is a deletion too: pointed outside the root, or at the root
-    /// itself, it evicts nothing.
+    /// Eviction outside the root, or at the root itself, evicts nothing.
     #[test]
     fn the_cap_refuses_to_evict_outside_a_per_user_directory() {
         let _serial = serialise_sweeps();
@@ -2090,8 +1703,7 @@ mod tests {
         let _ = std::fs::remove_file(&in_root);
     }
 
-    /// The join is the chokepoint: only a plain id produces a directory, and
-    /// the one it produces is a direct child of the root.
+    /// Only a plain id produces a directory, a direct child of the root.
     #[test]
     fn only_a_plain_id_resolves_to_a_cache_directory() {
         let root = Path::new("/srv/pollis/media-cache");
@@ -2105,12 +1717,7 @@ mod tests {
         }
     }
 
-    // ── DS-chosen URLs: origin and size are the client's problem ────────────
-    //
-    // The DS picks the presigned URL and the client fetches it unauthenticated,
-    // so both the WHERE and the HOW MUCH have to be enforced here. Neither was:
-    // the URL was taken verbatim, and the body was read with `resp.bytes()` —
-    // fully resident — before any caller's ceiling was consulted.
+    // The DS picks the presigned URL, so origin and size are enforced here.
 
     fn test_config(r2_endpoint: &str) -> crate::config::Config {
         let mut config = crate::config::Config::for_test().expect("test config");
@@ -2119,10 +1726,8 @@ mod tests {
         config
     }
 
-    /// A URL that is not on a configured R2 origin is refused outright, so it
-    /// never reaches a request builder. Includes the shapes that LOOK like the
-    /// configured host to a naive check: userinfo, a suffix host, a plaintext
-    /// downgrade of the right host, and a relative URL.
+    /// A URL off the configured R2 origin is refused, including lookalikes:
+    /// userinfo, a suffix host, an `http://` downgrade, a relative URL.
     #[test]
     fn a_presigned_url_off_the_configured_origin_is_refused() {
         let config = test_config("https://acct.r2.cloudflarestorage.com");
@@ -2143,9 +1748,7 @@ mod tests {
         }
     }
 
-    /// Both configured origins are accepted — the presign endpoint signs against
-    /// the S3 endpoint, public objects are served from the bucket domain — and
-    /// the query string the signature lives in is left alone.
+    /// Both configured origins are accepted, and the URL passes through verbatim.
     #[test]
     fn a_presigned_url_on_a_configured_origin_is_accepted_verbatim() {
         let config = test_config("https://acct.r2.cloudflarestorage.com");
@@ -2160,8 +1763,7 @@ mod tests {
         }
     }
 
-    /// An unconfigured build allows nothing rather than everything — the empty
-    /// string is not an origin.
+    /// An unconfigured build allows nothing.
     #[test]
     fn an_unconfigured_r2_allows_no_url_at_all() {
         let config = crate::config::Config::for_test().expect("test config");
@@ -2169,9 +1771,7 @@ mod tests {
         assert!(PresignedUrl::parse("".into(), &config).is_err());
     }
 
-    /// A host that hands in no R2 origin is refused by name at init rather than
-    /// booting into a build where every attachment fails. Both values are
-    /// required, each is named when missing, and a configured pair passes.
+    /// Missing R2 origins are named at init.
     #[test]
     fn an_r2_config_without_origins_is_named_at_init() {
         let both = r2_config_problem("", "").expect("empty config must be refused");
@@ -2190,10 +1790,9 @@ mod tests {
         );
     }
 
-    /// A minimal HTTP/1.1 server that answers every request with `total` bytes,
-    /// written in 64 KiB writes and terminated by EOF (no `Content-Length`, so a
-    /// client cannot know the size up front — the case a length pre-check does
-    /// not cover). Returns its origin and a counter of bytes actually written.
+    /// A minimal HTTP/1.1 server answering every request with `total` bytes and no
+    /// `Content-Length`, so a length pre-check can't help. Returns its origin and a
+    /// counter of bytes written.
     async fn streaming_stub(total: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -2233,9 +1832,7 @@ mod tests {
         (format!("http://{addr}"), written)
     }
 
-    /// The defect: the body was read to completion and only then measured, so a
-    /// URL that streams forever is an out-of-memory kill no downstream ceiling
-    /// can prevent. The transfer must be abandoned AT the cap.
+    /// The transfer must be abandoned at the cap, not read whole and then measured.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_body_past_the_cap_is_abandoned_mid_transfer() {
         const TOTAL: usize = 64 * 1024 * 1024;
@@ -2249,10 +1846,7 @@ mod tests {
         let got = r2_get_url(None, &url, CAP).await.expect("no transport error");
         assert!(got.is_none(), "a body over the cap must not be returned");
 
-        // Give the writer a moment to notice the closed socket, then assert it
-        // never got anywhere near sending the whole thing. The kernel's socket
-        // buffers make an exact byte count meaningless, so the assertion is on
-        // the order of magnitude: bounded, not the full 64 MiB.
+        // Socket buffers make an exact count meaningless: assert it stayed bounded.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let sent = written.load(std::sync::atomic::Ordering::Relaxed);
         assert!(
@@ -2261,8 +1855,7 @@ mod tests {
         );
     }
 
-    /// The other half: a body under the cap still comes back whole and
-    /// unmodified. A cap that also truncates honest downloads is not a fix.
+    /// A body under the cap comes back whole and unmodified.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_body_within_the_cap_is_returned_whole() {
         const TOTAL: usize = 200 * 1024;
@@ -2279,10 +1872,8 @@ mod tests {
         assert!(got.iter().all(|b| *b == b'x'), "the bytes must be the ones sent");
     }
 
-    /// #1497: sealing an upload must not occupy the async runtime. On a
-    /// single-threaded runtime a ticker task can only advance while the seal
-    /// is off the runtime's one thread; inline (the pre-#1497 shape) it never
-    /// ticks at all, which is the starvation that failed multi-image saves.
+    /// #1497: sealing must not occupy the async runtime; on a single-threaded runtime
+    /// the ticker advances only if the seal runs elsewhere.
     #[tokio::test]
     async fn sealing_an_upload_leaves_the_runtime_free() {
         let ticks = Arc::new(AtomicU64::new(0));
@@ -2296,7 +1887,6 @@ mod tests {
                 }
             })
         };
-        // Let the ticker start before the seal begins.
         tokio::task::yield_now().await;
 
         let data = Plaintext::Owned(vec![7u8; 48 * 1024 * 1024]);
@@ -2320,8 +1910,8 @@ mod tests {
         );
     }
 
-    /// The blurhash comes from a thumbnail (#1497), but the dimensions an
-    /// attachment reports are still the original's.
+    /// The blurhash comes from a thumbnail (#1497), but reported dimensions are the
+    /// original's.
     #[test]
     fn image_meta_reports_the_original_dimensions() {
         let img = image::RgbImage::from_fn(1200, 900, |x, y| {
@@ -2333,7 +1923,7 @@ mod tests {
             .expect("encode");
         let (hash, w, h) = compute_image_meta(&bytes).expect("meta");
         assert_eq!((w, h), (1200, 900));
-        // A 4x3-component blurhash: 1 size + 1 max-AC + 4 DC + 2 per AC (11).
+        // A 4x3 blurhash: 1 size + 1 max-AC + 4 DC + 2 per AC (11).
         assert_eq!(hash.len(), 1 + 1 + 4 + 2 * 11);
     }
 }

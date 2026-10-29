@@ -1,40 +1,11 @@
 //! On-device data export (#856): one conversation, or the whole account, as a
 //! plaintext JSON archive written to a file the user picked.
 //!
-//! # What this is, and is not
-//!
-//! "Your data is yours" needs an exit that is not `delete_account`. This is
-//! that exit, and it is also the honest answer to a data-access request. It is
-//! **not** key backup and does not touch the no-history-sync rule: it is a
-//! user-initiated read of plaintext this device has *already* decrypted, written
-//! to local disk, and nothing else. Concretely:
-//!
-//! - **Strictly local.** Every read is a rusqlite query against the encrypted
-//!   local DB. No DS call, no Turso, no R2. `tests::export_never_talks_to_the_network`
-//!   scans this file for the network helpers so that stays true.
-//! - **Per device.** A device only holds what it decrypted, so the archive is
-//!   exactly that device's view — accepted losses (1) and (2) in CLAUDE.md apply
-//!   to the export the same way they apply to the message list.
-//! - **No key material, ever.** Ciphertext, MLS state, identity keys, pin keys
-//!   and the device keystore are never read. `tests::archive_never_carries_key_material`
-//!   seeds every secret-bearing table with a marker and asserts none of it reaches
-//!   the file.
-//! - **No re-import.** There is deliberately no command that reads one of these
-//!   files back. An import path is exactly the backup channel the constraint on
-//!   #856 forbids.
-//!
-//! # Attachments
-//!
-//! The archive records each attachment's metadata (name, type, size, content
-//! hash, storage key) and the relative `file` its bytes go to, in a sibling
-//! `<archive>-files/` directory. Bytes are written for every attachment whose
-//! decrypted copy is **already in this device's media cache** — still zero
-//! network, and still only what this device has already seen. The rest are
-//! reported back in `ExportSummary::attachments_missing`, so the UI can offer
-//! (and only ever *offer*) the opt-in fetch in `export_fetch.rs`. The archive
-//! records each attachment's file id, key version and plaintext digest — not
-//! a key: fetching later needs a device that can still open the
-//! conversation's file key ring (#1382).
+//! A user-initiated read of what this device already decrypted, not key backup:
+//! strictly local (no network; a test scans this file), per device, never any key
+//! material, and deliberately no re-import path. Attachment bytes are written
+//! only from the local media cache; the rest are reported in
+//! `ExportSummary::attachments_missing` for the opt-in fetch in `export_fetch.rs`.
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -46,7 +17,7 @@ use std::sync::Arc;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// Bumped when the JSON shape changes incompatibly. Readers key off this.
+/// Bumped when the JSON shape changes incompatibly.
 pub const ARCHIVE_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,7 +29,7 @@ pub struct Archive {
     pub scope: ArchiveScope,
     pub account: ArchiveAccount,
     pub conversations: Vec<ArchiveConversation>,
-    /// The Vault (#107). Account scope only — a conversation export omits it.
+    /// Account scope only.
     pub vault: Vec<ArchiveVaultEntry>,
 }
 
@@ -83,7 +54,6 @@ pub struct ArchiveConversation {
     pub name: Option<String>,
     pub group_id: Option<String>,
     pub group_name: Option<String>,
-    /// The other party of a 1:1 DM, when this device recorded one.
     pub peer_user_id: Option<String>,
     pub messages: Vec<ArchiveMessage>,
 }
@@ -93,8 +63,7 @@ pub struct ArchiveMessage {
     pub id: String,
     pub sender_id: String,
     pub sender_username: Option<String>,
-    /// `null` for a deleted message — the tombstone is kept so the reader can
-    /// see that something was here.
+    /// `null` for a deleted message; the tombstone is kept.
     pub text: Option<String>,
     pub attachments: Vec<ArchiveAttachment>,
     pub reply_to_id: Option<String>,
@@ -115,17 +84,13 @@ pub struct ArchiveAttachment {
     /// The object's random file id (the `_att` `hash` field, #1382).
     pub content_hash: String,
     pub storage_key: String,
-    /// SHA-256 of the plaintext, from the encrypted reference; what a written
-    /// file is verified against. `None` for a reference from before #1382,
-    /// whose bytes can no longer be fetched.
+    /// SHA-256 of the plaintext; what a written file is verified against. `None`
+    /// for a pre-#1382 reference, which can no longer be fetched.
     pub sha256: Option<String>,
     /// Which key of the conversation's file key ring sealed it (`0` = Vault).
     pub key_version: Option<i64>,
-    /// Where the bytes live relative to the archive's directory, when they
-    /// were exported. Deterministic from the hash and name, so the same
-    /// attachment referenced twice is one file, and the opt-in fetch writes to
-    /// the same place. The JSON never claims the file exists — the filesystem
-    /// is the source of truth for that.
+    /// Path relative to the archive's directory. Deterministic from hash and name,
+    /// so one attachment referenced twice is one file. Never claims the file exists.
     pub file: String,
 }
 
@@ -146,47 +111,35 @@ pub struct ArchiveVaultEntry {
     pub updated_at: String,
 }
 
-/// What the UI reports after a successful export.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExportSummary {
     pub path: String,
     pub conversations: usize,
     pub messages: usize,
-    /// Attachment *references* across messages and vault entries.
+    /// Attachment references across messages and vault entries.
     pub attachments: usize,
     pub vault_entries: usize,
     pub bytes: u64,
-    /// The sibling directory attachment bytes were (or would be) written to.
     pub files_dir: String,
-    /// Distinct attachments whose bytes came out of the local media cache.
     pub attachments_written: usize,
-    /// Distinct attachments this device does not hold decrypted. The opt-in
-    /// fetch takes exactly this list.
+    /// Distinct attachments this device does not hold decrypted; the opt-in fetch
+    /// takes exactly this list.
     pub attachments_missing: Vec<MissingAttachment>,
 }
 
-/// One attachment the export could not satisfy from the local cache.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MissingAttachment {
     pub content_hash: String,
     pub storage_key: String,
-    /// The plaintext digest the fetched bytes must match.
     pub sha256: String,
-    /// Which key opens it.
     pub scope: crate::commands::r2::AttachmentKeyScope,
     pub content_type: Option<String>,
     /// Relative to `files_dir`; always a single path component.
     pub file: String,
 }
 
-// ── Content envelope ──────────────────────────────────────────────────────
-
-/// Split a stored `content` string into its text and attachment refs.
-///
-/// Plain text is returned as-is. The `{"_att":[...],"_txt":"..."}` envelope
-/// (see `frontend/src/utils/attachmentEnvelope.ts`) is unpacked; anything that
-/// starts with `{` but does not parse as that envelope is treated as text, so
-/// a message that literally begins with a brace is not lost.
+/// Split a stored `content` string into text and attachment refs. Anything
+/// starting with `{` that isn't the `_att`/`_txt` envelope is kept as text.
 fn split_content(raw: &str) -> (Option<String>, Vec<ArchiveAttachment>) {
     if !raw.starts_with('{') {
         return (Some(raw.to_string()), Vec::new());
@@ -232,10 +185,9 @@ fn split_content(raw: &str) -> (Option<String>, Vec<ArchiveAttachment>) {
     (text, attachments)
 }
 
-/// `<first 16 hex of hash>-<sanitised name>` — unique per attachment, readable
-/// by a human, and safe to hand to any filesystem: one path component, ASCII
-/// letters/digits/`.`/`-`/`_` only, no leading dot, capped in length. A
-/// nameless attachment gets an extension from its content type instead.
+/// `<first 16 hex of hash>-<sanitised name>`: one path component of ASCII
+/// letters/digits/`.`/`-`/`_`, no leading dot, length-capped. A nameless
+/// attachment gets an extension from its content type.
 pub fn attachment_file_name(content_hash: &str, name: Option<&str>, content_type: Option<&str>) -> String {
     let prefix: String = content_hash.chars().take(16).collect();
     let safe: String = name
@@ -248,7 +200,6 @@ pub fn attachment_file_name(content_hash: &str, name: Option<&str>, content_type
         let ext = content_type.map(crate::commands::r2::ext_for_content_type).unwrap_or("bin");
         return format!("{prefix}.{ext}");
     }
-    // Keep the extension when truncating a very long name.
     let (stem, ext) = match safe.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() && e.len() <= 8 => (s, Some(e)),
         _ => (safe, None),
@@ -259,8 +210,6 @@ pub fn attachment_file_name(content_hash: &str, name: Option<&str>, content_type
         None => format!("{prefix}-{stem}"),
     }
 }
-
-// ── Building ──────────────────────────────────────────────────────────────
 
 fn conversation_filter(scope: &ArchiveScope) -> Option<&str> {
     match scope {
@@ -309,8 +258,7 @@ fn load_usernames(conn: &Connection) -> Result<HashMap<String, String>> {
 }
 
 fn load_conversations(conn: &Connection, only: Option<&str>) -> Result<Vec<ArchiveConversation>> {
-    // Every conversation this device holds a message for, whether or not the
-    // name cache knows it: an unnamed conversation still exports its messages.
+    // Every conversation with a local message, named or not.
     let mut stmt = conn.prepare(
         "SELECT m.conversation_id, c.kind, c.name, c.group_id, c.group_name, d.peer_user_id
            FROM (SELECT DISTINCT conversation_id FROM message
@@ -395,8 +343,7 @@ fn load_vault(conn: &Connection) -> Result<Vec<ArchiveVaultEntry>> {
     rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
 }
 
-/// Assemble the archive from the local database. Pure rusqlite, no I/O beyond
-/// the connection — the unit tests drive this directly.
+/// Assemble the archive from the local database.
 pub fn build_archive(conn: &Connection, user_id: &str, scope: ArchiveScope) -> Result<Archive> {
     let only = conversation_filter(&scope);
     let usernames = load_usernames(conn)?;
@@ -425,9 +372,6 @@ pub fn build_archive(conn: &Connection, user_id: &str, scope: ArchiveScope) -> R
     })
 }
 
-// ── Writing ───────────────────────────────────────────────────────────────
-
-/// `<archive>.json` → sibling `<archive>-files/`.
 pub fn files_dir_for(path: &Path) -> PathBuf {
     let stem = path
         .file_stem()
@@ -436,26 +380,20 @@ pub fn files_dir_for(path: &Path) -> PathBuf {
     path.with_file_name(format!("{stem}-files"))
 }
 
-/// Where the bytes of an already-decrypted attachment can be read from, and how
-/// to read them. Injected so the writer is testable without the process-wide
-/// cache root; the command passes the real cache lookup. The closure gets a
-/// content hash and returns the cache file's bytes as stored (still under the
-/// cache's own encryption) — decryption happens here, under `db_key`.
+/// How to read an already-decrypted attachment's bytes: `locate` returns the
+/// cache file (still under the cache's encryption), decrypted here under
+/// `db_key`. Injected so the writer is testable.
 pub struct CachedBytes<'a> {
     pub db_key: &'a [u8],
     pub locate: &'a dyn Fn(&str) -> Option<PathBuf>,
 }
 
-/// Write the archive to `path`, and every attachment the local cache holds to
-/// `files_dir_for(path)`. The path must be absolute (a save-dialog result); a
-/// relative one would resolve against the process's working directory, which
-/// is never where the user pointed.
+/// Write the archive to `path` (must be absolute) and every cached attachment to
+/// `files_dir_for(path)`.
 ///
-/// The JSON is written to a sibling `.part` file and renamed into place, so a
-/// failure mid-write never leaves a truncated archive that parses as an empty
-/// account. Attachment files are written first, one by one; a file that fails
-/// to decrypt or to verify is treated as missing rather than aborting the
-/// export — the archive itself is the deliverable, the bytes are a bonus.
+/// The JSON goes to a `.part` file renamed into place, so a failed write never
+/// leaves a truncated archive. An attachment that fails to decrypt or verify is
+/// reported missing rather than aborting the export.
 pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<'_>>) -> Result<ExportSummary> {
     if !path.is_absolute() {
         return Err(Error::Other(anyhow::anyhow!("export path must be absolute")));
@@ -466,8 +404,8 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
         .ok_or_else(|| Error::Other(anyhow::anyhow!("export path has no file name")))?;
     let files_dir = files_dir_for(path);
 
-    // Distinct attachments, first reference wins for the name. Each carries
-    // the conversation it was found in, which is what names its key.
+    // Distinct attachments, first reference wins; each carries the conversation
+    // whose key ring opens it.
     let mut distinct: Vec<(&ArchiveAttachment, Option<&str>)> = Vec::new();
     let mut seen = HashSet::new();
     let refs = archive
@@ -500,8 +438,7 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
             attachments_written += 1;
             continue;
         }
-        // A reference without a digest and key version predates #1382; its
-        // object was sealed under the retired scheme and cannot be fetched.
+        // No digest or key version means pre-#1382: not fetchable.
         let Some(sha256) = att.sha256.clone() else {
             continue;
         };
@@ -559,9 +496,8 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
     })
 }
 
-/// Decrypt one cache entry and write it under its archive name. `false` for
-/// "not in the cache" and for every failure — the caller only needs to know
-/// whether the bytes are now next to the archive.
+/// Decrypt one cache entry and write it under its archive name; `false` on any
+/// miss or failure.
 fn write_cached_attachment(cached: &CachedBytes<'_>, files_dir: &Path, att: &ArchiveAttachment) -> bool {
     use sha2::{Digest, Sha256};
     let Some(source) = (cached.locate)(&att.content_hash) else {
@@ -575,8 +511,7 @@ fn write_cached_attachment(cached: &CachedBytes<'_>, files_dir: &Path, att: &Arc
     else {
         return false;
     };
-    // The cache entry was verified when it was written, but the export is the
-    // one artefact a person will keep, so check again before vouching.
+    // Verified again: the export is the artefact a person keeps.
     let Some(expected) = att.sha256.as_deref() else {
         return false;
     };
@@ -586,16 +521,9 @@ fn write_cached_attachment(cached: &CachedBytes<'_>, files_dir: &Path, att: &Arc
     crate::downloads::write_downloaded_file(&files_dir.join(&att.file), &plaintext).is_ok()
 }
 
-// ── Bundling (mobile) ─────────────────────────────────────────────────────
-
-/// Zip `<archive>.json` and its `<archive>-files/` directory into a single
-/// `<archive>.zip` beside them, for platforms whose only exit is a share sheet
-/// that takes ONE file (mobile). Desktop keeps the loose layout — a folder next
-/// to the JSON is the more useful shape when the user chose the destination.
-///
-/// Pure local I/O. The zip holds `archive.json` at its root and the attachment
-/// files under `files/`, so a reader finds the same relative `file` paths the
-/// JSON records once it strips the `-files/` directory name.
+/// Zip `<archive>.json` and `<archive>-files/` into one `<archive>.zip` for
+/// mobile, whose share sheet takes one file. The zip holds `archive.json` and
+/// `files/`, matching the JSON's relative `file` paths.
 pub fn bundle_archive(archive_path: &Path) -> Result<PathBuf> {
     use std::io::Read;
     if !archive_path.is_absolute() {
@@ -636,10 +564,8 @@ pub fn bundle_archive(archive_path: &Path) -> Result<PathBuf> {
     Ok(zip_path)
 }
 
-// ── Command ───────────────────────────────────────────────────────────────
-
-/// Export this device's decrypted history to `path` as JSON. `conversation_id`
-/// narrows it to one conversation; `None` is the full account archive.
+/// Export this device's decrypted history to `path` as JSON; `conversation_id`
+/// narrows it to one conversation.
 pub async fn export_archive(
     path: String,
     conversation_id: Option<String>,
@@ -656,8 +582,8 @@ pub async fn export_archive(
         Some(conversation_id) => ArchiveScope::Conversation { conversation_id },
         None => ArchiveScope::Account,
     };
-    // The whole build runs under the DB lock with no `.await` inside, so the
-    // non-`Send` connection never crosses a suspension point.
+    // No `.await` under the DB lock, so the non-`Send` connection never crosses a
+    // suspension point.
     let archive = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -665,8 +591,8 @@ pub async fn export_archive(
             .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
         build_archive(db.conn(), &user_id, scope)?
     };
-    // The cache is looked up for the unlocked user BY NAME, never through the
-    // ambient cache user — see `find_cached_file_for_user` and #1000.
+    // Look the cache up for the unlocked user by name, never the ambient cache user
+    // (#1000).
     let locate = |hash: &str| {
         crate::commands::r2::find_cached_file_for_user(&user_id, hash).map(|(p, _)| p)
     };
@@ -753,7 +679,6 @@ mod tests {
 
         let dm = archive.conversations.iter().find(|c| c.id == "dm-1").unwrap();
         assert_eq!(dm.peer_user_id.as_deref(), Some("alice"));
-        // The read-implies-delivered trigger materialises the second row.
         let kinds: Vec<&str> = dm.messages[0].receipts.iter().map(|r| r.kind.as_str()).collect();
         assert_eq!(kinds, ["delivered", "read"]);
 
@@ -929,14 +854,13 @@ mod tests {
         }
     }
 
-    /// A cache entry is written next to the archive, decrypted, hash-verified,
-    /// once — however many messages reference it.
+    /// One distinct cache entry is decrypted, verified and written once, however many
+    /// messages reference it.
     #[test]
     fn cached_attachments_are_written_beside_the_archive() {
         use sha2::{Digest, Sha256};
         let db = db();
         let plaintext = b"the real cat bytes".to_vec();
-        // The object's name is a random file id; the digest rides separately.
         let hash = "f1".repeat(32);
         let sha = hex::encode(Sha256::digest(&plaintext));
         let db_key = [7u8; 32];
@@ -965,8 +889,6 @@ mod tests {
         assert_eq!(std::fs::read(out.path().join("archive-files").join(&file)).unwrap(), plaintext);
     }
 
-    /// A cache entry that does not decrypt under this user's key, or whose
-    /// bytes do not match their hash, is reported missing — never written.
     #[test]
     fn an_unverifiable_cache_entry_is_missing_not_exported() {
         use sha2::{Digest, Sha256};
@@ -983,7 +905,6 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         let path = out.path().join("archive.json");
 
-        // Wrong key.
         let sealed = crate::commands::r2::cache_encrypt(b"what the sender meant".to_vec(), &[1u8; 32], hash.as_bytes()).unwrap();
         std::fs::write(&entry, sealed).unwrap();
         let summary =
@@ -991,7 +912,6 @@ mod tests {
         assert_eq!(summary.attachments_written, 0);
         assert_eq!(summary.attachments_missing.len(), 1);
 
-        // Right key, substituted bytes.
         let sealed = crate::commands::r2::cache_encrypt(b"something else".to_vec(), &[2u8; 32], hash.as_bytes()).unwrap();
         std::fs::write(&entry, sealed).unwrap();
         let summary =
@@ -1000,8 +920,7 @@ mod tests {
         assert!(std::fs::read_dir(out.path().join("archive-files")).unwrap().next().is_none());
     }
 
-    /// The constraint on #856: strictly local. Nothing in this module may reach
-    /// for the DS client, the directory reads, R2, or an HTTP client.
+    /// #856: strictly local; nothing here may reach for the network.
     #[test]
     fn export_never_talks_to_the_network() {
         let src = include_str!("export.rs");
@@ -1011,11 +930,9 @@ mod tests {
         }
     }
 
-    /// #1093: an export is the one artefact that holds full plaintext history
-    /// and every attachment, written wherever the user pointed the picker —
-    /// often a shared-machine directory. Every write here must go through
-    /// `private_fs` (0600/0700), never the process umask. Scanning the source
-    /// rather than the output is what keeps the NEXT write site honest.
+    /// #1093: the export holds full history, often written to a shared directory, so
+    /// every write must go through `private_fs` (0600/0700). A source scan keeps the
+    /// next write site honest.
     #[test]
     fn export_never_writes_outside_private_fs() {
         for (name, src) in [
@@ -1038,10 +955,7 @@ mod tests {
         }
     }
 
-    /// And the behaviour the scan is standing in for: the archive is owner-only
-    /// on a platform that says so by mode. `#[cfg(unix)]` because the mode
-    /// accessor itself is unix-only — a runtime guard would still leave the
-    /// `PermissionsExt` import to fail the Windows build.
+    /// `#[cfg(unix)]` because `PermissionsExt` itself would fail the Windows build.
     #[cfg(unix)]
     #[test]
     fn a_written_archive_is_owner_only() {
@@ -1062,8 +976,7 @@ mod tests {
         );
     }
 
-    /// The other half of the constraint: no re-import path. A reader for this
-    /// format would be the backup channel #856 forbids.
+    /// #856: no re-import path; it would be a backup channel.
     #[test]
     fn there_is_no_import_command() {
         let src = include_str!("export.rs");

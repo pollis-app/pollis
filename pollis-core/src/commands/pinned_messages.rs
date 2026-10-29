@@ -1,60 +1,12 @@
-//! Pinned messages (#99) — pin, unpin, list, and the pin-key lifecycle.
+//! Pinned messages (#99): pin, unpin, list, and the pin-key lifecycle. Not
+//! `commands::pin`, which is the device-unlock PIN.
 //!
-//! (Named `pinned_messages`, not `pin` — `commands::pin` is the device-unlock
-//! PIN and the two must never be conflated.)
-//!
-//! # The key model
-//!
-//! Every MLS conversation (a group — whose channels share one MLS group — or a
-//! DM) has one random 32-byte AES-256-GCM pin master key, `Kpin`. Pin content
-//! is sealed directly under `Kpin` exactly once, at pin time, and never
-//! re-encrypted. What rotates with the MLS epoch is only the ~60-byte WRAP of
-//! `Kpin` stored server-side in `pin_keystate`: AES-256-GCM under a KEK
-//! exported from the current epoch's MLS exporter secret
-//! (`export_secret("pollis-pin-kek")`). O(1) work per epoch regardless of pin
-//! count, no application data on Welcomes, and a device joining at epoch N
-//! unwraps with the exporter it already has.
-//!
-//! # Why the unwrapped `Kpin` is cached locally
-//!
-//! `max_past_epochs = 0`: the moment a commit merges, the previous epoch's
-//! exporter is gone. So "unwrap with the old KEK, re-wrap with the new" is
-//! impossible AFTER a merge, and the merge sites are many (committer,
-//! receiver replay, external join, welcome, migration). Instead, a device
-//! that has ever held `Kpin` keeps it in `pin_key_cache` — the same
-//! SQLCipher-encrypted local DB that holds the MLS state itself, so this adds
-//! no new exposure — and after any epoch advance simply wraps the CACHED key
-//! under the CURRENT exporter ([`maybe_rewrap_pin_key`], a pure local check
-//! in the steady state). A device that never held `Kpin` (a fresh external
-//! joiner) unwraps the stored wrap as soon as its `(generation, epoch)`
-//! matches the device's own — which any cache-holding member's next re-wrap
-//! makes true.
-//!
-//! # What the honest guarantee is
-//!
-//! Any current member, including a device enrolled long after a pin was
-//! created, can read every pin. A member removed from the conversation cannot
-//! unwrap any wrap produced after its removal, and the membership-gated DS
-//! reads refuse it the rows — but because `Kpin` itself never rotates, a
-//! removed member who EXTRACTED it while a member and who can additionally
-//! read Turso directly (a breach) could open pins created after its removal.
-//! Rotating `Kpin` on removal would close that at O(pins) re-encryption per
-//! membership change; the issue explicitly traded it away, since a removed
-//! member could equally have cached every plaintext it ever saw. If every
-//! device that ever held `Kpin` is lost AND the stored wrap has gone stale
-//! (nobody re-wrapped at the current epoch before vanishing), existing pins
-//! become unreadable — the same class of loss as losing an entire identity,
-//! and the price of the server never holding key material.
-//!
-//! # Forks are unrepresentable
-//!
-//! Two devices holding DIFFERENT `Kpin`s for one conversation would silently
-//! split pins into two undecryptable halves. The mint path closes it: a mint
-//! is an INSERT-ONLY write on the DS (`mint: true`, refused whenever any row
-//! exists, even at a newer epoch), the local cache is only ever written from
-//! a mint the server accepted or an unwrap of the server's row, and re-wraps
-//! carry that same canonical key. There is no path by which a non-canonical
-//! key enters the cache.
+//! Each MLS conversation has one random pin key `Kpin`; pins are sealed under it
+//! once. Only its server-side wrap rotates, under a KEK from the current epoch's
+//! exporter. With `max_past_epochs = 0` the old exporter is gone after a merge, so
+//! a device that holds `Kpin` caches it locally and re-wraps the cached key after
+//! each epoch advance. Minting is insert-only on the DS, so the key can't fork.
+//! See `.codesight/wiki/mls.md` § Pinned-message key state.
 
 use std::sync::Arc;
 
@@ -76,14 +28,13 @@ use super::mls::generation::local_generation;
 use super::mls::provider::load_stored_group;
 use super::mls::PollisProvider;
 
-/// Exporter label for the pin KEK. The exporter secret itself changes every
-/// epoch, so the wrap is epoch-bound without an explicit context.
+/// Exporter label for the pin KEK; the exporter changes every epoch, so the wrap
+/// is epoch-bound without a context.
 const PIN_KEK_EXPORT_LABEL: &str = "pollis-pin-kek";
 
 const NONCE_LEN: usize = 12;
 const KPIN_LEN: usize = 32;
 
-/// One decrypted pin, ready for the UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinnedMessage {
     pub id: String,
@@ -91,20 +42,15 @@ pub struct PinnedMessage {
     pub message_id: String,
     pub pinned_by: String,
     pub pinned_at: String,
-    /// The pinned message's content, snapshotted at pin time — the same
-    /// content-string shape the `message` table caches, so attachments render
-    /// through the exact same parser.
+    /// The pinned message's content at pin time, in the `message.content` shape.
     pub content: String,
     pub sender_id: String,
-    /// Resolved from the local `user_cache` when this device knows the name.
     pub sender_username: Option<String>,
     pub sent_at: String,
 }
 
-/// What gets sealed under `Kpin`: a self-describing snapshot of the message at
-/// pin time. `message_id`/`conversation_id` are INSIDE the ciphertext so a
-/// server that shuffles rows between messages or channels produces a visible
-/// mismatch instead of a silently relocated pin.
+/// Snapshot sealed under `Kpin`. `message_id`/`conversation_id` are inside the
+/// ciphertext so a server shuffling rows produces a visible mismatch.
 #[derive(Debug, Serialize, Deserialize)]
 struct PinSnapshot {
     v: u8,
@@ -114,8 +60,6 @@ struct PinSnapshot {
     sent_at: String,
     content: String,
 }
-
-// ── AES-256-GCM helpers ──────────────────────────────────────────────────────
 
 fn seal(key: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut nonce = [0u8; NONCE_LEN];
@@ -140,23 +84,16 @@ fn open(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| Error::Crypto(format!("pin open: {e}")))
 }
 
-// ── The exporter-derived KEK ─────────────────────────────────────────────────
-
-/// The KEK exported from a group's CURRENT exporter, together with the
-/// `(generation, epoch)` pair that produced it — everything a wrap upload
-/// needs to say which exporter opens it.
+/// The KEK from a group's current exporter, with the `(generation, epoch)` that
+/// produced it.
 struct PinKek {
     kek: Zeroizing<Vec<u8>>,
     generation: i64,
     epoch: i64,
 }
 
-/// The current [`PinKek`] for a conversation, or `None` when no local MLS
-/// group exists (pre-join, evicted, or a conversation this device has never
-/// synced).
-///
-/// Pure sync — call inside a `local_db` guard scope; nothing here may cross
-/// an await (`PollisProvider` wraps a `!Send` connection).
+/// The current [`PinKek`], or `None` with no local MLS group. Sync only: call
+/// inside a `local_db` guard; `PollisProvider` wraps a `!Send` connection.
 fn current_pin_kek(conn: &Connection, mls_conversation_id: &str) -> Option<PinKek> {
     let generation = local_generation(conn, mls_conversation_id);
     let group = load_stored_group(conn, mls_conversation_id)?;
@@ -171,8 +108,6 @@ fn current_pin_kek(conn: &Connection, mls_conversation_id: &str) -> Option<PinKe
         epoch,
     })
 }
-
-// ── Local Kpin cache ─────────────────────────────────────────────────────────
 
 fn read_cache(conn: &Connection, mls_conversation_id: &str) -> Result<Option<(Vec<u8>, i64, i64)>> {
     conn.query_row(
@@ -207,10 +142,8 @@ fn write_cache(
     Ok(())
 }
 
-// ── Keystate upload ──────────────────────────────────────────────────────────
-
-/// Wrap `kpin` under `kek.kek` and post it at `kek`'s `(generation, epoch)`.
-/// Returns the DS's `updated` answer.
+/// Wrap `kpin` under `kek` and post it at `kek`'s `(generation, epoch)`; returns
+/// the DS's `updated`.
 async fn post_keystate(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -242,27 +175,19 @@ async fn post_keystate(
     Ok(updated)
 }
 
-// ── Kpin acquisition ─────────────────────────────────────────────────────────
-
-/// Get this conversation's `Kpin`: from the local cache, by unwrapping the
-/// server's wrap, or — when `mint_if_absent` and no keystate exists — by
-/// minting a fresh key (insert-only on the DS, so a lost race adopts the
-/// winner's key instead of forking).
+/// This conversation's `Kpin`: from the cache, by unwrapping the server's wrap,
+/// or (with `mint_if_absent`) by an insert-only mint where a lost race adopts the
+/// winner's key.
 ///
-/// `Ok(None)` means the key exists but is UNREACHABLE from here right now:
-/// the stored wrap was produced at a `(generation, epoch)` other than this
-/// device's current one, and this device holds no cache. That heals when any
-/// cache-holding member re-wraps ([`maybe_rewrap_pin_key`] fires on every
-/// epoch advance and catch-up pass); until then pins are unavailable rather
-/// than wrong.
+/// `Ok(None)`: the stored wrap is from another `(generation, epoch)` and this
+/// device has no cache. Heals when a key-holding member re-wraps; until then pins
+/// are unavailable rather than wrong.
 async fn ensure_kpin(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
     user_id: &str,
     mint_if_absent: bool,
 ) -> Result<Option<Zeroizing<Vec<u8>>>> {
-    // Cache hit — the common case for every device that has pinned, listed,
-    // or re-wrapped before.
     {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -286,9 +211,7 @@ async fn ensure_kpin(
                 return Ok(None);
             };
             if ks.generation != kek.generation || ks.epoch != kek.epoch {
-                // Wrap from an epoch we are not at: with `max_past_epochs = 0`
-                // there is no exporter to open it with. A member's re-wrap
-                // heals this; report unavailable rather than guessing.
+                // No exporter for another epoch's wrap; a member's re-wrap heals it.
                 return Ok(None);
             }
             let kpin = open(&kek.kek, &nonce, &wrapped)?;
@@ -320,8 +243,7 @@ async fn ensure_kpin(
                 write_cache(db.conn(), mls_conversation_id, &kpin, kek.generation, kek.epoch)?;
                 return Ok(Some(kpin));
             }
-            // Lost the mint race: a row landed between our read and our
-            // insert. Adopt the winner's key — one refetch, no second mint.
+            // Lost the mint race: adopt the winner's key.
             let resp =
                 super::ds_reads::read_pin_keystate(state, mls_conversation_id, user_id).await?;
             let Some(ks) = resp.keystate else {
@@ -350,18 +272,10 @@ async fn ensure_kpin(
     }
 }
 
-// ── Epoch hooks ──────────────────────────────────────────────────────────────
-
-/// Re-wrap the cached `Kpin` under the current exporter if this device is
-/// behind — the pin sibling of `voice_e2ee::on_mls_epoch_changed`, called at
-/// every epoch-advance site and once per catch-up pass as a durability
-/// backstop.
-///
-/// Steady-state cost is ONE local SELECT (no cache row → nothing to do; row
-/// current → nothing to do). Only a device that actually holds the key and is
-/// actually behind pays for a group load and a DS post. Best-effort by
-/// design: a failed re-wrap costs a new device some waiting, never
-/// correctness, and the next pass retries.
+/// Re-wrap the cached `Kpin` under the current exporter if behind. Called at
+/// every epoch-advance site and once per catch-up pass. Steady state is one local
+/// SELECT. Best-effort: a failure only delays new devices, and the next pass
+/// retries.
 pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &str) {
     let staged: Option<(Zeroizing<Vec<u8>>, PinKek)> = {
         let guard = state.local_db.lock().await;
@@ -395,8 +309,7 @@ pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &s
         Err(_) => return,
     };
     match post_keystate(state, mls_conversation_id, &kpin, &kek, &user_id, false).await {
-        // `updated == false` means somebody newer-or-equal already covered
-        // this epoch — either way the server is current, so stop retrying.
+        // `updated == false` means a newer-or-equal wrap already covers this epoch.
         Ok(_) => {
             let guard = state.local_db.lock().await;
             let Some(db) = guard.as_ref() else {
@@ -430,11 +343,9 @@ fn conn_update_markers(
     Ok(())
 }
 
-/// Best-effort adopt of a conversation's pin key at a moment the wrap is
-/// likely to match this device's epoch exactly — right after a Welcome lands
-/// (before the post-join self-update moves the epoch) and after an external
-/// join completes. Failure is silent by design: a device that cannot adopt
-/// yet simply reads pins later, once a key-holding member re-wraps.
+/// Best-effort adopt at a moment the wrap likely matches this device's epoch:
+/// right after a Welcome lands (before the post-join self-update) and after an
+/// external join.
 pub async fn try_adopt_pin_key(state: &Arc<AppState>, mls_conversation_id: &str) {
     let user_id = match super::mls::current_user_id(state).await {
         Ok(u) => u,
@@ -449,9 +360,8 @@ pub async fn try_adopt_pin_key(state: &Arc<AppState>, mls_conversation_id: &str)
     }
 }
 
-/// Mint the pin key at group creation, while the creator is the sole member
-/// at epoch 0. Best-effort: on any failure the first pin mints instead, so a
-/// dropped create-time mint costs nothing but that later round trip.
+/// Mint the pin key at group creation, at epoch 0. Best-effort: otherwise the
+/// first pin mints.
 pub async fn mint_pin_key_for_new_group(state: &Arc<AppState>, conversation_id: &str) {
     let user_id = match super::mls::current_user_id(state).await {
         Ok(u) => u,
@@ -462,11 +372,8 @@ pub async fn mint_pin_key_for_new_group(state: &Arc<AppState>, conversation_id: 
     }
 }
 
-// ── Commands ─────────────────────────────────────────────────────────────────
-
-/// Pin a message: snapshot its content, seal the snapshot under the
-/// conversation's `Kpin`, and store it via the DS. Idempotent — pinning an
-/// already-pinned message leaves the existing pin in place.
+/// Pin a message: snapshot its local decrypted copy, seal it under `Kpin`, store
+/// via the DS. Idempotent.
 pub async fn pin_message(
     conversation_id: String,
     message_id: String,
@@ -481,8 +388,7 @@ pub async fn pin_message(
     }
     let mls_id = cu.mls_group_id;
 
-    // The snapshot comes from this device's own decrypted copy — a message
-    // this device cannot read is a message it cannot pin.
+    // A message this device cannot read cannot be pinned.
     let (content, sender_id, sent_at): (String, String, String) = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -520,8 +426,6 @@ pub async fn pin_message(
     };
     let json = serde_json::to_vec(&snapshot)
         .map_err(|e| Error::Other(anyhow::anyhow!("serialize pin snapshot: {e}")))?;
-    // Same size-bucket padding messages use, so a pin's length does not count
-    // its words for the server.
     let padded = super::messages::framing::pad(&json);
     let (nonce, ct) = seal(&kpin, &padded)?;
 
@@ -536,8 +440,7 @@ pub async fn pin_message(
     super::mls::ds_post_ok(state, &body).await
 }
 
-/// Remove a pin. Any current member may unpin; unpinning something already
-/// unpinned is a no-op.
+/// Remove a pin. Any current member may unpin; a no-op if not pinned.
 pub async fn unpin_message(
     conversation_id: String,
     message_id: String,
@@ -552,14 +455,9 @@ pub async fn unpin_message(
     super::mls::ds_post_ok(state, &body).await
 }
 
-/// One conversation's pins, newest first, decrypted.
-///
-/// A snapshot that fails to open (tampered, or sealed under a key this
-/// conversation no longer uses) is skipped with a log line rather than
-/// failing the whole list — one bad row must not hide the good ones. A
-/// snapshot that opens but names a DIFFERENT message or conversation is also
-/// skipped: that is the server (or another member) splicing rows, and
-/// rendering it would relocate a pin.
+/// One conversation's pins, newest first, decrypted. A pin that fails to open, or
+/// names a different message or conversation inside its ciphertext (a row
+/// splice), is skipped so one bad row can't hide the rest.
 pub async fn list_pinned_messages(
     conversation_id: String,
     user_id: String,
@@ -647,10 +545,8 @@ mod tests {
 
     const KEY: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
 
-    /// Ids are long and distinctive on purpose — see
-    /// [`the_stored_bytes_do_not_contain_the_plaintext`], which searches the
-    /// ciphertext for them. A two-character id makes that search a coin flip
-    /// rather than a leak detector.
+    /// Long, distinctive ids so the ciphertext search below is a leak detector, not
+    /// a coin flip.
     fn snapshot() -> PinSnapshot {
         PinSnapshot {
             v: 1,
@@ -671,26 +567,15 @@ mod tests {
         let opened = open(KEY, &nonce, &ct).unwrap();
         let stripped = crate::commands::messages::framing::strip(&opened);
         let back: PinSnapshot = serde_json::from_slice(&stripped).unwrap();
-        // Compared against the fixture, not against re-typed literals — the two
-        // drifted the moment the fixture's ids changed.
         assert_eq!(back.content, snap.content);
         assert_eq!(back.message_id, snap.message_id);
         assert_eq!(back.conversation_id, snap.conversation_id);
         assert_eq!(back.sender_id, snap.sender_id);
     }
 
-    /// What the DS stores must not carry the pin's words or ids.
-    ///
-    /// **Every needle must be long enough that finding one is evidence.** This
-    /// searched for `b"m1"` — the old two-byte `message_id` — and a two-byte
-    /// sequence turns up in random ciphertext about once every 300 runs, so the
-    /// test reddened CI roughly that often with nothing wrong. Measured at 2
-    /// failures in 400 runs before the fixture ids were lengthened.
-    ///
-    /// A short needle cannot tell a leak from a coincidence, which makes it
-    /// worse than no needle: it trains people to re-run the suite. The fixture's
-    /// ids are now long and distinctive, so a hit is a real leak, and the
-    /// assertion says which needle hit.
+    /// What the DS stores must not carry the pin's words or ids. Every needle must be
+    /// long enough (>= 8 bytes) that a hit is a leak, not a random match in the
+    /// ciphertext.
     #[test]
     fn the_stored_bytes_do_not_contain_the_plaintext() {
         let snap = snapshot();
@@ -732,8 +617,6 @@ mod tests {
         assert!(open(KEY, &nonce, &ct).is_err());
     }
 
-    /// Two pins of identical content produce different bytes — fresh nonce
-    /// every seal, and no equality oracle for the server.
     #[test]
     fn two_seals_of_the_same_content_differ() {
         let (n1, c1) = seal(KEY, b"same").unwrap();
@@ -742,8 +625,6 @@ mod tests {
         assert_ne!(c1, c2);
     }
 
-    /// Padding puts short pins in one bucket, so pin length does not count
-    /// words for the server.
     #[test]
     fn short_pins_share_a_size_bucket() {
         let a = crate::commands::messages::framing::pad(b"hi");
@@ -751,8 +632,7 @@ mod tests {
         assert_eq!(a.len(), b.len());
     }
 
-    /// The wrap-format round trip the keystate row depends on: KEK wraps the
-    /// 32-byte Kpin, and the wrapped blob stays small enough for the DS bound.
+    /// The 32-byte `Kpin` wrap round-trips and stays within the DS bound.
     #[test]
     fn kpin_wrap_round_trips_and_stays_small() {
         let mut kpin = [0u8; KPIN_LEN];

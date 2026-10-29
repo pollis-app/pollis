@@ -1,32 +1,15 @@
-//! In-app terminal pane backend.
+//! In-app terminal pane backend: the user's `$SHELL` behind a Unix PTY, with a
+//! reader thread and an aggregator thread coalescing output into a [`RawSink`]
+//! (raw bytes, #282). Sessions live for the app's lifetime; dropping a
+//! [`PtySession`] kills its child.
 //!
-//! Spawns the user's `$SHELL` behind a Unix PTY using `nix::pty::openpty` +
-//! `std::process::Command::pre_exec`. Each session gets a dedicated OS
-//! reader thread plus an aggregator thread that coalesce the master fd into
-//! a [`RawSink`] of raw bytes (binary IPC, no serde — see issue #282). The
-//! frontend (xterm.js) writes those bytes to the screen and forwards
-//! keystrokes back through [`terminal_write`].
+//! Not `portable-pty`: its post-fork `close_random_fds` sweep closes fds Rust
+//! owns, which aborts with "FD ownership violation". Our own `pre_exec` spawn
+//! skips it.
 //!
-//! Sessions are spawned on first activation and kept alive for the app's
-//! lifetime; toggling the view away and back reattaches to the same PTY.
-//! Dropping a [`PtySession`] kills its child, so process exit / `logout`
-//! cleanup leaves no zombies.
-//!
-//! Why not `portable-pty`: its `posix::spawn_command` does a post-fork
-//! `close_random_fds` sweep that walks `/proc/self/fd` and `close(2)`s every
-//! file descriptor it doesn't recognise. Under Electron the renderer
-//! process has thousands of FDs from the surrounding host, and Rust's I/O
-//! safety guard treats any close of an FD it owns (stdio, OwnedFds in
-//! tokio's reactor, etc.) as undefined behaviour and aborts with "Crashing
-//! due to FD ownership violation". Building our own spawn path with
-//! `pre_exec` skips the sweep entirely — same approach Tauri used before
-//! their portable_pty wrapper.
-//!
-//! Backpressure: bytes handed to xterm are credited via [`terminal_ack`]
-//! (fired from xterm's write callback when a chunk is actually rendered).
-//! The aggregator parks while `in_flight` exceeds [`HIGH_WATERMARK`] so a
-//! runaway producer (`cat bigfile`, chatty build) can't balloon xterm's
-//! unbounded internal write buffer on weak/software-rendered devices.
+//! Backpressure: xterm acks rendered bytes via [`terminal_ack`]; the aggregator
+//! parks above [`HIGH_WATERMARK`] so a runaway producer can't balloon xterm's
+//! unbounded write buffer.
 
 use std::fs::File;
 use std::io::{Read, Write};
@@ -48,22 +31,17 @@ fn map_pty<E: std::fmt::Display>(e: E) -> Error {
     Error::Other(anyhow::anyhow!("PTY error: {e}"))
 }
 
-/// Largest coalesced message handed to one sink send. The reader fills the
-/// mpsc faster than the aggregator drains under bulk output, so try_recv
-/// naturally batches many 64 KiB reads up to this bound.
+/// Largest coalesced message per sink send.
 const MAX_BATCH: usize = 256 * 1024;
 
-/// Aggregator parks once this many un-acked bytes are outstanding.
+/// Aggregator parks once this many un-acked bytes are outstanding...
 const HIGH_WATERMARK: usize = 1024 * 1024;
 
 /// ...and resumes once outstanding drops back below this.
 const LOW_WATERMARK: usize = 256 * 1024;
 
-/// Shared credit counter + parking primitive for one session's flow
-/// control. `terminal_ack` decrements and notifies; the aggregator parks
-/// on the condvar while over the high watermark. `closed` lets
-/// `terminal_close` / drop wake a parked aggregator so its thread exits
-/// instead of leaking until EOF.
+/// One session's flow-control credit. `closed` lets close/drop wake a parked
+/// aggregator so its thread exits instead of leaking until EOF.
 struct FlowControl {
     in_flight: AtomicUsize,
     closed: AtomicU64,
@@ -81,8 +59,8 @@ impl FlowControl {
         }
     }
 
-    /// Park the aggregator until outstanding bytes fall below the low
-    /// watermark (or the session is closed), then reserve `n` bytes.
+    /// Park until outstanding bytes fall below the low watermark (or the session
+    /// closes), then reserve `n`.
     fn gate(&self, n: usize) {
         if self.in_flight.load(Ordering::Acquire) > HIGH_WATERMARK {
             let mut guard = self.lock.lock().unwrap();
@@ -95,14 +73,12 @@ impl FlowControl {
         self.in_flight.fetch_add(n, Ordering::AcqRel);
     }
 
-    /// Credit `n` acked bytes back and wake a parked aggregator.
     fn ack(&self, n: usize) {
         self.in_flight.fetch_sub(n, Ordering::AcqRel);
         let _g = self.lock.lock().unwrap();
         self.cv.notify_all();
     }
 
-    /// Mark closed and wake any parked aggregator so its thread exits.
     fn close(&self) {
         self.closed.store(1, Ordering::Release);
         let _g = self.lock.lock().unwrap();
@@ -111,9 +87,7 @@ impl FlowControl {
 }
 
 pub struct PtySession {
-    /// Parent-side master fd, owned. Kept so [`terminal_resize`] can
-    /// `ioctl(TIOCSWINSZ)` against the right pty without racing the reader
-    /// thread's clone.
+    /// Kept for [`terminal_resize`]'s `TIOCSWINSZ` ioctl.
     master: OwnedFd,
     writer: Box<dyn Write + Send>,
     child: Child,
@@ -122,7 +96,6 @@ pub struct PtySession {
 
 impl Drop for PtySession {
     fn drop(&mut self) {
-        // Wake a parked aggregator so its thread isn't stuck until EOF.
         self.flow.close();
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -147,19 +120,15 @@ fn default_shell() -> String {
     }
 }
 
-/// Spawn a shell behind a PTY. Bytes from the shell are pushed to
-/// `on_output` until EOF (shell exit) or the sink detaches. Returns the
-/// session id the frontend passes back to `terminal_write` / `_resize` /
-/// `_close`.
+/// Spawn a shell behind a PTY, streaming its output to `on_output` until EOF.
+/// Returns the session id.
 pub async fn terminal_open(
     rows: u16,
     cols: u16,
     on_output: Arc<dyn RawSink>,
     state: &Arc<AppState>,
 ) -> Result<String> {
-    // Before anything else: this device has to have said yes. Off is the
-    // default and the fail-safe, so a fresh install, a corrupt settings file
-    // and a hostile renderer all land in the same place — no shell.
+    // Must come first: off is the default and the fail-safe.
     crate::commands::terminal_gate::require_terminal_enabled()?;
 
     let winsize = Winsize {
@@ -168,20 +137,14 @@ pub async fn terminal_open(
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    // openpty(3) gives us an owned master + slave pair. Both are OwnedFd
-    // so Drop will close them — the master stays with us, the slave is
-    // dup2'd into the child's stdio in pre_exec then dropped in the parent
-    // after spawn(). We never hit portable_pty's close_random_fds sweep.
+    // The master stays with us; the slave is dup2'd into the child's stdio in
+    // `pre_exec`, then dropped in the parent after spawn.
     let pty = openpty(Some(&winsize), None).map_err(map_pty)?;
     let master_fd = pty.master;
     let slave_fd = pty.slave;
 
-    // Build the shell command. login-shell `-l` so `.zprofile` /
-    // `.bash_profile` runs and the user's full PATH (Homebrew
-    // `eval "$(brew shellenv)"`, /usr/local/bin, nvm, fnm, asdf, etc.) is
-    // available — not just whatever launchd inherits for GUI apps on
-    // macOS. Terminal.app, iTerm2, and Warp all do this for the same
-    // reason. zsh and bash both honor `-l`.
+    // Login shell so `.zprofile`/`.bash_profile` run and the user's full PATH is
+    // available, not just what launchd gives GUI apps on macOS.
     let mut cmd = Command::new(default_shell());
     cmd.arg("-l");
     cmd.env("TERM", "xterm-256color");
@@ -190,21 +153,15 @@ pub async fn terminal_open(
             cmd.current_dir(dir);
         }
     }
-    // The child must NOT inherit our (parent) stdio fds — those belong to
-    // the host process (Electron renderer / Tauri shell). Stub them with
-    // /dev/null-style Stdio::null() so std doesn't try to wire them up;
-    // pre_exec then overwrites 0/1/2 with the pty slave anyway.
+    // The child must not inherit the host process's stdio; `pre_exec` replaces
+    // 0/1/2 with the slave anyway.
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    // pre_exec runs in the forked child between fork() and execvp(). Only
-    // async-signal-safe libc calls are allowed here — no allocations, no
-    // Rust I/O. Sequence (post-fork, pre-exec):
-    //   1. setsid()                              — new session for the shell
-    //   2. dup2(slave, 0/1/2)                    — wire stdio to the pty
-    //   3. ioctl(slave, TIOCSCTTY, 0)            — make slave the controlling tty
-    //   4. close(slave)                          — still open as 0/1/2
+    // Runs between fork and exec: async-signal-safe libc calls only, no allocation
+    // or Rust I/O. setsid, dup2 the slave onto 0/1/2, make it the controlling tty,
+    // close the original slave fd.
     let slave_raw = slave_fd.as_raw_fd();
     unsafe {
         cmd.pre_exec(move || {
@@ -219,28 +176,18 @@ pub async fn terminal_open(
             if libc::ioctl(slave_raw, libc::TIOCSCTTY as _, 0) == -1 {
                 return Err(std::io::Error::last_os_error());
             }
-            // Slave fd is still open at its original number on top of the
-            // 0/1/2 dups; close it so only stdio references the pty.
             libc::close(slave_raw);
             Ok(())
         });
     }
 
     let child = cmd.spawn().map_err(map_pty)?;
-    // Slave fd in the parent process can go away now — the child holds
-    // its own dup'd copies in 0/1/2. Dropping makes the shell see EOF /
-    // SIGHUP after it exits, which lets the reader loop terminate.
+    // Drop the parent's slave fd so the reader sees EOF once the shell exits.
     drop(slave_fd);
 
-    // Reader needs its own OwnedFd so it can do blocking reads while the
-    // parent thread keeps writing through its own File handle. `try_clone`
-    // is dup(2) under the hood — both fds reference the same pty master.
+    // Separate dup'd fds for the blocking reader, the writer, and the resize ioctl.
     let reader_fd = master_fd.try_clone().map_err(map_pty)?;
     let mut reader = File::from(reader_fd);
-    // Writer is the original master fd wrapped as a File so
-    // `Box<dyn Write + Send>` works unchanged downstream. Cloned into the
-    // session as a second handle (we need master_fd for terminal_resize
-    // too — File takes ownership otherwise).
     let writer_fd = master_fd.try_clone().map_err(map_pty)?;
     let writer: Box<dyn Write + Send> = Box::new(File::from(writer_fd));
 
@@ -248,9 +195,8 @@ pub async fn terminal_open(
 
     let flow = Arc::new(FlowControl::new());
 
-    // PTY reads are blocking, so the reader lives on a dedicated OS thread.
-    // It does no sinking — just forwards 64 KiB chunks over an mpsc to the
-    // aggregator. Dropping `tx` on EOF/err signals Disconnected downstream.
+    // PTY reads block, so the reader has its own OS thread and only forwards
+    // chunks; dropping `tx` signals Disconnected.
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     std::thread::Builder::new()
         .name(format!("pty-rd-{id}"))
@@ -270,24 +216,19 @@ pub async fn terminal_open(
         })
         .map_err(map_pty)?;
 
-    // Aggregator: coalesces queued reads into one ≤MAX_BATCH message with
-    // no timer (try_recv drains only what's already queued, so interactive
-    // keystrokes add zero latency), gates on flow control, then sinks.
+    // Aggregator: coalesces what is already queued (no timer, so keystrokes add no
+    // latency), gates on flow control, then sinks.
     let flow_agg = Arc::clone(&flow);
     std::thread::Builder::new()
         .name(format!("pty-agg-{id}"))
         .spawn(move || {
-            // Blocks; returns immediately for interactive output. `recv` erroring
-            // means the producer hung up, which ends the aggregator.
             while let Ok(first) = rx.recv() {
                 let mut buf = first;
                 let mut disconnected = false;
                 while buf.len() < MAX_BATCH {
                     match rx.try_recv() {
                         Ok(c) => buf.extend(c),
-                        // Nothing queued -> send now (low latency).
                         Err(TryRecvError::Empty) => break,
-                        // EOF: flush tail below, then exit after send.
                         Err(TryRecvError::Disconnected) => {
                             disconnected = true;
                             break;
@@ -316,10 +257,8 @@ pub async fn terminal_open(
     Ok(id)
 }
 
-/// Credit acked bytes back toward the per-session flow-control window so
-/// the aggregator can resume producing. Fired from xterm.js's `write`
-/// callback (true end-to-end render signal). Unknown ids are a no-op —
-/// the PTY may have closed between render and this call.
+/// Credit rendered bytes back to the session's flow-control window (from
+/// xterm.js's `write` callback). Unknown ids are a no-op.
 pub async fn terminal_ack(
     terminal_id: String,
     bytes: usize,
@@ -332,11 +271,8 @@ pub async fn terminal_ack(
     Ok(())
 }
 
-/// Forward user keystrokes (UTF-8 bytes) to the shell. Borrows the id +
-/// payload so the Tauri shim can hand straight through the IPC raw body
-/// (no clone, no JSON number-array per keystroke — see issue #282 for the
-/// matching output path). Unknown ids are a no-op — the PTY may have
-/// exited between a keypress and this call.
+/// Forward keystrokes to the shell. Borrowed so the shim can pass the IPC raw
+/// body straight through (#282). Unknown ids are a no-op.
 pub async fn terminal_write(
     terminal_id: &str,
     data: &[u8],
@@ -350,7 +286,7 @@ pub async fn terminal_write(
     Ok(())
 }
 
-/// Propagate a window/grid resize to the PTY (drives SIGWINCH).
+/// Propagate a resize to the PTY (delivers SIGWINCH).
 pub async fn terminal_resize(
     terminal_id: String,
     rows: u16,
@@ -365,10 +301,7 @@ pub async fn terminal_resize(
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
-        // TIOCSWINSZ on the master fd resizes the pty and delivers
-        // SIGWINCH to the foreground process group in the slave's session.
-        // libc::TIOCSWINSZ is c_ulong on Linux, c_int on BSD/macOS — the
-        // `as _` cast handles both without a per-OS branch.
+        // `TIOCSWINSZ` is c_ulong on Linux and c_int on BSD/macOS; `as _` covers both.
         let rc = unsafe {
             libc::ioctl(
                 session.master.as_raw_fd(),
@@ -385,7 +318,6 @@ pub async fn terminal_resize(
 
 /// Kill the PTY and drop the session. Idempotent.
 pub async fn terminal_close(terminal_id: String, state: &Arc<AppState>) -> Result<()> {
-    // Removing drops PtySession, whose Drop kills + reaps the child.
     state.terminals.lock().await.remove(&terminal_id);
     Ok(())
 }

@@ -11,22 +11,11 @@ static JOIN: &[u8] = include_bytes!("../../../assets/sfx/join_fx.wav");
 static LEAVE: &[u8] = include_bytes!("../../../assets/sfx/leave-fx.wav");
 static CALL: &[u8] = include_bytes!("../../../assets/sfx/call.wav");
 
-// Process-wide audio output. `OutputStream` is `!Send`, so it lives on a
-// dedicated parked thread that opens the host audio device once at first
-// access and stays alive for the whole process. Every play_sfx / start_ring
-// borrows the `Send + Sync` handle and creates a fresh `Sink` on it —
-// avoiding the per-call cost of opening the audio device.
-//
-// Why this matters: on Linux (PulseAudio / PipeWire) and Windows after the
-// audio stack idles, `OutputStream::try_default()` can take seconds to
-// return on the first call after a sleep. The previous implementation
-// opened a fresh stream on every play, which manifested as ~5–10s delay
-// before the incoming-call ringtone started — and a silent failure when
-// the cold-open hung past the window the user cared about. The handle is
-// initialised once, lazily, and reused forever after.
-//
-// `None` means the audio backend failed to open and every subsequent call
-// silently no-ops. A missing audio device must never crash the app.
+// Process-wide audio output, opened once and reused: a cold
+// `OutputStream::try_default()` can take seconds after the audio stack idles
+// (Linux, Windows), which delayed the ringtone. `OutputStream` is `!Send`, so it
+// lives on a parked thread; callers borrow the `Send + Sync` handle. `None` means
+// the backend failed to open and every call no-ops.
 static AUDIO_HANDLE: OnceLock<Option<OutputStreamHandle>> = OnceLock::new();
 
 fn ensure_audio() -> Option<&'static OutputStreamHandle> {
@@ -38,10 +27,8 @@ fn ensure_audio() -> Option<&'static OutputStreamHandle> {
                 .spawn(move || match OutputStream::try_default() {
                     Ok((stream, handle)) => {
                         let _ = tx.send(Some(handle));
-                        // `stream` is !Send and must outlive every Sink
-                        // created from `handle`. Bind it to a stack local
-                        // and park forever — the variable is dropped only
-                        // if this thread exits, which it never does.
+                        // `stream` must outlive every Sink created from `handle`; this thread never
+                        // exits.
                         let _keep_alive = stream;
                         loop {
                             std::thread::park();
@@ -61,22 +48,16 @@ fn ensure_audio() -> Option<&'static OutputStreamHandle> {
         .as_ref()
 }
 
-/// Prewarm the audio backend so the first user-facing playback (typically
-/// an incoming-call ringtone) doesn't pay the cold-open cost. Call once at
-/// app startup. Idempotent — the underlying `OnceLock` only initialises
-/// once regardless of how many callers fire this.
+/// Prewarm the audio backend so the first playback (usually the ringtone) skips
+/// the cold-open cost. Idempotent.
 pub fn prewarm_audio() {
     std::thread::spawn(|| {
         let _ = ensure_audio();
     });
 }
 
-/// Play a named sound effect on the host audio device.
-///
-/// `Sink::detach()` hands the sink off to rodio's internal mixer thread
-/// so playback continues without a wrapper thread blocking on it. All
-/// errors are silently ignored — a missing audio device should never
-/// crash the app.
+/// Play a named sound effect. Errors are ignored: a missing audio device must
+/// never crash the app.
 pub fn play_sfx(sound: &str) {
     let bytes: &'static [u8] = match sound {
         "ping" => PING,
@@ -106,12 +87,11 @@ pub fn play_sfx(sound: &str) {
     sink.detach();
 }
 
-/// Looping ringtone playback. The wav file has built-in inter-ring silence so
-/// looping the whole clip produces a natural ring-pause-ring pattern.
+/// Set while the ringtone loops. The clip has built-in silence, so looping it
+/// gives a ring-pause-ring pattern.
 static RING_STOP: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
-/// Start the incoming-call ringtone on a loop. Idempotent — calling twice
-/// while already ringing is a no-op.
+/// Start the incoming-call ringtone on a loop. Idempotent.
 pub fn start_ring() {
     let Some(handle) = ensure_audio() else {
         return;
@@ -147,9 +127,7 @@ pub fn start_ring() {
                 }
             };
             sink.append(source);
-            // Poll the stop flag while this iteration plays so a stop
-            // request is honored within ~100ms instead of waiting out the
-            // whole clip.
+            // Check the stop flag while the clip plays so a stop lands within ~100ms.
             while !sink.empty() && !stop.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(100));
             }

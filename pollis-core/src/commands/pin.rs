@@ -1,37 +1,12 @@
-//! PIN-wrapped per-user key storage.
+//! PIN-wrapped per-user key storage. The 4-digit PIN is a local unlock factor
+//! (~13 bits), so the keys are protected by Argon2id (~250 ms) and
+//! XChaCha20-Poly1305.
 //!
-//! The 4-digit PIN is a *local unlock* factor, not a server credential.
-//! Entropy is ~13 bits, so on-disk material is protected by Argon2id
-//! (memory-hard, tuned ~250ms/op) + XChaCha20-Poly1305.
-//!
-//! Concepts:
-//! - `pin_meta_{user_id}` — carries the KDF parameters, salt, a verifier
-//!   blob (constant plaintext), and the failed-attempt counter.
-//!   Lets us reject a wrong PIN without unwrapping the big keys.
-//! - `db_key_wrapped_{user_id}` — the SQLCipher key, AEAD-sealed under
-//!   the KEK derived from the PIN.
-//! - `account_id_key_wrapped_{user_id}` — the Ed25519 account identity
-//!   key, AEAD-sealed under the same KEK.
-//!
-//! `pin_meta` holds the Argon2 parameters + salt. The two wrapped-key
-//! blobs carry only a fresh nonce + ciphertext and reuse the already-
-//! derived KEK — one Argon2 evaluation per unlock, not three.
-//!
-//! ## The legacy unwrapped slots (#194 stage 6, finished by #951)
-//!
-//! Before #194 the two secrets lived in `db_key_{user_id}` and
-//! `account_id_key_{user_id}` as raw bytes with no PIN layer over them.
-//! #882 later put the file backend's whole contents inside AES-256-GCM,
-//! which helped those slots incidentally, but they still skipped the
-//! Argon2id KEK everyone enrolled after #194 gets — so an attacker who
-//! defeated the file layer read them directly instead of meeting a slow
-//! KDF.
-//!
-//! `set_pin` is the cutover: an upgrader boots with `pin_set = false`,
-//! the frontend routes them to the create-PIN screen (`App.tsx`), and
-//! [`source_initial_keys`] reads the legacy slots so [`install_wrapped_slots`]
-//! can wrap them. The **ordering** in that function is the load-bearing
-//! part — see its documentation.
+//! Slots per user: `pin_meta` (KDF params, salt, verifier, attempt counter),
+//! `db_key_wrapped` (the SQLCipher key) and `account_id_key_wrapped`, both sealed
+//! under the one PIN-derived KEK. Upgraders from pre-PIN builds have unwrapped
+//! legacy slots that [`install_wrapped_slots`] migrates (#951). See
+//! `.codesight/wiki/pin-design.md`.
 
 use aes_gcm::aead::OsRng as AeadOsRng;
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -46,26 +21,17 @@ use zeroize::Zeroizing;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-// ── Keystore slot names ──────────────────────────────────────────────
-
 const PIN_META_SLOT: &str = "pin_meta";
 const DB_KEY_WRAPPED_SLOT: &str = "db_key_wrapped";
 const ACCOUNT_ID_KEY_WRAPPED_SLOT: &str = "account_id_key_wrapped";
 const DB_KEY_SLOT_LEGACY: &str = "db_key";
 const ACCOUNT_ID_KEY_SLOT_LEGACY: &str = "account_id_key";
-/// Legacy `session_{user_id}` blob — duplicate source of truth for
-/// "who was signed in," written by pre-PIN `verify_otp`. A transient
-/// read failure on this slot was one of the paths behind #184. Stage 3
-/// added the PIN as the real unlock factor; `set_pin` deletes the blob
-/// once the wrap succeeds so we don't have two sources of truth during
-/// the migration window.
+/// Legacy `session_{user_id}` blob from pre-PIN builds (#184), deleted once the
+/// wrap succeeds.
 const SESSION_SLOT_LEGACY: &str = "session";
 
-// ── KDF tuning ───────────────────────────────────────────────────────
-//
-// Target ~250ms on a mid-range M1 / Ryzen 5. Bumps are safe: `pin_meta`
-// carries its own params, so a re-wrap (via `set_pin`) freely moves to
-// newer parameters without migration.
+// Target ~250 ms on a mid-range machine. `pin_meta` carries its own params, so
+// raising these needs no migration.
 
 const ARGON2_M_COST_KIB: u32 = 64 * 1024; // 64 MiB
 const ARGON2_T_COST: u32 = 3;
@@ -74,32 +40,15 @@ const KEK_LEN: usize = 32;
 const SALT_LEN: usize = 16;
 const VERIFIER_PLAINTEXT: &[u8; 16] = b"pollis-pin-ok\0\0\0";
 
-// ── Rate limit ───────────────────────────────────────────────────────
-
-/// 10 wrong attempts wipe the wrapped blobs and force re-enrollment via
-/// Secret Key. No time-based backoff — Argon2id's per-attempt cost is
-/// already the real defense against an offline brute-forcer.
+/// Wrong attempts before the wrapped blobs are wiped (recovery via Secret Key).
+/// No time backoff: Argon2id's cost is the defense against offline brute force.
 pub const MAX_FAILED_ATTEMPTS: u32 = 10;
 
-// ── Blob format (pin_meta) ───────────────────────────────────────────
-//
-// Fixed layout, not serde-encoded. Version prefix guarantees we can
-// evolve later without touching the parser:
-//
-//   version (1) = 1
-//   m_cost_kib (4, big-endian)
-//   t_cost (1)
-//   p_cost (1)
-//   salt (16)
-//   nonce (24)
-//   verifier_ct_len (2, big-endian) — always 32 (16 plaintext + 16 tag)
-//   verifier_ct||tag (32)
-//   failed_attempts (4, big-endian)
-//   last_attempt_unix (8, big-endian)
-//
-// Total: 93 bytes. The attempt counters sit outside the ciphertext on
-// purpose — the threat model is a local attacker who already has
-// keystore read access, and they can count attempts regardless.
+// `pin_meta` layout (93 bytes, fixed, not serde): version (1) = 1, m_cost_kib
+// (4 BE), t_cost (1), p_cost (1), salt (16), nonce (24), verifier_ct_len (2 BE),
+// verifier_ct||tag (32), failed_attempts (4 BE), last_attempt_unix (8 BE). The
+// counters are outside the ciphertext on purpose: an attacker with keystore
+// access can count attempts anyway.
 
 const PIN_META_VERSION: u8 = 1;
 
@@ -181,12 +130,7 @@ impl PinMeta {
     }
 }
 
-// ── Wrapped-key blob format (db_key / account_id_key) ────────────────
-//
-//   version (1) = 1
-//   nonce (24)
-//   ct_len (2, BE)
-//   ct||tag
+// Wrapped-key layout: version (1) = 1, nonce (24), ct_len (2 BE), ct||tag.
 
 const WRAPPED_VERSION: u8 = 1;
 
@@ -228,8 +172,6 @@ fn unwrap_bytes(kek: &[u8; KEK_LEN], blob: &[u8]) -> Result<Zeroizing<Vec<u8>>> 
     Ok(Zeroizing::new(pt))
 }
 
-// ── KDF ──────────────────────────────────────────────────────────────
-
 fn derive_kek(
     pin: &str,
     salt: &[u8; SALT_LEN],
@@ -246,8 +188,6 @@ fn derive_kek(
         .map_err(|e| Error::Crypto(format!("argon2 hash: {e}")))?;
     Ok(out)
 }
-
-// ── Helpers for the commands ─────────────────────────────────────────
 
 fn validate_pin(pin: &str) -> Result<()> {
     if pin.len() != 4 || !pin.chars().all(|c| c.is_ascii_digit()) {
@@ -290,46 +230,29 @@ async fn nuke_wrapped(
     Ok(())
 }
 
-// ── In-memory unlock state ───────────────────────────────────────────
-
-/// Per-user in-memory unlock snapshot. Zeroized on drop.
+/// Per-user in-memory unlock state; zeroized on drop.
 pub struct UnlockState {
     pub user_id: String,
     pub db_key: Zeroizing<Vec<u8>>,
     pub account_id_key: Zeroizing<Vec<u8>>,
 }
 
-// ── Commands ─────────────────────────────────────────────────────────
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnlockStateSnapshot {
     pub last_active_user: Option<String>,
     pub is_unlocked: bool,
-    /// True when a PIN has been set for `last_active_user`. Lets the
-    /// frontend route between "enter PIN" and "set PIN to finish signup."
+    /// Whether `last_active_user` has a PIN: routes between "enter PIN" and
+    /// "set PIN".
     pub pin_set: bool,
 }
 
-/// Set the PIN for the currently-active user.
+/// Set the PIN for the active user.
 ///
-/// * If `old_pin` is `None`, this is first-time setup. The raw key
-///   material to wrap is sourced in priority order from:
-///     1. `AppState.unlock` — populated by `verify_otp` /
-///        `/v1/auth/establish-identity` at signup, by `reset_identity`, or by an
-///        enrollment unwrap (the canonical path).
-///     2. Legacy `db_key_{uid}` / `account_id_key_{uid}` keystore
-///        slots — pre-PIN builds. Read once, then deleted after the
-///        wrap succeeds.
-/// * If `old_pin` is `Some`, this is the change-PIN flow: unwrap with
-///   the old PIN, rewrap under the new one.
-///
-/// On success: writes the three PIN-protected blobs (`pin_meta`,
-/// `db_key_wrapped`, `account_id_key_wrapped`), verifies they read back
-/// (see [`install_wrapped_slots`] — this is what makes the next step
-/// safe), deletes the legacy unwrapped slots, populates
-/// `AppState.unlock`, and opens the local SQLCipher DB under the same
-/// `db_key`. Best-effort `ensure_device_cert` follows so a fresh signup
-/// publishes its cert as part of the same roundtrip.
+/// With `old_pin = None` (first-time setup) the keys come from `AppState.unlock`,
+/// or from legacy unwrapped slots on a pre-PIN upgrader. With `Some` it is a
+/// change: unwrap with the old PIN, rewrap under the new. On success the wrapped
+/// slots are written and verified, the local DB opens, and the device cert is
+/// published.
 pub async fn set_pin(
     state: &Arc<AppState>,
     old_pin: Option<String>,
@@ -363,8 +286,8 @@ pub async fn set_pin(
         ARGON2_P_COST,
     )?;
 
-    // Verifier blob: encrypt a fixed plaintext so wrong-PIN rejection
-    // doesn't have to unwrap the big keys.
+    // Encrypt a fixed plaintext so a wrong PIN is rejected without unwrapping the
+    // keys.
     let verifier_nonce_raw = XChaCha20Poly1305::generate_nonce(&mut AeadOsRng);
     let verifier_nonce: [u8; 24] = verifier_nonce_raw.into();
     let verifier_cipher = XChaCha20Poly1305::new((&*kek).into());
@@ -400,37 +323,20 @@ pub async fn set_pin(
         account_id_key,
     });
 
-    // Wipe the media cache on unlock. If a different user previously cached
-    // media on this device, their files were encrypted under their db_key
-    // and are unreadable to us — purge them so they don't consume cap space.
-    //
-    // Scoped to `user_id` explicitly rather than to whichever user the cache
-    // happened to be pointed at: `load_user_db_with_key` below is what sets
-    // that, so a wipe reading it here resolved the empty `_anon` directory and
-    // cleared nothing at all.
+    // Another user's cached media is unreadable under our `db_key`; purge it. Scoped
+    // to `user_id` explicitly: the cache's ambient user isn't set until
+    // `load_user_db_with_key` below.
     crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(&user_id));
 
-    // Rotate the loopback media server token. Any URL the previous
-    // session handed out becomes invalid the moment the new token is
-    // installed, which is the behaviour we want when the active user
-    // changes.
+    // Rotate the loopback media token so the previous session's URLs die.
     *state.media_server_token.lock().await =
         Some(crate::media_server::fresh_token());
 
     let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
 
-    // Read the device id into a `let` FIRST, then release. In edition 2021 the
-    // guard produced by `state.device_id.lock().await` inside an `if let`
-    // scrutinee lives until the END of the `if let` body, so the `.clone()` only
-    // LOOKS like it releases the lock — the old shape held `device_id`, one of
-    // the hottest mutexes in the crate, across `ensure_device_cert`'s Turso
-    // read, OS-keystore signature and DS POST. That stalled every concurrent
-    // task needing the device id, and it was one refactor away from a hard
-    // self-deadlock: `tokio::sync::Mutex` is not reentrant, and the signed
-    // `ds_post` helper takes this very lock (`mls::ds_client`). Today
-    // `ensure_device_cert` only uses the sign-free bootstrap posts, so nothing
-    // deadlocks — which is exactly why the shape had to go before someone
-    // routed it through `ds_post`.
+    // Copy the device id out first: a guard taken in an `if let` scrutinee lives
+    // for the whole body (edition 2021), which would hold this hot, non-reentrant
+    // lock across `ensure_device_cert`, and the signed `ds_post` takes it too.
     let device_id = state.device_id.lock().await.clone();
     if let Some(device_id) = device_id {
         if let Err(e) =
@@ -440,10 +346,8 @@ pub async fn set_pin(
         }
     }
 
-    // A freshly-created/wiped local DB: re-arm welcome delivery so
-    // `initialize_identity`'s poll re-processes Welcomes and restores MLS
-    // group memberships. Runs AFTER `ensure_device_cert` so the signed DS
-    // reset authenticates against the just-published device key. Best-effort.
+    // A fresh local DB must re-arm Welcome delivery to restore MLS memberships.
+    // After `ensure_device_cert` so the signed reset authenticates. Best-effort.
     if mls_was_empty {
         if let Err(e) = crate::commands::mls::reset_welcome_delivery(state, &user_id).await {
             crate::diag!("[pin] set_pin: reset_welcome_delivery failed (non-fatal): {e}");
@@ -453,41 +357,15 @@ pub async fn set_pin(
     Ok(())
 }
 
-/// Write the three PIN-protected slots, prove they are readable, and only then
-/// remove the unwrapped legacy originals.
+/// Write the three PIN-protected slots, read them back, and only then delete the
+/// unwrapped legacy originals.
 ///
-/// # Why the order is the whole point (#951)
-///
-/// For a pre-#194 upgrader the legacy `db_key_{uid}` / `account_id_key_{uid}`
-/// slots are not stale duplicates — until this function finishes they are the
-/// **only** copy of the account identity key on this device, and losing an
-/// account identity key is unrecoverable (`account_identity.rs`: the sole other
-/// copy is the server-side `account_recovery` blob, which needs the one-time
-/// Secret Key the user was told to write down and typically has not).
-///
-/// So the sequence mirrors the atomic-rename migration #882 gave the keystore
-/// file, where every interruption leaves either the complete old state or the
-/// complete new one:
-///
-///   1. wrap under the PIN-derived KEK and write `db_key_wrapped`,
-///      `account_id_key_wrapped`, `pin_meta`;
-///   2. **read all three back and unwrap them**, asserting they reproduce the
-///      exact bytes that went in;
-///   3. only then delete the unwrapped slots.
-///
-/// Step 2 is not ceremony. A `store` returning `Ok(())` is a claim by the
-/// backend, not evidence: the OS keychain can report a successful write for an
-/// entry a later read does not return (a locked or half-available Secret
-/// Service is the #184 failure class), and the file backend can fail to seal on
-/// a host whose machine identity has gone missing. Every one of those is
-/// survivable while the legacy slot still exists and unrecoverable the moment it
-/// does not, so the delete is gated on a real round-trip rather than on a
-/// return code.
-///
-/// A failure anywhere in 1–2 propagates with the legacy slots untouched. The
-/// user is told to retry, and the retry re-runs the whole sequence — writes are
-/// idempotent overwrites, so a partially-written triple heals rather than
-/// accumulating.
+/// The order is the point (#951): until this finishes, a pre-PIN upgrader's
+/// legacy slot is the only local copy of the account identity key, which is
+/// unrecoverable without the Secret Key. A `store` returning `Ok(())` is a claim,
+/// not evidence (a keychain can accept a write it won't return, #184), so the
+/// delete is gated on a real round-trip. Any failure leaves the legacy slots
+/// untouched; writes are idempotent, so a retry heals.
 #[allow(clippy::too_many_arguments)]
 async fn install_wrapped_slots(
     keystore: &dyn crate::keystore::Keystore,
@@ -498,7 +376,6 @@ async fn install_wrapped_slots(
     account_id_key: &[u8],
     drop_legacy_session: bool,
 ) -> Result<()> {
-    // 1. Write the new state.
     keystore
         .store_for_user(DB_KEY_WRAPPED_SLOT, user_id, &wrap_bytes(kek, db_key)?)
         .await?;
@@ -511,12 +388,10 @@ async fn install_wrapped_slots(
         .await?;
     store_pin_meta(keystore, user_id, meta).await?;
 
-    // 2. Prove the new state is real before discarding the old one.
     verify_wrapped_slots(keystore, user_id, kek, db_key, account_id_key).await?;
 
-    // 3. The wrapped blobs are now durable AND readable. Delete every unwrapped
-    //    slot we know about. Idempotent for the post-#194 path, where these
-    //    slots never existed in the first place.
+    // Durable and readable: delete every unwrapped slot. A no-op for post-PIN
+    // users.
     let _ = keystore.delete_for_user(DB_KEY_SLOT_LEGACY, user_id).await;
     let _ = keystore
         .delete_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, user_id)
@@ -527,13 +402,9 @@ async fn install_wrapped_slots(
     Ok(())
 }
 
-/// Read back the triple `install_wrapped_slots` just wrote and unwrap it under
-/// the same KEK, checking it reproduces the supplied key material.
-///
-/// This is deliberately the same shape as the read half of [`unlock_inner`] —
-/// `pin_meta` present and its verifier decrypting, both wrapped blobs present
-/// and unwrapping — so what it proves is exactly "a future `unlock` with this
-/// PIN will recover these keys", not merely "some bytes were stored".
+/// Read back what `install_wrapped_slots` wrote and unwrap it under the same KEK.
+/// Same shape as [`unlock_inner`]'s read half, so it proves a future `unlock`
+/// recovers these keys.
 async fn verify_wrapped_slots(
     keystore: &dyn crate::keystore::Keystore,
     user_id: &str,
@@ -580,20 +451,10 @@ async fn verify_wrapped_slots(
     Ok(())
 }
 
-/// Source the raw `(db_key, account_id_key)` for the initial-set path.
-///
-/// Tier 1: `AppState.unlock` is the canonical post-#194 source. Fresh
-/// signup, identity reset, and device enrollment all populate it.
-///
-/// Tier 2: legacy plaintext keystore slots from a pre-PIN build. Read
-/// the bytes here so the wrap step works; [`install_wrapped_slots`]
-/// deletes the slots once the wrapped copies are proven readable.
-///
-/// Both slots are required together. A device holding only one of them
-/// has nothing this function can turn into a working unlock, and
-/// erroring out leaves whichever slot does exist untouched — the
-/// non-destructive answer, since the caller's next move is to retry or
-/// re-enroll rather than to overwrite.
+/// Source the raw `(db_key, account_id_key)` for first-time setup: from
+/// `AppState.unlock` (signup, identity reset, enrollment), else from legacy
+/// unwrapped slots, which must both exist. Erroring leaves whichever exists
+/// untouched.
 async fn source_initial_keys(
     state: &Arc<AppState>,
     user_id: &str,
@@ -627,15 +488,8 @@ pub struct UnlockOutcome {
     pub attempts_remaining: Option<u32>,
 }
 
-/// Verify a PIN, populate `AppState.unlock`, open the local DB.
-///
-/// Side effects on success:
-/// - Drops any legacy plaintext keystore slots left behind by a #195-
-///   vintage build (where `set_pin` wrote the wrapped form but didn't
-///   delete the unwrapped originals).
-/// - Opens the per-user SQLCipher DB under the unwrapped `db_key`.
-/// - Best-effort `ensure_device_cert` so a freshly-resumed device
-///   re-publishes its cert if the previous attempt was deferred.
+/// Verify a PIN, populate `AppState.unlock` and open the local DB. Also drops
+/// leftover legacy slots and re-publishes the device cert if needed.
 pub async fn unlock(
     state: &Arc<AppState>,
     user_id: String,
@@ -652,22 +506,16 @@ pub async fn unlock(
         account_id_key: unlocked.account_id_key,
     });
 
-    // Wipe the media cache on unlock — see equivalent comment in `set_pin`,
-    // including why the user is named here instead of read from the cache's own
-    // ambient state.
+    // Wipe the media cache; see `set_pin`.
     crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(
         &unlocked.user_id,
     ));
 
-    // Rotate the loopback media server token so URLs minted under the
-    // pre-unlock (or previous-session) token stop working. See the
-    // matching site in `set_pin`.
+    // Rotate the loopback media token; see `set_pin`.
     *state.media_server_token.lock().await =
         Some(crate::media_server::fresh_token());
 
-    // Migrate away from #195-vintage residue — the wrapped blobs are
-    // already in place; the legacy plaintext slots sitting next to
-    // them are stale duplicates.
+    // Leftover legacy slots beside the wrapped blobs (#195-era builds) are stale.
     let _ = keystore
         .delete_for_user(DB_KEY_SLOT_LEGACY, &user_id)
         .await;
@@ -677,18 +525,7 @@ pub async fn unlock(
 
     let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
 
-    // Read the device id into a `let` FIRST, then release. In edition 2021 the
-    // guard produced by `state.device_id.lock().await` inside an `if let`
-    // scrutinee lives until the END of the `if let` body, so the `.clone()` only
-    // LOOKS like it releases the lock — the old shape held `device_id`, one of
-    // the hottest mutexes in the crate, across `ensure_device_cert`'s Turso
-    // read, OS-keystore signature and DS POST. That stalled every concurrent
-    // task needing the device id, and it was one refactor away from a hard
-    // self-deadlock: `tokio::sync::Mutex` is not reentrant, and the signed
-    // `ds_post` helper takes this very lock (`mls::ds_client`). Today
-    // `ensure_device_cert` only uses the sign-free bootstrap posts, so nothing
-    // deadlocks — which is exactly why the shape had to go before someone
-    // routed it through `ds_post`.
+    // Copy the device id out first; see `set_pin`.
     let device_id = state.device_id.lock().await.clone();
     if let Some(device_id) = device_id {
         if let Err(e) =
@@ -698,33 +535,26 @@ pub async fn unlock(
         }
     }
 
-    // A freshly-created/wiped local DB: re-arm welcome delivery so the startup
-    // poll re-processes Welcomes and restores MLS group memberships. Runs AFTER
-    // `ensure_device_cert` so the signed DS reset authenticates. Best-effort.
+    // A fresh local DB must re-arm Welcome delivery; after `ensure_device_cert`.
     if mls_was_empty {
         if let Err(e) = crate::commands::mls::reset_welcome_delivery(state, &user_id).await {
             crate::diag!("[pin] unlock: reset_welcome_delivery failed (non-fatal): {e}");
         }
     }
 
-    // Opportunistic self-heal: if a sibling device rotated the account
-    // identity while this device was offline, every other device's row
-    // (including this one's, before `ensure_device_cert` above) is
-    // stale on the server and would fail cross-signing verification on
-    // every commit until that device next logs in. Re-sign any rows
-    // whose `cert_identity_version` is behind `users.identity_version`
-    // so the fleet self-heals as users come online. Best-effort.
+    // Self-heal: re-sign device rows whose `cert_identity_version` trails the
+    // account's after a sibling rotated the identity offline, or they fail
+    // cross-signing on every commit. Best-effort.
     if let Err(e) =
         crate::commands::mls::resign_stale_device_certs(state, &user_id).await
     {
         crate::diag!("[pin] unlock: resign_stale_device_certs failed (non-fatal): {e}");
     }
 
-    // Declare the attachment references sends before #1330 could not. Background.
+    // Declare attachment references from pre-#1330 sends, in the background.
     crate::commands::messages::spawn_attachment_ref_backfill(state, &user_id);
 
-    // Deliver whatever a killed process left in the outbox (#1335). Background:
-    // the unlock must not wait on the network.
+    // Deliver what a killed process left in the outbox (#1335), in the background.
     crate::commands::messages::spawn_outbox_flush(state);
 
     Ok(UnlockOutcome {
@@ -733,17 +563,15 @@ pub async fn unlock(
     })
 }
 
-/// Re-verify the PIN of an already-unlocked device, for an action that must be
-/// confirmed by the person at the keyboard rather than by whoever left the app
-/// open — today, showing a QR device link (#1207). Same attempt counter and
-/// lockout as [`unlock`]; touches nothing in `AppState`.
+/// Re-verify the PIN of an unlocked device for an action the person at the
+/// keyboard must confirm (e.g. a QR device link, #1207). Same attempt counter as
+/// [`unlock`]; leaves `AppState` alone.
 pub(crate) async fn verify_pin(state: &Arc<AppState>, user_id: &str, pin: &str) -> Result<()> {
     validate_pin(pin)?;
     unlock_inner(state.keystore.as_ref(), user_id, pin).await.map(|_| ())
 }
 
-/// Shared core for verify-and-unwrap, used by both `unlock` and the
-/// `set_pin(Some(old), ...)` change flow.
+/// Shared verify-and-unwrap for `unlock` and the change-PIN flow.
 async fn unlock_inner(
     keystore: &dyn crate::keystore::Keystore,
     user_id: &str,
@@ -754,9 +582,8 @@ async fn unlock_inner(
         .ok_or_else(|| Error::Other(anyhow::anyhow!("PIN not set for user {user_id}")))?;
 
     if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
-        // Defense-in-depth: if the UI missed the countdown and didn't
-        // nuke already, nuke on this attempt. The account is wiped
-        // locally; remote data + Secret Key recovery are untouched.
+        // Defense in depth if the UI didn't wipe already. Remote data and Secret Key
+        // recovery are untouched.
         nuke_wrapped(keystore, user_id).await?;
         return Err(Error::Other(anyhow::anyhow!(
             "pin locked out; use Secret Key recovery"
@@ -771,8 +598,7 @@ async fn unlock_inner(
         meta.p_cost,
     )?;
 
-    // Verify against the fixed plaintext blob first. Wrong PIN =>
-    // increment counter, store, bail. Cheap relative to two full unwraps.
+    // Check the verifier first; a wrong PIN increments the counter.
     let verifier_cipher = XChaCha20Poly1305::new((&*kek).into());
     let verifier_nonce = XNonce::from_slice(&meta.verifier_nonce);
     let verifier_ok = verifier_cipher
@@ -795,7 +621,6 @@ async fn unlock_inner(
         )));
     }
 
-    // Unwrap the two real keys.
     let db_key_blob = keystore
         .load_for_user(DB_KEY_WRAPPED_SLOT, user_id)
         .await?
@@ -807,7 +632,6 @@ async fn unlock_inner(
     let db_key = unwrap_bytes(&kek, &db_key_blob)?;
     let account_id_key = unwrap_bytes(&kek, &account_id_key_blob)?;
 
-    // Reset counter on success.
     if meta.failed_attempts != 0 {
         meta.failed_attempts = 0;
         meta.last_attempt_unix = crate::util::now_unix();
@@ -821,27 +645,21 @@ async fn unlock_inner(
     })
 }
 
-/// Drop the in-memory unlock state and close the open local DB. The
-/// next DB-touching command will fail with "Not signed in" until
-/// `unlock` runs. Accounts index is left intact — this is the "screen
-/// lock" primitive, not the "log out" one.
+/// Drop the in-memory unlock state and close the local DB: the screen-lock
+/// primitive, not logout. The accounts index is untouched.
 pub async fn lock(state: &Arc<AppState>) -> Result<()> {
     *state.unlock.lock().await = None;
-    // Clear the media-server token so URLs the locked session minted
-    // stop resolving. The cache files stay (encrypted at rest) — a
-    // subsequent unlock under the same `db_key` can still read them.
+    // Media URLs from the locked session stop resolving; the encrypted cache files
+    // stay.
     *state.media_server_token.lock().await = None;
-    // Release any attachment the composer had staged but not sent. These are
-    // plaintext bytes the user pasted; they live in memory only, and a session
-    // ending is exactly when they stop being anyone's business.
+    // Staged attachments are plaintext in memory; release them with the session.
     crate::commands::staging::discard_all_staged();
     state.unload_user_db().await;
     Ok(())
 }
 
-/// Snapshot of auth/unlock state for the frontend. Never blocks on
-/// keystore reads for secrets — just reads `accounts.json` and the
-/// cheap `pin_meta` blob.
+/// Auth/unlock state for the frontend. Reads only `accounts.json` and the cheap
+/// `pin_meta` blob.
 pub async fn get_unlock_state(
     state: &Arc<AppState>,
 ) -> Result<UnlockStateSnapshot> {
@@ -863,8 +681,6 @@ pub async fn get_unlock_state(
     })
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,8 +700,7 @@ mod tests {
     async fn wrap_unwrap_roundtrip() {
         let mut salt = [0u8; SALT_LEN];
         rand::rngs::OsRng.fill_bytes(&mut salt);
-        // Use a cheap Argon2 setting for tests — the real one is 64 MiB
-        // and would make the test suite glacial.
+        // Cheap Argon2 for tests.
         let kek = derive_kek("1234", &salt, 8, 1, 1).unwrap();
         let pt = b"some secret bytes";
         let blob = wrap_bytes(&kek, pt).unwrap();
@@ -939,8 +754,6 @@ mod tests {
         assert!(validate_pin("12a4").is_err());
     }
 
-    /// End-to-end: set PIN on a seeded user, unlock with correct PIN,
-    /// verify unwrapped material matches what was seeded.
     #[tokio::test]
     async fn set_and_unlock_roundtrip_via_inner() {
         let ks: StdArc<dyn crate::keystore::Keystore> =
@@ -948,9 +761,7 @@ mod tests {
         let uid = "user_01";
         seed_legacy(&*ks, uid).await;
 
-        // Simulate set_pin's wrap step directly (the tauri command
-        // wrapper requires a full AppState which is heavy to build in
-        // a unit test — the flows harness covers the command path).
+        // The command path needs a full `AppState`; the flows harness covers it.
         let mut salt = [0u8; SALT_LEN];
         rand::rngs::OsRng.fill_bytes(&mut salt);
         let kek = derive_kek("4321", &salt, 8, 1, 1).unwrap();
@@ -1052,7 +863,6 @@ mod tests {
         let after = load_pin_meta(&*ks, uid).await.unwrap().unwrap();
         assert_eq!(after.failed_attempts, 1);
 
-        // 9 more wrong attempts should trip the lockout nuke.
         for _ in 0..9 {
             let _ = unlock_inner(&*ks, uid, "2222").await;
         }
@@ -1122,25 +932,15 @@ mod tests {
         assert_eq!(after.failed_attempts, 0);
     }
 
-    // ── #951: finishing #194's cutover off the unwrapped legacy slots ───
-    //
-    // These drive `install_wrapped_slots` — the real function `set_pin`
-    // calls — rather than a restatement of it, so the ordering they pin is
-    // the ordering production runs. `set_pin` itself needs a full
-    // `AppState`; the flows harness covers that seam
-    // (`flows::auth::pin_set_lock_unlock_roundtrip`).
+    // #951: these drive the real `install_wrapped_slots`, so they pin the order
+    // production runs.
 
-    /// A keystore that accepts a write for one slot and then does not have
-    /// it — the exact failure `install_wrapped_slots`' verify step exists to
-    /// catch, and the one a `store` return code cannot distinguish from
-    /// success. Modelled on a Secret Service that reports a stored
-    /// credential it will not hand back (#184's failure class).
+    /// A keystore that accepts a write for one slot and then doesn't have it (#184's
+    /// failure class), which no return code can distinguish from success.
     struct DropsWritesTo {
         inner: InMemoryKeystore,
         slot_prefix: &'static str,
-        /// When false the write is refused outright instead of silently
-        /// vanishing. Both must be non-destructive; only the loud one is
-        /// caught without the read-back.
+        /// False refuses the write loudly instead; both must be non-destructive.
         silently: bool,
     }
 
@@ -1164,8 +964,6 @@ mod tests {
         }
     }
 
-    /// `(kek, meta)` at cheap Argon2 settings — the real 64 MiB parameters
-    /// would make these tests glacial and nothing here depends on the cost.
     fn cheap_kek_and_meta(pin: &str) -> (Zeroizing<[u8; KEK_LEN]>, PinMeta) {
         let mut salt = [0u8; SALT_LEN];
         rand::rngs::OsRng.fill_bytes(&mut salt);
@@ -1190,9 +988,6 @@ mod tests {
     const LEGACY_DB_KEY: [u8; 32] = [7u8; 32];
     const LEGACY_ACCOUNT_KEY: [u8; 32] = [42u8; 32];
 
-    /// The migration itself: a pre-#194 upgrader's raw slots become
-    /// PIN-wrapped ones, the wrapped copies really do carry the same key
-    /// material, and only then do the unwrapped originals go away.
     #[tokio::test]
     async fn legacy_slots_are_wrapped_then_removed() {
         let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
@@ -1215,7 +1010,6 @@ mod tests {
         .await
         .expect("migration must succeed on a healthy keystore");
 
-        // The unwrapped slots are gone — the point of the ticket.
         assert!(
             ks.load_for_user(DB_KEY_SLOT_LEGACY, uid).await.unwrap().is_none(),
             "the unwrapped db_key slot must not survive the migration"
@@ -1229,7 +1023,6 @@ mod tests {
             "the legacy session blob goes with them on the initial-set path"
         );
 
-        // And the key material survived, reachable only through the PIN.
         let unlocked = unlock_inner(&*ks, uid, "1357").await.unwrap();
         assert_eq!(&*unlocked.db_key, &LEGACY_DB_KEY);
         assert_eq!(&*unlocked.account_id_key, &LEGACY_ACCOUNT_KEY);
@@ -1239,16 +1032,9 @@ mod tests {
         );
     }
 
-    /// The property that makes the migration safe to ship: an interruption
-    /// anywhere before the wrapped copies are proven readable must leave the
-    /// legacy slots — the only other copy of an unrecoverable key — exactly
-    /// as they were.
-    ///
-    /// Both failure shapes are covered. The loud one (`store` errors) is
-    /// caught by `?` alone; the quiet one (`store` returns `Ok(())` and the
-    /// value is simply not there afterwards) is caught ONLY by the read-back
-    /// in `verify_wrapped_slots`, and is the case that used to delete a
-    /// user's account identity key.
+    /// An interruption before the wrapped copies are proven readable must leave the
+    /// legacy slots exactly as they were. The silent failure (`Ok(())`, value gone)
+    /// is caught only by the read-back.
     #[tokio::test]
     async fn an_interrupted_migration_loses_nothing() {
         for silently in [true, false] {
@@ -1290,9 +1076,7 @@ mod tests {
                      account identity key here is unrecoverable"
                 );
 
-                // And the retry heals: the same call against a healthy
-                // keystore completes, so the failure is a pause, not a
-                // dead end.
+                // And a retry against a healthy keystore completes.
                 let healthy: StdArc<dyn crate::keystore::Keystore> =
                     StdArc::new(InMemoryKeystore::new());
                 seed_legacy(&*healthy, uid).await;
@@ -1315,18 +1099,14 @@ mod tests {
         }
     }
 
-    /// The overwhelmingly common case — a post-#194 user who never had an
-    /// unwrapped slot — must be untouched by any of this: the wrap still
-    /// happens, the absent legacy slots are a no-op rather than an error,
-    /// and no OTHER user's slots are collateral.
+    /// A post-PIN user with no legacy slot is unaffected, and other users' slots
+    /// aren't collateral.
     #[tokio::test]
     async fn a_user_with_no_legacy_slot_is_unaffected() {
         let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
         let modern = "modern_01";
         let bystander = "upgrader_03";
 
-        // A second account on the same device that HAS legacy slots and is
-        // not the one being set up.
         seed_legacy(&*ks, bystander).await;
 
         let db_key = [1u8; 32];
@@ -1340,8 +1120,7 @@ mod tests {
         assert_eq!(&*unlocked.db_key, &db_key);
         assert_eq!(&*unlocked.account_id_key, &account_id_key);
 
-        // The bystander's slots are namespaced per user and must be
-        // untouched — the delete is `delete_for_user`, not a sweep.
+        // Slots are per-user; the delete is `delete_for_user`, not a sweep.
         assert_eq!(
             ks.load_for_user(DB_KEY_SLOT_LEGACY, bystander).await.unwrap(),
             Some(LEGACY_DB_KEY.to_vec()),

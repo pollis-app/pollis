@@ -1,41 +1,11 @@
-//! Saved messages (bookmarks) and message permalinks (#854).
+//! Saved messages (bookmarks) and message permalinks (#854), entirely in the
+//! encrypted local DB. No DS endpoint: a bookmark set is interest metadata the
+//! server must not see. See `.codesight/wiki/commands.md`.
 //!
-//! # Where bookmarks live, and why
-//!
-//! Entirely in the **device-local, SQLCipher-encrypted** database (the
-//! `bookmark` table in `db/local_schema.sql`). Nothing here talks to the DS or
-//! to Turso, and no DS endpoint was added or extended for it.
-//!
-//! That is a deliberate privacy choice, not an omission. Which messages a user
-//! saved is per-message *interest* metadata: a ranked list of the exact moments
-//! and conversations a user cares most about. The server already sees envelope
-//! routing metadata; a bookmark set would tell it strictly more, in the most
-//! sensitive possible shape, and it would do so for a feature whose entire value
-//! is a personal reading list. The cost of keeping it local is that bookmarks do
-//! not follow a user to a new device — which is consistent with accepted loss
-//! (2) in CLAUDE.md, since a new device starts with no history to bookmark.
-//!
-//! # Permalinks
-//!
-//! A permalink is `pollis://m/<conversation_id>/<message_id>` — two opaque ids.
-//! It is a **pointer, not a capability**: it carries no key material and grants
-//! no access, so forwarding one to a stranger is safe.
-//!
-//! [`resolve_permalink`] answers "do I hold this message?" **strictly against
-//! the local database**. There is deliberately no server-side lookup, because a
-//! "fetch message by id" endpoint is precisely what would convert this harmless
-//! pointer into a leak.
-//!
-//! The underlying guarantee is cryptographic rather than a permission check: a
-//! device that was not in the MLS group when the message was sent never received
-//! the key material, so it never decrypted the envelope, so the message was never
-//! written to its local `message` table. The lookup below misses for exactly that
-//! reason — there is no code path in which it could succeed. That is accepted
-//! loss (1) in CLAUDE.md working as intended.
-//!
-//! When the lookup misses, the caller gets a bare `found: false` and nothing
-//! else. No sender, no timestamp, no conversation name, no existence claim — the
-//! honest empty state must not hint at whether the message exists elsewhere.
+//! A permalink (`pollis://m/<conversation_id>/<message_id>`) is a pointer, not a
+//! capability. [`resolve_permalink`] answers strictly against the local DB; a
+//! server-side "fetch message by id" would turn it into a leak. A miss returns a
+//! bare `found: false` that hints at nothing.
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -44,30 +14,22 @@ use std::sync::Arc;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// One entry in the saved-items list.
-///
-/// The message body fields are `Option` because a bookmark deliberately outlives
-/// its message: local retention eviction (or a soft delete) can remove the row
-/// from `message` while the bookmark remains. A saved item whose message is gone
-/// renders as an honest placeholder instead of silently vanishing from the list.
+/// One saved item. Body fields are `Option` because a bookmark outlives its
+/// message (retention eviction, soft delete) and renders as a placeholder.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SavedMessage {
     pub message_id: String,
     pub conversation_id: String,
-    /// When the user saved it (not when the message was sent).
+    /// When the user saved it, not when it was sent.
     pub saved_at: String,
-    /// True iff this device still holds the message body.
     pub available: bool,
     pub content: Option<String>,
     pub sender_id: Option<String>,
     pub sent_at: Option<String>,
 }
 
-/// Result of resolving a permalink against the local database.
-///
-/// Intentionally minimal. On a miss every field but `found` is `None`, so the
-/// response cannot be used to probe for the existence of a message this device
-/// is not entitled to.
+/// Result of resolving a permalink. On a miss every field but `found` is `None`,
+/// so it can't probe for messages this device isn't entitled to.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PermalinkTarget {
     pub found: bool,
@@ -76,29 +38,18 @@ pub struct PermalinkTarget {
 }
 
 impl PermalinkTarget {
-    /// The single unresolvable answer. Every failure mode — unknown message,
-    /// evicted message, message that belongs to a different conversation than
-    /// the link claims, malformed input — funnels through here so they are
-    /// externally indistinguishable.
+    /// The single unresolvable answer; every failure mode funnels here so they are
+    /// indistinguishable.
     fn unresolved() -> Self {
         Self { found: false, conversation_id: None, message_id: None }
     }
 }
 
-// ─── Pure connection-level operations ────────────────────────────────────────
-//
-// Kept free of `AppState` so they unit-test against an in-memory `LocalDb`
-// under `--no-default-features`, with no Turso, keystore or network in play.
+// Free of `AppState` so these unit-test against an in-memory `LocalDb`.
 
-/// Save a message.
-///
-/// The conversation is read from the local `message` row rather than taken from
-/// the caller, so a bookmark cannot be created pointing at a conversation the
-/// message is not in. Saving a message this device does not hold is refused for
-/// the same reason: there would be nothing to anchor the row to.
-///
-/// Idempotent — `message_id` is the primary key, so "saved twice" is
-/// unrepresentable rather than merely avoided.
+/// Save a message. The conversation comes from the local `message` row, not the
+/// caller, so a bookmark can't point at the wrong one; a message this device
+/// doesn't hold is refused. Idempotent (primary key).
 pub fn add_bookmark(conn: &Connection, message_id: &str) -> Result<()> {
     let conversation_id: Option<String> = conn
         .query_row(
@@ -121,10 +72,7 @@ pub fn add_bookmark(conn: &Connection, message_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Unsave a message. Returns true if a bookmark was actually removed.
-///
-/// Works even when the message body is long gone, which is the point: an
-/// unavailable saved item must still be removable from the list.
+/// Unsave a message; true if one was removed. Works after the body is gone.
 pub fn remove_bookmark(conn: &Connection, message_id: &str) -> Result<bool> {
     let removed = conn.execute(
         "DELETE FROM bookmark WHERE message_id = ?1",
@@ -133,7 +81,6 @@ pub fn remove_bookmark(conn: &Connection, message_id: &str) -> Result<bool> {
     Ok(removed > 0)
 }
 
-/// Is this message currently saved?
 pub fn is_bookmarked(conn: &Connection, message_id: &str) -> Result<bool> {
     let hit: Option<i64> = conn
         .query_row(
@@ -145,8 +92,7 @@ pub fn is_bookmarked(conn: &Connection, message_id: &str) -> Result<bool> {
     Ok(hit.is_some())
 }
 
-/// Flip the saved state. Returns the state *after* the toggle, so the caller
-/// never has to re-read to know what to render.
+/// Flip the saved state and return the state after the flip.
 pub fn toggle_bookmark(conn: &Connection, message_id: &str) -> Result<bool> {
     if remove_bookmark(conn, message_id)? {
         return Ok(false);
@@ -155,12 +101,8 @@ pub fn toggle_bookmark(conn: &Connection, message_id: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Every saved message, newest save first, joined to the local message body.
-///
-/// A LEFT JOIN so bookmarks whose message has been evicted still come back, with
-/// `available: false`. Soft-deleted messages are reported as unavailable too —
-/// the body is gone, and the saved list should say so rather than render an
-/// empty bubble.
+/// Every saved message, newest save first. LEFT JOIN so evicted or soft-deleted
+/// messages come back as `available: false`.
 pub fn list_bookmarks(conn: &Connection) -> Result<Vec<SavedMessage>> {
     let mut stmt = conn.prepare(
         "SELECT b.message_id, b.conversation_id, b.created_at,
@@ -175,7 +117,6 @@ pub fn list_bookmarks(conn: &Connection) -> Result<Vec<SavedMessage>> {
         let sender_id: Option<String> = row.get(4)?;
         let sent_at: Option<String> = row.get(5)?;
         let deleted_at: Option<String> = row.get(6)?;
-        // Present in `message` AND not soft-deleted.
         let available = sender_id.is_some() && deleted_at.is_none();
         Ok(SavedMessage {
             message_id: row.get(0)?,
@@ -195,12 +136,9 @@ pub fn list_bookmarks(conn: &Connection) -> Result<Vec<SavedMessage>> {
     Ok(out)
 }
 
-/// Resolve a permalink against the local database only.
-///
-/// Requires the message to exist locally **and** to be in the conversation the
-/// link claims. A link whose two halves disagree is treated as unresolvable, so
-/// a caller cannot pair a real message id with an arbitrary conversation id to
-/// confirm which conversation the message is really in.
+/// Resolve a permalink against the local DB only. The message must be in the
+/// conversation the link claims, so a real message id can't be paired with a
+/// guessed conversation to confirm where it lives.
 pub fn resolve_permalink(
     conn: &Connection,
     conversation_id: &str,
@@ -225,13 +163,8 @@ pub fn resolve_permalink(
     })
 }
 
-// ─── AppState wrappers (the command surface) ─────────────────────────────────
-
-/// The local DB is absent before sign-in. Bookmarks are meaningless then, and
-/// this is the one place that has to say so.
-///
-/// `f` runs to completion with no `.await` inside, so the non-`Send` rusqlite
-/// connection never crosses a suspension point and these commands stay `Send`.
+/// `f` runs with no `.await`, so the non-`Send` connection never crosses a
+/// suspension point.
 async fn with_local<T, F>(state: &Arc<AppState>, f: F) -> Result<T>
 where
     F: FnOnce(&Connection) -> Result<T> + Send,
@@ -323,8 +256,6 @@ mod tests {
         assert!(toggle_bookmark(conn, "m1").unwrap(), "third toggle saves again");
     }
 
-    /// Saving twice must not create a second row — the primary key makes the
-    /// duplicate unrepresentable rather than merely unlikely.
     #[test]
     fn saving_twice_is_idempotent() {
         let db = db();
@@ -337,8 +268,6 @@ mod tests {
         assert_eq!(list_bookmarks(conn).unwrap().len(), 1);
     }
 
-    /// The bookmark's conversation comes from the message row, never the caller,
-    /// so a bookmark pointing at the wrong conversation cannot be created.
     #[test]
     fn bookmark_conversation_is_derived_not_supplied() {
         let db = db();
@@ -360,8 +289,6 @@ mod tests {
         assert!(list_bookmarks(conn).unwrap().is_empty());
     }
 
-    /// A bookmark outlives retention eviction, and degrades to an honest
-    /// "unavailable" entry rather than disappearing or rendering a blank body.
     #[test]
     fn bookmark_survives_message_eviction_as_unavailable() {
         let db = db();
@@ -398,8 +325,6 @@ mod tests {
         assert_eq!(saved[0].content, None);
     }
 
-    // ─── Permalink resolution ────────────────────────────────────────────────
-
     #[test]
     fn permalink_resolves_for_a_message_the_device_holds() {
         let db = db();
@@ -412,15 +337,12 @@ mod tests {
         assert_eq!(target.message_id.as_deref(), Some("m1"));
     }
 
-    /// The security property. A device that was never in the group never got the
-    /// key material, so the envelope never decrypted, so the message was never
-    /// written locally — this empty database IS that device. Resolution must
-    /// fail, and must hand back nothing at all.
+    /// A device never in the group never decrypted the message, so it was never
+    /// written locally; this empty DB is that device.
     #[test]
     fn permalink_to_a_message_the_device_lacks_resolves_to_nothing() {
         let db = db();
         let conn = db.conn();
-        // Device holds an unrelated conversation; it was never in `secret-conv`.
         seed_message(conn, "mine", "my-conv", "my own message");
 
         let target =
@@ -436,19 +358,16 @@ mod tests {
         );
     }
 
-    /// An unknown message and a known-but-inaccessible one must be
-    /// indistinguishable, or the resolver becomes an existence oracle.
+    /// Unknown and inaccessible must look identical, or the resolver is an existence
+    /// oracle.
     #[test]
     fn unresolvable_answers_are_indistinguishable() {
         let db = db();
         let conn = db.conn();
         seed_message(conn, "m1", "conv1", "hello");
 
-        // Real message id, wrong conversation.
         let mismatched = resolve_permalink(conn, "conv-i-am-not-in", "m1").unwrap();
-        // Entirely fabricated ids.
         let fabricated = resolve_permalink(conn, "conv-i-am-not-in", "no-such-message").unwrap();
-        // Real conversation, message this device never received.
         let missing = resolve_permalink(conn, "conv1", "no-such-message").unwrap();
 
         assert_eq!(mismatched, PermalinkTarget::unresolved());
@@ -458,8 +377,6 @@ mod tests {
         assert_eq!(mismatched, missing);
     }
 
-    /// Bookmarks are device-local, so a bookmark on one device's DB is simply
-    /// absent from another's. Nothing syncs it into place.
     #[test]
     fn bookmarks_do_not_cross_devices() {
         let device_a = db();

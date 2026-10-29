@@ -1,25 +1,14 @@
-//! Pure builders for the LiveKit realtime signalling (wake-up) payloads.
+//! Pure builders for the LiveKit realtime wake-up payloads, the single source of
+//! the wire format for both `livekit/publish.rs` and `livekit_stub.rs`.
 //!
-//! Kept out of the media-gated `livekit` module (the same split the since-
-//! deleted `livekit_jwt` module used — see `commands/mod.rs`) so the exact JSON
-//! shape compiles — and unit-tests —
-//! on every target, including the headless `--no-default-features` build
-//! that swaps in `livekit_stub`. Both the real publisher (`livekit/publish.rs`)
-//! and the mobile/headless stub (`livekit_stub.rs`) build their payloads here,
-//! so the wire format has a single source of truth.
-//!
-//! Metadata minimization (`docs/metadata-minimization-design.md` §5): these
-//! packets are only a **hint to fetch**. LiveKit forwards them in cleartext,
-//! so they deliberately carry **no sender identity** — just enough to route
-//! the recipient to the conversation to refresh. The recipient re-derives the
-//! true sender from the MLS credential inside the decrypted envelope it then
-//! fetches (§1, §2.1), so `sender_id` / `sender_username` / `deleted_by` in the
-//! ping would be pure leakage with no functional need.
+//! Metadata minimization (`docs/metadata-minimization-design.md` §5): LiveKit
+//! forwards these in cleartext, so shared-room payloads are only a hint to fetch
+//! and carry no sender identity; the recipient derives the sender from the
+//! decrypted MLS envelope it then fetches.
 
 use serde_json::{json, Value};
 
-/// `new_message` wake-up: "conversation X has a new message — refresh it".
-/// No sender: the client attributes the message from the decrypted envelope.
+/// `new_message` wake-up. No sender: attribution comes from the envelope.
 pub fn new_message_payload(channel_id: Option<&str>, conversation_id: Option<&str>) -> Value {
     json!({
         "type": "new_message",
@@ -28,8 +17,7 @@ pub fn new_message_payload(channel_id: Option<&str>, conversation_id: Option<&st
     })
 }
 
-/// `edited_message` wake-up: which message in which conversation changed.
-/// The editor is re-derived from the durable edit envelope on ingest.
+/// `edited_message` wake-up; the editor comes from the edit envelope on ingest.
 pub fn edited_message_payload(
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -43,9 +31,7 @@ pub fn edited_message_payload(
     })
 }
 
-/// `deleted_message` wake-up: which message in which conversation was removed.
-/// The actor (`deleted_by`) is re-derived from the authenticated `type='delete'`
-/// tombstone envelope on ingest — never needed in the cleartext ping.
+/// `deleted_message` wake-up; the actor comes from the `type='delete'` tombstone.
 pub fn deleted_message_payload(
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -59,7 +45,7 @@ pub fn deleted_message_payload(
     })
 }
 
-/// `membership_changed` wake-up: the named group's membership changed, refetch.
+/// `membership_changed` wake-up: refetch the group's membership.
 pub fn membership_changed_payload(group_id: &str) -> Value {
     json!({
         "type": "membership_changed",
@@ -67,20 +53,11 @@ pub fn membership_changed_payload(group_id: &str) -> Value {
     })
 }
 
-/// `membership_changed` wake-up for a member who LEFT — voluntarily, or by
-/// deleting their account.
+/// `membership_changed` wake-up for a member who left (or deleted their account).
 ///
-/// `kind: "leave"` is load-bearing, not a label (#1081). Every other membership
-/// change is committed by the device that made it, which is why the realtime
-/// handler only catches up on the rest. A leave cannot be: MLS forbids removing
-/// your own leaf, so the leaver deletes its roster row, wipes local state, and
-/// sends this — and somebody still online has to stage the remove. Without the
-/// kind, nobody did until a remaining member's next cold-launch sweep, and the
-/// leaver's leaf stayed in every tree until then, with every message still
-/// sealed for it.
-///
-/// It names no one. Who left is re-derived from the authenticated commit and the
-/// roster refetch, so the cleartext broadcast stays a bare wake-up (§5.3).
+/// `kind: "leave"` is load-bearing (#1081): MLS forbids removing your own leaf, so
+/// an online member must stage the remove on receipt. It names no one; who left
+/// is re-derived from the commit and roster refetch (§5.3).
 pub fn member_left_group_payload(group_id: &str) -> Value {
     json!({
         "type": "membership_changed",
@@ -98,15 +75,11 @@ pub fn member_left_conversation_payload(conversation_id: &str) -> Value {
     })
 }
 
-/// The `kind` that marks a `membership_changed` wake-up as a leave. Declared
-/// once so the emitters and the handler that reconciles on it cannot drift.
+/// The `kind` that marks a `membership_changed` wake-up as a leave.
 pub const LEAVE_KIND: &str = "leave";
 
-/// `roster_changed` wake-up broadcast to a conversation's LiveKit room. Carries
-/// only the routing handle + epochs so already-connected peers refetch the
-/// member list — the per-user `joined`/`left`/device id lists are deliberately
-/// omitted from the cleartext broadcast (§5.3). No client renders a membership
-/// line any more (#1506), so nothing needs them.
+/// `roster_changed` wake-up: routing handle and epochs only, no member or device
+/// id lists (§5.3).
 pub fn roster_changed_payload(conversation_id: &str, epoch_before: u64, epoch_after: u64) -> Value {
     json!({
         "type": "roster_changed",
@@ -116,18 +89,10 @@ pub fn roster_changed_payload(conversation_id: &str, epoch_before: u64, epoch_af
     })
 }
 
-/// `typing` broadcast to a conversation's LiveKit room.
-///
-/// A SHARED-ROOM broadcast, so §5 applies in full: it used to carry `user_id`
-/// and `username`, which — after #836 made participant identity an opaque
-/// per-room pseudonym — was the shortest path back to undoing that. The SFU
-/// forwards these in cleartext and knows which participant published them, so a
-/// `user_id` in the body annotates the pseudonym with the account it was
-/// supposed to hide, on every keystroke burst.
-///
-/// The recipient attributes the typist from the PUBLISHING PARTICIPANT instead
-/// (resolved through the DS, like every other identity), which is strictly
-/// better than trusting a self-declared id in the body anyway.
+/// `typing` broadcast to a conversation's room. No `user_id`/`username`: the SFU
+/// knows the publishing participant, so an id in the body would unmask the
+/// per-room pseudonym (#836). The recipient resolves the typist from the
+/// publishing participant via the DS.
 pub fn typing_payload(
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -141,13 +106,8 @@ pub fn typing_payload(
     })
 }
 
-/// `voice_joined` / `voice_left` broadcast to a group's LiveKit room: "the voice
-/// roster for this channel changed — refetch it".
-///
-/// Identity-free for the same reason as [`typing_payload`]: it is a shared-room
-/// broadcast, and it used to carry `user_id` + `display_name`. The recipient
-/// takes the actor from the publishing participant; the roster it then refetches
-/// is authoritative regardless.
+/// `voice_joined` / `voice_left` broadcast: refetch this channel's voice roster.
+/// Identity-free for the same reason as [`typing_payload`].
 pub fn voice_presence_payload(channel_id: &str, joined: bool) -> Value {
     json!({
         "type": if joined { "voice_joined" } else { "voice_left" },
@@ -155,33 +115,17 @@ pub fn voice_presence_payload(channel_id: &str, joined: bool) -> Value {
     })
 }
 
-/// `device_revoked` nudge sent to a user's own inbox room: "one of your devices
-/// was revoked — every device re-check whether it is still registered".
-///
-/// Carries nothing. It used to send `device_id` + `user_id`, and **no recipient
-/// read either**: the handler states outright that the payload is advisory and
-/// spoofable, so it ignores the `device_id` and re-checks authoritatively with
-/// `is_current_device_registered` using the user id it already holds. They were
-/// pure leakage — and the `user_id` was worse than most, because it re-identified
-/// the *inbox room* that #828 had just made pseudonymous, from inside a packet
-/// LiveKit forwards in cleartext.
+/// `device_revoked` nudge to a user's own inbox room: every device re-checks its
+/// registration. Carries nothing; a `user_id` would re-identify the
+/// pseudonymous inbox room (#828).
 pub fn device_revoked_payload() -> Value {
     json!({ "type": "device_revoked" })
 }
 
-/// `dm_created` wake-up sent to a user's PRIVATE inbox room (`inbox-{userId}`,
-/// single-subscriber). Unlike the group-room broadcasts above, this MAY carry
-/// the creator's public username: only the recipient subscribes to their own
-/// inbox, and the username is the same public directory metadata the DM-request
-/// query already returns — naming the requester in the status-bar alert is the
-/// point (issue #396). This is deliberately NOT subject to the §5 routing-only
-/// rule that governs shared-room broadcasts.
-///
-/// The value sent here is advisory only: the DS strips every identity key from
-/// a client payload and stamps the VERIFIED signer back in (`sender_id` +
-/// `sender_username`, from `users`) before fan-out, and the recipient's
-/// dispatcher reads only that stamp — so the name shown can never be one the
-/// sending client chose.
+/// `dm_created` wake-up to the recipient's private, single-subscriber inbox room.
+/// May carry the creator's public username so the alert can name them (#396); the
+/// §5 routing-only rule is for shared rooms. Advisory: the DS replaces identity
+/// fields with the verified signer before fan-out.
 pub fn dm_created_inbox_payload(conversation_id: &str, sender_username: Option<&str>) -> Value {
     json!({
         "type": "dm_created",
@@ -190,16 +134,10 @@ pub fn dm_created_inbox_payload(conversation_id: &str, sender_username: Option<&
     })
 }
 
-/// `membership_changed` / `kind: "invite"` wake-up sent to the invitee's PRIVATE
-/// inbox room. Like [`dm_created_inbox_payload`], MAY carry the inviter's public
-/// username + group name so the invitee's alert can name who invited them and to
-/// where (issue #396) — the same fields `get_pending_invites` returns. Distinct
-/// from [`membership_changed_payload`], which is the routing-only GROUP-ROOM
-/// broadcast and must never carry identity.
-///
-/// As with [`dm_created_inbox_payload`], both strings are advisory: the DS
-/// replaces `inviter_username` with the verified signer's username and
-/// `group_name` with the `groups` row the `group_id` names.
+/// `membership_changed` / `kind: "invite"` wake-up to the invitee's private inbox.
+/// May carry the inviter's username and the group name (#396); both are replaced
+/// by the DS with verified values. Unlike [`membership_changed_payload`], which
+/// must never carry identity.
 pub fn group_invite_inbox_payload(
     group_id: &str,
     inviter_username: Option<&str>,
@@ -218,9 +156,8 @@ pub fn group_invite_inbox_payload(
 mod tests {
     use super::*;
 
-    /// The metadata-minimization invariant (§5): no realtime wake-up payload
-    /// may carry a sender / actor identity or a membership id list. This test
-    /// tries to find such a field in every builder and fails if one reappears.
+    /// The §5 invariant: no shared-room wake-up carries an actor identity or member id
+    /// list.
     fn assert_no_identity(payload: &Value) {
         let obj = payload.as_object().expect("payload is a JSON object");
         for leaky in [
@@ -265,8 +202,6 @@ mod tests {
         assert_no_identity(&p);
     }
 
-    /// A leave wake-up must carry the kind the handler reconciles on — and still
-    /// name nobody (§5.3): which member left is re-derived from the commit.
     #[test]
     fn leave_pings_carry_the_kind_and_no_leaver() {
         let g = member_left_group_payload("group-1");
@@ -282,9 +217,6 @@ mod tests {
         assert_no_identity(&d);
     }
 
-    /// #836: the typing broadcast is where the pseudonymous participant identity
-    /// used to be un-done — it carried the typist's `user_id` and `username` in
-    /// cleartext, published by that very participant, several times a minute.
     #[test]
     fn typing_broadcast_carries_no_typist() {
         let p = typing_payload(Some("chan-1"), None, true);
@@ -292,12 +224,11 @@ mod tests {
         assert_eq!(p["channel_id"], "chan-1");
         assert_eq!(p["is_typing"], true);
         assert_no_identity(&p);
-        // `display_name` is not in the shared blocklist (it is legitimate on the
-        // inbox payloads); pin it here, where it is not.
+        // `display_name` is legitimate on inbox payloads, so it's not in the shared
+        // blocklist; pin it here.
         assert!(p.as_object().unwrap().get("display_name").is_none());
     }
 
-    /// Same for the voice roster nudge, which carried `user_id` + `display_name`.
     #[test]
     fn voice_presence_broadcast_carries_no_actor() {
         for joined in [true, false] {
@@ -309,8 +240,6 @@ mod tests {
         }
     }
 
-    /// The nudge must stay empty: `user_id` here would undo #828's pseudonymous
-    /// inbox room name, and `device_id` was never read by anyone.
     #[test]
     fn device_revoked_nudge_is_empty() {
         let p = device_revoked_payload();
@@ -337,11 +266,8 @@ mod tests {
         assert_no_identity(&p);
     }
 
-    /// Private-inbox pings are the intentional exception to §5: they DO carry the
-    /// counterparty's public username so a pre-MLS-join alert (DM request / group
-    /// invite) can name them. These assertions exist so a future §5 sweep doesn't
-    /// strip the username thinking it's a leak — it isn't, the inbox room is
-    /// single-subscriber and the username is public directory metadata.
+    /// Inbox pings are the deliberate exception to §5: single-subscriber room, public
+    /// username. Pinned so a future sweep doesn't strip it.
     #[test]
     fn dm_created_inbox_ping_carries_sender_username() {
         let p = dm_created_inbox_payload("conv-1", Some("alice"));

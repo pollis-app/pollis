@@ -1,64 +1,13 @@
 //! The per-conversation attachment key ring (#1382).
 //!
-//! # Why this exists
-//!
-//! Attachments used to be sealed under `HKDF(SHA-256(plaintext))` and stored at
-//! `media/{that hash}.enc`, with the hash also recorded by the DS: the server
-//! held everything needed to decrypt every file. Now every file is sealed
-//! under a key only the conversation's MLS members can reach.
-//!
-//! # The key model
-//!
-//! Every MLS conversation (a group, whose channels share one MLS group, or a
-//! DM) has a RING of random 32-byte file keys. An upload seals the file under
-//! `HKDF(newest ring key, random file_id)` and records the key's version in
-//! the attachment reference, which travels only inside the MLS-encrypted
-//! message. The ring crosses to the DS only WRAPPED under a KEK exported from
-//! the current MLS epoch (`export_secret("pollis-file-kek")`), exactly like the
-//! pin key (`pinned_messages`): any current member — a late joiner, an
-//! external joiner, a newly enrolled device — unwraps it with the exporter it
-//! already holds and can open every file the conversation ever shared, without
-//! any device keeping copies of the files themselves.
-//!
-//! # Rotation on removal
-//!
-//! Unlike the pin key, the ring grows. When a device commits the removal of a
-//! member it appends a fresh key, wrapped at the post-removal epoch, and new
-//! uploads use it, so the removed member (who may have kept the older keys)
-//! cannot open files posted afterwards. Files already uploaded are not
-//! re-encrypted.
-//!
-//! Each ring entry records the `(generation, epoch)` it was added at. A
-//! removal leaves a durable "rotation owed at (g, e)" mark on the committing
-//! device, cleared only once the ring holds a key added at or after `(g, e)`.
-//! That makes two racing removals safe: if another device's rotation lands
-//! first but at an older epoch, the mark is still unsatisfied and this device
-//! rotates again on top of it once it can open the newer ring.
-//!
-//! # Opening a wrap from an epoch this device has left
-//!
-//! The wrap is bound to ONE epoch, and openmls keeps no exporter for a past
-//! epoch (`max_past_epochs = 0`). A device that was not holding the ring could
-//! therefore open the DS's wrap only while sitting at exactly that epoch: one
-//! commit of its own (the post-join self-update, a periodic leaf rotation)
-//! before a key-holding peer re-wrapped, and it was locked out until that peer
-//! came online — in a 1:1 DM, until the other person opened the app. So every
-//! device keeps the file KEK of each epoch it leaves (`file_kek_history`,
-//! written by [`keep_epoch_kek`] right before every local merge; a source
-//! guard pins that every merge site does) and opens a wrap from any epoch it
-//! was a member at. That reveals nothing membership did not already give it:
-//! a wrap at epoch `e` holds only keys added at or before `e`, all of which a
-//! member at `e` was entitled to, and the ring itself sits in the same
-//! encrypted database once adopted. A removed member still cannot reach the
-//! key added at its removal — that key is only ever wrapped at the
-//! post-removal epoch, which it never entered.
-//!
-//! # Forks are unrepresentable
-//!
-//! The DS sees the ring's length and refuses every write that would fork it
-//! (mint is insert-only at length 1, a re-wrap keeps the length, a rotation
-//! adds exactly one). This module only ever caches a ring that came from a
-//! write the DS accepted or from unwrapping the DS's row.
+//! Each MLS conversation has a ring of random file keys. An upload seals the file
+//! under `HKDF(newest ring key, random file_id)` and records the key version in
+//! the MLS-encrypted attachment reference. The ring reaches the DS only wrapped
+//! under a KEK from the current epoch's exporter, like the pin key, so every
+//! current member can open every file. Unlike the pin key, the ring grows: the
+//! device committing a removal appends a key the removed member never sees. The
+//! DS refuses every write that would fork the ring. See `.codesight/wiki/mls.md`
+//! § Attachment file key ring.
 
 use std::sync::Arc;
 
@@ -83,8 +32,8 @@ use super::mls::generation::local_generation;
 use super::mls::provider::load_stored_group;
 use super::mls::PollisProvider;
 
-/// Exporter label for the ring's KEK. The exporter secret changes every epoch,
-/// so the wrap is epoch-bound without an explicit context.
+/// Exporter label for the ring's KEK; the exporter changes every epoch, so the
+/// wrap is epoch-bound without a context.
 const FILE_KEK_EXPORT_LABEL: &str = "pollis-file-kek";
 
 const KEY_LEN: usize = 32;
@@ -93,14 +42,12 @@ const NONCE_LEN: usize = 12;
 /// One serialized ring entry: key ‖ generation (BE i64) ‖ epoch (BE i64).
 pub(crate) const RING_ENTRY_LEN: usize = KEY_LEN + 16;
 
-/// HKDF `info` for a file's AES-256-GCM key and base nonce. Distinct from every
-/// other derivation in the codebase.
+/// HKDF `info` for a file's AES-256-GCM key and base nonce.
 const FILE_KEY_INFO: &[u8] = b"pollis-file-key-v1";
 const FILE_NONCE_INFO: &[u8] = b"pollis-file-nonce-v1";
 
-/// A file's AES-256-GCM key and 12-byte base nonce, derived from one ring key
-/// and the file's random id. The id is the HKDF salt, so every file gets its
-/// own key and nonce even under the same ring key.
+/// A file's AES-256-GCM key and 12-byte base nonce from one ring key and the
+/// file's random id (the HKDF salt), so every file gets its own key and nonce.
 pub(crate) fn derive_file_key(
     ring_key: &[u8; KEY_LEN],
     file_id: &[u8; 32],
@@ -114,8 +61,6 @@ pub(crate) fn derive_file_key(
         .expect("HKDF expand for a 12-byte nonce cannot fail");
     (key, nonce)
 }
-
-// ── The ring ─────────────────────────────────────────────────────────────────
 
 /// A decoded ring. Entry `i` is key version `i + 1`.
 #[derive(Clone)]
@@ -177,8 +122,6 @@ fn push_entry(bytes: &mut Vec<u8>, generation: i64, epoch: i64) {
     bytes.extend_from_slice(&epoch.to_be_bytes());
 }
 
-// ── AES-256-GCM wrap ─────────────────────────────────────────────────────────
-
 fn seal(key: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut nonce = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce);
@@ -199,16 +142,14 @@ fn open(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| Error::Crypto(format!("file key ring open: {e}")))
 }
 
-// ── The exporter-derived KEK ─────────────────────────────────────────────────
-
 struct Kek {
     kek: Zeroizing<Vec<u8>>,
     generation: i64,
     epoch: i64,
 }
 
-/// The current KEK for a conversation, or `None` when no local MLS group
-/// exists. Pure sync — call inside a `local_db` guard scope.
+/// The current KEK, or `None` with no local MLS group. Sync only: call inside a
+/// `local_db` guard.
 fn current_kek(conn: &Connection, mls_conversation_id: &str) -> Option<Kek> {
     let generation = local_generation(conn, mls_conversation_id);
     let group = load_stored_group(conn, mls_conversation_id)?;
@@ -224,19 +165,16 @@ fn current_kek(conn: &Connection, mls_conversation_id: &str) -> Option<Kek> {
     })
 }
 
-// ── KEKs of epochs this device has left ──────────────────────────────────────
-
-/// How many past epochs' KEKs a device keeps per MLS group (lineage). A wrap
-/// is re-wrapped by every key holder whenever its epoch advances, so the epoch
-/// it sits at is almost always recent; the bound only keeps a long-lived group
-/// from growing the table without limit.
+/// Past-epoch KEKs kept per MLS group (lineage). Wraps are re-wrapped as epochs
+/// advance, so the needed one is almost always recent; this just bounds the table.
 const KEPT_KEKS_PER_GROUP: i64 = 64;
 
-/// Keep `group`'s current file KEK before a merge moves it past this epoch.
-/// Called by every site that merges a commit (`every_merge_site_keeps_the_file_kek`
-/// pins that), so this device can still open a ring wrapped at any epoch it
-/// was a member at. Best-effort: a failure here costs only the ability to open
-/// a wrap from this one epoch, and must never block the merge.
+/// Keep `group`'s current file KEK before a merge moves past this epoch, so this
+/// device can open a ring wrapped at any epoch it was a member at. Reveals
+/// nothing new: a wrap at epoch `e` holds only keys a member at `e` was entitled
+/// to, and the key added at a removal is only wrapped past it. Every merge site
+/// calls this (`every_merge_site_keeps_the_file_kek`). Best-effort; never blocks
+/// the merge.
 pub(crate) fn keep_epoch_kek<C>(
     provider: &super::mls::provider::MlsProvider<'_, C>,
     group: &openmls::prelude::MlsGroup,
@@ -271,8 +209,6 @@ fn remember_kek(conn: &Connection, lineage: &str, epoch: i64, kek: &[u8]) -> rus
     Ok(())
 }
 
-/// The KEK this device kept for `(generation, epoch)` of the conversation, if
-/// it was a member there and has not pruned it.
 fn kept_kek(
     conn: &Connection,
     mls_conversation_id: &str,
@@ -291,15 +227,12 @@ fn kept_kek(
     .map(Zeroizing::new)
 }
 
-// ── Local cache ──────────────────────────────────────────────────────────────
-
 struct Cached {
     ring: Ring,
     wrapped_at: (i64, i64),
     rotation_owed: Option<(i64, i64)>,
 }
 
-/// A `file_key_cache` row as read: ring bytes, wrapped-at pair, owed pair.
 type CacheRow = (Vec<u8>, i64, i64, Option<i64>, Option<i64>);
 
 fn read_cache(conn: &Connection, mls_conversation_id: &str) -> Result<Option<Cached>> {
@@ -323,9 +256,8 @@ fn read_cache(conn: &Connection, mls_conversation_id: &str) -> Result<Option<Cac
     }))
 }
 
-/// Store `ring` as this device's copy, wrapped at `(g, e)`. A ring shorter
-/// than the cached one is never written over it — a stale server row read
-/// after a local rotation must not undo the rotation here.
+/// Store `ring` wrapped at `(g, e)`. Never overwrites a longer cached ring, so a
+/// stale server row can't undo a local rotation.
 fn write_cache(conn: &Connection, mls_conversation_id: &str, ring: &Ring, g: i64, e: i64) -> Result<()> {
     conn.execute(
         "INSERT INTO file_key_cache \
@@ -352,8 +284,6 @@ fn set_rotation_owed(conn: &Connection, mls_conversation_id: &str, owed: Option<
     .map_err(|e| Error::Other(anyhow::anyhow!("file key cache owed-mark: {e}")))?;
     Ok(())
 }
-
-// ── DS round trips ───────────────────────────────────────────────────────────
 
 async fn post_ring(
     state: &Arc<AppState>,
@@ -387,11 +317,9 @@ async fn post_ring(
     Ok(updated)
 }
 
-/// Unwrap the DS's current ring into the cache when this device is at the
-/// epoch it was wrapped at, or was at it and kept that epoch's KEK. `Ok(None)`
-/// when there is no row, or the row was wrapped at an epoch this device has no
-/// KEK for: one it has not reached yet (a catch-up heals that), or one from
-/// before it joined (a key-holding member's next re-wrap heals that).
+/// Unwrap the DS's ring into the cache when this device is at its epoch or kept
+/// that epoch's KEK. `Ok(None)` with no row, or a wrap from an epoch this device
+/// has no KEK for (not reached yet, or from before it joined).
 async fn adopt_from_server(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -420,8 +348,8 @@ async fn adopt_from_server(
             "file key ring length disagrees with the stored key_version".into(),
         ));
     }
-    // Marked as wrapped where the DS's copy is: a device that opened it with a
-    // kept KEK is behind, and its next re-wrap moves the DS's copy forward.
+    // Marked where the DS's copy is wrapped; if opened with a kept KEK, the next
+    // re-wrap moves the DS forward.
     write_cache(db.conn(), mls_conversation_id, &ring, ks.generation, ks.epoch)?;
     Ok(read_cache(db.conn(), mls_conversation_id)?.map(|c| c.ring))
 }
@@ -434,9 +362,8 @@ async fn cached_ring(state: &Arc<AppState>, mls_conversation_id: &str) -> Result
     read_cache(db.conn(), mls_conversation_id)
 }
 
-/// The conversation's ring: cached, adopted from the DS, or (when
-/// `mint_if_absent` and nobody has minted) freshly minted. A lost mint race
-/// adopts the winner's ring.
+/// The conversation's ring: cached, adopted, or (with `mint_if_absent`) minted;
+/// a lost mint race adopts the winner's.
 async fn ensure_ring(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -454,7 +381,7 @@ async fn ensure_ring(
     }
     let resp = super::ds_reads::read_file_keystate(state, mls_conversation_id, user_id).await?;
     if resp.keystate.is_some() {
-        // A ring exists but was wrapped at an epoch we cannot open yet.
+        // A ring exists but is wrapped at an epoch we can't open yet.
         return Ok(None);
     }
     let kek = {
@@ -479,12 +406,9 @@ async fn ensure_ring(
     adopt_from_server(state, mls_conversation_id, user_id).await
 }
 
-// ── Rotation ─────────────────────────────────────────────────────────────────
-
-/// If this device owes a rotation for a removal, perform it. Clears the mark
-/// once the ring's newest key was added at or after the removal point.
-/// Best-effort: an unreachable DS or a ring this device cannot open yet leaves
-/// the mark for the next pass.
+/// Perform any rotation this device owes for a removal; the mark clears once the
+/// newest key was added at or after the removal point. Best-effort: the mark
+/// survives for the next pass.
 async fn settle_owed_rotation(state: &Arc<AppState>, mls_conversation_id: &str, user_id: &str) -> Result<()> {
     for _ in 0..3 {
         let Some(cached) = cached_ring(state, mls_conversation_id).await? else {
@@ -520,9 +444,8 @@ async fn settle_owed_rotation(state: &Arc<AppState>, mls_conversation_id: &str, 
             set_rotation_owed(db.conn(), mls_conversation_id, None)?;
             return Ok(());
         }
-        // Another device rotated or re-wrapped first. Adopt its ring if this
-        // device can open it; if not, its holder's re-wrap will make it
-        // openable and the mark keeps us retrying until then.
+        // Another device rotated or re-wrapped first: adopt its ring if we can open it,
+        // else the mark keeps us retrying.
         if adopt_from_server(state, mls_conversation_id, user_id).await?.is_none() {
             return Ok(());
         }
@@ -530,17 +453,12 @@ async fn settle_owed_rotation(state: &Arc<AppState>, mls_conversation_id: &str, 
     Ok(())
 }
 
-// ── Hooks ────────────────────────────────────────────────────────────────────
-
-/// Record that this device committed a member removal, then rotate. Called by
-/// the committer right after the removal commit merged, so the current epoch
-/// is the first one the removed member is not in.
+/// Record a committed member removal, then rotate. Called right after the removal
+/// merged, so the current epoch is the first without the removed member.
 pub async fn on_member_removed(state: &Arc<AppState>, mls_conversation_id: &str) {
     let Ok(user_id) = super::mls::current_user_id(state).await else {
         return;
     };
-    // The committer normally holds the ring; adopt it if not, so the removal
-    // is recorded against the conversation's real ring.
     if let Err(e) = ensure_ring(state, mls_conversation_id, &user_id, false).await {
         crate::diag!("[file-keys] ring fetch before rotation failed for {mls_conversation_id}: {e}");
     }
@@ -562,9 +480,8 @@ pub async fn on_member_removed(state: &Arc<AppState>, mls_conversation_id: &str)
     }
 }
 
-/// Re-wrap the cached ring under the current exporter if this device is
-/// behind, and settle any owed rotation. Called at every epoch-advance site
-/// next to the pin key's re-wrap.
+/// Re-wrap the cached ring if behind and settle any owed rotation; called at
+/// every epoch-advance site.
 pub async fn maybe_rewrap_file_keys(state: &Arc<AppState>, mls_conversation_id: &str) {
     let Ok(user_id) = super::mls::current_user_id(state).await else {
         return;
@@ -575,8 +492,7 @@ pub async fn maybe_rewrap_file_keys(state: &Arc<AppState>, mls_conversation_id: 
     rewrap_if_behind(state, mls_conversation_id, &user_id).await;
 }
 
-/// Post the cached ring wrapped at this device's current epoch when the last
-/// wrap it knows of is older. One local SELECT when it is not.
+/// Post the cached ring wrapped at the current epoch if the known wrap is older.
 async fn rewrap_if_behind(state: &Arc<AppState>, mls_conversation_id: &str, user_id: &str) {
     let staged = {
         let guard = state.local_db.lock().await;
@@ -610,8 +526,7 @@ async fn rewrap_if_behind(state: &Arc<AppState>, mls_conversation_id: &str, user
             }
         }
         Ok(false) => {
-            // Somebody wrapped at this epoch already, or rotated: pick up a
-            // longer ring if there is one.
+            // Someone already wrapped at this epoch, or rotated: pick up a longer ring.
             if let Err(e) = adopt_from_server(state, mls_conversation_id, user_id).await {
                 crate::diag!("[file-keys] adopt after refused re-wrap failed for {mls_conversation_id}: {e}");
             }
@@ -622,8 +537,7 @@ async fn rewrap_if_behind(state: &Arc<AppState>, mls_conversation_id: &str, user
     }
 }
 
-/// Best-effort adopt right after a Welcome or external join, while the stored
-/// wrap is most likely to match this device's epoch.
+/// Best-effort adopt right after a Welcome or external join.
 pub async fn try_adopt_file_keys(state: &Arc<AppState>, mls_conversation_id: &str) {
     let Ok(user_id) = super::mls::current_user_id(state).await else {
         return;
@@ -633,8 +547,8 @@ pub async fn try_adopt_file_keys(state: &Arc<AppState>, mls_conversation_id: &st
     }
 }
 
-/// Mint the ring at conversation creation, while the creator is the sole
-/// member. Best-effort: the first upload mints otherwise.
+/// Mint the ring at conversation creation. Best-effort: the first upload mints
+/// otherwise.
 pub async fn mint_file_keys_for_new_group(state: &Arc<AppState>, mls_conversation_id: &str) {
     let Ok(user_id) = super::mls::current_user_id(state).await else {
         return;
@@ -644,12 +558,9 @@ pub async fn mint_file_keys_for_new_group(state: &Arc<AppState>, mls_conversatio
     }
 }
 
-// ── What uploads and downloads call ──────────────────────────────────────────
-
-/// A send needs the conversation's file key and this device cannot reach it
-/// yet: the only wrap is at an epoch it holds no KEK for, and only a key
-/// holder's next re-wrap fixes that. Not a failure of the message — the
-/// outbox keeps it queued and its next drain sends it.
+/// The conversation's file key hasn't reached this device: the only wrap is at an
+/// epoch it has no KEK for. Not a message failure; the outbox keeps the send
+/// queued.
 #[derive(Debug)]
 pub struct FileKeyUnavailable;
 
@@ -668,17 +579,13 @@ fn file_key_unavailable() -> Error {
     Error::Other(anyhow::Error::new(FileKeyUnavailable))
 }
 
-/// Whether `e` is the wait for the conversation's file key, and nothing else.
 pub fn is_file_key_unavailable(e: &Error) -> bool {
     matches!(e, Error::Other(any) if any.downcast_ref::<FileKeyUnavailable>().is_some())
 }
 
-/// [`ensure_ring`], and when that finds no ring this device can open, once
-/// more after catching the conversation up: the wrap may be at an epoch this
-/// device has not reached yet. An upload runs BEFORE the send's own catch-up,
-/// so without this a device one commit behind a peer's re-wrap failed every
-/// attempt, Retry included. Callers must hold no MLS lock (the catch-up takes
-/// it).
+/// [`ensure_ring`], retried once after catching the conversation up: uploads run
+/// before the send's own catch-up, so a device one commit behind would otherwise
+/// fail every attempt. Callers must hold no MLS lock.
 async fn ensure_ring_caught_up(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -697,8 +604,8 @@ async fn ensure_ring_caught_up(
     ensure_ring(state, mls_conversation_id, user_id, mint_if_absent).await
 }
 
-/// The key and version a NEW upload to this conversation must use: the ring's
-/// newest key, after settling any rotation this device owes.
+/// The key and version a new upload must use: the newest, after settling any
+/// owed rotation.
 pub(crate) async fn upload_key(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -708,11 +615,9 @@ pub(crate) async fn upload_key(
         .await?
         .ok_or_else(file_key_unavailable)?;
     settle_owed_rotation(state, mls_conversation_id, user_id).await?;
-    // A ring opened with a kept KEK is wrapped at an epoch this device has
-    // left: move the DS's copy to this epoch now, so every other device at it
-    // can open it too.
+    // Opened with a kept KEK means the DS's wrap is at an epoch we left; re-wrap so
+    // other devices here can open it.
     rewrap_if_behind(state, mls_conversation_id, user_id).await;
-    // Prefer the latest ring after any rotation; fall back to the one we have.
     let ring = cached_ring(state, mls_conversation_id)
         .await?
         .map(|c| c.ring)
@@ -722,8 +627,7 @@ pub(crate) async fn upload_key(
     Ok((version, key))
 }
 
-/// The ring key at `version`, for opening a file. Refetches from the DS when
-/// the cached ring is shorter (a rotation this device has not seen yet).
+/// The ring key at `version`, refetching when the cached ring is shorter.
 pub(crate) async fn key_at_version(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
@@ -746,10 +650,8 @@ pub(crate) async fn key_at_version(
         })
 }
 
-/// Test harness only: the newest ring version this device can open for the
-/// MLS conversation behind `conversation_id`, after picking up any rotation
-/// from the DS. `None` when the device cannot reach the ring at all — which is
-/// exactly what a removed member must see.
+/// Test harness only: the newest ring version this device can open. `None` is
+/// what a removed member must see.
 #[cfg(feature = "test-harness")]
 pub async fn test_file_key_version(
     conversation_id: String,
@@ -758,8 +660,7 @@ pub async fn test_file_key_version(
     let user_id = super::mls::current_user_id(state).await?;
     let mls_id = super::mls::ds_reads::resolve_mls_group(state, &conversation_id).await?;
     ensure_ring(state, &mls_id, &user_id, false).await?;
-    // A refused read (removed member) surfaces as an error from the DS; report
-    // it as "cannot reach the ring" rather than failing the probe.
+    // A refused read (removed member) means "cannot reach the ring".
     let _ = adopt_from_server(state, &mls_id, &user_id).await;
     Ok(cached_ring(state, &mls_id).await?.map(|c| c.ring.version()))
 }
@@ -779,19 +680,16 @@ mod tests {
 
     #[test]
     fn the_file_id_alone_does_not_determine_the_key() {
-        // The server knows every file id. Without the ring key it must not be
-        // able to reproduce the file key.
+        // The server knows every file id; it must not reproduce the key without the
+        // ring key.
         let file_id = [5u8; 32];
         let (a, _) = derive_file_key(&[1u8; 32], &file_id);
         let (b, _) = derive_file_key(&[2u8; 32], &file_id);
         assert_ne!(a.as_ref(), b.as_ref());
     }
 
-    /// #1382's invariant, end to end: everything the server holds about a
-    /// file — its random id (object name, `attachment_object`,
-    /// `attachment_ref`) and its ciphertext — is not enough to decrypt it.
-    /// The retired convergent derivation applied to what the server sees, and
-    /// the new derivation under any key but the ring's, both fail.
+    /// #1382's invariant: everything the server holds (file id and ciphertext) can't
+    /// decrypt a file, under the retired convergent derivation or the new one.
     #[test]
     fn what_the_server_holds_cannot_decrypt_a_file() {
         let plaintext = b"budget-2026.pdf contents".to_vec();
@@ -803,7 +701,6 @@ mod tests {
         let (key, nonce) = derive_file_key(&ring_key, &file_id);
         let ciphertext = crate::commands::r2::encrypt_chunked(&plaintext, &key, &nonce);
 
-        // The old scheme's key derivation, fed the only id the server has.
         let hk = Hkdf::<Sha256>::new(None, &file_id);
         let mut convergent_key = [0u8; 32];
         hk.expand(b"pollis-att-key", &mut convergent_key).unwrap();
@@ -811,11 +708,9 @@ mod tests {
         hk.expand(b"pollis-att-nonce", &mut convergent_nonce).unwrap();
         assert!(crate::commands::r2::decrypt_chunked(&ciphertext, &convergent_key, &convergent_nonce).is_err());
 
-        // The new derivation with the file id as the ring key.
         let (k, n) = derive_file_key(&file_id, &file_id);
         assert!(crate::commands::r2::decrypt_chunked(&ciphertext, &k, &n).is_err());
 
-        // A member holding the ring key opens it.
         assert_eq!(crate::commands::r2::decrypt_chunked(&ciphertext, &key, &nonce).unwrap(), plaintext);
     }
 

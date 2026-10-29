@@ -1,92 +1,55 @@
 pub mod account_identity;
 pub mod auth;
 pub mod pin;
-// Idle auto-lock (#851): the deadline + the single resettable timer that
-// drives `pin::lock`. Pure tokio, so it compiles on every target.
 pub mod autolock;
 pub mod blocks;
-// Saved messages + local permalink resolution (#854). Pure rusqlite against the
-// device-local DB — no DS, no Turso, compiles on every target.
 pub mod bookmarks;
 pub mod device_enrollment;
 pub mod device_link;
 pub mod diagnostics;
-// On-device plaintext export (#856). Pure rusqlite against the local DB — no
-// DS, no Turso, no R2 — and deliberately no import path.
 pub mod export;
-// The opt-in, network-touching second step of the export: fetch what the
-// cache did not have. Separate module so `export.rs` can be scanned as local.
 pub mod export_fetch;
-/// The client half of the DS directory + account READ endpoints (#987).
 pub(crate) mod ds_reads;
-// Custom per-group emoji (#848): the untrusted-image re-encoder, the
-// content-addressed upload/GC path, and the cross-group "may this user send
-// it" rule. Pure `image` + libsql + reqwest, so it compiles on every target.
 pub mod emoji;
 pub mod user;
 pub mod groups;
 pub mod messages;
 pub mod dm;
-// LiveKit realtime: real Rust impl when the `media` feature is on (desktop),
-// no-op stub otherwise — mobile builds with `media` off and uses the native
-// LiveKit SDK (issue #185). Same public API either way so core call sites stay
-// #[cfg]-free.
+// Real LiveKit with `media` (desktop); a stub with the same API otherwise, since
+// mobile uses the native LiveKit SDK (#185).
 #[cfg(feature = "media")]
 pub mod livekit;
 #[cfg(not(feature = "media"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
-// LiveKit tokens are minted server-side by the DS now (#393); no on-device
-// signer remains. Token/SendData/roster requests go through the DS client
-// helpers in `commands::mls` (`ds_livekit_*`).
-// LiveKit realtime signalling (wake-up) payload builders — pure serde_json,
-// no native deps, always compiled (the same split the deleted `livekit_jwt`
-// module used: pure code lives outside the media gate). Both the
-// media `livekit::publish` and the headless `livekit_stub` build their wire
-// payloads here so the metadata-minimized shape (§5) has one source of truth
-// and unit-tests on every target.
+// Pure signalling payload builders, outside the media gate so they are shared
+// by `livekit` and the stub and unit-tested on every target.
 pub mod livekit_signalling;
-// The participant-identity grammar (#836): the two identity spaces (opaque
-// wire pseudonym vs. internal `voice-{user}:{device}` key) and the pure
-// translation between them. Outside the media gate for the same reason as
-// `livekit_signalling` — it is pure string handling shared by the media voice
-// path and the headless stub, and keeping it here is what gets it unit-tested
-// on every target instead of only where LiveKit builds.
+// Participant-identity grammar (#836); outside the media gate for the same
+// reason as `livekit_signalling`.
 pub mod livekit_identity;
 pub mod mls;
-// Runtime application of the closed-overlay relay mode (design §14): the engine
-// behind get/set_overlay_mode that live-routes control-plane traffic through the
-// relay. Off-by-default; always compiled (pure Rust + pollis-relay).
 pub mod overlay;
-// Push-notification backend (#344): token registration + the content-free
-// send_message fanout. Pure libsql + reqwest, so it compiles on every target.
-// Pinned messages (#99). NOT `pin` — that module is the device-unlock PIN.
 pub mod file_keys;
 pub mod pinned_messages;
 pub mod push;
 pub mod r2;
-// The Vault (#107): personal encrypted storage, synced across devices.
 pub mod vault;
-// "Run a relay for others" (design §10.2, #813 D1): the consent + conditions
-// surface for letting THIS device forward other people's traffic. The mirror
-// image of `overlay` above, and independent of it.
 pub mod relay_serving;
 pub mod safety;
 pub mod staging;
 pub mod transparency;
 #[cfg(feature = "media")]
 pub mod sfx;
-// Terminal pane: real PTY backend on Unix desktop, Windows stub until
-// ConPTY is wired. Gated out entirely on mobile.
+// Real PTY backend on Unix desktop, a stub on Windows, absent on mobile.
 #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
 #[path = "terminal_unix.rs"]
 pub mod terminal;
 #[cfg(target_os = "windows")]
 #[path = "terminal_windows.rs"]
 pub mod terminal;
-// The device-local switch `terminal_open` consults. Not behind the same cfg as
-// the PTY backend: the settings command that reads and writes the flag has to
-// exist wherever the settings UI does.
+// Not behind the PTY cfg: the settings command for this flag must exist
+// wherever the settings UI does.
 pub mod terminal_gate;
 pub mod update;
 #[cfg(feature = "media")]
@@ -97,15 +60,12 @@ pub mod screenshare;
 pub mod voice;
 #[cfg(feature = "media")]
 pub mod voice_apm;
-// voice_e2ee: real impl with the `media` feature on; stub otherwise. The stub
-// keeps the one MLS-path call site (on_mls_epoch_changed) #[cfg]-free.
 #[cfg(feature = "media")]
 pub mod voice_e2ee;
 #[cfg(not(feature = "media"))]
 #[path = "voice_e2ee_stub.rs"]
 pub mod voice_e2ee;
-// Epoch → libwebrtc key-ring slot arithmetic for voice E2EE. Pure integer
-// code, outside the media gate so the mapping is unit-tested on every target.
+// Pure arithmetic, outside the media gate so it is unit-tested on every target.
 pub mod voice_key_ring;
 #[cfg(feature = "media")]
 pub mod voice_denoiser;

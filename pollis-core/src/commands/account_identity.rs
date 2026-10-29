@@ -1,26 +1,11 @@
 //! Account identity key management.
 //!
-//! Each user has a long-lived **ML-DSA-44** "account identity key" generated
-//! once at first-device signup. This key is distinct from per-device MLS signing
-//! keys — it represents the human, not any specific device, and is what
-//! lets every device of that user cross-sign each other into MLS groups.
-//!
-//! #668 moved this key from Ed25519 to ML-DSA-44. Only the *public* half (32 →
-//! 1312 bytes) and the *signature* (64 → 2420 bytes) changed size: an ML-DSA
-//! private key is canonically a 32-byte seed, exactly like an Ed25519 one, so
-//! the Secret-Key wrap, the PIN keystore blobs, the `account_recovery` row and
-//! the device-enrollment transfer are all byte-identical to before.
-//!
-//! The private key is:
-//!   1. Stored in the OS keystore on every device that holds a copy.
-//!   2. Also stored server-side in Turso's `account_recovery` table,
-//!      encrypted (wrapped) under a key derived from a user-held Secret
-//!      Key via HKDF-SHA256. The Secret Key itself is never sent to the
-//!      server.
-//!
-//! The Secret Key is shown to the user exactly once at signup. Losing it
-//! and all devices holding the account identity key means the account is
-//! unrecoverable (by design — see `MULTI_DEVICE_ENROLLMENT.md`).
+//! Each user has one long-lived ML-DSA-44 account identity key (#668), distinct
+//! from per-device MLS keys: it represents the human and cross-signs every
+//! device. Its private half is a 32-byte seed held on each device and, wrapped
+//! under a user-held Secret Key (shown once at signup, never sent), in the
+//! server's `account_recovery` row. Losing the Secret Key and every device makes
+//! the account unrecoverable by design.
 
 use std::sync::Arc;
 
@@ -40,67 +25,48 @@ use crate::state::AppState;
 
 const DB_KEY_LEN: usize = 32;
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
 /// Keystore slot for this device's copy of the account identity private key.
 const ACCOUNT_ID_KEY_KEYSTORE_SLOT: &str = "account_id_key";
 
-/// Keystore slot for the account identity **public** key the Delivery Service
-/// last reported for this account at `verify-otp`.
-///
-/// Public material, so there is nothing here to keep secret — the keystore is
-/// used because it is the one store a device has BEFORE it is enrolled (no
-/// local DB, no signing key), and it survives the app restart that a
-/// half-finished enrollment routinely involves.
+/// Keystore slot for the account identity public key the DS last reported at
+/// `verify-otp`. Public, but the keystore is the one store a not-yet-enrolled
+/// device has, and it survives restarts mid-enrollment.
 const ACCOUNT_ID_PUB_SLOT: &str = "account_id_pub";
 
-/// Keystore slot marking "the Delivery Service says this account's identity is
-/// no longer the one this device holds". Its value is the pub key the DS
-/// claimed, kept so the reason is inspectable rather than a bare flag.
+/// Keystore slot marking that the DS says this account's identity is no longer
+/// the one this device holds. Holds the claimed pub key.
 const ACCOUNT_IDENTITY_SUPERSEDED_SLOT: &str = "account_identity_superseded";
 
-/// Crockford base32 alphabet (32 chars, drops I/L/O/U for visual clarity).
+/// Crockford base32 (no I/L/O/U).
 const SECRET_KEY_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/// Number of base32 chars in the Secret Key body (excluding version prefix
-/// and dashes). 30 chars × 5 bits = 150 bits of entropy — well above the
-/// 128-bit floor for uncrackable-offline.
+/// Secret Key body length: 30 chars × 5 bits = 150 bits.
 const SECRET_KEY_BODY_CHARS: usize = 30;
 
-/// Current Secret Key format version prefix. Bump if the derivation or
-/// alphabet ever changes so old kits can be recognized and rejected.
+/// Secret Key format version prefix; bump if the derivation or alphabet changes.
 const SECRET_KEY_VERSION: &str = "A3";
 
-/// HKDF info string — bind the wrap key to this specific use so the same
-/// Secret Key cannot be repurposed for any other KDF output.
+/// HKDF info binding the wrap key to this use only.
 const HKDF_INFO: &[u8] = b"pollis-account-key-wrap-v1";
 
 const SALT_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 
-/// Length of the account identity **private** key on the wire and at rest. An
-/// ML-DSA-44 private key is canonically its 32-byte seed — the same size the
-/// Ed25519 key had before #668, which is why every wrap/recovery/transfer path
-/// that carries these bytes is untouched by the migration.
+/// Account identity private key length: an ML-DSA-44 seed, the same size the
+/// Ed25519 key had, so wrap/recovery/transfer formats are unchanged.
 const ACCOUNT_SEED_LEN: usize = 32;
 
-/// The account identity signing key. Aliased so the (long) ML-DSA parameter set
-/// is named in exactly one place.
 pub type AccountSigningKey = SigningKey<MlDsa44>;
 
-// ── Secret Key formatting ────────────────────────────────────────────────────
-
-/// Generate a fresh random Secret Key and return it in display form:
-/// `A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX` (6 groups of 5 Crockford base32 chars).
+/// A fresh random Secret Key in display form:
+/// `A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.
 pub fn generate_secret_key_string() -> String {
     let mut rng = OsRng;
-    // The raw body IS the secret. `Zeroizing` so it does not outlive this
-    // function as readable heap; `with_capacity` so `push` never reallocates
-    // and strands a copy the wipe cannot reach (#1141).
+    // The body is the secret: `Zeroizing`, pre-sized so `push` never reallocates
+    // and strands an unwiped copy (#1141).
     let mut body = Zeroizing::new(String::with_capacity(SECRET_KEY_BODY_CHARS));
     for _ in 0..SECRET_KEY_BODY_CHARS {
-        // Take a fresh random byte and reduce to 5 bits — rejection is
-        // unnecessary because 32 divides 256 evenly.
+        // 32 divides 256, so masking to 5 bits is unbiased.
         let mut buf = [0u8; 1];
         rng.fill_bytes(&mut buf);
         let idx = (buf[0] & 0x1f) as usize;
@@ -117,15 +83,10 @@ pub fn generate_secret_key_string() -> String {
     out
 }
 
-/// Normalize a user-entered Secret Key: strip whitespace, uppercase, remove
-/// the version prefix and all dashes, validate the result is exactly
-/// `SECRET_KEY_BODY_CHARS` characters from the Crockford alphabet.
-///
-/// Returned string is the raw body, suitable for feeding into HKDF as IKM.
+/// Normalize a typed Secret Key (whitespace, case, prefix, dashes) to its raw
+/// body, the HKDF IKM, validating length and alphabet.
 pub fn normalize_secret_key(input: &str) -> Result<Zeroizing<String>> {
-    // Both the filtered copy and the uppercased one carry the secret, so both
-    // are wiped — `to_uppercase` allocates a second buffer and drops the first,
-    // which is precisely the copy that used to linger (#1141).
+    // Both copies carry the secret, so both are wiped (#1141).
     let filtered = Zeroizing::new(
         input.chars().filter(|c| !c.is_whitespace()).collect::<String>(),
     );
@@ -160,8 +121,6 @@ pub fn normalize_secret_key(input: &str) -> Result<Zeroizing<String>> {
     Ok(body)
 }
 
-// ── Key derivation and AEAD ──────────────────────────────────────────────────
-
 fn derive_wrap_key(secret_key_body: &str, salt: &[u8]) -> Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(salt), secret_key_body.as_bytes());
     let mut out = Zeroizing::new([0u8; 32]);
@@ -177,8 +136,7 @@ fn aes_gcm_encrypt(key: &[u8; 32], nonce: &[u8; NONCE_LEN], plaintext: &[u8]) ->
         .map_err(|e| Error::Crypto(format!("aes-256-gcm encrypt: {e}")))
 }
 
-/// Returns `Zeroizing` because on every call site here the plaintext IS the
-/// account seed (#1141).
+/// `Zeroizing`: the plaintext here is always the account seed (#1141).
 fn aes_gcm_decrypt(
     key: &[u8; 32],
     nonce: &[u8; NONCE_LEN],
@@ -191,13 +149,8 @@ fn aes_gcm_decrypt(
         .map_err(|e| Error::Crypto(format!("aes-256-gcm decrypt: {e}")))
 }
 
-/// Unwrap a server-stored `account_recovery` row using a user-entered
-/// Secret Key. Returns the raw 32-byte `account_id_key` private material
-/// on success. Used by the Secret Key recovery path during new-device
-/// enrollment.
-///
-/// `secret_key_input` is the raw text the user typed (case, whitespace,
-/// and dash tolerance are handled by `normalize_secret_key`).
+/// Unwrap an `account_recovery` row with a typed Secret Key, returning the
+/// 32-byte account seed. Used by Secret Key recovery.
 pub fn unwrap_recovery_blob(
     secret_key_input: &str,
     salt: &[u8],
@@ -226,35 +179,23 @@ pub fn unwrap_recovery_blob(
     Ok(plaintext)
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
-
-/// The public/wrapped material the server persists for a fresh account identity.
-/// Everything here is safe to send to the server — the private `account_id_key`
-/// is held only locally (in `AppState.unlock`) and on the server only as
-/// `wrapped_key`, sealed under the user-held Secret Key.
+/// What the server persists for a fresh account identity. Safe to send: the
+/// private key is only ever there as `wrapped_key`, sealed under the Secret Key.
 pub struct AccountIdentityMaterial {
-    /// ML-DSA-44 account identity public key (`MLDSA44_PUB_LEN` = 1312 bytes).
+    /// ML-DSA-44 public key (1312 bytes).
     pub account_id_pub: Vec<u8>,
-    /// `account_recovery` salt (HKDF salt for the Secret-Key-derived wrap key).
+    /// HKDF salt for the Secret-Key-derived wrap key.
     pub salt: [u8; SALT_LEN],
-    /// AES-GCM nonce for the wrapped private key.
     pub nonce: [u8; NONCE_LEN],
-    /// The account identity private key, AES-GCM-sealed under the wrap key.
     pub wrapped_key: Vec<u8>,
 }
 
-/// Pure-crypto half of account-identity generation, with NO server write.
+/// Generate an account identity with no server write: the keypair and a
+/// one-time Secret Key, the private key wrapped under it, and the key plus a
+/// fresh `db_key` installed in `AppState.unlock`.
 ///
-/// Generates the ML-DSA-44 account keypair + a one-time Secret Key, wraps the
-/// private key under the Secret-Key-derived KEK, and installs the private key
-/// plus a fresh `db_key` into `AppState.unlock` (the only on-disk copy is the
-/// server-side `account_recovery` blob, which is wrapped under the Secret Key).
-///
-/// Returns the formatted Secret Key to show the user once, plus the
-/// [`AccountIdentityMaterial`] the caller persists by POSTing it to the
-/// session-gated `/v1/auth/establish-identity`. That is now the ONLY way this
-/// material reaches the server: the direct-to-Turso variant went with #910. The
-/// caller is responsible for ensuring the user has no existing identity first.
+/// Returns the Secret Key to show once and the material the caller POSTs to
+/// `/v1/auth/establish-identity`. The caller ensures no identity exists yet.
 pub async fn generate_account_identity_material(
     state: &Arc<AppState>,
     user_id: &str,
@@ -277,9 +218,7 @@ pub async fn generate_account_identity_material(
 
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &*private_bytes));
 
-    // Pin the public half locally as this account's published identity. The
-    // caller POSTs it to `establish-identity` next; recording it here is what
-    // lets a LATER unwrap on this device be checked against something.
+    // Pin the public half locally so a later unwrap here can be checked against it.
     if let Err(e) = remember_published_account_id_pub(state, user_id, &public_bytes).await {
         crate::diag!("[identity] could not record the published account_id_pub: {e}");
     }
@@ -295,9 +234,8 @@ pub async fn generate_account_identity_material(
     ))
 }
 
-/// Draw a fresh account identity keypair, returned as `(32-byte seed, encoded
-/// 1312-byte public key)`. The seed — not the expanded key — is what every
-/// storage and transfer path carries.
+/// A fresh account keypair: `(32-byte seed, 1312-byte public key)`. The seed is
+/// what every storage and transfer path carries.
 fn generate_account_keypair(rng: &mut OsRng) -> (Zeroizing<[u8; ACCOUNT_SEED_LEN]>, Vec<u8>) {
     let mut seed = Zeroizing::new([0u8; ACCOUNT_SEED_LEN]);
     rng.fill_bytes(&mut *seed);
@@ -306,10 +244,8 @@ fn generate_account_keypair(rng: &mut OsRng) -> (Zeroizing<[u8; ACCOUNT_SEED_LEN
     (seed, public_bytes)
 }
 
-/// Build an `UnlockState` carrying the supplied account identity
-/// private key plus a freshly generated `db_key`. Used by every "we
-/// just produced raw key material and have no PIN yet" path:
-/// fresh signup, identity reset, and device-enrollment unwrap.
+/// An `UnlockState` with the given account key and a fresh `db_key`, for paths
+/// that just produced key material with no PIN yet.
 pub(crate) fn unlock_state_with_fresh_db_key(
     user_id: &str,
     account_id_private: &[u8],
@@ -323,21 +259,11 @@ pub(crate) fn unlock_state_with_fresh_db_key(
     }
 }
 
-/// Keystore slot for the PIN-wrapped copy of the account identity key.
-/// Mirrors `commands::pin::ACCOUNT_ID_KEY_WRAPPED_SLOT` — duplicated here
-/// to avoid a cross-module visibility leak just for a string constant.
+/// Mirrors `commands::pin::ACCOUNT_ID_KEY_WRAPPED_SLOT`.
 const ACCOUNT_ID_KEY_WRAPPED_SLOT: &str = "account_id_key_wrapped";
 
-/// True if this device holds an account identity private key for `user_id`.
-///
-/// The key may live in any of three forms during the PIN rollout:
-///   1. Plaintext in `AppState.unlock` (post-PIN-unlock, OR fresh signup
-///      between `verify_otp` and `set_pin`).
-///   2. Ciphertext in `account_id_key_wrapped_{user_id}` (PIN set, locked).
-///   3. Plaintext in `account_id_key_{user_id}` (legacy, pre-PIN build).
-///
-/// Returning `true` means at least one of those is present — i.e. this
-/// device is not orphaned, even if it's currently locked.
+/// True if this device holds the account key for `user_id` in any form: in
+/// `AppState.unlock`, PIN-wrapped, or in the legacy unwrapped slot.
 pub async fn has_local_account_identity(state: &AppState, user_id: &str) -> Result<bool> {
     {
         let guard = state.unlock.lock().await;
@@ -362,17 +288,9 @@ pub async fn has_local_account_identity(state: &AppState, user_id: &str) -> Resu
         .is_some())
 }
 
-/// True if the locally-known account identity key's public half matches
-/// the `remote_pub` bytes read from `users.account_id_pub`.
-///
-/// Behavior depends on how the key is stored locally:
-///   - Plaintext in `AppState.unlock` or in the legacy keystore slot →
-///     derive pub-half and compare.
-///   - Ciphertext only (locked, PIN set) → return `Ok(true)`. We can't
-///     verify a match without the unwrapped key, so deferral is the
-///     honest answer; the orphan recompute moves into `unlock` itself
-///     once the bytes are available.
-///   - Nothing locally → `Ok(false)` (orphaned/unenrolled).
+/// True if the local account key's public half matches `remote_pub`. When only
+/// the PIN-wrapped copy exists (locked), returns `Ok(true)`: the check is
+/// deferred to `unlock`. No local key is `Ok(false)`.
 pub async fn has_matching_local_account_identity(
     state: &AppState,
     user_id: &str,
@@ -392,7 +310,6 @@ pub async fn has_matching_local_account_identity(
         .await?
         .is_some()
     {
-        // Locked: defer the match check until `unlock` runs.
         return Ok(true);
     }
     let Some(local_bytes) = state
@@ -412,15 +329,9 @@ pub(crate) fn account_id_pub_matches(private_bytes: &[u8], remote_pub: &[u8]) ->
     signing_key.verifying_key().encode().as_slice() == remote_pub
 }
 
-// ── The published account identity, as this device last saw it ───────────────
-
-/// Record the account identity public key the Delivery Service published for
-/// `user_id`, so a later unwrap can be checked against it.
-///
-/// Called from every path that learns the value: `verify-otp` reconciliation,
-/// first-device signup, and identity reset. Best-effort by return value, never
-/// by silence — the caller logs a failure, and a *missing* record makes
-/// [`adopt_recovered_account_identity`] refuse rather than proceed unchecked.
+/// Record the account identity public key the DS published, so a later unwrap
+/// can be checked against it. A missing record makes
+/// [`adopt_recovered_account_identity`] refuse.
 pub(crate) async fn remember_published_account_id_pub(
     state: &AppState,
     user_id: &str,
@@ -432,8 +343,6 @@ pub(crate) async fn remember_published_account_id_pub(
         .await
 }
 
-/// The account identity public key this device last saw published for
-/// `user_id`, or `None` if it has never seen one.
 pub(crate) async fn published_account_id_pub(
     state: &AppState,
     user_id: &str,
@@ -444,17 +353,12 @@ pub(crate) async fn published_account_id_pub(
         .await
 }
 
-/// Note that the server's account identity for `user_id` is not the one this
-/// device holds — an identity reset performed elsewhere, or a server lying
-/// about one.
+/// Mark that the server's account identity isn't the one this device holds
+/// (reset elsewhere, or a lying server).
 ///
-/// This REPLACES the wipe that used to happen here. Nothing authenticates the
-/// value that triggers it: it arrives inside a `verify-otp` response, the local
-/// database is still closed so there is no pin to compare against, and the
-/// transparency log is not consulted. Deleting the only local copy of the
-/// account identity key on an unauthenticated server claim hands any hostile
-/// (or merely buggy) Delivery Service a one-response way to strand a user on
-/// their Secret Key. Marking is reversible; deleting is not.
+/// Marks instead of deleting: the claim is unauthenticated, and deleting the
+/// only local copy would let any hostile DS strand a user on their Secret Key in
+/// one response. Marking is reversible.
 pub(crate) async fn mark_account_identity_superseded(
     state: &AppState,
     user_id: &str,
@@ -466,7 +370,6 @@ pub(crate) async fn mark_account_identity_superseded(
         .await
 }
 
-/// Clear the marker set by [`mark_account_identity_superseded`].
 pub(crate) async fn clear_account_identity_superseded(
     state: &AppState,
     user_id: &str,
@@ -477,12 +380,8 @@ pub(crate) async fn clear_account_identity_superseded(
         .await
 }
 
-/// True if this device has been told its account identity was superseded and
-/// has not yet re-enrolled.
-///
-/// Drives `enrollment_required`, which is what the wipe used to drive
-/// indirectly: the user still lands on the enrollment gate, but with their old
-/// key intact behind it.
+/// True if this device was told its identity was superseded and hasn't
+/// re-enrolled; drives `enrollment_required` with the old key kept intact.
 pub(crate) async fn account_identity_superseded(
     state: &AppState,
     user_id: &str,
@@ -494,31 +393,16 @@ pub(crate) async fn account_identity_superseded(
         .is_some())
 }
 
-/// Install an account identity seed this device just UNWRAPPED — from a
-/// sibling's enrollment approval, or from the Secret-Key recovery blob.
+/// Install an account seed this device just unwrapped, from a sibling's approval
+/// or the Secret Key recovery blob, only if it matches the account's published
+/// identity key.
 ///
-/// The one chokepoint for both, because both had the same hole: the bytes came
-/// out of a blob the Delivery Service served, and nothing checked that they were
-/// the account's actual identity key before they became this device's identity.
-/// Two concrete consequences, now both closed here:
-///
-///   * A forged approval blob (see `device_enrollment::unwrap_account_key` for
-///     how a non-contributory ECDH gets one) decrypts to an
-///     ATTACKER-CHOSEN seed. Unchecked, the device adopts it.
-///   * A SUPERSEDED `account_recovery` row replays: the old Secret Key still
-///     unwraps it, and the device silently adopts a key the account retired.
-///
-/// The check is against the public key the account PUBLISHES
-/// ([`published_account_id_pub`]). That value comes from the same server, which
-/// is the point: to pass this check a hostile DS must publish the forged key to
-/// EVERYONE — where it bumps `identity_version`, appends to the
-/// transparency-backed `account_key_log`, and invalidates every existing device
-/// cert — instead of aiming one blob at one enrollment.
-///
-/// Fails CLOSED when no published key is on record. `verify-otp` reports it
-/// whenever the account has an identity at all, and an account with no identity
-/// has nothing to enroll into, so the absent case is a server that withheld it —
-/// exactly the case that must not be a bypass.
+/// Closes both a forged approval blob (an attacker-chosen seed, see
+/// `device_enrollment::unwrap_account_key`) and a replayed superseded recovery
+/// row. To pass, a hostile DS must publish the forged key to everyone (bumping
+/// `identity_version`, appending to the transparency-backed `account_key_log`,
+/// invalidating every device cert) rather than aim one blob at one enrollment.
+/// Fails closed with no published key on record.
 pub(crate) async fn adopt_recovered_account_identity(
     state: &Arc<AppState>,
     user_id: &str,
@@ -539,9 +423,7 @@ pub(crate) async fn adopt_recovered_account_identity(
         )));
     }
 
-    // The user has now acted, which is the condition M2 keeps the stale key
-    // for. Drop it and the marker together, so a device that re-enrolls is not
-    // left holding a key it can never use.
+    // The user has acted, so drop the stale key and the marker together.
     if let Err(e) = wipe_local_account_identity(state, user_id).await {
         crate::diag!("[enrollment] clearing the superseded local key (non-fatal): {e}");
     }
@@ -553,11 +435,8 @@ pub(crate) async fn adopt_recovered_account_identity(
     Ok(())
 }
 
-/// Delete every local copy of the account identity private key —
-/// the in-memory `AppState.unlock` snapshot, the wrapped keystore
-/// slot, and the legacy plaintext keystore slot. Called when a device
-/// discovers it has been orphaned by an identity reset on another
-/// device.
+/// Delete every local copy of the account key: `AppState.unlock`, the wrapped
+/// slot and the legacy slot.
 pub async fn wipe_local_account_identity(state: &AppState, user_id: &str) -> Result<()> {
     {
         let mut guard = state.unlock.lock().await;
@@ -576,37 +455,21 @@ pub async fn wipe_local_account_identity(state: &AppState, user_id: &str) -> Res
         .await
 }
 
-/// Soft recovery: generate a completely fresh account identity, bumping
-/// `users.identity_version`, overwriting `users.account_id_pub`, and
-/// replacing the `account_recovery` blob under a new Secret Key.
+/// Soft recovery: a fresh account identity under a new Secret Key, bumping
+/// `identity_version`. For a user with neither their Secret Key nor a sibling
+/// device; the caller authenticates them by email OTP first.
 ///
-/// Used when the user has lost their old Secret Key AND has no sibling
-/// device to approve a new-device enrollment. The caller is responsible
-/// for authenticating the user through email OTP first — this function
-/// simply trusts that the user is authorized.
+/// The DS writes the `identity_rotated` audit row in the rotation's own
+/// transaction. A device-signed call is a plain rotation; an OTP-session-only
+/// call is also the `reset-recover` wipe, atomically, so an email OTP alone can
+/// never mint a key that inherits memberships and devices.
 ///
-/// Stores the new private key in the local OS keystore so the calling
-/// device immediately becomes a valid member of the reset identity.
-///
-/// The audit row (`security_event.kind = 'identity_rotated'`, metadata naming
-/// the credential the DS accepted) is written by the Delivery Service inside
-/// the rotation's own transaction — never by this client, which on the
-/// pre-enrollment path has no signing key to write one with anyway.
-///
-/// Credential semantics on the DS (`apply_rotate_identity`): a device-signed
-/// call is a plain rotation; a call carrying only the verified-OTP session —
-/// the pre-enrollment soft reset — is ALSO the `reset-recover` wipe, atomically,
-/// so an email OTP alone can never mint a key that inherits the account's
-/// memberships and other devices.
-///
-/// Returns the new formatted Secret Key to show the user once.
+/// Returns the new Secret Key to show once.
 pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<String> {
     let mut rng = OsRng;
 
-    // 1. Generate a new ML-DSA-44 keypair.
     let (private_bytes, public_bytes) = generate_account_keypair(&mut rng);
 
-    // 2. Generate a fresh Secret Key and wrap the new private key.
     let secret_key_display = generate_secret_key_string();
     let secret_key_body =
         normalize_secret_key(&secret_key_display).expect("just-generated key must normalize");
@@ -618,14 +481,10 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &*private_bytes)?;
 
-    // 3. Rotate the account identity. The `account_key_log` is an append-only,
-    //    transparency-backed log (#419 domains E+G): the version bump, the log
-    //    append, and the `account_recovery` rewrap MUST be one atomic,
-    //    CAS-guarded unit so two concurrent rotations can never fork the
-    //    published account-key transparency history. We read the current
-    //    version (the CAS expectation) and hand it to the Delivery Service —
-    //    the sole writer — which performs the conditional append in ONE
-    //    transaction (`pollis_delivery::account::apply_rotate_identity`).
+    // The version bump, `account_key_log` append and recovery rewrap must be one
+    // CAS-guarded unit (#419) so concurrent rotations can't fork the transparency
+    // history. The DS, sole writer, does it in one transaction; we send the
+    // expected version.
     let based_on_version: i64 = crate::commands::ds_reads::account_status(state, user_id)
         .await?
         .map(|a| a.identity_version)
@@ -644,11 +503,8 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
             salt: b64.encode(salt),
             nonce: b64.encode(nonce),
             wrapped_key: b64.encode(&wrapped),
-            // The DS's no-auth fallback for the acting user
-            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
-            // user and this must EQUAL it; auth off → this IS the actor, and a
-            // body without it is refused outright. Sending it never widens what
-            // the caller may do.
+            // Auth on: must equal the signed user. Auth off: this is the actor, and a body
+            // without it is refused.
             user_id: Some(user_id.to_string()),
         };
         let resp =
@@ -656,8 +512,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
                 .await?;
         let status = resp.status();
         if status.as_u16() == 409 {
-            // A concurrent rotation already won this version. Refuse rather
-            // than forking the transparency log — caller must re-read + retry.
+            // A concurrent rotation won this version: refuse rather than fork the log.
             return Err(Error::Other(anyhow::anyhow!(
                 "identity rotation lost a concurrent race (account_key_log CAS); retry"
             )));
@@ -668,24 +523,17 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
                 "DS rotate-identity {status}: {txt}"
             )));
         }
-        // Typed through `pollis-api` (#922). The old `.as_i64().unwrap_or(…)`
-        // silently substituted a GUESSED version whenever the field was absent
-        // or renamed — and the guess is the transparency log's leaf index, so a
-        // wrong one is not a cosmetic default.
+        // Typed (#922): the version is the transparency log's leaf index, never guessed.
         let pollis_api::account::RotateIdentityResponse::Ok { identity_version } =
             crate::commands::mls::decode_response::<pollis_api::account::RotateIdentityBody>(resp)
                 .await?;
         identity_version
     };
 
-    // 4. Install the new private key in AppState.unlock so the calling
-    //    device is enrolled under the new identity. The bytes never
-    //    touch the keystore unwrapped — set_pin will wrap them.
+    // The key never touches the keystore unwrapped; `set_pin` wraps it.
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &*private_bytes));
 
-    // 4b. The account now publishes a DIFFERENT identity key, and this device
-    //     is the one that rotated it. Re-pin, and drop any superseded marker —
-    //     this device is the account's identity now, by construction.
+    // This device now is the account's identity: re-pin and clear any marker.
     if let Err(e) = remember_published_account_id_pub(state, user_id, &public_bytes).await {
         crate::diag!("[reset] could not record the rotated account_id_pub: {e}");
     }
@@ -693,38 +541,23 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         crate::diag!("[reset] could not clear the superseded marker: {e}");
     }
 
-    // 5. Re-sign every existing `user_device` row for this user against
-    //    the freshly rotated account identity. Without this, every
-    //    device-cert that was signed under the previous account key
-    //    becomes unverifiable for every other client, and the
-    //    cross-signing defense (advisory in
-    //    `process_pending_commits`) is effectively off until each
-    //    device next runs `ensure_device_cert` on its own. Best-effort
-    //    — failure here doesn't block the reset, but is logged.
+    // Re-sign every `user_device` row under the rotated key, or other clients can't
+    // verify their certs until each device next runs `ensure_device_cert`.
+    // Best-effort.
     if let Err(e) = crate::commands::mls::resign_stale_device_certs(state, user_id).await {
         crate::diag!(
             "[reset] resign_stale_device_certs failed (non-fatal): {e}"
         );
     }
 
-    // 6. The `identity_rotated` security event was appended by the DS inside
-    //    the rotation transaction above (credential kind recorded server-side),
-    //    so there is nothing for this client to write.
     crate::diag!("[reset] identity rotated to version {new_version} for {user_id}");
 
     Ok(secret_key_display)
 }
 
-/// Load the account identity signing key for `user_id`.
-///
-/// Source priority:
-///   1. `AppState.unlock` (post-PIN-unlock, or fresh signup between
-///      `verify_otp` and `set_pin`).
-///   2. Legacy `account_id_key_{user_id}` keystore slot (pre-PIN builds).
-///
-/// Returns `Error::Crypto("locked")` when the wrapped slot is present
-/// but `AppState.unlock` is empty — the caller is expected to surface
-/// that to the frontend so it can prompt for the PIN.
+/// Load the account identity signing key: from `AppState.unlock`, else the
+/// legacy unwrapped slot. `Error::Crypto("locked")` when only the wrapped slot
+/// exists, so the frontend can prompt for the PIN.
 pub async fn load_account_id_key(state: &AppState, user_id: &str) -> Result<AccountSigningKey> {
     {
         let guard = state.unlock.lock().await;
@@ -769,29 +602,18 @@ fn signing_key_from_bytes(bytes: &[u8]) -> Result<AccountSigningKey> {
     Ok(AccountSigningKey::from_seed(&arr.into()))
 }
 
-// ── Device certificate ───────────────────────────────────────────────────────
-
-// The device-cert PAYLOAD FORMAT and its VERIFICATION live in the standalone
-// `pollis-device-cert` crate (deps: ml-dsa + std only) so `pollis-relay` can
-// verify certs at its handshake without depending on `pollis-core` (which would
-// be a cycle — pollis-core already depends on pollis-relay). Re-exported here so
-// every existing caller — `device.rs`, `key_packages.rs`, the MLS accept path,
-// and the tests below — is unchanged. `sign_device_cert` stays here: it needs
-// `AppState`/keystore to load the account key, but it signs over the SAME shared
-// payload, so signer and verifier can never drift. See §11.1.
+// The cert payload format and verification live in `pollis-device-cert` so
+// `pollis-relay` can verify certs without a dependency cycle. Signing stays
+// here (it needs the keystore) over the same shared payload, so signer and
+// verifier can't drift.
 pub use pollis_device_cert::{
     device_cert_signed_payload, verify_device_cert, DEVICE_CERT_DOMAIN, MLDSA44_PUB_LEN,
     MLDSA44_SIG_LEN,
 };
 
-/// Sign a device cert for this device using the loaded account identity key.
-///
-/// One cert covers **both** of the device's MLS leaf keys — the Ed25519 one used
-/// by the classic suite and the ML-DSA-44 one used by the PQ suite — so neither
-/// leaf is ever uncertified while a device is in groups of both suites (#668).
-/// The caller is responsible for persisting the returned signature, `issued_at`,
-/// `identity_version`, and both public keys in the remote `user_device` table so
-/// other clients can verify.
+/// Sign a device cert with the account identity key. One cert covers both of
+/// the device's MLS leaf keys, Ed25519 and ML-DSA-44 (#668). The caller persists
+/// the result in `user_device`.
 pub async fn sign_device_cert(
     state: &AppState,
     user_id: &str,
@@ -811,8 +633,6 @@ pub async fn sign_device_cert(
     )?;
     Ok(signing_key.sign(&payload).encode().to_vec())
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -854,7 +674,6 @@ mod tests {
 
     #[test]
     fn normalize_rejects_ambiguous_characters() {
-        // 'I' is deliberately omitted from the Crockford alphabet.
         let err = normalize_secret_key("A3-IIIIIIIIIIIIIIIIIIIIIIIIIIIIII").unwrap_err();
         assert!(format!("{err}").contains("invalid"));
     }
@@ -877,7 +696,6 @@ mod tests {
         assert_eq!(&*pt, plaintext);
     }
 
-    /// A test device's two leaf public keys: `(ed25519_pub, mldsa_pub)`.
     fn device_pubs(seed: u8) -> ([u8; 32], Vec<u8>) {
         let mldsa = AccountSigningKey::from_seed(&[seed; 32].into())
             .verifying_key()
@@ -886,12 +704,9 @@ mod tests {
         ([seed; 32], mldsa)
     }
 
-    /// Cross-crate consistency: the byte format `sign_device_cert` mints in
-    /// (account key signs `device_cert_signed_payload`) is IDENTICAL to the
-    /// golden vector `pollis-device-cert` freezes and `pollis-relay` verifies at
-    /// its handshake. Same fixed inputs ⇒ same 2420-byte cert. If this and
-    /// `pollis_device_cert`'s `golden_vector_is_frozen` ever disagree, the mint
-    /// and verify halves have drifted.
+    /// The mint format must match the golden vector `pollis-device-cert` freezes and
+    /// `pollis-relay` verifies; if this and `golden_vector_is_frozen` disagree, mint
+    /// and verify have drifted.
     #[test]
     fn sign_device_cert_matches_shared_golden_vector() {
         let account = AccountSigningKey::from_seed(&[42u8; 32].into());
@@ -902,22 +717,17 @@ mod tests {
             .encode()
             .to_vec();
 
-        // This is exactly what `sign_device_cert` does after loading the account
-        // key: sign the shared payload.
         let payload =
             device_cert_signed_payload(device_id, &ed_pub, &pq_pub, 3, 1_800_000_000).unwrap();
         let cert = account.sign(&payload).encode().to_vec();
 
-        // The same fingerprint `pollis_device_cert::tests::golden_vector_is_frozen`
-        // pins. ML-DSA blobs are kilobytes, so both sides pin a digest of the
-        // bytes rather than the bytes themselves.
+        // Same digest `golden_vector_is_frozen` pins (ML-DSA blobs are kilobytes).
         assert_eq!(
             fnv1a_128_hex(&cert),
             "6a63116689699b97746e47352a07d857",
             "pollis-core mint format drifted from the shared golden vector"
         );
 
-        // And it verifies through the shared (re-exported) verifier.
         verify_device_cert(
             &account.verifying_key().encode(),
             device_id,
@@ -930,9 +740,8 @@ mod tests {
         .expect("golden cert must verify under the shared verifier");
     }
 
-    /// Mirror of `pollis_device_cert`'s test-only fingerprint. Deliberately
-    /// duplicated (8 lines) rather than exported: the whole point of the golden
-    /// vector is that the two crates arrive at the same constant independently.
+    /// Mirror of `pollis_device_cert`'s test fingerprint, duplicated on purpose so
+    /// the two crates reach the constant independently.
     fn fnv1a_128_hex(bytes: &[u8]) -> String {
         const OFFSET: u128 = 0x6c62272e07bb014262b821756295c58d;
         const PRIME: u128 = 0x0000000001000000000000000000013b;
@@ -978,7 +787,6 @@ mod tests {
             device_cert_signed_payload(device_id, &ed_pub, &pq_pub, 1, 1_700_000_000).unwrap();
         let sig_bytes = signing.sign(&payload).encode();
 
-        // Wrong device_id.
         assert!(verify_device_cert(
             &account_pub,
             "01HXZZZZZZZZZZZZZZZZZZZZZZ",
@@ -990,7 +798,6 @@ mod tests {
         )
         .is_err());
 
-        // Wrong Ed25519 leaf key (the classic-suite half of the binding).
         let (other_ed, other_pq) = device_pubs(11);
         assert!(verify_device_cert(
             &account_pub,
@@ -1003,7 +810,6 @@ mod tests {
         )
         .is_err());
 
-        // Wrong ML-DSA leaf key (the PQ-suite half).
         assert!(verify_device_cert(
             &account_pub,
             device_id,
@@ -1015,7 +821,6 @@ mod tests {
         )
         .is_err());
 
-        // Wrong identity_version.
         assert!(verify_device_cert(
             &account_pub,
             device_id,
@@ -1027,7 +832,6 @@ mod tests {
         )
         .is_err());
 
-        // Wrong issued_at.
         assert!(verify_device_cert(
             &account_pub,
             device_id,
@@ -1063,10 +867,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    /// The private key stays a 32-byte seed across the Ed25519 → ML-DSA-44 move,
-    /// which is what lets the Secret-Key wrap, the PIN keystore blob and the
-    /// device-enrollment transfer carry it unchanged. A regression here would
-    /// silently break every one of those at-rest formats.
+    /// The private key must stay a 32-byte seed; every at-rest format depends on it.
     #[test]
     fn account_private_key_is_still_a_32_byte_seed() {
         let mut rng = OsRng;
@@ -1078,7 +879,6 @@ mod tests {
 
     #[test]
     fn unwrap_recovery_blob_roundtrip() {
-        // Full generate-then-unwrap roundtrip using the public API.
         let sk_display = generate_secret_key_string();
         let body = normalize_secret_key(&sk_display).unwrap();
 
@@ -1092,7 +892,6 @@ mod tests {
         let private = [0x17u8; ACCOUNT_SEED_LEN];
         let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private).unwrap();
 
-        // User types it back with noise — should still unwrap.
         let noisy = format!(" {}\n", sk_display.to_lowercase());
         let unwrapped = unwrap_recovery_blob(&noisy, &salt, &nonce, &wrapped).unwrap();
         assert_eq!(*unwrapped, private.to_vec());
@@ -1133,17 +932,14 @@ mod tests {
         assert!(aes_gcm_decrypt(&wrap2, &nonce, &ct).is_err());
     }
 
-    // The remaining tests pin schema behaviour of the account_key_log history
-    // table (migration 000005): its backfill and its UNIQUE constraint. The
-    // tests that only replayed the client dual-write SQL #987 removed were
-    // deleted.
+    // Schema tests for the `account_key_log` table (migration 000005): backfill and
+    // UNIQUE constraint.
     mod account_key_log {
         use rusqlite::Connection;
 
         use crate::db::BASELINE_SQL as BASELINE;
 
-        /// The registered migration 000005 SQL — pulled from the runner's list
-        /// so this test also fails if the migration is never registered.
+        /// Pulled from the runner's list, so this also fails if 000005 isn't registered.
         fn migration_sql() -> &'static str {
             crate::db::POST_BASELINE_MIGRATIONS
                 .iter()
@@ -1201,7 +997,6 @@ mod tests {
         fn migration_backfills_existing_users_with_identity() {
             let conn = baseline_db();
 
-            // alice already has an established identity at version 3.
             insert_user(&conn, "alice");
             let alice_key = vec![0xAAu8; 32];
             conn.execute(
@@ -1209,12 +1004,10 @@ mod tests {
                 rusqlite::params![alice_key],
             )
             .unwrap();
-            // bob has no identity yet (account_id_pub stays NULL).
             insert_user(&conn, "bob");
 
             conn.execute_batch(migration_sql()).unwrap();
 
-            // alice is backfilled at her current version; bob is not.
             let alice = log_rows(&conn, "alice");
             assert_eq!(alice.len(), 1);
             assert_eq!(alice[0].1, 3);
@@ -1231,7 +1024,6 @@ mod tests {
             let key = vec![0x33u8; 32];
             signup_dual_write(&conn, "erin", &key);
 
-            // A second row for the same (user_id, identity_version) must conflict.
             let dup = conn.execute(
                 "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
                  VALUES (?1, ?2, 1)",
@@ -1241,8 +1033,6 @@ mod tests {
             assert_eq!(log_rows(&conn, "erin").len(), 1);
         }
     }
-
-    // ── M1/M2: what this device will adopt, and what it refuses to delete ────
 
     mod adopting_and_superseding {
         use super::*;
@@ -1254,7 +1044,6 @@ mod tests {
             ))
         }
 
-        /// A `(seed, published public key)` pair for a real ML-DSA-44 identity.
         fn identity(seed_byte: u8) -> ([u8; ACCOUNT_SEED_LEN], Vec<u8>) {
             let seed = [seed_byte; ACCOUNT_SEED_LEN];
             let pub_bytes = AccountSigningKey::from_seed(&seed.into())
@@ -1264,8 +1053,6 @@ mod tests {
             (seed, pub_bytes)
         }
 
-        /// The legitimate path still works: the account's own key is adopted
-        /// and lands in `AppState.unlock`.
         #[tokio::test]
         async fn the_accounts_own_key_is_adopted() {
             let state = test_state();
@@ -1284,11 +1071,8 @@ mod tests {
             assert_eq!(&**unlocked.account_id_key, &seed[..]);
         }
 
-        /// M1: a forged approval blob decrypts to an ATTACKER-CHOSEN seed, and
-        /// nothing used to compare it against the account's published identity
-        /// — so the device adopted it. This is also the Secret-Key replay: a
-        /// superseded `account_recovery` row unwraps to the account's OLD seed,
-        /// which is just another seed that is not the published one.
+        /// M1: a seed that isn't the published identity (forged approval blob, or a
+        /// replayed superseded recovery row) is refused.
         #[tokio::test]
         async fn a_seed_that_is_not_the_published_identity_is_refused() {
             let state = test_state();
@@ -1311,8 +1095,7 @@ mod tests {
             );
         }
 
-        /// Fails CLOSED: a server that simply withholds `account_id_pub` must
-        /// not be able to turn the check off.
+        /// Fails closed: withholding `account_id_pub` can't turn the check off.
         #[tokio::test]
         async fn an_unwrapped_key_is_refused_when_no_published_key_is_known() {
             let state = test_state();
@@ -1324,10 +1107,8 @@ mod tests {
             assert!(state.unlock.lock().await.is_none());
         }
 
-        /// M2: being told the identity changed marks the device instead of
-        /// deleting its key. `wipe_local_account_identity` still exists — it is
-        /// what `adopt_recovered_account_identity` runs once the user has acted
-        /// — but nothing unauthenticated reaches it any more.
+        /// M2: being told the identity changed marks the device instead of deleting its
+        /// key.
         #[tokio::test]
         async fn being_told_the_identity_changed_keeps_the_local_key() {
             let state = test_state();
@@ -1363,8 +1144,7 @@ mod tests {
             );
         }
 
-        /// The marker is reversible, which is the whole difference from a wipe:
-        /// re-enrolling clears it and retires the stale key at the same moment.
+        /// Re-enrolling clears the marker and retires the stale key.
         #[tokio::test]
         async fn the_marker_clears_when_the_user_re_enrolls() {
             let state = test_state();

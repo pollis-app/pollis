@@ -1,11 +1,7 @@
-//! WebRTC AudioProcessing Module (APM) wrapper.
-//!
-//! This is the single source of mic-side audio processing for voice channels:
-//! AGC, noise suppression, high-pass filter, transient suppression, and
-//! acoustic echo cancellation. We own it end-to-end so we can tune the AGC
-//! target, NS aggressiveness, and AEC mode from user preferences. libwebrtc's
-//! internal APM is disabled at the LiveKit `AudioSourceOptions` level so we
-//! don't double-process the signal.
+//! WebRTC AudioProcessing Module (APM): the single source of mic-side processing
+//! for voice (AGC, NS, HPF, AEC), owned so it can be tuned from preferences.
+//! libwebrtc's internal APM is disabled in `AudioSourceOptions` so the signal
+//! isn't processed twice.
 //!
 //! Pipeline (per voice session, one [`ApmStage`] for the lifetime of the join):
 //!
@@ -18,13 +14,10 @@
 //!     ─→ analyze_render(processor, frame)     // AEC render reference
 //! ```
 //!
-//! APM rate is locked to the cpal mic input rate. WebRTC supports
-//! 8/16/32/48 kHz, and the rest of the pipeline (mic stream, speaker stream,
-//! mixer) is configured to match.
+//! The APM rate is locked to the cpal mic rate.
 //!
-//! Windows: `webrtc-audio-processing-sys` doesn't build with MSVC (upstream
-//! has no Windows CI; see Cargo.toml comment). On Windows the public API
-//! here resolves to no-op stubs — voice still works, just without AEC/AGC/NS.
+//! Windows: `webrtc-audio-processing-sys` doesn't build with MSVC, so the API
+//! here is no-op stubs there; voice works without AEC/AGC/NS.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -38,9 +31,8 @@ use webrtc_audio_processing::{
     Config,
 };
 
-/// The underlying APM processor. Re-exported from `webrtc-audio-processing`
-/// where the crate builds; a unit-like stub on Windows so the rest of the
-/// voice pipeline keeps a single set of types.
+/// The APM processor; a unit stub on Windows so the pipeline keeps one set of
+/// types.
 #[cfg(not(target_os = "windows"))]
 pub use webrtc_audio_processing::Processor;
 
@@ -52,47 +44,29 @@ impl Processor {
     pub fn set_output_will_be_muted(&self, _muted: bool) {}
 }
 
-/// Number of mono samples in a 10ms APM frame at `sample_rate_hz`.
 pub const fn frame_samples(sample_rate_hz: u32) -> usize {
     (sample_rate_hz / 100) as usize
 }
 
-/// Default APM rate when the mic device cooperates. WebRTC supports 8/16/32/48
-/// kHz; we prefer 48 kHz because it matches LiveKit's encoding rate and keeps
-/// the AEC reference frame size aligned across the whole pipeline.
+/// Default APM rate: 48 kHz matches LiveKit's encoding rate and keeps the AEC
+/// reference frame size aligned across the pipeline.
 pub const DEFAULT_APM_RATE_HZ: u32 = 48_000;
 
-/// User-facing audio-processing settings. Persisted via the existing
-/// preferences flow (see `frontend/src/hooks/queries/usePreferences.ts`) and
-/// passed in at every join. Mid-call changes hit `set_voice_audio_processing`,
-/// which calls [`ApmStage::set_config`].
+/// User-facing audio-processing settings, passed at every join; mid-call changes
+/// go through [`ApmStage::set_config`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ApmConfig {
-    /// Pre-AGC mic boost in dB. Applied as a fixed pre-amplifier *before*
-    /// the AGC stage, so it lifts quiet input into a range where AGC's
-    /// speech-presence detector reliably engages. 0..=20; 0 = off.
-    /// Useful for naturally quiet talkers — combine with a low
-    /// `agc_target_dbfs` (3–4) for maximum perceived loudness.
+    /// Fixed pre-AGC boost in dB (0..=20, 0 = off), lifting quiet input into the
+    /// range where AGC's speech detector engages.
     pub mic_boost_db: u8,
-    /// AGC on/off. Mirrors the existing `auto_gain_control` preference.
     pub agc_enabled: bool,
-    /// AGC target loudness expressed as headroom from full scale in dB.
-    /// Smaller magnitude = louder; clamped to 3..=15 in the UI. Maps to
-    /// WebRTC AGC2's `headroom_db`. Default 6 dB matches the canonical
-    /// WebRTC default for AdaptiveDigital and is meaningfully louder than
-    /// AGC1's old defaults.
+    /// AGC target as headroom from full scale in dB (3..=15); smaller is louder. Maps
+    /// to AGC2's `headroom_db`.
     pub agc_target_dbfs: u8,
-    /// Noise suppression aggressiveness.
     pub ns_level: NsLevel,
-    /// Echo cancellation on/off. Off is occasionally useful for headset users
-    /// who want raw mic-only processing, but most voice setups want this on.
     pub aec_enabled: bool,
-    /// Run RNNoise (via `nnnoiseless`) as a pre-APM denoiser. APM's spectral
-    /// NS misses transients — keyboard clicks, mouse clicks, hard consonants;
-    /// RNNoise was trained specifically on those. Off by default since it
-    /// adds ~5% of one core during voice and only kicks in at 48 kHz.
-    /// Lives in this struct (rather than its own) so the wire shape stays
-    /// flat and `set_voice_audio_processing` is a single round-trip.
+    /// Run RNNoise as a pre-APM denoiser for transients (clicks, typing) APM's NS
+    /// misses. Off by default: ~5% of a core, and 48 kHz only.
     pub click_suppression: bool,
 }
 
@@ -101,11 +75,8 @@ impl Default for ApmConfig {
         Self {
             mic_boost_db: 0,
             agc_enabled: true,
-            // 6 dB headroom: WebRTC AGC2 canonical default. Lower values
-            // (3) clip easily on hot mics; higher (12+) sound quiet.
+            // WebRTC AGC2's default; 3 clips on hot mics, 12+ sounds quiet.
             agc_target_dbfs: 6,
-            // High by default — Moderate matched libwebrtc's old default
-            // and produced no audible change for users upgrading.
             ns_level: NsLevel::High,
             aec_enabled: true,
             click_suppression: false,
@@ -139,51 +110,34 @@ impl ApmConfig {
         };
 
         let echo_canceller = if self.aec_enabled {
-            // Full AEC3 with `stream_delay_ms: None` lets APM3's internal
-            // delay estimator run. That's the right default for a desktop
-            // app where mic→speaker latency is dominated by the OS audio
-            // stack and varies device-to-device. Manually setting a delay
-            // is only worth it once we have a calibrated number per host.
+            // `stream_delay_ms: None` lets AEC3 estimate the delay, which varies with the
+            // OS audio stack per device.
             Some(EchoCanceller::Full { stream_delay_ms: None })
         } else {
             None
         };
 
         let gain_controller = if self.agc_enabled {
-            // AGC2 with AdaptiveDigital — modern WebRTC AGC. Speech-presence
-            // gated, up to 30 dB of boost for quiet talkers, with built-in
-            // noise-floor limiter. AGC1 (the older controller) is what
-            // libwebrtc internally enables when `auto_gain_control: true`,
-            // and its hardcoded conservative target is what made the issue's
-            // "voice too quiet" complaint show up — switching to AGC2 is
-            // the whole point of owning APM ourselves.
+            // AGC2 AdaptiveDigital: libwebrtc's built-in AGC1 has a conservative target
+            // that left voices too quiet, which is why we own APM.
             Some(GainController::GainController2(GainController2 {
-                // No hardware analog control on a desktop app — the OS owns mic gain.
+                // The OS owns mic gain; no analog control.
                 input_volume_controller_enabled: false,
                 adaptive_digital: Some(AdaptiveDigital {
                     headroom_db: f32::from(self.agc_target_dbfs.clamp(3, 15)),
-                    // WebRTC defaults: max +30 dB total, +8 dB initial,
-                    // 3 dB/s max change rate, output noise floor -50 dBFS.
                     max_gain_db: 30.0,
                     initial_gain_db: 8.0,
                     max_gain_change_db_per_second: 3.0,
                     max_output_noise_level_dbfs: -50.0,
                 }),
-                // FixedDigital is a static post-gain on top of AdaptiveDigital.
-                // 0 dB = no extra static gain; the adaptive stage does the work.
                 fixed_digital: webrtc_audio_processing::config::FixedDigital { gain_db: 0.0 },
             }))
         } else {
             None
         };
 
-        // Pre-amplifier: a fixed linear gain applied to capture before any
-        // other APM stage. Lifts very quiet talkers into a range where AGC's
-        // speech-presence detector engages reliably. Bypassed when the user
-        // hasn't asked for any boost, so APM's signal path is identical to
-        // pre-boost behaviour at mic_boost_db == 0.
+        // Bypassed at 0 dB so the signal path is unchanged without a boost.
         let capture_amplifier = if self.mic_boost_db > 0 {
-            // dB → linear: 10^(dB/20). +6 dB = ×2, +20 dB = ×10.
             let gain = 10f32.powf(f32::from(self.mic_boost_db.min(20)) / 20.0);
             Some(CaptureAmplifier::PreAmplifier(PreAmplifier {
                 fixed_gain_factor: gain,
@@ -203,8 +157,7 @@ impl ApmConfig {
     }
 }
 
-/// Owns the APM `Processor` for one voice session. Cheap to clone (the
-/// processor itself is shared via `Arc`); the underlying C++ object is
+/// Owns the APM `Processor` for one voice session. The C++ object is
 /// `Send + Sync` and serialises capture/render internally.
 pub struct ApmStage {
     processor: Arc<Processor>,
@@ -213,10 +166,8 @@ pub struct ApmStage {
 }
 
 impl ApmStage {
-    /// Build an APM at `sample_rate_hz` and apply `config`. The rate must
-    /// match the mic stream rate (and the render reference rate); otherwise
-    /// `process_capture_frame` / `analyze_render_frame` will panic on frame
-    /// size mismatches.
+    /// Build an APM at `sample_rate_hz`, which must match the mic and render
+    /// reference rates or frame-size mismatches panic.
     #[cfg(not(target_os = "windows"))]
     pub fn new(sample_rate_hz: u32, config: ApmConfig) -> Result<Self, String> {
         if !matches!(sample_rate_hz, 8_000 | 16_000 | 32_000 | 48_000) {
@@ -285,9 +236,8 @@ impl ApmStage {
         &self.config
     }
 
-    /// Apply a new config without recreating the processor. Internal state
-    /// (echo estimate, noise estimate, AGC envelope) is preserved; only
-    /// changed submodules are re-initialised.
+    /// Apply a new config without recreating the processor; echo/noise/AGC state is
+    /// kept.
     #[cfg(not(target_os = "windows"))]
     pub fn set_config(&mut self, config: ApmConfig) {
         self.processor.set_config(config.to_processor_config());
@@ -305,16 +255,13 @@ impl ApmStage {
 
     #[cfg(target_os = "windows")]
     pub fn set_config(&mut self, config: ApmConfig) {
-        // No-op on Windows: APM isn't running, but we still store the config
-        // so reads (and the eventual real-APM swap-in) reflect user prefs.
+        // Stored even though APM isn't running, so reads reflect user prefs.
         self.config = config;
     }
 }
 
-/// Run APM on a 10ms i16 mono capture frame, in place. `samples.len()` must
-/// equal [`ApmStage::frame_samples`]. Converts to non-interleaved f32 for the
-/// FFI call and converts back; the round-trip is the same precision loss
-/// libwebrtc's internal pipeline already incurs.
+/// Run APM on a 10 ms i16 mono capture frame in place. `samples.len()` must equal
+/// [`ApmStage::frame_samples`].
 #[cfg(not(target_os = "windows"))]
 pub fn run_capture(
     processor: &Processor,
@@ -330,9 +277,7 @@ pub fn run_capture(
     Ok(())
 }
 
-/// Windows no-op: passes the capture frame through untouched. Returns
-/// [`std::convert::Infallible`] in the error position so the call site's
-/// `if let Err(e)` pattern still type-checks.
+/// Windows no-op. `Infallible` keeps the call site's `if let Err(e)` compiling.
 #[cfg(target_os = "windows")]
 pub fn run_capture(
     _processor: &Processor,
@@ -342,9 +287,7 @@ pub fn run_capture(
     Ok(())
 }
 
-/// Feed a 10ms f32 mono render frame (what's about to hit the speaker) into
-/// APM as the AEC reference. Doesn't modify the frame; APM only inspects.
-/// `samples.len()` must equal [`ApmStage::frame_samples`].
+/// Feed a 10 ms f32 mono render frame to APM as the AEC reference (read-only).
 #[cfg(not(target_os = "windows"))]
 pub fn analyze_render(
     processor: &Processor,
@@ -355,7 +298,6 @@ pub fn analyze_render(
     processor.analyze_render_frame([samples])
 }
 
-/// Windows no-op: APM has no AEC reference to feed.
 #[cfg(target_os = "windows")]
 pub fn analyze_render(
     _processor: &Processor,

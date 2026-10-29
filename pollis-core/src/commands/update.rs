@@ -15,39 +15,26 @@ pub async fn is_update_required(state: &Arc<AppState>) -> Result<bool> {
     Ok(state.update_required.load(Ordering::Relaxed))
 }
 
-/// How the auto-updater is allowed to reach `cdn.pollis.com` right now.
+/// How the auto-updater may reach `cdn.pollis.com` right now.
 ///
-/// The updater is the one HTTP caller in the app that does not go through
-/// `pollis_relay::http::http_client` — it is `tauri-plugin-updater`'s own
-/// `reqwest` client, built inside the plugin. So with the overlay on, every
-/// other first-party request rode the relay and this one still went direct,
-/// announcing the device's real address to the CDN on every window focus. In
-/// `Strict` that is precisely the silent-direct the mode exists to forbid
-/// (design §10.1).
-///
-/// Mirrored in TypeScript by `UpdateCheckPlan` in
-/// `frontend/src/bridge/updater.ts`.
+/// `tauri-plugin-updater` uses its own `reqwest` client, not
+/// `pollis_relay::http::http_client`, so it must be routed explicitly or it leaks
+/// the device's address in `Strict` (design §10.1). Mirrored by `UpdateCheckPlan`
+/// in `frontend/src/bridge/updater.ts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UpdateCheckPlan {
-    /// The overlay is off. Check directly, exactly as a build without the
-    /// overlay does.
+    /// The overlay is off: check directly.
     Direct,
-    /// Route the manifest fetch AND the artifact download through the shim.
-    /// `tauri-plugin-updater`'s `check` takes a proxy and stores it on the
-    /// `Update` it returns, so the download inherits it.
+    /// Route the manifest fetch and the download through the shim; the plugin stores
+    /// the proxy on the returned `Update`, so the download inherits it.
     Proxy { url: String },
-    /// `Strict` with no circuit: the check does not happen. Degrading to a
-    /// direct fetch here would leak the address the mode exists to hide, and an
-    /// update check is the one first-party request that can always wait — the
+    /// `Strict` with no circuit: skip the check rather than leak the address; the
     /// next focus after the overlay comes up runs it.
     Blocked { reason: String },
 }
 
 /// Decide the [`UpdateCheckPlan`] from the live overlay state.
-///
-/// Split from the command so the four cases are unit-testable without an
-/// `AppState`: the input really is just "which mode, and is a shim up".
 pub fn plan_update_check(
     mode: pollis_relay::OverlayMode,
     socks_addr: Option<std::net::SocketAddr>,
@@ -57,8 +44,7 @@ pub fn plan_update_check(
         (_, Some(addr)) => UpdateCheckPlan::Proxy {
             url: format!("socks5h://{addr}"),
         },
-        // Prefer without a circuit is allowed to go direct — that is what
-        // Prefer MEANS. Strict is not.
+        // Prefer without a circuit may go direct; Strict may not.
         (pollis_relay::OverlayMode::Prefer, None) => UpdateCheckPlan::Direct,
         (pollis_relay::OverlayMode::Strict, None) => UpdateCheckPlan::Blocked {
             reason: "the overlay is in strict mode and no relay circuit is up, so the \
@@ -68,7 +54,6 @@ pub fn plan_update_check(
     }
 }
 
-/// The live plan for this device.
 pub async fn get_update_check_plan(state: &Arc<AppState>) -> Result<UpdateCheckPlan> {
     let handle = state.overlay_handle();
     let mode = handle
@@ -92,7 +77,6 @@ mod tests {
     #[test]
     fn off_checks_directly() {
         assert_eq!(plan_update_check(OverlayMode::Off, None), UpdateCheckPlan::Direct);
-        // Off is off even if a handle somehow lingers.
         assert_eq!(
             plan_update_check(OverlayMode::Off, Some(addr())),
             UpdateCheckPlan::Direct
@@ -120,8 +104,6 @@ mod tests {
         );
     }
 
-    /// The finding: in Strict, an update check must never be the one request
-    /// that quietly goes direct and hands the CDN the real address.
     #[test]
     fn strict_without_a_circuit_blocks_rather_than_leaking() {
         let plan = plan_update_check(OverlayMode::Strict, None);

@@ -1,19 +1,11 @@
-//! QR device link (#1207) — sign a new phone in from an enrolled, PIN-verified
-//! device by scanning a QR, instead of the email OTP plus a typed SAS.
-//! Protocol, threat model and guardrails: `docs/qr-device-link-design.md`.
+//! QR device link (#1207, v2 #1361): sign a new device in by QR from an enrolled,
+//! PIN-verified one. Design: `docs/qr-device-link-design.md`.
 //!
-//! Two sides:
-//!
-//! - **Creator** (the enrolled device showing the QR): [`create_device_link`]
-//!   (PIN required) → [`poll_device_link`] → [`approve_device_link`] /
-//!   [`cancel_device_link`]. It holds the link token `t` in memory only.
-//! - **Claimer** (the new phone): [`claim_device_link`] signs in with the
-//!   enrollment-only session the claim mints, then the ordinary
-//!   `start_device_enrollment` carries a link tag keyed by the QR's secret.
-//!
-//! The approval is authenticated by that tag, not by a typed code: the DS never
-//! sees `t` (only `SHA-256(claim)`), so it cannot derive the MAC key and cannot
-//! substitute the ephemeral key the account identity is wrapped to.
+//! v1: the enrolled device shows a QR carrying token `t`; the new device claims
+//! it and tags its enrollment request with a MAC keyed from `t`. The DS sees only
+//! `SHA-256(claim)`, so it can't forge the tag or swap the ephemeral key the
+//! account identity is wrapped to. v2: the new device shows its ephemeral key and
+//! the enrolled device wraps only to a request carrying exactly that key.
 
 use std::sync::Arc;
 
@@ -29,8 +21,8 @@ use zeroize::Zeroizing;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// QR payload prefix. Versioned so a future change to the token or fields is a
-/// clean refusal on an old client, not a misparse.
+/// QR payload prefix, versioned so a format change is a clean refusal on an old
+/// client.
 pub const LINK_PAYLOAD_PREFIX: &str = "pollis-link:v1:";
 
 /// HKDF info for the claim secret the DS verifies (`SHA-256(claim)` stored).
@@ -42,8 +34,7 @@ const LINK_MAC_INFO: &[u8] = b"pollis-link-mac-v1";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceLinkHandle {
     pub link_id: String,
-    /// `pollis-link:v1:<link_id>:<base64url(t)>` — render as a QR, or show for
-    /// manual entry.
+    /// `pollis-link:v1:<link_id>:<base64url(t)>`.
     pub qr_payload: String,
     /// Unix seconds, server-set.
     pub expires_at: i64,
@@ -57,78 +48,61 @@ pub enum DeviceLinkStatus {
     Open,
     /// A phone scanned it and is signing in.
     Claimed { device_name: Option<String> },
-    /// That phone is waiting for approval, and its key is authenticated by the
-    /// link tag. Safe to show Approve.
+    /// Waiting for approval, its key authenticated by the link tag.
     ReadyToApprove { device_name: Option<String>, new_device_id: String, request_id: String },
-    /// The request's tag does NOT verify — the server (or someone between)
-    /// altered it. Never approvable; the UI says so and offers a fresh QR.
+    /// The request's tag does not verify: altered in transit. Never approvable.
     Tampered,
     /// Past its lifetime, already used, or unknown.
     Expired,
 }
 
-/// The new device's in-memory link state once it holds a link session, read by
-/// `start_device_enrollment`.
+/// The new device's in-memory link state, read by `start_device_enrollment`.
 pub struct PendingDeviceLink {
     pub link_id: String,
     pub kind: PendingLinkKind,
 }
 
-/// How the new device was signed in, which decides what its enrollment request
-/// carries.
 pub enum PendingLinkKind {
-    /// v1 — it scanned a QR shown by a signed-in device ([`claim_device_link`]):
-    /// tag the request with the MAC key derived from that QR's secret.
+    /// v1: it scanned a QR ([`claim_device_link`]); tag the request with the MAC key
+    /// from that QR's secret.
     Claimed { mac_key: Zeroizing<[u8; 32]> },
-    /// v2 (#1361) — it SHOWED a QR that a signed-in device scanned
-    /// ([`await_device_offer`]): enroll with exactly the ephemeral key whose
-    /// public half the QR carried. No tag; the approver compares keys.
+    /// v2 (#1361): it showed a QR ([`await_device_offer`]); enroll with exactly the
+    /// ephemeral key the QR carried. The approver compares keys.
     Offered { ephemeral_secret: Zeroizing<[u8; 32]> },
 }
 
-/// QR payload prefix for v2 (#1361): a code shown by the NEW device for a
-/// signed-in device to scan. Distinct from v1 so each side refuses the other's
-/// code with a message that says which device it belongs on.
+/// v2 QR prefix (#1361). Distinct from v1 so each side refuses the other's code
+/// and says which device it belongs on.
 pub const OFFER_PAYLOAD_PREFIX: &str = "pollis-link:v2:";
 
-/// What a new device renders while it waits to be signed in (#1361).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceOfferHandle {
     pub link_id: String,
-    /// `pollis-link:v2:<link_id>:<base64url(ephemeral X25519 public key)>` —
-    /// render as a QR, or show for manual entry. Carries no secret.
+    /// `pollis-link:v2:<link_id>:<base64url(ephemeral X25519 public key)>`; carries
+    /// no secret.
     pub qr_payload: String,
-    /// Unix seconds, server-set. Show a fresh code after this.
     pub expires_at: i64,
 }
 
-/// The new device's offer in progress: the secrets the QR does NOT carry.
+/// The new device's offer: the secrets the QR does not carry.
 pub struct DeviceOfferInProgress {
     pub link_id: String,
-    /// Presented to `poll-offer` to collect the session. The DS holds only its
-    /// hash; the QR never carries it, so a photo of the QR cannot collect.
+    /// Collects the session; the DS holds only its hash, so a photo of the QR can't.
     pub poll_secret: Zeroizing<[u8; 32]>,
-    /// The private half of the key the QR shows. The account key is wrapped to
-    /// its public half by the device that scans the QR.
+    /// Private half of the key the QR shows.
     pub ephemeral_secret: Zeroizing<[u8; 32]>,
-    /// The id this device registers under; the offer and the session name it.
     pub device_id: String,
     pub expires_at: i64,
 }
 
-/// What [`await_device_offer`] resolves to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DeviceOfferWait {
-    /// A signed-in device accepted the code: this device now holds an
-    /// enrollment-only session and must enroll (`start_device_enrollment`),
-    /// which that device approves.
+    /// This device holds an enrollment-only session and must enroll.
     SignedIn { profile: crate::commands::auth::UserProfile },
-    /// The code lapsed (or was cancelled); show a fresh one.
     Expired,
 }
 
-/// What the scanning device learns when it accepts a code (#1361).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptedDeviceOffer {
     pub link_id: String,
@@ -136,15 +110,12 @@ pub struct AcceptedDeviceOffer {
     pub device_name: Option<String>,
 }
 
-/// How [`finish_device_offer`] ended.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum DeviceOfferOutcome {
-    /// The account key was wrapped to the scanned device's key.
     Linked { device_name: Option<String> },
-    /// The request's key is NOT the one the QR showed — refused, nothing sent.
+    /// The request's key is not the one the QR showed; nothing sent.
     Tampered,
-    /// The new device never filed its request in time.
     Expired,
 }
 
@@ -155,9 +126,8 @@ fn kdf(token: &[u8], info: &[u8]) -> Zeroizing<[u8; 32]> {
     out
 }
 
-/// The link tag: `HMAC-SHA256(mac_key, link_id ‖ request_id ‖ new_device_id ‖
-/// ephemeral_pub)`, each field length-prefixed (u32 BE) so no two field splits
-/// can produce the same MAC input.
+/// `HMAC-SHA256(mac_key, link_id ‖ request_id ‖ new_device_id ‖ ephemeral_pub)`,
+/// each field u32-BE length-prefixed so no two splits give the same input.
 pub(crate) fn link_tag(
     mac_key: &[u8; 32],
     link_id: &str,
@@ -173,8 +143,7 @@ pub(crate) fn link_tag(
     mac.finalize().into_bytes().into()
 }
 
-/// Parse a QR payload into `(link_id, token)`. Refuses anything that is not
-/// exactly the v1 shape with a 32-byte token.
+/// Parse a v1 payload into `(link_id, token)`; anything else is refused.
 pub(crate) fn parse_payload(payload: &str) -> Result<(String, Zeroizing<Vec<u8>>)> {
     if payload.trim().starts_with(OFFER_PAYLOAD_PREFIX) {
         return Err(Error::Other(anyhow::anyhow!(
@@ -197,9 +166,8 @@ pub(crate) fn parse_payload(payload: &str) -> Result<(String, Zeroizing<Vec<u8>>
     Ok((link_id.to_string(), Zeroizing::new(token)))
 }
 
-/// Parse a v2 payload into `(link_id, ephemeral_pub)`. Refuses anything that
-/// is not exactly the v2 shape with a 32-byte key — and a v1 code, which
-/// belongs on the new device, with a message saying so.
+/// Parse a v2 payload into `(link_id, ephemeral_pub)`; anything else, including a
+/// v1 code, is refused.
 pub(crate) fn parse_offer_payload(payload: &str) -> Result<(String, [u8; 32])> {
     let payload = payload.trim();
     if payload.starts_with(LINK_PAYLOAD_PREFIX) {
@@ -229,10 +197,8 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-// ── Creator side ─────────────────────────────────────────────────────────────
-
-/// Create a link and return the QR to show. Requires the device PIN — verified
-/// here, with the unlock attempt counter, so no UI can skip it.
+/// Create a link and return the QR. The PIN is verified here, with the attempt
+/// counter, so no UI can skip it.
 pub async fn create_device_link(state: &Arc<AppState>, user_id: String, pin: String) -> Result<DeviceLinkHandle> {
     crate::commands::pin::verify_pin(state, &user_id, &pin).await?;
 
@@ -265,18 +231,13 @@ pub async fn create_device_link(state: &Arc<AppState>, user_id: String, pin: Str
     Ok(DeviceLinkHandle { link_id, qr_payload, expires_at: resp.expires_at })
 }
 
-/// Where the link stands, with the request's tag verified when there is one.
 pub async fn poll_device_link(state: &Arc<AppState>, user_id: String, link_id: String) -> Result<DeviceLinkStatus> {
     Ok(verified_status(state, &user_id, &link_id).await?.0)
 }
 
-/// Wait until the link leaves the state the caller last saw (`since`, the
-/// `state` tag of a [`DeviceLinkStatus`]), then return the new status.
-///
-/// ONE awaited call, not a renderer poll — the same shape as
-/// `await_enrollment_approval`: exponential backoff between reads in Rust and
-/// a hard stop at the claimed-link lifetime, so it cannot outlive the link.
-/// The creator's UI calls it again after each transition.
+/// Wait until the link leaves state `since`, then return the new status. One
+/// awaited call with Rust-side backoff, bounded by the claimed-link lifetime;
+/// never a renderer poll.
 pub async fn await_device_link(
     state: &Arc<AppState>,
     user_id: String,
@@ -298,7 +259,6 @@ pub async fn await_device_link(
     }
 }
 
-/// The serde `state` tag of a status, for [`await_device_link`]'s comparison.
 fn status_tag(s: &DeviceLinkStatus) -> &'static str {
     match s {
         DeviceLinkStatus::Open => "open",
@@ -309,24 +269,18 @@ fn status_tag(s: &DeviceLinkStatus) -> &'static str {
     }
 }
 
-/// How the approver authenticates the new device's enrollment key.
 enum ApproverCheck {
-    /// v1: this device created the link and holds its token.
     Tag(Zeroizing<Vec<u8>>),
-    /// v2: this device scanned the new device's QR and holds the key it showed.
     ScannedKey([u8; 32]),
 }
 
-/// [`poll_device_link`] plus, when approvable, the request facts the wrap
-/// needs — read and verified in one pass so approval wraps to exactly the key
-/// whose tag was checked.
+/// [`poll_device_link`] plus the request facts the wrap needs, read and verified
+/// in one pass so approval wraps to exactly the checked key.
 async fn verified_status(
     state: &Arc<AppState>,
     user_id: &str,
     link_id: &str,
 ) -> Result<(DeviceLinkStatus, Option<(String, String, Vec<u8>)>)> {
-    // What this device holds that the DS does not: the v1 link token (for the
-    // MAC), or the v2 key it read off the QR it scanned (#1361).
     let token = state.device_link_tokens.lock().await.get(link_id).cloned();
     let scanned_key = state.device_offer_accepts.lock().await.get(link_id).copied();
     let check = match (token, scanned_key) {
@@ -360,8 +314,6 @@ async fn verified_status(
             };
             let ephemeral_pub = crate::commands::ds_reads::decode_b64("new_device_ephemeral_pub", eph_b64)?;
             let key_ok = match &check {
-                // v1: the request's key is authenticated by a MAC only the QR's
-                // secret could key.
                 ApproverCheck::Tag(token) => {
                     let presented = st
                         .link_tag
@@ -372,9 +324,7 @@ async fn verified_status(
                     let expected = link_tag(&mac_key, link_id, &request_id, &row.new_device_id, &ephemeral_pub);
                     presented.len() == 32 && constant_time_eq(&presented, &expected)
                 }
-                // v2 (#1361): the request's key must BE the key the camera read
-                // off the new device's screen. Nothing the DS can compute
-                // stands in for it.
+                // v2 (#1361): the request's key must be the key read off the new device's screen.
                 ApproverCheck::ScannedKey(scanned) => constant_time_eq(&ephemeral_pub, scanned),
             };
             let ok = row.user_id == user_id && row.status == "pending" && key_ok;
@@ -393,8 +343,8 @@ async fn verified_status(
     }
 }
 
-/// Approve the phone: re-verify the tag, then wrap `account_id_key` to its
-/// key. Refuses anything not `ReadyToApprove` at this moment.
+/// Approve: re-verify, then wrap `account_id_key` to the new device's key.
+/// Refuses anything not `ReadyToApprove` now.
 pub async fn approve_device_link(state: &Arc<AppState>, user_id: String, link_id: String) -> Result<()> {
     let approver_device_id = state
         .device_id
@@ -410,7 +360,6 @@ pub async fn approve_device_link(state: &Arc<AppState>, user_id: String, link_id
             _ => "The phone hasn't finished signing in yet.",
         })));
     };
-    // The audit trail says which direction the QR went.
     let via = if state.device_offer_accepts.lock().await.contains_key(&link_id) {
         "qr_scan"
     } else {
@@ -431,26 +380,19 @@ pub async fn approve_device_link(state: &Arc<AppState>, user_id: String, link_id
     Ok(())
 }
 
-/// Forget a link on this device. The DS copy dies with its TTL; without the
-/// token (or the scanned key) nothing can approve it anyway.
+/// Forget a link here; without the token or scanned key nothing can approve it.
 pub async fn cancel_device_link(state: &Arc<AppState>, link_id: String) -> Result<()> {
     state.device_link_tokens.lock().await.remove(&link_id);
     state.device_offer_accepts.lock().await.remove(&link_id);
     Ok(())
 }
 
-// ── v2, the NEW device shows the QR (#1361) ──────────────────────────────────
-//
-// The new device (no session, no account) offers a link and shows
-// `pollis-link:v2:<link_id>:<its ephemeral public key>`. A signed-in device
-// scans it, proves its PIN, and accepts — binding the offer to its account.
-// The new device collects an enrollment-only session with a poll secret the
-// QR does not carry, registers, and files its enrollment request under the key
-// the QR showed. The scanner wraps `account_id_key` only to a request whose key
-// is byte-for-byte that key.
+// v2 (#1361): the new device shows its ephemeral key; a signed-in device scans
+// it, proves its PIN and accepts. The new device collects an enrollment-only
+// session with a poll secret the QR doesn't carry, and the scanner wraps only to
+// a request whose key is exactly the one shown.
 
-/// New device: offer a link and return the QR to show. Replaces any earlier
-/// offer of this device (a refreshed QR).
+/// New device: offer a link and return the QR, replacing any earlier offer.
 pub async fn create_device_offer(state: &Arc<AppState>, device_name: Option<String>) -> Result<DeviceOfferHandle> {
     let mut poll_secret = Zeroizing::new([0u8; 32]);
     OsRng.fill_bytes(poll_secret.as_mut());
@@ -495,16 +437,13 @@ pub async fn create_device_offer(state: &Arc<AppState>, device_name: Option<Stri
     Ok(DeviceOfferHandle { link_id, qr_payload, expires_at: v.expires_at })
 }
 
-/// New device: wait until a signed-in device accepts the code, then sign in
-/// with the enrollment-only session it yields. ONE awaited call — Rust-side
-/// backoff, bounded by the offer's server-set lifetime — like
-/// `await_enrollment_approval`; never a renderer poll.
+/// New device: wait until a signed-in device accepts, then sign in with the
+/// enrollment-only session. One awaited call, bounded by the offer's lifetime.
 pub async fn await_device_offer(state: &Arc<AppState>, link_id: String) -> Result<DeviceOfferWait> {
     let mut delay = std::time::Duration::from_millis(500);
     loop {
         let (poll_secret, expires_at) = match state.device_offer.lock().await.as_ref() {
             Some(o) if o.link_id == link_id => (b64(o.poll_secret.as_ref()), o.expires_at),
-            // Cancelled, or replaced by a fresher code.
             _ => return Ok(DeviceOfferWait::Expired),
         };
         let resp = crate::commands::mls::ds_post_plain(
@@ -533,8 +472,7 @@ pub async fn await_device_offer(state: &Arc<AppState>, link_id: String) -> Resul
             let profile = crate::commands::auth::sign_in_with_link_session(state, session, device_id).await?;
             return Ok(DeviceOfferWait::SignedIn { profile });
         }
-        // A little past the server's expiry, so the lapse is reported by the
-        // same 401 every other failure gets.
+        // Slightly past expiry, so the lapse is reported by the DS's 401.
         let now = chrono::Utc::now().timestamp();
         if now > expires_at + 5 {
             return Ok(DeviceOfferWait::Expired);
@@ -544,17 +482,14 @@ pub async fn await_device_offer(state: &Arc<AppState>, link_id: String) -> Resul
     }
 }
 
-/// New device: stop offering. The DS copy dies with its TTL; without the poll
-/// secret nobody can collect it.
+/// New device: stop offering. Without the poll secret nobody can collect it.
 pub async fn cancel_device_offer(state: &Arc<AppState>) -> Result<()> {
     *state.device_offer.lock().await = None;
     Ok(())
 }
 
-/// Signed-in device: accept a scanned (or pasted) v2 code. Requires the device
-/// PIN — verified here, with the unlock attempt counter, before anything is
-/// sent — because accepting is what hands this account's sign-in to the device
-/// showing the code.
+/// Signed-in device: accept a scanned or pasted v2 code. PIN-verified first,
+/// because accepting hands this account's sign-in to the device showing it.
 pub async fn accept_device_offer(
     state: &Arc<AppState>,
     user_id: String,
@@ -584,11 +519,9 @@ pub async fn accept_device_offer(
     Ok(AcceptedDeviceOffer { link_id, new_device_id: v.new_device_id, device_name: v.device_name })
 }
 
-/// Signed-in device: after [`accept_device_offer`], wait for the new device's
-/// enrollment request and, if its key is the scanned one, approve it. The
-/// person already decided — they scanned this device's own screen and entered
-/// their PIN — and only the holder of that key can open the wrap, so there is
-/// no second Approve. One awaited call.
+/// Signed-in device: wait for the new device's request and approve it if its key
+/// is the scanned one. No second Approve: the user already scanned and entered
+/// their PIN, and only that key's holder can open the wrap.
 pub async fn finish_device_offer(
     state: &Arc<AppState>,
     user_id: String,
@@ -610,18 +543,13 @@ pub async fn finish_device_offer(
                 state.device_offer_accepts.lock().await.remove(&link_id);
                 return Ok(DeviceOfferOutcome::Expired);
             }
-            // An accepted offer reads `claimed` until the request is filed;
-            // `open` never applies to one, but waiting through it is harmless.
             other => since = status_tag(&other).to_string(),
         }
     }
 }
 
-// ── Claimer side ─────────────────────────────────────────────────────────────
-
-/// Scan → signed in with an enrollment-only session. Returns the profile with
-/// `enrollment_required = true`; the caller then runs the ordinary
-/// `start_device_enrollment`, which tags the request with this link.
+/// Claim a scanned code: sign in with an enrollment-only session
+/// (`enrollment_required = true`); `start_device_enrollment` then tags the request.
 pub async fn claim_device_link(
     state: &Arc<AppState>,
     payload: String,
@@ -659,7 +587,6 @@ pub async fn claim_device_link(
 
     *state.device_link_pending.lock().await =
         Some(PendingDeviceLink { link_id, kind: PendingLinkKind::Claimed { mac_key } });
-    // Signed in by the other direction: stop offering this device's own code.
     *state.device_offer.lock().await = None;
     crate::commands::auth::sign_in_with_link_session(state, v, candidate_device_id).await
 }
@@ -701,8 +628,6 @@ mod tests {
         }
     }
 
-    /// #1361: a v2 code parses to its link id and the 32-byte key, and each
-    /// direction refuses the other's code with a pointer to the right device.
     #[test]
     fn an_offer_payload_round_trips_and_the_two_directions_refuse_each_other() {
         let key = [7u8; 32];
@@ -738,9 +663,8 @@ mod tests {
         assert_ne!(*kdf(&t, LINK_CLAIM_INFO), *kdf(&t, LINK_MAC_INFO));
     }
 
-    /// The tag binds every field: change any one and it no longer verifies —
-    /// in particular the ephemeral key, which is what a hostile server would
-    /// swap.
+    /// The tag binds every field, especially the ephemeral key a hostile server
+    /// would swap.
     #[test]
     fn the_link_tag_binds_every_field() {
         let k = [3u8; 32];
@@ -750,7 +674,6 @@ mod tests {
         assert_ne!(base, link_tag(&k, "link", "req", "devX", &[1u8; 32]));
         assert_ne!(base, link_tag(&k, "link", "req", "dev", &[2u8; 32]));
         assert_ne!(base, link_tag(&[4u8; 32], "link", "req", "dev", &[1u8; 32]));
-        // Length-prefixing: moving a byte across a field boundary changes it.
         assert_ne!(link_tag(&k, "ab", "c", "dev", &[1u8; 32]), link_tag(&k, "a", "bc", "dev", &[1u8; 32]));
     }
 }

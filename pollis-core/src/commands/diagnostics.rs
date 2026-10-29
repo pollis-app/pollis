@@ -1,10 +1,8 @@
 //! `get_diagnostics` (#1305): the on-device log ([`crate::diag`]) with a short
-//! header, for the user to copy out and send. Read-only, local-only — nothing
-//! here touches the network.
+//! header, for the user to copy out and send. Local-only.
 
-/// The report the "Copy diagnostics" button puts on the clipboard. The host
-/// passes its own version (the desktop bundle / mobile store build), which is
-/// not the core crate's.
+/// The "Copy diagnostics" report. `app_version` is the host's build version, not
+/// the core crate's.
 pub fn get_diagnostics(app_version: Option<String>) -> String {
     let log = crate::diag::read_log();
     format!(

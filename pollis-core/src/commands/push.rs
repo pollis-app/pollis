@@ -1,44 +1,19 @@
-//! Push-token registration (#344) — **always compiled, all targets**.
+//! Push-token registration (#344), handle resolution and read-notification
+//! dismissal. Always compiled. Only mobile registers tokens; the fan-out itself is
+//! the DS's (`pollis_delivery::push`, #987).
 //!
-//! A mobile client upserts its Expo push token (one row per device install)
-//! through `POST /v1/push-tokens`. Desktop never registers one, so its users
-//! have no rows.
-//!
-//! # The fan-out moved server-side (#987)
-//!
-//! `notify_new_message` used to live here: it read the conversation's members,
-//! read their `push_token` rows, and POSTed to Expo directly. All three are now
-//! the DS's (`pollis_delivery::push`), driven by the `push_to` field on
-//! `POST /v1/messages/send`. Three things went with it:
-//!
-//!   * the client's need for a whole-database read credential to see other
-//!     people's push tokens — the most identifying row it had any reason to read
-//!     about someone else;
-//!   * two dependent round trips on the hot send path, after the send had
-//!     already landed;
-//!   * every client talking to `exp.host` directly, which is a non-first-party
-//!     host outside the overlay allowlist, so a relay could never carry it.
-//!
-//! What a push carries has never included content — no plaintext, no sender.
-//! Since #1122 it does not include the conversation either: the payload carries
-//! an opaque `h` handle, and [`resolve_push_handle`] trades it for
-//! `{ conversation_id, kind }` over this client's own authenticated channel.
-//! Expo/APNs/FCM are outside the overlay by design, so anything in the payload
-//! is disclosed to three third parties on every message — and "which
-//! conversation, when" is exactly the signal the metadata-minimisation design
-//! sets out to withhold.
-//!
-//! Foreground delivery still uses the LiveKit realtime path; push is strictly
-//! the background/closed path.
+//! A push never carries content, sender or conversation: the payload has an
+//! opaque `h` handle (#1122) that [`resolve_push_handle`] trades over this
+//! client's authenticated channel, because Expo/APNs/FCM see every payload.
+//! Foreground delivery uses LiveKit; push is the background path.
 
 use std::sync::Arc;
 
 use crate::error::Result;
 use crate::state::AppState;
 
-/// Upsert a device's Expo push token. Keyed on the token (unique per device
-/// install) so re-registering from the same device — e.g. after switching
-/// accounts — reassigns ownership rather than creating a duplicate row.
+/// Upsert a device's Expo push token. Keyed on the token, so re-registering after
+/// an account switch reassigns it rather than duplicating it.
 pub async fn register_push_token(
     user_id: String,
     token: String,
@@ -47,8 +22,6 @@ pub async fn register_push_token(
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
 
-    // DS seam: route the owner-scoped upsert through the Delivery Service (the
-    // write API).
     let body = pollis_api::devices::PushTokenBody {
         token,
         platform,
@@ -59,17 +32,11 @@ pub async fn register_push_token(
     Ok(())
 }
 
-/// Trade an opaque push handle for the conversation it was minted for (#1122).
+/// Trade an opaque push handle for its conversation (#1122).
 ///
-/// `None` means the handle is unknown, expired, swept, or not this user's — the
-/// DS answers all four identically on purpose, so possessing a handle proves
-/// nothing. The caller degrades to opening the app rather than the conversation.
-///
-/// **Cached, and deliberately not single-use.** A background data push resolves
-/// the handle to re-ingest, and a later tap resolves the SAME handle to
-/// navigate; burning it on first use would break tap-to-conversation for every
-/// notification already ingested. The cache makes the repeat free and survives
-/// the round trip being unavailable offline.
+/// `None` covers unknown, expired, swept and not-this-user's alike, so holding a
+/// handle proves nothing. Cached and not single-use: the background push and a
+/// later tap resolve the same handle.
 pub async fn resolve_push_handle(
     handle: String,
     state: &Arc<AppState>,
@@ -91,17 +58,12 @@ pub async fn resolve_push_handle(
     }
 }
 
-/// Resolved handles, in memory only.
-///
-/// Not persisted: a handle is worth minutes-to-days and the mapping is exactly
-/// the "which conversation" fact the payload stopped carrying, so writing it to
-/// disk would re-create locally what #1122 removed from the wire. A cold start
-/// simply resolves again.
+/// Resolved handles, in memory only: on disk they'd recreate locally the
+/// "which conversation" fact #1122 removed from the wire.
 static HANDLE_CACHE: std::sync::LazyLock<
     tokio::sync::Mutex<std::collections::HashMap<String, (String, String)>>,
 > = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
-/// Bound on the cache, so a stream of notifications cannot grow it without end.
 const HANDLE_CACHE_MAX: usize = 256;
 
 async fn handle_cache_get(handle: &str) -> Option<(String, String)> {
@@ -110,9 +72,7 @@ async fn handle_cache_get(handle: &str) -> Option<(String, String)> {
 
 async fn handle_cache_put(handle: &str, conversation_id: &str, kind: &str) {
     let mut map = HANDLE_CACHE.lock().await;
-    // Crude but sufficient: a full cache is dropped rather than evicted
-    // one-by-one. Every entry is re-resolvable over the network, so the cost of
-    // being wrong here is one round trip, not a lost notification.
+    // A full cache is cleared rather than evicted; every entry is re-resolvable.
     if map.len() >= HANDLE_CACHE_MAX {
         map.clear();
     }
@@ -122,38 +82,19 @@ async fn handle_cache_put(handle: &str, conversation_id: &str, kind: &str) {
     );
 }
 
-// ── Clearing read notifications (#1508) ──────────────────────────────────────
-//
-// A notification stayed in the phone's tray after its message was read, unless
-// it was the one the user tapped: opening the conversation from the list, from
-// Search, from a link, or reading it on desktop or another phone left it there.
-//
-// Every client marks a conversation read through `mark_conversation_read`, so
-// that is where the report starts: when the cursor actually MOVES (there was
-// something from somebody else to read), the conversation is queued here and,
-// after a short debounce, sent to `POST /v1/push/dismiss`. The DS clears the
-// account's notifications for it on every device with a silent push. Desktop
-// and the terminal client register no push token, but their user's phone does,
-// which is the point: read on the desktop, the phone's tray clears.
-//
-// What the DS learns from the report — that this user read this conversation
-// at about this time — is what the read-receipt envelope already tells it
-// (#892, on by default). The encrypted read-cursor blob stays opaque; this is a
-// separate, minimal message, sent only when the cursor moved.
+// Clearing read notifications (#1508): when `mark_conversation_read` actually
+// moves the cursor, the conversation is queued and, after a debounce, sent to
+// `POST /v1/push/dismiss`; the DS clears that account's notifications on every
+// device. The DS learns only what read receipts already tell it (#892).
 
-/// How long cursor advances are gathered into one report. Opening three
-/// conversations in a row is one request; a conversation that keeps advancing
-/// while it is open (messages arriving as you read) is one request per window.
+/// How long cursor advances are gathered into one report.
 const DISMISS_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Conversations read but not yet reported, per signed-in account, with when
-/// each cursor last moved. Keyed by user rather than process-global like the
-/// cursor push, because the report is signed with that account's `AppState`
-/// and the integration suite runs several accounts in one process.
+/// Unreported reads per account, with when each cursor moved. Per user, not
+/// global, because the report is signed with that account's `AppState`.
 struct PendingDismiss {
     state: Arc<AppState>,
     read_at: std::collections::HashMap<String, std::time::Instant>,
-    /// A debounced report is waiting to send `read_at`.
     scheduled: bool,
 }
 
@@ -161,13 +102,9 @@ static DISMISS_PENDING: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, PendingDismiss>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
-/// The report for a set of reads, at `now`.
-///
-/// Ages are whole seconds rounded UP, plus one second for the request's own
-/// trip: the DS subtracts the age from its clock and clears only what it minted
-/// before that, so erring old can only keep a notification, never drop one for
-/// a message that arrived after the read. The newest reads win when there are
-/// more than the DS accepts in one request.
+/// The report for a set of reads at `now`. Ages round up plus a second for
+/// transit: the DS clears only notifications minted before `now - age`, so erring
+/// old can only keep one, never drop a newer one. Newest reads win past the cap.
 pub(crate) fn dismiss_entries(
     read_at: &std::collections::HashMap<String, std::time::Instant>,
     now: std::time::Instant,
@@ -193,14 +130,9 @@ pub(crate) fn dismiss_entries(
         .collect()
 }
 
-/// Queue `conversation_id` (whose read cursor just moved) for the next
-/// dismissal report, scheduling one if none is pending for this account.
-///
-/// Fire-and-forget, like the cursor push: a report that fails is a notification
-/// that lingers on another device, never a message lost, so it must not fail
-/// the call that marked the conversation read. A failed report is kept and
-/// rides along with the next one — lazy recovery, no timer when nothing
-/// happened.
+/// Queue a conversation whose cursor just moved, scheduling a report if none is
+/// pending. Fire-and-forget: a failed report only leaves a notification lingering,
+/// and it is kept and rides along with the next one.
 pub(crate) fn schedule_push_dismiss(state: &Arc<AppState>, user_id: &str, conversation_id: &str) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
@@ -217,8 +149,8 @@ pub(crate) fn schedule_push_dismiss(state: &Arc<AppState>, user_id: &str, conver
         p.state = Arc::clone(state);
         p.read_at
             .insert(conversation_id.to_string(), std::time::Instant::now());
-        // Entries left behind by a failed report have no task waiting on them;
-        // this advance is what sends them again.
+        // Entries left by a failed report have no task waiting; this advance resends
+        // them.
         !std::mem::replace(&mut p.scheduled, true)
     };
     if !schedule {
@@ -231,9 +163,8 @@ pub(crate) fn schedule_push_dismiss(state: &Arc<AppState>, user_id: &str, conver
     });
 }
 
-/// Send whatever this account has queued. Taken out of the queue BEFORE the
-/// request, so a read that lands during it schedules the next report instead
-/// of being swallowed; put back (unless superseded) if the request fails.
+/// Send this account's queue. Taken out before the request, so a read landing
+/// during it schedules the next report; put back if the request fails.
 async fn flush_push_dismissals(user_id: &str) {
     let taken = {
         let mut pending = DISMISS_PENDING.lock().unwrap_or_else(|e| e.into_inner());
@@ -261,8 +192,7 @@ async fn flush_push_dismissals(user_id: &str) {
             for (conversation, at) in read_at {
                 p.read_at.entry(conversation).or_insert(at);
             }
-            // Bounded: a DS that never accepts (one predating #1508 answers
-            // 404) cannot grow this past one request's worth.
+            // Bounded, so a DS that never accepts (pre-#1508, 404) can't grow it.
             if p.read_at.len() > pollis_api::devices::DISMISS_MAX_CONVERSATIONS {
                 let keep: std::collections::HashSet<String> =
                     dismiss_entries(&p.read_at, std::time::Instant::now())
@@ -276,12 +206,8 @@ async fn flush_push_dismissals(user_id: &str) {
 }
 
 /// Which of these tray notifications were read since, on any device (#1508)?
-///
-/// The phone asks on foreground and unlock with the handles still in its tray,
-/// so a notification whose silent dismissal never arrived (iOS does not wake a
-/// force-quit app; Android may hold a normal-priority push in Doze) clears as
-/// soon as the user is back. A handle that is not this account's is simply
-/// absent from the answer.
+/// Asked on foreground/unlock, for silent dismissals that never arrived (iOS
+/// force-quit, Android Doze).
 pub async fn dismissed_push_handles(
     user_id: String,
     handles: Vec<String>,
@@ -306,9 +232,6 @@ mod tests {
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
 
-    /// Ages round up and carry a second of margin, so the DS's cutoff can only
-    /// fall before the read: a message that arrived just after it keeps its
-    /// notification.
     #[test]
     fn report_ages_err_old_never_young() {
         let now = Instant::now();
@@ -325,7 +248,6 @@ mod tests {
         assert_eq!(ages, vec![("a-bit-ago", 3), ("exactly-3s", 4), ("just-now", 1)]);
     }
 
-    /// More reads than one request carries: the newest are kept.
     #[test]
     fn a_long_backlog_keeps_the_newest_reads() {
         let now = Instant::now();
@@ -339,7 +261,6 @@ mod tests {
         assert!(!entries.iter().any(|e| e.conversation_id == format!("c{:03}", max + 9)));
     }
 
-    /// The report body is exactly what the DS expects on the wire.
     #[test]
     fn the_report_serializes_to_the_wire_shape() {
         let body = pollis_api::devices::DismissPushBody {

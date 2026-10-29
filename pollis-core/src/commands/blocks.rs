@@ -12,11 +12,8 @@ pub struct BlockedUser {
     pub blocked_at: String,
 }
 
-/// Returns true if `blocker_id` has blocked `blocked_id` OR vice versa.
-///
-/// Used by any command that sends traffic between two users
-/// (create_dm_channel, send_message, send_group_invite) so either
-/// side's block silently halts delivery.
+/// True if either user has blocked the other; any traffic between two users is
+/// halted by either side's block.
 pub async fn is_blocked_either_way(
     state: &Arc<AppState>,
     user_a: &str,
@@ -25,17 +22,12 @@ pub async fn is_blocked_either_way(
     any_blocked_either_way(state, user_a, std::slice::from_ref(&user_b.to_string())).await
 }
 
-/// Whether ANY of `others` is in a block relationship with `me`, in either
+/// Whether any of `others` is in a block relationship with `me`, in either
 /// direction.
 ///
-/// The batch form, because every caller has a set: a DM's other members, a
-/// multi-party DM's proposed roster. Before #987 this was a query per candidate,
-/// run inside a loop on the send path.
-///
-/// Direction-blind by construction — the DS answers which ids are blocked, never
-/// which way — because every caller reports the same generic refusal so neither
-/// side can infer who blocked whom. A helper that knew the direction would put
-/// that inference one log line away from leaking.
+/// Direction-blind by design: the DS answers which ids are blocked, never which
+/// way, so callers can only report a generic refusal and neither side can infer
+/// who blocked whom.
 pub async fn any_blocked_either_way(
     state: &Arc<AppState>,
     _me: &str,
@@ -57,10 +49,8 @@ pub async fn block_user(
         )));
     }
 
-    // DS seam: route the block write (insert block row + reset the blocker's
-    // accepted_at in shared DMs) through the Delivery Service. Server-side authz
-    // binds the block to the authenticated user's own list and runs both writes
-    // in one transaction.
+    // The DS binds the block to the caller's own list and also resets the blocker's
+    // `accepted_at` in shared DMs, in one transaction.
     let body = pollis_api::profile::AddBlock(pollis_api::profile::BlockBody {
         blocker_id,
         blocked_id,
@@ -70,14 +60,9 @@ pub async fn block_user(
     Ok(())
 }
 
-/// Report an account (#1213), optionally pointing at one of their messages,
-/// and optionally block them in the same step.
-///
-/// Signal-style: the report carries the reported account, a reason and the
-/// conversation/message ids, never message text. The reporter is this device's
-/// own user (the DS binds it to the signature anyway). `reason` is one of
-/// `spam`, `harassment`, `illegal`, `other`; anything else is refused here
-/// before it is sent, and by the DS and the table after.
+/// Report an account (#1213), optionally citing one of their messages, and
+/// optionally block them too. Carries ids and a reason, never message text.
+/// `reason` is `spam`, `harassment`, `illegal` or `other`.
 pub async fn report_user(
     reported_id: String,
     reason: String,
@@ -114,8 +99,6 @@ pub async fn unblock_user(
     blocked_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // DS seam: route the unblock (delete block row) through the Delivery
-    // Service.
     let body = pollis_api::profile::RemoveBlock(pollis_api::profile::BlockBody {
         blocker_id,
         blocked_id,
@@ -141,9 +124,8 @@ pub async fn list_blocked_users(
         .collect())
 }
 
-// The remaining tests pin schema constraints (PRIMARY KEY dedupe, ON DELETE
-// CASCADE) against the shipped remote schema. Query-simulation tests for the
-// client SQL #987 removed were deleted.
+// Schema-constraint tests (PRIMARY KEY dedupe, ON DELETE CASCADE) against the
+// shipped remote schema.
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -151,9 +133,7 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        // The SHIPPED schema: baseline plus every numbered migration, in the order
-        // `scripts/db-apply.sh` applies them. #875 — applying the baseline alone left
-        // the fixture on a pre-migration schema no deploy has run for months.
+        // The shipped schema: baseline plus every numbered migration, in apply order.
         for sql in pollis_schema::main_scripts() {
             conn.execute_batch(sql).unwrap();
         }
