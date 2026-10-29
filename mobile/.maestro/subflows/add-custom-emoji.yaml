@@ -28,7 +28,7 @@ appId: ${MAESTRO_APP_ID}
       - waitForAnimationToEnd:
           timeout: 3000
 - tapOn:
-    text: "(Photo|Animated)(,| taken on) .*"
+    text: "(Photo|GIF|Animated)(,| taken on) .*"
     index: 0
 - extendedWaitUntil:
     visible:

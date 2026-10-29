@@ -22,7 +22,7 @@ appId: ${MAESTRO_APP_ID}
     text: "(?i).*${GROUP_NAME}.*"
     index: 0
 - tapOn:
-    text: "General"
+    text: ".*General.*"
 - assertVisible:
     id: "screen-chat"
 - extendedWaitUntil:
