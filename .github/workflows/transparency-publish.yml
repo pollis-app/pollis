@@ -289,9 +289,11 @@ jobs:
           # statement against the pinned root before publishing, so a tampered or
           # stale key set fails the publish instead of reaching clients — for whom
           # an unverifiable key set means no signer is trusted at all.
+          # Anchor on the `pub const` definition: a bare name match lands on the first
+          # doc-comment mention and picks up the signer key below it instead of the root.
           KEYSET_ARG=()
           if [ -f key-set.json ]; then
-            ROOT_HEX="$(python3 -c "import re,sys; s=open('pollis-core/src/commands/transparency.rs').read(); m=re.search(r'PINNED_LOG_ROOT_KEYS.*?public_key: \"([0-9a-f]+)\"', s, re.S); print(m.group(1) if m else '')")"
+            ROOT_HEX="$(python3 -c "import re,sys; s=open('pollis-core/src/commands/transparency.rs').read(); m=re.search(r'pub const PINNED_LOG_ROOT_KEYS\b.*?public_key: \"([0-9a-f]+)\"', s, re.S); print(m.group(1) if m else '')")"
             if [ -n "$ROOT_HEX" ]; then
               KEYSET_ARG=(--key-set key-set.json --root-key "$ROOT_HEX")
             else
