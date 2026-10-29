@@ -60,12 +60,18 @@ Four properties are load-bearing and easy to lose in a refactor:
    together. Split across two requests, a device can see a GroupInfo without the
    Welcome written atomically beside it, external-join into its own inbound
    Welcome, and be stranded. Do not add a round trip between them.
-3. **Commit batches are contiguous or refused.** `head`, `head_generation` and
+3. **Commit holes are reported, not refused.** `head`, `head_generation` and
    the commits are read inside that same transaction, and
-   `pollis_api::reads::check_contiguous` rejects a hole server-side. A hole
-   reaching the client makes it delete its MLS crypto state; a genuine retention
-   prune is reported as `pruned_below` instead, which is a different thing and
-   handled differently.
+   `pollis_api::reads::check_contiguous` reports a gap as
+   `ConversationState::hole`. The client's answer to a real hole
+   (`forget_local_mls_group_at`, then external-join onto the head) is the
+   recovery, pinned by `epoch_gap_recovers_via_external_join` and
+   `corrupt_commit_recovers_instead_of_wedging`; refusing to serve would leave a
+   damaged conversation unreadable for good. What the one transaction fixed
+   (#987) is the *phantom* hole: with `head` and `commits` from separate
+   statements, a torn read could manufacture a gap and trigger that destructive
+   recovery for nothing. A retention prune is a moved floor (`pruned_below`), not
+   a hole.
 4. **Failure biases stay at the call sites.** `is_member` and
    `device_registered` are `Option<bool>` on the wire and fail **CLOSED**;
    `welcome_pending` fails **OPEN**. They are seven lines apart in

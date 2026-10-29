@@ -68,6 +68,8 @@ pub fn mark_downloaded(path: &Path) -> Marking {
             .unwrap_or(0);
         let value = quarantine_value(now);
         // position 0 (not a resource fork), options 0 = create or replace.
+        // SAFETY: `c_path` and `name` are NUL-terminated C strings and `value`'s
+        // pointer/length pair is a live buffer; all outlive the call.
         let rc = unsafe {
             libc::setxattr(
                 c_path.as_ptr(),
