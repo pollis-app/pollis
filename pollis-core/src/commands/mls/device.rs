@@ -1,9 +1,8 @@
 //! Per-device stable MLS signing keys and cross-signing certificates.
 //!
-//! Each device has a single stable MLS signing keypair (so every KeyPackage
-//! it ever ships is covered by one `device_cert` in `user_device`). The
-//! cert chains the device's signing pub to the user's `account_id_pub`,
-//! and is re-signed whenever the account identity rotates.
+//! A device's stable signing key per scheme is chained to the user's
+//! `account_id_pub` by one `device_cert` in `user_device`, re-signed whenever
+//! the account identity rotates.
 
 use openmls::prelude::SignatureScheme;
 use openmls_basic_credential::SignatureKeyPair;
@@ -15,38 +14,20 @@ use crate::state::AppState;
 
 use super::provider::{MlsProvider, PollisProvider};
 
-// ── Per-device stable MLS signing key ────────────────────────────────────────
-
-/// Custom scope in `mls_kv` that stores the stable per-device MLS
-/// signature public-key bytes. The private side is held by openmls under
-/// its own `SignatureKeyPair` scope, looked up by these same bytes.
+/// `mls_kv` scope storing the stable per-device MLS signature public-key bytes.
+/// openmls holds the private side under its own scope, keyed by these bytes.
 const DEVICE_SIG_PUB_SCOPE: &str = "PollisDeviceSigPub";
 
 /// The `mls_kv` key holding this device's stable signing pub for one signature
-/// scheme.
-///
-/// Scheme-scoped since #668. Up to v1.7.0 both suites signed Ed25519, so one
-/// row per `(user, device)` was the whole story; now [`CS_PQ`] leaves sign
-/// ML-DSA-44 while pre-#668 groups still sign Ed25519, and a device holding
-/// both is holding two keys at once. #669 retired the classic suite but not
-/// this: a device only stops needing its Ed25519 key once every group it is in
-/// has actually been migrated, which is a per-group event, not a release.
-///
-/// Keying on the scheme rather than the suite is deliberate — it is the scheme
-/// that determines whether a stored key can verify a given leaf, and two suites
-/// sharing a scheme should share a key.
-///
-/// [`CS_PQ`]: super::provider::CS_PQ
+/// scheme (#668). Keyed on the scheme, not the suite: the scheme decides whether
+/// a stored key can verify a leaf, so suites sharing a scheme share a key.
 fn device_sig_pub_kv_key(user_id: &str, device_id: &str, scheme: SignatureScheme) -> Vec<u8> {
     format!("{user_id}:{device_id}:{}", scheme as u16).into_bytes()
 }
 
-/// The pre-#668 `mls_kv` key: no scheme suffix, always Ed25519.
-///
-/// Read-only and Ed25519-only. Every device that has ever run a shipped build
-/// has its Ed25519 signing pub here and nowhere else, and that key is the one
-/// its existing classic groups' leaves are signed with — so dropping the
-/// fallback would strand every group on the device, not just cost a rotation.
+/// The pre-#668 `mls_kv` key: no scheme suffix, always Ed25519. Read-only; every
+/// shipped device's Ed25519 pub lives only here, so dropping this fallback would
+/// strand every group on the device.
 fn legacy_device_sig_pub_kv_key(user_id: &str, device_id: &str) -> Vec<u8> {
     format!("{user_id}:{device_id}").into_bytes()
 }
@@ -97,8 +78,8 @@ fn store_stable_device_sig_pub_bytes(
             pub_bytes
         ],
     )?;
-    // Keep the un-suffixed row in step for Ed25519 so a downgrade to a v1.7.0
-    // build still finds the key its groups are signed with.
+    // Keep the un-suffixed row in step so a downgrade to a v1.7.0 build still
+    // finds the key its groups are signed with.
     if scheme == SignatureScheme::ED25519 {
         conn.execute(
             "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
@@ -112,22 +93,12 @@ fn store_stable_device_sig_pub_bytes(
     Ok(())
 }
 
-/// Return the stable MLS signing keypair for this device, creating it if
-/// missing. All key packages and group creation on this device MUST use
-/// this keypair so the device-level cross-signing cert in `user_device`
-/// covers every leaf node this device produces.
+/// Return the stable MLS signing keypair for this device and `scheme`, creating
+/// it if missing, as `(SignatureKeyPair, pub_bytes)`. Every key package and group
+/// on this device MUST use it so the `device_cert` covers every leaf it produces.
 ///
-/// Returns `(SignatureKeyPair, pub_bytes)`. The Ed25519 pub_bytes are also what
-/// gets signed into the `device_cert` in `user_device`.
-///
-/// **Stable per signature scheme, not per device** (#668). Until v1.7.0 both
-/// suites signed Ed25519 and a device had exactly one signing key; now `CS_PQ`
-/// leaves sign ML-DSA-44 while any group still on a pre-#668 suite signs
-/// Ed25519, and a leaf can only be signed by a key of its suite's scheme. A
-/// device in groups of both therefore holds both keys — same `mls_kv`,
-/// different rows. Callers pass the scheme they need, which they get from the
-/// suite they are operating in (`provider::signature_scheme`) or from the
-/// stored group.
+/// Stable per signature scheme, not per device (#668): a leaf can only be signed
+/// by a key of its suite's scheme.
 pub fn load_or_create_device_signer<C>(
     provider: &MlsProvider<'_, C>,
     user_id: &str,
@@ -137,8 +108,6 @@ pub fn load_or_create_device_signer<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    // Fast path: pub bytes are stashed → recover the private side from
-    // openmls storage and return.
     if let Some(pub_bytes) = load_stable_device_sig_pub_bytes(
         provider.raw_conn(),
         user_id,
@@ -148,15 +117,12 @@ where
         if let Some(kp) = SignatureKeyPair::read(provider.storage(), &pub_bytes, scheme) {
             return Ok((kp, pub_bytes));
         }
-        // Pub bytes stashed but the private side is gone (e.g. mls_kv
-        // got partially wiped). Fall through to regenerate.
         crate::diag!(
             "[mls] stable device signer pub present but private missing for {user_id}:{device_id} \
              ({scheme:?}) — regenerating"
         );
     }
 
-    // Slow path: create, store, stash.
     let sig_keys = SignatureKeyPair::new(scheme)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
     sig_keys
@@ -173,14 +139,9 @@ where
     Ok((sig_keys, pub_bytes))
 }
 
-/// Load this device's stable ML-DSA-44 MLS signing key as an
-/// `ml_dsa::SigningKey<MlDsa44>` — the PQ suite's leaf key, and (since #668 P6)
-/// the key the relay handshake's possession signature is made with.
-///
-/// Like Ed25519, openmls stores an ML-DSA private key as exactly its 32-byte
-/// seed (`openmls_rust_crypto`'s `signature_key_gen` calls `to_seed()`), so the
-/// same `private()`-to-seed recovery works. Returns `(signing_key, pub_bytes)`;
-/// `pub_bytes` is the 1312-byte `mls_signature_pub_pq`.
+/// Load this device's stable ML-DSA-44 MLS signing key: the PQ suite's leaf key
+/// and the relay handshake's possession key (#668 P6). openmls stores it as its
+/// 32-byte seed. `pub_bytes` is the 1312-byte `mls_signature_pub_pq`.
 pub fn load_device_pq_signing_key(
     provider: &PollisProvider<'_>,
     user_id: &str,
@@ -200,12 +161,8 @@ pub fn load_device_pq_signing_key(
 }
 
 /// Both of this device's certified leaf public keys, `(ed25519, ml_dsa_44)`,
-/// creating either if missing.
-///
-/// A device cert covers BOTH (#668 P4): the classic suite's leaves are Ed25519
-/// and the PQ suite's are ML-DSA-44, and a device in groups of both suites holds
-/// both keys at once. Certifying only one would leave the other leaf
-/// uncertified, which is exactly what cross-signing exists to prevent.
+/// creating either if missing. The v2 cert binds both (#668 P4), so neither
+/// leaf is ever uncertified.
 pub fn load_device_cert_pubs(
     provider: &PollisProvider<'_>,
     user_id: &str,
@@ -218,22 +175,15 @@ pub fn load_device_cert_pubs(
     Ok((ed_pub, pq_pub))
 }
 
-// ── Device cross-signing ─────────────────────────────────────────────────────
-
-/// Ensure this device has a stable MLS signing keypair AND a `device_cert`
-/// published in `user_device` binding the pub bytes to the user's
-/// `account_id_key`. Idempotent — safe to call on every login.
-///
-/// Skipped if `account_id_key` is not in the local OS keystore (i.e. this
-/// is a returning user on a device that has never been enrolled yet).
-/// Returns `true` if a cert was written, `false` if skipped.
+/// Ensure this device has its stable MLS signing keys AND a `device_cert`
+/// published in `user_device` binding them to the user's `account_id_key`.
+/// Idempotent. Returns `false` (skipped) when the account identity is not in the
+/// local keystore, i.e. a device not yet enrolled.
 pub async fn ensure_device_cert(
     state: &Arc<AppState>,
     user_id: &str,
     device_id: &str,
 ) -> crate::error::Result<bool> {
-    // 0. Bail early if we don't have the account identity locally. This
-    //    happens on a new device before step-5 enrollment has run.
     if !crate::commands::account_identity::has_local_account_identity(
         state.as_ref(),
         user_id,
@@ -241,10 +191,6 @@ pub async fn ensure_device_cert(
         return Ok(false);
     }
 
-    // 1. Load or create BOTH stable per-device MLS signing keypairs and capture
-    //    their public bytes. Cert v2 (#668) binds both, so a device is never
-    //    holding an uncertified leaf key during the classic→PQ overlap. Sync
-    //    openmls work inside a scope.
     let (sig_pub_bytes, pq_sig_pub_bytes) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
@@ -254,21 +200,9 @@ pub async fn ensure_device_cert(
         load_device_cert_pubs(&provider, user_id, device_id)?
     };
 
-    // 2. Read the current identity_version to stamp into the cert.
-    //
-    //    Via the UNAUTHENTICATED account probe, not the authenticated
-    //    `account-status` read, because of the bootstrap pivot documented at
-    //    step 4: this runs on a device whose `user_device.mls_signature_pub` is
-    //    still NULL, which is the exact column the DS reads to verify a
-    //    signature — so a device-signed read here 401s on every first signup and
-    //    on every sibling-approval enrollment. A session does not close the gap
-    //    either; the enrollment path deliberately publishes on cert-validity
-    //    alone because a human approval outlives the session TTL.
-    //
-    //    `identity_version` is public by construction (it is stamped in the
-    //    clear into every device cert every group member reads), so the probe is
-    //    the right place for it. Defaults to 1 when the column is NULL —
-    //    defensive; it should not happen post-migration-13.
+    // Via the UNAUTHENTICATED account probe: this device's `mls_signature_pub`
+    // is still NULL (see the bootstrap pivot below), so a device-signed read
+    // would 401. `identity_version` is public by construction.
     let identity_version: u32 = crate::commands::ds_reads::account_probe(state, user_id)
         .await?
         .identity_version
@@ -278,8 +212,6 @@ pub async fn ensure_device_cert(
             ))
         })? as u32;
 
-    // 3. Sign the cert with the account identity key loaded from the OS
-    //    keystore, using the current unix time as `issued_at`.
     let issued_at = crate::util::now_unix();
 
     let cert = crate::commands::account_identity::sign_device_cert(
@@ -293,29 +225,12 @@ pub async fn ensure_device_cert(
     )
     .await?;
 
-    // 4. Write cert + signing pub + issued_at + identity_version into
-    //    the remote `user_device` row. Other clients read these columns
-    //    before accepting this device into any MLS group.
-
-    // BOOTSTRAP PIVOT — this write sets `mls_signature_pub`, the exact column the
-    // DS reads to authenticate a signed request (`auth::verify_request`). Until
-    // it's populated the device cannot produce a signature the DS would accept,
-    // so the write that *establishes* the credential cannot be authenticated by
-    // that credential. Two paths (both use the SAME
-    // `/v1/auth/publish-device-cert` endpoint):
-    //
-    //   * First-device signup — gated by the OTP session (stashed in
-    //     `state.bootstrap_session` by `verify_otp`) PLUS cert-validity. The token
-    //     is single-use, spent server-side on success.
-    //   * Subsequent device (sibling-approval enrollment / Secret-Key recovery) —
-    //     gated by **cert-validity ALONE**, no live session. The cert proves
-    //     possession of the account key (it verifies against the account's
-    //     `account_id_pub`), which is STRONGER than a session and survives a slow
-    //     sibling approval that would outlast the session TTL. The request carries
-    //     `user_id` in the body (no session to bind it); the DS still requires a
-    //     pre-existing `user_device` row and never fails open.
-    //
-    // See `docs/otp-server-bootstrap-design.md` §5.
+    // BOOTSTRAP PIVOT: this write sets `mls_signature_pub`, the column the DS
+    // authenticates signed requests with, so it cannot be signed by it. First
+    // device: OTP session + cert-validity (single-use token). Subsequent device:
+    // cert-validity ALONE, which proves possession of the account key and
+    // survives a sibling approval that outlasts the session TTL. See
+    // `docs/otp-server-bootstrap-design.md` §5.
     let bootstrap_session = state.bootstrap_session.lock().await.clone();
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
@@ -330,20 +245,16 @@ pub async fn ensure_device_cert(
     };
     match bootstrap_session {
         Some(token) => {
-            // First-device signup: session + cert-validity, single-use.
             crate::commands::mls::ds_post_session_ok(
                 state,
                 &token,
                 &body,
             )
             .await?;
-            // The token is spent server-side on success. Clear the local
-            // copy so the next ensure_device_cert takes the cert-validity
-            // path.
+            // The token is spent server-side; the next call takes the cert-validity path.
             *state.bootstrap_session.lock().await = None;
         }
         None => {
-            // Subsequent device: cert-validity ALONE — no session header.
             let resp = crate::commands::mls::ds_post_plain(
                 state,
                 &body,
@@ -356,9 +267,7 @@ pub async fn ensure_device_cert(
                     "publish-device-cert (cert-validity) {s}: {txt}"
                 )));
             }
-            // A subsequent device's first cert publish completes its
-            // bootstrap; the session it used for register-device /
-            // enrollment-request has done its job.
+            // The first cert publish completes this device's bootstrap.
             *state.enrollment_session.lock().await = None;
         }
     }
@@ -370,13 +279,9 @@ pub async fn ensure_device_cert(
     Ok(true)
 }
 
-/// One device that needs its cross-signing cert re-signed: its id and both leaf
-/// signing keys, decoded from the base64 the DS serves.
-///
-/// A named type rather than a tuple because the v2 cert (#668) binds BOTH leaf
-/// keys and the two are the same shape — an accidental swap at a call site would
-/// produce a cert that verifies against the wrong key and fails only for the
-/// device it was minted for.
+/// One device that needs its cross-signing cert re-signed, with both leaf
+/// signing keys decoded. A named type because the two keys have the same shape
+/// and a swap would mint a cert for the wrong key.
 pub struct StaleCertDevice {
     pub device_id: String,
     /// Ed25519 leaf signing key (classic MLS suite).
@@ -385,34 +290,13 @@ pub struct StaleCertDevice {
     pub mls_signature_pub_pq: Vec<u8>,
 }
 
-/// The stale-cert candidate set for `user_id` at account identity version
-/// `identity_version`: every `user_device` row that still needs re-signing.
+/// Every `user_device` row for `user_id` whose cert predates `identity_version`
+/// (or was never issued) and so no longer chains to the current `account_id_pub`.
 ///
-/// "Stale" means `cert_identity_version IS NULL` or
-/// `cert_identity_version < identity_version` — the cert was signed under a
-/// previous account key and no longer chains to the currently-published
-/// `account_id_pub`.
-///
-/// Excluded:
-///   - **revoked** rows (`revoked_at IS NOT NULL`, #685) — a revoked device can
-///     never rejoin the tree, so re-signing its cert is wasted work and would
-///     resurrect a valid-looking cert for a deliberately-retired device;
-///   - rows with a NULL leaf pub (`mls_signature_pub` or `mls_signature_pub_pq`)
-///     — registered devices that never finished `ensure_device_cert` (or predate
-///     the #668 v2 cert), which get their cert when that device next comes online.
-///
-/// A PURE predicate over rows the Delivery Service supplied (#987).
-///
-/// The revoked exclusion is enforced twice, on purpose: the caller asks the DS
-/// for non-revoked rows, and this filters again on `revoked_at`. A predicate
-/// this consequential should not depend on a caller having passed the right
-/// flag — re-signing a tombstoned device's cert resurrects a valid-looking
-/// credential for a device that was deliberately turned off.
-///
-/// `pub` so the regression suite drives the real predicate rather than a copy.
-/// It is pure now, so it needs no database and no separate integration binary —
-/// the libsql/rusqlite `sqlite3_config` clash that forced `tests/
-/// resign_stale_certs.rs` into its own process is simply gone.
+/// Excludes revoked rows (#685), which must never get a valid-looking cert back,
+/// and rows with a NULL leaf pub, which get their cert when that device next
+/// comes online. The caller also asks the DS for non-revoked rows; the revoked
+/// filter is repeated here on purpose. Pure, so tests drive the real predicate.
 pub fn stale_cert_candidates(
     rows: &[pollis_api::account_reads::DeviceRow],
     identity_version: i64,
@@ -422,17 +306,13 @@ pub fn stale_cert_candidates(
         if row.revoked_at.is_some() {
             continue;
         }
-        // A device that never finished `ensure_device_cert` (or predates the
-        // #668 v2 cert) has no leaf pub to sign over. It gets its cert when it
-        // next comes online, not from here.
         let (Some(sig), Some(pq)) = (
             row.mls_signature_pub.as_deref(),
             row.mls_signature_pub_pq.as_deref(),
         ) else {
             continue;
         };
-        // NULL `cert_identity_version` means "never certified", which is stale
-        // by definition — the same reading the SQL's `IS NULL OR <` gave.
+        // NULL `cert_identity_version` means "never certified": stale.
         let stale = row
             .cert_identity_version
             .is_none_or(|v| v < identity_version);
@@ -448,24 +328,12 @@ pub fn stale_cert_candidates(
     Ok(out)
 }
 
-/// Re-sign every stale `user_device` row for `user_id` with the user's
-/// current account identity key, stamping each row's `device_cert`,
-/// `cert_issued_at`, and `cert_identity_version` to match
-/// `users.identity_version`. Staleness (and the revoked / NULL-leaf-pub
-/// exclusions) is defined by [`stale_cert_candidates`].
+/// Re-sign every stale `user_device` row for `user_id` (see
+/// [`stale_cert_candidates`]) with the current account identity key. Returns the
+/// number of rows re-signed.
 ///
-/// Called in two places:
-///   1. `account_identity::reset_identity`, immediately after a
-///      rotation — every existing row becomes stale by definition,
-///      so this catches them all.
-///   2. `pin::unlock`, opportunistically — if a sibling device
-///      rotated identity while this device was offline, this
-///      device's row is stale on the server and will continue to
-///      fail cross-signing verification on every other client until
-///      it logs in. Re-signing on unlock means existing fleets
-///      self-heal as users come online, without a separate sweep.
-///
-/// Returns the number of rows re-signed.
+/// Called after `account_identity::reset_identity`, and opportunistically from
+/// `pin::unlock` so a fleet whose sibling rotated identity offline self-heals.
 pub async fn resign_stale_device_certs(
     state: &Arc<AppState>,
     user_id: &str,
@@ -479,17 +347,11 @@ pub async fn resign_stale_device_certs(
             ))
         })?;
 
-    // The caller's OWN devices, including the cert columns — served with the
-    // management columns because this is the owner asking. Revoked rows are
-    // excluded: re-signing a tombstoned device's cert would be re-issuing
-    // credentials for a device that was deliberately turned off.
     let rows = crate::commands::ds_reads::devices(state, Some(user_id), Vec::new(), false).await?;
     let devices = stale_cert_candidates(&rows, identity_version as i64)?;
 
-    // Sign every stale device's cert with the account identity key (held only in
-    // the OS keystore) BEFORE any remote write, collecting the cert columns. The
-    // re-sign never touches `mls_signature_pub` — only the cert columns — so it
-    // cannot change a device's DS-auth credential.
+    // Sign every cert before any remote write. Only the cert columns change, so
+    // a device's DS-auth credential (`mls_signature_pub`) cannot.
     let mut signed: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(devices.len());
     for StaleCertDevice {
         device_id,
@@ -513,9 +375,6 @@ pub async fn resign_stale_device_certs(
     }
     let count = signed.len();
 
-    // DS seam: re-stamp the cert columns through the Delivery Service (the write
-    // API) — user-scoped: the actor re-signs certs for any of THEIR OWN devices,
-    // never another user's.
     if !signed.is_empty() {
         use base64::Engine as _;
         let certs: Vec<pollis_api::devices::ResignedCert> = signed
@@ -541,41 +400,28 @@ pub async fn resign_stale_device_certs(
     Ok(count)
 }
 
-// ── Leaf cross-signing ───────────────────────────────────────────────────────
-
-/// One leaf an MLS commit grafts, as read off the MERGED TREE.
+/// One leaf an MLS commit grafts, as read off the MERGED TREE
+/// (`group_state::grafted_leaves`).
 ///
-/// Diffed out of the ratchet tree after the merge (`group_state::grafted_leaves`)
-/// — never from the `added_user_id` / `added_device_ids` columns the committing
-/// client wrote next to it. Those columns are a prefetch hint the DS uses to
-/// fold cert rows into the commit batch; a committer that NULLs or shortens them
-/// changes what is prefetched, not what is verified.
-///
-/// The tree, not the commit's Add proposals: an external-join commit carries no
-/// Add at all — the joiner's leaf arrives in the UpdatePath — so reading
-/// proposals made the check blind to exactly the path that needs it most
+/// Never from the committer-written `added_*` columns, which are only a prefetch
+/// hint, and never from Add proposals, which an external join does not carry
 /// (#1161 H4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedLeaf {
     pub user_id: String,
     pub device_id: String,
-    /// The leaf node's signature public key — the key that will sign every
-    /// message and commit this leaf produces, and the one the device cert has to
-    /// certify.
+    /// The leaf's signature public key: the one the device cert has to certify.
     pub signature_key: Vec<u8>,
-    /// The signature scheme of the KeyPackage's suite: decides which certified
-    /// device key `signature_key` has to equal.
+    /// The KeyPackage suite's scheme: picks which certified device key
+    /// `signature_key` has to equal.
     pub scheme: SignatureScheme,
 }
 
-/// Verdict on one leaf (an added KeyPackage or a leaf already in the tree)
-/// against the claimed user's cross-signing material.
+/// Verdict on one leaf against the claimed user's cross-signing material.
 ///
-/// Three-valued on purpose. `Unverifiable` and `Uncertified` are both refusals
-/// for a leaf about to be ADDED — a committer never grafts a leaf it cannot
-/// prove is the user's — but only `Uncertified` evicts a leaf ALREADY in the
-/// tree: it is positive evidence, where `Unverifiable` may be a row the DS did
-/// not return.
+/// Both non-`Certified` verdicts refuse a leaf about to be ADDED, but only
+/// `Uncertified` (positive evidence) evicts a leaf ALREADY in the tree;
+/// `Unverifiable` may be a row the DS did not return.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafVerdict {
     /// The leaf's signature key is the device key the user's `account_id_pub`
@@ -591,24 +437,14 @@ pub enum LeafVerdict {
 
 /// The cross-signing material of a set of users, indexed for leaf verdicts.
 ///
-/// Built from the DS's `AddedIdentity` rows (`/v1/mls/conversation-state` on
-/// the inbound side, `/v1/read/roster-identities` on the committing side). The
-/// DS supplies INPUTS; every verdict is computed here, because it is a signature
-/// check over a chain rooted in the user's own identity key and the DS is
-/// outside the trust boundary (`docs/security-whitepaper.md`). A DS that
-/// answered "Certified" would be a DS that could add devices to groups.
+/// The DS supplies the `AddedIdentity` INPUTS; every verdict is computed here,
+/// because the DS is outside the trust boundary. A DS that could answer
+/// "Certified" could add devices to groups.
 pub struct IdentityDirectory {
     by_user: std::collections::HashMap<String, pollis_api::reads::AddedIdentity>,
-    /// Whether [`Self::into_pinned`] has run, i.e. whether the two local
-    /// substitutions — our own account key from the keystore, peers dropped
-    /// where the DS disagrees with the TOFU pin — have been applied.
-    ///
-    /// A field rather than a convention because forgetting it is invisible and
-    /// total: the receive side judged every inbound leaf against an entirely
-    /// DS-authored directory for as long as it existed (#1161 M3), and nothing
-    /// about the resulting `Certified` looked different from an honest one. An
-    /// unpinned directory now answers `Unverifiable` to everything, which is
-    /// the weakest verdict and therefore safe to fail to.
+    /// Whether [`Self::into_pinned`] has run (own account key from the keystore,
+    /// peers dropped where the DS disagrees with the TOFU pin). Unpinned answers
+    /// `Unverifiable` to everything, the safe verdict to fail to (#1161 M3).
     pinned: bool,
 }
 
@@ -624,22 +460,16 @@ impl IdentityDirectory {
         }
     }
 
-    /// Declare the local substitutions applied — see [`Self::pinned`].
-    ///
-    /// Called ONLY at the end of `reconcile::pin_identities`, which is the one
-    /// place that performs them; every other route to a directory leaves it
-    /// unpinned and therefore unable to certify anything.
+    /// Declare the local substitutions applied; called ONLY at the end of
+    /// `reconcile::pin_identities`.
     pub(super) fn into_pinned(mut self) -> Self {
         self.pinned = true;
         self
     }
 
-    /// Replace one user's account key with a locally-trusted value, or drop it.
-    ///
-    /// The committing side pins here: a peer whose DS-reported key differs from
-    /// the local TOFU pin is set to `None` (every one of their leaves becomes
-    /// `Unverifiable`), and the actor's own key is overwritten with the one in
-    /// the device keystore, so the DS cannot substitute a root for either.
+    /// Replace one user's account key with a locally-trusted value, or drop it
+    /// (`None` makes every one of their leaves `Unverifiable`), so the DS cannot
+    /// substitute a root.
     pub fn set_account_key(&mut self, user_id: &str, account_id_pub: Option<Vec<u8>>) {
         use base64::Engine as _;
         if let Some(identity) = self.by_user.get_mut(user_id) {
@@ -658,12 +488,9 @@ impl IdentityDirectory {
     /// Is the leaf `(user_id, device_id, signature_key)` the device the user's
     /// account key certified?
     ///
-    /// `scheme` is the group's signature scheme and picks which certified key
-    /// the leaf must equal: ML-DSA-44 leaves must present `mls_signature_pub_pq`,
-    /// Ed25519 leaves `mls_signature_pub`. Both keys are bound by the ONE v2
-    /// cert, so the cert check is the same either way; the equality is what
-    /// stops a valid cert for the real device vouching for an attacker's leaf
-    /// that merely claims the same `user:device` credential.
+    /// `scheme` picks which certified key the leaf must equal. That equality is
+    /// what stops a valid cert for the real device vouching for an attacker's
+    /// leaf that merely claims the same `user:device` credential.
     pub fn leaf_verdict(
         &self,
         user_id: &str,
@@ -688,8 +515,7 @@ impl IdentityDirectory {
             return LeafVerdict::Unverifiable("device not registered");
         };
 
-        // Tombstone wins — a revoked device is unambiguously not allowed into a
-        // tree, regardless of cert column state.
+        // A revoked device is never allowed into a tree, whatever the cert says.
         if let Some(revoked_at) = &row.revoked_at {
             return LeafVerdict::Uncertified(format!("device revoked at {revoked_at}"));
         }
@@ -741,8 +567,6 @@ impl IdentityDirectory {
             return LeafVerdict::Uncertified(format!("device cert invalid: {e}"));
         }
 
-        // The cert is the user's and it certifies (ed_pub, pq_pub). The leaf has
-        // to BE one of those keys — the one this group's suite signs with.
         let certified: &[u8] = match scheme {
             SignatureScheme::ED25519 => &ed_pub,
             _ => &pq_pub,
@@ -771,8 +595,6 @@ mod leaf_verdict_tests {
         base64::engine::general_purpose::STANDARD.encode(b)
     }
 
-    /// A real account key, a real v2 cert over `(ed_pub, pq_pub)`, and the
-    /// directory that describes them.
     fn certified_identity() -> (IdentityDirectory, Vec<u8>, Vec<u8>) {
         let account = AccountSigningKey::from_seed(&[42u8; 32].into());
         let ed_pub = vec![7u8; 32];
@@ -801,15 +623,7 @@ mod leaf_verdict_tests {
     }
 
     /// #1161 M3: a directory that has NOT been through the local substitutions
-    /// cannot certify anything.
-    ///
-    /// The receive side built one straight from `conversation-state` rows for as
-    /// long as inbound verification existed — neither swapping in the keystore
-    /// copy of our own account key nor dropping peers the local
-    /// `contact_verification` pin disagrees with — so a DS that substituted a
-    /// user's `account_id_pub` along with a matching device cert produced a
-    /// `Certified` verdict for a leaf of its own choosing. It answers
-    /// `Unverifiable` now, which flags and evicts rather than admits.
+    /// cannot certify anything, even for rows that would otherwise certify.
     #[test]
     fn an_unpinned_directory_certifies_nothing() {
         let (pinned, _ed_pub, pq_pub) = certified_identity();
@@ -845,10 +659,8 @@ mod leaf_verdict_tests {
         );
     }
 
-    /// The finding's attack: a leaf that claims the real `user:device`
-    /// credential but carries the attacker's key. The device row, the cert and
-    /// the account key are all genuine — only the leaf key differs — and that
-    /// alone must be a refusal. The old check never compared the leaf key.
+    /// A leaf claiming the real `user:device` credential with the attacker's key:
+    /// every other input is genuine, and that alone must be a refusal.
     #[test]
     fn a_valid_cert_does_not_vouch_for_a_different_leaf_key() {
         let (dir, _, _) = certified_identity();

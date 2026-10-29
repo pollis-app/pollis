@@ -1,61 +1,23 @@
 //! Unconfirmed external-join branches, and who may replace a local group (#1220).
 //!
-//! An external join builds and MERGES its commit locally before the commit-log
-//! compare-and-swap decides whether it won. Until then the stored group is a
-//! *branch*: if another member's commit took the same epoch, it was never part
-//! of the canonical log and has to go. Every other local group, however it got
-//! here (a Welcome, our own creation, an external join that won), is
-//! *confirmed*: it sits on the canonical log, and under `max_past_epochs = 0` it
-//! holds the only keys this device will ever have for its current epoch.
-//!
-//! Before #1220 the two looked the same, so both join paths replaced whatever
-//! was stored:
-//!
-//! * A recipient that lost the epoch-0 race dropped its branch and, on the
-//!   retry, external-joined again. If its Welcome had been applied in between,
-//!   that retry deleted the confirmed Welcome group (epoch 1) and joined at
-//!   epoch 2. Anything the creator sealed at epoch 1 was undecryptable from then
-//!   on, and the ingest cursor (correctly, for an epoch the device no longer
-//!   holds) moved past it: the message was lost.
-//! * The same Welcome, polled while the doomed branch was still stored at its
-//!   epoch, was refused as a replay and acknowledged — gone for good — and the
-//!   retry ended in the same place.
-//!
-//! The marker here tells the two apart, and two predicates decide every
-//! replacement:
-//!
-//! * [`external_join_may_replace`]: an external join replaces nothing but its
-//!   own unconfirmed branch. A confirmed group is never thrown away to build
-//!   another branch; the join stands down instead (the device is already a
-//!   member). Callers that genuinely need to rebuild a broken group say so by
-//!   deleting it first (`forget_local_mls_group_at`).
-//! * [`welcome_may_replace`]: a Welcome replaces a strictly older group, as
-//!   before, and ALSO an unconfirmed branch at the same epoch. A Welcome at or
-//!   above a branch's epoch was produced by a commit at or above the epoch the
-//!   branch is trying to claim, so the branch's compare-and-swap cannot win.
-//!
-//! Together they make "a device discards a group the canonical log carries,
-//! for a branch it does not" unrepresentable on these paths, which is what the
-//! watermark's rule "an envelope below the epoch this pass started at is
-//! permanently undecryptable" relies on.
-//!
-//! Stored in `mls_kv` beside the group state it describes, under its own scope,
-//! so it needs no local schema change and travels with the MLS state in every
-//! database that has one.
+//! An external join merges its commit locally before the commit-log CAS decides
+//! it; until then the stored group is a *branch*. Every other local group is
+//! *confirmed* and, under `max_past_epochs = 0`, holds the only keys this device
+//! will ever have for its epoch. [`external_join_may_replace`] and
+//! [`welcome_may_replace`] make "discard a confirmed group for a branch"
+//! unrepresentable; see `.codesight/wiki/mls.md` → "Join paths never replace a
+//! confirmed group".
 
-/// `mls_kv` scope for the marker rows. Key: the raw MLS GroupId bytes of the
-/// lineage (`mls_group_id(conversation_id, generation)`). Value: the epoch the
-/// branch was built at, little-endian — kept for diagnostics only; the
-/// decisions below need only the marker's presence.
+/// `mls_kv` scope for the marker rows, keyed by the lineage's raw MLS GroupId.
+/// The value (branch epoch, little-endian) is diagnostic only.
 const UNCONFIRMED_JOIN_SCOPE: &str = "pollis_unconfirmed_join";
 
 fn key(conversation_id: &str, generation: i64) -> Vec<u8> {
     super::generation::mls_group_id_str(conversation_id, generation).into_bytes()
 }
 
-/// Record that the group stored for `(conversation_id, generation)` is an
-/// external-join branch whose commit has not been accepted by the log yet.
-/// Written in the same local-DB critical section that stores the branch.
+/// Record that the stored group is an external-join branch the log has not
+/// accepted yet. Written in the same critical section that stores the branch.
 pub(super) fn mark_unconfirmed(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -73,7 +35,6 @@ pub(super) fn mark_unconfirmed(
     Ok(())
 }
 
-/// Drop the marker: the branch won (it is now confirmed), or it was deleted.
 pub(super) fn clear(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) {
     if let Err(e) = conn.execute(
         "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
@@ -86,10 +47,9 @@ pub(super) fn clear(conn: &rusqlite::Connection, conversation_id: &str, generati
     }
 }
 
-/// Is the group stored for `(conversation_id, generation)` an unconfirmed
-/// external-join branch? A failed read answers `false`: treating a branch as
-/// confirmed only ever keeps a group, never destroys one, and a doomed branch
-/// that is kept is caught by the replay's fork recovery.
+/// A failed read answers `false`: treating a branch as confirmed only ever keeps
+/// a group, and a doomed branch that is kept is caught by the replay's fork
+/// recovery.
 pub(super) fn is_unconfirmed(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -107,25 +67,18 @@ pub(super) fn is_unconfirmed(
     .is_some()
 }
 
-/// May an external join replace what is stored for its lineage?
-///
-/// `stored` = a group exists for the lineage; `unconfirmed` = it is this
-/// device's own branch that the log has not accepted. Only nothing, or an
-/// unconfirmed branch, may be replaced. A confirmed group means the device is
-/// already a member, and the join must stand down rather than delete it.
+/// May an external join replace what is stored for its lineage? Only nothing,
+/// or this device's own unconfirmed branch; a confirmed group means the device
+/// is already a member and the join stands down.
 pub(super) fn external_join_may_replace(stored: bool, unconfirmed: bool) -> bool {
     !stored || unconfirmed
 }
 
-/// May a Welcome at `welcome_epoch` replace the group stored for its lineage at
-/// `local_epoch`?
+/// May a Welcome at `welcome_epoch` replace the group stored at `local_epoch`?
 ///
-/// A confirmed group is replaced only by a STRICTLY newer Welcome; one at or
-/// below it is a replay or a fabrication (#1161 C1). An unconfirmed branch is
-/// also replaced by a Welcome at its own epoch: the branch was built on the
-/// GroupInfo at `local_epoch - 1` and is trying to claim that epoch, and a
-/// Welcome at `local_epoch` or above comes from a commit that already holds it,
-/// so the branch is doomed and the Welcome is the canonical way in.
+/// A confirmed group yields only to a STRICTLY newer Welcome (#1161 C1). An
+/// unconfirmed branch also yields to one at its own epoch: that Welcome comes
+/// from a commit that already holds the epoch the branch is trying to claim.
 pub(super) fn welcome_may_replace(local_epoch: u64, welcome_epoch: u64, unconfirmed: bool) -> bool {
     if unconfirmed {
         welcome_epoch >= local_epoch
@@ -135,21 +88,11 @@ pub(super) fn welcome_may_replace(local_epoch: u64, welcome_epoch: u64, unconfir
 }
 
 /// `mls_kv` scope for the epoch from which this device is entitled to read each
-/// lineage (#1312). Key: as [`UNCONFIRMED_JOIN_SCOPE`]. Value: the epoch,
-/// little-endian.
+/// lineage (#1312), separating "never sent to this device" from a real loss.
 ///
-/// It separates the one loss this device was never entitled to avoid — a
-/// message sealed while it was not in the tree — from every other. Two ways in
-/// set it, deliberately differently:
-///
-/// * **Added** (a Welcome, [`record_added`]): someone put this device in the
-///   tree at that epoch. Whatever was sealed before it — first join, or the gap
-///   while it was removed and before it was re-added — it was never sent to
-///   this device. Replaces any earlier value.
+/// * **Added** (a Welcome, [`record_added`]): replaces any earlier value.
 /// * **Held** (creating the group, an external join, [`record_first_join`]):
-///   only the FIRST is kept. A group rebuilt by recovery keeps the original
-///   floor, because what the device missed in between was sent while it was a
-///   member and is a real loss.
+///   only the FIRST is kept, so a recovery rebuild keeps the original floor.
 const FIRST_JOIN_SCOPE: &str = "pollis_first_join";
 
 fn write_join(
@@ -173,9 +116,8 @@ fn write_join(
     }
 }
 
-/// Record that this device holds the lineage `(conversation_id, generation)`
-/// from `epoch` on, unless a join is already recorded. Best-effort: a missing
-/// floor only means the loss check stays quiet for that lineage.
+/// Record that this device holds the lineage from `epoch` on, unless a join is
+/// already recorded. Best-effort: a missing floor only silences the loss check.
 pub(crate) fn record_first_join(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -196,8 +138,6 @@ pub(crate) fn record_added(
     write_join(conn, conversation_id, generation, epoch, "INSERT OR REPLACE");
 }
 
-/// The epoch at which this device first held `(conversation_id, generation)`,
-/// or `None` if no join was ever recorded for it.
 pub(crate) fn first_join(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -221,9 +161,6 @@ pub(crate) fn first_join(
 mod tests {
     use super::*;
 
-    /// A rebuild (external join) keeps the first floor — what the device missed
-    /// in between is a real loss — but being ADDED again (a Welcome after a
-    /// removal) moves it: the gap was never sent to this device.
     #[test]
     fn a_rebuild_keeps_the_floor_and_a_re_add_moves_it() {
         let conn = kv();
@@ -248,8 +185,6 @@ mod tests {
         conn
     }
 
-    /// The invariant itself: a confirmed group is never replaced by an external
-    /// join, whatever else is true.
     #[test]
     fn an_external_join_never_replaces_a_confirmed_group() {
         assert!(!external_join_may_replace(true, false));
@@ -258,7 +193,6 @@ mod tests {
         assert!(external_join_may_replace(false, true));
     }
 
-    /// A confirmed group keeps the #1161 C1 rule: only a strictly newer Welcome.
     #[test]
     fn a_confirmed_group_is_replaced_only_by_a_strictly_newer_welcome() {
         assert!(!welcome_may_replace(1, 0, false));
@@ -266,9 +200,8 @@ mod tests {
         assert!(welcome_may_replace(1, 2, false));
     }
 
-    /// The #1220 ordering B: the branch is at epoch 1 (built on GroupInfo 0),
-    /// the Welcome from the creator's Add is at epoch 1. The Welcome wins; an
-    /// older Welcome still does not.
+    /// #1220 ordering B: a branch at epoch 1 yields to the creator's Welcome at
+    /// epoch 1, not to an older one.
     #[test]
     fn an_unconfirmed_branch_yields_to_a_welcome_at_its_own_epoch() {
         assert!(welcome_may_replace(1, 1, true));
@@ -288,7 +221,6 @@ mod tests {
         assert!(!is_unconfirmed(&conn, "c", 0));
     }
 
-    /// No `mls_kv` at all reads as "confirmed" — the bias that keeps groups.
     #[test]
     fn an_unreadable_marker_reads_as_confirmed() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();

@@ -1,26 +1,12 @@
 //! The client half of the Delivery Service's READ endpoints (#987).
 //!
-//! Every question the MLS join/replay path used to ask its own Turso connection
-//! is asked here instead, over the same device-signed POST transport the writes
-//! already use. Two properties are worth stating at the seam, because both are
-//! easy to lose in a refactor and neither fails loudly:
+//! **One snapshot, one request.** [`conversation_snapshot`] returns GroupInfo
+//! and the pending-Welcome flag from one DS transaction; splitting it would let
+//! a device external-join into its own inbound Welcome and be stranded.
 //!
-//! **One snapshot, one request.** [`conversation_snapshot`] returns GroupInfo,
-//! the pending-Welcome flag, the lineage heads and the commit batch together
-//! because the DS read them together, in one transaction. Splitting this into
-//! two calls would restore the exact hazard the endpoint exists to close: a
-//! device that sees a GroupInfo without the Welcome written atomically beside it
-//! external-joins into its own inbound Welcome and is stranded. Do not add a
-//! second round trip between the two.
-//!
-//! **Failure biases stay at the call sites.** This module returns
-//! `Result<ConversationState>` and nothing else — it never picks a default. The
-//! gates it feeds have OPPOSITE biases seven lines apart (`has_pending_welcome`
-//! fails OPEN so a transient blip cannot deadlock recovery; `local_user_is_member`
-//! fails CLOSED so it cannot leak membership), so collapsing them into one
-//! "returns false on error" helper here would silently invert one of them. HTTP
-//! makes those failures common where a libsql read failure was rare, which is
-//! precisely why the distinction now matters more than it did.
+//! **Failure biases stay at the call sites.** This module never picks a default:
+//! `has_pending_welcome` fails open (no recovery deadlock) while
+//! `local_user_is_member` fails closed (no membership leak).
 
 use std::sync::Arc;
 
@@ -33,24 +19,13 @@ use crate::state::AppState;
 
 use super::ds_client::{current_user_id, ds_post_json};
 
-/// The control plane decodes DS base64 with the same helper the data plane uses.
-/// Re-exported rather than redefined so `super::ds_reads::decode_b64` keeps
-/// resolving from inside `mls/` — this module used to carry a byte-identical
-/// second copy of the body.
 pub(crate) use crate::commands::ds_reads::decode_b64;
 
-/// Ask about several conversations at once.
+/// Ask about several conversations at once: one signed request per sweep pass,
+/// not per conversation, so don't call it in a loop.
 ///
-/// Batched because the cold-launch sweep runs the catch-up chain per
-/// conversation, serially: at ~5 dependent round trips each, a 20-group launch
-/// was 60–80 sequential hops. One signed request per *pass* rather than per
-/// *conversation* is the whole point — a caller that loops this per conversation
-/// has moved the latency problem rather than fixed it.
-///
-/// Entries come back in request order, one per query. An entry the caller is not
-/// authorized for is present with `authorized: false` rather than failing the
-/// batch — a sweep naming one stale conversation must not blind the client to
-/// the other nineteen.
+/// Entries come back in request order. An unauthorized entry is present with
+/// `authorized: false` rather than failing the batch.
 pub(crate) async fn conversation_states(
     state: &Arc<AppState>,
     queries: Vec<ConversationStateQuery>,
@@ -61,9 +36,7 @@ pub(crate) async fn conversation_states(
     let device_id = state.device_id.lock().await.clone();
     let body = ConversationStateBody {
         queries,
-        // The DS's no-auth fallback only. With auth on both halves come from the
-        // verified signature and these are ignored — though still signature-bound,
-        // since the signature covers the whole body.
+        // The DS's no-auth fallback only; with auth on, the verified signature wins.
         user_id: Some(current_user_id(state).await?),
         device_id,
     };
@@ -71,12 +44,8 @@ pub(crate) async fn conversation_states(
     Ok(resp.states)
 }
 
-/// One conversation's snapshot — GroupInfo, Welcome flag, heads, commits, and
-/// the two membership gates, all from ONE server-side read transaction.
-///
-/// The single-conversation shape of [`conversation_states`]; it still costs one
-/// round trip, so a caller with several conversations in hand should batch
-/// instead of calling this in a loop.
+/// One conversation's snapshot, all from ONE server-side read transaction. Batch
+/// with [`conversation_states`] when you have several.
 pub(crate) async fn conversation_snapshot(
     state: &Arc<AppState>,
     query: ConversationStateQuery,
@@ -103,13 +72,8 @@ pub(crate) fn state_query(conversation_id: &str, generation: Option<i64>) -> Con
     }
 }
 
-/// The MLS group backing a conversation: a channel maps to its `group_id` (all
-/// channels of a group share ONE MLS group), a DM is its own group.
-///
-/// Falls back to the id itself when the DS cannot resolve it, which is what the
-/// direct `SELECT group_id FROM channels` did by returning no row — the caller
-/// then treats the id as its own MLS group, and the paths that need membership
-/// re-check it themselves.
+/// The MLS group backing a conversation: a channel maps to its `group_id`, a DM
+/// is its own group. Falls back to the id itself when the DS cannot resolve it.
 pub(crate) async fn resolve_mls_group(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -123,12 +87,9 @@ pub(crate) async fn resolve_mls_group(
     })
 }
 
-/// Drain this device's undelivered Welcomes: `(welcome_id, welcome_bytes)`,
-/// oldest first.
-///
-/// The read counterpart of `POST /v1/welcomes/ack`, which the caller still posts
-/// afterwards to mark them delivered. The DS scopes the drain to the VERIFIED
-/// signing device, so the `device_id` below is only the no-auth path's input.
+/// Drain this device's undelivered Welcomes, oldest first. The caller still
+/// posts `/v1/welcomes/ack` afterwards; the DS scopes the drain to the verified
+/// signing device.
 pub(crate) async fn fetch_welcomes(
     state: &Arc<AppState>,
     user_id: &str,
@@ -137,8 +98,7 @@ pub(crate) async fn fetch_welcomes(
     let body = FetchWelcomesBody {
         user_id: Some(user_id.to_string()),
         device_id: Some(device_id.to_string()),
-        // #1412: ask for this device's pool size in the suite it publishes in,
-        // so the drain doubles as the "pool is low" signal.
+        // #1412: the drain doubles as the "key-package pool is low" signal.
         count_key_packages_in_suite: Some(i64::from(u16::from(super::provider::current_suite()))),
     };
     let resp = ds_post_json(state, &body).await?;
