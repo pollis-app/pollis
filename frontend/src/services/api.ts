@@ -285,11 +285,33 @@ export interface SecurityEvent {
   metadata: string | null;
 }
 
+/** Mirrors `SecurityEventCursor` in pollis-api `account_reads.rs` (#1548). */
+export interface SecurityEventCursor {
+  created_at: string;
+  id: string;
+}
+
+/** Mirrors `SecurityEventsPage` in pollis-core `device_enrollment.rs` (#1548). */
+export interface SecurityEventsPage {
+  events: SecurityEvent[];
+  next_cursor: SecurityEventCursor | null;
+}
+
+/**
+ * One keyset page of the account's security-event log, newest first (#1548).
+ * `before` is the previous page's `next_cursor`; `kinds` empty/omitted = every
+ * kind. `limit` is clamped to 1..=500 in Rust and again on the DS.
+ */
 export async function listSecurityEvents(
   userId: string,
-  limit?: number,
-): Promise<SecurityEvent[]> {
-  return invoke<SecurityEvent[]>('list_security_events', { userId, limit: limit ?? null });
+  options: { limit?: number; before?: SecurityEventCursor | null; kinds?: string[] | null } = {},
+): Promise<SecurityEventsPage> {
+  return invoke<SecurityEventsPage>('list_security_events', {
+    userId,
+    limit: options.limit ?? null,
+    before: options.before ?? null,
+    kinds: options.kinds && options.kinds.length > 0 ? options.kinds : null,
+  });
 }
 
 export async function initializeIdentity(userId: string): Promise<void> {

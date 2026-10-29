@@ -1,0 +1,159 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# SECURITY EVENTS (#1548) — desktop parity with e2e/security-events.spec.ts:
+# Security shows only the newest three events and a "View all" row; the
+# Security events screen pages by cursor as it scrolls and narrows by filter
+# chip. Also #1547: no Recovery card, and `?section=data` still lands on
+# "Your data".
+#
+# The multi-page part needs a log longer than a page, which a fresh account
+# does not have. Against a LOCAL DS, pass MAESTRO_SQLD_URL (its sqld, e.g.
+# http://127.0.0.1:8090) and the flow seeds 40 events through it
+# (`scripts/seed-security-events.js`). Without it (the dev DS) the flow checks
+# what an unseeded account shows and skips the paging assertions.
+
+- runFlow: ../subflows/sign-in.yaml
+- runScript:
+    file: ../scripts/seed-security-events.js
+    env:
+      SQLD_URL: '${typeof MAESTRO_SQLD_URL === "undefined" ? "" : MAESTRO_SQLD_URL}'
+      EMAIL: ${MAESTRO_EMAIL}
+
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- assertVisible:
+    id: "screen-self-security"
+# #1547: the inert Recovery card is gone.
+- assertNotVisible: "Recovery"
+
+- runFlow:
+    when:
+      true: ${output.securitySeeded}
+    commands:
+      # --- Security: the newest three, nothing older ---
+      - scrollUntilVisible:
+          element:
+            id: "row-security-events-all"
+          direction: DOWN
+      - assertVisible:
+          id: "row-security-event-mae-039"
+      - assertVisible:
+          id: "row-security-event-mae-038"
+      - assertVisible:
+          id: "row-security-event-mae-037"
+      - assertNotVisible:
+          id: "row-security-event-mae-036"
+      # The relative time is whole ("just now", not "just").
+      - assertVisible: ".*just now.*"
+      - takeScreenshot: security-events-01-preview
+
+      # --- View all: the first page ---
+      - tapOn:
+          id: "row-security-events-all"
+      - assertVisible:
+          id: "screen-self-security-events"
+      - assertVisible:
+          id: "row-security-event-mae-039"
+      - assertVisible:
+          id: "chip-security-events-all"
+      - takeScreenshot: security-events-02-first-page
+
+      # --- Scrolling loads the next page: mae-000 is the 40th row, past the
+      #     first page of 25, so it only exists once onEndReached fetched more.
+      - scrollUntilVisible:
+          element:
+            id: "row-security-event-mae-000"
+          direction: DOWN
+          timeout: 30000
+      - takeScreenshot: security-events-03-loaded-more
+
+      # --- Filter: Account keeps only the email changes ---
+      - scrollUntilVisible:
+          element:
+            id: "chip-security-events-account"
+          direction: UP
+          # 40-odd rows back to the top of the list.
+          speed: 80
+          timeout: 90000
+      - tapOn:
+          id: "chip-security-events-account"
+      - extendedWaitUntil:
+          notVisible:
+            id: "row-security-event-mae-039"
+          timeout: 15000
+      - assertVisible:
+          id: "row-security-event-mae-037"
+      - assertNotVisible:
+          id: "row-security-event-mae-038"
+      - takeScreenshot: security-events-04-filter-account
+
+      # --- Identity & keys: the rotation and the recovery-blob fetch ---
+      - tapOn:
+          id: "chip-security-events-identity"
+      - extendedWaitUntil:
+          visible:
+            id: "row-security-event-mae-039"
+          timeout: 15000
+      - assertVisible:
+          id: "row-security-event-mae-038"
+      - assertNotVisible:
+          id: "row-security-event-mae-037"
+      # recovery_blob_fetched has its own copy, not the raw kind.
+      - assertVisible: "Account recovery started.*"
+      - takeScreenshot: security-events-05-filter-identity
+
+      # --- Devices ---
+      - tapOn:
+          id: "chip-security-events-devices"
+      - extendedWaitUntil:
+          visible:
+            id: "row-security-event-mae-036"
+          timeout: 15000
+      - assertNotVisible:
+          id: "row-security-event-mae-039"
+      - takeScreenshot: security-events-06-filter-devices
+      # The header's back button: `back` is Android-only.
+      - tapOn:
+          id: "btn-back"
+
+- runFlow:
+    when:
+      true: ${!output.securitySeeded}
+    commands:
+      # An unseeded account: the screen opens and the chips are there.
+      - runFlow:
+          when:
+            visible:
+              id: "row-security-events-all"
+          commands:
+            - tapOn:
+                id: "row-security-events-all"
+            - assertVisible:
+                id: "screen-self-security-events"
+            - assertVisible:
+                id: "chip-security-events-devices"
+            - tapOn:
+                id: "btn-back"
+
+# --- #1547: `section=data` still scrolls to "Your data" ---
+# Leave Security first: the section scroll runs when the page mounts, and on
+# Android a link to the route already on top re-uses that screen.
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-self"
+- openLink: "pollis://self/security?section=data"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- assertVisible:
+    id: "screen-self-security"
+- assertVisible:
+    id: "row-export-archive"
+- takeScreenshot: security-events-07-section-data

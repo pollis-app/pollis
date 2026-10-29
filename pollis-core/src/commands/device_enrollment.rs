@@ -216,6 +216,20 @@ pub struct SecurityEvent {
     pub metadata: Option<String>,
 }
 
+/// A keyset position in the security-event log (#1548): the `(created_at, id)`
+/// of the last row a page returned. Opaque to the UI — it hands back the
+/// previous page's `next_cursor` verbatim.
+pub use pollis_api::account_reads::SecurityEventCursor;
+
+/// One page of the security-event log, newest first (#1548).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecurityEventsPage {
+    pub events: Vec<SecurityEvent>,
+    /// Pass back as `before` for the next page; `None` = this page reached the
+    /// oldest matching row.
+    pub next_cursor: Option<SecurityEventCursor>,
+}
+
 // ── Crypto helpers ───────────────────────────────────────────────────────────
 
 /// The verification code the human compares, derived from the new device's
@@ -1136,28 +1150,40 @@ pub async fn reset_identity_and_recover(
     Ok(new_secret_key)
 }
 
-/// Fetch the user's security event log, most recent first. Used by the
-/// Security settings page to surface enrollments, rejections, identity
-/// resets, and secret-key rotations.
+/// One page of the user's security event log, most recent first. Used by the
+/// Security settings page (latest three) and the Security events page (keyset
+/// pages, optionally filtered by `kinds`, #1548) to surface enrollments,
+/// rejections, identity resets, and secret-key rotations.
+///
+/// `before` is the previous page's `next_cursor`; `None` starts at the newest
+/// row. `kinds` `None` or empty = every kind.
 pub async fn list_security_events(
     state: &Arc<AppState>,
     user_id: String,
     limit: Option<i64>,
-) -> Result<Vec<SecurityEvent>> {
+    before: Option<SecurityEventCursor>,
+    kinds: Option<Vec<String>>,
+) -> Result<SecurityEventsPage> {
     // The clamp stays here AND is re-applied server-side (#987): a body cannot
     // ask the DS for the whole table regardless of what this client sends.
     let limit = limit.unwrap_or(100).clamp(1, 500);
-    let rows = crate::commands::ds_reads::security_events(state, &user_id, limit).await?;
-    Ok(rows
-        .into_iter()
-        .map(|e| SecurityEvent {
-            id: e.id,
-            kind: e.kind,
-            device_id: e.device_id,
-            created_at: e.created_at,
-            metadata: e.metadata,
-        })
-        .collect())
+    let kinds = kinds.filter(|k| !k.is_empty());
+    let resp =
+        crate::commands::ds_reads::security_events(state, &user_id, limit, before, kinds).await?;
+    Ok(SecurityEventsPage {
+        events: resp
+            .events
+            .into_iter()
+            .map(|e| SecurityEvent {
+                id: e.id,
+                kind: e.kind,
+                device_id: e.device_id,
+                created_at: e.created_at,
+                metadata: e.metadata,
+            })
+            .collect(),
+        next_cursor: resp.next_cursor,
+    })
 }
 
 /// Existing-device side. Reject an enrollment request without installing

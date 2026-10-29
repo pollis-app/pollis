@@ -371,6 +371,7 @@
       "preferencesSub": "Theme, density, behavior",
       "savedSub": "Bookmarked messages",
       "securitySub": "Keys, devices, sign out",
+      "securityEventsSub": "Devices, keys and account changes",
       "signingOut": "Signing out…",
       "userSettingsSub": "Display name, handle, email",
       "customAccent": "Custom",
@@ -448,7 +449,6 @@
       "reject": "Reject",
       "rejectA11y": "Reject enrollment",
       "safetyHeading": "Safety",
-      "showOlderA11y": "Show older events",
       "thisDevice": "{{name}} · this device",
       "blockedUsers": "Blocked users"
     },

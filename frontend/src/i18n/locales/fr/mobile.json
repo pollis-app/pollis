@@ -360,6 +360,7 @@
       "preferencesSub": "Thème, densité, comportement",
       "savedSub": "Messages enregistrés",
       "securitySub": "Clés, appareils, déconnexion",
+      "securityEventsSub": "Appareils, clés et modifications du compte",
       "signingOut": "Déconnexion…",
       "userSettingsSub": "Nom affiché, nom d'utilisateur, e-mail",
       "customAccent": "Personnalisée",
@@ -437,7 +438,6 @@
       "reject": "Refuser",
       "rejectA11y": "Refuser l'enrôlement",
       "safetyHeading": "Sécurité",
-      "showOlderA11y": "Afficher les événements plus anciens",
       "thisDevice": "{{name}} · cet appareil",
       "blockedUsers": "Utilisateurs bloqués"
     },

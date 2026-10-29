@@ -229,6 +229,13 @@ const securityRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/SecurityPage"), "SecurityPage"),
 });
 
+// The full security-event log (#1548); Security shows only the newest three.
+const securityEventsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security/events",
+  component: lazyRouteComponent(() => import("./pages/SecurityEventsPage"), "SecurityEventsPage"),
+});
+
 const changePinRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security/change-pin",
@@ -368,6 +375,7 @@ const routeTree = rootRoute.addChildren([
   userRoute,
   userProfileRoute,
   securityRoute,
+  securityEventsRoute,
   changePinRoute,
   linkDeviceRoute,
   reportUserRoute,

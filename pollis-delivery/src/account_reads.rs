@@ -740,16 +740,14 @@ pub async fn security_events(
     // Clamped server-side, matching the client's previous clamp, so a body
     // cannot ask for the whole table.
     let limit = parsed.limit.unwrap_or(100).clamp(1, 500);
+    let kinds = parsed.kinds.unwrap_or_default();
+    if kinds.len() > SECURITY_EVENTS_MAX_KINDS {
+        return Ok(bad_request("too many kinds"));
+    }
 
+    let (sql, params) = security_events_query(&who, parsed.before.as_ref(), &kinds, limit);
     let conn = state.db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT id, kind, device_id, created_at, metadata \
-             FROM security_event WHERE user_id = ?1 \
-             ORDER BY created_at DESC LIMIT ?2",
-            libsql::params![who, limit],
-        )
-        .await?;
+    let mut rows = conn.query(&sql, params).await?;
     let mut events = Vec::new();
     while let Some(row) = rows.next().await? {
         events.push(SecurityEventRow {
@@ -760,9 +758,59 @@ pub async fn security_events(
             metadata: row.get(4)?,
         });
     }
+    // One row past the page was asked for: its presence is the only honest
+    // "there is more" (a full page alone cannot tell the last page from one
+    // that happens to end exactly on the limit).
+    let next_cursor = if events.len() as i64 > limit {
+        events.truncate(limit as usize);
+        events.last().map(|e| SecurityEventCursor {
+            created_at: e.created_at.clone(),
+            id: e.id.clone(),
+        })
+    } else {
+        None
+    };
     Ok(ok_response::<SecurityEventsBody>(SecurityEventsResponse {
         events,
+        next_cursor,
     }))
+}
+
+/// The keyset page query (#1548):
+///
+/// `WHERE user_id = ?1 [AND kind IN (…)] [AND (created_at, id) < (?, ?)]
+///  ORDER BY created_at DESC, id DESC LIMIT limit + 1`
+///
+/// Served by `idx_security_event_user_created_id` unfiltered and by
+/// `idx_security_event_user_kind` filtered (migration 000041). Never OFFSET: a
+/// row written while someone pages would shift every later page by one.
+pub fn security_events_query(
+    user_id: &str,
+    before: Option<&SecurityEventCursor>,
+    kinds: &[String],
+    limit: i64,
+) -> (String, Vec<libsql::Value>) {
+    let mut sql = String::from(
+        "SELECT id, kind, device_id, created_at, metadata \
+         FROM security_event WHERE user_id = ?1",
+    );
+    let mut params: Vec<libsql::Value> = vec![user_id.to_string().into()];
+    if !kinds.is_empty() {
+        sql.push_str(&format!(" AND kind IN ({})", placeholders(kinds.len(), params.len() + 1)));
+        params.extend(kinds.iter().map(|k| libsql::Value::from(k.clone())));
+    }
+    if let Some(c) = before {
+        let n = params.len();
+        sql.push_str(&format!(" AND (created_at, id) < (?{}, ?{})", n + 1, n + 2));
+        params.push(c.created_at.clone().into());
+        params.push(c.id.clone().into());
+    }
+    sql.push_str(&format!(
+        " ORDER BY created_at DESC, id DESC LIMIT ?{}",
+        params.len() + 1
+    ));
+    params.push((limit + 1).into());
+    (sql, params)
 }
 
 // ── POST /v1/read/emoji ──────────────────────────────────────────────────────

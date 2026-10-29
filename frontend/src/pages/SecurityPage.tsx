@@ -15,7 +15,14 @@ import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
+import { SecurityEventRow } from "../components/Security/SecurityEventRow";
+import { shortId } from "../components/Security/securityEvents";
 import { useSelfAuditAccountKey, useVerifyOwnBuild } from "../hooks/queries";
+import {
+  securityEventQueryKeys,
+  useSecurityEventsPreview,
+} from "../hooks/queries/useSecurityEvents";
+import { useQueryClient } from "@tanstack/react-query";
 import { getVersion, shellOpen } from "../bridge";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import {
@@ -63,134 +70,6 @@ function permissionPill(
   }
 }
 
-/// The two addresses in an `email_changed` row's metadata, or `null` when the
-/// row does not carry the expected JSON object. Never throws: the metadata
-/// column is free-form and a row written by some other build must render as an
-/// event with a vaguer detail line, not as a crashed page.
-function parseEmailChangeMetadata(
-  metadata: string | null | undefined,
-): { from: string; to: string } | null {
-  if (!metadata) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(metadata);
-    if (parsed && typeof parsed === "object") {
-      const { from, to } = parsed as { from?: unknown; to?: unknown };
-      if (typeof from === "string" && typeof to === "string") {
-        return { from, to };
-      }
-    }
-  } catch {
-    // Not JSON. Fall through to the unknown-shape copy.
-  }
-  return null;
-}
-
-/// Human-readable summary for each `security_event.kind` the backend
-/// currently emits. Unknown kinds fall through to the raw string so we
-/// never silently drop new event types.
-function describe(
-  t: TFunction<"settings">,
-  event: api.SecurityEvent,
-): { heading: string; detail: string } {
-  switch (event.kind) {
-    case "device_enrolled":
-      return {
-        heading: t("security.eventDeviceEnrolledHeading"),
-        detail: event.device_id
-          ? t("security.eventDeviceEnrolledDetail", { device: shortId(event.device_id) })
-          : t("security.eventDeviceEnrolledDetailUnknown"),
-      };
-    case "device_rejected":
-      return {
-        heading: t("security.eventDeviceRejectedHeading"),
-        detail: event.device_id
-          ? t("security.eventDeviceRejectedDetail", { device: shortId(event.device_id) })
-          : t("security.eventDeviceRejectedDetailUnknown"),
-      };
-    case "device_revoked": {
-      if (!event.device_id) {
-        return {
-          heading: t("security.eventDeviceRevokedHeading"),
-          detail: t("security.eventDeviceRevokedDetailUnknown"),
-        };
-      }
-      // `name=<device name>` when the revoked row carried one (#947). The
-      // device id alone answers "was it revoked"; the name answers "which
-      // one", which is the question someone who has just lost a laptop is
-      // actually asking.
-      const name = event.metadata?.startsWith("name=")
-        ? event.metadata.slice("name=".length)
-        : null;
-      return {
-        heading: t("security.eventDeviceRevokedHeading"),
-        detail: name
-          ? t("security.eventDeviceRevokedDetailNamed", {
-              name,
-              device: shortId(event.device_id),
-            })
-          : t("security.eventDeviceRevokedDetail", {
-              device: shortId(event.device_id),
-            }),
-      };
-    }
-    case "identity_reset":
-      return {
-        heading: t("security.eventIdentityResetHeading"),
-        detail: t("security.eventIdentityResetDetail"),
-      };
-    case "identity_rotated":
-      // Written by the Delivery Service inside the rotation transaction, not
-      // by a client. `credential=session` is the pre-enrollment soft reset
-      // (email code only — the DS also wiped memberships and other devices);
-      // `credential=signature` is a rotation from an enrolled device.
-      return {
-        heading: t("security.eventIdentityRotatedHeading"),
-        detail: event.metadata?.includes("credential=session")
-          ? t("security.eventIdentityRotatedDetailSession")
-          : t("security.eventIdentityRotatedDetailSignature"),
-      };
-    case "secret_key_rotated":
-      return {
-        heading: t("security.eventSecretKeyRotatedHeading"),
-        detail: t("security.eventSecretKeyRotatedDetail"),
-      };
-    case "email_changed": {
-      // Written by the Delivery Service as part of the change (#1161), not by
-      // a client — a client that simply omits the call cannot suppress it.
-      // Metadata is `{"from":"…","to":"…"}`; both addresses matter, because
-      // "from" is the mailbox that had to approve the move and "to" is where
-      // account recovery now points.
-      const addresses = parseEmailChangeMetadata(event.metadata);
-      return {
-        heading: t("security.eventEmailChangedHeading"),
-        detail: addresses
-          ? t("security.eventEmailChangedDetail", addresses)
-          : t("security.eventEmailChangedDetailUnknown"),
-      };
-    }
-    default:
-      // The raw backend `kind` for an event type this build doesn't know
-      // about: a wire value, deliberately not translated.
-      return {
-        heading: event.kind,
-        detail: event.metadata ?? "",
-      };
-  }
-}
-
-function shortId(id: string): string {
-  if (id.length <= 10) {
-    return id;
-  }
-  return `${id.slice(0, 6)}…${id.slice(-4)}`;
-}
-
-// How many security events to render before "Show older events". The backend
-// caps the fetch at 100 newest-first, so this is a display slice, not a query.
-const SECURITY_EVENTS_PAGE_SIZE = 20;
-
 const sectionHeaderClass =
   "text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
 
@@ -211,9 +90,13 @@ export const SecurityPage: React.FC = observer(() => {
   // "This build" verification is on-demand (a mutation), never run on mount.
   const buildVerify = useVerifyOwnBuild();
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
-  const [visibleEvents, setVisibleEvents] = useState(SECURITY_EVENTS_PAGE_SIZE);
-  const [error, setError] = useState<string | null>(null);
+  // Only the newest few (#1548); the whole log is its own page.
+  const queryClient = useQueryClient();
+  const {
+    data: events,
+    isError: eventsFailed,
+    error: eventsError,
+  } = useSecurityEventsPreview();
 
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -350,24 +233,7 @@ export const SecurityPage: React.FC = observer(() => {
     if (!currentUser) {
       return;
     }
-    let cancelled = false;
-    api
-      .listSecurityEvents(currentUser.id)
-      .then((rows) => {
-        if (!cancelled) {
-          setEvents(rows);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(errorMessage(err, t("security.eventsLoadFailed")));
-          setEvents([]);
-        }
-      });
     loadDevices();
-    return () => {
-      cancelled = true;
-    };
   }, [currentUser?.id, loadDevices]);
 
   const cancelConfirm = () => {
@@ -385,6 +251,8 @@ export const SecurityPage: React.FC = observer(() => {
       await api.revokeDevice(currentUser.id, confirmingDevice.device_id);
       cancelConfirm();
       loadDevices();
+      // The revoke wrote a `device_revoked` event; show it.
+      void queryClient.invalidateQueries({ queryKey: securityEventQueryKeys.all });
     } catch (err) {
       setDevicesError(errorMessage(err, t("security.revokeFailed")));
     } finally {
@@ -719,12 +587,12 @@ export const SecurityPage: React.FC = observer(() => {
               {t("security.eventsDescription")}
             </p>
 
-            {error && (
+            {eventsFailed && (
               <p
                 data-testid="security-events-error"
                 className="text-xs text-danger"
               >
-                {error}
+                {errorMessage(eventsError, t("security.eventsLoadFailed"))}
               </p>
             )}
 
@@ -736,48 +604,33 @@ export const SecurityPage: React.FC = observer(() => {
                 window focus, a keystroke in the revoke-confirm field) yanked
                 focus here and scrolled the user down to it. A plain list has no
                 focus to steal. */}
-            {events === null ? (
-              <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
+            {events === undefined ? (
+              !eventsFailed && (
+                <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
+              )
             ) : events.length === 0 ? (
               <p className="text-xs font-mono text-dim">
                 {t("security.eventsEmpty")}
               </p>
             ) : (
               <div data-testid="security-events-list" className="flex flex-col">
-                {events.slice(0, visibleEvents).map((event) => {
-                  const { heading, detail } = describe(t, event);
-                  return (
-                    <div
-                      key={event.id}
-                      data-testid={`security-event-${event.id}`}
-                      className="flex min-w-0 flex-col px-4 py-2 text-xs font-mono"
-                    >
-                      <span className="text-fg">{heading}</span>
-                      {detail && <span className="text-muted">{detail}</span>}
-                      <span className="text-dim">
-                        {formatDateTime(event.created_at)}
-                      </span>
-                    </div>
-                  );
-                })}
-                {/* The backend already returns newest-first, capped at 100, so
-                    paging is a pure slice — no refetch, no cursor. */}
-                {events.length > visibleEvents && (
-                  <div className="px-4 pt-2">
-                    <Button
-                      data-testid="security-events-show-more"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)
-                      }
-                    >
-                      {t("security.eventsShowOlder", {
-                        count: events.length - visibleEvents,
-                      })}
-                    </Button>
-                  </div>
-                )}
+                {/* Only the newest few (#1548): the DS is asked for exactly
+                    that many, and the full log is the Security events page. */}
+                {events.map((event) => (
+                  <SecurityEventRow key={event.id} event={event} />
+                ))}
+              </div>
+            )}
+            {events !== undefined && events.length > 0 && (
+              <div className="self-start">
+                <Button
+                  data-testid="security-events-view-all"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => navigate({ to: "/security/events" })}
+                >
+                  {t("security.eventsViewAll")}
+                </Button>
               </div>
             )}
           </section>

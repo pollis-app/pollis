@@ -216,6 +216,10 @@ export default function RootLayout() {
                 options={settingsPage}
               />
               <Stack.Screen
+                name="self/security-events"
+                options={settingsPage}
+              />
+              <Stack.Screen
                 name="self/link-device"
                 options={settingsPage}
               />

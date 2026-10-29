@@ -123,10 +123,42 @@ async fn a_qr_link_enrolls_a_phone_without_the_email_otp() {
         .invoke_json("list_security_events", json!({ "userId": primary.user_id(), "limit": 10 }))
         .await;
     assert!(
-        events.as_array().unwrap().iter().any(|e| e["kind"] == "device_enrolled"
+        events["events"].as_array().unwrap().iter().any(|e| e["kind"] == "device_enrolled"
             && e["metadata"].as_str().is_some_and(|m| m.contains("via=qr_link"))),
         "a device_enrolled event with via=qr_link: {events}"
     );
+
+    // #1548: the same command pages and filters through the real dispatch path.
+    // A `kinds` filter keeps only that kind, and a one-row page of a log with
+    // more than one row hands back a cursor that resumes strictly after it.
+    let filtered = primary
+        .invoke_json(
+            "list_security_events",
+            json!({ "userId": primary.user_id(), "limit": 50, "kinds": ["device_enrolled"] }),
+        )
+        .await;
+    let filtered_rows = filtered["events"].as_array().unwrap();
+    assert!(!filtered_rows.is_empty(), "{filtered}");
+    assert!(
+        filtered_rows.iter().all(|e| e["kind"] == "device_enrolled"),
+        "the kind filter leaked another kind: {filtered}"
+    );
+    let all = events["events"].as_array().unwrap();
+    if all.len() > 1 {
+        let first = primary
+            .invoke_json("list_security_events", json!({ "userId": primary.user_id(), "limit": 1 }))
+            .await;
+        let cursor = first["next_cursor"].clone();
+        assert!(cursor.is_object(), "a one-row page of a longer log has a cursor: {first}");
+        let second = primary
+            .invoke_json(
+                "list_security_events",
+                json!({ "userId": primary.user_id(), "limit": 1, "before": cursor }),
+            )
+            .await;
+        assert_eq!(first["events"][0]["id"], all[0]["id"], "{first}");
+        assert_eq!(second["events"][0]["id"], all[1]["id"], "{second}");
+    }
     drop(phone);
 }
 
@@ -261,7 +293,7 @@ async fn a_scanned_code_signs_the_showing_device_in_without_the_email_otp() {
         .invoke_json("list_security_events", json!({ "userId": phone.user_id(), "limit": 10 }))
         .await;
     assert!(
-        events.as_array().unwrap().iter().any(|e| e["kind"] == "device_enrolled"
+        events["events"].as_array().unwrap().iter().any(|e| e["kind"] == "device_enrolled"
             && e["metadata"].as_str().is_some_and(|m| m.contains("via=qr_scan"))),
         "a device_enrolled event with via=qr_scan: {events}"
     );
