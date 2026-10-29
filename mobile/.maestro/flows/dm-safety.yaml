@@ -1,0 +1,132 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - two-client
+---
+# SAFETY NUMBER IN THE DM (#1563) — a safety number belongs to a pair (your
+# key with theirs), so it lives in the conversation: DM info → "Verify safety
+# number" opens "You & @<peer>" with the 60 digits in 5-digit blocks (#1278's
+# field-drift guard), and Mark verified flips to Verified and back. The chat
+# header's members button reaches the same row. The peer's profile no longer
+# shows the number. Run via scripts/maestro-report.sh, which signs up a fresh
+# peer on a second device and passes its handle as ${MAESTRO_PEER_HANDLE}.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "btn-new-dm"
+- assertVisible:
+    id: "screen-dm-new"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+# Exact-match lookup on return only.
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+
+# DM info (the header's "more" button on a DM) → Verify safety number.
+- tapOn:
+    id: "btn-chat-menu"
+- extendedWaitUntil:
+    visible:
+      id: "screen-dm-info"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "row-verify-safety-.*"
+      text: "Verify safety number"
+    timeout: 20000
+- tapOn:
+    id: "row-verify-safety-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-dm-safety"
+    timeout: 10000
+- assertVisible:
+    text: "You & @${MAESTRO_PEER_HANDLE}"
+- extendedWaitUntil:
+    visible:
+      id: "text-safety-number"
+      text: "[0-9]{5}( [0-9]{5}){11}"
+    timeout: 20000
+- assertVisible:
+    id: "img-safety-qr"
+- assertVisible:
+    id: "text-safety-shared"
+- takeScreenshot: dm-safety-01-number
+- tapOn:
+    id: "btn-verify"
+    text: "Mark verified"
+# Once verified the chip reads "Verified" and its spoken label becomes
+# "Remove verification" (iOS matches the label, Android the text).
+- extendedWaitUntil:
+    visible:
+      id: "btn-verify"
+      text: "Verified|Remove verification"
+    timeout: 15000
+- takeScreenshot: dm-safety-02-verified
+- tapOn:
+    id: "btn-verify"
+- extendedWaitUntil:
+    visible:
+      id: "btn-verify"
+      text: "Mark verified"
+    timeout: 15000
+
+# The members button in the chat header reaches the same row.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 10000
+- tapOn:
+    id: "btn-members"
+- extendedWaitUntil:
+    visible:
+      id: "screen-conversation-info"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "row-verify-safety-.*"
+    direction: DOWN
+- tapOn:
+    id: "row-verify-safety-.*"
+- extendedWaitUntil:
+    visible:
+      id: "text-safety-number"
+      text: "[0-9]{5}( [0-9]{5}){11}"
+    timeout: 20000
+- tapOn:
+    id: "btn-back"
+
+# The profile no longer carries a safety number.
+- scrollUntilVisible:
+    element:
+      text: "@${MAESTRO_PEER_HANDLE}"
+    direction: UP
+- tapOn:
+    text: "@${MAESTRO_PEER_HANDLE}"
+- extendedWaitUntil:
+    visible:
+      id: "screen-user"
+    timeout: 10000
+- assertVisible:
+    id: "btn-report-user"
+- assertNotVisible:
+    id: "text-safety-number"
+- assertNotVisible:
+    id: "btn-verify"
+- takeScreenshot: dm-safety-03-profile

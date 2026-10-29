@@ -190,6 +190,7 @@ export default function RootLayout() {
               <Stack.Screen name="group/discover" />
               <Stack.Screen name="dm/new" />
               <Stack.Screen name="dm/info" />
+              <Stack.Screen name="dm/safety" />
               <Stack.Screen name="dm/requests" />
               <Stack.Screen name="conversation/info" />
               <Stack.Screen name="conversation/pins" />

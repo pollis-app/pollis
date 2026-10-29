@@ -2,8 +2,9 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - parity
 ---
-# SECURITY — device list + safety/blocked entry points. Self-contained
-# (revoke/verify need a peer or a second device; captured visually here).
+# SECURITY — device list + blocked-users entry point. Self-contained
+# (revoke needs a second device; captured visually here). Safety numbers are
+# per pair and live in the DM since #1563, not here: flows/dm-safety.yaml.
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:

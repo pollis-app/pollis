@@ -559,6 +559,13 @@ export function useDMConversations() {
           user2_id: other?.user_id,
           user2_avatar_url: other?.avatar_url,
           member_count: c.members.length,
+          peers: c.members
+            .filter((m) => m.user_id !== currentUser.id)
+            .map((m) => ({
+              user_id: m.user_id,
+              username: m.username,
+              avatar_url: m.avatar_url,
+            })),
           created_at: new Date(c.created_at).getTime(),
           updated_at: new Date(c.created_at).getTime(),
         };

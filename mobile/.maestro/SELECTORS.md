@@ -83,7 +83,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
-| `user/[id]` | `screen-user` | `text-safety-number`, `btn-verify` (mark/unmark verified), `btn-block` / `btn-unblock` (label switches on state), `btn-message` (start DM) |
+| `user/[id]` | `screen-user` | `btn-report-user`, `btn-block` / `btn-unblock` (label switches on state), `btn-message` (start DM) |
 
 ### Self
 
@@ -106,7 +106,8 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | --- | --- | --- |
 | `dm/new` | `screen-dm-new` | `input-user-search`, `btn-user-search`, `row-user-<id>` (single exact-match result; tapping starts the DM) |
 | `dm/requests` | `screen-dm-requests` | reached from the Direct tab's `row-dm-requests`; per request `row-request-<id>`, `btn-accept-request-<id>`, `btn-block-request-<id>` |
-| `dm/info` | `screen-dm-info` | `row-member-<userId>` (tap → user profile), export (#856, same ids as `self/security`): `row-export-archive` … `btn-export-share`, `btn-leave` (leave conversation). Back is the top `btn-back` (`btn-back-to-conversation` was removed). |
+| `dm/info` | `screen-dm-info` | `row-member-<userId>` (tap → user profile), `row-verify-safety-<userId>` (#1563: one per other member — "Verify safety number" in a 1:1, "You & @name" in a group DM; also on `conversation/info` for a DM; → `dm/safety`), export (#856, same ids as `self/security`): `row-export-archive` … `btn-export-share`, `btn-leave` (leave conversation). Back is the top `btn-back` (`btn-back-to-conversation` was removed). |
+| `dm/safety` | `screen-dm-safety` | "You & @name" (#1563), params `{ peerId, name }`; a pane page on iPad. `text-safety-number` (60 digits in 5-digit blocks), `img-safety-qr` (QR of the digits), `btn-verify` (mark/unmark verified), `text-safety-shared` |
 | `conversation/info` | `screen-conversation-info` | `row-member-<userId>`, media grid `btn-media-tile-<attachmentId>` (opens `media`), export (#856): `row-export-archive` … `btn-export-share`. Back is the top `btn-back` (`btn-back-to-conversation` was removed). |
 | `conversation/pins` | `screen-pins` | #1315 the conversation's pinned messages (iPad: inside the detail pane). `list-pins`, `row-pin-<msgId>` (tap → back to the conversation scrolled to the message; label `"<author>, <when>: <text>"`), `btn-unpin-<msgId>`; `pins-empty`, `pins-unavailable` (pin key not on this device yet), `pins-loading`, `pins-unresolved-notice` (the message is not on this device). |
 
@@ -133,10 +134,10 @@ delete/remove/revoke), the record id is appended to keep the selector unique
   management only).
 - `self/security` has **no** change-password / PIN-entry buttons, and no
   Recovery section (#1547 removed it: a new device signs in by email or through
-  `row-link-device`). Safety numbers live on `user/[id]`, not here. Enrollment
+  `row-link-device`). Safety numbers live in the DM (`dm/safety`, #1563), not here. Enrollment
   approve/reject and device revoke are the load-bearing actions.
-- `user/[id]` self-view shows no safety-number card or block/message buttons
-  (it's you) — those testIDs only render for a peer.
+- `user/[id]` shows no safety number (#1563 moved it to `dm/safety`); the
+  self-view shows no block/message buttons either (it's you).
 - `dm/new` returns a single exact-match user (no result list); the one result
   row `row-user-<id>` doubles as the start-DM affordance (no separate
   `btn-start-dm`).

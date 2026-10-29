@@ -118,6 +118,9 @@ export interface DMConversation {
    * Drives the per-reader receipt summary (#857) — optional because callers
    * that only need the "other side" never populate it. */
   member_count?: number;
+  /** Every member except the viewer; a group DM has several. Drives the
+   * right panel's roster and its one-per-peer safety numbers (#1563). */
+  peers?: Array<{ user_id: string; username?: string; avatar_url?: string }>;
   created_at: number;
   updated_at: number;
 }

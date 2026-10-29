@@ -35,6 +35,7 @@ export const PANE_PATHS = [
   "/conversation/info",
   "/conversation/pins",
   "/dm/info",
+  "/dm/safety",
   "/user/[id]",
   "/group/settings",
   "/group/members",
