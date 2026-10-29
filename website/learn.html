@@ -2111,9 +2111,14 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
           <p>
             <code>/v1/&lt;log&gt;/sth/latest.json</code> is the current signed
             statement and <code>/v1/&lt;log&gt;/entries.json</code> the log's
-            entries, where <code>&lt;log&gt;</code> is <code>binaries</code> or
-            <code>account-keys</code> (the commit log sits directly under
-            <code>/v1/</code>). <code>/verify/release/&lt;tag&gt;</code> is a
+            entries, where <code>&lt;log&gt;</code> is <code>commit-log-2</code>,
+            <code>binaries</code> or <code>account-keys</code>. The first commit log,
+            served directly under <code>/v1/</code>, was retired in October 2026 after
+            it signed three inconsistent heads; its files stay frozen in place and a
+            signed statement at <code>/v1/commit-log-reset.json</code> describes them
+            (<a href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md#commit-log-reset-1579"
+            target="_blank" rel="noopener noreferrer">details</a>).
+            <code>/verify/release/&lt;tag&gt;</code> is a
             ready-made report for one release. <code>/v1/&lt;log&gt;/public_key.json</code>
             is the signing key, served for convenience only: real verification
             compares against a key you already have (Topic 8).

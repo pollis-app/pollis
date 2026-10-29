@@ -1,15 +1,19 @@
 // Key Transparency explorer — verifies a conversation's commit chain IN THIS
-// BROWSER against the static, signed log published at verify.pollis.com/v1/.
+// BROWSER against the static, signed log published at
+// verify.pollis.com/v1/commit-log-2/ (the live commit log since the #1579 reset;
+// the first tree at /v1/ is retired and frozen).
 //
 // This is a port of `pollis-verify group` (verifiable-log-serve/src/group.rs,
-// `verify_group_via` + `verify_group_in_bundle_at`) and must reach the same
-// verdict for the same log. No server computes anything: the page fetches the
-// same static files the CLI fetches and checks them itself.
+// `verify_group_via` + `verify_group_in_bundle_with_context`) and must reach the
+// same verdict for the same log. No server computes anything: the page fetches
+// the same static files the CLI fetches and checks them itself.
 //
-//   1. Version gate on /v1/index.json (refuse a log format we do not understand).
-//   2. Pin: /v1/public_key.json must carry a key in PINNED_KEYS below, compared on
+// Paths below are relative to the tree prefix (/v1/commit-log-2, or /v1 for a
+// log that predates the reset):
+//   1. Version gate on index.json (refuse a log format we do not understand).
+//   2. Pin: public_key.json must carry a key in PINNED_KEYS below, compared on
 //      the id recomputed from the served key bytes, never the served id.
-//   3. Fetch /v1/sth/latest.json and /v1/entries.json, select this conversation's
+//   3. Fetch sth/latest.json and entries.json, select this conversation's
 //      commits by re-deriving its windowed pseudonym in each leaf's window (#701),
 //      and fetch an inclusion proof for each selected entry only.
 //   4. Verify the STH's ML-DSA-44 signature, every inclusion proof against it, and
@@ -60,6 +64,11 @@ const CONVERSATION_PSEUDONYM_DOMAIN = "pollis-verifiable-log:commit-pseudonym:co
 // It is part of the MESSAGE; the FIPS 204 context string is empty, because the
 // Rust signer uses ml-dsa's `Signer` impl, which signs with an empty context.
 const STH_CONTEXT_COMMIT_LOG = "pollis-verifiable-log:sth:v2";
+// The second commit-log tree (sth.rs STH_CONTEXT_COMMIT_LOG_2, #1579). The first
+// tree, served directly under /v1/, is retired and frozen; the live commit log is
+// served under COMMIT_LOG_2_PREFIX and its heads are signed under this context.
+const STH_CONTEXT_COMMIT_LOG_2 = "pollis-verifiable-log:sth:v2:commit-log-2";
+const COMMIT_LOG_2_PREFIX = "/v1/commit-log-2";
 const STH_PUB_LEN = 1312;
 const STH_SIG_LEN = 2420;
 
@@ -349,14 +358,14 @@ function requirePinned(doc, nowMs) {
 
 // ── STH (sth.rs) ────────────────────────────────────────────────────────────
 // CONTEXT || tree_size (u64 BE) || root (32) || timestamp (u64 BE).
-function sthVerifyWith(sth, key) {
+function sthVerifyWith(sth, key, context) {
   const root = hexToBytes(sth.root_hash);
   const sig = hexToBytes(sth.signature);
   if (root === null || root.length !== 32 || sig === null || sig.length !== STH_SIG_LEN) {
     return false;
   }
   const message = concatBytes([
-    utf8.encode(STH_CONTEXT_COMMIT_LOG),
+    utf8.encode(context),
     u64Bytes(sth.tree_size, false),
     root,
     u64Bytes(sth.timestamp, false),
@@ -370,17 +379,17 @@ function sthVerifyWith(sth, key) {
 
 // Sth::verify_any: try the key the (unsigned) key_id hints at first, then every
 // candidate. The hint can only reorder attempts, never change the verdict.
-function sthVerifyAny(sth, candidates) {
+function sthVerifyAny(sth, candidates, context) {
   if (sth.key_id !== null) {
     const hinted = candidates.find(function (c) {
       return c.keyId === sth.key_id;
     });
-    if (hinted && sthVerifyWith(sth, hinted.key)) {
+    if (hinted && sthVerifyWith(sth, hinted.key, context)) {
       return true;
     }
   }
   return candidates.some(function (c) {
-    return sthVerifyWith(sth, c.key);
+    return sthVerifyWith(sth, c.key, context);
   });
 }
 
@@ -522,6 +531,24 @@ function fetchText(url) {
   );
 }
 
+// fetchText, but a 404 resolves to null: the document is not published.
+function fetchTextOrNull(url) {
+  return fetch(url, { cache: "no-cache" }).then(
+    function (resp) {
+      if (resp.status === 404) {
+        return null;
+      }
+      if (!resp.ok) {
+        throw new Error("http error: GET " + url + ": status code " + resp.status);
+      }
+      return resp.text();
+    },
+    function (err) {
+      throw new Error("http error: GET " + url + ": " + (err && err.message ? err.message : "network error"));
+    }
+  );
+}
+
 function fetchJson(url) {
   return fetchText(url).then(function (body) {
     try {
@@ -564,8 +591,18 @@ async function verifyGroup(baseUrl, conversationId, onProgress) {
   const base = baseUrl.replace(/\/+$/, "");
   const nowMs = Date.now();
 
+  // #1579: the live commit log is commit-log-2. Only a log that does not serve
+  // it (one published before the reset) is read from /v1/, under the first
+  // tree's context. Same rule as group.rs.
   progress("Fetching the log index…");
-  const indexBody = await fetchText(base + "/v1/index.json");
+  let prefix = base + COMMIT_LOG_2_PREFIX;
+  let context = STH_CONTEXT_COMMIT_LOG_2;
+  let indexBody = await fetchTextOrNull(prefix + "/index.json");
+  if (indexBody === null) {
+    prefix = base + "/v1";
+    context = STH_CONTEXT_COMMIT_LOG;
+    indexBody = await fetchText(prefix + "/index.json");
+  }
   let manifest;
   try {
     manifest = JSON.parse(indexBody);
@@ -590,7 +627,7 @@ async function verifyGroup(baseUrl, conversationId, onProgress) {
   }
 
   progress("Checking the log's public key against the pinned key…");
-  const pkUrl = base + "/v1/public_key.json";
+  const pkUrl = prefix + "/public_key.json";
   let pkDoc = parsePublicKeyDoc(await fetchJson(pkUrl));
   if (pkDoc === null) {
     throw new Error("http error: parse " + pkUrl + ": unexpected shape");
@@ -599,8 +636,8 @@ async function verifyGroup(baseUrl, conversationId, onProgress) {
   pkDoc = requirePinned(pkDoc, nowMs);
 
   progress("Fetching the signed tree head and log entries…");
-  const sthUrl = base + "/v1/sth/latest.json";
-  const entriesUrl = base + "/v1/entries.json";
+  const sthUrl = prefix + "/sth/latest.json";
+  const entriesUrl = prefix + "/entries.json";
   const fetched = await Promise.all([fetchJson(sthUrl), fetchJson(entriesUrl)]);
   const sth = parseSth(fetched[0]);
   if (sth === null) {
@@ -642,7 +679,7 @@ async function verifyGroup(baseUrl, conversationId, onProgress) {
   // leaf_index they carry, and only those for the latest head are kept.
   progress("Checking " + selected.length + " inclusion proof" + (selected.length === 1 ? "" : "s") + "…");
   const proofs = await mapLimit(selected, PROOF_FETCH_PARALLELISM, function (s) {
-    const url = base + "/v1/proof/inclusion/" + sth.tree_size + "/" + s.index + ".json";
+    const url = prefix + "/proof/inclusion/" + sth.tree_size + "/" + s.index + ".json";
     return fetchJson(url).then(parseInclusionProof, function () {
       return null;
     });
@@ -658,7 +695,7 @@ async function verifyGroup(baseUrl, conversationId, onProgress) {
   const violations = [];
 
   // 1. Trust anchor.
-  const sthSigOk = sthVerifyAny(sth, bundleKeyCandidates(pkDoc, nowMs));
+  const sthSigOk = sthVerifyAny(sth, bundleKeyCandidates(pkDoc, nowMs), context);
   if (!sthSigOk) {
     violations.push("STH signature is invalid — published head is not trustworthy");
   }
@@ -759,7 +796,8 @@ function renderError(message) {
     '<span class="kt-badge kt-badge--fail">Could not verify</span>' +
       '<p class="kt-note">The check could not run against <code>' +
       esc(LOG_BASE) +
-      "/v1/</code>: " +
+      COMMIT_LOG_2_PREFIX +
+      "/</code>: " +
       esc(message) +
       "</p>" +
       '<p class="kt-note">Nothing was verified. You can run the same check with ' +

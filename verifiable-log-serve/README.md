@@ -32,8 +32,10 @@ The file path under the output directory is the URL path without the leading `/`
 | `/v1/entries/<index>.json` | one entry | immutable |
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json` | inclusion proof | immutable |
 | `/v1/proof/consistency/<first>-<second>.json` | consistency proof | immutable |
+| `/v1/commit-log-2/...` | the live commit-log tree (`generate --commit-log-2-bundle`), same layout | as above |
 | `/v1/account-keys/...` | account-key tree, same layout | as above |
 | `/v1/binaries/...` | released-binaries tree, same layout | as above |
+| `/v1/commit-log-reset.json` | signed reset statement retiring the first commit-log tree (`generate --reset-statement`, #1579) | immutable |
 | `/verify/account/<user_id>` | precomputed `AccountReport` | short |
 | `/verify/release/<tag>` | precomputed `ReleaseReport` | short |
 | `/verify/group/<conversation_id>` | `GroupReport`, computed per request by a server (not a file) | `no-cache` |
@@ -134,6 +136,17 @@ signatures, equivocation, entry replay against each STH root, and every inclusio
 and consistency proof. A missing account-key or binaries tree is a `NOTE`, not a
 failure. `group`, `account` and `release` each take `--json` to print the report
 instead of a summary.
+
+The `/v1/...` rows above are the first commit-log tree, which production retired
+(#1579): its files stay served, frozen, and `generate --bundle` is no longer run
+against production. When a log serves `/v1/commit-log-reset.json` or
+`/v1/commit-log-2/`, `remote` verifies the reset statement, reports the first tree
+as `RETIRED` (each listed fork as `KNOWN`) while still checking every head on its
+consistent chain and failing on any head the statement does not describe, and
+verifies `commit-log-2` in full, including that its first leaf is the genesis the
+statement names. `group` reads `commit-log-2` whenever it is served. A log with
+neither (a self-hosted dev log) is verified as before, with `/v1/...` as the live
+tree.
 
 `serve` also has `verify-remote <base-url>` and
 `verify-group --base <url> --group <id> [--json]`, which run the same code for local

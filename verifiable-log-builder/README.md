@@ -22,12 +22,24 @@ encodings and invariants, and the bundle builder and signer.
 That is the local and test path. In production the DS prunes `mls_commit_log`
 (#539), so the table is not the log of record (#1579): CI runs `append-commit-log`
 to append the rows above the last persisted `seq` to the persisted leaves
-(`internal/commit-log-leaves.json` in R2), then `build --commit-leaves` to sign over
-those leaves. `append-commit-log` fails closed on a missing, shrunk or rewritten
-leaves file, on a file that does not reproduce `--published-sth`, and on a live row
-below the head that was never logged or has changed. It runs both invariant passes
-over the whole appended stream. See [`src/commit_leaves.rs`](src/commit_leaves.rs)
-and `docs/transparency.md`.
+(`internal/commit-log-2-leaves.json` in R2), then `build --commit-leaves
+--commit-tree commit-log-2` to sign over those leaves under the `commit-log-2` STH
+context. `append-commit-log` fails closed on a missing, shrunk or rewritten leaves
+file, on a file that does not reproduce `--published-sth`, and on a live row below
+the head that was never logged or has changed. It runs both invariant passes over
+the whole appended stream. See [`src/commit_leaves.rs`](src/commit_leaves.rs) and
+`docs/transparency.md`.
+
+`--commit-tree` defaults to `commit-log`, the retired first tree's context, which
+local and test logs still use. `commit-log-2` requires `--commit-leaves`.
+
+`commit-log-reset` mints the signed reset statement that retires the first
+commit-log tree (#1579). It reads the committed facts
+(`commit-log-retirement.json`), the served retired heads (`--retired-sths <dir>`)
+and the successor's persisted leaves, refuses unless every listed head is served
+with its root and (for chain and fork heads) a valid signature, and signs the
+statement under `pollis-verifiable-log:reset:v1`. See
+[`src/commit_log_reset.rs`](src/commit_log_reset.rs).
 
 ## Commit leaf encoding
 

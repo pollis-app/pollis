@@ -93,7 +93,9 @@ jobs:
       - name: Deployed pin matches the live transparency log
         run: |
           set -euo pipefail
-          served="$(curl -fsSL -m 30 https://verify.pollis.com/v1/public_key.json | jq -r '.public_key')"
+          # The live commit-log tree's key document (#1579): /v1/public_key.json
+          # belongs to the retired, frozen first tree and never changes again.
+          served="$(curl -fsSL -m 30 https://verify.pollis.com/v1/commit-log-2/public_key.json | jq -r '.public_key')"
           live_js="$(curl -fsSL -m 30 "$SITE/artifacts.js")"
           if [[ "$live_js" == *"$served"* ]]; then
             echo "✓ deployed pin matches the served log key (${served:0:16}…)"

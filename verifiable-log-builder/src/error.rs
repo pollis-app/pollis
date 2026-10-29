@@ -29,6 +29,12 @@ pub enum BuilderError {
     #[error("commit-log leaves refused: {0}")]
     PersistedLeaves(String),
 
+    /// The commit-log reset statement (#1579) could not be minted: the committed
+    /// retirement facts disagree with what is served, or the successor has no
+    /// genesis yet.
+    #[error("commit-log reset refused: {0}")]
+    Reset(String),
+
     #[error("invalid signing key: {0}")]
     SigningKey(String),
 

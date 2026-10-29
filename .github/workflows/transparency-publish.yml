@@ -5,9 +5,17 @@ name: Publish Transparency Log
 # static files — there is NO server on the trust path.
 #
 # What it does, daily (and on demand):
+#   0. The commit log (#1579). The first commit-log tree, served directly under
+#      /v1/..., is RETIRED and frozen: it was rebuilt from the pruned DS table
+#      and signed heads (56, 113, 129) that do not extend its own chain to 137.
+#      This workflow never writes any of its files again. The commit log
+#      continues as `commit-log-2` under /v1/commit-log-2/..., signed under its
+#      own STH context, and a signed reset statement at
+#      /v1/commit-log-reset.json (minted once, from the committed
+#      commit-log-retirement.json) ties the two together.
 #   1. Cheap early-exit BEFORE any Rust toolchain: compare each published head's
 #      tree_size against what it would become — for the commit log, the persisted
-#      leaves (internal/commit-log-leaves.json) plus the mls_commit_log rows above
+#      leaves (internal/commit-log-2-leaves.json) plus the mls_commit_log rows above
 #      their last seq; for the account-key tree, a live COUNT(*) of
 #      account_key_log. Rebuild if EITHER differs (or
 #      the account head is absent). Both equal => nothing new, exit success
@@ -59,7 +67,7 @@ on:
         type: boolean
         default: false
       seed_commit_log:
-        description: "One-shot: start internal/commit-log-leaves.json from the live mls_commit_log. Refused if it already exists, or if the served commit-log head cannot be reproduced from it (#1579)."
+        description: "One-shot: start the commit-log-2 tree's log of record (internal/commit-log-2-leaves.json) from the live mls_commit_log, and mint the reset statement that retires the first commit-log tree. Refused if the leaves file already exists (#1579)."
         type: boolean
         default: false
 
@@ -109,8 +117,14 @@ jobs:
           # Published head tree_sizes (empty if never published / unreachable).
           # The account head 404s until this feature's first publish — an empty
           # value therefore reads as "needs rebuild" below.
-          published="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/sth/latest.json \
+          # The live commit log is commit-log-2 (#1579); /v1/sth/ is the frozen,
+          # retired first tree and never moves again.
+          published="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/commit-log-2/sth/latest.json \
             | jq -r '.tree_size' 2>/dev/null || echo "")"
+          # No reset statement served yet means the reset has not finished
+          # publishing: always rebuild until it has.
+          reset_served="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+            https://verify.pollis.com/v1/commit-log-reset.json || echo "000")"
           published_acct="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/account-keys/sth/latest.json \
             | jq -r '.tree_size' 2>/dev/null || echo "")"
           published_bin="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/binaries/sth/latest.json \
@@ -139,7 +153,7 @@ jobs:
           # prunes. An absent or unreadable leaves file leaves `count` empty,
           # which forces a build, and the build then fails closed on it.
           count=""
-          if aws s3 cp "s3://${R2_BUCKET}/internal/commit-log-leaves.json" ./decide-leaves.json \
+          if aws s3 cp "s3://${R2_BUCKET}/internal/commit-log-2-leaves.json" ./decide-leaves.json \
                --endpoint-url "${R2_ENDPOINT}" --only-show-errors 2>/dev/null; then
             leaves_len="$(jq 'length' ./decide-leaves.json)"
             last_seq="$(jq -r 'if length == 0 then "" else .[-1].data end' ./decide-leaves.json \
@@ -164,7 +178,7 @@ jobs:
             --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
           [ -n "${bin_count}" ] || bin_count=0
 
-          echo "commit-log:  published ${published:-<none>} | after append ${count:-<leaves unreadable>}"
+          echo "commit-log-2: published ${published:-<none>} | after append ${count:-<leaves unreadable>} | reset statement HTTP ${reset_served}"
           echo "account-key: published ${published_acct:-<none>} | live ${acct_count}"
           echo "binaries:    published ${published_bin:-<none>} | live ${bin_count}"
 
@@ -180,7 +194,8 @@ jobs:
 
           # Rebuild if ANY tree is behind (or absent). All must be present AND
           # equal (binaries: current per bin_ok) to skip.
-          if [ -n "${published}" ] && [ "${published}" = "${count}" ] \
+          if [ "${reset_served}" = "200" ] \
+             && [ -n "${published}" ] && [ "${published}" = "${count}" ] \
              && [ -n "${published_acct}" ] && [ "${published_acct}" = "${acct_count}" ] \
              && [ "${bin_ok}" = "true" ]; then
             echo "All trees already up to date — nothing to publish."
@@ -274,22 +289,27 @@ jobs:
           # that does not reproduce the served head. When it refuses, the
           # commit-log tree is WITHHELD from this publish (the account-key and
           # binaries trees still go out) and the job fails at the end.
+          #
+          # The live commit log is commit-log-2: its own leaves file, its own
+          # /v1/commit-log-2/ namespace, its own STH context. The retired first
+          # tree's internal/commit-log-leaves.json (if any) and its /v1/ files are
+          # never read or written here.
           commit_ok=true
           rc=0
-          err="$(aws s3 cp "s3://${R2_BUCKET}/internal/commit-log-leaves.json" ./commit-log-leaves.json \
+          err="$(aws s3 cp "s3://${R2_BUCKET}/internal/commit-log-2-leaves.json" ./commit-log-leaves.json \
                    --endpoint-url "${R2_ENDPOINT}" 2>&1)" || rc=$?
           if [ "${rc}" -ne 0 ]; then
             rm -f ./commit-log-leaves.json
             if ! printf '%s' "${err}" | grep -qiE '404|Not Found|NoSuchKey'; then
-              echo "::error::could not read internal/commit-log-leaves.json, and it is not merely absent: aws exit ${rc}"
+              echo "::error::could not read internal/commit-log-2-leaves.json, and it is not merely absent: aws exit ${rc}"
               exit 1
             fi
-            echo "commit-log leaves: none persisted yet."
+            echo "commit-log-2 leaves: none persisted yet."
           fi
           # The served head the persisted leaves must reproduce. Only a 404 means
-          # "no commit-log tree published yet"; any other failure stops here.
+          # "no commit-log-2 tree published yet"; any other failure stops here.
           PUB_ARG=()
-          code="$(curl -sS --max-time 20 -o ./published-sth.json -w '%{http_code}' "${base}/v1/sth/latest.json" || echo "000")"
+          code="$(curl -sS --max-time 20 -o ./published-sth.json -w '%{http_code}' "${base}/v1/commit-log-2/sth/latest.json" || echo "000")"
           if [ "${code}" = "200" ]; then
             PUB_ARG=(--published-sth ./published-sth.json)
           elif [ "${code}" != "404" ]; then
@@ -309,7 +329,7 @@ jobs:
             mv ./commit-log-leaves.next.json ./commit-log-leaves.json
           else
             commit_ok=false
-            echo "::error::commit-log leaves refused (see above). The commit-log tree is withheld from this publish; the other trees still publish. See #1579."
+            echo "::error::commit-log-2 leaves refused (see above). The commit-log tree is withheld from this publish; the other trees still publish. See #1579."
             echo "[]" > ./commit-log-leaves.json
           fi
           rm -f ./published-sth.json
@@ -317,7 +337,7 @@ jobs:
 
           # The commit-log size is the appended leaves; account_key_log is in
           # the main DB.
-          commit_ts="$(frozen_or_now "${base}/v1/sth/latest.json" "${base}/v1/sth" "${commit_count}")"
+          commit_ts="$(frozen_or_now "${base}/v1/commit-log-2/sth/latest.json" "${base}/v1/commit-log-2/sth" "${commit_count}")"
           account_ts="$(frozen_or_now "${base}/v1/account-keys/sth/latest.json" "${base}/v1/account-keys/sth" "$(live_count "$main_http" "$TURSO_AUTH_TOKEN" 'SELECT COUNT(*) FROM account_key_log')")"
           echo "commit-log STH ts=${commit_ts}  account-keys STH ts=${account_ts}  (now=${now})"
 
@@ -338,9 +358,12 @@ jobs:
           # context with the same key. The commit log comes from the appended
           # leaves (--commit-leaves, #1579), never from mls_commit_log directly;
           # --db reads account_key_log from the main DB (TURSO_AUTH_TOKEN).
+          # --commit-tree commit-log-2 signs every commit-log head under the
+          # successor's own STH context (#1579).
           ./target/release/builder build \
             --db "${TURSO_DATABASE_URL}" \
             --commit-leaves ./commit-log-leaves.json \
+            --commit-tree commit-log-2 \
             --out bundle.json --account-out account-bundle.json \
             --timestamp "${commit_ts}" --account-timestamp "${account_ts}"
 
@@ -377,12 +400,63 @@ jobs:
               echo "::warning::key-set.json is present but no root is pinned; not publishing it"
             fi
           fi
-          ./target/release/serve generate --bundle bundle.json \
+          # ── The reset statement retiring the first commit-log tree (#1579) ──
+          # Minted ONCE, by the first run that has commit-log-2 leaves (its
+          # genesis is the first leaf), from the committed
+          # commit-log-retirement.json. `builder commit-log-reset` refuses unless
+          # every head that file lists is served at /v1/sth/<size>.json with that
+          # root and, for chain and fork heads, a valid signature. Once served it
+          # is immutable and never re-minted. Only a 404 means "not yet minted".
+          RESET_ARG=()
+          reset_code="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "${base}/v1/commit-log-reset.json" || echo "000")"
+          if [ "${reset_code}" = "404" ] && [ "${commit_ok}" = "true" ] && [ "${commit_count}" != "0" ]; then
+            mkdir -p ./retired-sths
+            fetched=true
+            for size in $(jq -r '.retired | [.last_consistent.tree_size] + .chain_sizes + [.forks[].tree_size] + [.superseded[].tree_size] | unique | .[]' commit-log-retirement.json); do
+              curl -fsS --max-time 20 "${base}/v1/sth/${size}.json" -o "./retired-sths/${size}.json" || fetched=false
+            done
+            # A refused mint withholds commit-log-2 too: a successor served with
+            # no statement retiring its predecessor fails every audit. The other
+            # trees still publish and the job fails at the end.
+            if [ "${fetched}" = "true" ] && ./target/release/builder commit-log-reset \
+                 --retirement commit-log-retirement.json \
+                 --retired-sths ./retired-sths \
+                 --leaves ./commit-log-leaves.json \
+                 --issued-at "${now}" \
+                 --out ./commit-log-reset.json; then
+              RESET_ARG=(--reset-statement ./commit-log-reset.json)
+            else
+              echo "::error::the commit-log reset statement could not be minted (see above); withholding commit-log-2 from this publish. See #1579."
+              commit_ok=false
+            fi
+            rm -rf ./retired-sths
+          elif [ "${reset_code}" = "200" ]; then
+            echo "reset statement already served; not re-minting it."
+          elif [ "${reset_code}" = "404" ]; then
+            echo "::warning::reset statement not minted this run: commit-log-2 has no published leaves yet."
+          else
+            echo "::error::could not check the served reset statement (HTTP ${reset_code})"
+            exit 1
+          fi
+
+          # No --bundle: the retired first commit-log tree is never generated, so
+          # not one of its frozen /v1 files can be rewritten. The successor goes
+          # to /v1/commit-log-2/.
+          ./target/release/serve generate --commit-log-2-bundle bundle.json "${RESET_ARG[@]}" \
             --account-bundle account-bundle.json "${BIN_ARG[@]}" "${KEYSET_ARG[@]}" --out ./site
           # The bundles carry hashed commit identities / public keys only — no
           # plaintext — but remove them anyway so they can never be synced. The
           # records JSON is a build input, never part of the published tree.
-          rm -f bundle.json account-bundle.json binaries-bundle.json binary-records.json
+          rm -f bundle.json account-bundle.json binaries-bundle.json binary-records.json ./commit-log-reset.json
+
+          # Belt and braces for the freeze: nothing of the retired tree may be in
+          # the site at all.
+          for p in v1/sth v1/entries v1/proof v1/entries.json v1/index.json v1/public_key.json verify/group; do
+            if [ -e "./site/${p}" ]; then
+              echo "::error::./site/${p} exists: the retired commit-log tree must never be written (#1579)"
+              exit 1
+            fi
+          done
 
           # Per-size heads are immutable and pass 1 skips same-size files, so a
           # head this build signed at a size that already holds a DIFFERENT
@@ -390,13 +464,13 @@ jobs:
           # ours. Refuse rather than publish a tree that disagrees with what is
           # served (#1579).
           if [ "${commit_ok}" = "true" ]; then
-            for f in ./site/v1/sth/*.json; do
+            for f in ./site/v1/commit-log-2/sth/*.json; do
               size="$(basename "${f}" .json)"
               [ "${size}" = "latest" ] && continue
-              served="$(curl -fsS --max-time 20 "${base}/v1/sth/${size}.json" 2>/dev/null | jq -r '.root_hash' || true)"
+              served="$(curl -fsS --max-time 20 "${base}/v1/commit-log-2/sth/${size}.json" 2>/dev/null | jq -r '.root_hash' || true)"
               ours="$(jq -r '.root_hash' "${f}")"
               if [ -n "${served}" ] && [ "${served}" != "${ours}" ]; then
-                echo "::error::the served commit-log head at size ${size} has a different root than this build's: refusing to publish over it"
+                echo "::error::the served commit-log-2 head at size ${size} has a different root than this build's: refusing to publish over it"
                 commit_ok=false
               fi
             done
@@ -406,8 +480,7 @@ jobs:
           # commit-log artifact so no pass below can sync one. The other trees
           # are unaffected. The job fails in the last step.
           if [ "${commit_ok}" != "true" ]; then
-            rm -rf ./site/v1/sth ./site/v1/entries ./site/v1/proof \
-                   ./site/v1/entries.json ./site/v1/index.json ./site/verify/group
+            rm -rf ./site/v1/commit-log-2 ./site/v1/commit-log-reset.json
             rm -f ./commit-log-leaves.json
           fi
           echo "commit_ok=${commit_ok}" >> "$GITHUB_OUTPUT"
@@ -437,11 +510,11 @@ jobs:
         run: |
           set -euo pipefail
           aws s3 cp ./commit-log-leaves.json \
-            "s3://${R2_BUCKET}/internal/commit-log-leaves/${COMMIT_COUNT}.json" \
+            "s3://${R2_BUCKET}/internal/commit-log-2-leaves/${COMMIT_COUNT}.json" \
             --endpoint-url "${R2_ENDPOINT}" --only-show-errors --content-type application/json
-          aws s3 cp ./commit-log-leaves.json "s3://${R2_BUCKET}/internal/commit-log-leaves.json" \
+          aws s3 cp ./commit-log-leaves.json "s3://${R2_BUCKET}/internal/commit-log-2-leaves.json" \
             --endpoint-url "${R2_ENDPOINT}" --only-show-errors --content-type application/json
-          echo "commit-log leaves persisted: ${COMMIT_COUNT}"
+          echo "commit-log-2 leaves persisted: ${COMMIT_COUNT}"
 
       - name: Publish immutable artifacts (pass 1)
         if: steps.decide.outputs.build == 'true'
@@ -478,6 +551,11 @@ jobs:
             --exclude "v1/index.json" \
             --exclude "v1/entries.json" \
             --exclude "verify/group/*" \
+            --exclude "v1/commit-log-2/sth/latest.json" \
+            --exclude "v1/commit-log-2/index.json" \
+            --exclude "v1/commit-log-2/entries.json" \
+            --exclude "v1/commit-log-2/proof/*" \
+            --exclude "v1/commit-log-2/entries/*" \
             --exclude "v1/account-keys/sth/latest.json" \
             --exclude "v1/account-keys/index.json" \
             --exclude "v1/account-keys/entries.json" \
@@ -520,6 +598,8 @@ jobs:
             --exclude "*" \
             --include "v1/proof/*" \
             --include "v1/entries/*" \
+            --include "v1/commit-log-2/proof/*" \
+            --include "v1/commit-log-2/entries/*" \
             --include "v1/account-keys/proof/*" \
             --include "v1/account-keys/entries/*" \
             --include "v1/binaries/proof/*" \
@@ -546,6 +626,9 @@ jobs:
             --include "v1/index.json" \
             --include "v1/entries.json" \
             --include "verify/group/*" \
+            --include "v1/commit-log-2/sth/latest.json" \
+            --include "v1/commit-log-2/index.json" \
+            --include "v1/commit-log-2/entries.json" \
             --include "v1/account-keys/sth/latest.json" \
             --include "v1/account-keys/index.json" \
             --include "v1/account-keys/entries.json" \
@@ -638,7 +721,11 @@ jobs:
           #     at S_old, a vanished S_old, or a shrinking latest size all mean
           #     attested history was rewritten — append-only was violated.
           check_tree() {
-            name="$1"; prev="$2"; sth_base="$3"; latest_url="$4"
+            name="$1"; prev="$2"; sth_base="$3"; latest_url="$4"; allow_first="${5:-false}"
+            if [ ! -f "${prev}" ] && [ "${allow_first}" = "true" ]; then
+              echo "${name}: no prior STH; this run retires the first commit-log tree, so commit-log-2's baseline is recorded now."
+              return 0
+            fi
             if [ ! -f "${prev}" ]; then
               # Distinguish "never seeded" from "we HAD state and lost it". The
               # second is how this check silently disarmed itself for months
@@ -701,12 +788,76 @@ jobs:
             skip_tripwire=1
           fi
 
+          # ── The retired first commit-log tree (#1579) ────────────────────────
+          # Its old baseline (.sth-prev/commit-latest.json) was the last head that
+          # passed the self-audit, size 137. Its latest.json now points at the
+          # 129 fork, so the old "latest never shrinks" check would fail forever.
+          # It is retired against the reset statement instead, never silently
+          # dropped:
+          #   * transition run (old baseline present, no retirement marker): the
+          #     old baseline must still be served byte-for-byte AND be a head the
+          #     signed reset statement places on the consistent chain. Then it is
+          #     replaced by a marker pinning the served statement and the frozen
+          #     latest.json by hash;
+          #   * every later run: both hashes must still match. Any change to the
+          #     statement or to the frozen head is a failure.
+          # pollis-verify remote above has already verified the statement's
+          # signature and every head it lists.
+          retire_v1() {
+            marker=".sth-prev/commit-log-retired.json"
+            reset_sha="$(curl -fsS --max-time 20 "${base}/v1/commit-log-reset.json" | sha256sum | cut -d' ' -f1)"
+            latest_sha="$(curl -fsS --max-time 20 "${base}/v1/sth/latest.json" | sha256sum | cut -d' ' -f1)"
+            if [ -f "${marker}" ]; then
+              if [ "$(jq -r '.reset_sha256' "${marker}")" != "${reset_sha}" ]; then
+                echo "::error::commit-log (retired): the served reset statement CHANGED since it was pinned."
+                return 1
+              fi
+              if [ "$(jq -r '.frozen_latest_sha256' "${marker}")" != "${latest_sha}" ]; then
+                echo "::error::commit-log (retired): the frozen /v1/sth/latest.json CHANGED: the retired tree is being written to."
+                return 1
+              fi
+              echo "commit-log (retired): reset statement and frozen latest.json unchanged."
+              return 0
+            fi
+            old=".sth-prev/commit-latest.json"
+            if [ -f "${old}" ]; then
+              size="$(jq -r '.tree_size' "${old}")"
+              served="$(curl -fsS --max-time 20 "${base}/v1/sth/${size}.json" || echo "")"
+              if [ -z "${served}" ] \
+                 || [ "$(echo "${served}" | jq -r '.root_hash')" != "$(jq -r '.root_hash' "${old}")" ] \
+                 || [ "$(echo "${served}" | jq -r '.signature')" != "$(jq -r '.signature' "${old}")" ]; then
+                echo "::error::commit-log (retired): the last audited head (size ${size}) is gone or changed."
+                return 1
+              fi
+              # Expected: size 137, the last head to pass the audit. A listed
+              # fork is accepted too (it is described, and signed); anything
+              # else is a head the statement does not account for.
+              described="$(curl -fsS --max-time 20 "${base}/v1/commit-log-reset.json" \
+                | jq --argjson s "${size}" --arg root "$(jq -r '.root_hash' "${old}")" \
+                  '.statement.retired as $r | (($r.chain_sizes | index($s)) != null) or ([$r.forks[] | select(.tree_size == $s and .root_hash == $root)] | length > 0)')"
+              if [ "${described}" != "true" ]; then
+                echo "::error::commit-log (retired): the last audited head (size ${size}) is not one the reset statement describes."
+                return 1
+              fi
+              echo "commit-log (retired): last audited head ${size} is described by the reset statement; retiring its baseline."
+            elif [ "${seeded:-false}" = "true" ]; then
+              echo "::error::commit-log (retired): tripwire state has neither the old baseline nor a retirement marker."
+              return 1
+            fi
+            rm -f "${old}"
+            jq -n --arg r "${reset_sha}" --arg l "${latest_sha}" \
+              '{reset_sha256: $r, frozen_latest_sha256: $l}' > "${marker}"
+            retiring_now=true
+          }
+
           rc=0
+          retiring_now=false
           if [ "${skip_tripwire}" = "1" ]; then
             echo "tripwire: skipped (rotation)."
           else
-          check_tree "commit-log" ".sth-prev/commit-latest.json" \
-            "${base}/v1/sth" "${base}/v1/sth/latest.json" || rc=1
+          retire_v1 || rc=1
+          check_tree "commit-log-2" ".sth-prev/commit-log-2-latest.json" \
+            "${base}/v1/commit-log-2/sth" "${base}/v1/commit-log-2/sth/latest.json" "${retiring_now}" || rc=1
           # The account tree may be brand-new this publish; only tripwire if a
           # prior STH was cached.
           check_tree "account-key" ".sth-prev/account-latest.json" \
@@ -723,7 +874,8 @@ jobs:
 
           # (3) Refresh the cached latest STHs for the next run's tripwire.
           mkdir -p .sth-prev
-          curl -fsS --max-time 20 "${base}/v1/sth/latest.json" -o .sth-prev/commit-latest.json
+          # commit-log-2 only: the retired tree's state is the marker above.
+          curl -fsS --max-time 20 "${base}/v1/commit-log-2/sth/latest.json" -o .sth-prev/commit-log-2-latest.json
           curl -fsS --max-time 20 "${base}/v1/account-keys/sth/latest.json" \
             -o .sth-prev/account-latest.json \
             || echo "account latest not yet visible — will seed next run"

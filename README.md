@@ -142,7 +142,11 @@ can fetch it with `curl` and check the math with your own tools.
 
 The account-key and binaries trees use the same layout under `/v1/account-keys/...`
 and `/v1/binaries/...`, each signed under its own context so a head for one cannot
-pass as a head for another. The browser explorer at
+pass as a head for another. The paths in the table are the commit log's first tree,
+which was retired in October 2026 and stays served, frozen; the live commit log uses
+the same layout under `/v1/commit-log-2/...`, and `/v1/commit-log-reset.json` is the
+signed statement that explains why (see `docs/transparency.md`, "Commit-log reset
+(#1579)"). The browser explorer at
 [pollis.com/transparency](https://pollis.com/transparency) shows the same data, but
 it is only as trustworthy as the server it calls; run the CLI for a verdict you can
 rely on. Full reference: [docs/transparency.md](docs/transparency.md).

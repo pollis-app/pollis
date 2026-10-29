@@ -360,7 +360,7 @@ const TREES = [
     id: "commit-log",
     name: "Commit log",
     desc: "conversation history",
-    url: BACKEND_BASE + "/v1/sth/latest.json",
+    url: BACKEND_BASE + "/v1/commit-log-2/sth/latest.json",
   },
   {
     id: "account-keys",
@@ -509,7 +509,7 @@ function renderKeyUnavailable() {
 }
 
 function loadKey() {
-  fetchJSON(BACKEND_BASE + "/v1/public_key.json")
+  fetchJSON(BACKEND_BASE + "/v1/commit-log-2/public_key.json")
     .then(function (doc) {
       const served = doc && doc.public_key ? String(doc.public_key).trim() : "";
       renderKey(served);
