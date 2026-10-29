@@ -46,6 +46,7 @@ import {
 import { refreshUnread } from "./queries/useUnread";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
+import { catchUpThenBackstop } from "../lib/mlsBackstop";
 
 export function useInboxRealtime() {
   const signedInId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -318,9 +319,15 @@ export function useInboxRealtime() {
           }
         }
       }
-      for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
-        void ingestRef.current(target.id, target.kind);
-      }
+      // Then the re-add backstop (#1571): a device missing from a
+      // conversation's tree — one of ours or a peer's — is put back now, not
+      // when it next opens that conversation and joins at the head.
+      const resumedUser = userId;
+      void catchUpThenBackstop(
+        catchUpTargets(groupsRef.current, dmsRef.current),
+        (id, kind) => ingestRef.current(id, kind),
+        () => invoke("reconcile_backstop_all", { userId: resumedUser }),
+      );
       // A send the OS suspended mid-flight, or one that failed while the
       // phone was offline, goes out now (#1335).
       void flushOutbox(qcRef.current);
@@ -347,10 +354,15 @@ export function useInboxRealtime() {
       return;
     }
     landedRef.current = true;
-    for (const target of catchUpTargets(groupsRef.current, dmsRef.current)) {
-      void ingestRef.current(target.id, target.kind);
-    }
-  }, [inApp, groupsLoaded, dmsLoaded]);
+    const landedUser = signedInId;
+    // The same re-add backstop a resume runs (#1571), once the landing
+    // catch-up has settled.
+    void catchUpThenBackstop(
+      catchUpTargets(groupsRef.current, dmsRef.current),
+      (id, kind) => ingestRef.current(id, kind),
+      () => invoke("reconcile_backstop_all", { userId: landedUser }),
+    );
+  }, [inApp, groupsLoaded, dmsLoaded, signedInId]);
 
   // Signed in / unlocked: deliver what the durable outbox holds (#1335) — a
   // message a killed process left unsent. The core starts this drain itself
