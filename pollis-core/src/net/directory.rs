@@ -1,29 +1,10 @@
-//! The client's consumer of the signed relay **directory** (issue #616 §3, the
-//! frozen contract; the hydra's `infra/relay-hydra/lib/directory-verify.mjs` is
-//! the byte-for-byte reference this mirrors). The reconciler Lambda signs a
-//! directory of live relay endpoints and publishes it at a stable HTTPS URL; this
-//! module fetches it, verifies the Ed25519 signature against the client-pinned
-//! public key, and hands back the typed [`Directory`]. The overlay engine
-//! ([`crate::net::overlay`]) turns that into the live relay pool.
+//! Fetches and verifies the signed relay **directory** (#616 §3; reference: `directory-verify.mjs`).
 //!
-//! **Byte-for-byte discipline (§3).** The envelope is
-//! `{ "payload_b64", "signature_b64" }`. We verify the signature over the EXACT
-//! bytes we base64-decode from `payload_b64`, THEN parse those bytes as the
-//! Directory. No JSON canonicalization — both sides sign/verify identical bytes.
+//! **Byte-for-byte (§3).** Verify the signature over the decoded `payload_b64` bytes, THEN parse them.
 //!
-//! **Fail closed.** Every rejection ([`DirectoryError`]) leaves the caller with no
-//! usable relays, which in `Prefer` means direct fallback and in `Strict` a
-//! surfaced degrade — never a silent send over an unverified path. The reject set
-//! matches the reference exactly: bad signature, `version != 1`, a `type` that is
-//! not [`DIRECTORY_TYPE`], `now >= expires_at`, malformed JSON (envelope or
-//! payload), or empty `relays`.
+//! **Fail closed.** Every [`DirectoryError`] leaves no usable relays; the reject set matches the reference.
 //!
-//! **Bootstrap is direct, by necessity.** The fetch uses a plain (non-overlay)
-//! HTTP client: the directory is what BUILDS the relay pool, so it cannot itself
-//! route through a pool that does not exist yet. The artifact is Ed25519-signed,
-//! so its integrity does not depend on the transport — only the client's IP is
-//! exposed to the directory host during the fetch, the same unavoidable bootstrap
-//! every bridge-list design has.
+//! **Bootstrap is direct**: the directory builds the pool, so it cannot route through it.
 
 use std::time::Duration;
 
@@ -31,8 +12,7 @@ use base64::Engine as _;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 
-/// How long a single directory fetch may take before it is treated as a failure
-/// (the refresh loop retries; the pool keeps its previous membership meanwhile).
+/// Per-fetch timeout; the pool keeps its membership meanwhile.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Why a directory was rejected. Every variant is fail-closed at the call site.
@@ -65,34 +45,14 @@ pub enum DirectoryError {
 /// The artifact name a directory payload identifies itself by, mirroring
 /// `pollis_relay::REVOCATION_TYPE` for the revocation list.
 ///
-/// **The cross-artifact confusion guard.** The pool signs more than one artifact
-/// with the SAME pinned Ed25519 key (`POLLIS_OVERLAY_DIRECTORY_KEY`): the
-/// directory here and the `revocations.json` `pollis_relay::verify_revocations`
-/// consumes. A valid signature therefore proves only "this key signed these
-/// bytes", never "these bytes are the artifact I asked for" — so an on-path
-/// attacker can serve one where the other is expected and both signatures check
-/// out. The revocation verifier has always rejected a payload whose `type` is not
-/// its own; this is the directory's half of the same rule.
+/// **Cross-artifact guard.** The same key signs the directory and `revocations.json`, so a signature alone can't tell them apart.
 ///
-/// **The guard is deliberately ONE-SIDED, and that is not a weakening.** A
-/// present-and-wrong `type` is rejected; an ABSENT one is accepted — which is
-/// what the reconciler publishes today and what it must be free to keep
-/// publishing. Requiring the field would couple this release to a reconciler
-/// release with no safe ordering between them: ship the client first and every
-/// directory is rejected until the Lambda catches up, i.e. a fleet-wide outage
-/// waiting on a deploy race. (Same reason `version` stayed `1` for the
-/// `revocation` and `peers` fields.)
+/// **One-sided on purpose**: a wrong `type` is rejected, an absent one accepted, so no reconciler deploy-order race.
 ///
-/// It costs nothing, because absence is unambiguous in the direction that
-/// matters: every OTHER artifact this key signs DOES carry a `type`, so a payload
-/// with none cannot be one of them. What the guard buys is that the rejection is
-/// a DECISION rather than a side effect of [`Directory`]'s required fields
-/// (`issued_at`, `relays`) happening to be absent from the other artifacts — a
-/// rejection one future `#[serde(default)]` away from silently disappearing.
+/// Safe because every other artifact this key signs carries a `type`.
 pub const DIRECTORY_TYPE: &str = "pollis-relay-directory";
 
-/// The signed envelope as published: base64 (STANDARD) of the payload bytes plus
-/// base64 of the 64-byte Ed25519 signature over those exact bytes.
+/// The signed envelope: base64 payload bytes plus a base64 Ed25519 signature over them.
 #[derive(Deserialize)]
 struct Envelope {
     payload_b64: String,
@@ -103,35 +63,20 @@ struct Envelope {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Directory {
     pub version: u32,
-    /// The artifact self-identifier, `None` for a directory published before
-    /// [`DIRECTORY_TYPE`] existed. Read as the JSON key `type` to match the
-    /// revocation list's field of the same name (`type` is a Rust keyword).
-    /// See [`DIRECTORY_TYPE`] for what it guards and why absence is allowed.
+    /// JSON `type`; `None` before [`DIRECTORY_TYPE`] existed (see there).
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
     pub issued_at: i64,
     pub expires_at: i64,
     pub relays: Vec<DirectoryRelay>,
-    /// #813 revocation anchor. `None` for a directory published before
-    /// revocation existed, or by a pool that has not enabled it.
+    /// #813 revocation anchor; `None` when not enabled.
     ///
-    /// One additive **optional** field; `version` stays `1` deliberately (Phase C
-    /// decision) — bumping it would make every already-shipped client reject the
-    /// directory outright, a fleet-wide outage strictly worse than the exposure
-    /// window it was meant to close. See [`crate::net::revocation`] for what the
-    /// client does with it.
+    /// Additive and optional; `version` stays `1` so shipped clients keep accepting the directory.
     #[serde(default)]
     pub revocation: Option<RevocationAnchor>,
-    /// #813 wave-3 peer-hosted relays. Empty for a directory published before
-    /// peers existed, by a pool with no consenting devices parked, or by one
-    /// that has excluded them all as revoked.
+    /// #813 wave-3 peer-hosted relays.
     ///
-    /// The second additive **optional** field, on the same terms as
-    /// `revocation`: `version` stays `1`. **Absent means "no peers", never
-    /// "unknown"** — hence a `Vec` that defaults to empty rather than an
-    /// `Option`: there is no third state for a caller to mishandle, and the
-    /// fail-closed answer (use no peers) is the one an absent field already
-    /// produces.
+    /// Additive, `version` stays `1`. **Absent means "no peers"**, hence a defaulted `Vec`.
     #[serde(default)]
     pub peers: Vec<DirectoryPeer>,
 }
@@ -139,22 +84,15 @@ pub struct Directory {
 /// The directory's binding to the separately-published, short-lived
 /// `revocations.json`.
 ///
-/// Both artifacts are signed by the same key and neither can be forged, but they
-/// can be **paired dishonestly**: serve a fresh directory beside a
-/// stale-but-unexpired revocation list and the newest revocation disappears.
-/// Carrying the sequence inside the signed directory makes that pairing
-/// detectable — which is the difference between "signed" and "fresh".
+/// Carrying the sequence inside the signed directory detects a fresh directory paired with a stale list.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RevocationAnchor {
-    /// Monotonic publisher sequence (the SSM parameter's `Version`). A list
-    /// below this is a replay.
+    /// Monotonic publisher sequence; a list below this is a replay.
     pub seq: u64,
     /// Where the list lives, relative to the directory URL unless absolute.
     #[serde(default)]
     pub path: Option<String>,
-    /// How many relays the anchored list revokes. `Some(0)` is the only value
-    /// that lets a client tolerate an unreachable list (see
-    /// [`crate::net::revocation`]'s deploy-order carve-out).
+    /// How many relays the list revokes. Only `Some(0)` tolerates an unreachable list.
     #[serde(default)]
     pub count: Option<u32>,
 }
@@ -163,8 +101,7 @@ pub struct RevocationAnchor {
 const DEFAULT_REVOCATION_PATH: &str = "revocations.json";
 
 impl RevocationAnchor {
-    /// The path to fetch, defaulted. An empty string is treated as absent —
-    /// mirroring `directory-verify.mjs`'s `length > 0` guard.
+    /// The path to fetch; an empty string counts as absent.
     pub fn resolved_path(&self) -> &str {
         match self.path.as_deref().map(str::trim) {
             Some(p) if !p.is_empty() => p,
@@ -173,69 +110,38 @@ impl RevocationAnchor {
     }
 }
 
-/// One relay advertised by the directory. `cert_b64` is base64 (STANDARD) of the
-/// DER bytes of that node's pinned QUIC leaf — the client verifies the relay it
-/// dials against exactly this cert (the relay's identity *is* its cert, §7).
+/// One relay; `cert_b64` is its pinned QUIC leaf (the cert is the identity, §7).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DirectoryRelay {
     /// Directly-dialable `public-ip-or-host:udp-port`.
     pub addr: String,
-    /// Informational (the client may later prefer nearer regions). Defaulted so a
-    /// future directory that omits it still parses.
+    /// Informational; defaulted.
     #[serde(default)]
     pub region: String,
     pub cert_b64: String,
 }
 
-/// One **peer-hosted** relay the pool advertises (#813 wave 3), published from
-/// the parked-peer fingerprints the first-party relays report on their health
-/// port. A peer entry is deliberately NOT shaped like a [`DirectoryRelay`]:
+/// One **peer-hosted** relay (#813 wave 3). Deliberately unlike a [`DirectoryRelay`]:
 ///
-/// - there is **no `addr`**, because a peer never listens for inbound
-///   connections. It is reached only through a first-party relay it has parked
-///   an outbound link with, so a directly-dialable peer is not a state this
-///   design can be in;
-/// - there is **no id, no region and nothing about the volunteer** — a relay
-///   identity must not be linkable to an account. The cert IS the identity (§7),
-///   and it is the selector phase C's revocation list already understands.
+/// - **no `addr`**: a peer never listens; it is reached only through a relay it parked at;
+/// - **nothing about the volunteer**: the cert IS the identity (§7).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DirectoryPeer {
-    /// Base64 (STANDARD) of the DER bytes of the peer's relay leaf. The client
-    /// pins the layer it runs to this hop against exactly these bytes, so
-    /// whichever relay carries the parked link cannot substitute itself for it.
+    /// Base64 DER of the peer's relay leaf; this hop's layer is pinned to it.
     pub cert_b64: String,
-    /// The first-party relay addresses this peer is currently parked at, i.e.
-    /// the relays that can reach it. Defaulted so a directory that omits it
-    /// still parses; an entry with none is unreachable and the client drops it.
-    ///
-    /// In v1 a peer parks at **every** first-party relay in the directory, so
-    /// this is informational — the field exists so the scaling path (park at a
-    /// subset, have selection target a relay that holds the link) needs no
-    /// schema change later. [`crate::net::overlay`] already honours it, so that
-    /// change is a reconciler change only.
+    /// First-party relays this peer is parked at; an entry with none is dropped.
     #[serde(default)]
     pub parked_at: Vec<String>,
 }
 
 /// Fetch the raw envelope bytes from `url` over a DIRECT (non-overlay) client.
-/// See the module docs for why the fetch cannot route through the overlay.
 pub async fn fetch_directory(url: &str) -> Result<Vec<u8>, DirectoryError> {
     fetch_signed(url).await
 }
 
-/// Fetch any of the pool's signed artifacts (the directory itself, or the
-/// `revocations.json` its anchor names) over the same DIRECT client. Both are
-/// Ed25519-signed, so their integrity does not depend on the transport, and both
-/// must bootstrap without the pool they describe.
+/// Fetch any signed pool artifact over the same DIRECT client.
 pub async fn fetch_signed(url: &str) -> Result<Vec<u8>, DirectoryError> {
-    // The SHARED direct client (`pollis_relay::http`), not a fresh build. A
-    // freshly-built client starts with an empty connection pool, so building one
-    // per fetch paid a full DNS + TCP + TLS handshake every time — and this path
-    // fetches two artifacts (the directory and the `revocations.json` its anchor
-    // names) from the same host, back to back, on a schedule. `None` = direct: an
-    // artifact that describes the relay pool cannot bootstrap through it.
-    // The timeout moves onto the request so it stays identical while the pool is
-    // shared (a client-wide timeout would leak onto every other direct caller).
+    // The shared direct client keeps its connection pool across back-to-back fetches; timeout is per-request.
     let resp = pollis_relay::http::http_client(None)
         .get(url)
         .timeout(FETCH_TIMEOUT)
@@ -252,13 +158,9 @@ pub async fn fetch_signed(url: &str) -> Result<Vec<u8>, DirectoryError> {
 }
 
 /// Verify a directory envelope against the pinned public key and validity window,
-/// returning the parsed [`Directory`] on success. `pinned_pubkey_b64` is base64
-/// (STANDARD) of the raw 32-byte Ed25519 public key (as
-/// `POLLIS_OVERLAY_DIRECTORY_KEY` is minted). `now_secs` is injected so tests can
-/// exercise expiry deterministically.
+/// `pinned_pubkey_b64` is the raw 32-byte key in base64; `now_secs` is injected for tests.
 ///
-/// Mirrors `directory-verify.mjs` exactly: verify the signature over the decoded
-/// payload bytes FIRST, then parse and range-check.
+/// Mirrors `directory-verify.mjs`: verify signature FIRST, then parse and range-check.
 pub fn verify_directory(
     envelope_bytes: &[u8],
     pinned_pubkey_b64: &str,
@@ -287,9 +189,7 @@ pub fn verify_directory(
     if directory.version != 1 {
         return Err(DirectoryError::UnsupportedVersion(directory.version));
     }
-    // Cross-artifact confusion guard — see DIRECTORY_TYPE. Checked BEFORE the
-    // range checks so a foreign artifact is rejected as what it is rather than
-    // as "expired" or "no relays".
+    // Checked before range checks so a foreign artifact is rejected as such.
     if let Some(kind) = directory.kind.as_deref() {
         if kind != DIRECTORY_TYPE {
             return Err(DirectoryError::WrongType(kind.to_string()));
@@ -321,7 +221,6 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
 
-    // Deterministic key so the test never touches the RNG.
     fn signing_key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; 32])
     }
@@ -330,8 +229,7 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(sk.verifying_key().to_bytes())
     }
 
-    /// Build a signed envelope from a Directory JSON string (so tests can craft
-    /// exact payload bytes, including invalid ones, and sign them faithfully).
+    /// Sign a Directory JSON string as-is, so tests control the exact bytes.
     fn envelope_for(sk: &SigningKey, payload_json: &str) -> Vec<u8> {
         let payload = payload_json.as_bytes();
         let sig = sk.sign(payload);
@@ -356,7 +254,6 @@ mod tests {
         assert_eq!(dir.version, 1);
         assert_eq!(dir.relays.len(), 2);
         assert_eq!(dir.relays[0].addr, "203.0.113.7:9444");
-        // Per-node certs are distinct — the format carries one per entry.
         assert_ne!(dir.relays[0].cert_b64, dir.relays[1].cert_b64);
     }
 
@@ -364,7 +261,6 @@ mod tests {
     fn rejects_a_tampered_payload() {
         let sk = signing_key();
         let mut env = envelope_for(&sk, &valid_payload(2000));
-        // Flip a byte in the base64 payload so the signature no longer matches.
         let text = String::from_utf8(env).unwrap();
         let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
         let p = v["payload_b64"].as_str().unwrap().to_string();
@@ -406,7 +302,7 @@ mod tests {
     fn rejects_an_expired_directory() {
         let sk = signing_key();
         let env = envelope_for(&sk, &valid_payload(2000));
-        // now == expires_at is already expired (>=, matching the reference).
+        // now == expires_at is already expired.
         assert!(matches!(
             verify_directory(&env, &pinned_b64(&sk), 2000),
             Err(DirectoryError::Expired { .. })
@@ -424,9 +320,7 @@ mod tests {
         ));
     }
 
-    /// **Cross-artifact confusion, the positive case.** A directory that names
-    /// itself is accepted, and the name it must carry is exactly the one the
-    /// reconciler publishes.
+    /// Cross-artifact, positive case: the published name verifies.
     #[test]
     fn accepts_a_directory_that_names_its_own_artifact_type() {
         let sk = signing_key();
@@ -439,8 +333,7 @@ mod tests {
         assert_eq!(dir.relays.len(), 1);
     }
 
-    /// ...and a directory published before the field existed still verifies, so
-    /// shipping this guard cannot strand the fleet.
+    /// A directory without the field still verifies.
     #[test]
     fn accepts_a_directory_that_predates_the_artifact_type() {
         let sk = signing_key();
@@ -449,13 +342,7 @@ mod tests {
         assert!(dir.kind.is_none());
     }
 
-    /// **Cross-artifact confusion, the attack.** The pool signs the directory and
-    /// `revocations.json` with the SAME key, so a genuinely-signed revocation
-    /// list served where the directory is expected has a signature that verifies.
-    /// It must still be rejected — and rejected as the WRONG ARTIFACT, not as a
-    /// coincidence of which fields serde happened to require. The payload below
-    /// therefore also carries every field `Directory` needs, so nothing but the
-    /// `type` check can reject it.
+    /// Cross-artifact attack: a same-key revocation list with every Directory field is rejected by `type` alone.
     #[test]
     fn rejects_a_revocation_list_signed_by_the_same_key() {
         let sk = signing_key();
@@ -471,8 +358,7 @@ mod tests {
         }
     }
 
-    /// Any other artifact name is rejected too — the guard is an allowlist of
-    /// one, not a denylist of the revocation list.
+    /// The guard is an allowlist of one.
     #[test]
     fn rejects_an_unknown_artifact_type() {
         let sk = signing_key();
@@ -483,10 +369,7 @@ mod tests {
         ));
     }
 
-    /// The mirror of [`rejects_a_revocation_list_signed_by_the_same_key`]: the
-    /// OTHER verifier must reject a directory for the same reason. Both halves
-    /// live here so the pair cannot drift apart silently — one crate away, only
-    /// one of them had the guard.
+    /// Mirror case: the revocation verifier rejects a directory, kept here so the pair can't drift.
     #[test]
     fn the_revocation_verifier_rejects_a_directory_signed_by_the_same_key() {
         let sk = signing_key();
@@ -502,7 +385,6 @@ mod tests {
             "a same-key directory must be rejected by the revocation verifier"
         );
 
-        // ...and the artifact it IS for still verifies through the same call.
         let ok = format!(
             r#"{{"version":1,"type":"{}","seq":4,"issued_at":1000,"expires_at":2000,"revoked":[]}}"#,
             pollis_relay::REVOCATION_TYPE
@@ -511,8 +393,7 @@ mod tests {
             .expect("a well-formed revocation list must still verify");
     }
 
-    /// The #813 anchor is additive: a directory WITHOUT it still verifies (this
-    /// is what keeps already-shipped clients working), and `version` stays 1.
+    /// The #813 anchor is additive: a directory WITHOUT it still verifies.
     #[test]
     fn a_directory_without_a_revocation_anchor_still_verifies() {
         let sk = signing_key();
@@ -534,15 +415,13 @@ mod tests {
         assert_eq!(anchor.count, Some(2));
         assert_eq!(anchor.resolved_path(), "revocations.json");
 
-        // An explicit path wins; an empty one falls back to the default.
         let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"revocation":{"seq":1,"path":"  ","count":0}}"#;
         let dir =
             verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
         assert_eq!(dir.revocation.unwrap().resolved_path(), "revocations.json");
     }
 
-    /// The #813 wave-3 `peers` field is additive on the same terms: a directory
-    /// WITHOUT it still verifies and reads as "no peers", and `version` stays 1.
+    /// `peers` is additive too: absent reads as "no peers".
     #[test]
     fn a_directory_without_peers_still_verifies_and_means_no_peers() {
         let sk = signing_key();
@@ -566,17 +445,11 @@ mod tests {
         assert_eq!(dir.peers.len(), 2);
         assert_eq!(dir.peers[0].cert_b64, "UEVFUg==");
         assert_eq!(dir.peers[0].parked_at.len(), 2);
-        // A peer that reports no parking is parsed, not rejected — the client
-        // drops it as unreachable rather than the whole directory.
+        // A peer with no parking is parsed and dropped by the client, not rejected.
         assert!(dir.peers[1].parked_at.is_empty());
     }
 
-    /// **Backward compatibility of the frozen §3 contract.** A directory
-    /// carrying BOTH additive fields must still satisfy everything an
-    /// already-shipped client checks: version 1, its relay entries unchanged,
-    /// and no new required field anywhere. The Rust struct ignores unknown
-    /// fields, which is the property this pins — the JS half of the same
-    /// guarantee is `infra/relay-hydra/test/directory-contract.test.mjs`.
+    /// Frozen §3 contract: both additive fields leave everything a shipped client checks intact.
     #[test]
     fn an_old_client_still_parses_a_peers_carrying_directory() {
         let sk = signing_key();
@@ -601,10 +474,7 @@ mod tests {
         ));
     }
 
-    /// Cross-language interop proof: verify a REAL reconciler-signed directory
-    /// (Node `crypto.sign`) with this Rust verifier — the unit tests above only
-    /// prove dalek-signs / dalek-verifies. Ignored (needs the live pool + creds);
-    /// run locally with:
+    /// Cross-language proof against a real reconciler-signed directory. Ignored; run with:
     ///   POLLIS_OVERLAY_DIRECTORY_URL=... POLLIS_OVERLAY_DIRECTORY_KEY=... \
     ///     cargo test -p pollis-core --no-default-features --features test-harness \
     ///     net::directory::tests::verifies_the_live_directory -- --ignored --nocapture

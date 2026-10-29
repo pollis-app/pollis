@@ -1,49 +1,12 @@
 //! #875 — a REGRESSION GUARD, not a proof: no DS write body leaves its actor
 //! field unset.
 //!
-//! ## The failure this guards
-//!
-//! `pollis-delivery` resolves the acting user for every write through one of
-//! three helpers (`writes::resolve_actor`, `broker::resolve_user`,
-//! `writes::resolve_recipient`), all with the same rule:
-//!
-//! | DS `require_auth` | actor comes from | body's actor field |
-//! | --- | --- | --- |
-//! | **on** (production) | the device-signed `X-Pollis-User` | must EQUAL the signer, else `403` |
-//! | **off** | the body's actor field | **required** — missing/empty is `403`/`400` |
-//!
-//! So a body without it is perfectly healthy against a signed deployment and a
-//! hard refusal against an unsigned one — invisible to anyone running with auth
-//! on, and a total outage for anyone running with it off. It has been found and
-//! fixed three times: `/v1/messages/delete` (×2) and `/v1/emoji/*` earlier in
-//! #875, then twelve account/enrollment/welcome endpoints and the four broker
-//! endpoints when typing the client surfaced them all at once.
-//!
-//! ## What typing did and did not fix
-//!
-//! Typed bodies (`pollis-api`) made OMITTING the field impossible: a Rust struct
-//! literal must name every field, so a forgotten actor is a compile error. But
-//! `user_id: None` is a perfectly legal way to name it, and it reproduces the
-//! outage exactly. The type system cannot tell a deliberate `None` from a lazy
-//! one — which is what this scan is for.
-//!
-//! ## Why a source scan
-//!
-//! The property is about a VALUE at every call site, so nothing in the type
-//! system can carry it, and a runtime test would need every command driven
-//! against a no-auth DS. `pollis-delivery/tests/schema_is_not_reinvented.rs`
-//! establishes the pattern: when the failure mode is "someone adds a convenient
-//! line that no assertion elsewhere would notice", grep for the line.
-//!
-//! This is a guard. It proves no call site currently sets an actor field to a
-//! bare `None`; it does NOT prove the values sent are correct, and it cannot see
-//! a body built through a helper that returns `None` from elsewhere.
+//! With DS `require_auth` off, the body's actor field is required; a `None`
+//! there works against production and fails on any unsigned deployment.
 
 use std::path::{Path, PathBuf};
 
-/// Field names `pollis-delivery` reads as "who is acting", across all three
-/// resolver helpers. Taken from the `*Body` definitions in `pollis-api` that
-/// document a field as the no-auth actor/recipient.
+/// Field names `pollis-delivery` reads as "who is acting".
 const ACTOR_FIELDS: &[&str] = &[
     "actor_id",
     "approver_id",
@@ -59,11 +22,6 @@ const ACTOR_FIELDS: &[&str] = &[
 ];
 
 /// Call sites allowed to pass `None`, each with the reason it is not an actor.
-///
-/// Empty, and that is the point: every DS write the client makes currently names
-/// its acting user. Adding an entry here is a deliberate claim that the field is
-/// not the DS's actor for that endpoint — check the handler's `resolve_*` line
-/// before you make it.
 const ALLOWED: &[(&str, &str, &str)] = &[];
 
 fn command_sources() -> Vec<PathBuf> {
@@ -99,8 +57,7 @@ fn no_ds_write_body_sets_its_actor_field_to_none() {
             .replace('\\', "/");
         let body = std::fs::read_to_string(&path).expect("read");
 
-        // Track whether we are inside a `pollis_api::…Body { … }` literal, so a
-        // `None` in unrelated code (a local struct, a match arm) is not flagged.
+        // Only inside a `pollis_api::…Body { … }` literal.
         let mut depth: i32 = 0;
         for (i, line) in body.lines().enumerate() {
             if depth == 0 {
@@ -142,10 +99,6 @@ fn no_ds_write_body_sets_its_actor_field_to_none() {
 }
 
 /// Control: the scanner can actually see an offending line.
-///
-/// Without this, `no_ds_write_body_sets_its_actor_field_to_none` would pass just
-/// as happily if the literal-tracking were broken and it inspected nothing at
-/// all — which is the most likely way a source scan silently stops working.
 #[test]
 fn the_scanner_recognises_an_offending_line() {
     let sample = "    let b = pollis_api::emoji::RemoveEmojiBody {\n\
@@ -179,8 +132,6 @@ fn the_scanner_recognises_an_offending_line() {
     );
 }
 
-/// The field list is not allowed to quietly empty out — an empty `ACTOR_FIELDS`
-/// would make the scan above pass against anything.
 #[test]
 fn the_actor_field_list_is_populated() {
     assert!(

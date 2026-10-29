@@ -31,18 +31,14 @@ async fn overlay_directory_routes_real_traffic_through_a_relay() {
     );
     let state = Arc::new(AppState::new(config).await.expect("AppState::new"));
 
-    // 1. Log in first, with the overlay OFF — enrollment/OTP is a pre-cert
-    //    bootstrap that must go direct (it can't authenticate to a relay yet).
+    // Log in with the overlay OFF: pre-cert OTP can't authenticate to a relay.
     let profile = auth::get_session(&state)
         .await
         .expect("get_session")
         .expect("DEV_EMAIL should auto-log-in");
     eprintln!("[live] logged in as user {}", profile.id);
 
-    // First-device tail: set a PIN (opens the encrypted local DB + persists the
-    // account key) then initialize identity — the relay handshake needs both the
-    // account key and the device signing key, which this makes loadable. Mirrors
-    // the desktop/TUI first-device flow (set_pin -> initialize_identity).
+    // The relay handshake needs the account key and device signing key.
     pin::set_pin(&state, None, "0000".to_string())
         .await
         .expect("set_pin (opens local DB, persists account key)");
@@ -51,9 +47,7 @@ async fn overlay_directory_routes_real_traffic_through_a_relay() {
         .expect("initialize_identity");
     eprintln!("[live] device fully provisioned (PIN set, identity initialized)");
 
-    // 2. Turn the overlay to STRICT. This fetches the signed directory, verifies
-    //    it against the pinned key, builds the relay pool, and reconnects the
-    //    remote DBs through the loopback shim. Strict = no silent direct fallback.
+    // Strict = no silent direct fallback.
     overlay::apply_overlay_mode(&state, OverlayMode::Strict)
         .await
         .expect("apply Strict overlay (directory fetch + pool build)");
@@ -61,9 +55,7 @@ async fn overlay_directory_routes_real_traffic_through_a_relay() {
     assert_eq!(live, "strict", "overlay must actually be strict now");
     eprintln!("[live] overlay is STRICT — remote DB is routed through the relay");
 
-    // 3. A real remote read: SELECT from the users table on Turso. In Strict this
-    //    can ONLY succeed by going through the relay — if the relay weren't
-    //    forwarding, this would degrade/error instead of returning the row.
+    // In Strict this can only succeed through the relay.
     let read = user::get_user_profile(profile.id.clone(), &state)
         .await
         .expect("remote profile read routed through the relay");

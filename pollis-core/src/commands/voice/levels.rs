@@ -1,35 +1,19 @@
-//! Per-source multi-band audio level analysis for the participant-tile
-//! "live waveform" meter. We already compute a per-frame peak for speaking
-//! detection (see `playback.rs` / `lifecycle.rs`) and throw it away; this
-//! turns the same PCM into a small bank of band envelopes so the UI can
-//! show a real, per-source meter instead of a static glyph.
+//! Per-source multi-band level meter for participant tiles.
 //!
-//! Deliberately cheap: a fixed bank of 2nd-order bandpass biquads (RBJ
-//! cookbook, constant 0 dB peak gain) with a peak-hold envelope follower.
-//! No FFT, no allocation in the hot path. For mono voice at 48 kHz this is
-//! a few million flops/sec across all bands — negligible next to the codec
-//! and APM. The result is decimated to ~20 Hz before it leaves Rust.
+//! Cheap: a few RBJ bandpass biquads + peak-hold envelopes; no FFT or allocation.
 
 use std::f32::consts::PI;
 
-/// Number of frequency bands. MUST stay in sync with the renderer
-/// (`frontend/src/voice/audioLevels.ts` `BAND_COUNT`). Voice energy is
-/// concentrated low/low-mid, so three wide bands capture it well — five
-/// narrow bands left the top two near-dead for normal speech.
+/// Number of bands; MUST match `BAND_COUNT` in `frontend/src/voice/audioLevels.ts`.
 pub const BAND_COUNT: usize = 3;
 
-/// Band centers across the voice-relevant range (Hz): fundamentals/low
-/// formants, the main formant region, and consonant/sibilance energy.
+/// Band centers (Hz): low formants, main formants, sibilance.
 const CENTERS_HZ: [f32; BAND_COUNT] = [250.0, 800.0, 2000.0];
 
-/// Bandpass Q. Low Q = wide bands that integrate more energy → a meter
-/// that actually moves at conversational levels.
+/// Bandpass Q; low = wide bands, so the meter moves at speaking levels.
 const Q: f32 = 1.0;
 
-/// i16 band-envelope magnitude that maps to a full bar. Each bandpass only
-/// passes a slice of the signal, so per-band envelopes are a fraction of
-/// the full-band peak — this reference is set low (with a perceptual curve
-/// in `levels()`) so normal speech a foot from the mic fills the bars.
+/// Band-envelope magnitude for a full bar; low because bands pass a slice.
 const REF: f32 = 2000.0;
 
 /// Direct-Form-I biquad. Coefficients are pre-normalized by a0.
@@ -124,9 +108,7 @@ impl BandAnalyzer {
         }
     }
 
-    /// Current per-band levels, normalized to 0..1 with a perceptual
-    /// (sqrt) curve so quiet-but-audible speech reads as real movement
-    /// instead of a barely-lifted floor.
+    /// Per-band levels in 0..1, sqrt-curved so quiet speech still moves.
     pub fn levels(&self) -> Vec<f32> {
         self.env
             .iter()

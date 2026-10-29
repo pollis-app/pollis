@@ -1,13 +1,5 @@
 //! Signal-style safety numbers / contact verification.
-//!
-//! The cryptographic root of trust for a user is `users.account_id_pub`
-//! (32-byte Ed25519). Every device cert chains to it, so verifying this
-//! one value out-of-band transitively covers all of a user's devices.
-//!
-//! Turso (and anyone who can write to it) is untrusted, so we cannot rely
-//! on the server to honestly report a peer's `account_id_pub`. This module
-//! pins the first-seen key locally (TOFU) and lets two humans compare a
-//! 60-digit safety number derived from both parties' keys.
+//! `account_id_pub` is the root of trust; the server is untrusted, so pin it locally (TOFU).
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -18,13 +10,10 @@ use sha2::{Digest, Sha512};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// Iteration count for the fingerprint hash. Matches Signal's
-/// NumericFingerprintGenerator default — deliberately slow so a brute
-/// force against a truncated fingerprint is infeasible.
+/// Signal's default; deliberately slow against brute force.
 const FP_ITERATIONS: usize = 5200;
 
-/// Bump if the fingerprint derivation ever changes so old and new
-/// clients never display a matching number under different schemes.
+/// Bump if the derivation changes, so old/new schemes never show a matching number.
 const FP_VERSION: u16 = 0;
 
 #[derive(Debug, Serialize)]
@@ -35,25 +24,17 @@ pub struct SafetyNumberInfo {
     pub status: String,
     /// Peer's current identity version (bumps on account reset).
     pub peer_identity_version: i64,
-    /// Both parties' raw `account_id_pub` keys (hex, lowercased) joined
-    /// with `:` in canonical order (sorted lexicographically) so the QR
-    /// payload is identical on both sides regardless of who opens whose
-    /// profile. Decoders compare this directly — no separate "is this
-    /// my key or yours" branch needed.
+    /// Both parties' keys (lowercase hex), sorted so both sides get the same payload.
     pub qr_payload: String,
 }
 
-/// SHA-512^N over (version || pubkey || stable_id), then 6 blocks of
-/// 5 bytes each rendered as 5 decimal digits → a 30-digit per-user
-/// fingerprint. Signal's scheme, our own domain/version.
+/// SHA-512^N then 6×5 digits → a 30-digit per-user fingerprint (Signal's scheme).
 fn fingerprint(pubkey: &[u8], stable_id: &[u8]) -> String {
     let mut hasher = Sha512::new();
     hasher.update(FP_VERSION.to_be_bytes());
     hasher.update(pubkey);
     hasher.update(stable_id);
-    // A fixed buffer, not a fresh `Vec` per round: the loop runs
-    // `FP_ITERATIONS` times, so a re-allocating digest costs ~5200 heap
-    // allocations for every safety number rendered.
+    // Fixed buffer: avoids ~5200 allocations per safety number.
     let mut hash = [0u8; 64];
     hash.copy_from_slice(&hasher.finalize());
     for _ in 1..FP_ITERATIONS {
@@ -75,9 +56,7 @@ fn fingerprint(pubkey: &[u8], stable_id: &[u8]) -> String {
     out
 }
 
-/// Combine both parties' 30-digit fingerprints into one 60-digit number.
-/// Sorted so both sides compute the identical string regardless of who
-/// opens whose profile, then grouped into 5-digit blocks.
+/// Sorted so both sides compute the same 60-digit number.
 fn combined(my_fp: &str, peer_fp: &str) -> String {
     let (a, b) = if my_fp <= peer_fp {
         (my_fp, peer_fp)
@@ -101,8 +80,6 @@ pub async fn get_safety_number(
     peer_user_id: String,
     state: &Arc<AppState>,
 ) -> Result<SafetyNumberInfo> {
-    // Both keys in ONE request — this used to be two sequential reads for a
-    // screen that cannot render until it has both.
     let keys = crate::commands::ds_reads::account_keys(
         state,
         &[my_user_id.clone(), peer_user_id.clone()],
@@ -124,8 +101,6 @@ pub async fn get_safety_number(
     let peer_fp = fingerprint(&peer_pub, peer_user_id.as_bytes());
     let safety_number = combined(&my_fp, &peer_fp);
 
-    // QR payload: both raw pubkeys (lowercase hex) joined with `:`, in a
-    // canonical (sorted) order so both sides scan the same string.
     let my_hex = hex::encode(&my_pub);
     let peer_hex = hex::encode(&peer_pub);
     let (a, b) = if my_hex <= peer_hex {
@@ -164,12 +139,7 @@ pub async fn get_safety_number(
     })
 }
 
-/// Snapshot of every contact for whom the local user has a TOFU pin row,
-/// keyed by peer user id. `verified=true` means they were explicitly marked
-/// verified by the user; `key_changed=true` means the pin exists but the
-/// current `account_id_pub` differs from what was pinned. Drives the
-/// shield-icon badges in DM/contact lists and the inline key-changed
-/// banner without N round-trips for an N-DM sidebar.
+/// Every TOFU-pinned contact, keyed by peer user id.
 #[derive(Debug, Serialize)]
 pub struct PeerVerificationEntry {
     pub peer_user_id: String,
@@ -180,9 +150,6 @@ pub struct PeerVerificationEntry {
 pub async fn list_peer_verifications(
     state: &Arc<AppState>,
 ) -> Result<Vec<PeerVerificationEntry>> {
-    // Read all pinned rows from the local DB first (cheap, single query),
-    // then cross-reference against the current `account_id_pub` snapshot in
-    // Turso so we can flag mismatches as `key_changed`.
     let pinned: Vec<(String, Vec<u8>, i64)> = {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -207,17 +174,7 @@ pub async fn list_peer_verifications(
         return Ok(Vec::new());
     }
 
-    // ONE Turso SELECT for every pinned peer (#875). This is what the struct
-    // docs above always claimed — "without N round-trips for an N-DM sidebar" —
-    // and what the function did not do: it called `fetch_account_key` per peer,
-    // so a user with 80 pinned contacts opened the sidebar on 80 sequential
-    // Turso queries. Bound by position, deliberately, for the reason
-    // `batch_check_and_pin_account_keys` gives: `account_id_pub` is the
-    // cryptographic root of trust, so its lookup does not go near string-built
-    // SQL.
-    // One request for the whole pinned-contact list. The DS chunks its own
-    // binds, so a long contact list is still one round trip rather than one per
-    // ceiling-sized chunk.
+    // One request for every pinned peer (#875); the DS chunks its own binds.
     let ids: Vec<String> = pinned.iter().map(|(id, _, _)| id.clone()).collect();
     let server_keys: std::collections::HashMap<String, Vec<u8>> =
         crate::commands::ds_reads::account_keys(state, &ids)
@@ -228,12 +185,7 @@ pub async fn list_peer_verifications(
 
     let mut out = Vec::with_capacity(pinned.len());
     for (peer_id, pinned_pub, verified) in pinned {
-        // Absent from the result set = the peer no longer resolves (deleted, or
-        // a NULL `account_id_pub`). Keep them in the list with the local pin as
-        // the only truth and do NOT mark them `key_changed` — we don't actually
-        // know. Identical to the old per-peer `Err(_) => None` arm, except that
-        // a whole-query failure now surfaces as one error instead of silently
-        // reporting every peer as unchanged.
+        // Absent = peer no longer resolves: keep the local pin, don't claim `key_changed`.
         let key_changed = matches!(server_keys.get(&peer_id), Some(p) if *p != pinned_pub);
         out.push(PeerVerificationEntry {
             peer_user_id: peer_id,
@@ -244,9 +196,7 @@ pub async fn list_peer_verifications(
     Ok(out)
 }
 
-/// Explicitly mark a contact verified (or unverified). Pins the peer's
-/// current `account_id_pub`/`identity_version` so a later swap flips the
-/// status back to "changed".
+/// Mark a contact (un)verified, pinning their current key.
 pub async fn set_contact_verified(
     peer_user_id: String,
     verified: bool,
@@ -273,10 +223,7 @@ pub async fn set_contact_verified(
     Ok(())
 }
 
-/// TOFU pin + change detection for the DM/reconcile path. First sight of a
-/// peer's key is pinned silently. A later mismatch updates the pin and
-/// clears `verified` (advisory — the caller does not block delivery, the
-/// next profile open shows "changed").
+/// TOFU pin for the DM path. A mismatch re-pins and clears `verified` (advisory).
 pub async fn check_and_pin_account_key(
     state: &Arc<AppState>,
     peer_user_id: &str,
@@ -326,18 +273,11 @@ pub async fn check_and_pin_account_key(
             )?;
         }
     }
-    // Release the local-DB lock before touching the livekit channel — the
-    // sink call is sync but the mutex on `state.livekit` is async, and we
-    // never want to hold the local DB lock across an await.
+    // Never hold the local-DB lock across the `state.livekit` await.
     drop(guard);
 
     if key_did_change {
-        // Surface the change to the open frontend inline (Signal-style
-        // "safety number changed" banner). Advisory only — the policy is
-        // ADVISORY-with-acknowledge: sends still work, the banner lets the
-        // user re-verify out-of-band. Failing to emit is non-fatal; the
-        // pin is already updated locally and the next profile open will
-        // still report status="changed".
+        // Advisory banner; emit failure is fine, the pin already says "changed".
         let sink = state.livekit.lock().await.channel.clone();
         if let Some(ch) = sink {
             let _ = ch.send(crate::realtime::RealtimeEvent::KeyChanged {
@@ -351,20 +291,10 @@ pub async fn check_and_pin_account_key(
 
 /// Batch TOFU pin + change detection for the group-reconcile path.
 ///
-/// Same semantics as [`check_and_pin_account_key`] but bulk-fetches every
-/// peer's `account_id_pub` in one Turso query, so a 50-member group costs
-/// one round-trip instead of fifty. New peers are pinned silently; an
-/// existing pin that no longer matches the server's current key is
-/// updated, has its `verified` flag cleared, and emits a `KeyChanged`
-/// event so any open conversation surface (DM, group, channel) can show
-/// the banner.
-///
 /// Callers should exclude their own user_id — the local user is not a
 /// peer and has no `contact_verification` row.
 ///
-/// Non-fatal: failures are logged and swallowed. The MLS reconcile must
-/// continue even if Turso is briefly unreachable; the next reconcile (or
-/// the per-message ingest TOFU) will catch up.
+/// Non-fatal for the caller's reconcile; the next one catches up.
 pub async fn batch_check_and_pin_account_keys(
     state: &Arc<AppState>,
     peer_user_ids: &[String],
@@ -373,13 +303,6 @@ pub async fn batch_check_and_pin_account_keys(
         return Ok(());
     }
 
-    // 1. One Turso SELECT for every peer. Bind by-position to avoid the
-    //    quote-and-format SQL-injection foot-gun the surrounding code
-    //    uses for its own `IN (...)` lookups (those filter by alphanum
-    //    via input scrubbing; we're stricter here because account_id_pub
-    //    is the cryptographic root of trust).
-    // One request for every peer. The DS chunks its own binds, so a whole group
-    // roster is one round trip.
     let server_keys: std::collections::HashMap<String, (Vec<u8>, i64)> =
         crate::commands::ds_reads::account_keys(state, peer_user_ids)
             .await?
@@ -391,7 +314,6 @@ pub async fn batch_check_and_pin_account_keys(
         return Ok(());
     }
 
-    // 2. One local-DB SELECT for existing pins covering this batch.
     let mut changed: Vec<(String, i64)> = Vec::new();
     {
         let guard = state.local_db.lock().await;
@@ -443,9 +365,6 @@ pub async fn batch_check_and_pin_account_keys(
         }
     }
 
-    // 3. Emit one KeyChanged event per changed peer. Done outside the
-    //    local-DB guard so we never hold the rusqlite lock across an
-    //    await on the LiveKit mutex.
     if !changed.is_empty() {
         let sink = state.livekit.lock().await.channel.clone();
         if let Some(ch) = sink {
@@ -476,13 +395,7 @@ mod tests {
     }
 
     /// The exact digits a given (key, id) pair must produce.
-    ///
-    /// The other tests here pin only shape and determinism, which a change to
-    /// the hash chain would satisfy while silently renumbering every user's
-    /// safety number — two people comparing across app versions would then read
-    /// a mismatch as a MITM. These vectors were taken from the implementation
-    /// before the buffer rewrite in this sweep and must not change without
-    /// bumping `FP_VERSION`.
+    /// Changing them without bumping `FP_VERSION` makes peers read a mismatch as MITM.
     #[test]
     fn fingerprint_matches_its_pinned_vectors() {
         assert_eq!(

@@ -151,15 +151,12 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
             android_bootstrap(parsed.data_dir.as_deref())?;
             #[cfg(target_os = "ios")]
             ios_bootstrap()?;
-            // On-device diagnostics log (#1305), under the same data directory
-            // the local DB uses. A failure leaves logging on stderr only.
+            // A failure leaves logging on stderr only (#1305).
             let log_dir = crate::diag::log_dir(&crate::db::local::dirs_path());
             if let Err(e) = crate::diag::init(&log_dir) {
                 crate::diag!("[diag] could not open the diagnostics log: {e}");
             }
-            // Media needs both R2 origins: without them every presigned URL is
-            // refused and each attachment renders as unavailable while the rest
-            // of the app looks healthy. Refuse the build here instead, by name.
+            // Without both R2 origins every attachment is unavailable; refuse by name.
             if let Some(problem) =
                 crate::commands::r2::r2_config_problem(&parsed.r2_endpoint, &parsed.r2_public_url)
             {
@@ -171,9 +168,7 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 r2_public_url: parsed.r2_public_url,
                 livekit_url: parsed.livekit_url,
                 pollis_delivery_url: parsed.pollis_delivery_url.filter(|s| !s.is_empty()),
-                // Overlay is off on the mobile bridge path in Slice 1b: the shim
-                // + connector wiring ships desktop-first (config-from-env).
-                // Mobile opt-in follows once the relay pool is deployed (Slice 2).
+                // Overlay is desktop-first; mobile opt-in waits for the relay pool.
                 overlay_mode: pollis_relay::OverlayMode::Off,
                 overlay_relay_url: None,
                 overlay_relay_cert: None,
@@ -284,7 +279,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(crate::commands::diagnostics::get_diagnostics(app_version))
         }
 
-        // ----- auth -----
         "get_session" => ok(auth::get_session(&state()?).await?),
         "request_otp" => {
             let email: String = arg(&args, "email")?;
@@ -305,9 +299,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::mls::poll_mls_welcomes(&state()?, user_id).await?;
             ok(())
         }
-        // #1571: mobile's half of desktop's sweep backstop — re-add a device
-        // missing from a conversation's tree (or evict a stale leaf). Run after
-        // the app's landing / resume ingest pass.
+        // #1571: re-add a device missing from a tree (or evict a stale leaf).
         "reconcile_backstop_all" => {
             let user_id: String = arg(&args, "userId")?;
             ok(crate::commands::mls::reconcile_backstop_all(&state()?, &user_id).await?)
@@ -332,7 +324,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             auth::verify_email_change(&state()?, user_id, new_email, code, current_code).await?;
             ok(())
         }
-        // ----- device enrollment -----
         "start_device_enrollment" => {
             let user_id: String = arg(&args, "userId")?;
             ok(device_enrollment::start_device_enrollment(&state()?, user_id).await?)
@@ -439,9 +430,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             auth::revoke_device(&state()?, user_id, device_id).await?;
             ok(())
         }
-        // Authoritative, spoof-resistant check of whether THIS device is still
-        // registered for the user. Mobile calls it from the inbox realtime
-        // handler on a `device_revoked` nudge before deciding to self-sign-out.
+        // Spoof-resistant registration check, run on a `device_revoked` nudge before self-sign-out.
         "is_current_device_registered" => {
             let user_id: String = arg(&args, "userId")?;
             ok(auth::is_current_device_registered(&state()?, user_id).await?)
@@ -468,7 +457,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
 
-        // ----- pin -----
         "set_pin" => {
             let old_pin: Option<String> = arg_opt(&args, "oldPin")?;
             let new_pin: String = arg(&args, "newPin")?;
@@ -486,7 +474,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
         "get_unlock_state" => ok(pin::get_unlock_state(&state()?).await?),
 
-        // ----- user -----
         "get_user_profile" => {
             let user_id: String = arg(&args, "userId")?;
             ok(user::get_user_profile(user_id, &state()?).await?)
@@ -514,10 +501,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
         "get_preferences" => {
             let user_id: String = arg(&args, "userId")?;
-            // Rust returns a JSON-encoded string; the JS bridge will
-            // wrap it in JSON.stringify again to feed our serde_json
-            // ser path. The TS hook JSON.parses the outer wrapper to
-            // recover the raw blob.
+            // Returns a JSON string; the TS hook unwraps the outer layer.
             ok(user::get_preferences(user_id, &state()?).await?)
         }
         "save_preferences" => {
@@ -527,7 +511,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
 
-        // ----- groups -----
         "list_user_groups" => {
             let user_id: String = arg(&args, "userId")?;
             ok(groups::list_user_groups(user_id, &state()?).await?)
@@ -728,7 +711,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             )
             .await?)
         }
-        // ----- invite links -----
         "create_group_invite_link" => {
             let group_id: String = arg(&args, "groupId")?;
             let creator_id: String = arg(&args, "creatorId")?;
@@ -760,7 +742,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(groups::redeem_group_invite_link(token, user_id, &state()?).await?)
         }
 
-        // ----- messages -----
         "list_messages" => {
             let conversation_id: String = arg(&args, "conversationId")?;
             let limit: Option<i64> = arg_opt(&args, "limit")?;
@@ -780,11 +761,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let reply_to_id: Option<String> = arg_opt(&args, "replyToId")?;
             let thread_id: Option<String> = arg_opt(&args, "threadId")?;
             let sender_username: Option<String> = arg_opt(&args, "senderUsername")?;
-            // Optional (#1335): a renderer that predates the outbox sends none
-            // and the core mints one.
             let message_id: Option<String> = arg_opt(&args, "messageId")?;
-            // Attachments the outbox uploads itself (#1335). Expo pickers hand
-            // out `file://` URIs; the core reads bare paths.
+            // #1335: Expo hands out `file://` URIs; the core reads bare paths.
             let attachments: Vec<messages::OutgoingAttachment> =
                 arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
                     .unwrap_or_default()
@@ -858,7 +836,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let conversation_ids: Vec<String> = arg(&args, "conversationIds")?;
             ok(messages::read_last_messages(conversation_ids, &state()?).await?)
         }
-        // ----- unread (#844, mobile #1422) -----
         // Persisted per-conversation read cursors, so a message that arrived
         // while the app was backgrounded or closed still badges.
         "get_unread_counts" => {
@@ -874,7 +851,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(messages::sync_read_cursors(user_id, &state()?).await?)
         }
-        // ----- threads -----
         "read_thread_messages" => {
             let thread_id: String = arg(&args, "threadId")?;
             ok(messages::read_thread_messages(thread_id, &state()?).await?)
@@ -883,7 +859,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let conversation_id: String = arg(&args, "conversationId")?;
             ok(messages::list_thread_summaries(conversation_id, &state()?).await?)
         }
-        // ----- read receipts -----
         "get_conversation_receipts" => {
             let conversation_id: String = arg(&args, "conversationId")?;
             ok(messages::get_conversation_receipts(conversation_id, &state()?).await?)
@@ -948,9 +923,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
 
-        // ----- saved messages + permalinks (#854) -----
-        // Device-local, exactly as on desktop: no DS endpoint backs any of
-        // these, and resolve_message_permalink only ever consults the local DB.
+        // Device-local (#854); no DS endpoint backs these.
         "list_saved_messages" => ok(bookmarks::list_saved_messages(&state()?).await?),
         "save_message" => {
             let message_id: String = arg(&args, "messageId")?;
@@ -972,11 +945,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                 .await?)
         }
 
-        // ----- on-device export (#856) -----
-        // Same three steps as desktop's Security page, plus the bundle: a
-        // sandboxed app has no "save as" — the archive is written under the
-        // app's cache dir, optionally completed with the fetch, then zipped so
-        // the OS share sheet (one file) can hand it wherever the user wants.
+        // #856: no "save as" in a sandbox, so the archive is zipped for the share sheet.
         "export_archive" => {
             let path: String = arg(&args, "path")?;
             let conversation_id: Option<String> = arg_opt(&args, "conversationId")?;
@@ -1002,7 +971,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(format!("file://{}", zip.display()))
         }
 
-        // ----- pinned messages (#99) -----
         "pin_message" => {
             let conversation_id: String = arg(&args, "conversationId")?;
             let message_id: String = arg(&args, "messageId")?;
@@ -1024,7 +992,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(pinned_messages::list_pinned_messages(conversation_id, user_id, &state()?).await?)
         }
 
-        // ----- vault (#107) -----
         "get_vault_messages" => {
             let user_id: String = arg(&args, "userId")?;
             ok(vault::get_vault_messages(user_id, &state()?).await?)
@@ -1058,12 +1025,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(vault::search_vault_messages(query, user_id, &state()?).await?)
         }
 
-        // ----- dm -----
         "list_dm_channels" => {
             let user_id: String = arg(&args, "userId")?;
             ok(dm::list_dm_channels(user_id, &state()?).await?)
         }
-        // ----- search -----
         "search_messages" => {
             let q: String = arg(&args, "query")?;
             let conversation_id: Option<String> = arg_opt(&args, "conversationId")?;
@@ -1089,7 +1054,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(messages::read_messages_after(conversation_id, cursor, limit, &state()?).await?)
         }
 
-        // ----- blocks -----
         "block_user" => {
             let blocker_id: String = arg(&args, "blockerId")?;
             let blocked_id: String = arg(&args, "blockedId")?;
@@ -1116,7 +1080,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(blocks::list_blocked_users(user_id, &state()?).await?)
         }
 
-        // ----- safety -----
         "get_safety_number" => {
             let my_user_id: String = arg(&args, "myUserId")?;
             let peer_user_id: String = arg(&args, "peerUserId")?;
@@ -1176,10 +1139,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(dm::create_dm_channel(creator_id, member_ids, &state()?).await?)
         }
 
-        // ----- push notifications -----
-        // Mobile registers its Expo push token so senders can wake a
-        // backgrounded/closed app with a content-free notification. The send
-        // side lives in send_message's background fanout (commands::push).
+        // Expo push token, so senders can wake the app with a content-free push.
         "register_push_token" => {
             let user_id: String = arg(&args, "userId")?;
             let token: String = arg(&args, "token")?;
@@ -1188,10 +1148,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
 
-        // #1122: the push payload carries an opaque handle, not the conversation
-        // id, so routing a tap (or a background re-ingest) means resolving it
-        // here first. Returns null when the handle is unknown, expired or not
-        // ours — the caller opens the app instead of a conversation.
+        // #1122: resolve the opaque push handle. Null when unknown, expired or not ours.
         "resolve_push_handle" => {
             let handle: String = arg(&args, "handle")?;
             let resolved = crate::commands::push::resolve_push_handle(handle, &state()?).await?;
@@ -1209,17 +1166,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(crate::commands::push::dismissed_push_handles(user_id, handles, &state()?).await?)
         }
 
-        // ----- livekit (realtime token) -----
-        // Mobile joins the same SFU rooms as desktop via the JS LiveKit SDK
-        // (data-only, see mobile/lib/realtime/). It only passes the room name;
-        // the DS mints the token, deriving identity server-side from this
-        // device's verified signature — matching desktop's `connect_rooms`
-        // scheme (`{user_id}:{device_id}`), so multiple devices coexist. The
-        // LiveKit API secret is no longer on the client (#393).
-        // Returns `{token, url}`, not a bare token. Mobile used to pair the
-        // token with a build-time `EXPO_PUBLIC_LIVEKIT_URL`, which pinned the SFU
-        // address into the app bundle exactly as the desktop config did. The URL
-        // the DS minted the token for is authoritative, so it ships with it.
+        // Returns `{token, url}`; the DS mints both, so the SFU URL is not baked into the bundle (#393).
         "get_livekit_token" => {
             let room: String = arg(&args, "room")?;
             let st = state()?;
@@ -1228,7 +1175,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(serde_json::json!({ "token": token, "url": url }))
         }
 
-        // ----- custom emoji (#890, #940) -----
         "list_usable_emoji" => {
             let user_id: String = arg(&args, "userId")?;
             ok(emoji::list_usable_emoji(user_id, &state()?).await?)
@@ -1242,8 +1188,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let group_id: String = arg(&args, "groupId")?;
             let shortcode: String = arg(&args, "shortcode")?;
             let path: String = arg(&args, "path")?;
-            // Expo hands out `file://` URIs; the Rust side reads a bare path
-            // (same strip as `get_media_path`'s destDir).
+            // Strip `file://` to a bare path.
             let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
             ok(emoji::upload_group_emoji(group_id, shortcode, path, &state()?).await?)
         }
@@ -1258,12 +1203,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let text: String = arg(&args, "text")?;
             ok(emoji::prepare_emoji_text(user_id, text, &state()?).await?)
         }
-        // Mobile counterpart of desktop's `get_emoji_url`: no loopback media
-        // server exists inside a sandboxed RN app, so instead of an
-        // http://127.0.0.1 URL this materialises the hash-verified emoji bytes
-        // to a file in the app's sandbox and hands back a `file://` path that
-        // expo-image can load — the same shape as `get_media_path` below, and
-        // the JS side manages the file's lifetime the same way.
+        // No loopback server on mobile: write the hash-verified emoji to a sandbox file and return `file://`.
         "get_emoji_path" => {
             let content_hash: String = arg(&args, "contentHash")?;
             let dest_dir: String = arg(&args, "destDir")?;
@@ -1279,41 +1219,24 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(format!("file://{}", path.display()))
         }
 
-        // ----- media -----
-        // The Vault's upload path (chat attachments go through the outbox in
-        // `send_message`): reads the file from the sandbox path (no bytes over
-        // the JSON bridge), seals it under the Vault file key (#1382), uploads
-        // via a DS-minted presign, and returns the metadata the JS side folds
-        // into the entry's `_att` envelope — identical to desktop.
+        // The Vault upload path (chat attachments use the outbox); sealed under the Vault file key (#1382).
         "upload_media" => {
             let path: String = arg(&args, "path")?;
             let filename: String = arg(&args, "filename")?;
             let content_type: String = arg(&args, "contentType")?;
-            // Expo pickers hand out `file://` URIs; strip to a bare path.
             let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
             ok(crate::commands::r2::upload_media(path, filename, content_type, &state()?)
                 .await?)
         }
-        // Mobile can't run the desktop's loopback media server inside a
-        // sandboxed RN app, so instead of returning an http://127.0.0.1 URL
-        // we decrypt the R2 object straight to a file in the app's sandbox
-        // cache dir and hand back a `file://` path that expo-image can load.
-        // Reuses `download_media` (R2 fetch + AES-GCM decrypt) verbatim; the
-        // only mobile-specific bit is materialising plaintext to `destDir`.
-        // The JS side (mobile/lib/media/cache.ts) ref-counts and unlinks the
-        // file on last release, so plaintext never lingers past use.
+        // No loopback server on mobile: decrypt to a sandbox file; the JS side unlinks it on last release.
         "get_media_path" => {
             let r2_key: String = arg(&args, "r2Key")?;
             let content_hash: String = arg(&args, "contentHash")?;
             let sha256: String = arg(&args, "sha256")?;
             let key_scope: crate::commands::r2::AttachmentKeyScope = arg(&args, "keyScope")?;
             let dest_dir: String = arg(&args, "destDir")?;
-            // expo's cacheDirectory comes through as a `file://` URI; Rust's
-            // PathBuf needs a bare path (same strip as init's data_dir).
             let dir = dest_dir.strip_prefix("file://").unwrap_or(&dest_dir);
-            // A failure here is what the app renders as "Image unavailable",
-            // with no detail on screen — so the reason goes to the on-device
-            // diagnostics log, where Self → Diagnostics can show it.
+            // This failure renders as "Image unavailable", so log the reason to diagnostics.
             let bytes =
                 match crate::commands::r2::download_media(
                     r2_key,

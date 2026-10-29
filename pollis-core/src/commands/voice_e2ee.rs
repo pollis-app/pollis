@@ -1,39 +1,10 @@
 //! End-to-end encryption for voice channels.
 //!
-//! LiveKit is an SFU: every audio frame goes through the server. To keep the
-//! server from being able to listen, frames are encrypted post-Opus/pre-SRTP
-//! by libwebrtc's native `FrameCryptor` (AES-GCM), driven by a shared
-//! symmetric key derived from the channel's MLS exporter secret. The server
-//! routes ciphertext; only current MLS members of the group can decrypt it.
-//!
-//! Key handoff:
-//!   - Each voice channel resolves to its parent MLS group (same group the
-//!     channel's messages use).
-//!   - Both peers derive the same 32-byte key via
-//!     `MlsGroup::export_secret("pollis/voice/v1", epoch_be_bytes, 32)`.
-//!   - On every MLS epoch advance, `on_mls_epoch_changed` re-derives and
-//!     rotates the key in the live `KeyProvider` without reconnecting.
-//!
-//! Key-ring mechanics (why rotation is two calls, not one):
-//!   - libwebrtc keeps a 16-slot key ring per participant. A sender encrypts
-//!     with the slot its `FrameCryptor::key_index` points at and writes that
-//!     index into the frame trailer; a receiver decrypts with whatever key it
-//!     holds in the slot the trailer names. Installing a key in a slot does
-//!     NOT move any cryptor onto it — `KeyProvider::with_shared_key` seeds slot
-//!     0 and every cryptor is born on slot 0, and the SDK never calls
-//!     `set_key_index` itself.
-//!   - So the key for epoch `e` goes in slot `voice_key_index(e)` (= `e % 16`,
-//!     never out of range), and on every rotation — and on every newly
-//!     published local track — each local sender cryptor is pointed at that
-//!     slot with `set_key_index`. Receivers need no pointing: the trailer
-//!     carries the slot.
-//!   - The previous epoch's slot stays populated for
-//!     `VOICE_KEY_SLOT_GRACE_SECS` so in-flight frames and slower peers still
-//!     decrypt, then is overwritten with random bytes so an ex-member holding
-//!     the old key cannot keep injecting frames under the old index. Residual:
-//!     two epochs exactly 16 apart share a slot, so the ring wrapping inside
-//!     one grace window would retire the older key early — 16 commits in ten
-//!     seconds, and the cost is a few dropped frames, never plaintext exposure.
+//! libwebrtc `FrameCryptor` (AES-GCM) with an MLS-exported key; the SFU sees ciphertext.
+//! Key ring: epoch `e` lives in slot `e % 16`; local sender cryptors (born on
+//! slot 0, never moved by the SDK) are re-pointed on rotation and publish.
+//! The old slot survives `VOICE_KEY_SLOT_GRACE_SECS`, then gets random bytes
+//! so an ex-member can't inject frames under it.
 
 use std::sync::Arc;
 
@@ -60,16 +31,7 @@ const VOICE_KEY_LEN: usize = 32;
 /// Resolves a voice room's channel/conversation id to the MLS group id whose
 /// exporter secret backs the voice key.
 ///
-/// Three room shapes are recognised:
-///   1. **Group channels** (`channels` table row) — use the parent group's
-///      MLS group, same as `messages::send_message`.
-///   2. **DM channels** (no `channels` row, no `call-` prefix) — the channel
-///      id IS the MLS group id.
-///   3. **1:1 calls** (`call-<ulid>` ephemeral rooms) — minted on the fly by
-///      `start_call`, no DB row of their own. Resolve to the MLS group of
-///      the DM channel between the two participants. Requires
-///      `counterparty_user_id`; both sides know the other party (caller from
-///      `start_call`, callee from the `call_invite` payload).
+/// Group channel → parent group; DM → itself; `call-*` → the two users' 1:1 DM.
 async fn resolve_mls_group_id(
     state: &Arc<AppState>,
     channel_id: &str,
@@ -82,10 +44,7 @@ async fn resolve_mls_group_id(
                 "voice call room {channel_id} requires a counterparty user id"
             ))
         })?;
-        // The 1:1 DM channel between the two users. The DS guards it with
-        // `HAVING COUNT(*) = 2` so a group DM containing both cannot match —
-        // exporting a call key from a three-person group's tree would hand it to
-        // the third party.
+        // 1:1 DM only (DS checks `COUNT(*) = 2`): a group DM would leak the key.
         return match crate::commands::ds_reads::one_to_one_dm(state, self_user_id, other).await? {
             Some(id) => Ok(id),
             None => Err(Error::Other(anyhow::anyhow!(
@@ -95,15 +54,11 @@ async fn resolve_mls_group_id(
         };
     }
 
-    // A channel resolves to its owning group; anything else (a DM id) is its own
-    // MLS group.
+    // A channel resolves to its group; a DM id is its own MLS group.
     crate::commands::mls::ds_reads::resolve_mls_group(state, channel_id).await
 }
 
-/// Public entry point used at voice-join time. Returns
-/// `(key, key_index, epoch, mls_group_id)`. Caller stashes `mls_group_id` and
-/// `epoch` on `VoiceState` so the epoch-rotation hook can match on group id
-/// and skip duplicate work.
+/// Join-time entry: returns `(key, key_index, epoch, mls_group_id)`.
 ///
 /// `counterparty_user_id` is required for `call-*` rooms and ignored for
 /// group channels / DMs.
@@ -115,26 +70,8 @@ pub async fn derive_voice_key(
 ) -> Result<(Vec<u8>, i32, u64, String)> {
     let mls_group_id =
         resolve_mls_group_id(state, channel_id, self_user_id, counterparty_user_id).await?;
-    // Catch up local MLS state before exporting the key. Without this, the
-    // two peers race: whichever one joined voice first holds a stale epoch
-    // and derives a key the other peer can't decrypt — black tile on the
-    // receiver, "InvalidKey: Decryption failed" in livekit-client.
-    //
-    // `process_pending_commits` alone isn't enough — commits live in
-    // `message_envelope` rows on Turso that this client may not have
-    // pulled yet. We have to do a real ingest of the conversations
-    // backing this MLS group so any unprocessed commits get applied.
-    // The catch-up and the published-GroupInfo read are INDEPENDENT requests —
-    // the second one asks the DS what epoch the group is at, which is not a
-    // function of anything the first one writes locally. Running them
-    // concurrently takes one full DS round trip off the voice-join hot path,
-    // where every serialized request sits between the user and a live call.
-    //
-    // Reading the remote epoch concurrently can only observe it EARLIER, never
-    // later, so the worst case is a remote epoch that is one commit stale. That
-    // biases the comparison below towards *not* firing recovery, which is the
-    // same direction `published_group_epoch` already fails in on purpose: it
-    // gates a destructive rebuild, so "can't tell" must mean "don't".
+    // Catch up MLS first, else peers on different epochs derive different keys.
+    // Runs concurrently with the remote-epoch read, which can only be stale.
     let (_, remote_epoch) = tokio::join!(
         catch_up_mls_group(state, &mls_group_id, self_user_id),
         published_group_epoch(state, &mls_group_id),
@@ -142,18 +79,8 @@ pub async fn derive_voice_key(
     let (mut key, mut idx, mut epoch) = derive_voice_key_for_group(state, &mls_group_id).await?;
     crate::diag!("[voice-e2ee] catch-up: {mls_group_id} now at epoch {epoch}");
 
-    // If the catch-up couldn't bring us level with the published GroupInfo,
-    // we're stranded behind commits that are no longer in `mls_commit_log`
-    // (e.g. the rejection-and-delete path in `process_pending_commits_locked`
-    // wiped them — see issue #371). External-join rebuilds local state at
-    // the current epoch from the published GroupInfo, which is how `process_
-    // pending_commits` already recovers when there's no local group at all.
-    //
-    // External join refuses to replace a CONFIRMED local group (#1220: a join
-    // that clobbered one lost every envelope sealed at its epoch), so this
-    // path deletes the stranded group first. It is a deliberate rebuild: the
-    // catch-up above already ran and could not reach the published epoch, so
-    // the commits that would advance this group are gone from the log.
+    // Still behind the published epoch: the commits are gone (#371), so delete
+    // the stranded group and external-join (it refuses to clobber one, #1220).
     if let Some(remote_epoch) = remote_epoch {
         if epoch < remote_epoch {
             crate::diag!(
@@ -197,16 +124,9 @@ pub async fn derive_voice_key(
 
 /// The highest epoch published in `mls_group_info` for this MLS group.
 ///
-/// `None` on any failure — "can't tell, don't trigger recovery" — so a transient
-/// blip never forces an unnecessary external-join. That bias is the opposite of
-/// `group_state::published_group_info_head`'s, deliberately: this one gates a
-/// DESTRUCTIVE recovery, that one gates a redundant republish.
+/// `None` on any failure: this gates a DESTRUCTIVE recovery, so "can't tell" = "don't".
 ///
-/// Known limitation, out of scope for #987 and tracked separately: this compares
-/// `epoch` WITHOUT `generation`. After a suite migration the successor lineage's
-/// numerically-lower epoch reads as "not stale" and recovery silently never
-/// fires — the same bug class `group_info_is_stale` already fixes for the
-/// republish path.
+/// Known limitation: compares `epoch` without `generation` (post-migration miss).
 async fn published_group_epoch(state: &Arc<AppState>, mls_group_id: &str) -> Option<u64> {
     let snap = crate::commands::mls::ds_reads::conversation_snapshot(
         state,
@@ -219,20 +139,7 @@ async fn published_group_epoch(state: &Arc<AppState>, mls_group_id: &str) -> Opt
 
 /// Pull and process any unread envelopes for every conversation backed by this
 /// MLS group so the local epoch matches whoever sent the most recent commit.
-/// Best-effort: failures are logged and ignored so a transient blip doesn't block
-/// the voice join.
-///
-/// #987 folded this into the ONE catch-up entry point. It used to run its own
-/// copy of the resolve → is-DM → channel-enumerate chain and then ingest each
-/// conversation, which is exactly what `catch_up_mls_group_interleaved` does —
-/// except that this copy did NOT interleave, so a voice join could advance the
-/// shared group past an epoch at which a text channel held an un-ingested
-/// message and (with `max_past_epochs = 0`) discard its keys.
-///
-/// It also carried a diagnostic that dumped up to 20 `mls_commit_log` rows on
-/// every voice join, with a silent fall-back to the MAIN database if the log DB
-/// connection failed — a fall-back that would have quietly queried a database
-/// with no such table. Both are gone.
+/// Best-effort; uses the shared interleaved catch-up (#987).
 async fn catch_up_mls_group(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) {
     if let Err(e) =
         crate::commands::messages::catch_up_mls_group_interleaved(state, mls_group_id, user_id)
@@ -242,10 +149,7 @@ async fn catch_up_mls_group(state: &Arc<AppState>, mls_group_id: &str, user_id: 
     }
 }
 
-/// JSON-serializable wrapper around the derived key for the napi command.
-/// Used by the renderer-side livekit-client view connection to enable
-/// E2EE on screen-share publishes/subscribes with the same MLS-derived
-/// key the Rust voice path uses.
+/// The derived key, serialized for the renderer's screen-share view client.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct E2eeKeyInfo {
     pub key: Vec<u8>,
@@ -254,13 +158,7 @@ pub struct E2eeKeyInfo {
     pub mls_group_id: String,
 }
 
-/// Renderer-facing entry point. Returns the same MLS-derived shared key
-/// the Rust voice path uses for `KeyProvider::with_shared_key`, so the
-/// JS-side `livekit-client`'s ExternalE2EEKeyProvider can encrypt the
-/// screen-share video track with an interop-compatible key. Both SDKs
-/// HKDF the shared key with the canonical `LKFrameEncryptionKey` salt
-/// internally, so passing the raw 32-byte MLS export to both produces
-/// the same per-frame encryption key on every peer.
+/// Renderer entry: the same raw MLS export; both SDKs HKDF it identically.
 pub async fn get_voice_e2ee_key(
     channel_id: String,
     user_id: String,
@@ -328,15 +226,9 @@ where
     Ok((key, key_index, epoch))
 }
 
-/// Build LiveKit `E2eeOptions` backed by a shared symmetric key, with the
-/// join-epoch key installed in its own ring slot (`key_index`). Defaults
-/// otherwise match `livekit-client` JS (`LKFrameEncryptionKey` salt, 16-key
-/// ring, PBKDF2 derivation) so peers across SDKs interop.
+/// LiveKit `E2eeOptions` with the join key in slot `key_index`; JS-compatible defaults.
 ///
-/// `with_shared_key` can only seed slot 0. When the join epoch does not map
-/// to slot 0 that seed is scrubbed straight away — no frame has been sent yet,
-/// and leaving the key there would let anyone holding it (a member removed
-/// after we joined) inject frames tagged with index 0 that we would decrypt.
+/// `with_shared_key` seeds slot 0; scrub it unless that's the join slot.
 pub fn build_e2ee_options(key: Vec<u8>, key_index: i32) -> E2eeOptions {
     let options = KeyProviderOptions {
         key_ring_size: VOICE_KEY_RING_SIZE,
@@ -344,8 +236,7 @@ pub fn build_e2ee_options(key: Vec<u8>, key_index: i32) -> E2eeOptions {
     };
     let kp = KeyProvider::with_shared_key(options, key.clone());
     if key_index != 0 {
-        // Scrub first, install second, so `latest_key_index` ends on the live
-        // slot.
+        // Scrub first so `latest_key_index` ends on the live slot.
         scrub_slot(&kp, 0);
         install_shared_key(&kp, key, key_index);
     }
@@ -355,11 +246,7 @@ pub fn build_e2ee_options(key: Vec<u8>, key_index: i32) -> E2eeOptions {
     }
 }
 
-/// Install `key` in ring slot `key_index` and confirm it landed. The SDK
-/// wrapper discards libwebrtc's `bool` (false when the index is outside the
-/// ring), so the read-back is the only way to observe a rejected install.
-/// `voice_key_index` keeps the index in range by construction; this is the
-/// tripwire for that invariant, not the enforcement of it.
+/// Install `key` in slot `key_index`; read-back is the only failure signal.
 fn install_shared_key(kp: &KeyProvider, key: Vec<u8>, key_index: i32) -> bool {
     kp.set_shared_key(key, key_index);
     let landed = kp.get_shared_key(key_index).is_some();
@@ -371,17 +258,9 @@ fn install_shared_key(kp: &KeyProvider, key: Vec<u8>, key_index: i32) -> bool {
     landed
 }
 
-/// Overwrite ring slot `key_index` with random bytes. libwebrtc has no
-/// "remove key" call, so a fresh random key is the closest thing to an empty
-/// slot: frames tagged with this index fail authentication instead of
-/// decrypting under a retired epoch's key.
+/// Overwrite slot `key_index` with random bytes (libwebrtc can't remove keys).
 ///
-/// Side effect to know about: `set_shared_key` also moves the provider's
-/// `latest_key_index` onto the slot it writes. The SDK reads that only when
-/// encrypting data-channel packets, and the voice room never publishes any
-/// (signalling rides the separate `state.livekit` realtime rooms), so it is
-/// harmless here; a caller that has the live key to hand re-installs it
-/// afterwards anyway (see `build_e2ee_options`) to keep the field truthful.
+/// Also moves `latest_key_index`; harmless, voice publishes no data packets.
 fn scrub_slot(kp: &KeyProvider, key_index: i32) {
     let mut junk = vec![0u8; VOICE_KEY_LEN];
     OsRng.fill_bytes(&mut junk);
@@ -391,11 +270,7 @@ fn scrub_slot(kp: &KeyProvider, key_index: i32) {
 /// Point every LOCAL sender `FrameCryptor` in `room` at ring slot
 /// `key_index`. Returns how many were updated.
 ///
-/// Receivers are left alone: they take the slot from each frame's trailer, so
-/// pointing them anywhere is meaningless. Senders are the whole problem —
-/// libwebrtc creates every cryptor on slot 0 and nothing in the SDK ever
-/// moves it, so without this call a "rotated" key is written into a slot no
-/// outgoing frame is ever encrypted with.
+/// Receivers read the slot from the trailer; senders never leave slot 0 alone.
 pub fn apply_sender_key_index(room: &Room, key_index: i32) -> usize {
     let local = room.local_participant().identity();
     let mut updated = 0;
@@ -409,12 +284,7 @@ pub fn apply_sender_key_index(room: &Room, key_index: i32) -> usize {
     updated
 }
 
-/// Re-point the active room's local sender cryptors at the current epoch's
-/// slot. Called from the room event loop on every `LocalTrackPublished`
-/// (microphone, screen-share video/audio, camera): each new publication gets
-/// a brand-new cryptor on slot 0, which would otherwise encrypt under
-/// whatever that slot holds — the scrubbed join seed or a retired epoch's
-/// key — with a trailer nobody decodes correctly.
+/// Re-point local sender cryptors on `LocalTrackPublished` (new ones start on slot 0).
 pub async fn sync_local_sender_key_index(state: &Arc<AppState>) {
     let voice = state.voice.lock().await;
     let Some(room) = voice.room.as_ref() else {
@@ -430,13 +300,8 @@ pub async fn sync_local_sender_key_index(state: &Arc<AppState>) {
     );
 }
 
-/// Called from `mls::process_pending_commits_inner` after any commit is
-/// merged. If the changed group is the one currently backing the active
-/// voice room, re-derive the voice key for the new epoch, install it in the
-/// new epoch's ring slot, and move every local sender cryptor onto that slot.
-/// Live frames published after this call use the new key; the previous slot
-/// keeps the old key for `VOICE_KEY_SLOT_GRACE_SECS` so in-flight frames and
-/// peers still applying the commit decrypt, then is scrubbed.
+/// After a commit on the active voice group: install the new epoch's key and
+/// re-point senders; the old slot is scrubbed after the grace period.
 pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
     let (provider, prev_epoch) = {
         let voice = state.voice.lock().await;
@@ -492,9 +357,7 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(VOICE_KEY_SLOT_GRACE_SECS)).await;
             let voice = scrub_state.voice.lock().await;
-            // Skip if the call ended or moved groups (the provider we hold is
-            // dead either way), or if a newer epoch has since re-occupied the
-            // slot — wiping it then would destroy a live key.
+            // Skip if the call ended/moved, or a newer epoch re-occupied the slot.
             if voice.e2ee_mls_group_id.as_deref() != Some(scrub_group.as_str()) {
                 return;
             }
@@ -508,10 +371,7 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
         });
     }
 
-    // Notify the renderer so the screen-share view client's
-    // ExternalE2EEKeyProvider can rotate too. Without this, the JS-side
-    // key stays at its connect-time epoch and decrypt fails on every
-    // remote video frame after a commit.
+    // Let the renderer's view-client key provider rotate too.
     if let Some(ch) = channel {
         let _ = ch.send(crate::commands::voice::VoiceEvent::VoiceE2eeKeyRotated {
             key,

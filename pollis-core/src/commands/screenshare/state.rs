@@ -1,7 +1,4 @@
-//! Per-process screen-share state. Owns the live LiveKit track + source,
-//! the per-platform capture handles (helper subprocess on Linux/macOS,
-//! dedicated WGC thread on Windows), the picker session (macOS in-app
-//! picker phase), and the drain tasks for incoming remote screenshares.
+//! Per-process screen-share state.
 
 use std::sync::Arc;
 
@@ -12,12 +9,7 @@ use crate::sink::EventSink;
 
 use super::{RawSink, ScreenShareEvent};
 
-/// A connected capture-helper session — the spawned child plus the two
-/// halves of its Unix-socket connection. We split the stream because the
-/// parent both **writes** (Select message on macOS) and **reads**
-/// (Format + Frames). Owning both halves lets us park the writer in state
-/// while the reader task drains frames; dropping the writer would signal
-/// EOF to the helper's reader and risk an early exit.
+/// A connected capture-helper session: child plus split socket halves.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub struct HelperSession {
     pub child: tokio::process::Child,
@@ -31,57 +23,29 @@ pub struct ScreenShareState {
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
-    /// The shared-audio track, published only once the capture backend
-    /// has actually announced an audio format. A share with
-    /// `with_audio` requested but no audio available leaves these `None`
-    /// and runs video-only — the two tracks have independent lifetimes,
-    /// which is why they are not folded into one Option pair.
+    /// Shared-audio track; `None` until an audio format arrives (own lifetime).
     pub local_audio_track: Option<LocalAudioTrack>,
     pub local_audio_source: Option<NativeAudioSource>,
-    /// macOS picker phase: helper is spawned and has sent its `Sources`
-    /// list; we're waiting on the user's pick from the in-app picker.
-    /// `start_screen_share` consumes this (sends `Select`, transitions
-    /// to capture); `cancel_screen_share_picker` discards it.
+    /// macOS picker phase: helper sent `Sources`, awaiting the user's pick.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub picker_session: Option<HelperSession>,
-    /// Linux/macOS: handle to the capture helper subprocess.
-    /// Linux for libpipewire isolation; macOS for SCK uncatchable-ObjC
-    /// isolation (#283 Phase 2). Dropping/killing it terminates capture;
-    /// the reader task observes the socket close.
+    /// Linux/macOS: the capture helper; killing it ends capture.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub local_helper: Option<tokio::process::Child>,
-    /// Kept open for the lifetime of the capture so the helper's read
-    /// side doesn't see EOF and exit early. Dropped on stop.
+    /// Held open so the helper doesn't see EOF and exit early.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub local_writer: Option<tokio::net::unix::OwnedWriteHalf>,
-    /// Linux/macOS: the supervising task that reads from the helper's
-    /// socket and pushes frames into the LiveKit source.
+    /// Linux/macOS: the task reading helper frames into the LiveKit source.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub local_reader_task: Option<tokio::task::JoinHandle<()>>,
 
-    /// Windows: the dedicated thread running the blocking WGC capture
-    /// (`GraphicsCaptureApiHandler::start`). We can't use
-    /// `start_free_threaded` here: it requires the capture item be `Send`,
-    /// but `windows-capture`'s picker hands back a `PickedGraphicsCaptureItem`
-    /// that owns an `HwndGuard` (`!Send`). So the picker + capture run on
-    /// their own thread and `stop_screen_share` ends them by flipping
-    /// `windows_active` (the frame callback then calls
-    /// `InternalCaptureControl::stop`). The handle is detached, not
-    /// force-joined — the fence guarantees no post-stop source access.
+    /// Windows: the dedicated WGC thread (picker item is `!Send`); detached on stop.
     #[cfg(target_os = "windows")]
     pub windows_thread: Option<std::thread::JoinHandle<()>>,
-    /// Windows: per-session fence, same role as `macos_active`. The WGC
-    /// frame callback checks it before touching the LiveKit source; a
-    /// fresh Arc per session so a stale stop can't fence a newer one.
+    /// Windows: fresh per-session fence, so a stale stop can't fence a newer one.
     #[cfg(target_os = "windows")]
     pub windows_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    /// Windows in-app picker phase: cached enumeration result from
-    /// `enumerate_screen_sources`. The frontend's in-app picker renders
-    /// these as tiles; `start_screen_share(Some(Selection))` then looks
-    /// up the chosen handle by its 0-based index. Dropped on the next
-    /// enumerate, `cancel_screen_share_picker`, or after a successful
-    /// start. Holding the bare `HMONITOR` / `HWND` is cheap — they're
-    /// just kernel handles, not COM objects.
+    /// Windows in-app picker cache from `enumerate_screen_sources`.
     #[cfg(target_os = "windows")]
     pub windows_picker: Option<super::WindowsPickerCache>,
 

@@ -15,24 +15,14 @@ use crate::commands::voice::{
 use crate::error::Result;
 use crate::state::AppState;
 
-/// Speaker rate the test harness asks cpal for. Matches the call-path
-/// default; if the device can't honour it, cpal falls back to its native
-/// rate (handled inside `start_speaker_stream`).
+/// Test speaker rate; cpal falls back to native if unsupported.
 const TEST_SPEAKER_RATE_HZ: u32 = 48_000;
 
-// ── Events pushed to the frontend ─────────────────────────────────────────
-
-/// Lifecycle + meter events for the Voice Settings test harness.
-/// `Frame` is emitted at ~30 Hz while a mic test is running. The record /
-/// tone commands emit the Recording*/Playback* markers so the UI can
-/// reflect state transitions without the frontend having to poll.
+/// Voice Settings test-harness events; `Frame` at ~30 Hz.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VoiceTestEvent {
-    /// Mic level sample. `peak` and `rms` are normalised 0.0..1.0 and are
-    /// computed on the raw (pre-APM) signal so the meter still moves under
-    /// quiet input — useful for verifying that the device is actually
-    /// receiving audio.
+    /// Mic level (0..1), on the raw pre-APM signal.
     Frame { peak: f32, rms: f32 },
     RecordingStarted,
     RecordingFinished,
@@ -40,18 +30,12 @@ pub enum VoiceTestEvent {
     PlaybackFinished,
 }
 
-// ── Test session state ────────────────────────────────────────────────────
-
-/// All state owned by the test harness. Held in a tokio Mutex inside
-/// `AppState`. There is at most one active test at a time — starting a
-/// new one (mic test, tone, or record+play) tears the previous one down.
+/// Test-harness state; one active test at a time.
 pub struct VoiceTestState {
     pub channel: Option<std::sync::Arc<dyn crate::sink::EventSink<VoiceTestEvent>>>,
-    // ── Mic test ──
     pub mic_stream: Option<SendableStream>,
     pub mic_task: Option<tokio::task::JoinHandle<()>>,
     pub monitor_enabled: Arc<AtomicBool>,
-    // ── Output (shared between monitor / tone / record-playback) ──
     pub output_stream: Option<SendableStream>,
     pub output_buf: Option<Arc<Mutex<VecDeque<f32>>>>,
     pub output_channels: u32,
@@ -83,11 +67,7 @@ impl VoiceTestState {
     }
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────
-
-/// Abort any running playback / monitor / mic tasks and drop their streams.
-/// Called at the start of every `start_*` command so tests are mutually
-/// exclusive and idempotent.
+/// Stop all tests; called by every `start_*` so tests are exclusive.
 fn stop_everything(state: &mut VoiceTestState) {
     if let Some(t) = state.playback_task.take() {
         t.abort();
@@ -103,10 +83,7 @@ fn stop_everything(state: &mut VoiceTestState) {
     state.monitor_enabled.store(false, Ordering::Relaxed);
 }
 
-/// Ensure `state.output_*` is populated for `device_name`. If an output
-/// stream is already open on a different device, tear it down first.
-/// Runs the blocking cpal init on a dedicated thread so the async mutex
-/// stays responsive.
+/// Open (or reuse) the output on `device_name`, initialising cpal off-thread.
 async fn ensure_output(
     state_arc: &Arc<tokio::sync::Mutex<VoiceTestState>>,
     device_name: &str,
@@ -124,9 +101,7 @@ async fn ensure_output(
         }
     }
 
-    // If the requested device can't be opened (e.g. duplex Bluetooth in HFP,
-    // stale pref), fall back to the OS default so the user still hears the
-    // test playback instead of getting "audio device not found".
+    // Fall back to the OS default output if the device won't open.
     let dev_name = device_name.to_string();
     let (stream, sample_rate, channels, buf, opened_name) = tokio::task::spawn_blocking(move || -> Result<_> {
         let host = cpal::default_host();
@@ -153,8 +128,6 @@ async fn ensure_output(
     .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
 
     let mut s = state_arc.lock().await;
-    // If a previous stream was opened on another device, drop it so the
-    // new one takes over cleanly.
     s.output_stream = None;
     s.output_stream = Some(stream);
     s.output_buf = Some(buf.clone());
@@ -164,8 +137,7 @@ async fn ensure_output(
     Ok((buf, sample_rate, channels))
 }
 
-/// Fire an event on the registered channel, if any. No-op when the frontend
-/// hasn't called `subscribe_voice_test_events` yet.
+/// Emit on the registered channel, if any.
 async fn emit(state_arc: &Arc<tokio::sync::Mutex<VoiceTestState>>, ev: VoiceTestEvent) {
     let s = state_arc.lock().await;
     if let Some(ch) = &s.channel {
@@ -173,10 +145,7 @@ async fn emit(state_arc: &Arc<tokio::sync::Mutex<VoiceTestState>>, ev: VoiceTest
     }
 }
 
-// ── Tauri commands ────────────────────────────────────────────────────────
-
 /// Register the Tauri Channel used to push VoiceTestEvents.
-/// Call once when the Voice Settings page mounts.
 pub async fn subscribe_voice_test_events(
     on_event: std::sync::Arc<dyn crate::sink::EventSink<VoiceTestEvent>>,
     state: &Arc<AppState>,
@@ -186,13 +155,7 @@ pub async fn subscribe_voice_test_events(
     Ok(())
 }
 
-/// Start a mic self-test against `input_device_id`. Opens the same cpal
-/// input stream the voice chat uses, computes peak/RMS on every frame, and
-/// pushes a `Frame` event to the frontend at ~30 Hz. When `monitor` is
-/// true, also opens the output device and loops the mic back through it
-/// (feedback warning).
-///
-/// Cancels any previous test.
+/// Start a mic self-test: peak/RMS `Frame`s at ~30 Hz, optional loopback monitor.
 pub async fn start_mic_test(
     input_device_id: String,
     output_device_id: String,
@@ -201,21 +164,18 @@ pub async fn start_mic_test(
 ) -> Result<()> {
     let state_arc = Arc::clone(&state.voice_test);
 
-    // Cancel any previous test atomically.
     {
         let mut s = state_arc.lock().await;
         stop_everything(&mut s);
     }
 
-    // Open the output first if we're monitoring — makes feedback obvious
-    // from the first mic frame rather than after a one-way warmup gap.
+    // Open the output first so monitor feedback starts on frame one.
     let output = if monitor {
         Some(ensure_output(&state_arc, &output_device_id).await?)
     } else {
         None
     };
 
-    // Pull the shared atomics we need before spawning the blocking init.
     let (is_muted, monitor_flag) = {
         let s = state_arc.lock().await;
         let voice = state.voice.lock().await;
@@ -238,8 +198,7 @@ pub async fn start_mic_test(
     let state_task = Arc::clone(&state_arc);
     let monitor_flag_task = Arc::clone(&monitor_flag);
     let task = tokio::spawn(async move {
-        // Emit one frame every 3 mic chunks (≈30ms ≈ 33Hz). Keeps the
-        // IPC volume reasonable while still feeling responsive.
+        // Emit every 3 chunks (~33 Hz).
         const EMIT_EVERY: u32 = 3;
         let mut chunks_seen: u32 = 0;
         let mut acc_peak: i16 = 0;
@@ -247,7 +206,6 @@ pub async fn start_mic_test(
         let mut acc_count: usize = 0;
 
         while let Some((samples, _rate)) = frame_rx.recv().await {
-            // Level math on the raw chunk.
             let mut chunk_peak: i16 = 0;
             let mut chunk_sq: f64 = 0.0;
             for &s in &samples {
@@ -264,9 +222,7 @@ pub async fn start_mic_test(
             acc_sq += chunk_sq;
             acc_count += samples.len();
 
-            // Feed monitor output if enabled. Mono → output_channels by
-            // duplication. Use the same ring buffer cap strategy as the
-            // call-path: trim to 200ms so it doesn't drift.
+            // Monitor: duplicate mono to all channels, trim the ring to 200 ms.
             if monitor_flag_task.load(Ordering::Relaxed) {
                 let (buf_opt, ch) = {
                     let s = state_task.lock().await;
@@ -328,9 +284,7 @@ pub async fn set_mic_test_monitor(
 ) -> Result<()> {
     let state_arc = Arc::clone(&state.voice_test);
 
-    // When enabling, make sure the output is open on the requested device
-    // before flipping the flag so we don't drop the first 100ms of monitor
-    // audio into a silent ring.
+    // Open the output before enabling, so early monitor audio isn't lost.
     if enabled {
         ensure_output(&state_arc, &output_device_id).await?;
     }
@@ -364,8 +318,7 @@ pub async fn record_and_play_back(
         stop_everything(&mut s);
     }
 
-    // Set up mic — APM is voice-channel-only; the test harness records the
-    // raw input so users hear what their device is actually delivering.
+    // Raw input (no APM), so users hear what the device delivers.
     let is_muted = {
         let _s = state_arc.lock().await;
         let v = voice_arc.lock().await;
@@ -383,7 +336,6 @@ pub async fn record_and_play_back(
     .await
     .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
 
-    // Store mic stream so cancellation can drop it.
     {
         let mut s = state_arc.lock().await;
         s.mic_stream = Some(mic_stream);
@@ -393,14 +345,12 @@ pub async fn record_and_play_back(
     let task = tokio::spawn(async move {
         emit(&state_task, VoiceTestEvent::RecordingStarted).await;
 
-        // Accumulate samples for `duration_ms`.
         let target_samples = (mic_rate as u64 * duration_ms as u64 / 1_000) as usize;
         let mut recorded: Vec<i16> = Vec::with_capacity(target_samples + 4_800);
         let deadline = tokio::time::Instant::now()
             + Duration::from_millis(duration_ms as u64);
 
-        // Same level-meter emission as start_mic_test — emit every 3 chunks
-        // (~33 Hz) so users see input feedback while recording.
+        // Same meter cadence as start_mic_test.
         const EMIT_EVERY: u32 = 3;
         let mut chunks_seen: u32 = 0;
         let mut acc_peak: i16 = 0;
@@ -461,14 +411,12 @@ pub async fn record_and_play_back(
             }
         }
 
-        // Stop the mic — we have what we need.
         {
             let mut s = state_task.lock().await;
             s.mic_stream = None;
         }
         emit(&state_task, VoiceTestEvent::RecordingFinished).await;
 
-        // Playback phase.
         let output = match ensure_output(&state_task, &output_device_id).await {
             Ok(v) => v,
             Err(e) => {
@@ -480,8 +428,7 @@ pub async fn record_and_play_back(
 
         emit(&state_task, VoiceTestEvent::PlaybackStarted).await;
 
-        // Push recorded mono i16 into the f32 ring, duplicated per channel.
-        // Assumes mic_rate == out_rate (both forced to 48 kHz elsewhere).
+        // Duplicate mono per channel; assumes mic_rate == out_rate (48 kHz).
         {
             let mut b = buf.lock().unwrap();
             for &sample in &recorded {
@@ -492,7 +439,7 @@ pub async fn record_and_play_back(
             }
         }
 
-        // Wait for drain. Poll at 50ms; covers ~20 ticks/sec.
+        // Wait for drain, polling every 50 ms.
         let drained_at_wait = {
             let total_samples = recorded.len() as u64 * out_channels as u64;
             Duration::from_millis(total_samples * 1_000 / out_rate as u64 + 250)
@@ -509,7 +456,6 @@ pub async fn record_and_play_back(
             }
         }
 
-        // Tear down the output now that playback is done.
         {
             let mut s = state_task.lock().await;
             s.output_stream = None;
@@ -557,7 +503,6 @@ pub async fn play_test_tone(
     let task = tokio::spawn(async move {
         emit(&state_task, VoiceTestEvent::PlaybackStarted).await;
 
-        // Push mono samples duplicated to output channels.
         {
             let mut b = buf.lock().unwrap();
             for &s in &samples {
@@ -570,7 +515,6 @@ pub async fn play_test_tone(
         // Wait for the ring to drain, with a small grace period.
         tokio::time::sleep(Duration::from_millis(total_duration_ms + 250)).await;
 
-        // Tear down so the next test starts clean.
         {
             let mut s = state_task.lock().await;
             s.output_stream = None;
@@ -598,8 +542,6 @@ pub async fn stop_test_playback(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-// ── Tone generators ───────────────────────────────────────────────────────
-
 /// Linear-frequency sine sweep with a short attack/release envelope to
 /// avoid clicks at the edges.
 fn generate_sweep(sample_rate: u32, duration_ms: u32, f0: f32, f1: f32) -> Vec<f32> {
@@ -626,8 +568,7 @@ fn generate_sweep(sample_rate: u32, duration_ms: u32, f0: f32, f1: f32) -> Vec<f
     out
 }
 
-/// C5–E5–G5 arpeggio, 200ms per note, with envelopes. Just enough of a
-/// "voice ready" jingle to confirm the output path is wired up end-to-end.
+/// C5–E5–G5 arpeggio, 200 ms per note, with envelopes.
 fn generate_chime(sample_rate: u32) -> Vec<f32> {
     let notes: [f32; 3] = [523.25, 659.25, 783.99];
     let per_note_ms = 200u32;
@@ -640,8 +581,7 @@ fn generate_chime(sample_rate: u32) -> Vec<f32> {
             if phase > 2.0 * PI {
                 phase -= 2.0 * PI;
             }
-            // Exponential decay inside each note so it sounds plucked
-            // rather than held.
+            // Exponential decay so it sounds plucked.
             let env = (-4.0 * i as f32 / note_samples as f32).exp();
             out.push(phase.sin() * 0.15 * env);
         }

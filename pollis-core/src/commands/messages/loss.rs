@@ -1,39 +1,14 @@
 //! Making a lost message visible (#1312).
 //!
-//! Under `max_past_epochs = 0` an envelope this device did not decrypt while
-//! its group sat at the envelope's epoch can never be decrypted here again. The
-//! ingest cursor still has to move past it — holding it would wedge the
-//! conversation forever — and before #1312 that is all that happened: no row,
-//! no log line. A loss was invisible by construction, so nobody could tell a
-//! lost message from one that was never sent.
+//! Under `max_past_epochs = 0` an envelope missed at its epoch is lost; the cursor must still pass it.
 //!
 //! Now, when the cursor moves past a message envelope this device was ENTITLED
 //! to read and never did, a placeholder row is written (`message.undecryptable`
 //! = the [`Reason`]) and the conversation shows it in place.
 //!
-//! "Entitled" excludes exactly two cases, and nothing else (and the first is
-//! narrowed by #1571, see [`sealed_while_entitled`]):
+//! Not entitled: envelopes sealed before this device joined (see [`sealed_while_entitled`]) or already accounted for.
 //!
-//! * **Before this device was in the tree.** An envelope sealed below the epoch
-//!   this device was added at ([`crate::commands::mls::first_join`]) is the loss
-//!   `CLAUDE.md` accepts (a message sent before you joined the MLS tree) — on a
-//!   first join, and equally for the gap while a removed member was out. A
-//!   recovery rebuild does not move that floor. A lineage with no recorded join
-//!   — one this device joined before #1312 shipped — gets its floor from the
-//!   first catch-up that sees it ([`fallback_floor`]).
-//! * **Envelopes this device already accounted for.** Sealed sender leaves
-//!   nothing on an envelope that says who sent it, and MLS cannot decrypt a
-//!   message for the leaf that sealed it, so every receipt and delete notice
-//!   this device posted comes back through the fetch looking undecryptable.
-//!   Nor can a message be decrypted twice, and an envelope past one that is not
-//!   readable yet is fetched again on the next pass; a text message has its row
-//!   to show for the first time, a control frame or edit has none.
-//!   [`record_own_envelope`] and [`record_opened_envelope`] keep that list.
-//!
-//! An envelope can hold a control frame (a receipt, a delete) rather than text;
-//! nothing outside the ciphertext says which. A placeholder therefore claims
-//! only that *something sent here* could not be read on this device — which is
-//! true either way, and is why a lost edit or delete is logged, not shown.
+//! A placeholder claims only that something sent here was unreadable; a lost edit or delete is only logged.
 
 use rusqlite::OptionalExtension;
 
@@ -41,9 +16,7 @@ use rusqlite::OptionalExtension;
 /// CHECK constraint admits exactly these strings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Reason {
-    /// The device's group had already moved past the envelope's epoch before
-    /// the envelope was fetched, so it was never attempted: those keys were
-    /// already gone.
+    /// The group moved past the envelope's epoch before it was fetched.
     Stranded,
     /// Attempted at its own epoch and the decrypt failed.
     Failed,
@@ -131,11 +104,7 @@ pub(crate) fn sealed_while_entitled(
     }
 }
 
-/// The floor to record for a lineage this device holds but whose first join
-/// predates #1312, given the epoch the first catch-up after the upgrade
-/// started at. One above it: the device may have posted control frames at that
-/// epoch before [`record_own_envelope`] existed, and those must not come back
-/// as losses. The price is that a real loss at that single epoch stays silent.
+/// Floor for a lineage joined before #1312: one above the first catch-up's start epoch.
 pub(crate) fn fallback_floor(start_epoch: u64) -> u64 {
     start_epoch.saturating_add(1)
 }
@@ -202,9 +171,7 @@ pub(crate) fn has_real_row(conn: &rusqlite::Connection, id: &str) -> bool {
 
 /// Write the placeholder for a lost envelope. Idempotent.
 ///
-/// The envelope's `sender_id` column is copied as-is: under sealed sender it is
-/// the `sealed` sentinel, which no user has, so the UI shows no author — the
-/// truth, since nothing readable says who sent it.
+/// `sender_id` stays the `sealed` sentinel, so the UI shows no author.
 pub(crate) fn write_placeholder(
     conn: &rusqlite::Connection,
     conversation_id: &str,

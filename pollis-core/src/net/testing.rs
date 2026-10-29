@@ -3,17 +3,7 @@
 
 /// A revocation store holding a freshly-signed list that revokes nobody.
 ///
-/// **Every test relay that will be asked to `Extend` needs one.** A node that
-/// cannot evaluate revocation refuses to extend circuits (#813 phase C, enforced
-/// at the `serve_extend` call site by phase E2), so the production shape of a
-/// middle hop is "keyed, with a current list" — a relay built without this
-/// fails every multi-hop dial with `ExtendFailed`.
-///
-/// Lives here rather than being copied per-suite because three separate suites
-/// need the identical fixture (`net::overlay`, `net::peer::engine`, and
-/// `pollis-relay/tests/onion.rs` — the last has its own copy, being in another
-/// crate). The unkeyed and genuinely-revoked cases are covered directly in
-/// `pollis-relay/tests/revocation.rs`; this is only the "healthy node" shape.
+/// **Every test relay that will `Extend` needs one**: without a current list it refuses (#813 C).
 pub(crate) fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
     use base64::Engine as _;
     use ed25519_dalek::{Signer, SigningKey};
@@ -40,15 +30,9 @@ pub(crate) fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
 /// The signed directory this process's test relays check `Extend` against, plus
 /// the loopback addresses published into it so far.
 ///
-/// **Every test relay that will be asked to `Extend` needs one**, for the same
-/// reason it needs [`healthy_revocations`]: a relay extends only to an address
-/// the current signed directory lists (`pollis_relay::nexthop`), so a node built
-/// without one refuses every multi-hop dial with `ExtendFailed`.
+/// **Every test relay that will `Extend` needs one**: it only extends to listed addresses.
 ///
-/// Shared and **additive** across the suites in one binary: every test relay
-/// binds a fresh loopback port, so one test's pool membership is invisible to
-/// another's, and re-signing on each spawn keeps the artifact fresh without any
-/// test having to sequence it.
+/// Shared and **additive**: each relay binds a fresh port, re-signed on each spawn.
 fn test_pool() -> &'static (
     pollis_relay::nexthop::NextHopDirectory,
     std::sync::Mutex<Vec<std::net::SocketAddr>>,
@@ -77,8 +61,7 @@ pub(crate) fn test_directory() -> pollis_relay::nexthop::NextHopDirectory {
     test_pool().0.clone()
 }
 
-/// Add `addr` to the test pool and re-sign the directory, so relays already
-/// running observe the new member immediately (the store is one shared cell).
+/// Add `addr` to the test pool and re-sign; running relays see it immediately.
 pub(crate) fn publish_hop(addr: std::net::SocketAddr) {
     use base64::Engine as _;
     use ed25519_dalek::{Signer, SigningKey};

@@ -3,55 +3,21 @@
 //!
 //! # Why it listens on loopback
 //!
-//! [`PeerEngine`] binds `127.0.0.1:0`. Nothing on the network can reach it: a
-//! peer is reached over a link the device itself opened outbound (see the module
-//! docs), and the bridge relays that link's datagrams to the loopback endpoint.
-//! So a volunteer gains no externally-reachable port, no firewall prompt, and no
-//! new attack surface from turning the feature on — and the engine's own
-//! security properties (below) hold regardless of what is on the other end of
-//! the link, because the QUIC/TLS terminates at the engine's own pinned leaf.
+//! [`PeerEngine`] binds `127.0.0.1:0`; it is reached only over an outbound link, so no new port or attack surface.
 //!
 //! # A peer cannot be an exit — structurally, not by policy
 //!
-//! The engine is configured with an **empty destination allowlist**.
-//! `Allowlist::permits` returns false for every host when the pattern list is
-//! empty, and the allowlist is checked on the `Connect` frame — the only frame
-//! that names a destination — *before* any socket is opened. So a peer that is
-//! handed a `Connect` refuses it with `NotAllowed` and never dials anything, no
-//! matter who sent it or what path selection intended. `o1_*` in
-//! `pollis-relay/tests/onion.rs` proves the same property for first-party
-//! middles; [`tests::a_peer_cannot_be_a_circuits_exit`] proves it for this
-//! configuration.
+//! An **empty destination allowlist** refuses every `Connect` before any socket opens (see `a_peer_cannot_be_a_circuits_exit`).
 //!
 //! # …and it is not a dialer either
 //!
-//! Extending to another **relay** is the peer's whole job, so `allow_extend` is
-//! on — but only when the device can say what a relay *is*. `Extend` carries a
-//! bare address the client chose, so an engine that honoured it unconditionally
-//! would let anyone make a volunteer's laptop open a QUIC connection to any
-//! address, inside that volunteer's own network. The engine therefore takes a
-//! [`NextHopDirectory`] and turns `allow_extend` on **only** when it is
-//! configured: no signed directory, no middle-hop role. On top of that the
-//! address must be public unicast — the peer's next hop is a first-party relay
-//! on a public address, never something on the volunteer's LAN.
+//! `allow_extend` is on **only** with a configured [`NextHopDirectory`], and only to public unicast, so a volunteer's device is never an open dialer.
 //!
 //! # Rate limiting
 //!
-//! Per-IP limits do no *discriminating* here and per-account limits do the
-//! work. Every stream — and every connection — arrives through the bridge, so
-//! its source address is loopback and identifies nothing; keying limits on it
-//! would lump every account behind one bucket. (A first-party node does the
-//! opposite and keys layered streams on the previous hop's address too, because
-//! there an opening `Layer` can come from anyone; here nothing but the bridge
-//! can reach the engine at all.)
+//! Every stream arrives from loopback, so per-IP limits discriminate nothing; per-account limits do the work.
 //!
-//! They are still **finite**, sized so the loopback bucket can never be what
-//! refuses legitimate traffic: `u32::MAX` would have been a bound that stops
-//! existing the moment something other than the bridge reaches the engine, and
-//! a limit that is only correct because of a fact stated in a comment is the
-//! kind that quietly stops holding. The global connection cap
-//! ([`MAX_CONCURRENT_CONNECTIONS`]) is still the bound on what the bridge may
-//! carry.
+//! They stay **finite** and sized never to bind first; [`MAX_CONCURRENT_CONNECTIONS`] bounds the bridge.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -69,32 +35,19 @@ use tokio::task::JoinHandle;
 
 use super::link::PeerLink;
 
-/// Largest datagram the bridge will move. QUIC's own path-MTU ceiling is well
-/// under this; the slack is there so a jumbo-frame path cannot silently truncate
-/// a packet into a corrupt one.
+/// Largest datagram the bridge moves; slack so jumbo frames don't truncate.
 const MAX_DATAGRAM: usize = 4096;
 
-/// Drop a link that has carried nothing for this long. Not a poll — no work
-/// happens on the deadline, and any traffic in either direction resets it. It
-/// exists so a link whose far end vanished without closing cleanly does not sit
-/// on a socket forever.
+/// Drop a link idle this long, so a vanished far end doesn't hold a socket. Not a poll.
 const LINK_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// How long in-flight circuits get to drain when the user turns relaying off.
-/// Someone else's message is mid-flight; cutting it dead is the one failure this
-/// feature must not cause.
+/// Drain time on turning relaying off; someone's message is mid-flight.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Concurrent QUIC connections the engine will carry. A volunteer's laptop is
-/// not a datacentre; the cap bounds what consenting costs.
+/// Concurrent QUIC connections; bounds what consenting costs.
 const MAX_CONCURRENT_CONNECTIONS: u32 = 32;
 
-/// Concurrent circuits the engine will carry from one source address. Every
-/// connection arrives from loopback, so in practice this is a second global cap
-/// — set above what [`MAX_CONCURRENT_CONNECTIONS`] connections can produce
-/// (a connection may hold a handful of streams) so it never binds before the
-/// real one does, and finite so the bound does not evaporate if anything but
-/// the bridge ever reaches the engine.
+/// Per-source circuits; effectively a second global cap, set above what the real one allows.
 const MAX_CIRCUITS_PER_IP: u32 = 256;
 
 /// New circuits per minute from one source address, on the same terms.
@@ -102,15 +55,12 @@ const NEW_CIRCUITS_PER_MIN_PER_IP: u32 = 600;
 
 /// Live counters for the status surface.
 ///
-/// Both numbers describe traffic *volume*, never who sent it — a relay has no
-/// way to know that, and recording it is exactly what §5.2/§11.7 forbid.
+/// Volume only, never who sent it (§5.2/§11.7).
 #[derive(Default)]
 pub struct PeerCounters {
     active_links: AtomicU32,
     bytes_forwarded: AtomicU64,
-    /// Invoked when the live-link count changes, so the manager can push a
-    /// status event. Byte movement deliberately does NOT notify: that would be a
-    /// per-datagram event storm for a number the UI renders in kB.
+    /// Called when the live-link count changes; bytes never notify (event storm).
     on_change: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
@@ -121,12 +71,7 @@ impl PeerCounters {
 
     /// Links currently carrying traffic.
     ///
-    /// Reported to the UI as `active_circuits`. One link is one QUIC connection
-    /// from a first-party relay, which may carry more than one circuit —
-    /// `pollis-relay`'s `RelayStats` exposes cumulative counters only, with no
-    /// live gauge to read. A true circuit gauge is a one-line addition to
-    /// `serve_authenticated` in `pollis-relay/src/server.rs`, which phase D1 does
-    /// not own; it is filed as a cross-cutting request.
+    /// Reported as `active_circuits`; one link may carry several circuits (no live gauge in `pollis-relay`).
     pub fn active_links(&self) -> u32 {
         self.active_links.load(Ordering::Relaxed)
     }
@@ -135,7 +80,6 @@ impl PeerCounters {
         self.bytes_forwarded.load(Ordering::Relaxed)
     }
 
-    /// Register the change hook. Replaces any previous one.
     pub fn set_on_change(&self, hook: Arc<dyn Fn() + Send + Sync>) {
         *self.on_change.lock().unwrap() = Some(hook);
     }
@@ -144,9 +88,7 @@ impl PeerCounters {
         self.bytes_forwarded.fetch_add(n as u64, Ordering::Relaxed);
     }
 
-    /// Count a link as live until the returned guard drops. A guard rather than
-    /// paired calls so the count self-heals when a pump ends for any reason,
-    /// including a panic.
+    /// A guard, so the count self-heals however a pump ends.
     fn link_guard(self: &Arc<Self>) -> LinkGuard {
         self.active_links.fetch_add(1, Ordering::Relaxed);
         self.notify();
@@ -185,57 +127,36 @@ pub struct PeerEngine {
 }
 
 impl PeerEngine {
-    /// Stand up the node. The identity is generated fresh per run: a peer's leaf
-    /// cert only means anything once something has published it for clients to
-    /// pin, and nothing publishes it yet, so persisting one would be storing a
-    /// credential with no reader.
+    /// Fresh identity per run; nothing publishes a persisted leaf yet.
     ///
-    /// `revocations` and `next_hops` are not optional by accident. A peer's
-    /// whole job is to `Extend` to the next hop; a node that cannot evaluate
-    /// revocation refuses to extend (#813 phase C, enforced in `serve_extend`)
-    /// and one that cannot check the address against the signed directory
-    /// refuses too — so an engine handed the unconfigured form of either
-    /// forwards nothing at all. Taking them as parameters makes that a decision
-    /// at the call site instead of a silent default that looks like it works.
+    /// `revocations` and `next_hops` are explicit because the unconfigured form of either forwards nothing.
     pub fn start(
         counters: Arc<PeerCounters>,
         revocations: pollis_relay::policy::RevocationStore,
         next_hops: NextHopDirectory,
     ) -> anyhow::Result<PeerEngine> {
         let identity = tls::generate_self_signed(tls::RELAY_SERVER_NAME)?;
-        // Empty allowlist — permits nothing. See the module docs: this is what
-        // makes "a peer is never an exit" structural.
+        // Empty allowlist: a peer is never an exit.
         let mut config = RelayConfig::with_identity(
             "127.0.0.1:0".parse().expect("loopback literal parses"),
             Allowlist::default(),
             identity,
         );
-        // Forwarding to the next relay is the entire job — but only for hops
-        // the signed directory names, so a device that cannot check one is not
-        // a middle hop at all rather than an open dialer (see the module docs).
+        // Extend only to hops the signed directory names.
         config.allow_extend = next_hops.is_configured();
         config.next_hops = next_hops;
-        // A peer's next hop is a first-party relay on a public address, so a
-        // private one is never legitimate here. This crate's own tests stand the
-        // whole pool up on loopback, and that relaxation is compiled only into
-        // the test build — never into a shipped client.
+        // Private next hops are allowed only in this crate's tests.
         config.allow_private_next_hops = cfg!(test);
         config.revocations = revocations;
         config.max_concurrent_connections = MAX_CONCURRENT_CONNECTIONS;
-        // Every connection arrives from loopback, so a per-IP connection cap is
-        // in practice a second global cap. It matches the global one rather than
-        // being lifted: `u32::MAX` is not a bound.
+        // Per-IP cap matches the global one; `u32::MAX` is not a bound.
         config.max_connections_per_ip = MAX_CONCURRENT_CONNECTIONS;
         config.rate_limits = RateLimitConfig {
-            // Loopback source addresses identify nothing behind the bridge, so
-            // the per-account limits are what discriminate; these sit above what
-            // the global connection cap can produce and still bound it.
             new_circuits_per_min_per_ip: NEW_CIRCUITS_PER_MIN_PER_IP,
             max_concurrent_per_ip: MAX_CIRCUITS_PER_IP,
             ..RateLimitConfig::default()
         };
-        // Production nodes never record who connects to them (§5.2, §11.7), and
-        // a volunteer's device least of all.
+        // Never record who connects (§5.2, §11.7).
         config.peer_observer = None;
 
         let cert_der = config.server_cert();
@@ -260,26 +181,21 @@ impl PeerEngine {
         })
     }
 
-    /// The loopback address the bridge feeds. Never reachable off-device.
     pub fn quic_addr(&self) -> SocketAddr {
         self.quic_addr
     }
 
-    /// The leaf cert a client pins to reach this node. Published through the
-    /// signed directory once peer registration exists ([`super::discovery`]).
+    /// The leaf cert a client pins to reach this node.
     pub fn cert_der(&self) -> &CertificateDer<'static> {
         &self.cert_der
     }
 
-    /// Relay counters (`connects`, `extends`, `dials`, …). `connects` above zero
-    /// with `dials` at zero is the shape a peer should always have: something
-    /// asked it to be an exit and it refused.
+    /// `connects > 0` with `dials == 0` is a peer refusing to be an exit.
     pub fn stats(&self) -> &Arc<RelayStats> {
         &self.stats
     }
 
-    /// Start carrying traffic for one link. Runs until the link closes, goes
-    /// idle, or the engine is dropped.
+    /// Carry one link until it closes, idles out, or the engine drops.
     pub fn serve_link(&self, link: PeerLink) {
         let counters = self.counters.clone();
         let quic = self.quic_addr;
@@ -324,10 +240,7 @@ impl Drop for PeerEngine {
 /// Peer side of the bridge: shuttle datagrams between `link` and the loopback
 /// QUIC endpoint at `quic`.
 ///
-/// The socket is `connect`ed, so each link gets its own source port and the
-/// engine sees one QUIC peer per link. Nothing here parses, buffers, or reorders
-/// a datagram — it is a byte mover, which is the whole promise the consent
-/// screen makes.
+/// `connect`ed socket: one QUIC peer per link. A byte mover only.
 async fn pump_link_to_quic(
     mut link: PeerLink,
     quic: SocketAddr,
@@ -346,15 +259,13 @@ async fn pump_link_to_quic(
                         counters.add_bytes(datagram.len());
                         let _ = socket.send(&datagram).await;
                     }
-                    // Link closed, or idle for the whole timeout.
                     Ok(None) | Err(_) => return Ok(()),
                 }
             }
             received = socket.recv(&mut buf) => {
                 let n = received?;
                 counters.add_bytes(n);
-                // A dropped datagram is a datagram; QUIC recovers. Blocking the
-                // whole pipe on one slow reader would not.
+                // Drop rather than block; QUIC recovers.
                 let _ = link.try_send(buf[..n].to_vec());
             }
         }
@@ -364,9 +275,7 @@ async fn pump_link_to_quic(
 /// Client side of the bridge: bind a loopback UDP address that a QUIC client can
 /// dial, and shuttle its datagrams over `link`.
 ///
-/// The returned address is what goes in `Hop::addr`; the hop's *identity* is
-/// still the peer's pinned leaf cert, verified end to end inside the tunnel, so
-/// nothing carrying the link can impersonate the peer.
+/// The hop's identity is still the peer's pinned leaf, verified inside the tunnel.
 pub async fn bridge_to_link(
     link: PeerLink,
     counters: Arc<PeerCounters>,
@@ -388,8 +297,7 @@ async fn pump_quic_to_link(
 ) -> anyhow::Result<()> {
     let _guard = counters.link_guard();
     let mut buf = vec![0u8; MAX_DATAGRAM];
-    // Whoever dialled us last. A QUIC client keeps one source port per
-    // connection, so this is that connection's return path.
+    // Last client to dial us; its return path.
     let mut client: Option<SocketAddr> = None;
     loop {
         tokio::select! {
@@ -464,8 +372,7 @@ mod tests {
     ) {
         let mut config = RelayConfig::new(
             "127.0.0.1:0".parse().unwrap(),
-            // The test origin listens on a random port, so the entry says so
-            // — a bare host would mean 443 only.
+            // Random port, so `:*`.
             Allowlist::from_patterns([format!("{ORIGIN_NAME}:*")]),
         )
         .unwrap();
@@ -478,8 +385,7 @@ mod tests {
         let cert = config.server_cert();
         let stats = config.stats.clone();
         let (task, addr) = RelayServer::spawn(config).unwrap();
-        // The peer under test extends to this node, and it extends only to
-        // addresses the signed directory names. See net::testing.
+        // Extends only to directory-listed addresses (net::testing).
         crate::net::testing::publish_hop(addr);
         (addr, cert, stats, task)
     }
@@ -505,9 +411,7 @@ mod tests {
         (addr, count)
     }
 
-    /// The property the whole feature rests on: hand a peer a `Connect` and it
-    /// refuses, having dialled nothing. Flip `Allowlist::default()` in
-    /// [`PeerEngine::start`] to `["*"]` and this test fails.
+    /// A peer refuses `Connect`, dialling nothing.
     #[tokio::test]
     async fn a_peer_cannot_be_a_circuits_exit() {
         let (origin, connections) = spawn_echo().await;
@@ -518,19 +422,16 @@ mod tests {
             Hop::new(peer.quic_addr(), peer.cert_der().clone()),
             client_identity(),
         );
-        // A live, trivially reachable destination, so refusal is the ONLY reason
-        // this can fail — an open allowlist here would succeed.
+        // A reachable destination, so refusal is the only way to fail.
         let result = circuit.connect("127.0.0.1", origin.port()).await;
 
         assert!(result.is_err(), "a peer must refuse to reach a destination");
-        // It parsed the Connect — and refused before opening any socket.
         assert_eq!(peer.stats().connects(), 1);
         assert_eq!(peer.stats().dials(), 0);
         assert_eq!(connections.load(Ordering::Relaxed), 0);
     }
 
-    /// A first-party host name is not special-cased either: the allowlist is
-    /// empty, so nothing is permitted, whatever the destination looks like.
+    /// Even a first-party host name is not permitted.
     #[tokio::test]
     async fn a_peer_refuses_named_destinations_too() {
         let (origin, connections) = spawn_echo().await;
@@ -547,10 +448,7 @@ mod tests {
         assert_eq!(connections.load(Ordering::Relaxed), 0);
     }
 
-    /// A volunteer's device is not a dialer. With no signed directory to check a
-    /// next hop against, the engine does not act as a middle hop at all — so an
-    /// `Extend` naming any address, including one that is a real relay, is
-    /// refused and nothing is dialled.
+    /// With no signed directory, any `Extend` is refused and nothing is dialled.
     #[tokio::test]
     async fn without_a_directory_a_peer_extends_to_nothing() {
         let (origin, connections) = spawn_echo().await;
@@ -583,26 +481,19 @@ mod tests {
         assert_eq!(connections.load(Ordering::Relaxed), 0);
     }
 
-    /// Nothing the engine bounds is bounded by `u32::MAX`. Loopback carries every
-    /// stream, so the per-IP limits do no discriminating — but a limit that is
-    /// only correct because of where the traffic happens to come from stops being
-    /// a limit the moment that changes.
+    /// No engine limit is `u32::MAX`.
     #[test]
     fn the_engines_per_ip_bounds_are_finite() {
         const {
             assert!(MAX_CIRCUITS_PER_IP < u32::MAX);
             assert!(NEW_CIRCUITS_PER_MIN_PER_IP < u32::MAX);
             assert!(MAX_CONCURRENT_CONNECTIONS < u32::MAX);
-            // ...and sized so the loopback bucket never binds before the global
-            // cap. Const-evaluated, so raising one of these back to `u32::MAX`
-            // fails the build rather than a test run.
+            // Const-evaluated, so raising one to `u32::MAX` fails the build.
             assert!(MAX_CIRCUITS_PER_IP >= MAX_CONCURRENT_CONNECTIONS);
         }
     }
 
-    /// The job a peer *does* do: forward to the next relay without ever seeing
-    /// the destination. The peer's allowlist is empty throughout, so if it had
-    /// been the node that parsed the `Connect`, the circuit would have failed.
+    /// A peer forwards to the next relay without seeing the destination.
     #[tokio::test]
     async fn a_peer_forwards_as_a_non_terminal_hop() {
         let (origin, connections) = spawn_echo().await;
@@ -625,20 +516,15 @@ mod tests {
         stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf, b"through the peer");
 
-        // The peer extended and never learned a destination.
         assert_eq!(peer.stats().extends(), 1);
         assert_eq!(peer.stats().connects(), 0);
         assert_eq!(peer.stats().dials(), 0);
-        // The first-party hop is the one that talked to the origin.
         assert_eq!(fp_stats.connects(), 1);
         assert_eq!(fp_stats.dials(), 1);
         assert_eq!(connections.load(Ordering::Relaxed), 1);
     }
 
-    /// The same circuit, but the client reaches the peer only through a
-    /// [`PeerLink`] datagram tunnel — the transport a peer is actually reached
-    /// over. Proves the bridge carries a full onion circuit, and that the
-    /// counters the UI shows are real.
+    /// The same circuit through a [`PeerLink`] tunnel, with real counters.
     #[tokio::test]
     async fn a_full_circuit_rides_a_peer_link() {
         let (origin, connections) = spawn_echo().await;
@@ -646,8 +532,6 @@ mod tests {
         let counters = PeerCounters::new();
         let peer = PeerEngine::start(counters.clone(), crate::net::testing::healthy_revocations(), crate::net::testing::test_directory()).unwrap();
 
-        // Tunnel: client bridge ⇄ link ⇄ peer engine. Nothing dials the peer's
-        // loopback endpoint from outside this process.
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
         let (bridge_addr, _bridge) = bridge_to_link(client_end, counters.clone())
@@ -677,14 +561,11 @@ mod tests {
             counters.bytes_forwarded() > 0,
             "the bridge must account for what it moved"
         );
-        // Both ends of the tunnel share one counter here because both run in
-        // this process; in production the client bridge and the peer pump are on
-        // different devices and each counts one.
+        // Both ends count here because both run in this process.
         assert_eq!(counters.active_links(), 2);
     }
 
-    /// The engine still refuses to be an exit when reached over a link — the
-    /// transport cannot launder a `Connect`.
+    /// The link cannot launder a `Connect`.
     #[tokio::test]
     async fn a_peer_reached_over_a_link_still_refuses_to_exit() {
         let (origin, connections) = spawn_echo().await;
@@ -713,7 +594,6 @@ mod tests {
 
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
-        // Give the pump a moment to register.
         for _ in 0..50 {
             if counters.active_links() == 1 {
                 break;
@@ -761,8 +641,7 @@ mod tests {
         let addr = peer.quic_addr();
         peer.shutdown().await;
 
-        // Nothing answers there any more: the dial either errors or never
-        // completes, and both are "the node is gone".
+        // The node is gone: the dial errors or never completes.
         let circuit = Circuit::build_single_hop(
             Hop::new(addr, peer.cert_der().clone()),
             client_identity(),

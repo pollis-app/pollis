@@ -1,19 +1,6 @@
 //! The opt-in second step of the export (#856): download the attachments the
 //! archive could not satisfy from the local cache.
-//!
-//! Deliberately a separate module and a separate command. `export.rs` is
-//! strictly device-local and its own test scans it for network helpers; this
-//! module is the one place the export feature is allowed to touch R2, and only
-//! when the user pressed a second, separately-worded button *after* the archive
-//! was written. The default path never comes here.
-//!
-//! What it fetches is exactly `ExportSummary::attachments_missing` — a list the
-//! renderer hands back — so every entry is treated as untrusted: `files_dir`
-//! must be absolute and each `file` must be a single path component, or the
-//! whole call is refused before any byte moves. The bytes themselves come
-//! through [`crate::commands::r2::download_media`], which decrypts and verifies
-//! each object against its content hash, so a substituted or corrupted object
-//! is a per-file failure, never a file on disk.
+//! The one export path allowed to touch R2. Renderer input is untrusted.
 
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -26,8 +13,7 @@ use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FetchSummary {
-    /// Files now present and verified under `files_dir` — including any that
-    /// were already there from an earlier run, so the call is idempotent.
+    /// Files now present and verified under `files_dir` (idempotent across runs).
     pub fetched: usize,
     pub failed: Vec<FetchFailure>,
 }
@@ -53,8 +39,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-/// The fetch loop with the download injected, so the tests can drive it with
-/// a fake and the command with the real R2 path.
+/// The fetch loop with the download injected for tests.
 pub(crate) async fn fetch_with<F, Fut>(
     files_dir: &Path,
     attachments: &[MissingAttachment],
@@ -80,8 +65,6 @@ where
     let mut failed = Vec::new();
     for att in attachments {
         let target = files_dir.join(&att.file);
-        // Already there and correct — an earlier run, or the cache step. Don't
-        // download what the disk already holds.
         if let Ok(existing) = std::fs::read(&target) {
             if sha256_hex(&existing) == att.sha256 {
                 fetched += 1;
@@ -90,8 +73,7 @@ where
         }
         match fetch(att).await {
             Ok(bytes) => {
-                // `download_media` verifies; a fake might not. Never vouch for
-                // bytes on disk that do not match their name.
+                // A fake download might not verify; never vouch for mismatched bytes.
                 if sha256_hex(&bytes) != att.sha256 {
                     failed.push(FetchFailure {
                         content_hash: att.content_hash.clone(),
@@ -119,10 +101,7 @@ where
     Ok(FetchSummary { fetched, failed })
 }
 
-/// Download the attachments an export reported missing into its files
-/// directory. **This is the one network step of the export, and it only runs
-/// on an explicit second request.** Sequential by design: one presigned GET
-/// at a time, so a large archive cannot fan out into a burst against the DS.
+/// Download reported-missing attachments, one GET at a time so it cannot burst the DS.
 pub async fn fetch_export_attachments(
     files_dir: String,
     attachments: Vec<MissingAttachment>,
@@ -235,8 +214,7 @@ mod tests {
         assert_eq!(std::fs::read(dir.path().join("a.png")).unwrap(), b"new");
     }
 
-    /// The list comes from the renderer. A crafted `file` must not be able to
-    /// write outside `files_dir`, and nothing is fetched before that is known.
+    /// The list comes from the renderer; a crafted `file` must not escape `files_dir`.
     #[tokio::test]
     async fn a_file_name_that_is_not_one_component_refuses_the_whole_call() {
         let dir = tempfile::tempdir().unwrap();

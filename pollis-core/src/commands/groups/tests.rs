@@ -1,13 +1,6 @@
-// The remaining tests pin schema constraints (CHECK, UNIQUE, PRIMARY KEY, FK,
-// DEFAULT, ON DELETE CASCADE) against the shipped remote schema, plus the
-// derive_slug contract. Query-simulation tests for the client SQL #987 removed
-// were deleted.
 use rusqlite::Connection;
 
-/// The SHIPPED remote schema — baseline plus every numbered migration, in the
-/// order `scripts/db-apply.sh` applies them. #875: this used to be `BASELINE`
-/// plus a hand-written `EXTRA_TABLES` block standing in for the later
-/// migrations, which is how a fixture ends up laxer than production.
+/// The shipped remote schema: baseline plus every numbered migration.
 fn db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
@@ -32,14 +25,6 @@ fn setup(conn: &Connection) {
     conn.execute("INSERT INTO conversation (id, kind) VALUES ('ch2', 'channel')", []).unwrap();
     conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('ch2', 'g1', 'random', 'text')", []).unwrap();
 }
-
-// ── derive_slug ────────────────────────────────────────────────────────
-//
-// The function moved to `pollis-api` in #987 so the client and the DS derive a
-// slug from ONE implementation — `POST /v1/read/group-by-slug` runs it
-// server-side now, and two copies that agree today are exactly how a lookup
-// starts silently missing. These cases stay here because they are the client's
-// contract with it.
 
 #[test]
 fn slug_simple_name() {
@@ -81,8 +66,6 @@ fn slug_unicode_stripped() {
     assert_eq!(pollis_api::directory::derive_slug("café"), "caf");
 }
 
-// ── column defaults ────────────────────────────────────────────────────
-
 #[test]
 fn channel_type_defaults_to_text() {
     let conn = db();
@@ -99,8 +82,6 @@ fn channel_type_defaults_to_text() {
     ).unwrap();
     assert_eq!(ct, "text");
 }
-
-// ── group deletion cascades ────────────────────────────────────────────
 
 #[test]
 fn delete_group_cascades_members_and_channels() {
@@ -124,8 +105,6 @@ fn delete_group_cascades_members_and_channels() {
     assert_eq!(channel_count, 0, "channels should be cascade-deleted");
 }
 
-// ── add_member_to_group (INSERT OR IGNORE) ─────────────────────────────
-
 #[test]
 fn add_member_ignores_duplicate() {
     let conn = db();
@@ -144,8 +123,6 @@ fn add_member_ignores_duplicate() {
     ).unwrap();
     assert_eq!(count, 1, "should still be exactly one membership row");
 }
-
-// ── invites ────────────────────────────────────────────────────────────
 
 #[test]
 fn invite_cascade_deletes_with_group() {
@@ -166,8 +143,6 @@ fn invite_cascade_deletes_with_group() {
     ).unwrap();
     assert_eq!(count, 0, "invite should be cascade-deleted with group");
 }
-
-// ── join requests ──────────────────────────────────────────────────────
 
 #[test]
 fn join_request_unique_per_group_requester() {
@@ -218,8 +193,6 @@ fn join_request_cascade_deletes_with_group() {
     ).unwrap();
     assert_eq!(count, 0, "join requests should be cascade-deleted with group");
 }
-
-// ── membership constraints ─────────────────────────────────────────────
 
 #[test]
 fn duplicate_group_member_violates_unique() {

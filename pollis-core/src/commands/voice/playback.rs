@@ -31,18 +31,9 @@ use super::types::{
 /// Emit an AudioBands event every N drained frames (~10 ms each) ⇒ ~20 Hz.
 const BANDS_EMIT_EVERY: u32 = 5;
 
-// ── Mixer + per-track drain ───────────────────────────────────────────────
-
-/// Drain a remote track's `NativeAudioStream` into a per-track ring buffer
-/// and emit speaking-state transitions. Runs as one tokio task per
-/// subscribed remote audio track. The mixer reads from the buffer.
+/// Drain a remote track into its ring buffer and emit speaking transitions.
 ///
-/// `is_shared_audio` marks a screen share's soundtrack rather than a
-/// person's microphone. Such a track still mixes to the speaker exactly
-/// like any other, but it must NOT drive the speaking indicator or the
-/// level meter: those are attributed to a participant, and a shared video
-/// would otherwise show the sharer talking continuously for its whole
-/// runtime — while they sit silent.
+/// Shared audio (`is_shared_audio`) mixes but never drives speaking/meters.
 async fn run_drain_task(
     rtc_track: libwebrtc::audio_track::RtcAudioTrack,
     track_key: String,
@@ -58,17 +49,14 @@ async fn run_drain_task(
     let mut speak_hold: u32 = 0;
     let mut is_speaking = false;
 
-    // Live multi-band meter. Clone the event sink once so the hot loop never
-    // has to re-lock the shared VoiceState mutex just to publish levels.
+    // Sink cloned once so the hot loop never re-locks VoiceState.
     let event_sink = voice_arc.lock().await.channel.clone();
     let mut analyzer = BandAnalyzer::new(sample_rate);
     let mut bands_ctr: u32 = 0;
 
     crate::diag!("[voice] remote drain task started for {track_key}");
     while let Some(frame) = audio_stream.next().await {
-        // Shared audio is mixed but never attributed: skip straight to
-        // the buffer push, leaving the sharer's tile showing whether
-        // *they* are talking.
+        // Shared audio is mixed but never attributed.
         if is_shared_audio {
             let mut buffers = track_buffers.lock().unwrap();
             let buf = buffers.entry(track_key.clone()).or_default();
@@ -81,8 +69,6 @@ async fn run_drain_task(
 
         let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
 
-        // Feed the same PCM to the band analyzer and publish a decimated
-        // snapshot. Cheap, allocation-free until the (rare) emit.
         analyzer.process(&frame.data);
         bands_ctr += 1;
         if bands_ctr >= BANDS_EMIT_EVERY {
@@ -130,16 +116,12 @@ async fn run_drain_task(
     }
     crate::diag!("[voice] remote drain task ended for {track_key}");
 
-    // Stream closed — clean up our buffer slot so the mixer doesn't keep
-    // reading a dead entry.
+    // Stream closed: free our buffer slot.
     let mut buffers = track_buffers.lock().unwrap();
     buffers.remove(&track_key);
 }
 
-/// Mix every active per-track buffer into a single 10 ms frame, send a copy
-/// to APM as the AEC render reference, and push the frame (channel-duplicated)
-/// onto the cpal output ring. Runs at 100 Hz for the duration of the voice
-/// session; aborted on `leave_voice_channel` or output-device switch.
+/// 100 Hz mixer: sum tracks, tap APM's AEC reference, feed the cpal ring.
 // The mixer's whole working set, moved into the task once at spawn.
 #[allow(clippy::too_many_arguments)]
 async fn run_mixer_task(
@@ -155,8 +137,7 @@ async fn run_mixer_task(
     shared_audio_render: crate::commands::screenshare::self_echo::SelfEchoSlot,
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(10));
-    // Skip catch-up bursts: under sustained load we'd rather lose 10 ms than
-    // process several frames back-to-back and inject a click.
+    // Skip catch-up bursts: losing 10 ms beats injecting a click.
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     let mut mix = vec![0.0f32; apm_frame_samples];
@@ -164,30 +145,21 @@ async fn run_mixer_task(
     loop {
         interval.tick().await;
 
-        // Reset mix to silence
         for s in mix.iter_mut() {
             *s = 0.0;
         }
 
-        // Snapshot per-user volumes once per tick so the mixer doesn't
-        // hold the volumes lock across the buffer drain. Map is small
-        // (one entry per remote participant the user has adjusted) so
-        // cloning it is cheap compared to the per-sample work below.
+        // Snapshot volumes so the lock isn't held across the drain.
         let volumes_snapshot: HashMap<String, f32> = {
             let guard = user_volumes.lock().unwrap();
             guard.clone()
         };
 
-        // Sum available samples from each track, scaling by the
-        // per-user gain. Tracks that don't have a full 10 ms ready
-        // contribute partial silence — that's a tiny glitch but fixing
-        // it would require waiting, which would back-pressure the mixer.
+        // Short tracks contribute partial silence; waiting would back-pressure.
         {
             let mut buffers = track_buffers.lock().unwrap();
             for (track_key, buf) in buffers.iter_mut() {
-                // Track key format is `"{identity}-{sid}"`. LiveKit SIDs
-                // are dash-free alphanumerics (e.g. `TR_AVxN6oCmK4hDk7`),
-                // so the last `-` always sits between identity and sid.
+                // Key is `"{identity}-{sid}"`; SIDs have no `-`, so split on the last one.
                 let gain = track_key
                     .rsplit_once('-')
                     .map(|(id, _)| user_id_from_voice_identity(id))
@@ -210,44 +182,31 @@ async fn run_mixer_task(
             }
         }
 
-        // Soft-clip in case multiple participants stack onto a near-full
-        // sample. Hard clipping past ±1.0 sounds harsh; we just hold here.
+        // Soft-clip stacked participants.
         for s in mix.iter_mut() {
             *s = s.clamp(-1.0, 1.0);
         }
 
-        // Self-deafen (#849): silence the mixed frame. Deliberately *after*
-        // the drain above — remote buffers keep advancing, so undeafening
-        // resumes at the live edge instead of dumping a backlog, and the
-        // speaking/level meters keep working while deafened. Also
-        // deliberately *before* the APM render tap: nothing is reaching the
-        // speaker, so the echo canceller's reference must be silence too,
-        // or it would spend the deafened window subtracting an echo that
-        // physically cannot exist.
+        // Deafen (#849): after the drain (stay at live edge), before the AEC tap.
         if deafened.load(Ordering::Relaxed) {
             for s in mix.iter_mut() {
                 *s = 0.0;
             }
         }
 
-        // AEC render reference: APM analyses the about-to-play signal so its
-        // echo subtraction has something to subtract on the next capture.
+        // AEC render reference for the next capture.
         if let Some(apm) = &apm_processor {
             let _ = voice_apm::analyze_render(apm, &mix, apm_frame_samples);
         }
 
-        // The same signal, for a different subtraction: a screen share
-        // capturing system audio would otherwise re-publish this mix and
-        // every participant would hear themselves. Costs one uncontended
-        // lock per tick when no such share is running.
+        // Also feeds the screen-share self-echo canceller (one lock/tick when idle).
         crate::commands::screenshare::self_echo::analyze_render(
             &shared_audio_render,
             &mix,
             apm_rate,
         );
 
-        // Push to the cpal output ring. The output stream's callback
-        // de-interleaves, so we duplicate mono → output_channels here.
+        // Mono → output_channels; the callback de-interleaves.
         {
             let mut ring = output_ring.lock().unwrap();
             for s in mix.iter() {
@@ -262,10 +221,7 @@ async fn run_mixer_task(
     }
 }
 
-/// Open the speaker, spawn the mixer task. Idempotent: if a stream is
-/// already running on `output_device_name`, return the existing
-/// `(sample_rate, ring)` without rebuilding. Otherwise tear the old one
-/// down first.
+/// Open the speaker and spawn the mixer; reuses a stream on the same device.
 pub(crate) async fn ensure_playback(
     voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
     output_device_name: Option<String>,
@@ -273,7 +229,6 @@ pub(crate) async fn ensure_playback(
     apm_rate: u32,
     apm_frame_samples: usize,
 ) -> Result<()> {
-    // ── Reuse existing stream if already on the requested device. ─────────
     {
         let voice = voice_arc.lock().await;
         let pb = voice.playback.lock().unwrap();
@@ -284,17 +239,13 @@ pub(crate) async fn ensure_playback(
         }
     }
 
-    // Tear down any existing pipeline first so device-switch is clean.
     {
         let voice = voice_arc.lock().await;
         let mut pb = voice.playback.lock().unwrap();
         pb.stop_all();
     }
 
-    // Open the new cpal output stream on a blocking thread (ALSA syscalls).
-    // If the requested device fails (e.g. stale pref, or a duplex Bluetooth
-    // device that cpal can't query in its current state), fall back to the
-    // OS default output so the user at least hears remote audio.
+    // Open on a blocking thread; on failure fall back to the OS default output.
     let output_device_name_for_open = output_device_name.clone();
     let (stream, sample_rate, channels, output_ring, opened_device_name) =
         tokio::task::spawn_blocking(move || -> Result<_> {
@@ -326,9 +277,7 @@ pub(crate) async fn ensure_playback(
         .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
     let output_device_name = opened_device_name;
 
-    // If the speaker can't run at the APM rate (very rare; e.g. forced
-    // device override), the AEC render reference would be at the wrong
-    // rate. Disabling the tap is preferable to feeding APM aliased data.
+    // Speaker not at the APM rate: drop the AEC tap rather than feed aliased data.
     let apm_for_mixer = if sample_rate == apm_rate {
         apm_handle
     } else {
@@ -339,16 +288,11 @@ pub(crate) async fn ensure_playback(
         None
     };
 
-    // `deafened` is cloned off VoiceState (not PlaybackState) so the flag
-    // survives a mid-call output-device switch: this function tears the
-    // mixer down and builds a new one, and a deafened user must stay
-    // deafened across that rebuild.
+    // Cloned off VoiceState so it survives a device-switch rebuild.
     let (track_buffers, user_volumes, output_capacity_samples, deafened, shared_audio_render) = {
         let voice = voice_arc.lock().await;
         let deafened = Arc::clone(&voice.deafened);
-        // Cloned off VoiceState for the same reason `deafened` is: this
-        // function rebuilds the mixer on an output-device switch, and a
-        // live share's echo canceller must survive that rebuild.
+        // Same reason as `deafened`.
         let shared_audio_render = Arc::clone(&voice.shared_audio_render);
         let pb = voice.playback.lock().unwrap();
         let cap = (sample_rate as usize) * (channels as usize) / 5; // 200 ms
@@ -385,9 +329,7 @@ pub(crate) async fn ensure_playback(
     Ok(())
 }
 
-/// Subscribe a newly-arrived remote audio track to the playback pipeline:
-/// spawn its drain task, register it for mixing. Output stream + mixer are
-/// expected to be already running (set up at join time).
+/// Spawn a drain task for a new remote audio track; playback must be running.
 pub(crate) async fn register_remote_track(
     rtc_track: libwebrtc::audio_track::RtcAudioTrack,
     track_key: String,

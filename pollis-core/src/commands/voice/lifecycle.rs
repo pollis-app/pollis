@@ -38,15 +38,7 @@ use super::types::{
     VOICE_WARMUP_TTL,
 };
 
-// ── Gate plumbing (#849) ─────────────────────────────────────────────────
-//
-// `TransmitGate` is the authority; these two helpers are the only way its
-// decisions reach the rest of the process. Every command that mutates the
-// gate calls both, in this order, while still holding the voice lock.
-
-/// Republish the gate's derived booleans onto the atomics the audio hot
-/// paths read — the cpal capture callback (`transmit_muted`) and the
-/// playback mixer (`deafened`). Neither can afford a lock per frame.
+/// Mirror gate state onto the lock-free atomics the audio paths read.
 fn publish_gate(voice: &VoiceState, gate: &TransmitGate) {
     voice
         .transmit_muted
@@ -55,14 +47,7 @@ fn publish_gate(voice: &VoiceState, gate: &TransmitGate) {
     voice.self_muted.store(gate.self_muted(), Ordering::Relaxed);
 }
 
-/// Signal the local mic state to the room so remote participants' tiles
-/// show the truth.
-///
-/// A released push-to-talk key is a *real* mute as far as the SFU and
-/// everyone else's UI are concerned — "PTT idle" and "deafened" are local
-/// distinctions for our own UI, and leaking them would tell the room more
-/// about the user than it needs to know. What must never happen is the
-/// inverse: appearing unmuted to others while the gate is closed.
+/// Signal mic state to the room; PTT-idle and deafen show as plain mute.
 fn apply_gate_to_room(voice: &VoiceState, gate: &TransmitGate) {
     let muted = !gate.transmitting();
 
@@ -86,17 +71,10 @@ fn apply_gate_to_room(voice: &VoiceState, gate: &TransmitGate) {
     }
 }
 
-// The LOCAL participant's identity. Note "local": since #836 the identity that
-// reaches LiveKit is an opaque per-room pseudonym, and this is the internal key
-// the app and the renderer share for *ourselves*, where the device id is known.
-// Remote peers arrive as pseudonyms and are translated by
-// `livekit::identity::resolve_participants`. See `commands::livekit_identity`.
+// The LOCAL identity; remote peers are per-room pseudonyms (#836).
 use crate::commands::livekit_identity::voice_identity;
 
-// ── Tauri commands ────────────────────────────────────────────────────────
-
 /// Register the Tauri Channel used to push VoiceEvents to the frontend.
-/// Call once on app startup, just like subscribe_realtime.
 pub async fn subscribe_voice_events(
     on_event: std::sync::Arc<dyn crate::sink::EventSink<VoiceEvent>>,
     state: &Arc<AppState>,
@@ -106,33 +84,8 @@ pub async fn subscribe_voice_events(
     Ok(())
 }
 
-/// "Hot mic" warmup: signals user intent to (maybe) join `channel_id` so the
-/// client can pre-pay the latency before they actually click Join. Mirrors
-/// `room.prepareConnection(url, token)` from the JS livekit-client SDK,
-/// which has no equivalent in the `livekit` Rust crate (v0.7) — the Rust
-/// `Room::connect` is the only entry point and it commits to the room.
-///
-/// What we do instead:
-///  1. Mint and cache the LiveKit token so the synchronous JWT work is
-///     already done by the time the user clicks Join.
-///  2. Fire a one-shot HTTPS request to the LiveKit server's RoomService
-///     endpoint (`twirp_base/.../ListParticipants`). This warms:
-///       - DNS for the LiveKit host in the OS resolver cache,
-///       - the TLS session ticket cache used by `rustls` (rustls keeps a
-///         per-process cache that the LiveKit WS handshake can reuse),
-///       - reqwest's HTTPS connection pool, used for the same host's API.
-///
-///     The body of the response is irrelevant; we want the network plumbing
-///     to be primed.
-///
-/// Idempotent + cancel-safe: a second call with the same channel_id while
-/// the first warmup is still running is a no-op. Calling with a different
-/// channel_id supersedes the pending one (its DNS/TLS work is wasted, but
-/// it's a background task — no user impact).
-///
-/// Frontend should call this on intent points: route entry to a voice
-/// channel page, hover/keyboard-select on a voice item in TerminalMenu /
-/// SearchPanel, etc. Cheap enough to call eagerly.
+/// Warmup before Join: pre-mint the token and prime DNS/TLS/conn pool.
+/// Same channel_id is a no-op; a different one supersedes it.
 pub async fn prepare_voice_connection(
     channel_id: String,
     user_id: String,
@@ -141,14 +94,10 @@ pub async fn prepare_voice_connection(
 ) -> Result<()> {
     let url = state.config.livekit_url.clone();
     if url.is_empty() {
-        // No LiveKit configured — nothing to warm. Silent success so the
-        // frontend can call this unconditionally.
         return Ok(());
     }
 
-    // ── De-dupe: skip if we already have a fresh warmup for this exact
-    // channel + identity. Cheap to mint a token, but firing the HTTPS
-    // request again would be wasted work.
+    // De-dupe: skip if already warm for this channel + identity.
     {
         let voice = state.voice.lock().await;
         if let Some(w) = &voice.warmup {
@@ -162,10 +111,7 @@ pub async fn prepare_voice_connection(
         }
     }
 
-    // Pre-fetch (and cache) the DS-minted voice token so the JWT round-trip is
-    // already paid by the time the user clicks Join. Identity (`voice-{user}:
-    // {device}`) is derived server-side from the verified signer — the LiveKit
-    // API secret is no longer on the client. Non-fatal: warmup is best-effort.
+    // Pre-fetch the DS-minted token; best-effort.
     let (token, ds_url) = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
         Ok(pair) => pair,
         Err(e) => {
@@ -174,14 +120,9 @@ pub async fn prepare_voice_connection(
         }
     };
 
-    // Fire the DNS/TLS warmup in the background. If the user immediately
-    // clicks Join, they'll race this — that's fine, the worst case is a
-    // single redundant TLS handshake. Errors are non-fatal: this whole
-    // command is best-effort.
+    // Best-effort; a racing Join costs at most one extra TLS handshake.
     let warm_url = ds_url.clone();
     let task = tokio::spawn(async move {
-        // Reuse the same twirp transform `livekit::room_service_list_participants`
-        // uses; we don't import it to keep the dependency direction clean.
         let twirp = if let Some(rest) = warm_url.strip_prefix("wss://") {
             format!("https://{rest}")
         } else if let Some(rest) = warm_url.strip_prefix("ws://") {
@@ -190,13 +131,7 @@ pub async fn prepare_voice_connection(
             warm_url.clone()
         };
         let probe = format!("{twirp}/rtc/validate");
-        // The SHARED direct client (`None` = direct: LiveKit is deliberately not
-        // overlaid, §14.4). Building one here defeated the point of the probe —
-        // a fresh client's connection pool and TLS session cache die with the
-        // client, so the handshake this paid for was thrown away before the user
-        // could ever reach it. Short timeout, per-request so the shared client
-        // keeps its own defaults: if the server is slow there is nothing to gain
-        // by hanging on.
+        // The SHARED client, so the warmed pool and TLS cache survive (§14.4).
         let client = crate::net::overlay::http_client(None);
         let started = Instant::now();
         match client.get(&probe).timeout(Duration::from_secs(5)).send().await {
@@ -212,9 +147,7 @@ pub async fn prepare_voice_connection(
         }
     });
 
-    // Stash the warm credentials. Replacing any prior entry triggers Drop
-    // on the previous warmup, which aborts its still-running background task
-    // so a fast hover-flip doesn't pile up redundant probes.
+    // Replacing an entry drops it, aborting its probe task.
     let mut voice = state.voice.lock().await;
     voice.warmup = Some(VoiceWarmup {
         channel_id,
@@ -231,18 +164,6 @@ pub async fn prepare_voice_connection(
 
 /// Connect to a LiveKit voice room, publish the local microphone, and start
 /// the remote-playback pipeline (single shared mixer + cpal output stream).
-///
-/// `audio_processing` carries the user's APM preferences (AGC, NS, AEC).
-/// libwebrtc's internal AudioProcessingModule is disabled at the
-/// `AudioSourceOptions` level so we don't double-process: APM is the only
-/// stage that touches the mic signal between cpal and `capture_frame`.
-///
-/// Performance: the LiveKit network handshake (DNS, TLS, WS upgrade) and
-/// the cpal mic init (ALSA enumeration + device open) are independent and
-/// both block for hundreds of milliseconds on cold starts. We run them
-/// concurrently with `tokio::join!` so total join latency is ~max(net, mic)
-/// rather than net+mic. If `prepare_voice_connection` was called for this
-/// channel, DNS/TLS is already warm and we reuse the precomputed token.
 // Mirrors the `#[tauri::command]` shim's signature, which is the IPC contract the
 // renderer calls by argument name — it cannot be regrouped on this side alone.
 #[allow(clippy::too_many_arguments)]
@@ -253,24 +174,17 @@ pub async fn join_voice_channel(
     input_device: Option<String>,
     output_device: Option<String>,
     audio_processing: voice_apm::ApmConfig,
-    // The other participant in a 1:1 call (`call-<ulid>` room). Required for
-    // those rooms because they have no DB row; ignored for group channels
-    // and DMs, which carry their MLS group id implicitly.
+    // 1:1 call peer; required for `call-` rooms (no DB row), else ignored.
     counterparty_user_id: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // Wall-clock anchor for `total_join_ms` and per-phase deltas.
     let join_start = Instant::now();
     let join_started_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    // Refuse re-entry if a join is already in flight or a room is already
-    // connected. Two concurrent joins with the same identity (`voice-{user_id}`)
-    // race LiveKit's session bookkeeping and trigger DuplicateIdentity, which
-    // disconnects the surviving session shortly after Connected. Holds the
-    // voice lock just long enough to swap the flag, then releases.
+    // Refuse re-entry: two same-identity joins trip DuplicateIdentity.
     let _join_guard = {
         let voice = state.voice.lock().await;
         if voice.room.is_some() {
@@ -288,26 +202,11 @@ pub async fn join_voice_channel(
         JoinGuard(Arc::clone(&voice.joining))
     };
 
-    // The URL is no longer read from config here — it now arrives with the token
-    // (cached warmup pair, or the DS response below), so the emptiness check moved
-    // to after the token is resolved. `ds_livekit_token` already falls back to
-    // `config.livekit_url` when a self-hosted DS leaves `LIVEKIT_URL` unset, so an
-    // empty value here still means "LiveKit is not configured" — just checked one
-    // step later.
-
-    // Per-device LiveKit identity (#140): `voice-{user_id}:{device_id}`. Lets a
-    // second device of the same user join the room as a distinct participant
-    // instead of getting kicked on an identity collision. Stable for the
-    // process, so it's resolved once here and reused for the token, the local
-    // speaking-indicator identity, the seed ParticipantJoined, and the
-    // self-hear filter below.
+    // Per-device identity (#140) so a user's second device isn't kicked.
     let device_id = state.device_id.lock().await.clone();
     let local_identity = voice_identity(&user_id, device_id.as_deref());
 
-    // Try to consume a fresh warmup for this exact channel + identity. If
-    // the warmup is stale or for a different room/user we mint a new token.
-    // VoiceWarmup implements Drop (to abort its background task) so we can't
-    // simply destructure it; clone the token out before dropping the entry.
+    // VoiceWarmup is Drop: clone the token out, don't destructure.
     let cached_token: Option<(String, String)> = {
         let mut voice = state.voice.lock().await;
         let usable = voice
@@ -323,17 +222,14 @@ pub async fn join_voice_channel(
         if usable {
             // Token and URL travel together — see `VoiceWarmup::url`.
             let cloned = voice.warmup.as_ref().map(|w| (w.token.clone(), w.url.clone()));
-            // Drop the entry now — its background task is no longer needed.
             voice.warmup = None;
             cloned
         } else {
-            // Anything else cached (different channel / stale) is dead weight.
             voice.warmup = None;
             None
         }
     };
-    // ── Phase: jwt_mint ────────────────────────────────────────────────────
-    // 0 if a warmup-cached token was usable.
+    // jwt_mint: 0 if a warmup token was usable.
     let jwt_mint_ms;
     let (token, url): (String, String) = match cached_token {
         Some(pair) => {
@@ -341,10 +237,6 @@ pub async fn join_voice_channel(
             pair
         }
         None => {
-            // DS-minted (identity derived server-side; matches `local_identity`
-            // because the DS builds `voice-{user}:{device}` from this device's
-            // verified signature). Now a network round-trip, not a local sign —
-            // still on the join hot path, so it stays phase-timed.
             let jwt_start = Instant::now();
             let pair = crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await?;
             jwt_mint_ms = jwt_start.elapsed().as_millis() as u64;
@@ -355,22 +247,12 @@ pub async fn join_voice_channel(
         return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
     }
 
-    // #836: pin OUR pseudonym → `local_identity` before connecting, so every
-    // event LiveKit reports about our own participant (notably the `TrackMuted`
-    // that fires on each push-to-talk keypress) lands on the local tile instead
-    // of a synthetic-device identity nothing else uses. Read from the token we
-    // were just handed — the pseudonym is computed server-side and travels only
-    // there.
+    // #836: pin our pseudonym first so our own events land on our tile.
     pin_local_identity(state, &channel_id, &token, &local_identity, &display_name).await;
 
-    // ── Run room connect and mic init concurrently ─────────────────────────
-    // Both are independent and individually expensive on cold starts. Running
-    // them with `tokio::join!` cuts the user-visible delay to ~max(net, mic).
+    // Room connect and mic init run concurrently (tokio::join!).
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
-    // Reset the per-session gate bits (mute / deafen / any stale
-    // push-to-talk latch) and republish the derived atomics. The input
-    // *mode* deliberately survives — it's a user preference pushed down
-    // from voice settings, not something a join should silently undo.
+    // Reset session gate bits; input mode (a pref) survives.
     let is_muted = {
         let voice = state.voice.lock().await;
         {
@@ -383,17 +265,8 @@ pub async fn join_voice_channel(
 
     let input_device_clone = input_device.clone();
 
-    // Derive the per-room voice key from the channel's MLS exporter secret.
-    // Both peers compute the same key from the same (group, epoch) so the
-    // SFU never sees plaintext audio. Fails closed: if the local MLS group
-    // isn't ready, refuse to join rather than fall back to unencrypted.
-    //
-    // ── Phase: e2ee ────────────────────────────────────────────────────────
-    // Strictly before the connect, because `RoomOptions::encryption` has to
-    // carry the key: LiveKit's Rust `Room::connect` is the only entry point and
-    // it commits to the room. So every round trip in here is one the user waits
-    // through before the WebSocket is even dialled — which is exactly why it is
-    // phase-timed rather than lumped into `total_join`.
+    // Voice key from the MLS exporter; fail closed, never unencrypted.
+    // Must precede connect: `RoomOptions::encryption` carries the key.
     let e2ee_start = Instant::now();
     let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) = voice_e2ee::derive_voice_key(
         state,
@@ -413,8 +286,6 @@ pub async fn join_voice_channel(
     let mic_started = Instant::now();
     crate::diag!("[voice] connecting to room {channel_id} and opening mic in parallel…");
 
-    // `RoomOptions` is #[non_exhaustive] so build it via Default + field
-    // mutation rather than a struct literal.
     let mut room_options = RoomOptions::default();
     room_options.encryption = Some(e2ee_options);
     let connect_fut = async {
@@ -424,9 +295,7 @@ pub async fn join_voice_channel(
     };
     let mic_fut = async {
         tokio::task::spawn_blocking(move || {
-            // Test seam: exercise the listen-only path without unplugging a
-            // physical mic. The e2e suite sets this to prove a join still
-            // succeeds when capture is unavailable.
+            // Test seam: e2e listen-only path without unplugging a mic.
             if std::env::var("POLLIS_DISABLE_MIC").is_ok() {
                 return Err(anyhow::anyhow!("mic disabled via POLLIS_DISABLE_MIC").into());
             }
@@ -445,11 +314,7 @@ pub async fn join_voice_channel(
     let (room, mut events) =
         connect_res.map_err(|e| anyhow::anyhow!("LiveKit connect: {e}"))?;
 
-    // Mic is best-effort: a missing/failed capture device must not block the
-    // join. On failure we connect *listen-only* — in the room, receiving
-    // remote audio/video, just not publishing a mic track. A missing mic, an
-    // ALSA "No such file or directory", a busy device, or POLLIS_DISABLE_MIC
-    // all land here.
+    // Mic is best-effort: on failure join listen-only.
     let mic = match mic_res {
         Ok(Ok(v)) => Some(v),
         Ok(Err(e)) => {
@@ -462,8 +327,7 @@ pub async fn join_voice_channel(
         }
     };
     let has_mic = mic.is_some();
-    // Listen-only still needs a nominal rate for the playback/APM plumbing;
-    // 48 kHz is what everything downstream prefers.
+    // Listen-only still needs a nominal rate; 48 kHz.
     let mic_rate = mic.as_ref().map(|(_, r, _)| *r).unwrap_or(48_000);
     let mic_init_ms = mic.as_ref().map(|(_, _, ms)| *ms).unwrap_or(0);
     let mic_stream = mic.map(|(s, _, _)| s);
@@ -475,12 +339,7 @@ pub async fn join_voice_channel(
 
     let room = Arc::new(room);
 
-    // ── Build APM at the mic's actual rate ────────────────────────────────
-    // WebRTC supports 8/16/32/48 kHz. Anything else (e.g. legacy 44.1) means
-    // we can't run APM for this session; we log and proceed without it.
-    // APM only touches the captured mic signal (and taps playback as its AEC
-    // render reference). With no mic there's nothing to process and no echo to
-    // cancel, so skip it entirely on the listen-only path.
+    // APM needs 8/16/32/48 kHz; skipped otherwise and on listen-only.
     let apm_stage = if has_mic {
         match voice_apm::ApmStage::new(mic_rate, audio_processing.clone()) {
             Ok(stage) => Some(stage),
@@ -495,9 +354,7 @@ pub async fn join_voice_channel(
     let apm_handle = apm_stage.as_ref().map(|s| s.handle());
     let apm_frame_samples = voice_apm::frame_samples(mic_rate);
 
-    // Build the RNNoise denoiser if the user wants click suppression and
-    // the mic is at the rate the model was trained on. Other rates pass
-    // through to APM unchanged — RNNoise is rate-locked at 48 kHz.
+    // RNNoise is 48 kHz-only; other rates pass straight to APM.
     let denoiser_arc = Arc::clone(&{
         let voice = state.voice.lock().await;
         Arc::clone(&voice.denoiser)
@@ -518,18 +375,13 @@ pub async fn join_voice_channel(
         };
     }
 
-    // Publish the mic track and run the capture pipeline only when we have a
-    // working mic. On the listen-only path we skip all of it — no track, no
-    // APM capture loop — and simply consume remote media.
     let mut audio_source_opt: Option<NativeAudioSource> = None;
     let mut local_track_opt: Option<LocalAudioTrack> = None;
     let mut frame_task_opt: Option<tokio::task::JoinHandle<()>> = None;
     let mut first_publish_ms: u64 = 0;
 
     if has_mic {
-        // Disable libwebrtc's internal AudioProcessingModule — APM is the only
-        // stage that touches the mic signal. Leaving libwebrtc's APM on would
-        // double-process and produce pumping/swirling artefacts.
+        // libwebrtc's APM off: ours is the only mic processing stage.
         let audio_source = NativeAudioSource::new(
             AudioSourceOptions {
                 echo_cancellation: false,
@@ -547,7 +399,6 @@ pub async fn join_voice_channel(
         );
 
         crate::diag!("[voice] publishing track…");
-        // ── Phase: first_publish ───────────────────────────────────────────────
         let publish_start = Instant::now();
         room.local_participant()
             .publish_track(
@@ -557,17 +408,11 @@ pub async fn join_voice_channel(
             .await
             .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
         first_publish_ms = publish_start.elapsed().as_millis() as u64;
-        // The mic's FrameCryptor was just created on ring slot 0; point it at
-        // the join epoch's slot before the first frame goes out. The room event
-        // loop repeats this for every later local publish (screen share,
-        // camera), but `voice.room` is not stored yet at this point, so the
-        // first track is handled here directly.
+        // Move the new mic cryptor (slot 0) to the join epoch's slot.
         let moved = voice_e2ee::apply_sender_key_index(&room, voice_key_index);
         crate::diag!("[voice] track published ({moved} sender cryptor(s) on ring slot {voice_key_index})");
 
-        // ── Mic frame task: rebuffer to exact 10ms, run APM, capture_frame ────
-        // Speaking detection runs on the post-APM peak so the indicator follows
-        // the user's effective level (after AGC + NS) rather than raw input.
+        // Mic task: 10 ms rebuffer → APM → capture_frame.
         let audio_source_task = audio_source.clone();
         let voice_arc_frame = Arc::clone(&state.voice);
         let local_identity_for_speaking = local_identity.clone();
@@ -580,9 +425,7 @@ pub async fn join_voice_channel(
             let mut onset_frames: u32 = 0; // consecutive above-threshold frames; 2 required to (re)trigger
             let mut is_speaking = false;
 
-            // Live multi-band meter for our own tile. Sink cloned once so the
-            // per-frame emit never re-locks the shared VoiceState mutex. Emit
-            // every 5 chunks (~10 ms each) ⇒ ~20 Hz.
+            // Own-tile meter; sink cloned once so emits never re-lock.
             let bands_sink = voice_arc_frame.lock().await.channel.clone();
             let mut analyzer = BandAnalyzer::new(mic_rate);
             let mut bands_ctr: u32 = 0;
@@ -592,10 +435,7 @@ pub async fn join_voice_channel(
                 while buf.len() >= chunk_size {
                     let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
 
-                    // RNNoise (if enabled) runs first so APM gets a cleaner signal:
-                    // its NS / AGC adapt to actual voice energy instead of the
-                    // typing/click noise floor. Std Mutex; the lock is held for
-                    // ~0.1 ms per frame (single-writer) and never crosses an await.
+                    // RNNoise first so APM's NS/AGC adapt to voice, not clicks.
                     {
                         let mut guard = denoiser_for_capture.lock().unwrap();
                         if let Some(d) = guard.as_mut() {
@@ -613,8 +453,7 @@ pub async fn join_voice_channel(
 
                     let peak = chunk.iter().map(|&s| s.abs()).max().unwrap_or(0);
 
-                    // Speaking detection: require 2 consecutive above-threshold frames to trigger,
-                    // preventing single trailing spikes from resetting the hold counter.
+                    // Speaking needs 2 consecutive above-threshold frames.
                     if peak > 1000 {
                         onset_frames += 1;
                         if onset_frames >= 2 {
@@ -637,9 +476,6 @@ pub async fn join_voice_channel(
                         }
                     }
 
-                    // Live band meter on the post-APM signal (same source as
-                    // the speaking indicator, so the meter matches what others
-                    // hear). Decimated to ~20 Hz.
                     analyzer.process(&chunk);
                     bands_ctr += 1;
                     if bands_ctr >= 5 {
@@ -670,9 +506,7 @@ pub async fn join_voice_channel(
         frame_task_opt = Some(frame_task);
     }
 
-    // ── Open the speaker pipeline: single output stream + mixer task ──────
-    // Doing this BEFORE the room event loop starts means the very first
-    // TrackSubscribed has somewhere to push its decoded frames.
+    // Open playback before the event loop: first TrackSubscribed needs it.
     if let Err(e) = ensure_playback(
         Arc::clone(&state.voice),
         output_device.clone(),
@@ -685,16 +519,9 @@ pub async fn join_voice_channel(
         crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
     }
 
-    // ── Seed participant list ─────────────────────────────────────────────────
-    // Emit ParticipantJoined for participants already in the room.
-    // Do NOT attach tracks here — TrackSubscribed fires for pre-existing
-    // subscribed tracks once the event loop drains buffered events, and
-    // attaching twice creates competing draining tasks.
+    // Seed roster only; TrackSubscribed attaches tracks (twice would race).
     let roster_start = Instant::now();
-    // #836: everything the SDK reports is an opaque per-room pseudonym. Resolve
-    // the whole seed roster in ONE batched DS call — the join path already pays
-    // for a Turso avatar lookup here, and doing it per participant instead would
-    // put a round trip between the user and every tile.
+    // #836: resolve all pseudonyms in ONE batched DS call.
     let seen: Vec<String> = room
         .remote_participants()
         .into_values()
@@ -710,30 +537,16 @@ pub async fn join_voice_channel(
                 .get(&wire)
                 .cloned()
                 .unwrap_or_else(|| (wire.clone(), String::new()));
-            // Skip renderer-side `view` clients (Phase 6 — Electron screen-
-            // share connection). They share the same user as the matching voice
-            // participant and would otherwise dup the tile grid. The screen-share
-            // tracks they publish are still routed (they're not hidden); we just
-            // don't render them as a separate tile. `is_view_identity` reads both
-            // the resolved `:view` suffix and the unresolved `w-` pseudonym, so a
-            // resolve failure cannot turn one into a phantom participant.
+            // Skip `view` clients (both resolved and wire forms).
             if is_view_identity(&identity) || is_view_identity(&wire) {
                 return None;
             }
-            // Seed mute state from current publications — TrackMuted only
-            // fires on transitions, so a participant who muted before we
-            // joined would otherwise render as unmuted indefinitely.
+            // Seed mute state: TrackMuted only fires on transitions.
             let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
             Some((identity, name, is_muted))
         })
         .collect();
-    // Avatars for OURSELVES and everyone already in the room, in ONE DS round
-    // trip. This used to be a `lookup_avatar_url` for the local user followed by
-    // a `lookup_avatar_url_for_identity` per existing participant, awaited in
-    // sequence — so the last thing between the user and a live call was a chain
-    // of N+1 network round trips that grew with how busy the channel was. The
-    // one case where joining should feel fastest (everyone is already in there)
-    // was the slowest.
+    // All avatars (self + roster) in ONE DS round trip, not N+1.
     let mut avatar_identities: Vec<String> = Vec::with_capacity(existing_remote.len() + 1);
     avatar_identities.push(local_identity.clone());
     avatar_identities.extend(existing_remote.iter().map(|(identity, _, _)| identity.clone()));
@@ -770,12 +583,10 @@ pub async fn join_voice_channel(
 
     let voice_arc = Arc::clone(&state.voice);
     let state_for_room = Arc::clone(state);
-    // The LOGICAL room, needed to resolve peer pseudonyms (#836): identity keys
-    // are room-scoped, so the same string means nothing under another room.
+    // Logical room, to resolve room-scoped pseudonyms (#836).
     let logical_room = channel_id.clone();
     let apm_rate_for_room = mic_rate;
-    // Captured for the self-hear filter on TrackSubscribed: audio published by
-    // this user's *other* devices must not be played back locally (#140).
+    // Self-hear filter: don't play this user's other devices (#140).
     let local_user_id = user_id.clone();
     let room_task = tokio::spawn(async move {
         while let Some(event) = events.recv().await {
@@ -786,10 +597,7 @@ pub async fn join_voice_channel(
                     if is_view_identity(&wire) {
                         continue;
                     }
-                    // #836: translate before anything downstream sees it. The
-                    // display name comes back with it — the LiveKit `name` claim
-                    // is empty now, because it used to be the username and made
-                    // the pseudonymous identity beside it pointless.
+                    // #836: translate before anything downstream sees it.
                     let (identity, name) =
                         resolve_participant(&state_for_room, &logical_room, &wire).await;
                     if is_view_identity(&identity) {
@@ -820,8 +628,7 @@ pub async fn join_voice_channel(
                         continue;
                     }
                     crate::diag!("[voice] participant left: {identity}");
-                    // Clear any screenshare they were publishing so a stale
-                    // black tile doesn't linger (esp. if they later rejoin).
+                    // Clear their screenshare so a stale tile doesn't linger.
                     crate::commands::screenshare::on_participant_left(
                         &identity,
                         &state_for_room,
@@ -841,12 +648,7 @@ pub async fn join_voice_channel(
                     .await;
                     match track {
                         RemoteTrack::Audio(audio_track) => {
-                            // Self-hear mute (#140): never attach a playback
-                            // stream for audio published by our own user's other
-                            // devices. The participant still shows in the UI (its
-                            // ParticipantConnected event already fired) — we just
-                            // don't route its mic back into our speakers, which
-                            // would otherwise echo us to ourselves.
+                            // #140: never play our other devices' mic.
                             if user_id_from_voice_identity(&participant_identity) == local_user_id {
                                 crate::diag!(
                                     "[voice] skipping own-device audio track for self-hear mute: {participant_identity}"
@@ -854,11 +656,7 @@ pub async fn join_voice_channel(
                                 continue;
                             }
                             let track_key = format!("{}-{}", participant_identity, audio_track.sid());
-                            // A screen share's soundtrack arrives as an
-                            // ordinary remote audio track and mixes to the
-                            // speaker like one; the publication's
-                            // TrackSource is the only thing that says it
-                            // is not the person's voice.
+                            // TrackSource marks shared audio.
                             let is_shared_audio = matches!(
                                 publication.source(),
                                 livekit::track::TrackSource::ScreenshareAudio
@@ -878,10 +676,7 @@ pub async fn join_voice_channel(
                         }
                         RemoteTrack::Video(video_track) => {
                             let track_key = format!("{}-{}", participant_identity, video_track.sid());
-                            // Screen share and webcam both arrive as remote
-                            // video; the publication's TrackSource is the only
-                            // thing that tells them apart, so the renderer can
-                            // route this track_key to the right kind of tile.
+                            // TrackSource tells screen share from webcam.
                             let source = match publication.source() {
                                 livekit::track::TrackSource::Camera => {
                                     crate::commands::screenshare::RemoteVideoSource::Camera
@@ -965,36 +760,14 @@ pub async fn join_voice_channel(
                         }
                     }
                     crate::commands::screenshare::on_room_disconnected(&state_for_room).await;
-                    // Tear down our own Rust-side resources on a server-initiated
-                    // disconnect (network drop, duplicate identity, room close).
-                    // Previously this branch only emitted the event and broke,
-                    // leaking VoiceState.room + the cpal mic stream until the
-                    // user manually left or quit. Pass abort_room_task=false:
-                    // we ARE room_task and `break` right after, so it ends on
-                    // its own. The frontend's reconciler may also call
-                    // leave_voice_channel; release_voice_resources is idempotent.
+                    // We ARE room_task (breaking next), so don't abort it.
                     let _ = release_voice_resources(&state_for_room, false).await;
                     break;
                 }
                 RoomEvent::ConnectionStateChanged(conn_state) => {
                     crate::diag!("[voice] connection state: {conn_state:?}");
                 }
-                // #1097: the per-participant frame-cryptor verdict. livekit
-                // reports `EncryptionState::{Ok, EncryptionFailed,
-                // DecryptionFailed, MissingKey, KeyRatcheted, InternalError}`
-                // and, until now, this event was dropped — which is why "the
-                // removed member can no longer decrypt" was a claim no test
-                // could make: the one signal that says so never left the room
-                // loop.
-                //
-                // `MissingKey` / `DecryptionFailed` against a REMAINING member's
-                // track is the observable half of voice forward secrecy: after a
-                // mid-call removal the senders move to the new epoch's ring slot
-                // and an ex-member, holding only the join-time key, lands here.
-                // So it is logged at the same level as a connection change
-                // rather than swallowed — an e2e can assert on it, and an
-                // operator reading a user's log can tell "silent because the key
-                // rotated" from "silent because the mic broke".
+                // #1097: logged so e2e can assert voice forward secrecy.
                 RoomEvent::E2eeStateChanged { participant, state } => {
                     let (identity, _) = resolve_participant(
                         &state_for_room,
@@ -1007,8 +780,7 @@ pub async fn join_voice_channel(
                     );
                 }
                 RoomEvent::LocalTrackPublished { .. } => {
-                    // Every new local publication gets a FrameCryptor born on
-                    // ring slot 0; move it onto the current epoch's slot.
+                    // New cryptors start on slot 0; move to current epoch.
                     voice_e2ee::sync_local_sender_key_index(&state_for_room).await;
                 }
                 RoomEvent::ConnectionQualityChanged { quality, participant } => {
@@ -1037,7 +809,6 @@ pub async fn join_voice_channel(
         }
     });
 
-    // ── Phase: total_join + record timings ─────────────────────────────────
     let total_join_ms = join_start.elapsed().as_millis() as u64;
 
     let timings = JoinTimings {
@@ -1063,7 +834,6 @@ pub async fn join_voice_channel(
         total_join_ms,
     );
 
-    // ── Store state ───────────────────────────────────────────────────────────
     let mut voice = state.voice.lock().await;
     if let Some(t) = voice.room_task.take() { t.abort(); }
     if let Some(t) = voice.frame_task.take() { t.abort(); }
@@ -1082,20 +852,13 @@ pub async fn join_voice_channel(
     voice.e2ee_key_index = voice_key_index;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
 
-    // Sync the freshly-created publication to the gate, now that the room
-    // and APM are actually on `voice`. A LiveKit publication is born
-    // unmuted, so joining in push-to-talk mode would otherwise advertise a
-    // hot mic to every remote tile while capture is in fact gated shut —
-    // exactly the "tiles misreport your state" failure. Capture already
-    // obeys `transmit_muted`; this makes the signalling agree with it.
+    // Publications start unmuted; sync so PTT joins aren't shown hot.
     {
         let gate = voice.gate.lock().unwrap();
         apply_gate_to_room(&voice, &gate);
     }
 
-    // Tell the renderer whether this session can transmit, so the local tile
-    // and tray show a "listening only" state instead of a live mute toggle
-    // when there's no capture device.
+    // Tell the renderer if this session can transmit (listen-only UI).
     if let Some(ch) = &voice.channel {
         let _ = ch.send(VoiceEvent::MicAvailability {
             identity: local_identity.clone(),
@@ -1106,10 +869,7 @@ pub async fn join_voice_channel(
     Ok(())
 }
 
-/// Return the most recent `join_voice_channel` timing record. The frontend
-/// calls this immediately after a successful join and dumps the values into
-/// the dev console for analysis. Returns `None` if no join has completed
-/// since process start.
+/// Return the most recent `join_voice_channel` timing record, if any.
 pub async fn get_last_join_timings(
     state: &Arc<AppState>,
 ) -> Result<Option<JoinTimings>> {
@@ -1118,43 +878,24 @@ pub async fn get_last_join_timings(
     Ok(snapshot)
 }
 
-/// Disconnect from the current voice room and release all audio resources.
-/// Tear down all live voice resources and return the room handle (if any) for
-/// the caller to close. Stops the mic frame feed, takes the cpal input/output
-/// streams and drops them on a blocking thread (CoreAudio dispose must not run
-/// on a tokio worker — see the macOS mic-indicator note below), and clears the
-/// playback + e2ee state while holding the lock only briefly.
-///
-/// `abort_room_task` controls whether the room event-loop task is aborted.
-/// `leave_voice_channel` passes `true`. The `RoomEvent::Disconnected` handler
-/// — which runs *inside* that task and is about to `break` on its own — passes
-/// `false` so it doesn't abort itself mid-teardown.
-///
-/// Idempotent: a second call after teardown is a cheap no-op (every field is
-/// already `None`), so the Disconnected path and a racing `leave_voice_channel`
-/// can both run without harm.
+/// Tear down voice resources; returns the room for the caller to close.
+/// Pass `abort_room_task = false` from inside the room task itself.
+/// Idempotent.
 async fn release_voice_resources(
     state: &Arc<AppState>,
     abort_room_task: bool,
 ) -> Option<Arc<Room>> {
-    // Extract everything that needs cleanup while holding the lock, then release
-    // the lock before awaiting. If the network is broken (e.g. VPN dropped),
-    // room.close() (in the caller) hangs sending a disconnect signal — holding
-    // the lock across that await would deadlock every subsequent voice command.
+    // Don't hold the lock across room.close(): it hangs on a broken network.
     let (room, input_stream, output_stream) = {
         let mut voice = state.voice.lock().await;
 
-        // Kill the frame feed first so no more frames are pushed into the
-        // audio source / room while we tear them down.
+        // Kill the frame feed first.
         if let Some(t) = voice.frame_task.take() { t.abort(); }
         if abort_room_task {
             if let Some(t) = voice.room_task.take() { t.abort(); }
         }
 
-        // Take the cpal output stream out of playback state so we can drop
-        // it on a blocking thread (CoreAudio dispose isn't safe to run on a
-        // tokio worker — on macOS the mic-in-use indicator can otherwise
-        // stay on until the process exits).
+        // Taken out so it can drop on a blocking thread (see below).
         let output_stream = {
             let mut pb = voice.playback.lock().unwrap();
             let s = pb.output_stream.take();
@@ -1172,10 +913,7 @@ async fn release_voice_resources(
         if let Ok(mut slot) = voice.denoiser.lock() {
             *slot = None;
         }
-        // Clear the session gate bits (mute / deafen / any held
-        // push-to-talk latch) and republish, so nothing carries into the
-        // next join — most importantly, a `deafened` atomic left set here
-        // would silence the *next* call's mixer.
+        // Clear gate bits: stale `deafened` mutes next call.
         {
             let mut gate = voice.gate.lock().unwrap();
             gate.reset_for_join();
@@ -1190,11 +928,7 @@ async fn release_voice_resources(
         (voice.room.take(), input_stream, output_stream)
     }; // voice lock released here
 
-    // Drop cpal streams on a blocking thread. cpal's macOS Drop calls
-    // AudioOutputUnitStop + AudioUnitUninitialize + AudioComponentInstanceDispose;
-    // when run from a tokio worker those calls can leave the OS "microphone
-    // in use" indicator on until process exit. Running drop on the blocking
-    // pool lets CoreAudio fully tear down the AudioUnit synchronously.
+    // Drop off-worker, else macOS's mic indicator can stick on.
     if input_stream.is_some() || output_stream.is_some() {
         let _ = tokio::task::spawn_blocking(move || {
             drop(input_stream);
@@ -1207,23 +941,14 @@ async fn release_voice_resources(
 }
 
 pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
-    // Stop any active screen share first. We abort room_task in
-    // release_voice_resources below, so the RoomEvent::Disconnected ->
-    // on_room_disconnected path never fires on an explicit leave; without this,
-    // the share keeps capturing after the call ends. Done before we take/close
-    // the room so the track unpublishes gracefully while the connection is
-    // still alive. No-ops cheaply (the had_session guard) when nothing is
-    // being shared.
+    // room_task abort skips on_room_disconnected; stop here.
     crate::commands::screenshare::stop_screen_share(state).await.ok();
-    // Same for any active webcam capture — it publishes into this same room,
-    // so it must be torn down before the room closes or its helper keeps
-    // capturing after the call ends. Idempotent (no-op when no camera live).
+    // Same for the webcam, which publishes into this room.
     crate::commands::camera::stop_camera(state).await.ok();
 
     let room = release_voice_resources(state, true).await;
 
-    // Close outside the lock with a timeout so a broken connection (dropped VPN,
-    // network change) can't stall a reconnect attempt indefinitely.
+    // Close outside the lock, with a timeout (broken networks hang).
     if let Some(room) = room {
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -1235,26 +960,20 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
 }
 
 /// Toggle the local microphone mute. Returns the new muted state (true = muted).
-/// Also signals the muted state to remote participants via the LiveKit publication.
 pub async fn toggle_voice_mute(state: &Arc<AppState>) -> Result<VoiceGateState> {
     mutate_gate(state, |g| g.toggle_mute()).await
 }
 
 /// Toggle self-deafen (#849).
 ///
-/// Deafening silences all *incoming* audio and, as on Discord, implies
-/// self-mute. Undeafening restores the mute state that deafening
-/// displaced rather than blindly unmuting — see `gate::TransmitGate`.
+/// Deafen implies mute; undeafen restores the prior mute state.
 pub async fn toggle_voice_deafen(state: &Arc<AppState>) -> Result<VoiceGateState> {
     mutate_gate(state, |g| g.toggle_deafen()).await
 }
 
-/// Choose how the microphone is gated: voice-activity (open whenever
-/// unmuted — the default and prior behaviour) or push-to-talk.
+/// Mic gating mode: voice-activity (default) or push-to-talk.
 ///
-/// Safe to call outside a call: the mode is a persisted preference, so the
-/// renderer pushes it on load as well as on change. Switching modes always
-/// drops any held push-to-talk latch.
+/// Safe outside a call (persisted pref); always drops any held PTT latch.
 pub async fn set_voice_input_mode(
     mode: VoiceInputMode,
     state: &Arc<AppState>,
@@ -1263,27 +982,18 @@ pub async fn set_voice_input_mode(
 }
 
 /// Push-to-talk key down (`held: true`) / up (`held: false`).
-///
-/// The renderer also calls this with `false` on window blur — see
-/// `release_voice_ptt`, which is the same transition under a name that
-/// says why.
 pub async fn set_voice_ptt_held(held: bool, state: &Arc<AppState>) -> Result<VoiceGateState> {
     mutate_gate(state, |g| g.set_ptt_held(held)).await
 }
 
 /// Release the push-to-talk latch because the window lost keyboard focus.
 ///
-/// Separate from `set_voice_ptt_held(false)` purely so the call site reads
-/// as the safety measure it is: the OS delivers the keydown and then, once
-/// focus moves elsewhere, never the matching keyup. Without this the mic
-/// stays hot in the background — the push-to-talk failure everyone
-/// remembers. Idempotent, and never clears an explicit mute.
+/// The OS drops the keyup after focus moves; else the mic stays hot.
 pub async fn release_voice_ptt(state: &Arc<AppState>) -> Result<VoiceGateState> {
     mutate_gate(state, |g| g.on_focus_lost()).await
 }
 
-/// Read the current gate without changing it. Used by the renderer to
-/// resync after a reload or a late subscribe.
+/// Read the current gate without changing it.
 pub async fn get_voice_gate_state(state: &Arc<AppState>) -> Result<VoiceGateState> {
     let voice = state.voice.lock().await;
     let gate = voice.gate.lock().unwrap();
@@ -1292,10 +1002,6 @@ pub async fn get_voice_gate_state(state: &Arc<AppState>) -> Result<VoiceGateStat
 
 /// Apply one transition to the gate, then republish it everywhere that
 /// depends on it: the audio hot-path atomics and the LiveKit publication.
-///
-/// Every gate-mutating command funnels through here so no caller can
-/// mutate the state machine and forget half the propagation — the
-/// "protocol chokepoint" rung of the invariant ladder.
 async fn mutate_gate<F>(state: &Arc<AppState>, f: F) -> Result<VoiceGateState>
 where
     F: FnOnce(&mut TransmitGate),
@@ -1313,14 +1019,7 @@ where
 
 /// Set the per-user output gain multiplier for a remote participant.
 ///
-/// `user_id` is the bare user id (no `voice-` prefix, no `:device_id`
-/// suffix — see `user_id_from_voice_identity`). `volume` is clamped to
-/// 0.0..=2.0; 1.0 is unity, values <1 attenuate, values >1 boost.
-///
-/// Persistence is handled by the frontend via the existing
-/// `save_preferences` command — this only updates the live mixer state.
-/// Setting volume == 1.0 removes the entry so unity-gain tracks take the
-/// fast path in the mixer.
+/// `user_id` is bare; `volume` is clamped to 0.0..=2.0. Live only.
 pub async fn set_remote_user_volume(
     user_id: String,
     volume: f32,
@@ -1343,24 +1042,19 @@ pub async fn set_remote_user_volume(
     Ok(())
 }
 
-/// Switch the microphone device mid-call. Stops the current input stream and
-/// restarts it on the new device. Rebuilds APM if the new device's sample
-/// rate differs from the current one — APM is rate-locked at construction.
+/// Switch the microphone device mid-call; APM is rebuilt on a rate change.
 pub async fn set_voice_input_device(
     device_name: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
     let mut voice = state.voice.lock().await;
 
-    // Only valid while in a call
     if voice.audio_source.is_none() {
         voice.current_input_device = Some(device_name);
         return Ok(());
     }
 
-    // Extract shared atomics + current APM rate / config before dropping the
-    // lock — cpal init makes blocking ALSA syscalls and must not hold the
-    // async mutex.
+    // Copy out before unlocking: cpal init blocks (ALSA).
     let is_muted_clone = Arc::clone(&voice.transmit_muted);
     let prev_apm_rate = voice.apm.as_ref().map(|a| a.sample_rate_hz());
     let prev_apm_config = voice.apm.as_ref().map(|a| a.config().clone());
@@ -1376,7 +1070,6 @@ pub async fn set_voice_input_device(
     .await
     .map_err(|e| anyhow::anyhow!("audio init panicked: {e}"))??;
 
-    // Rebuild APM if the new mic rate differs from the previous one.
     let rate_changed = prev_apm_rate.map(|r| r != new_rate).unwrap_or(true);
     let new_apm_stage = if rate_changed {
         match (
@@ -1398,17 +1091,13 @@ pub async fn set_voice_input_device(
 
     let mut voice = state.voice.lock().await;
 
-    // Swap the input stream — dropping the old one stops it
     voice.input_stream = Some(new_mic);
     voice.current_input_device = Some(device_name);
     if rate_changed {
         voice.apm = new_apm_stage;
     }
 
-    // Reset the RNNoise state on every device switch — RNN hidden state is
-    // tied to the previous mic's spectrum and isn't useful afterwards.
-    // Re-engage it iff the new mic is at the right rate and the user still
-    // has click suppression enabled.
+    // Reset RNNoise on device switch: its state is tied to the old mic.
     let want_denoiser = voice
         .apm
         .as_ref()
@@ -1423,7 +1112,6 @@ pub async fn set_voice_input_device(
         };
     }
 
-    // Abort the old frame-feed task and start a new one on the new channel.
     if let Some(t) = voice.frame_task.take() { t.abort(); }
     let source = voice.audio_source.clone().unwrap();
     let apm_for_capture = voice.apm.as_ref().map(|a| a.handle());
@@ -1462,10 +1150,7 @@ pub async fn set_voice_input_device(
     Ok(())
 }
 
-/// Switch the speaker device mid-call. Tears down the current cpal output
-/// stream + mixer task and rebuilds them on the new device. Per-track drain
-/// tasks keep running — `track_buffers` is preserved across the switch, so
-/// the new mixer picks up where the old one left off without re-subscribing.
+/// Switch the speaker mid-call; track buffers survive the switch.
 pub async fn set_voice_output_device(
     device_name: String,
     state: &Arc<AppState>,
@@ -1495,11 +1180,7 @@ pub async fn set_voice_output_device(
     .await
 }
 
-/// Update the live APM configuration without rejoining. Internal AEC / AGC /
-/// NS state is preserved across config changes — only the changed submodule
-/// re-initialises. The RNNoise denoiser is created or dropped to match the
-/// new `click_suppression` flag (its RNN state isn't worth preserving across
-/// toggles). No-op when no voice session is active.
+/// Update the live APM config without rejoining; no-op outside a session.
 pub async fn set_voice_audio_processing(
     config: voice_apm::ApmConfig,
     state: &Arc<AppState>,
@@ -1513,7 +1194,6 @@ pub async fn set_voice_audio_processing(
         stage.set_config(config.clone());
     }
 
-    // Reconcile the RNNoise slot with the new flag.
     if let Some(rate) = mic_rate {
         let mut slot = voice.denoiser.lock().unwrap();
         let want = config.click_suppression && rate == voice_denoiser::REQUIRED_RATE_HZ;

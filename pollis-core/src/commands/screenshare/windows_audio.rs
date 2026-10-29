@@ -1,35 +1,11 @@
 //! Shared-audio capture on Windows: WASAPI **process loopback**, with our
 //! own process tree excluded.
 //!
-//! The obvious implementation — `AUDCLNT_STREAMFLAGS_LOOPBACK` on the
-//! default render endpoint — is wrong here, and quietly so. That endpoint
-//! carries everything the machine is playing *including the call*, so the
-//! shared audio would contain every remote participant's voice and send it
-//! back to them a few hundred milliseconds late. On Linux that is fixed by
-//! subtracting the known playback signal (`super::self_echo`); on Windows
-//! it cannot be, because `webrtc-audio-processing` has no MSVC build and
-//! the echo canceller there is a stub.
+//! Plain endpoint loopback would include the call, and Windows has no AEC (MSVC).
 //!
-//! So Windows takes the route Chromium takes for `getDisplayMedia({audio:
-//! true})`: activate a loopback client against the
-//! `VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK` pseudo-device with
-//! `PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE` targeting our own
-//! PID. The OS mixes every process *except* ours, so the call is absent by
-//! construction rather than by subtraction.
+//! So, like Chromium, exclude our PID tree via process-loopback activation.
 //!
-//! That requires Windows 10 20H1 (build 19041) or newer. The rest of the
-//! screen-share path only needs 1803, so a machine between the two shares
-//! video and reports audio unavailable — the same downgrade a Linux box
-//! with no PipeWire gets. **We deliberately do not fall back to endpoint
-//! loopback there**: shipping a known echo is worse than shipping silence,
-//! because the person it breaks the call for is not the person who turned
-//! it on.
-//!
-//! Scope is the whole system minus us. Per-application audio would mean
-//! `PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE` against the shared
-//! window's owning PID — reachable, since the picker already resolves an
-//! HWND — but it is a separate behaviour from what the other two platforms
-//! do today, so it is not silently introduced here.
+//! Needs 20H1+; older builds go video-only, never endpoint loopback (echo).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -55,10 +31,7 @@ use windows::Win32::System::Variant::VT_BLOB;
 
 use super::audio::SHARED_AUDIO_RATE_HZ;
 
-/// What we ask the loopback client to produce. Process loopback does not
-/// support `GetMixFormat` — the caller states the format and WASAPI
-/// converts — so this is a choice rather than a discovery. 48 kHz stereo
-/// s16 matches what the publish path wants, leaving nothing to convert.
+/// Requested format (process loopback has no `GetMixFormat`); WASAPI converts.
 const CAPTURE_CHANNELS: u16 = 2;
 const CAPTURE_BITS: u16 = 16;
 
@@ -70,11 +43,6 @@ pub(super) struct AudioBlock {
 }
 
 /// Completion handler for `ActivateAudioInterfaceAsync`.
-///
-/// The activation is asynchronous with no synchronous alternative, so the
-/// only way to get the `IAudioClient` is to implement this one-method COM
-/// interface. It does the minimum: signal an event and let the calling
-/// thread pick the result off the operation object.
 #[implement(IActivateAudioInterfaceCompletionHandler)]
 struct ActivationHandler {
     done: HANDLE,
@@ -85,10 +53,7 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationHandler_Impl {
         &self,
         _operation: Ref<'_, IActivateAudioInterfaceAsyncOperation>,
     ) -> WinResult<()> {
-        // Deliberately does not touch the operation's result. Reading it
-        // here would mean carrying the interface pointer back across a
-        // thread boundary; the waiter already holds the operation and can
-        // read it itself once this event fires.
+        // Doesn't read the result: the waiter holds the operation itself.
         unsafe {
             let _ = SetEvent(self.done);
         }
@@ -96,19 +61,9 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationHandler_Impl {
     }
 }
 
-/// Run the capture loop until `active` is cleared, pushing blocks into
-/// `tx`.
+/// Run the capture loop until `active` (the shared WGC fence) is cleared.
 ///
-/// `active` is the *same* per-session fence the WGC video thread uses, so
-/// `stop_screen_share` ends both halves with the one store it already
-/// does — there is no second flag to forget to flip.
-///
-/// `started` fires the moment the capture stream is actually running:
-/// `Ok(())` right after `IAudioClient::Start()` succeeds, `Err(reason)` if
-/// anything before that fails. The caller must not learn "it started" from
-/// this function *returning* — that only happens when the share ends, so
-/// waiting on the return means waiting out a timeout on every healthy
-/// start while captured blocks pile up unconsumed.
+/// `started` fires once the stream runs; returning only means the share ended.
 pub(super) fn run_loopback_capture(
     tx: tokio::sync::mpsc::Sender<AudioBlock>,
     active: Arc<AtomicBool>,
@@ -118,8 +73,7 @@ pub(super) fn run_loopback_capture(
     if let Err(e) = unsafe { run_inner(tx, active, &mut started) } {
         let msg = format!("{e}");
         match started.take() {
-            // Failed before the stream came up: a startup failure the
-            // caller downgrades to video-only.
+            // Startup failure: the caller downgrades to video-only.
             Some(s) => {
                 let _ = s.send(Err(msg));
             }
@@ -136,10 +90,7 @@ unsafe fn run_inner(
     active: Arc<AtomicBool>,
     started: &mut Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
 ) -> WinResult<()> {
-    // Ask the OS for "everything except us". `TargetProcessId` names the
-    // root of the tree to exclude, so a helper subprocess of ours is
-    // excluded too — which matters, because the capture helpers are
-    // separate processes.
+    // Exclude our whole process tree, which includes the capture helpers.
     let mut activation = AUDIOCLIENT_ACTIVATION_PARAMS {
         ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
         Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
@@ -149,10 +100,7 @@ unsafe fn run_inner(
             },
         },
     };
-    // The activation params travel as a VT_BLOB inside a PROPVARIANT.
-    // windows-rs offers no typed BLOB constructor, so the union is
-    // written field by field. `activation` must outlive the call below —
-    // the blob is borrowed, not copied.
+    // Params as a VT_BLOB PROPVARIANT; `activation` must outlive the call.
     let mut prop = PROPVARIANT::default();
     {
         let inner = &mut *prop.Anonymous.Anonymous;
@@ -173,9 +121,7 @@ unsafe fn run_inner(
         &handler,
     )?;
 
-    // The handler fires on a system thread. Two seconds is far longer than
-    // this activation ever takes; a timeout means the audio service is
-    // wedged, which is an audio-only failure.
+    // 2 s timeout = wedged audio service (audio-only failure).
     if WaitForSingleObject(done, 2_000) != WAIT_OBJECT_0 {
         return Err(windows::core::Error::new(
             HRESULT(-1),
@@ -187,8 +133,7 @@ unsafe fn run_inner(
     let mut interface: Option<windows::core::IUnknown> = None;
     operation.GetActivateResult(&mut activate_result, &mut interface)?;
     if activate_result != S_OK {
-        // The expected failure on Windows 10 pre-20H1, where the
-        // pseudo-device does not exist.
+        // Expected on Windows 10 pre-20H1.
         return Err(windows::core::Error::new(
             activate_result,
             "process-loopback audio capture is unavailable on this version of Windows",
@@ -211,9 +156,7 @@ unsafe fn run_inner(
         cbSize: 0,
     };
 
-    // 200 ms buffer, in 100 ns units. Generous: the publish path rebuffers
-    // to 10 ms anyway, and a deeper buffer costs nothing but tolerates a
-    // scheduling hiccup without dropping a block.
+    // 200 ms buffer, in 100 ns units.
     const BUFFER_DURATION_100NS: i64 = 200 * 10_000;
     audio_client.Initialize(
         AUDCLNT_SHAREMODE_SHARED,
@@ -248,9 +191,7 @@ unsafe fn capture_loop(
     active: &Arc<AtomicBool>,
 ) -> WinResult<()> {
     while active.load(Ordering::Acquire) {
-        // Bounded wait rather than INFINITE so the fence is still
-        // observed when the source has gone quiet and WASAPI stops
-        // signalling — otherwise a stop would hang until the next sound.
+        // Bounded wait so the fence is seen even when WASAPI goes quiet.
         if WaitForSingleObject(ready, 200) != WAIT_OBJECT_0 {
             continue;
         }
@@ -274,9 +215,7 @@ unsafe fn capture_loop(
                 return Ok(());
             }
             let samples = frames as usize * CAPTURE_CHANNELS as usize;
-            // A silent packet's buffer contents are undefined — WASAPI
-            // sets the flag instead of zeroing — so synthesise the
-            // silence rather than publishing whatever was in memory.
+            // Silent packets hold undefined data; synthesise silence.
             let pcm: Vec<i16> = if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0
                 || data.is_null()
             {
@@ -285,11 +224,7 @@ unsafe fn capture_loop(
                 std::slice::from_raw_parts(data.cast::<i16>(), samples).to_vec()
             };
             let _ = capture.ReleaseBuffer(frames);
-            // `blocking_send` is correct here and `try_send` is not: this
-            // is a plain OS thread, never a tokio worker, and dropping
-            // audio under momentary back-pressure is an audible gap
-            // rather than the harmless stale pixel a dropped video frame
-            // would be.
+            // OS thread, so `blocking_send`; dropped audio is an audible gap.
             if tx
                 .blocking_send(AudioBlock {
                     sample_rate: SHARED_AUDIO_RATE_HZ,

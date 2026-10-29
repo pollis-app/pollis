@@ -7,12 +7,7 @@ use crate::state::AppState;
 use super::outbox::{OutgoingAttachment, Queued};
 use super::types::Message;
 
-/// Non-identifying placeholder written into the still-NOT-NULL
-/// `message_envelope.sender_id` column when sealed sender is enabled (issue
-/// #331). A fixed sentinel (rather than a per-message random token) carries zero
-/// joinable information and is smaller than a real ULID; the true sender lives in
-/// the MLS credential inside the ciphertext. See
-/// `docs/metadata-minimization-design.md` §2.1.
+/// Placeholder for the NOT NULL `message_envelope.sender_id` under sealed sender (#331).
 pub const SEALED_SENDER_SENTINEL: &str = "sealed";
 
 /// Send a message under a fresh id. See [`send_message_with_id`].
@@ -21,9 +16,7 @@ pub async fn send_message(
     sender_id: String,
     content: String,
     reply_to_id: Option<String>,
-    // ULID of the thread root this message replies into (#825). `None` for an
-    // ordinary channel message. Travels only inside the MLS ciphertext — it is
-    // never included in the DS request body.
+    // Thread root ULID (#825); travels only inside the MLS ciphertext.
     thread_id: Option<String>,
     sender_username: Option<String>,
     state: &Arc<AppState>,
@@ -44,24 +37,11 @@ pub async fn send_message(
 
 /// Send a message, durably (#1335).
 ///
-/// The message is written to the local `message` table as `send_state =
-/// 'pending'` BEFORE any network work — that row is the outbox entry. Only then
-/// does delivery (catch-up, seal, DS post) run, and only a confirmed post clears
-/// the state. If this process dies part-way, the row survives and the outbox
-/// drain delivers it after the next unlock or reconnect; if the attempt fails,
-/// the row is marked `'failed'` and the renderer offers Retry. Either way a
-/// message the user saw accepted is never silently gone.
+/// Written locally as `pending` before any network work; only a confirmed post clears it.
 ///
-/// `message_id` lets the renderer name the message before it calls (from
-/// `new_message_id`), so its optimistic row and the stored row are the same
-/// message. A second call with the same id is idempotent: an unsent row is
-/// delivered (never duplicated), a delivered one is returned as it stands.
+/// `message_id` makes a repeat call idempotent.
 ///
-/// `attachments` makes the outbox own the upload too: their bytes are read and
-/// stored with the row before anything touches the network, `content` is then
-/// the caption, and delivery uploads them and builds the `_att` envelope. A
-/// caller that uploaded already (an older renderer, the TUI) passes none and
-/// the finished envelope as `content`, exactly as before.
+/// `attachments` are stored with the row and uploaded by delivery; `content` is then the caption.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_message_with_id(
     message_id: Option<String>,
@@ -92,17 +72,14 @@ pub async fn send_message_with_id(
     {
         return Ok(message);
     }
-    // Test-harness only: stand in for the process dying right after the
-    // outbox row was written (#1335) — nothing marks it failed, exactly as
-    // with a real kill.
+    // Test-harness only: die right after the outbox row is written (#1335).
     if test_hooks::take(test_hooks::Crash::AfterEnqueue) {
         return Err(test_hooks::simulated_crash());
     }
     super::outbox::deliver(state, &queued.id, sender_username).await
 }
 
-/// Deliver one queued message: everything `send_message` did before #1335,
-/// minus writing the local row, which the outbox already holds.
+/// Deliver one queued message (the outbox already holds the local row).
 ///
 /// Runs under the message's outbox lock (`outbox::deliver`). Clears
 /// `send_state` once the DS has the envelope; any error leaves it set, and the
@@ -123,13 +100,7 @@ pub(super) async fn deliver_queued(
     } = queued.clone();
     state.check_not_outdated()?;
 
-    // For group channels, all channels share the group's MLS group (keyed by group_id).
-    // For DM conversations, the MLS group is keyed by conversation_id directly.
-    // is_channel = true means conversation_id is a channel ID; group_id is the LiveKit room name.
-    //
-    // ONE request answers the resolve, the membership check and the DM peer list
-    // (which the block gate below consumes) — three dependent round trips before
-    // #987, and the peer list was itself a query per peer.
+    // Group channels share the group's MLS group; a DM's is keyed by conversation_id.
     let resolved =
         crate::commands::ds_reads::catch_up(state, &conversation_id, false, true).await?;
     // Not (or no longer) a member: no attempt will ever get further, so say so
@@ -140,15 +111,7 @@ pub(super) async fn deliver_queued(
     let is_channel = resolved.kind == pollis_api::directory::ConversationKind::Channel;
     let mls_group_id = resolved.mls_group_id.clone();
 
-    // Block enforcement for DMs: if any other participant in this DM
-    // has a block relationship with the sender (either direction),
-    // silently drop the message. The send appears to succeed to the
-    // sender (message is stored locally so their own history looks
-    // consistent) but it is NOT encrypted, NOT posted to Turso, and
-    // NOT broadcast on LiveKit — the recipient never sees it and no
-    // observable signal reveals the block. Group channels are not
-    // gated here; blocks in groups are purely render-side on the
-    // blocker's client.
+    // DM blocks silently drop the message: stored locally, never sent, so no signal reveals the block.
     let suppress_delivery = if !is_channel {
         let peers: Vec<String> = resolved
             .dm
@@ -167,11 +130,7 @@ pub(super) async fn deliver_queued(
     };
 
     if suppress_delivery {
-        // The outbox row stays as the local-only copy, so the sender's own
-        // conversation view stays consistent (history survives reloads). Its
-        // empty ciphertext is fine — nothing will ever decrypt this row; it's
-        // only read back via the `content` column. Settling it is the whole
-        // "delivery".
+        // The outbox row stays as the local-only copy; settling it is the whole "delivery".
         let sent_at = super::outbox::settle(state, &id).await?;
         return Ok(Message {
             id,
@@ -195,47 +154,17 @@ pub(super) async fn deliver_queued(
         }
     }
 
-    // Catch this device up to head with the INTERLEAVED ingesting catch-up,
-    // decrypting every bound conversation's messages at each epoch BEFORE the
-    // shared local group advances past it. A bare commit-only replay
-    // (`process_pending_commits_inner`) would reach head immediately, and with
-    // `max_past_epochs = 0` a current-epoch inbound message we haven't fetched
-    // yet would have its keys discarded the instant we advance past its epoch
-    // (issue #440, the committer strand — a send that catches up commit-only
-    // strands an un-ingested inbound message). The interleaved catch-up is a
-    // superset: it still reaches head (creating/repairing the local group via
-    // external-join if needed), just decrypting en route. Safe to call here —
-    // send_message holds no MLS group lock, so re-acquiring it inside the
-    // catch-up cannot deadlock.
+    // Ingest-before-advance (#440): interleaved catch-up so no inbound keys are discarded; no lock held here.
     if let Err(e) = super::catch_up_mls_group_interleaved(state, &mls_group_id, &sender_id).await {
         crate::diag!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
-    // #1571: a device that belongs in this conversation and holds no leaf is
-    // re-added BEFORE this message is sealed, so it can read it — on any
-    // platform, without waiting for a sweep. Throttled per conversation, and
-    // best-effort: it never fails the send.
+    // #1571: re-add a leafless device before sealing so it can read this. Best-effort.
     // Boxed: a reconcile is a large future, and inlining it into every send's
     // state machine overflowed a default (2 MiB) test-thread stack.
     Box::pin(crate::commands::mls::backstop_before_seal(state, &mls_group_id, &sender_id)).await;
 
-    // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
-    // §4.1). Pad TEXT plaintext to a size bucket before encryption so the
-    // ciphertext length in `message_envelope` no longer reveals the message
-    // length. The framing (version byte + length prefix) lives inside the
-    // MLS ciphertext, so only members see it and there's no schema/server
-    // change. Attachment envelopes are left unpadded — their R2 blob size is
-    // inherent and dedup depends on it.
-    //
-    // A THREADED send (#825) always takes the padded frame, attachment
-    // envelope or not, because the thread id rides in that frame's trailer
-    // and there is nowhere else inside the ciphertext to put it. Padding an
-    // attachment envelope is harmless — the exemption above exists because
-    // the R2 blob size already leaks, not because padding would hurt — and
-    // an old client still strips a `0xF5` frame correctly, so a threaded
-    // attachment stays readable on clients that predate threads.
-    //
-    // An UNTHREADED send is byte-for-byte what it was before threads.
+    // Pad text to a size bucket (#331); attachments stay unpadded unless threaded (#825), whose id rides the frame.
     let plaintext: Vec<u8> = match thread_id.as_deref() {
         Some(thread) => super::framing::pad_threaded(content.as_bytes(), thread),
         None if super::edit_delete::is_attachment_content(&content) => {
@@ -262,11 +191,7 @@ pub(super) async fn deliver_queued(
             &held,
         )?;
 
-        // The outbox row (#1335) already holds everything but the ciphertext.
-        // Its `sent_at`: refreshed by every attempt until the first seal (a
-        // message queued offline lands at the time it went out, not when it
-        // was typed), then fixed — this seal may post, and every later
-        // attempt must post the same stamp the DS may already hold.
+        // `sent_at` refreshes per attempt until the first seal, then stays fixed (the DS may hold it).
         let never_sealed: bool = db.conn().query_row(
             "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
             rusqlite::params![id],
@@ -281,53 +206,14 @@ pub(super) async fn deliver_queued(
         (sealed, sent_at)
     };
 
-    // Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2) —
-    // UNCONDITIONAL (#607). We always blind the server-visible `message_envelope`:
-    // `sealed = 1` and a fixed, non-identifying sentinel in the still-NOT-NULL
-    // `sender_id` column, so a Turso breach / subpoena of the stored table no
-    // longer reveals sender-per-message. Attribution is unaffected — recipients
-    // take the true sender from the MLS credential inside the ciphertext (the
-    // reader, already shipped), so the sentinel never has to decode. There is no
-    // opt-out: no config flag can emit an UNSEALED envelope (invariant test in
-    // `flows/sealed_sender.rs`), which is what lets edit/delete authorization move
-    // fully client-side (Solution A) — the DS can no longer see who authored a
-    // message, so it stops trying to enforce authorship.
-    //
-    // Scope (be honest, §2.1): this defends the AT-REST envelope only. The DS
-    // still authenticates every write with an `X-Pollis-User` header and gates on
-    // membership, so a *live* DS operator still sees the sender in real time.
-    // Closing that axis is v1.5 (anonymous membership proof).
-    //
-    // The LOCAL `message` row (inserted above) deliberately keeps the real
-    // `sender_id`: it is the author's own decrypted copy on their trusted device,
-    // where the field is self-attribution and the at-rest server threat does not
-    // apply. Sealing it would mislabel the author's own message, since the send
-    // path writes attribution directly rather than re-deriving it from the
-    // credential the way the ingest reader does.
-
-    // Mentions (#843) — decided HERE, before the envelope post, because the push
-    // audience now rides on that write (#987).
-    //
-    // An explicit `@all` pings every group member's inbox, and an `@username`
-    // pings exactly the members named. Both resolve against THIS channel's
-    // roster, which the sender is already a member of, so a mention can never
-    // address (or probe for) someone outside the room. Only meaningful for group
-    // channels; a DM already notifies its recipient unconditionally.
-    //
-    // Who hears about it, end to end (#1431): every channel message pushes every
-    // other member, and the DS skips a member who muted the channel unless they
-    // are in `direct` below (Slack semantics). In-app, each client applies the
-    // same rule to its own alerts (desktop `notify.ts`); the account-wide
-    // "notifications off" preference still silences OS banners there.
+    // Mentions (#843) resolve against this channel's roster only, before the post carries the push audience.
     let members: Vec<(String, String)> = if is_channel {
         crate::commands::ds_reads::group(state, &mls_group_id, &sender_id, false)
             .await?
             .members
             .into_iter()
             .filter(|m| m.user_id != sender_id)
-            // A member whose `users` row is missing still counts for `@all` — it
-            // just cannot be named individually, which is exactly what the LEFT
-            // JOIN's empty-string default expressed.
+            // A member with no `users` row still counts for `@all`.
             .map(|m| (m.user_id, m.username.unwrap_or_default()))
             .collect()
     } else {
@@ -339,20 +225,7 @@ pub(super) async fn deliver_queued(
         MentionAudience::Everyone
     };
 
-    // Content-free push to recipients' backgrounded/closed apps (#344), fanned
-    // out by the DS since #987 — the client no longer reads other people's
-    // `push_token` rows, and the two round trips it took to do so are gone.
-    //
-    // Since #1431 every message pushes every other member — a DM, `@all`,
-    // `@username` and ordinary channel chatter alike — and the DS drops each
-    // member who muted the channel unless `push_mentions` names them. The
-    // mention list is the members named directly by `@username`, even inside an
-    // `@all`, because being named is what gets through a mute. A DM has no
-    // mention list: nobody can mute one.
-    //
-    // A client from before #1431 still sends `None` for channel chatter (no
-    // push) and a bare `push_to` list for `@username`; the DS keeps reading both
-    // the old way (`pollis_delivery::push::PushAudience::from_send`).
+    // Push fan-out is on the DS (#987, #1431); `direct` names who gets through a mute.
     let direct: Vec<String> = if is_channel {
         direct_mentions(&content, &members)
     } else {
@@ -365,18 +238,11 @@ pub(super) async fn deliver_queued(
         None
     };
 
-    // Post to Turso for offline delivery. DS seam: route the envelope write
-    // through the Delivery Service (the write API). The body asserts the epoch
-    // the envelope was sealed at; if a commit landed since our catch-up the DS
-    // refuses it (#1041) and `post_resealing` catches up, re-seals at the new
-    // The per-envelope deletion capability (#1086). Computed once, outside the
-    // re-seal closure: it binds to the envelope id, which a re-seal does not
-    // change, so the same hash is correct for every attempt.
+    // Post via the DS; on an epoch-behind refusal (#1041) `post_resealing` re-seals and retries.
+    // The deletion capability (#1086), computed once: re-seals keep the envelope id.
     let delete_token_hash =
         super::delete_capability::envelope_delete_token_hash(state, &id).await;
 
-    // epoch, rewrites our own local copy to match, and posts again. What landed
-    // is not needed past here: the row keeps the send's own `sent_at` (#1335).
     super::seal::post_resealing(
         state,
         super::seal::Target {
@@ -413,9 +279,7 @@ pub(super) async fn deliver_queued(
     )
     .await?;
 
-    // Test-harness only: the process dies after the DS took the envelope but
-    // before this device recorded it (#1335) — the retry must not deliver it
-    // twice.
+    // Test-harness only: die after the DS took the envelope (#1335).
     if test_hooks::take(test_hooks::Crash::AfterPost) {
         return Err(test_hooks::simulated_crash());
     }
@@ -424,21 +288,14 @@ pub(super) async fn deliver_queued(
     super::outbox::settle(state, &id).await?;
     let now = sent_at;
 
-    // Register a server-side reference for each attachment this message carries
-    // (#690), keyed by the message id. The DS reference-counts the
-    // `attachment_object` row so deleting one message that names an object
-    // cannot strand another message that still does. Best-effort — never fails the
-    // send (the envelope above is the durable delivery).
+    // Register attachment references (#690) so the DS refcounts objects. Best-effort.
     if super::edit_delete::is_attachment_content(&content) {
         let _ = super::edit_delete::register_attachment_refs(state, &id, &content).await;
     }
 
-    // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.
-    // §5 signalling minimization: the wake-up carries conversation routing only,
-    // no sender — recipients attribute the message from the decrypted envelope.
+    // Notify via LiveKit (non-fatal); the wake-up carries routing only, no sender.
     if is_channel {
-        // One LiveKit room per group covers all its channels.
-        // Receivers filter by channel_id in the event payload.
+        // One room per group; receivers filter by channel_id.
         if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
             state,
             &mls_group_id,
@@ -448,8 +305,7 @@ pub(super) async fn deliver_queued(
             crate::diag!("[realtime] send_message: publish to group {mls_group_id}: {e}");
         }
     } else {
-        // DM: publish directly to the shared DM room (conversation_id is the room name).
-        // Both participants are connected to this room via connect_rooms.
+        // DM: publish to the shared DM room.
         if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
             state,
             &conversation_id,
@@ -460,12 +316,9 @@ pub(super) async fn deliver_queued(
         }
     }
 
-    // Inbox pings for the audience decided above. Fire-and-forget; failures are
-    // logged, never fatal to the send.
+    // Inbox pings; fire-and-forget.
     if is_channel {
-        // `@all` pings every member. A member ALSO named directly gets the
-        // `user_mention` instead (#1431): that is the ping that gets through a
-        // channel they muted, so naming them inside an `@all` must not demote it.
+        // A member also named directly gets `user_mention`, which gets through a mute (#1431).
         if mentions_all(&content) {
             let payload = serde_json::json!({
                 "type": "all_mention",
@@ -541,11 +394,7 @@ fn is_mention_body_char(c: char) -> bool {
 /// Extract the `@`-prefixed mention tokens from `content`, lowercased and
 /// stripped of the leading `@`.
 ///
-/// A token only counts when the `@` starts the string or follows whitespace —
-/// that is what stops "email@allcorp" and "a@b.com" from reading as mentions,
-/// matching the spirit of `mentions_all()` above. Trailing `.`/`-`/`_` are
-/// trimmed so "@dana." mentions `dana`, and `@all` is deliberately excluded:
-/// it is the everyone-mention, handled by `mentions_all()`, never a username.
+/// Only a string-initial or whitespace-preceded `@` counts; `@all` is excluded.
 ///
 /// MIRROR: `mentionTokens()` in `frontend/src/utils/mentions.ts`. The two must
 /// agree or the composer will promise a ping the backend does not send.
@@ -587,9 +436,7 @@ pub(crate) enum MentionAudience {
     /// Everyone in the conversation except the sender. A DM (always personal)
     /// or a channel `@all`.
     Everyone,
-    /// Only these user ids — a channel message that names specific members by
-    /// `@username`. This is the case that lets a mention reach you in a
-    /// channel whose ordinary chatter is badge-only.
+    /// Only these user ids — a channel message naming members by `@username`.
     Only(Vec<String>),
     /// Nobody — ordinary channel chatter. The accompanying `new_message`
     /// event still bumps the unread badge.
@@ -598,12 +445,7 @@ pub(crate) enum MentionAudience {
 
 /// Decide the wake-up audience for a message.
 ///
-/// `members` is `(user_id, username)` for every OTHER member of the
-/// conversation — the caller reads it from the conversation the sender is
-/// already a member of, which is what keeps mentions from becoming a user
-/// directory: an `@name` that matches nobody in this room resolves to nothing
-/// and reveals nothing. Matching is case-insensitive, and the returned ids
-/// preserve `members` order with duplicates removed.
+/// `members` is every other member of the conversation, so an `@name` never reaches outside the room.
 pub(crate) fn mention_audience(
     is_channel: bool,
     content: &str,
@@ -626,9 +468,6 @@ pub(crate) fn mention_audience(
 
 /// The members `content` names directly by `@username`, whether or not it also
 /// says `@all` — the ones a channel mute does not silence (#1431).
-///
-/// Same matching as [`mention_audience`]: against `members` only (never a
-/// directory), case-insensitive, in `members` order, deduplicated.
 pub(crate) fn direct_mentions(content: &str, members: &[(String, String)]) -> Vec<String> {
     let tokens = mention_tokens(content);
     let mut ids: Vec<String> = Vec::new();
@@ -763,10 +602,7 @@ mod tests {
     }
 }
 
-/// A test-only way to make the next outgoing message undecryptable for every
-/// recipient (#1312), so a lost message can be produced end to end — through
-/// the DS and a real recipient's ingest — instead of only simulated. Compiled
-/// out of every shipping build: without `test-harness` it is the identity.
+/// Test-only hooks (crashes, corruption); compiled out without `test-harness`.
 pub mod test_hooks {
     /// Where a simulated process death cuts a send short (#1335).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -778,15 +614,9 @@ pub mod test_hooks {
         /// The envelope is sealed (the sender's ratchet has moved on) and
         /// nothing has been posted (#1524).
         AfterSeal,
-        /// A receiving device: `process_message` opened an envelope (its key is
-        /// spent) and the row is not written yet (#1524). Unlike the send-side
-        /// points this one sits inside the commit replay's epoch hook, which
-        /// has no error path, so it unwinds — a dead process runs nothing
-        /// after that point either.
+        /// A receiving device opened an envelope (#1524) but has not written the row; unwinds.
         AfterDecrypt,
-        /// An edit is stored in the edit outbox; nothing has touched the
-        /// network (#1555) — where an edit used to have already rewritten the
-        /// sender's copy.
+        /// An edit is stored in the edit outbox; nothing has touched the network (#1555).
         EditAfterEnqueue,
         /// The DS holds the edit envelope; this device has not recorded that
         /// (#1555).

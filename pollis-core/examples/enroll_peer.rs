@@ -1,30 +1,14 @@
 //! Dev-DS peer for the mobile Maestro device-approval flows (#1360).
 //!
-//! It plays the DESKTOP half of device linking with the very `pollis-core`
-//! commands the desktop app calls, so a phone under Maestro can be checked
-//! against it in both directions:
+//! Plays the DESKTOP half of device linking with the desktop's own commands:
 //!
-//! - `new <email>` — a new device of an existing account: email sign-in, then
-//!   `start_device_enrollment` (the desktop's "Approve from another device").
-//!   Prints `PEER_CODE=<code>` and `PEER_REQUEST=<id>`, waits for a signed-in
-//!   device to approve, then sets its PIN and finalizes (`PEER_ENROLLED`), or
-//!   prints `PEER_REJECTED` / `PEER_EXPIRED`.
-//! - `approver <email>` — the account's FIRST device: signs up
-//!   (`PEER_SIGNED_UP`), waits for another device's pending request and for
-//!   the code that device shows to be written to `$POLLIS_PEER_CODE_FILE`
-//!   (Maestro reads it off the phone's screen), then approves it with
-//!   `approve_device_enrollment`, the call desktop's approval prompt makes
-//!   (`PEER_APPROVED`).
-//! - `offer -` (#1361) — a desktop at "Sign in with another device" showing
-//!   its QR (`PEER_OFFER=<payload>`) for the phone to scan; enrolls once the
-//!   phone accepts (`PEER_ENROLLED`).
-//! - `show <email>` (#1207) — a signed-in desktop showing a v1 code
-//!   (`PEER_LINK=<payload>`) for a NEW phone to sign in with; approves it.
+//! - `new <email>` — a new device of an existing account (`PEER_CODE`, `PEER_ENROLLED`).
+//! - `approver <email>` — the FIRST device; approves the code read from
+//!   `$POLLIS_PEER_CODE_FILE` (`PEER_APPROVED`).
+//! - `offer -` (#1361) — a signed-out desktop showing its QR (`PEER_OFFER`).
+//! - `show <email>` (#1207) — a signed-in desktop showing a v1 code (`PEER_LINK`).
 //!
-//! An example of `pollis-core` rather than `pollis-tui` so it can be built
-//! with `--no-default-features`: no `os-keystore`, so the peer keeps its keys
-//! in the encrypted file under `POLLIS_DATA_DIR` and never touches the macOS
-//! Keychain (whose prompts a run over SSH must never raise).
+//! Built with `--no-default-features` so it never raises macOS Keychain prompts.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
 //!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-core --no-default-features \
@@ -72,10 +56,7 @@ async fn main() -> Result<()> {
     }
 }
 
-/// `offer -` (#1361): a desktop that is NOT signed in shows its QR. Prints
-/// `PEER_OFFER=<payload>` (again, with a fresh code, whenever one lapses); a
-/// signed-in phone scans it. Then enrolls and prints `PEER_ENROLLED` once that
-/// phone has wrapped the account key to the key the code showed.
+/// `offer -`: reprints `PEER_OFFER` with a fresh code whenever one lapses.
 async fn offering_device(state: &Arc<AppState>) -> Result<()> {
     let started = Instant::now();
     let profile = loop {
@@ -93,10 +74,6 @@ async fn offering_device(state: &Arc<AppState>) -> Result<()> {
     new_device(state, &profile.id, profile.enrollment_required).await
 }
 
-/// `show <email>` (#1207): the account's first device shows a v1 code under
-/// Security → Link a new device; a NEW phone signs in with it. Prints
-/// `PEER_LINK=<payload>`, then approves the phone's tag-verified request
-/// (`PEER_APPROVED`).
 async fn showing_device(state: &Arc<AppState>, user_id: &str, first_device: bool) -> Result<()> {
     if !first_device {
         bail!("show mode signs up a fresh account; use a new email");

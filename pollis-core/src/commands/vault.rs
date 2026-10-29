@@ -1,49 +1,10 @@
 //! The Vault (#107) — a personal encrypted space that behaves like a chat
 //! with yourself, synced across the account's devices like cloud storage.
 //!
-//! # The one deliberate inversion of "a new device starts empty"
-//!
-//! Accepted loss (2) in CLAUDE.md says a new device has no message history —
-//! that is a property of MLS (no key backup, by design). The vault is the
-//! stated exception, and the exception is CRYPTOGRAPHIC, not policy: entries
-//! are sealed under a key derived from the ACCOUNT identity key
-//! (HKDF-SHA256, `pollis-vault-v1`), the one secret every enrolled device
-//! already receives at enrollment and the server has never held. So a
-//! brand-new device decrypts the entire vault the moment it enrolls, every
-//! device converges with no coordination, and the DS remains a byte bucket.
-//! Same construction as the read-cursor sync (`messages::read_state`), one
-//! entry per row instead of one blob per account, different `info` string so
-//! the two keys cannot be repurposed across uses.
-//!
-//! # Entry shape
-//!
-//! An entry's plaintext is `{ body, pinned }` where `body` is the SAME
-//! content string chat messages use — plain text, or the
-//! `{"_att":[...],"_txt":"..."}` attachment envelope — so the renderer, the
-//! attachment pipeline, and the media grid all run the exact same code
-//! against vault entries as against messages. The pinned flag lives inside
-//! the ciphertext: pin/unpin is a re-encrypt-and-save the server cannot
-//! distinguish from an edit.
-//!
-//! Attachments ride the normal upload pipeline (`commands::r2`), sealed under
-//! the Vault file key (`vault_file_root_key`, derived from the account
-//! identity key like the entry key, #1382) in the shared `media/` domain. What keeps a
-//! vault-held object from being garbage-collected out from under the entry
-//! is the `attachment_hashes` list on every save: the DS maintains
-//! `vault_attachment_ref` rows from it and its GC liveness predicate counts
-//! them (see `pollis-delivery/src/messages.rs`). The DECRYPTION capability
-//! for those objects still travels only inside the entry's ciphertext.
-//!
-//! # Sync model
-//!
-//! The remote is the source of truth — that is what "functions like cloud
-//! storage" means. Every read command first pulls and replaces the local
-//! `vault_message` cache (tolerating a failed pull by serving the last
-//! synced state, so the vault renders offline); every write goes remote
-//! FIRST and touches the cache only after the DS accepted it, so the cache
-//! can lag the truth but never contradict it. Entries are ULID-keyed and
-//! rewritten whole, so cross-device conflict is last-write-wins per entry —
-//! exactly Drive semantics, and honest for a single-owner store.
+//! Sealed under a key derived from the account identity key, so a new device reads the whole vault.
+//! Plaintext is `{ body, pinned }` (`body` as in chat), so pin/unpin looks like an edit to the DS.
+//! Each save's `attachment_hashes` keep its files alive for the DS GC.
+//! Writes go remote first; reads pull then serve the cache (offline-tolerant). Last write wins.
 
 use std::sync::Arc;
 
@@ -62,9 +23,7 @@ use zeroize::Zeroizing;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// HKDF info string — binds this key to the vault so the account identity key
-/// cannot be repurposed between this, the read-cursor sync, and the
-/// `account_recovery` wrap.
+/// Distinct info strings keep the account key from being repurposed across uses.
 const VAULT_HKDF_INFO: &[u8] = b"pollis-vault-v1";
 
 const NONCE_LEN: usize = 12;
@@ -89,11 +48,7 @@ pub(crate) struct VaultEntryPlain {
     pinned: bool,
 }
 
-// ── Key derivation + AEAD ────────────────────────────────────────────────────
-
-/// Derive this account's vault key. Salted by the user id (non-secret domain
-/// separation between accounts, same reasoning as the cursor-sync key — the
-/// IKM is a uniformly random 32-byte seed, so no stretching salt is needed).
+/// Derive this account's vault key, salted by the user id.
 fn derive_vault_key(account_seed: &[u8], user_id: &str) -> Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(user_id.as_bytes()), account_seed);
     let mut out = Zeroizing::new([0u8; 32]);
@@ -103,15 +58,9 @@ fn derive_vault_key(account_seed: &[u8], user_id: &str) -> Zeroizing<[u8; 32]> {
 }
 
 /// HKDF info for the root key Vault ATTACHMENTS are sealed under (#1382).
-/// Distinct from [`VAULT_HKDF_INFO`] so the entry key and the file key can
-/// never be confused.
 const VAULT_FILES_HKDF_INFO: &[u8] = b"pollis-vault-files-v1";
 
-/// The root key Vault attachments are sealed under: derived from the account
-/// identity key exactly like the entry key, so every enrolled device can open
-/// every Vault file and the DS, which has never held the account key, cannot.
-/// Each file then derives its own key from this and its random file id
-/// (`file_keys::derive_file_key`).
+/// Root key for Vault attachments, derived from the account key like the entry key.
 pub(crate) async fn vault_file_root_key(
     state: &Arc<AppState>,
     user_id: &str,
@@ -130,9 +79,7 @@ async fn account_seed(state: &Arc<AppState>, user_id: &str) -> Result<Zeroizing<
     Ok(Zeroizing::new(key.to_seed().to_vec()))
 }
 
-/// Seal one entry into the `(nonce, blob)` the DS stores. Padded to the
-/// message-framing size buckets first, so entry length does not count words
-/// for the server.
+/// Seal one entry, padded to the message size buckets.
 pub(crate) fn seal_entry(
     account_seed: &[u8],
     user_id: &str,
@@ -173,8 +120,6 @@ pub(crate) fn open_entry(
     serde_json::from_slice(&json)
         .map_err(|e| Error::Other(anyhow::anyhow!("parse vault entry: {e}")))
 }
-
-// ── Local cache ──────────────────────────────────────────────────────────────
 
 fn upsert_local(
     conn: &Connection,
@@ -241,16 +186,9 @@ fn get_local(conn: &Connection, id: &str) -> Result<Option<VaultMessage>> {
     .map_err(|e| Error::Other(anyhow::anyhow!("vault cache lookup: {e}")))
 }
 
-// ── Sync ─────────────────────────────────────────────────────────────────────
-
 /// Pull the account's entries and make the local cache exactly match them —
 /// upsert everything the server holds, delete everything it no longer does
-/// (removed on another device). Returns how many entries the vault holds.
-///
-/// An entry that fails to decrypt is DROPPED FROM THE CACHE VIEW but left
-/// untouched on the server: it may belong to a newer client version, and
-/// deleting data because this build cannot read it is how "cloud storage"
-/// stops deserving the name.
+/// (removed elsewhere). Undecryptable entries are hidden, never deleted server-side.
 pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<usize> {
     let resp = super::ds_reads::read_vault(state, user_id).await?;
     let seed = account_seed(state, user_id).await?;
@@ -267,8 +205,6 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
                 decrypted.push((m.id, entry, m.created_at, m.updated_at));
             }
             Err(e) => {
-                // Keep the row server-side; just don't render what we cannot
-                // read. Undecryptable ≠ deletable.
                 crate::diag!("[vault] entry {} is unreadable on this build: {e}", m.id);
                 keep_ids.push(m.id);
             }
@@ -280,8 +216,7 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
     let conn = db.conn();
-    // Remove local rows the server no longer holds (deleted from another
-    // device). Chunked IN-list, mirroring the codebase's BIND_CHUNK habit.
+    // Chunked IN-list, mirroring the codebase's BIND_CHUNK habit.
     if keep_ids.is_empty() {
         conn.execute("DELETE FROM vault_entry_cache", [])
             .map_err(|e| Error::Other(anyhow::anyhow!("vault cache prune: {e}")))?;
@@ -303,11 +238,7 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
     Ok(count)
 }
 
-// ── Commands ─────────────────────────────────────────────────────────────────
-
-/// The vault's entries, oldest first (chat order). Syncs from the server
-/// when reachable; serves the last synced state when not, because a vault
-/// you cannot open on a plane is not storage.
+/// The vault's entries, oldest first; serves the cache when offline.
 pub async fn get_vault_messages(user_id: String, state: &Arc<AppState>) -> Result<Vec<VaultMessage>> {
     if let Err(e) = sync_vault(state, &user_id).await {
         crate::diag!("[vault] sync failed, serving the local cache: {e}");
@@ -319,8 +250,7 @@ pub async fn get_vault_messages(user_id: String, state: &Arc<AppState>) -> Resul
     list_local(db.conn())
 }
 
-/// Save one entry remote-first: seal, POST (with the attachment hashes the
-/// DS needs for GC liveness), and only then cache locally.
+/// Save remote-first; cache only after the DS accepts.
 async fn save_entry(
     state: &Arc<AppState>,
     user_id: &str,
@@ -345,8 +275,7 @@ async fn save_entry(
     super::mls::ds_post_ok(state, &body).await
 }
 
-/// Add a new entry (a "message to yourself"). `content` is the same string
-/// the chat composer produces — plain text or the attachment envelope.
+/// Add a new entry; `content` is a chat composer string.
 pub async fn send_vault_message(
     user_id: String,
     content: String,
@@ -431,8 +360,7 @@ pub async fn edit_vault_message(
     })
 }
 
-/// Flip an entry's pinned flag. On the wire this is indistinguishable from an
-/// edit — the flag lives inside the ciphertext.
+/// Flip an entry's pinned flag (inside the ciphertext).
 pub async fn set_vault_message_pinned(
     id: String,
     pinned: bool,
@@ -477,16 +405,13 @@ pub async fn set_vault_message_pinned(
     })
 }
 
-/// Hard-delete one entry, remote first. The DS releases its attachment
-/// references with it; the shared objects are collected only when nothing
-/// else (message or vault, any user) still references them.
+/// Hard-delete one entry, remote first.
 pub async fn delete_vault_message(
     id: String,
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // Read the entry's files BEFORE it is gone: the DS drops the entry's
-    // references with it, but nothing else would ever collect the objects.
+    // Read the files BEFORE delete; nothing else would ever collect them.
     let released = released_files(state, &id, None).await?;
 
     let body = pollis_api::vault::DeleteVaultMessageBody {
@@ -517,10 +442,6 @@ pub async fn delete_vault_message(
 /// The files entry `id` holds that no OTHER entry in the local cache holds,
 /// minus any still named by `new_body` (an edit that keeps a file). These are
 /// the files whose last reference a delete or an edit of `id` releases.
-///
-/// Read from the local cache, which every write keeps in step with the server
-/// and every list refreshes: the UI can only delete or edit an entry it has
-/// listed, so the entry is there.
 async fn released_files(
     state: &Arc<AppState>,
     id: &str,
@@ -553,16 +474,7 @@ async fn released_files(
         .collect())
 }
 
-/// Collect a Vault file whose last reference was just released (#1491): the
-/// DS's `attachment_object` row, the stored object, and this device's cached
-/// copy. Until this ran on delete, a deleted Vault file stayed in object storage
-/// and in `attachment_object` for the life of the account.
-///
-/// Best-effort and logged, like `cleanup_attachment` for chat messages: the
-/// entry itself is already gone, which is what the user asked for. Both server
-/// steps are conditional on the server side — the row is collected and the
-/// delete presign minted only while NO live reference (message or vault, any
-/// user) remains — so a file another entry or message still holds survives.
+/// Collect a Vault file whose last reference was just released (#1491). Best-effort.
 async fn release_vault_file(
     state: &Arc<AppState>,
     user_id: &str,
@@ -581,9 +493,7 @@ async fn release_vault_file(
     super::r2::evict_cached_file_for_user(user_id, &att.content_hash);
 }
 
-/// Case-insensitive substring search over the local cache. Runs entirely
-/// client-side — the server cannot search what it cannot read, which is the
-/// point.
+/// Case-insensitive substring search over the local cache (the server can't search).
 pub async fn search_vault_messages(
     query: String,
     user_id: String,
@@ -593,8 +503,6 @@ pub async fn search_vault_messages(
     if needle.is_empty() {
         return Ok(Vec::new());
     }
-    // Search sees whatever the last sync saw; a stale cache is refreshed by
-    // the list view, not by every keystroke here.
     let _ = user_id;
     let guard = state.local_db.lock().await;
     let db = guard
@@ -607,11 +515,7 @@ pub async fn search_vault_messages(
         .collect())
 }
 
-/// Test harness only: the secrets a Vault file's confidentiality rests on, so
-/// the vault soak suite (#1491, `src-tauri/tests/vault_soak.rs`) can search
-/// every place the file passes through — request bodies, object storage, DS
-/// rows, the local disk — for each of them, and prove the stored object opens
-/// with the real key and with nothing else.
+/// Test harness only: a Vault file's secrets, for the soak suite (#1491).
 #[cfg(feature = "test-harness")]
 pub mod test_hooks {
     use super::*;
@@ -671,8 +575,7 @@ mod tests {
         assert!(back.pinned);
     }
 
-    /// THE POINT: the bytes the server stores carry neither the words nor the
-    /// pinned flag — pin/unpin must be indistinguishable from an edit.
+    /// The stored bytes carry neither the words nor the pinned flag.
     #[test]
     fn the_stored_bytes_leak_neither_words_nor_the_pinned_flag() {
         let (_, blob) = seal_entry(SEED, ME, &entry("remember the milk", true)).unwrap();
@@ -682,8 +585,7 @@ mod tests {
                 "plaintext leaked into the stored vault bytes"
             );
         }
-        // And a pinned vs unpinned save of the same body has the same length,
-        // so the flag does not even leak through size.
+        // Same length pinned vs unpinned: the flag does not leak through size.
         let (_, a) = seal_entry(SEED, ME, &entry("same body", true)).unwrap();
         let (_, b) = seal_entry(SEED, ME, &entry("same body", false)).unwrap();
         assert_eq!(a.len(), b.len());
@@ -734,8 +636,6 @@ mod tests {
         assert_ne!(n1, n2);
         assert_ne!(b1, b2);
     }
-
-    // ── Local cache behavior ────────────────────────────────────────────────
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

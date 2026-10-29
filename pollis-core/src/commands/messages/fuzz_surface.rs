@@ -1,6 +1,4 @@
-//! What the detached `fuzz/` crate drives in this module (#1537), behind the
-//! `fuzzing` feature. Thin wrappers over the production functions — never a
-//! copy of them — so a fuzz target exercises the code that ships.
+//! Thin wrappers over production code for the detached `fuzz/` crate (#1537).
 
 pub use super::framing::{
     classify, pad, pad_receipt, pad_redaction, pad_threaded, strip, thread_of, Frame, ReceiptKind,

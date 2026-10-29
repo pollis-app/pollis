@@ -1,11 +1,7 @@
 //! Shared-audio normalisation: the single place every platform's captured
 //! system audio is turned into the exact frames LiveKit wants.
 //!
-//! The three capture backends hand us three different shapes — macOS
-//! ScreenCaptureKit delivers planar f32 scoped to the content filter,
-//! Linux PipeWire delivers whatever the sink monitor runs at, Windows
-//! WASAPI delivers the render endpoint's mix format — so each one is
-//! normalised here rather than three times over:
+//! Every backend's shape is normalised here, once:
 //!
 //! ```text
 //!   interleaved s16 @ (rate, channels)
@@ -14,11 +10,7 @@
 //!     ─→ rebuffer to exact 10 ms  (480 samples — LiveKit's frame size)
 //! ```
 //!
-//! **Mono is not a compromise here.** The receiving end mixes every
-//! remote track down to mono in `voice::playback`'s mixer before it
-//! reaches the speaker, so a stereo shared-audio track would be folded
-//! back to mono on arrival anyway — publishing stereo would cost double
-//! the bandwidth to reach an identical result.
+//! Mono: the receiving mixer folds every track to mono anyway.
 
 use std::sync::Arc;
 
@@ -40,32 +32,21 @@ use super::{
     ScreenShareEvent,
 };
 
-/// The rate every shared-audio track publishes at. Matches
-/// `voice_apm::DEFAULT_APM_RATE_HZ` and LiveKit's Opus encoding rate, so
-/// the self-echo canceller can run without a second resampling stage.
+/// Shared-audio publish rate; matches APM and Opus, so no second resample.
 pub(crate) const SHARED_AUDIO_RATE_HZ: u32 = 48_000;
 
 /// Samples in one 10 ms mono frame at [`SHARED_AUDIO_RATE_HZ`].
 pub(crate) const SHARED_AUDIO_FRAME_SAMPLES: usize = (SHARED_AUDIO_RATE_HZ / 100) as usize;
 
-/// Rebuffers arbitrary-length captured blocks into exact 10 ms mono
-/// frames at 48 kHz. One instance per share; `push` is called with each
-/// block the capture backend produces and returns however many whole
-/// frames that block completed (usually one, sometimes zero or two).
+/// Rebuffers captured blocks into exact 10 ms 48 kHz mono frames.
 ///
-/// Holds the resampler's fractional read position across calls, so a
-/// capture device running at a rate that doesn't divide evenly into
-/// 48 kHz (44.1 kHz being the common one) doesn't accumulate drift or
-/// click at every block boundary.
+/// Keeps the fractional read cursor across calls so 44.1 kHz doesn't drift.
 pub(crate) struct SharedAudioResampler {
-    /// Source rate as last announced. A mid-stream rate change (device
-    /// switch under a live share) resets the interpolator rather than
-    /// reading the tail of the old rate's samples at the new one.
+    /// Last announced source rate; a change resets the interpolator.
     src_rate: u32,
     /// Mono samples awaiting resampling, at `src_rate`.
     pending: Vec<f32>,
-    /// Fractional read cursor into `pending`, in source samples. Carried
-    /// across `push` calls — this is what keeps 44.1 kHz from drifting.
+    /// Fractional read cursor into `pending`, carried across `push` calls.
     cursor: f64,
     /// Resampled 48 kHz mono samples not yet emitted as a whole frame.
     out: Vec<i16>,
@@ -86,9 +67,7 @@ impl SharedAudioResampler {
         self.src_rate
     }
 
-    /// Point the resampler at a new source rate, discarding any partially
-    /// consumed input. Output already resampled to 48 kHz is kept — it is
-    /// rate-correct regardless of where the next block comes from.
+    /// Switch source rate, dropping unconsumed input but keeping output.
     pub(crate) fn set_src_rate(&mut self, src_rate: u32) {
         if src_rate == self.src_rate {
             return;
@@ -98,10 +77,8 @@ impl SharedAudioResampler {
         self.cursor = 0.0;
     }
 
-    /// Feed one captured block and take back every whole 10 ms mono frame
-    /// it completed. `pcm` is interleaved at `channels`; a `channels` of 0
-    /// is treated as mono so a helper that forgets to fill the field
-    /// cannot divide by zero.
+    /// Feed one interleaved block; returns each whole 10 ms frame.
+    /// `channels == 0` is treated as mono (no divide by zero).
     pub(crate) fn push(&mut self, pcm: &[i16], channels: u32) -> Vec<Vec<i16>> {
         let channels = channels.max(1) as usize;
         self.pending.reserve(pcm.len() / channels + 1);
@@ -109,9 +86,7 @@ impl SharedAudioResampler {
             self.pending
                 .extend(pcm.iter().map(|s| f32::from(*s) / 32_768.0));
         } else {
-            // Average rather than sum. Summing two correlated channels —
-            // which most music is — produces a signal up to 2x full scale
-            // that then hard-clips on the way back to i16.
+            // Average, not sum: correlated channels would clip.
             for frame in pcm.chunks_exact(channels) {
                 let sum: f32 = frame.iter().map(|s| f32::from(*s)).sum();
                 self.pending.push(sum / (channels as f32) / 32_768.0);
@@ -121,24 +96,12 @@ impl SharedAudioResampler {
         self.take_frames()
     }
 
-    /// Linear interpolation from `src_rate` to 48 kHz. Linear is the right
-    /// choice here and not a shortcut: the overwhelmingly common case is
-    /// 48 kHz in, where `step == 1.0` makes this an exact passthrough with
-    /// no filtering at all, and the only realistic non-48 case (44.1 kHz)
-    /// is upsampled, where linear interpolation adds no aliasing — only a
-    /// gentle high-shelf roll-off well above the Opus encoder's own.
+    /// Linear interpolation to 48 kHz: exact at 48 in, alias-free upsampling 44.1.
     fn resample(&mut self) {
         if self.src_rate == 0 {
             return;
         }
-        // Exact fast path. Almost every capture backend already runs at
-        // 48 kHz, and it matters that this is a byte-for-byte copy rather
-        // than "interpolation that happens to land on integers": the
-        // general branch below cannot emit a sample until its successor
-        // arrives, so it runs one sample behind forever. That lag is
-        // inaudible in the published audio but it would make the echo
-        // canceller's render reference slip a sample per block against the
-        // capture stream it is supposed to cancel.
+        // Exact copy at 48 kHz: interpolation would lag a sample, skewing the AEC reference.
         if self.src_rate == SHARED_AUDIO_RATE_HZ {
             self.out.extend(
                 self.pending
@@ -160,8 +123,7 @@ impl SharedAudioResampler {
                 .push((s * 32_767.0).clamp(-32_768.0, 32_767.0) as i16);
             self.cursor += step;
         }
-        // Drop the fully-consumed prefix and rebase the cursor onto what
-        // is left, so `pending` doesn't grow without bound across a share.
+        // Drop the consumed prefix so `pending` stays bounded.
         let consumed = self.cursor as usize;
         if consumed > 0 {
             self.pending.drain(..consumed);
@@ -178,20 +140,11 @@ impl SharedAudioResampler {
     }
 }
 
-/// Create and publish the second LiveKit track a share carries when the
-/// user asked for its audio, and park it in screenshare state so `stop`
-/// can unpublish it.
+/// Publish the share's audio track and park it for `stop`.
 ///
-/// Called only once the capture backend has announced a real audio format
-/// — publishing on intent rather than on arrival would show every viewer a
-/// speaker icon for a track that may never carry a sample.
+/// Only called once a real audio format arrives (no phantom speaker icons).
 ///
-/// The track needs no E2EE wiring of its own: encryption is configured at
-/// the room (`RoomOptions::encryption`, set in `voice::lifecycle` from the
-/// MLS-exported key), so libwebrtc's `FrameCryptor` attaches to *every*
-/// track the participant publishes. Shared audio is ciphertext to the SFU
-/// on exactly the same terms as the mic, and rotates with the same
-/// `KeyProvider` on every MLS epoch advance.
+/// E2EE comes from the room's `RoomOptions::encryption`, like the mic.
 ///
 /// Returns `None` after emitting `LocalAudioUnavailable` if the publish
 /// fails; the caller keeps the video share running.
@@ -199,9 +152,7 @@ pub(super) async fn publish_shared_audio_track(
     state: &Arc<AppState>,
     room: &Arc<Room>,
 ) -> Option<NativeAudioSource> {
-    // Every processing stage off. This is a verbatim copy of what the
-    // machine is playing, not a microphone: noise suppression and AGC
-    // would chew up music, and there is no acoustic echo to cancel.
+    // All processing off: this is the machine's playback, not a mic.
     let source = NativeAudioSource::new(
         AudioSourceOptions {
             echo_cancellation: false,
@@ -221,10 +172,7 @@ pub(super) async fn publish_shared_audio_track(
         .publish_track(
             LocalTrack::Audio(track.clone()),
             TrackPublishOptions {
-                // The tag that lets a receiver tell shared audio from a
-                // microphone; `voice`'s room loop reads it to keep a
-                // shared video's soundtrack from lighting up the sharer's
-                // speaking indicator.
+                // Lets receivers keep shared audio off the speaking indicator.
                 source: TrackSource::ScreenshareAudio,
                 ..Default::default()
             },
@@ -253,16 +201,7 @@ pub(super) async fn publish_shared_audio_track(
     Some(source)
 }
 
-/// Take the shared-audio track + source out of state and disarm the
-/// self-echo tap — the state transition behind an audio-only failure
-/// mid-share. Returns the pair for the caller to unpublish: that needs
-/// the room, and keeping the room out of here is what lets a unit test
-/// prove the transition leaves nothing behind.
-///
-/// Both halves come out together on purpose. Leaving the track parked
-/// would keep every viewer's speaker indicator lit on a track that no
-/// longer carries a sample; leaving the tap armed would keep the voice
-/// mixer feeding a canceller nothing is reading any more.
+/// Take the shared-audio track + source out of state and disarm the tap.
 pub(super) fn retire_shared_audio(
     ss: &mut ScreenShareState,
     slot: &SelfEchoSlot,
@@ -272,17 +211,12 @@ pub(super) fn retire_shared_audio(
     let source = ss.local_audio_source.take();
     match (track, source) {
         (Some(track), Some(source)) => Some((track, source)),
-        // A track without its source (or the reverse) is not a state
-        // `publish_shared_audio_track` can produce; if one half is
-        // somehow missing there is nothing coherent to unpublish.
+        // Half a pair isn't a reachable state; nothing coherent to unpublish.
         _ => None,
     }
 }
 
-/// Tear down the shared-audio track mid-share, leaving the video share
-/// untouched. Unpublishes before dropping the source, in the same order
-/// `stop` uses, so an in-flight `capture_frame` cannot outlive its
-/// backing. Idempotent: a second call finds nothing parked and returns.
+/// Unpublish shared audio mid-share (video untouched); unpublish before drop.
 pub(super) async fn unpublish_shared_audio(state: &Arc<AppState>, room: &Arc<Room>) {
     // Same lock order as `stop_screen_share`: screenshare, then voice.
     let retired = {
@@ -301,8 +235,7 @@ pub(super) async fn unpublish_shared_audio(state: &Arc<AppState>, room: &Arc<Roo
     crate::diag!("[screenshare/audio] shared-audio track unpublished");
 }
 
-/// Send one screen-share event without holding the state lock across the
-/// send. Shared by the audio paths, which emit from several places.
+/// Send a screen-share event without holding the state lock.
 pub(super) async fn emit(state: &Arc<AppState>, event: ScreenShareEvent) {
     let sink = {
         let ss = state.screenshare.lock().await;
@@ -313,12 +246,7 @@ pub(super) async fn emit(state: &Arc<AppState>, event: ScreenShareEvent) {
     }
 }
 
-/// Classify a helper `Error` message. A capture backend reports a failure
-/// to open *audio* through the same 0xFF channel it uses for fatal video
-/// errors, distinguished only by this prefix — see the wire-protocol table
-/// in `pollis-capture-proto`. Getting this wrong in the fatal direction
-/// would tear down a perfectly good video share because the machine had no
-/// output device.
+/// Classify a helper `Error`: an `audio:` prefix means video-only failure.
 pub(crate) fn audio_error_message(message: &str) -> Option<&str> {
     message
         .strip_prefix("audio:")
@@ -382,20 +310,14 @@ mod tests {
         let frames = r.push(&vec![0i16; 44_100], 1);
         let out = total_samples(&frames);
         let expected = 48_000;
-        // Only whole frames come out, so up to one frame of resampled
-        // audio is still buffered when the input runs out.
+        // Up to one frame may still be buffered.
         assert!(
             out.abs_diff(expected) <= SHARED_AUDIO_FRAME_SAMPLES,
             "44.1k->48k produced {out} samples, expected ~{expected}"
         );
     }
 
-    /// The drift case: at 44.1 kHz the resample ratio is irrational in
-    /// whole samples, so a resampler that restarted its cursor on every
-    /// block would lose a fraction of a sample each time. Over 500 blocks
-    /// that is an audible, accumulating pitch/timing error. Pushing the
-    /// same total input as many small blocks must land within one frame of
-    /// pushing it as one big one.
+    /// Drift: many small 44.1 kHz blocks must match one big block within a frame.
     #[test]
     fn fractional_cursor_survives_block_boundaries() {
         let mut chunked = SharedAudioResampler::new(44_100);
@@ -420,8 +342,7 @@ mod tests {
         let frames = r.push(&input, 1);
         assert_eq!(frames.len(), 1);
         for (i, got) in frames[0].iter().enumerate() {
-            // The f32 round trip is the same precision loss the mic path
-            // already takes; allow the resulting +/-1 LSB, nothing more.
+            // Allow the f32 round trip's +/-1 LSB.
             assert!(
                 (*got as i32 - input[i] as i32).abs() <= 1,
                 "sample {i}: got {got}, want {}",
@@ -437,9 +358,7 @@ mod tests {
         assert_eq!(frames.len(), 1);
     }
 
-    /// The prefix is load-bearing: a mis-classified audio failure would
-    /// end a working video share, and a mis-classified fatal error would
-    /// leave a dead share on screen. Pinned in both directions.
+    /// The prefix is load-bearing in both directions.
     #[test]
     fn only_the_audio_prefix_is_non_fatal() {
         assert_eq!(
@@ -455,8 +374,7 @@ mod tests {
         assert_eq!(audio_error_message("audio:   "), None);
     }
 
-    /// A parked track + source, the shape `publish_shared_audio_track`
-    /// leaves in state once the track is live.
+    /// State as `publish_shared_audio_track` leaves it.
     fn parked_state() -> ScreenShareState {
         let source = NativeAudioSource::new(
             AudioSourceOptions {
@@ -478,9 +396,7 @@ mod tests {
         ss
     }
 
-    /// The #1040 regression: an `audio:` error mid-share must leave neither
-    /// the track parked (viewers' speaker indicator stays lit) nor the
-    /// self-echo tap armed (the mixer keeps feeding a dead canceller).
+    /// #1040: an `audio:` error mid-share leaves no track parked and no tap armed.
     #[test]
     fn retiring_shared_audio_clears_the_track_and_disarms_the_tap() {
         let mut ss = parked_state();

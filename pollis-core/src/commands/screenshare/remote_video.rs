@@ -1,8 +1,4 @@
-//! Remote video track plumbing — called from the voice room loop when a
-//! remote participant publishes/unpublishes a video track (screen share or
-//! webcam), and on room disconnect for blanket cleanup. Both video kinds
-//! share this one drain + frame WebSocket; the `source` tag on the
-//! `RemoteStarted` event is what lets the renderer tell them apart.
+//! Remote video (screen share and webcam) drain + frame WebSocket plumbing.
 
 use std::sync::Arc;
 
@@ -26,9 +22,7 @@ pub async fn on_remote_video_subscribed(
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
     };
-    // WebSocket fan-out for the Tauri/WebKitGTK render path (spike/tauri-revival).
-    // Cheap to clone (a broadcast Sender). The frontend reads these over the
-    // loopback media server's `/screenshare/<token>` route; see `media_server.rs`.
+    // WebSocket fan-out, served at `/screenshare/<token>` (see `media_server.rs`).
     let frame_tx = state.screenshare_frame_tx.clone();
 
     let mut stream = NativeVideoStream::new(track.rtc_track());
@@ -38,12 +32,7 @@ pub async fn on_remote_video_subscribed(
     let task = tokio::spawn(async move {
         use futures_util::StreamExt;
         let mut announced: Option<(u32, u32)> = None;
-        // No stall watchdog — when the remote streamer's capture is
-        // idle, frames simply stop arriving and our local canvas keeps
-        // showing the last paint. The track stays subscribed; the next
-        // real frame is rendered when it arrives. Stream ending (track
-        // unpublished) exits this loop and RemoteStopped is emitted by
-        // the unsubscribe path.
+        // No stall watchdog: idle capture just stops frames; the canvas keeps the last.
         while let Some(frame) = stream.next().await {
             let i420 = frame.buffer.to_i420();
             let w = i420.width();
@@ -60,10 +49,7 @@ pub async fn on_remote_video_subscribed(
                     });
                 }
             }
-            // Pack once. Broadcast to any WebSocket subscribers (Tauri render
-            // path) and, when a legacy Channel sink is still registered, mirror
-            // to it too. `frame_tx` has no active receivers when nobody's
-            // watching, in which case `send` is a cheap no-op (returns Err).
+            // Pack once for WS subscribers and any legacy Channel sink.
             if frame_tx.receiver_count() > 0 || frames.is_some() {
                 let bytes = pack_frame_bytes(
                     &track_key_for_task,
@@ -102,13 +88,7 @@ pub async fn on_remote_video_unsubscribed(
     }
 }
 
-/// Tear down any screenshare a participant was publishing when they leave the
-/// room. LiveKit doesn't reliably emit per-track `TrackUnsubscribed` on a
-/// `ParticipantDisconnected`, so without this the remote stream's drain task
-/// and the frontend's `screenShareRemotes` entry linger — and if the participant
-/// later rejoins (without resharing) their tile renders a dead, black canvas
-/// instead of falling back to the avatar. Track keys are `{identity}-{sid}`, so
-/// every key prefixed with this participant's identity is theirs.
+/// Tear down a leaving participant's screenshares (no reliable `TrackUnsubscribed`).
 pub async fn on_participant_left(participant_identity: &str, state: &Arc<AppState>) {
     let prefix = format!("{participant_identity}-");
     let (events, stopped_keys) = {

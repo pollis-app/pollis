@@ -1,29 +1,13 @@
 //! What caching an attachment actually costs in memory (#915).
 //!
-//! `cache_encrypt` is the largest single allocation `pollis-core` makes. Before
-//! #915 it took the plaintext by reference, asked AES-GCM for a fresh ciphertext
-//! buffer, and then copied nonce+ciphertext into a THIRD buffer — so caching a
-//! 100 MiB attachment held roughly 300 MiB at once: the decrypted bytes the
-//! caller still owned, the ciphertext, and the concatenation. On a phone (this
-//! crate ships to mobile via uniffi) that is the difference between caching a
-//! video and being killed for it.
-//!
-//! Memory is only testable if it is measured, so this installs a counting global
-//! allocator and asserts against the numbers. The assertions are in multiples of
-//! the payload rather than absolute bytes, so they say something durable rather
-//! than encoding today's constants.
-//!
-//! Own process (an integration test), which is what makes a global allocator
-//! usable here at all — it must not perturb the rest of the suite.
+//! Installs a counting global allocator; its own process so it can't perturb the suite.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Bytes allocated since the last reset, and the peak live total.
 ///
-/// `live` can legitimately go negative-ish across a reset (a buffer allocated
-/// before the window is freed inside it), so it is saturating rather than
-/// wrapping — an underflow would otherwise read as an enormous peak.
+/// `live` saturates: a buffer allocated before a reset may be freed after it.
 static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
@@ -80,15 +64,7 @@ fn db_key() -> Vec<u8> {
 
 /// The real path allocates essentially NOTHING to encrypt a cached attachment.
 ///
-/// This models `get_media_url`: the plaintext arrives from `decrypt_chunked`,
-/// which sizes its buffer from the CIPHERTEXT length and therefore hands back a
-/// `Vec` that already carries spare capacity (one 16-byte AEAD tag per chunk).
-/// `cache_encrypt` encrypts into that spare room in place and splices the nonce
-/// within the same allocation.
-///
-/// Before #915 this call allocated about **two full payloads** — the ciphertext
-/// AES-GCM returned, plus the nonce+ciphertext concatenation — on top of the
-/// plaintext the caller was still holding.
+/// `decrypt_chunked` leaves spare capacity, which `cache_encrypt` encrypts into.
 #[test]
 fn encrypting_a_cached_attachment_allocates_nothing_like_the_payload() {
     // Spare capacity exactly as `decrypt_chunked` leaves it.
@@ -109,10 +85,6 @@ fn encrypting_a_cached_attachment_allocates_nothing_like_the_payload() {
 }
 
 /// Even with NO spare capacity, it never needs more than one extra buffer.
-///
-/// The worst case is one reallocation to make room for the 28 bytes of nonce and
-/// tag. That is still bounded by a single payload — the point being that three
-/// simultaneous copies are gone, not that allocation is always zero.
 #[test]
 fn a_tight_buffer_costs_at_most_one_extra_copy_not_two() {
     let plaintext = vec![7u8; PAYLOAD];
@@ -132,9 +104,6 @@ fn a_tight_buffer_costs_at_most_one_extra_copy_not_two() {
 }
 
 /// Round trip, so the memory assertions above are not measuring broken crypto.
-///
-/// The on-disk layout is unchanged by #915 — `[12-byte nonce][ciphertext+tag]` —
-/// which is what lets already-cached files stay readable across the upgrade.
 #[test]
 fn the_in_place_encryption_still_round_trips_and_keeps_its_layout() {
     let key = db_key();
@@ -152,7 +121,6 @@ fn the_in_place_encryption_still_round_trips_and_keeps_its_layout() {
         pollis_core::commands::r2::cache_decrypt(&encrypted, &key, b"info").expect("decrypt");
     assert_eq!(decrypted, plaintext);
 
-    // Wrong info string (the content hash) must not decrypt — the per-file key
-    // derivation is what stops one cached object being served as another.
+    // Per-file key derivation stops one cached object being served as another.
     assert!(pollis_core::commands::r2::cache_decrypt(&encrypted, &key, b"other").is_err());
 }

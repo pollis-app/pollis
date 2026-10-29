@@ -29,50 +29,22 @@ pub struct AppState {
     pub config: Config,
     /// None until a user logs in. Opened per-user as pollis_{user_id}.db.
     ///
-    /// The ONLY database this process opens (#987). `remote_db` and `log_db`
-    /// used to sit beside it, each holding a whole-database Turso token baked
-    /// into the shipped binary; both are gone, along with `RemoteDb` and the
-    /// `libsql` dependency itself. Every remote read is now a signed
-    /// `POST /v1/read/...` on the Delivery Service, on the same transport as the
-    /// writes — see `commands/ds_reads.rs`.
+    /// The only database this process opens (#987); remote reads go through the DS.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
-    /// Test-harness only (#1524): where THIS state's per-user database lives,
-    /// instead of the process-wide data directory. Production runs one device
-    /// per process; the integration harness runs several, and two devices of
-    /// one account would otherwise open the same `pollis_{user_id}.db` and
-    /// share one history and one MLS store — a sibling device that could never
-    /// lose a message because it never held its own. Set once, before sign-in.
+    /// Test-harness only (#1524): a per-device data dir, so sibling devices don't share one DB. Set before sign-in.
     #[cfg(feature = "test-harness")]
     pub local_dir: std::sync::OnceLock<std::path::PathBuf>,
-    /// Pluggable secret store. Production wires an [`OsKeystore`]; integration
-    /// tests inject an [`InMemoryKeystore`] per simulated client so multiple
-    /// users coexist in one test process without sharing session tokens or
-    /// account identity keys.
+    /// Pluggable secret store; tests inject an [`InMemoryKeystore`] per simulated client.
     pub keystore: Arc<dyn Keystore>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
     /// #836 identity translations, keyed `(logical_room, wire_identity)` and
     /// valued `(internal_identity, display_name)`.
     ///
-    /// LiveKit participant identities are opaque per-room pseudonyms that only
-    /// the DS can open, so every peer seen on the SDK event stream costs one
-    /// `/v1/livekit/identities` round trip — once. This is that memo.
-    ///
-    /// It lives in its own lock rather than on `LiveKitState` or `VoiceState` so
-    /// the voice and realtime paths, which already hold one of those, never have
-    /// to nest two locks to attribute a participant.
-    ///
-    /// It stores the finished internal identity rather than the DS's answer,
-    /// because one entry is not derived at all: the LOCAL participant's, which is
-    /// pinned at join to the identity the renderer independently builds from
-    /// `get_device_id`. LiveKit reports the local participant's own events (every
-    /// push-to-talk `TrackMuted`) under its wire identity, and those have to land
-    /// on the local tile.
-    ///
-    /// Never invalidated: a pseudonym is a deterministic function of the room,
-    /// the user and the device, so an entry cannot go stale — it can only stop
-    /// being asked about. Bounded by the number of distinct participants seen
-    /// this process.
+    /// Memo of the DS's `/v1/livekit/identities` answers; pseudonyms only the DS can open.
+    /// Its own lock so voice/realtime paths never nest two locks.
+    /// Stores the internal identity because the LOCAL participant's entry is pinned at join, not derived.
+    /// Never invalidated: a pseudonym is deterministic, so entries cannot go stale.
     #[cfg(feature = "media")]
     pub livekit_identities: Arc<Mutex<crate::commands::livekit_identity::IdentityCache>>,
     #[cfg(feature = "media")]
@@ -84,27 +56,15 @@ pub struct AppState {
     #[cfg(feature = "media")]
     pub camera: Arc<Mutex<CameraState>>,
     pub update_required: Arc<AtomicBool>,
-    /// The device the DS has answered `device_revoked` for (#1338), bound to the
-    /// exact `(user_id, device_id)` that signed the refused request. Only that
-    /// device's signed calls short-circuit, and only a `logout` of that account
-    /// is forced to wipe — so a response that lands late, after a sign-out or a
-    /// switch to another account, can never act on anyone else. Cleared by that
-    /// logout.
+    /// The device the DS answered `device_revoked` for (#1338), bound to the signing `(user_id, device_id)` so a late response cannot act on another account.
     pub revoked_device: Arc<std::sync::Mutex<Option<RevokedDevice>>>,
-    /// Per-device ULID, set during login. Each physical device gets a stable ID
-    /// stored in the OS keystore so it survives local DB wipes.
+    /// Per-device ULID, kept in the OS keystore so it survives local DB wipes.
     pub device_id: Arc<Mutex<Option<String>>>,
-    /// In-memory ephemeral X25519 private keys for pending device-enrollment
-    /// requests. Keyed by enrollment request id. Populated by
-    /// `start_device_enrollment` and consumed by `poll_enrollment_status`
-    /// when the approver has written back the wrapped account key.
+    /// Ephemeral X25519 private keys for pending enrollment requests, by request id.
     ///
-    /// Stored in memory only — if the app restarts mid-enrollment the user
-    /// starts over. The 10-minute request TTL bounds the exposure.
+    /// Memory only; the 10-minute request TTL bounds the exposure.
     pub enrollment_ephemeral_keys: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    /// QR device links this device created (#1207): link_id → link token.
-    /// Memory only — the token is the QR's secret and never leaves this device
-    /// except as the QR itself.
+    /// QR device links this device created (#1207): link_id → link token. Memory only.
     pub device_link_tokens: Arc<Mutex<HashMap<String, zeroize::Zeroizing<Vec<u8>>>>>,
     /// The QR device link this (new) device claimed (#1207), read by
     /// `start_device_enrollment` to tag its request.
@@ -112,133 +72,47 @@ pub struct AppState {
     /// The code this NEW device is showing (#1361): the poll secret and the
     /// ephemeral private key its QR does not carry. Memory only.
     pub device_offer: Arc<Mutex<Option<crate::commands::device_link::DeviceOfferInProgress>>>,
-    /// Codes this signed-in device scanned and accepted (#1361): link_id → the
-    /// ephemeral public key the QR showed. The approval wraps only to a request
-    /// carrying exactly that key.
+    /// Codes this device scanned and accepted (#1361): link_id → the QR's ephemeral public key.
     pub device_offer_accepts: Arc<Mutex<HashMap<String, [u8; 32]>>>,
-    /// In-memory PIN unlock state. `Some` once the user has entered a
-    /// valid PIN (or just set one via `set_pin`); dropped by `lock`.
-    /// Not yet load-bearing — stage 6 flips the app over to reading the
-    /// unwrapped keys from here instead of the legacy keystore slots.
+    /// PIN unlock state. `Some` once a valid PIN was entered or set; dropped by `lock`.
     pub unlock: Arc<Mutex<Option<UnlockState>>>,
-    /// The short-lived OTP-session bearer token minted by the DS `verify-otp`
-    /// during first-device signup, held across the bootstrap sequence so the
-    /// session-gated `publish-device-cert` (driven later by `set_pin` →
-    /// `ensure_device_cert`) can present it. `Some` only between `verify_otp` and
-    /// the first cert publish; cleared once the cert lands (the token is then
-    /// spent server-side too). Always `None` on the direct (no-DS) path and for
-    /// re-login / subsequent-device cert publishes, which stay on the direct
-    /// Turso write path. See `docs/otp-server-bootstrap-design.md`.
+    /// OTP-session bearer from first-device signup, held until the first cert publish spends it.
     pub bootstrap_session: Arc<Mutex<Option<String>>>,
-    /// The OTP-session bearer token minted by the DS `verify-otp` on a
-    /// **re-login / subsequent-device** (`has_identity`) sign-in, held so the
-    /// session-gated writes a NEW device performs *before* it has a signing
-    /// credential — `register-device` and the enrollment **request** — can
-    /// present it. Deliberately SEPARATE from [`bootstrap_session`]: the
-    /// subsequent-device cert publish must NOT consume a session (sibling
-    /// approval can outlast the TTL), so it is gated by cert-validity ALONE.
-    /// `Some` only between `verify_otp` and the enrollment request; `None` on the
-    /// direct (no-DS) path. See `docs/otp-server-bootstrap-design.md` §5.
+    /// OTP-session bearer for a subsequent-device sign-in, for pre-credential writes. Separate from [`bootstrap_session`] (§5).
     pub enrollment_session: Arc<Mutex<Option<String>>>,
-    /// Bound port of the loopback media HTTP server, set once during
-    /// startup. `None` in test/headless contexts that don't spin up the
-    /// server. The port plus `media_server_token` produce the URLs the
-    /// frontend embeds in `<img>/<audio>/<video>` `src` attributes.
+    /// Bound port of the loopback media server; `None` where it is not started.
     pub media_server_port: Arc<Mutex<Option<u16>>>,
-    /// Per-session 32-byte hex token for the loopback media server.
-    /// Rotated on `unlock` / `set_pin`, cleared on `logout`. Without
-    /// this token the server returns 403 — even loopback access is
-    /// gated since other local users could otherwise read decrypted
-    /// media in flight.
+    /// Per-session token for the media server; rotated on unlock, cleared on logout. Other local users must not read media.
     pub media_server_token: Arc<Mutex<Option<String>>>,
-    /// Live in-app terminal sessions, keyed by the id returned from
-    /// `terminal_open`. Spawned on first activation, kept for the app's
-    /// lifetime; dropping an entry kills + reaps its child shell.
-    /// Desktop only — the terminal pane is gated out on mobile targets.
+    /// Live in-app terminal sessions by id; dropping one kills its shell. Desktop only.
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub terminals: Arc<Mutex<HashMap<String, PtySession>>>,
-    /// Broadcasts "tear down" to every long-lived background task that
-    /// has wired itself up to wait on it. Today the media-server task
-    /// listens via `axum::serve(...).with_graceful_shutdown(...)`. A
-    /// shell calls `shutdown_signal.notify_waiters()` (via the
-    /// `shutdown()` method on AppState) when the process is exiting — the
-    /// only caller today is the Tauri shell's quit path in
-    /// `src-tauri/src/lib.rs`.
+    /// Tells long-lived background tasks (the media server) to shut down; fired by `shutdown()`.
     ///
-    /// Without this, the axum task's accept loop pins the Tokio runtime
-    /// alive and the host process hangs instead of exiting — the
-    /// "Relaunching…" hang #335 fixes, whose symptom was first hit under
-    /// the (since-reverted, #386/#389) Electron shell's auto-updater.
+    /// Without it the accept loop pins the runtime and the process hangs on quit (#335).
     pub shutdown_signal: Arc<Notify>,
-    /// Per-conversation locks serializing MLS group mutations within this
-    /// process. The MLS sync path (`process_pending_commits`,
-    /// `external_join_group`, reconcile) has several independent callers —
-    /// `send_message`, channel + DM ingest, the realtime inbox handler, and
-    /// device-enrollment finalize. Without serialization two of them can both
-    /// observe "no local group", both external-join, and post two distinct
-    /// commits at the same epoch, forking the group (prod incident: group
-    /// `01KQYX89…`). One lock per `conversation_id` makes the
-    /// read-modify-write of an MLS group's local state + its commit-log INSERT
-    /// atomic on this device. Cross-device races are caught instead by the
-    /// `UNIQUE(conversation_id, epoch)` constraint on `mls_commit_log`.
+    /// Per-conversation locks serializing local MLS mutations, so two callers can't both external-join and fork the group. Cross-device races hit `UNIQUE(conversation_id, epoch)`.
     pub mls_group_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    /// Per-message locks for the durable outbox (#1335): one delivery attempt
-    /// per queued message at a time, so a send still in flight, a retry the user
-    /// asked for and the drain that runs after unlock or a reconnect can never
-    /// post the same message twice at once. See `messages::outbox`.
+    /// Per-message outbox locks (#1335): never post the same message twice at once.
     pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    /// Held while this device tops up its KeyPackage pool (#1412). Taken with
-    /// `try_lock`: a drain that finds a top-up running leaves it to fill the
-    /// whole shortfall instead of publishing a second batch beside it.
+    /// Held during a KeyPackage top-up (#1412); `try_lock` so a drain never publishes a second batch.
     pub key_package_refill: Arc<Mutex<()>>,
-    /// When this device last ran the missing-device check before sealing into
-    /// each conversation (#1571), so a burst of sends costs one check, not one
-    /// per message. Process-local: a fresh launch checks again on its first
-    /// send.
+    /// Last pre-seal missing-device check per conversation (#1571), so a burst of sends checks once.
     pub pre_seal_checked: Arc<Mutex<HashMap<String, std::time::Instant>>>,
-    /// Held for the length of an outbox drain, carrying the last drain's
-    /// report: `flush_outbox` is single-flight, and a call that finds it held
-    /// waits and answers with that report rather than draining again (#1335).
+    /// Single-flight outbox drain (#1335); a waiting caller answers with the last report.
     pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
-    /// Set by a `flush_outbox` call that found a drain running: that drain
-    /// goes round once more (or the caller drains itself) so the trigger is
-    /// not lost (#1335).
+    /// A `flush_outbox` that found a drain running asks it to go round again (#1335).
     pub outbox_rerun: Arc<AtomicBool>,
-    /// Fan-out of decoded remote screenshare frames (packed I420, the same
-    /// `pack_frame_bytes` wire format the legacy Tauri `Channel` carried) to
-    /// the loopback media server's `/screenshare/<token>` WebSocket route.
-    ///
-    /// This is the Electron→Tauri revival path (spike/tauri-revival): the POC
-    /// in `actuallydan/rustwebrtc` proved that pushing raw frames over a local
-    /// WebSocket into a `<canvas>` WebGL shader sustains 1080p60+ inside
-    /// WebKitGTK, where the per-frame Tauri IPC `Channel` (#305 Phase 1) stalled
-    /// on V8 GC. `remote_video.rs` publishes here; each WS subscriber gets its
-    /// own receiver. Capacity is small and lagged receivers drop old frames —
-    /// latest-frame-wins, never back-pressure the decoder.
+    /// Decoded screenshare frames to the media server's WebSocket route. Small capacity; lagged receivers drop (latest-frame-wins).
     pub screenshare_frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
-    /// The running closed-overlay relay shim (design §14), or `None` when the
-    /// overlay is off (`POLLIS_OVERLAY` unset/`off`). `Some` owns the loopback
-    /// SOCKS5 shim task; dropping it (process exit, or a runtime switch to Off)
-    /// aborts the accept loop. Control-plane HTTP consults
-    /// [`overlay_handle`](AppState::overlay_handle) to route through the shim;
-    /// when `None` every path is byte-for-byte the pre-overlay direct behavior.
+    /// The running overlay shim, or `None` when off; control-plane HTTP reads it via [`overlay_handle`](AppState::overlay_handle).
     ///
-    /// Interior-mutable (and `Arc`-wrapped inside) so the overlay can be started,
-    /// stopped, and replaced **at runtime** — `commands::overlay::set_overlay_mode`
-    /// swaps this handle live. A `std::sync::Mutex` (not tokio) so the hot-path
-    /// read is a cheap uncontended lock + `Arc` clone with no `.await` held;
-    /// swaps happen only on a mode change. Off-by-default: `None` at boot until
-    /// `apply_overlay_mode` starts a shim for a non-off `POLLIS_OVERLAY`.
+    /// Swapped live by `set_overlay_mode`; a `std::sync::Mutex` so the hot read holds no `.await`.
     pub overlay: std::sync::Mutex<Option<Arc<pollis_relay::OverlayHandle>>>,
 }
 
 impl AppState {
-    /// Nothing to connect to any more (#987) — this stays `async` because its
-    /// callers await it, and because the overlay is applied AFTERWARDS, by the
-    /// shell calling `commands::overlay::apply_overlay_mode(&state,
-    /// config.overlay_mode)` on the `Arc`-wrapped state. That keeps boot on the
-    /// SAME runtime code path a settings toggle uses (design §14). Off by
-    /// default: with the overlay off no shim is ever started.
+    /// `async` for its callers; the shell applies the overlay afterwards, via the same path as a settings toggle.
     pub async fn new(config: Config) -> crate::error::Result<Self> {
         Ok(Self::new_with_parts(
             config,
@@ -246,9 +120,7 @@ impl AppState {
         ))
     }
 
-    /// Build AppState from pre-constructed parts. Production should use
-    /// [`AppState::new`]; tests use this to inject an [`InMemoryKeystore`] so
-    /// several simulated clients can coexist in one process.
+    /// Build AppState from parts; tests inject an [`InMemoryKeystore`].
     pub fn new_with_parts(
         config: Config,
         keystore: Arc<dyn Keystore>,
@@ -293,31 +165,17 @@ impl AppState {
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
             outbox_rerun: Arc::new(AtomicBool::new(false)),
-            // Receiver dropped immediately; subscribers are created per
-            // WebSocket connection via `screenshare_frame_tx.subscribe()`.
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,
-            // Overlay off until `apply_overlay_mode` starts a shim (boot honoring
-            // `POLLIS_OVERLAY`, or a runtime `set_overlay_mode`). Test harness /
-            // `new_with_parts` callers stay direct unless a test applies a mode.
             overlay: std::sync::Mutex::new(None),
         }
     }
 
-    /// The overlay shim handle currently in force, or `None` when the overlay is
-    /// off. Cheap hot-path read: an uncontended lock plus an `Arc` clone (no
-    /// `.await` held). Every control-plane HTTP caller goes through this, so a
-    /// runtime `set_overlay_mode` is picked up immediately.
+    /// The overlay shim in force, or `None`. Cheap: no `.await` held.
     pub fn overlay_handle(&self) -> Option<Arc<pollis_relay::OverlayHandle>> {
         self.overlay.lock().unwrap().clone()
     }
 
-    /// Acquire the per-conversation MLS lock. The returned guard must be held
-    /// for the full read-modify-write of the group's local MLS state plus its
-    /// `mls_commit_log` INSERT, so concurrent callers on this device can't race
-    /// into a commit fork. The lock is keyed by `conversation_id` (group_id for
-    /// channels, conversation_id for DMs — the same id used as the MLS group
-    /// id). Non-reentrant: a caller already holding this lock must call the
-    /// `*_locked` helper variants rather than re-acquiring.
+    /// Hold for the whole read-modify-write of local MLS state plus its `mls_commit_log` INSERT. Non-reentrant: use the `*_locked` variants.
     pub async fn mls_group_lock(
         &self,
         conversation_id: &str,
@@ -332,24 +190,7 @@ impl AppState {
     }
 
 
-    /// Tear down long-lived background tasks so the host process can
-    /// exit cleanly. Idempotent — safe to call more than once and from
-    /// more than one exit path, because a quit and an update-relaunch can
-    /// both funnel through the same teardown.
-    ///
-    /// Steps, in order:
-    /// 1. Signal `shutdown_signal` so the axum media server hits its
-    ///    graceful-shutdown branch and stops accepting new connections.
-    /// 2. Drain LiveKit room handles — close each room cleanly so the
-    ///    SFU sees a normal disconnect, then abort the per-room task so
-    ///    its event-loop holder is released.
-    ///
-    /// Voice / screenshare / terminals are NOT touched here:
-    /// * Voice cleanup happens via `leave_voice_channel`, which the
-    ///   `UpdateScreen` renderer already invokes before triggering an
-    ///   install (and is a no-op when no voice session is active).
-    /// * Terminal PtySessions die naturally when their child shell
-    ///   receives SIGTERM during process exit; nothing extra to do.
+    /// Tear down long-lived tasks so the host process can exit. Idempotent.
     pub async fn shutdown(&self) {
         self.shutdown_signal.notify_waiters();
 
@@ -365,15 +206,7 @@ impl AppState {
                 handle.abort();
             }
 
-            // The voice room is held separately in `self.voice.room`, not in the
-            // `livekit.rooms` map above — so close it here too. Without this, a
-            // graceful quit (Cmd+Q / window close → pollis-node shutdown) leaves
-            // our participant in the room until LiveKit's server-side RTC timeout
-            // evicts us, which is the lingering "ghost card" other members see.
-            // Mirror `leave_voice_channel`: abort the room/frame tasks (so the
-            // Disconnected handler can't race the teardown), take the room, then
-            // close it outside the lock with a timeout so a dead connection can't
-            // stall the quit.
+            // The voice room lives in `self.voice.room`; close it too or we linger as a "ghost card" until LiveKit times out.
             let room = {
                 let mut voice = self.voice.lock().await;
                 if let Some(t) = voice.frame_task.take() {
@@ -394,9 +227,7 @@ impl AppState {
         }
     }
 
-    /// The directory this state's per-user database lives in: the process's
-    /// data directory, except under the integration harness when
-    /// [`AppState::local_dir`] gives this device its own.
+    /// This state's per-user DB directory ([`AppState::local_dir`] under the harness).
     pub fn local_data_dir(&self) -> std::path::PathBuf {
         #[cfg(feature = "test-harness")]
         if let Some(dir) = self.local_dir.get() {
@@ -407,16 +238,9 @@ impl AppState {
 
     /// Open the per-user database under a caller-supplied DB key.
     ///
-    /// Used by `set_pin` (after wrapping freshly generated bytes) and
-    /// `unlock` (after unwrapping the PIN-protected blob). Does not touch
-    /// the keystore — the caller is responsible for sourcing `db_key`
-    /// from `AppState.unlock`.
+    /// Used by `set_pin` and `unlock`; does not touch the keystore.
     ///
-    /// Returns whether `mls_kv` was empty (freshly-created or wiped local DB).
-    /// The caller runs `reset_welcome_delivery` on `true`, AFTER
-    /// `ensure_device_cert` republishes this device's key — both so the signed
-    /// DS reset authenticates and so the check isn't fooled by
-    /// `ensure_device_cert` itself writing the device signer into `mls_kv`.
+    /// Returns whether `mls_kv` was empty; the caller then runs `reset_welcome_delivery` AFTER `ensure_device_cert`.
     pub async fn load_user_db_with_key(
         &self,
         user_id: &str,
@@ -424,35 +248,21 @@ impl AppState {
     ) -> crate::error::Result<bool> {
         let db = LocalDb::open_for_user_in(&self.local_data_dir(), user_id, db_key)?;
 
-        // mls_kv empty ⇒ the local DB was freshly created or wiped (e.g. a
-        // schema-version bump deleted and recreated the file). Reported to the
-        // caller, which re-arms welcome delivery (reset_welcome_delivery) after
-        // ensure_device_cert so poll_mls_welcomes restores group memberships.
         let mls_empty: bool = db.conn()
             .query_row("SELECT COUNT(*) FROM mls_kv", [], |r| r.get::<_, i64>(0))
             .map(|c| c == 0)
             .unwrap_or(true);
 
-        // Bounded local history: sweep messages older than the device-local
-        // retention window now that the DB is ready. Best-effort — a failed
-        // sweep must never block login.
+        // Best-effort: a failed sweep must never block login.
         if let Err(e) = crate::db::local::evict_old_messages(db.conn()) {
             crate::diag!("[state] startup message eviction failed (non-fatal): {e}");
         }
         crate::commands::messages::loss::prune_known_envelopes(db.conn());
 
         *self.local_db.lock().await = Some(db);
-        // Bring the full-text search index up to date for whatever history this
-        // database already holds (#850). Spawned rather than awaited, and
-        // chunked with a yield between chunks, because it is the one piece of
-        // open-path work whose cost scales with the corpus — 265 ms for 100k
-        // messages measured, which is 265 ms nobody should wait to sign in for.
-        // Resumable, so a quit part-way through costs nothing.
+        // Spawned (#850): indexing scales with the corpus and must not delay sign-in.
         spawn_search_index_maintenance(self.local_db.clone());
-        // Scope the media cache to this user. Two clients on the same machine
-        // (dev workflow) otherwise share `app_data_dir/media-cache` but each
-        // has its own db_key, so client B can't decrypt client A's cache
-        // entries and the media server returns 500.
+        // Per-user media cache: each client's db_key only decrypts its own entries.
         crate::commands::r2::set_cache_user(Some(user_id));
         Ok(mls_empty)
     }
@@ -461,8 +271,7 @@ impl AppState {
     pub async fn unload_user_db(&self) {
         *self.local_db.lock().await = None;
         crate::commands::r2::set_cache_user(None);
-        // The corpus footer reading is per-account; the next user has a
-        // different history and must not be shown the previous one's count.
+        // The corpus count is per-account.
         crate::commands::messages::invalidate_corpus_cache();
     }
 
@@ -477,9 +286,7 @@ impl AppState {
             .unwrap_or(false)
     }
 
-    /// Record that the DS refused `(user_id, device_id)` as revoked. Callers
-    /// pass the identity that SIGNED the refused request, and must only call
-    /// this while that device is still this process's device.
+    /// Record that the DS refused the device that SIGNED the request, while it is still ours.
     pub fn mark_revoked_device(&self, user_id: &str, device_id: &str) {
         if let Ok(mut g) = self.revoked_device.lock() {
             *g = Some(RevokedDevice {
@@ -513,29 +320,16 @@ impl AppState {
 
 /// Proof, at the type level, that its holder has the per-conversation MLS lock.
 ///
-/// #1079: a post that seals an envelope has to serialize behind any committer on
-/// this device, or it chooses an epoch the commit log has not decided — sealing
-/// at the old epoch risks landing behind the head, and merging to seal at the
-/// new one advances this device onto a branch the log may never hold. Neither is
-/// an encryptor's decision to make.
+/// #1079: a sealing post must serialize behind any committer on this device, or it picks an undecided epoch.
 ///
-/// Taking the lock is one line, so relying on every post site to remember it is
-/// exactly the code discipline `docs/backend-core-invariants.md` calls a last
-/// resort. Instead [`crate::commands::messages::seal`]'s locked sealer demands
-/// one of these, and the only way to get one is [`MlsLockHeld::from_guard`] with
-/// a live guard in hand — so a new post site that forgets the lock does not
-/// compile. The deliberately lock-free caller (`receipts::emit_receipt`, which
-/// cannot take the lock without deadlocking the catch-up paths that hold it)
-/// uses the unlocked sealer and skips when a commit is staged.
+/// Only [`MlsLockHeld::from_guard`] makes one, so a post site that forgets the lock does not compile.
 ///
-/// Borrows the guard rather than owning it, so it can never extend the lock's
-/// lifetime past the block that took it.
+/// Borrows the guard so it can't outlive the lock.
 pub struct MlsLockHeld<'a> {
     _guard: &'a tokio::sync::OwnedMutexGuard<()>,
 }
 
 impl<'a> MlsLockHeld<'a> {
-    /// Witness the guard. Cheap — the guard keeps doing the actual locking.
     pub fn from_guard(guard: &'a tokio::sync::OwnedMutexGuard<()>) -> Self {
         Self { _guard: guard }
     }
@@ -543,20 +337,8 @@ impl<'a> MlsLockHeld<'a> {
 
 /// Bring the local full-text search index up to date, off the sign-in path (#850).
 ///
-/// Two jobs, in this order:
-///
-/// 1. **Auto-repair.** `integrity-check` on the FTS index. The delete side of a
-///    contentless index depends on `pollis_search_text` producing byte-identical
-///    output for the same body forever; if that ever stops being true the index
-///    drifts, and the only honest repair is to rebuild. Silent by design — the
-///    user did nothing wrong and there is nothing for them to decide. (The
-///    manual escape hatch is the "Rebuild search index" button in Settings.)
-/// 2. **Backfill.** Index whatever history predates the index, in chunks, with
-///    a yield between them so the local-DB mutex is never held long enough to
-///    sit in front of a send.
-///
-/// Best-effort throughout: search degrading to "fewer results than it could
-/// have" must never cost anyone a login or a message.
+/// 1. **Auto-repair**: rebuild if FTS `integrity-check` fails (contentless delete needs stable output).
+/// 2. **Backfill** in chunks, yielding so the local-DB mutex never blocks a send.
 fn spawn_search_index_maintenance(local_db: Arc<Mutex<Option<LocalDb>>>) {
     tokio::spawn(async move {
         {
@@ -613,9 +395,7 @@ mod guard_lifetime_tests {
 
     /// The edition-2021 temporary-lifetime footgun, made unrepresentable.
     ///
-    /// In edition 2021 a temporary created in the SCRUTINEE of `if let` /
-    /// `match` / `while let` — or on the right-hand side of a `let` — lives
-    /// until the end of the whole statement, body included. So
+    /// In edition 2021 a temporary in an `if let`/`match`/`while let` scrutinee lives to the end of the statement, so
     ///
     /// ```ignore
     /// if let Some(id) = state.device_id.lock().await.clone() {
@@ -623,23 +403,9 @@ mod guard_lifetime_tests {
     /// }
     /// ```
     ///
-    /// holds the mutex across the await even though `.clone()` reads as though
-    /// it released it. #875 found this on both `pin::set_pin` and `pin::unlock`,
-    /// pinning `state.device_id` — one of the hottest shared mutexes in the
-    /// crate — across a Turso read, an OS-keystore signature and a DS POST.
-    /// Nothing deadlocked, because the callee happened to use the sign-free
-    /// bootstrap posts; the signed `ds_client::ds_post` takes that same
-    /// non-reentrant `tokio::sync::Mutex`, so the shape was one ordinary
-    /// refactor away from a self-deadlock with no compiler diagnostic.
+    /// holds the mutex across the await (#875); with a signed `ds_post` that is a self-deadlock.
     ///
-    /// The correct shape is a `let` STATEMENT — `let id = ...lock().await.clone();`
-    /// — whose guard drops at the `;`. Every other lock read in the crate
-    /// already uses it. This test is the invariant: the scrutinee form is
-    /// allowed only when nothing in the body awaits.
-    ///
-    /// A guard, not a proof: it is a source-shape check, so it cannot see a
-    /// guard bound to a `let` and then held deliberately. It closes the one
-    /// case where the source LOOKS correct and is not.
+    /// Use a `let` statement, whose guard drops at the `;`.
     #[test]
     fn no_lock_guard_in_a_scrutinee_spans_an_await() {
         let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -686,25 +452,20 @@ mod guard_lifetime_tests {
         );
     }
 
-    /// Does this line open an `if let` / `match` / `while let` whose scrutinee is
-    /// the locking expression? Also matches the `let x = match …` form, whose
-    /// temporary lives just as long.
+    /// Does this line open a scrutinee (or `let x = match …`) on the locking expression?
     fn is_scrutinee(trimmed: &str) -> bool {
         let rest = trimmed
             .strip_prefix('}')
             .map(str::trim_start)
             .unwrap_or(trimmed);
         let rest = match rest.find('=') {
-            // `let x = match …` / `let x = if let …`
             Some(eq) if rest.starts_with("let ") => rest[eq + 1..].trim_start(),
             _ => rest,
         };
         rest.starts_with("if let ") || rest.starts_with("match ") || rest.starts_with("while let ")
     }
 
-    /// Whether the braced body opened at or after `start` contains an `.await`.
-    /// Brace-counted rather than parsed — good enough because the only thing it
-    /// has to get right is "where does this statement end".
+    /// Whether the braced body from `start` contains an `.await`. Brace-counted.
     fn body_awaits(lines: &[&str], start: usize) -> bool {
         let mut depth: i32 = 0;
         let mut opened = false;
