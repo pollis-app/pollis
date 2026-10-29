@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T06:01:39Z",
+  "generated_at": "2026-10-29T06:02:52Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
@@ -7,12 +7,32 @@
   },
   "runs": [
     {
+      "tag": "v1.17.18",
+      "conclusion": "success",
+      "created_at": "2026-10-29T05:41:36Z",
+      "event": "workflow_dispatch",
+      "run_id": "40824856640",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/40824856640",
+      "classification": null,
+      "evidence": null
+    },
+    {
       "tag": "v1.17.17",
       "conclusion": "success",
       "created_at": "2026-10-29T05:41:29Z",
       "event": "workflow_dispatch",
       "run_id": "40824846334",
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/40824846334",
+      "classification": null,
+      "evidence": null
+    },
+    {
+      "tag": "v1.17.16",
+      "conclusion": "success",
+      "created_at": "2026-10-29T05:41:23Z",
+      "event": "workflow_dispatch",
+      "run_id": "40824836519",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/40824836519",
       "classification": null,
       "evidence": null
     },
