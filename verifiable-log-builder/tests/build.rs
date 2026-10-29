@@ -1,15 +1,7 @@
-//! Requires the `db-source` feature (on by default): these fixtures seed a local
-//! libsql database and drive `source`'s readers, which are the part of this crate
-//! #987 gated so a verification-only consumer does not link `libsql`.
+//! Requires the `db-source` feature (on by default); see #987.
 #![cfg(feature = "db-source")]
 
 //! Deterministic gate suite for the commit-log builder.
-//!
-//! Seeds a LOCAL libSQL/SQLite fixture file (no network, no prod DB), builds a
-//! bundle, and verifies it through the slice-1 monitor path (the public
-//! `verifiable_log::proof::verify_*` / `Sth::verify` functions, replayed exactly
-//! as the `monitor` CLI does). Also exercises fork/regression rejection,
-//! tamper detection, and keygen round-trip.
 
 use verifiable_log::SigningKey;
 use verifiable_log::{
@@ -23,7 +15,6 @@ use verifiable_log_builder::{
 };
 
 const TS: u64 = 1_700_000_000_000;
-// Deterministic dev key (custody is a later slice).
 const KEY: [u8; 32] = [9u8; 32];
 
 /// A synthetic commit row to seed the fixture DB with.
@@ -52,14 +43,7 @@ fn row_at(seq: i64, conv: &'static str, generation: i64, epoch: i64, data: &str)
 }
 
 /// Create a fresh local libSQL file with the **pre-#454-P4** `mls_commit_log`
-/// shape — no `generation` column — and the given rows. No UNIQUE index, so
-/// fork/regression rows can be injected exactly as a buggy/malicious server
-/// might have written them.
-///
-/// Most tests seed this shape deliberately: the builder deploys independently of
-/// the Delivery Service that migrates the log DB, so reading a log DB that
-/// predates `000004_commit_generation.sql` is a real operating state, not a
-/// legacy curiosity.
+/// shape (no `generation` column), which the builder must still read.
 async fn seed_db(path: &std::path::Path, rows: &[Row]) {
     seed(path, rows, false).await
 }
@@ -119,9 +103,7 @@ async fn seed(path: &std::path::Path, rows: &[Row], with_generation: bool) {
 }
 
 /// Faithful in-process re-implementation of `monitor verify`, built ONLY on the
-/// public slice-1 verification functions — the same checks the CLI runs on the
-/// emitted file: STH signatures, equivocation, entry replay through tenant
-/// invariants + per-STH root agreement, inclusion proofs, consistency proofs.
+/// public slice-1 verification functions.
 fn monitor_verify(bundle: &Bundle) -> bool {
     let vk = match verifying_key_from_hex(&bundle.public_key) {
         Ok(k) => k,
@@ -194,7 +176,6 @@ fn signing_key() -> SigningKey {
 async fn valid_bundle_verifies_through_monitor_path() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("commits.db");
-    // Two conversations, sequential epochs, interleaved in seq order.
     let rows = vec![
         row(1, "conv-a", 0, "a-commit-0"),
         row(2, "conv-b", 0, "b-commit-0"),
@@ -208,13 +189,10 @@ async fn valid_bundle_verifies_through_monitor_path() {
     let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
     let read = source::read_commit_log(&conn).await.unwrap();
     assert_eq!(read.len(), 6);
-    // The raw blob is never surfaced — only its sha256 hex.
     assert_eq!(read[0].commit_sha256, source::sha256_hex(b"a-commit-0"));
 
     let bundle = build_bundle(&read, &signing_key(), TS).unwrap();
 
-    // Shape: an inclusion proof per entry, a midpoint + final STH, one
-    // consistency proof.
     assert_eq!(bundle.entries.len(), 6);
     assert_eq!(bundle.inclusion.len(), 6);
     assert_eq!(bundle.sths.len(), 2);
@@ -223,7 +201,6 @@ async fn valid_bundle_verifies_through_monitor_path() {
 
     assert!(monitor_verify(&bundle), "freshly built bundle must verify");
 
-    // Round-trips through the on-disk JSON shape and still verifies.
     let json = serde_json::to_string_pretty(&bundle).unwrap();
     let reparsed: Bundle = serde_json::from_str(&json).unwrap();
     assert!(monitor_verify(&reparsed), "bundle must verify after JSON round-trip");
@@ -233,7 +210,6 @@ async fn valid_bundle_verifies_through_monitor_path() {
 async fn fork_row_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("fork.db");
-    // Same (conversation_id, epoch) twice with different commit bytes.
     let rows = vec![
         row(1, "conv-a", 0, "a-commit-0"),
         row(2, "conv-a", 0, "a-commit-0-EVIL"),
@@ -254,7 +230,7 @@ async fn fork_row_is_rejected() {
 async fn epoch_regression_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("regress.db");
-    // conv-a goes 0 -> 5 -> 3 (backwards) in seq order.
+    // conv-a goes 0 -> 5 -> 3 in seq order.
     let rows = vec![
         row(1, "conv-a", 0, "a-commit-0"),
         row(2, "conv-a", 5, "a-commit-5"),
@@ -273,9 +249,7 @@ async fn epoch_regression_is_rejected() {
 }
 
 /// A log DB that predates migration `000004_commit_generation.sql` reads as
-/// generation 0 throughout — which is not a lossy fallback but the truth: such a
-/// DB cannot contain a migrated conversation, because nothing could have written
-/// one. The builder must not require a schema upgrade to keep running.
+/// generation 0 throughout, with no schema upgrade required.
 #[tokio::test]
 async fn a_pre_p4_log_db_reads_as_the_classic_lineage() {
     let dir = tempfile::tempdir().unwrap();
@@ -290,10 +264,7 @@ async fn a_pre_p4_log_db_reads_as_the_classic_lineage() {
 }
 
 /// The #454 P4 acceptance criterion for the transparency log: a conversation
-/// that migrates to the hybrid suite restarts at MLS epoch 0 in a successor
-/// lineage, and the builder must publish that as valid history. Before the
-/// monotone key widened to `(conversation, generation, epoch)`, this build
-/// aborted — every honest migration would have taken the transparency log down.
+/// that migrates restarts at MLS epoch 0 in a successor lineage; that is valid history.
 #[tokio::test]
 async fn a_suite_migration_builds_and_verifies() {
     let dir = tempfile::tempdir().unwrap();
@@ -301,10 +272,8 @@ async fn a_suite_migration_builds_and_verifies() {
     let rows = vec![
         row_at(1, "conv-a", 0, 0, "a-g0-e0"),
         row_at(2, "conv-a", 0, 1, "a-g0-e1"),
-        // The migration: same conversation, successor lineage, epoch restarts.
         row_at(3, "conv-a", 1, 0, "a-g1-e0"),
         row_at(4, "conv-a", 1, 1, "a-g1-e1"),
-        // A conversation that never migrated is untouched by any of this.
         row_at(5, "conv-b", 0, 0, "b-g0-e0"),
     ];
     seed_db_with_generation(&db_path, &rows).await;
@@ -319,8 +288,7 @@ async fn a_suite_migration_builds_and_verifies() {
 }
 
 /// Widening the key must not have bought the server a way to launder a fork as a
-/// migration: bumping the generation while picking an arbitrary epoch is caught
-/// because a successor lineage may only ever *open*, and it opens at epoch 0.
+/// migration: a successor lineage only opens at epoch 0.
 #[tokio::test]
 async fn a_lineage_opening_mid_stream_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
@@ -343,8 +311,7 @@ async fn a_lineage_opening_mid_stream_is_rejected() {
 }
 
 /// Once a conversation has migrated, its old lineage is closed — every honest
-/// device has deleted that suite's key material. A commit appearing there is the
-/// server rewriting history, and it stays a regression under the widened key.
+/// device has deleted that suite's keys, so a commit there is a regression.
 #[tokio::test]
 async fn a_commit_on_a_retired_lineage_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
@@ -382,8 +349,7 @@ async fn tampered_entry_fails_verification() {
     let mut bundle = build_bundle(&read, &signing_key(), TS).unwrap();
     assert!(monitor_verify(&bundle));
 
-    // Flip a byte in one committed entry's leaf data: its leaf hash no longer
-    // matches the STH root the inclusion proof reconstructs.
+    // The flipped leaf no longer matches the STH root the proof reconstructs.
     bundle.entries[0].data[0] ^= 0xff;
     assert!(
         !monitor_verify(&bundle),
@@ -395,8 +361,7 @@ async fn tampered_entry_fails_verification() {
 async fn empty_commit_log_yields_empty_commit_log_error_not_no_db_source() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("empty.db");
-    // A connectable DB with the right table but ZERO rows — the freshly-cut-over
-    // log DB case. The DB is fine; it is just empty.
+    // A connectable DB with the right table but zero rows.
     seed_db(&db_path, &[]).await;
 
     let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
@@ -404,7 +369,7 @@ async fn empty_commit_log_yields_empty_commit_log_error_not_no_db_source() {
     assert!(read.is_empty());
 
     let err = source::ensure_non_empty(&read).unwrap_err();
-    // It must be the empty-table signal, NOT the missing-`--db` signal.
+    // Must be the empty-table signal, not the missing-`--db` one.
     assert!(
         matches!(err, verifiable_log_builder::BuilderError::EmptyCommitLog),
         "expected EmptyCommitLog, got: {err}"
@@ -426,10 +391,7 @@ async fn empty_commit_log_still_builds_a_valid_bundle() {
     let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
     let read = source::read_commit_log(&conn).await.unwrap();
 
-    // A zero-row commit log produces a valid empty bundle (one STH over tree
-    // size 0, no entries). This is what keeps `serve generate --bundle ...`
-    // working when the commit log happens to be empty: the file always exists
-    // and parses, rather than the builder aborting and leaving it missing.
+    // A zero-row log still yields a valid empty bundle, so `serve generate` finds a file.
     let bundle = build_bundle(&read, &signing_key(), TS).unwrap();
     assert_eq!(bundle.entries.len(), 0);
     assert_eq!(bundle.inclusion.len(), 0);
@@ -438,15 +400,10 @@ async fn empty_commit_log_still_builds_a_valid_bundle() {
     assert_eq!(bundle.sths[0].tree_size, 0);
     assert!(monitor_verify(&bundle), "empty bundle must still verify");
 
-    // And it round-trips through the on-disk JSON shape `serve generate` reads.
     let json = serde_json::to_string_pretty(&bundle).unwrap();
     let reparsed: Bundle = serde_json::from_str(&json).unwrap();
     assert!(monitor_verify(&reparsed));
 }
-
-// ---------------------------------------------------------------------------
-// #701: windowed pseudonyms in the published leaf.
-// ---------------------------------------------------------------------------
 
 /// The published tree carries windowed pseudonyms, never the raw ids: an
 /// `entries.json` scraper sees no stable `conversation_id` or `sender_id`.
@@ -462,7 +419,6 @@ async fn published_leaves_are_pseudonymous_not_raw_ids() {
     let bundle = build_bundle(&read, &signing_key(), TS).unwrap();
 
     let leaf0 = CommitLeaf::decode(&bundle.entries[0].data).unwrap();
-    // The pseudonym is a 64-hex SHA-256, and it is NOT the raw id.
     assert_eq!(leaf0.conversation_pseudonym.len(), 64);
     assert_ne!(leaf0.conversation_pseudonym, "conv-a");
     assert_eq!(
@@ -476,23 +432,18 @@ async fn published_leaves_are_pseudonymous_not_raw_ids() {
         derive_sender_pseudonym("conv-a", "u-sender", window_for_seq(leaf0.seq))
     );
 
-    // Belt and braces: the raw strings appear nowhere in the serialized entries.
     let raw = serde_json::to_string(&bundle.entries).unwrap();
     assert!(!raw.contains("conv-a"), "raw conversation id leaked into the log");
     assert!(!raw.contains("u-sender"), "raw sender id leaked into the log");
 }
 
 /// DoD: a fork whose two branches straddle a pseudonym-window boundary is NOT
-/// visible to the public per-pseudonym check (the two branches carry different
-/// pseudonyms), but the builder's full-strength source-integrity gate — which
-/// runs on the real ids — still aborts the build. This is the residual being held
-/// shut at the one place the real ids are in hand.
+/// visible to the public check, but the full-strength gate on real ids aborts.
 #[tokio::test]
 async fn a_cross_window_fork_is_rejected_at_full_strength() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("xwindow.db");
     let w = PSEUDONYM_WINDOW_SIZE as i64;
-    // Same conversation, same epoch 0 (a real fork), but placed one window apart.
     let rows = vec![
         row(1, "conv-a", 0, "a0"),
         row(w + 1, "conv-a", 0, "a0-EVIL"),
@@ -502,8 +453,6 @@ async fn a_cross_window_fork_is_rejected_at_full_strength() {
     let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
     let read = source::read_commit_log(&conn).await.unwrap();
 
-    // Sanity: the two branches really do land in different windows / pseudonyms,
-    // so a public replay grouping by pseudonym would miss them.
     assert_ne!(
         derive_conversation_pseudonym("conv-a", window_for_seq(1)),
         derive_conversation_pseudonym("conv-a", window_for_seq(w + 1))
@@ -523,8 +472,6 @@ fn keygen_output_roundtrips() {
     let arr: [u8; 32] = secret.as_slice().try_into().unwrap();
     let signing_key = SigningKey::from_seed(&arr.into());
 
-    // An STH signed by the emitted private key verifies against the emitted
-    // public key.
     let root = [3u8; 32];
     let sth = verifiable_log::Sth::create(&signing_key, 1, root, TS);
     let vk = verifying_key_from_hex(&g.public_hex).unwrap();

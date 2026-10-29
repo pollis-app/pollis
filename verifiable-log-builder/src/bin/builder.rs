@@ -464,13 +464,11 @@ async fn run_build(
         .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
         .ok_or(BuilderError::NoDbSource)?;
 
-    // The commit log lives in its own DB after Goal A's cutover. Resolve it from
-    // (1) --log-db, (2) LOG_DB_URL, (3) the main DB (single-DB / pre-cutover).
+    // Log DB: --log-db, then LOG_DB_URL, then the main DB.
     let log_db = log_db
         .or_else(|| std::env::var("LOG_DB_URL").ok())
         .unwrap_or_else(|| db.clone());
-    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
-    // tests, and pre-cutover all behave exactly as before.
+    // The log DB has its own token; falls back to TURSO_AUTH_TOKEN.
     let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
         .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
         .unwrap_or_default();
@@ -478,13 +476,10 @@ async fn run_build(
     // Resolve the signing key BEFORE touching the DB so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
-    // The two tenants are INDEPENDENT: the commit log lives in the log DB and the
-    // account-key directory in the main DB, on separate Merkle trees. A transient
-    // empty commit log (e.g. right after Goal A's cutover) must NOT block the
-    // account-key bundle, and vice versa. So we read both first, then decide.
+    // Independent tenants: an empty commit log must not block the account-key bundle, or vice
+    // versa.
 
-    // Commit-log tenant (frozen contract). From the persisted log of record when
-    // given (#1579); otherwise from the LOG DB with its token.
+    // Commit-log tenant: from the persisted log of record when given (#1579), else the log DB.
     let commit_source = match &commit_leaves {
         Some(path) => CommitSource::Leaves(commit_leaves::load(path)?.ok_or_else(|| {
             BuilderError::PersistedLeaves(format!(
@@ -503,31 +498,21 @@ async fn run_build(
     };
     let commit_empty = commit_count == 0;
 
-    // Account-key tenant (separate tree, domain-separated STH) — only when asked.
-    // It stays in the MAIN DB (TURSO_AUTH_TOKEN), independent of the log DB.
+    // Account-key tenant, only when asked; stays in the main DB.
     let account_rows = if account_out.is_some() {
         let conn = source::connect(&db).await?;
         Some(source::read_account_key_log(&conn).await?)
     } else {
         None
     };
-    // "Absent" (not requested) counts the same as "empty" for the all-empty check.
     let account_empty = account_rows.as_ref().is_none_or(|r| r.is_empty());
 
-    // Only hard-fail when there is nothing to publish from EITHER tenant. With at
-    // least one non-empty source we go on to write a bundle for each — an empty
-    // source yields a valid empty/zero-length bundle (see below), never an abort.
+    // Only fail when both are empty; an empty source still yields a valid empty bundle.
     if commit_empty && account_empty {
-        // The DB connected fine; the commit log is just empty. Surface that
-        // distinct condition (EmptyCommitLog), not the missing-source NoDbSource.
         return Err(BuilderError::EmptyCommitLog);
     }
 
-    // Commit-log bundle. `build_bundle` over zero rows is well-defined — it emits
-    // a valid bundle with a single STH over tree size 0 and no entries — so we
-    // ALWAYS write `out`. That keeps the downstream `serve generate --bundle
-    // bundle.json` step working (the file always exists and parses) instead of
-    // crashing on a missing file when the commit log happens to be empty.
+    // Always write `out` (a zero-row bundle is valid) so `serve generate --bundle` finds a file.
     if commit_empty {
         eprintln!(
             "notice: commit log is empty (db connected OK) — writing an empty commit-log \
@@ -546,7 +531,7 @@ async fn run_build(
     let json = serde_json::to_string_pretty(&bundle)?;
     std::fs::write(&out, json)?;
 
-    // Never print the raw commit_data or the auth token — only safe metadata.
+    // Never print the raw commit_data or the auth token.
     println!(
         "wrote commit-log bundle: {} commits, {} STH(s), {} inclusion proof(s) -> {}",
         commit_count,
@@ -555,9 +540,7 @@ async fn run_build(
         out.display()
     );
 
-    // Account-key bundle, written independently of the commit log's state. Like
-    // the commit bundle, a zero-row account log yields a valid empty bundle, so
-    // `serve generate --account-bundle ...` always has a file to read.
+    // Written independently of the commit log; a zero-row account log is a valid bundle.
     if let (Some(account_out), Some(account_rows)) = (account_out, account_rows) {
         if account_rows.is_empty() {
             eprintln!(
@@ -692,8 +675,7 @@ fn run_commit_log_reset(
         served.insert(size, serde_json::from_str::<verifiable_log::Sth>(&raw)?);
     }
 
-    // The retired heads were signed by this same key; it is the only key the
-    // statement can describe them under.
+    // The retired heads were signed by this same key.
     let vk = ml_dsa::Keypair::verifying_key(&signing_key);
     let candidates = vec![(verifiable_log::key_id_for(&vk), vk)];
     commit_log_reset::check_against_served(&facts, &served, &candidates)?;
@@ -775,9 +757,7 @@ fn run_key_set(
     let statement = verifiable_log::KeySetStatement::create(&root, issued_at, not_after, signers)
         .map_err(|e| BuilderError::SigningKey(e.to_string()))?;
 
-    // Verify what we just signed before writing it. A ceremony that emits an
-    // unverifiable statement is worse than one that fails: it is discovered by
-    // clients, at the moment they most need the key set to work.
+    // Verify before writing: an unverifiable statement is found by clients when they most need it.
     statement
         .verify(&ml_dsa::Keypair::verifying_key(&root))
         .map_err(|e| BuilderError::SigningKey(format!("refusing to write an unverifiable statement: {e}")))?;
@@ -819,8 +799,7 @@ mod signer_spec_tests {
         hex::encode(sk.verifying_key().encode())
     }
 
-    // The bug this pins: tree contexts contain colons, so splitting the spec on
-    // every ':' mangles them. Caught live during the first ceremony run.
+    // Tree contexts contain colons, so splitting the spec on every `:` mangles them.
     #[test]
     fn a_tree_context_containing_colons_survives_parsing() {
         let s = parse_signer(&format!("{}:pollis-verifiable-log:sth:v2", pubkey())).expect("parse");

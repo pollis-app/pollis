@@ -1,18 +1,5 @@
 //! Deterministic gate suite for the **binaries** builder tenant (binary
 //! transparency, Phase 1 of #453).
-//!
-//! Mirrors `account_build.rs` for the third tenant: drives the builder's
-//! `build-binaries` mode over a fixture `records.json` (a few `BinaryRecord`s
-//! across platforms, with payload/signed pairs), then verifies the emitted
-//! bundle through the slice-1 monitor path — checking STH signatures under the
-//! **binaries** domain context, since the binaries tree is domain-separated from
-//! both the commit log and the account-key tree. Also exercises the invariant's
-//! build-time rejections (fork, monotonic tag order, payload/signed pairing) and
-//! tamper detection.
-//!
-//! The `build-binaries` mode reads a JSON file (not a DB), so — unlike the
-//! account tenant — the fixture is a `records.json` handed to the real CLI
-//! binary, exactly what the release job produces.
 
 use std::path::Path;
 use std::process::Command;
@@ -29,7 +16,6 @@ use verifiable_log_builder::build_binaries_bundle;
 use verifiable_log_builder::builder::Bundle;
 
 const TS: u64 = 1_700_000_000_000;
-/// 32-byte hex Ed25519 signing key handed to the CLI via `VLOG_SIGNING_KEY`.
 const KEY_HEX: &str = "0909090909090909090909090909090909090909090909090909090909090909";
 
 fn signing_key() -> SigningKey {
@@ -70,26 +56,19 @@ fn record(
     }
 }
 
-/// A well-formed fixture: one release across three platforms, with a
-/// payload+signed pair on macOS and Windows and a payload-only Linux AppImage.
+/// One release on three platforms: payload+signed on macOS/Windows, payload-only Linux.
 fn fixture_records() -> Vec<BinaryRecord> {
     vec![
-        // macOS: reproducible payload, then the notarized signed wrapper.
         record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x11, 0x11),
         record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Signed, 0x11, 0x1a),
-        // Linux AppImage: reproducible payload only (no separate signature layer).
         record("v1.3.0", "linux", "x86_64", "appimage", Layer::Payload, 0x22, 0x22),
-        // Windows: reproducible payload, then the Authenticode-signed wrapper.
         record("v1.3.0", "windows", "x86_64", "nsis", Layer::Payload, 0x33, 0x33),
         record("v1.3.0", "windows", "x86_64", "nsis", Layer::Signed, 0x33, 0x3a),
     ]
 }
 
 /// Run the **real** monitor pass over a bundle under `context`, with the
-/// binaries tenant's own invariant enforced on replay.
-///
-/// Was a hand-written copy of the monitor's loop — see the note on
-/// `account_build.rs`'s equivalent. One verifier, tree as an argument (#875).
+/// binaries tenant invariant enforced on replay (#875).
 fn verify_binaries(bundle: &Bundle, context: &[u8]) -> bool {
     let invariant: Box<dyn TenantInvariant> = Box::new(BinaryInvariant);
     verify_bundle(
@@ -108,8 +87,7 @@ fn monitor_verify_binaries(bundle: &Bundle) -> bool {
     verify_binaries(bundle, STH_CONTEXT)
 }
 
-/// Drive the real `builder build-binaries` subcommand over a fixture
-/// `records.json` written to `dir`, returning the parsed bundle it emits.
+/// Drive the real `builder build-binaries` over a fixture `records.json` in `dir`.
 fn run_build_binaries(dir: &Path, records: &[BinaryRecord], ts: u64) -> Bundle {
     let records_in = dir.join("records.json");
     let bundle_out = dir.join("binaries-bundle.json");
@@ -139,17 +117,12 @@ fn build_binaries_mode_emits_wellformed_signed_bundle() {
     let records = fixture_records();
     let bundle = run_build_binaries(dir.path(), &records, TS);
 
-    // One entry per artifact leaf, one inclusion proof each.
     assert_eq!(bundle.entries.len(), records.len());
     assert_eq!(bundle.inclusion.len(), records.len());
-    // Every leaf carries the binaries tenant tag.
     assert!(bundle.entries.iter().all(|e| e.tenant == TENANT));
-    // A midpoint + final STH (5 leaves) plus the consistency proof between them.
     assert_eq!(bundle.sths.len(), 2);
     assert_eq!(bundle.consistency.len(), 1);
-    // The binaries tenant is the one whose invariant a verifier re-checks.
     assert_eq!(bundle.enforce_unique, vec![TENANT.to_string()]);
-    // The head is signed by the pinned key we handed the CLI.
     assert_eq!(
         bundle.public_key,
         hex::encode(signing_key().verifying_key().encode())
@@ -160,10 +133,7 @@ fn build_binaries_mode_emits_wellformed_signed_bundle() {
         "binaries bundle must verify under the binaries domain context"
     );
 
-    // Domain separation against BOTH sibling trees, asserted in the open rather
-    // than hidden inside the verifier: the same bundle checked as another tree
-    // must fail, which is what stops a binaries head standing in for a
-    // commit-log or account-key head.
+    // Domain separation against both sibling trees.
     assert!(
         !verify_binaries(&bundle, STH_CONTEXT_COMMIT_LOG),
         "a binaries head must NOT verify as a commit-log head"
@@ -173,15 +143,13 @@ fn build_binaries_mode_emits_wellformed_signed_bundle() {
         "a binaries head must NOT verify as an account-key head"
     );
 
-    // Round-trips through the on-disk JSON shape and still verifies.
     let json = serde_json::to_string_pretty(&bundle).unwrap();
     let reparsed: Bundle = serde_json::from_str(&json).unwrap();
     assert!(monitor_verify_binaries(&reparsed));
 }
 
 /// The signed STH must be byte-stable across rebuilds for a reused timestamp, so
-/// an unchanged binaries tree republishes without diverging from the already
-/// -published head. The timestamp is the only time-varying input.
+/// an unchanged binaries tree republishes without diverging from its published head.
 #[test]
 fn rebuild_is_byte_identical_for_a_reused_timestamp() {
     let records = fixture_records();
@@ -208,8 +176,7 @@ fn rebuild_is_byte_identical_for_a_reused_timestamp() {
 
 #[test]
 fn fork_same_tuple_different_hash_aborts_the_build() {
-    // Two leaves describing the SAME released unit (tag/platform/arch/bundle/layer)
-    // but different artifact bytes — a silent re-issue the log must refuse.
+    // Same released unit, different bytes: a silent re-issue the log must refuse.
     let records = vec![
         record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x11, 0x11),
         record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x99, 0x99),
@@ -220,7 +187,6 @@ fn fork_same_tuple_different_hash_aborts_the_build() {
 
 #[test]
 fn signed_without_payload_aborts_the_build() {
-    // A signed leaf whose payload_sha256 was never logged as a payload leaf.
     let records = vec![record(
         "v1.3.0", "windows", "x86_64", "nsis", Layer::Signed, 0x44, 0x55,
     )];
@@ -233,7 +199,6 @@ fn signed_without_payload_aborts_the_build() {
 
 #[test]
 fn tag_out_of_publish_order_aborts_the_build() {
-    // v1.0.0 reappears after v1.1.0 has begun — a jump backwards in publish order.
     let records = vec![
         record("v1.0.0", "linux", "x86_64", "appimage", Layer::Payload, 0x11, 0x11),
         record("v1.1.0", "linux", "x86_64", "appimage", Layer::Payload, 0x22, 0x22),
@@ -252,8 +217,7 @@ fn tampered_binary_entry_fails_verification() {
     let mut bundle = build_binaries_bundle(&records, &signing_key(), TS).unwrap();
     assert!(monitor_verify_binaries(&bundle));
 
-    // Flip a byte in one committed entry's leaf data: its leaf hash no longer
-    // matches the STH root the inclusion proof reconstructs.
+    // The flipped leaf no longer matches the STH root the proof reconstructs.
     bundle.entries[0].data[0] ^= 0xff;
     assert!(
         !monitor_verify_binaries(&bundle),

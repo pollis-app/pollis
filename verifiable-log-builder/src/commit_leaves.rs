@@ -1,19 +1,6 @@
 //! The commit log's **persisted leaves** — its log of record (#1579).
-//!
-//! The DS prunes `mls_commit_log` below a retention floor (#539), so the live
-//! table is only a *window* onto the log, never the log itself. Rebuilding the
-//! tree from that window on each publish put different leaves at already-signed
-//! positions the first time a prune removed a published row, and every earlier
-//! signed head became unreproducible. So the leaves the builder publishes are
-//! kept outside the DS, the same way `internal/binary-records.json` holds the
-//! binaries tree's records, and each publish only **appends** to them.
-//!
-//! The persisted file is a JSON array of [`Entry`] values in leaf order — the
-//! exact shape of the served `/v1/entries.json`. It holds only the published,
-//! pseudonymous leaves (#701), never a real `conversation_id` or `sender_id`, so
-//! keeping it longer than the DS keeps its rows discloses nothing the public log
-//! does not already disclose.
-//!
+//! The DS prunes `mls_commit_log` (#539), so the published pseudonymous leaves are kept here
+//! and only appended to.
 //! [`append_rows`] is the whole contract, and it fails closed:
 //!
 //! * the persisted leaves must decode as commit-log leaves in strictly
@@ -27,13 +14,8 @@
 //! * only rows above the last persisted `seq` are appended. A pruned row simply
 //!   is not read again; its leaf stays where it was published.
 //!
-//! Both [`CommitLogInvariant`] passes run on the whole appended stream: the
-//! public, within-window check over the pseudonymous leaves, and the
-//! full-strength check keyed on real ids. For the second, a persisted leaf is
-//! re-keyed to its real conversation whenever a live row's conversation derives
-//! that leaf's pseudonym for that leaf's window, so a new commit is still checked
-//! against the conversation's already-published history after the rows behind
-//! that history have been pruned.
+//! Both [`CommitLogInvariant`] passes run; persisted leaves are re-keyed to real ids where a
+//! live row matches.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -56,8 +38,7 @@ pub struct AppendOutcome {
 }
 
 /// Read a persisted leaves file. `Ok(None)` only when the file does not exist;
-/// any other read or parse failure is an error, so an unreadable file can never
-/// be mistaken for "nothing persisted yet".
+/// any other failure is an error, never "nothing persisted yet".
 pub fn load(path: &Path) -> Result<Option<Vec<Entry>>> {
     match std::fs::read_to_string(path) {
         Ok(raw) => Ok(Some(serde_json::from_str(&raw)?)),
@@ -124,9 +105,7 @@ pub fn check_reproduces(entries: &[Entry], published: &Sth) -> Result<()> {
 /// Append the live rows above the last persisted `seq` to `persisted`.
 ///
 /// `published` is the latest head already served for this tree, when one is.
-/// `live` must be the DS rows in ascending `seq` order (what
-/// [`crate::source::read_commit_log`] returns). See the module docs for every
-/// condition this refuses.
+/// `live` must be the DS rows in ascending `seq` order. See the module docs.
 pub fn append_rows(
     persisted: &[Entry],
     live: &[CommitRow],
@@ -176,8 +155,7 @@ pub fn append_rows(
     }
 
     // (1) Full-strength gate on real ids, over the whole appended stream.
-    // A persisted leaf's pseudonym is re-keyed to the real conversation when a
-    // live conversation derives it for that leaf's window.
+    // A persisted leaf is re-keyed when a live conversation derives its pseudonym.
     let mut real_by_pseudonym: HashMap<(String, u64), String> = HashMap::new();
     let windows: BTreeSet<u64> = persisted_leaves
         .iter()
@@ -208,7 +186,7 @@ pub fn append_rows(
         identity_log.append(row.to_identity_leaf().to_entry()?)?;
     }
 
-    // (2) The published, pseudonymous stream: exactly what a replayer checks.
+    // (2) The published, pseudonymous stream.
     let mut leaves: Vec<Entry> = persisted.to_vec();
     for row in &new_rows {
         leaves.push(row.to_leaf().to_entry()?);
@@ -221,8 +199,7 @@ pub fn append_rows(
     })
 }
 
-/// Replay `leaves` through the public [`CommitLogInvariant`], as an outside
-/// auditor would.
+/// Replay `leaves` through the public [`CommitLogInvariant`].
 pub fn replay_public(leaves: &[Entry]) -> Result<VerifiableLog> {
     let mut log = VerifiableLog::new();
     log.register_invariant(TENANT, Box::new(CommitLogInvariant));

@@ -1,11 +1,6 @@
 //! The append-only log itself: tenant-tagged entries, the pluggable
 //! per-tenant invariant hook, and [`VerifiableLog`] which hosts many tenants
 //! in a single Merkle tree.
-//!
-//! A single global tree (one STH covers every tenant) mirrors how
-//! Certificate Transparency logs work: tenants are logical partitions
-//! identified by `tenant`, and correctness rules specific to a tenant are
-//! enforced by a [`TenantInvariant`] hook consulted at append time.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +9,7 @@ use crate::hash::{leaf_hash, Hash};
 use crate::merkle;
 use crate::sth::Sth;
 
-/// Lowercase-hex serde for the opaque entry payload, keeping the JSON wire
-/// contract printable and stable.
+/// Lowercase-hex serde for the opaque entry payload.
 mod hex_bytes {
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -31,11 +25,7 @@ mod hex_bytes {
 
 /// A single log entry. `tenant` is an opaque, caller-chosen partition id;
 /// `data` is the tenant-specific payload, opaque to the core.
-///
-/// Canonical leaf encoding (the bytes that get hashed) is
-/// `len(tenant) as u32 big-endian || tenant_utf8 || data`. Length-prefixing
-/// the tenant makes the encoding unambiguous so two different
-/// `(tenant, data)` pairs can never collide into the same leaf bytes.
+/// Leaf bytes are `len(tenant) as u32 BE || tenant || data`, so pairs never collide.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub tenant: String,
@@ -51,7 +41,7 @@ impl Entry {
         }
     }
 
-    /// Canonical byte encoding fed to the leaf hash. See the struct docs.
+    /// Canonical byte encoding fed to the leaf hash.
     pub fn encode(&self) -> Vec<u8> {
         let tenant = self.tenant.as_bytes();
         let mut out = Vec::with_capacity(4 + tenant.len() + self.data.len());
@@ -71,17 +61,11 @@ impl Entry {
 /// tenant that has one registered: it sees the entries already committed for
 /// that tenant (in order) and the candidate, and rejects the append by
 /// returning an [`InvariantViolation`].
-///
-/// A future commit-log tenant would implement this to enforce "one commit per
-/// (group, epoch)"; the account-key tenant would enforce monotonic key
-/// versions. This crate ships only [`UniqueDataInvariant`] as an example.
 pub trait TenantInvariant: Send + Sync {
     fn check(&self, existing: &[&Entry], candidate: &Entry) -> std::result::Result<(), InvariantViolation>;
 }
 
-/// Example invariant: reject an append whose `data` duplicates any existing
-/// entry for the same tenant. Demonstrates the hook mechanism without
-/// implementing any real tenant's rules.
+/// Example invariant: reject an append whose `data` duplicates an existing entry.
 pub struct UniqueDataInvariant;
 
 impl TenantInvariant for UniqueDataInvariant {
@@ -100,10 +84,6 @@ impl TenantInvariant for UniqueDataInvariant {
 }
 
 /// An append-only, multi-tenant verifiable Merkle log.
-///
-/// Holds every entry in commit order plus its leaf hash. The Merkle structure
-/// (root, proofs) is derived on demand from the leaf hashes, so appending is
-/// O(1) amortised — just push.
 #[derive(Default)]
 pub struct VerifiableLog {
     entries: Vec<Entry>,
@@ -123,8 +103,7 @@ impl VerifiableLog {
     }
 
     /// Append an entry, returning its leaf index. Runs the tenant's invariant
-    /// (if any) first; on violation the entry is rejected and the log is
-    /// unchanged.
+    /// (if any) first; on violation the log is unchanged.
     pub fn append(&mut self, entry: Entry) -> Result<usize> {
         if let Some(invariant) = self.invariants.get(&entry.tenant) {
             let existing: Vec<&Entry> = self
@@ -155,7 +134,6 @@ impl VerifiableLog {
     }
 
     /// Merkle root the log had at `size` leaves (`size <= self.size()`).
-    /// Lets a monitor tie an entry list to every historical STH.
     pub fn root_at(&self, size: usize) -> Result<Hash> {
         if size > self.leaves.len() {
             return Err(Error::IndexOutOfRange {

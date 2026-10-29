@@ -3,9 +3,6 @@
 //! (b) the dev server serves them and `verify_remote` verifies the whole log
 //!     over HTTP (signatures + inclusion + consistency);
 //! (c) tampering with a served artifact makes remote verification FAIL.
-//!
-//! The fixture is built directly from slice 1's primitives (this mirrors what
-//! the builder does — it does not reimplement any verification).
 
 use std::path::Path;
 
@@ -78,11 +75,9 @@ fn layout_generator_writes_documented_files() {
     let bundle = generate_into(dir.path());
     let v1 = dir.path().join("v1");
 
-    // The two top-level documents.
     assert!(v1.join("public_key.json").is_file());
     assert!(v1.join("index.json").is_file());
 
-    // STHs: latest plus one per size.
     assert!(v1.join("sth").join("latest.json").is_file());
     for sth in &bundle.sths {
         assert!(v1
@@ -91,13 +86,11 @@ fn layout_generator_writes_documented_files() {
             .is_file());
     }
 
-    // Entries: the ordered list and every per-entry file.
     assert!(v1.join("entries.json").is_file());
     for i in 0..bundle.entries.len() {
         assert!(v1.join("entries").join(format!("{i}.json")).is_file());
     }
 
-    // Inclusion proofs at /v1/proof/inclusion/<tree_size>/<leaf_index>.json.
     for check in &bundle.inclusion {
         assert!(v1
             .join("proof")
@@ -107,7 +100,6 @@ fn layout_generator_writes_documented_files() {
             .is_file());
     }
 
-    // Consistency proofs at /v1/proof/consistency/<first>-<second>.json.
     for check in &bundle.consistency {
         assert!(v1
             .join("proof")
@@ -119,7 +111,6 @@ fn layout_generator_writes_documented_files() {
             .is_file());
     }
 
-    // The manifest advertises exactly what was written.
     let manifest: verifiable_log_serve::Manifest =
         serde_json::from_str(&std::fs::read_to_string(v1.join("index.json")).unwrap()).unwrap();
     assert_eq!(manifest.entry_count, bundle.entries.len() as u64);
@@ -130,9 +121,7 @@ fn layout_generator_writes_documented_files() {
 
 #[test]
 fn commit_log_tree_emits_no_group_reports() {
-    // Since #701 the commit-log tree never precomputes per-group reports (they
-    // would re-enumerate the group set next to pseudonymous leaves). Per-group
-    // verification is dynamic and member-gated instead.
+    // Since #701 the commit-log tree never precomputes per-group reports.
     let dir = tempfile::tempdir().unwrap();
     generate_into(dir.path());
 
@@ -141,7 +130,6 @@ fn commit_log_tree_emits_no_group_reports() {
         || std::fs::read_dir(&group_dir).unwrap().next().is_none();
     assert!(empty, "the commit-log tree must not produce any verify/group reports");
 
-    // And the manifest no longer carries a `conversations` enumeration at all.
     let index = std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&index).unwrap();
     assert!(value.get("conversations").is_none(), "index.json must not enumerate conversations");
@@ -160,7 +148,6 @@ fn fetch_over_http_and_verify_end_to_end() {
         "remote verification should pass; checks: {:?}",
         report.checks
     );
-    // Sanity: it actually ran a meaningful number of checks, not zero.
     assert!(report.checks.len() >= 8, "too few checks ran");
     server.shutdown();
 }
@@ -170,7 +157,6 @@ fn tampered_entry_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     generate_into(dir.path());
 
-    // Corrupt one per-entry artifact: swap its payload for a different one.
     let entry_path = dir.path().join("v1").join("entries").join("0.json");
     let tampered = r#"{"tenant":"commits","data":"6861786f7264"}"#;
     std::fs::write(&entry_path, tampered).unwrap();
@@ -186,7 +172,6 @@ fn tampered_sth_signature_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let bundle = generate_into(dir.path());
 
-    // Flip a hex nibble in the largest STH's signature.
     let size = bundle.entries.len();
     let sth_path = dir.path().join("v1").join("sth").join(format!("{size}.json"));
     let mut sth: Sth =
@@ -207,8 +192,6 @@ fn tampered_entries_list_breaks_root() {
     let dir = tempfile::tempdir().unwrap();
     generate_into(dir.path());
 
-    // Corrupt the ordered entries list: replay roots will no longer match the
-    // signed STHs.
     let entries_path = dir.path().join("v1").join("entries.json");
     let tampered =
         r#"[{"tenant":"commits","data":"00"},{"tenant":"commits","data":"01"},{"tenant":"accounts","data":"02"},{"tenant":"commits","data":"03"}]"#;

@@ -1,17 +1,5 @@
 //! End-to-end gate suite for the `monitor` CLI — the thing an auditor actually
 //! runs.
-//!
-//! Two failures this covers were, until #875, "verify returns false" for logs
-//! that are perfectly honest:
-//!
-//! * The CLI hard-coded the commit-log STH context, so an **account-keys** or
-//!   **binaries** bundle — both of which the builder's README tells you to check
-//!   with this exact command — reported FAIL on every head. Two builder tests had
-//!   even frozen that as expected behaviour by re-implementing the loop
-//!   themselves.
-//! * Its private bundle struct had no `retired_keys` field, so serde dropped the
-//!   rotation-overlap key set and every head minted under a **retiring** key
-//!   failed to verify. A key rotation would have made the log look forged.
 
 use std::path::Path;
 use std::process::Command;
@@ -33,8 +21,7 @@ fn hex_key(sk: &SigningKey) -> String {
     hex::encode(sk.verifying_key().encode())
 }
 
-/// A complete, well-formed bundle over `tenant`, signed by `sk` under
-/// `context` — the shape the builder emits for whichever tree it just built.
+/// A complete bundle over `tenant`, signed by `sk` under `context`.
 fn bundle_for(tenant: &str, context: &[u8], sk: &SigningKey) -> Bundle {
     let mut log = VerifiableLog::new();
     log.register_invariant(tenant, Box::new(UniqueDataInvariant));
@@ -86,16 +73,13 @@ fn monitor_verify(dir: &Path, name: &str, bundle: &Bundle, args: &[&str]) -> boo
         .args(args)
         .output()
         .expect("failed to spawn monitor");
-    // Surfaced on failure so a broken run reads as a report, not an exit code.
     if !out.status.success() {
         eprintln!("{}", String::from_utf8_lossy(&out.stdout));
     }
     out.status.success()
 }
 
-/// The account-key tree is domain-separated from the commit log, so the monitor
-/// must be *told* which tree it is checking. It verifies under the right one and
-/// — the property the separation exists for — refuses under the wrong one.
+/// The account-key tree verifies under its own context and fails under the commit log.
 #[test]
 fn monitor_verifies_an_account_keys_bundle() {
     let dir = tempfile::tempdir().unwrap();
@@ -115,8 +99,6 @@ fn monitor_verifies_an_account_keys_bundle() {
     );
 }
 
-/// Same for the binaries tree — the one the builder README's `build-binaries`
-/// example tells an auditor to check with this command.
 #[test]
 fn monitor_verifies_a_binaries_bundle() {
     let dir = tempfile::tempdir().unwrap();
@@ -132,8 +114,6 @@ fn monitor_verifies_a_binaries_bundle() {
     );
 }
 
-/// The commit log stays the default, so the command an auditor has always run
-/// keeps working with no new flag.
 #[test]
 fn commit_log_remains_the_default_tree() {
     let dir = tempfile::tempdir().unwrap();
@@ -141,9 +121,7 @@ fn commit_log_remains_the_default_tree() {
     assert!(monitor_verify(dir.path(), "commits.json", &b, &[]));
 }
 
-/// An unknown `--tree` is rejected rather than silently falling back to the
-/// commit log, which would report FAIL for an honest account-key bundle and read
-/// as tampering.
+/// An unknown `--tree` is rejected rather than falling back to the commit log.
 #[test]
 fn an_unknown_tree_name_is_refused() {
     let dir = tempfile::tempdir().unwrap();
@@ -151,11 +129,7 @@ fn an_unknown_tree_name_is_refused() {
     assert!(!monitor_verify(dir.path(), "commits.json", &b, &["--tree", "nope"]));
 }
 
-/// A rotation in progress: the bundle publishes the NEW key as active and the
-/// outgoing key in `retired_keys` with its window end, while the heads on disk
-/// are still the ones the OLD key signed. Inside the window the monitor must
-/// accept them — an honest log mid-rotation is the common case, and reporting it
-/// as tampering is the failure mode a verifier must never have.
+/// Mid-rotation: heads from the outgoing key verify inside its `retired_keys` window.
 #[test]
 fn monitor_accepts_a_head_from_a_retiring_key_inside_the_overlap() {
     let dir = tempfile::tempdir().unwrap();
@@ -163,7 +137,6 @@ fn monitor_accepts_a_head_from_a_retiring_key_inside_the_overlap() {
     let incoming = key(5);
     let window_end = TS + 30 * 86_400_000;
 
-    // Heads signed by the OUTGOING key; the bundle advertises the INCOMING one.
     let mut b = bundle_for("commits", STH_CONTEXT_COMMIT_LOG, &outgoing);
     b.public_key = hex_key(&incoming);
     b.retired_keys = vec![PublicKeyEntry {
@@ -195,8 +168,7 @@ fn monitor_accepts_a_head_from_a_retiring_key_inside_the_overlap() {
     );
 }
 
-/// The overlap set is not a free pass: a head from a key that is neither active
-/// nor published as retiring still fails.
+/// The overlap set is no free pass: an unpublished key still fails.
 #[test]
 fn a_head_from_an_unpublished_key_still_fails() {
     let dir = tempfile::tempdir().unwrap();
@@ -212,7 +184,6 @@ fn a_head_from_an_unpublished_key_still_fails() {
     assert!(!monitor_verify(dir.path(), "forged.json", &b, &["--now-ms", &TS.to_string()]));
 }
 
-/// `gen-example` still round-trips through the (now shared) bundle type.
 #[test]
 fn gen_example_round_trips_through_verify() {
     let dir = tempfile::tempdir().unwrap();

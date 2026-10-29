@@ -1,13 +1,7 @@
 //! Static layout generator: turn a signed [`Bundle`] into the immutable
 //! directory tree that implements the log's public read API.
 //!
-//! Every file written here is **write-once / immutable**: an STH for a given
-//! tree size, a proof for a given `(leaf, tree_size)`, an entry at a given
-//! index — none of them ever change once published. That is what makes the
-//! whole API trivially cacheable and host-agnostic: it is just a directory of
-//! JSON blobs you can drop on any static host (R2, Pages, an edge CDN). The two
-//! exceptions that *move* as the log grows — `sth/latest.json` and `index.json`
-//! — are the only documents a client must refetch.
+//! Every file is write-once except `sth/latest.json` and `index.json`.
 //!
 //! ## URL → file mapping (the read API)
 //!
@@ -22,20 +16,9 @@
 //! | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | [`InclusionProof`]                | immutable |
 //! | `/v1/proof/consistency/<first>-<second>.json`         | [`ConsistencyProof`]              | immutable |
 //!
-//! Since #701 there is **no** static `/verify/group/<id>` artifact for the commit
-//! log: the leaves carry windowed pseudonyms, so per-group verification is dynamic
-//! and member-gated (the `GET /verify/group/<conversation_id>` endpoint and
-//! `pollis-verify group <conversation_id>` take the real id, which only a member
-//! knows). See the note in [`generate_artifacts`].
-//!
 //! ### The account-key tree (`/v1/account-keys/...`)
 //!
-//! The account-key directory is a **fully separate** Merkle tree from the commit
-//! log — its own entries, its own STHs (signed under the domain-separated
-//! [`account_key::STH_CONTEXT`]), its own manifest. So it gets its own subtree,
-//! mirroring the commit-log layout one level down under `account-keys/`; the
-//! commit-log `/v1/...` paths above are never touched. The two trees only share
-//! the signing key and the `/verify/...` namespace.
+//! A fully separate tree from the commit log, mirrored one level down under `account-keys/`.
 //!
 //! | URL                                                              | Contents                          | Cache     |
 //! |------------------------------------------------------------------|-----------------------------------|-----------|
@@ -51,12 +34,7 @@
 //!
 //! ### The binaries tree (`/v1/binaries/...`)
 //!
-//! A **third** fully separate Merkle tree (binary transparency, #453) — its own
-//! entries, its own STHs signed under the domain-separated
-//! [`binaries::STH_CONTEXT`], its own manifest. It mirrors the account-key subtree
-//! one level down under `binaries/`, and the commit-log / account-key paths are
-//! never touched. The three trees only share the signing key and the `/verify/...`
-//! namespace.
+//! A third separate tree (binary transparency, #453), mirrored under `binaries/`.
 //!
 //! | URL                                                          | Contents                          | Cache     |
 //! |--------------------------------------------------------------|-----------------------------------|-----------|
@@ -70,37 +48,14 @@
 //! | `/v1/binaries/proof/consistency/<first>-<second>.json`       | [`ConsistencyProof`]              | immutable |
 //! | `/verify/release/<tag>`                                      | [`ReleaseReport`] (precomputed)   | short     |
 //!
-//! [`binaries::STH_CONTEXT`]: verifiable_log_builder::binaries::STH_CONTEXT
 //! [`ReleaseReport`]: crate::release::ReleaseReport
 //!
 //! ### The second commit-log tree (`/v1/commit-log-2/...`, #1579)
 //!
-//! The commit-log tree served directly under `/v1/...` is **retired**: after the
-//! DS began pruning `mls_commit_log`, heads were signed that do not extend its
-//! earlier history. Its files stay served exactly where they are, frozen; the
-//! publisher no longer writes any of them. Its successor uses the same layout as
-//! the table above under [`COMMIT_LOG_2_API_PREFIX`], with heads signed under
-//! `STH_CONTEXT_COMMIT_LOG_2`. The signed reset statement that ties the two
-//! together is served at [`RESET_STATEMENT_PATH`] (`/v1/commit-log-reset.json`).
+//! The tree directly under `/v1/...` is retired and frozen; its successor uses the
+//! same layout under [`COMMIT_LOG_2_API_PREFIX`], linked by [`RESET_STATEMENT_PATH`].
 //!
-//! The file path under the output root mirrors the URL exactly (drop the
-//! leading `/`), so serving is a literal static-file mapping.
-//!
-//! ## Per-group verification is dynamic and member-gated (#701)
-//!
-//! The commit-log tree emits **no** precomputed per-group report. Before #701 it
-//! wrote one report per conversation at `verify/group/<conversation_id>` and
-//! listed every conversation in the manifest — but that enumeration is exactly the
-//! longitudinal exposure #701 closes. The published leaves now carry windowed
-//! pseudonyms, so per-group verification moves to the dynamic
-//! `GET /verify/group/<conversation_id>` endpoint (dev + live servers) and
-//! `pollis-verify group <conversation_id>`, both of which take the *real*
-//! conversation id (something only a member knows), re-derive the windowed
-//! pseudonyms, and verify the whole conversation across windows via the shared
-//! `verify_group_in_bundle`. The account-key tree still emits precomputed
-//! `/verify/account/<user_id>` reports — its `user_id` is deliberately load-bearing
-//! (key transparency looks a user up by identity) and out of #701's scope (see
-//! [`generate_account`]).
+//! File paths mirror URLs (drop the leading `/`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -119,18 +74,12 @@ use crate::release::{verify_release_in_bundle, BINARIES_TENANT};
 /// API version segment all artifacts live under.
 pub const API_VERSION: &str = "v1";
 
-/// Path prefix the account-key tree's artifacts live under — the commit-log
-/// `/v1` surface one level down, in its own subtree.
+/// Path prefix the account-key tree's artifacts live under.
 pub const ACCOUNT_API_PREFIX: &str = "v1/account-keys";
 
 /// Emit the root-signed key-set statement at `/v1/key-set.json` (#754).
-///
-/// The statement is produced OFFLINE by the root ceremony (`builder key-set`), so it
-/// is not derived from any bundle — it is carried through. What this does add is a
-/// gate: the statement is verified against the supplied root pin before it can be
-/// written. Publishing a key set that does not verify would be the worst possible
-/// artifact to serve, because a client that cannot validate the set falls back to
-/// trusting nothing and the whole log reads as unverifiable.
+/// Produced offline by the root ceremony; verified against the root pin before it is
+/// written, since a bad key set makes the whole log unverifiable.
 pub fn insert_key_set(
     map: &mut BTreeMap<String, Vec<u8>>,
     statement: &verifiable_log::KeySetStatement,
@@ -145,8 +94,7 @@ pub fn insert_key_set(
 }
 
 /// Write an artifact map out file-for-file under `root`, creating parent
-/// directories as it goes. The three `generate*` entry points differ only in
-/// which map they build, never in how it lands on disk.
+/// directories as it goes.
 fn write_artifacts(root: &Path, artifacts: &BTreeMap<String, Vec<u8>>) -> Result<()> {
     for (rel, bytes) in artifacts {
         let path = root.join(rel);
@@ -161,24 +109,14 @@ fn write_artifacts(root: &Path, artifacts: &BTreeMap<String, Vec<u8>>) -> Result
 /// The complete read API for a bundle as an in-memory map of
 /// **relative path → JSON bytes** (e.g. `"v1/sth/latest.json"`), exactly the
 /// content the static tree would write to disk.
-///
-/// This is the single source of truth for the `/v1` surface: the disk
-/// [`generate`] writes this map out file-for-file, and the live server
-/// ([`crate::live`]) holds it in memory and serves the bytes directly. Keying by
-/// the request-relative path (no leading `/`) means a server looks an artifact
-/// up with the same `path.trim_start_matches('/')` it uses for the static host,
-/// so on-disk and in-memory serving cannot diverge.
+/// The single source of truth for the `/v1` surface: [`generate`] writes it and
+/// [`crate::live`] serves it from memory.
 pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
     commit_tree_artifacts(bundle, API_VERSION)
 }
 
 /// Path prefix of the **second** commit-log tree (#1579). The first commit-log
-/// tree, served directly under `/v1/...`, is retired and frozen: the publisher no
-/// longer writes any of its files. Its successor gets its own subtree, a sibling
-/// of `account-keys/` and `binaries/`, so it shares the API version, the manifest
-/// shape and the format gate, and so no URL of the retired tree is ever reused.
-/// The path segment is the tree's name (`commit-log-2`), the same string as its
-/// STH context suffix and its `STH_CONTEXTS` entry, so the three cannot drift.
+/// tree under `/v1/...` is retired; the segment matches the tree's STH context suffix.
 pub const COMMIT_LOG_2_API_PREFIX: &str = "v1/commit-log-2";
 
 /// Where the signed reset statement retiring the first commit-log tree is served
@@ -186,9 +124,7 @@ pub const COMMIT_LOG_2_API_PREFIX: &str = "v1/commit-log-2";
 pub const RESET_STATEMENT_PATH: &str = "v1/commit-log-reset.json";
 
 /// The read API for the **second** commit-log tree, under
-/// [`COMMIT_LOG_2_API_PREFIX`]. Same artifact set and manifest as the first tree,
-/// one level down; the heads in `bundle` are signed under
-/// [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`] by the builder.
+/// [`COMMIT_LOG_2_API_PREFIX`].
 pub fn generate_commit_log_2_artifacts(
     bundle: &Bundle,
 ) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
@@ -223,14 +159,12 @@ fn commit_tree_artifacts(
 ) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
-    // /v1/public_key.json
     insert_json(
         &mut map,
         format!("{prefix}/public_key.json"),
         &bundle.public_key_doc(),
     )?;
 
-    // /v1/sth/<size>.json for every head, plus latest.json for the largest.
     let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
     for sth in &bundle.sths {
         insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
@@ -244,13 +178,11 @@ fn commit_tree_artifacts(
         insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
     }
 
-    // /v1/entries.json and /v1/entries/<index>.json
     insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
     for (i, entry) in bundle.entries.iter().enumerate() {
         insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
     }
 
-    // /v1/proof/inclusion/<tree_size>/<leaf_index>.json
     let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
     for check in &bundle.inclusion {
         let ts = check.proof.tree_size;
@@ -266,7 +198,6 @@ fn commit_tree_artifacts(
         });
     }
 
-    // /v1/proof/consistency/<first>-<second>.json
     let mut consistency_refs: Vec<ConsistencyRef> = Vec::with_capacity(bundle.consistency.len());
     for check in &bundle.consistency {
         let f = check.proof.first_size;
@@ -283,24 +214,6 @@ fn commit_tree_artifacts(
     }
 
     // No precomputed `/verify/group/<id>` files and no conversation list (#701).
-    //
-    // Before #701 this emitted one static report per conversation and advertised
-    // every conversation id in the manifest — but that enumeration *is* the
-    // exposure #701 closes (which groups exist and how active each is). Since the
-    // published leaves now carry only windowed pseudonyms, a static report can key
-    // on nothing better than a per-(conversation, window) pseudonym, which still
-    // enumerates conversation-windows and their activity — undoing the ticket.
-    //
-    // Per-group verification therefore becomes **dynamic and member-gated**: the
-    // `GET /verify/group/<conversation_id>` endpoint (dev + live servers) and
-    // `pollis-verify group <conversation_id>` take the *real* id — which only a
-    // member knows — re-derive the windowed pseudonyms, and verify the whole
-    // conversation across windows. There is nothing for a static host to
-    // precompute without either re-publishing real ids or re-enumerating the group
-    // set, so the static commit-log tree publishes no per-group artifact at all.
-
-    // /v1/index.json — the discovery manifest. Built last so it only ever
-    // advertises artifacts already present in the map.
     let manifest = Manifest {
         format_version: FORMAT_VERSION,
         version: API_VERSION.to_string(),
@@ -319,14 +232,7 @@ fn commit_tree_artifacts(
 
 /// Write the full immutable artifact tree for `bundle` under `root`, returning
 /// the [`Manifest`] that was published at `/v1/index.json`.
-///
-/// `root` is created if missing. Existing files with the same names are
-/// overwritten — generating from the same bundle is idempotent, and since every
-/// artifact is content-addressed by its `(size, index)` coordinates, a larger
-/// bundle only ever *adds* files, it never rewrites an existing immutable one.
-///
-/// The bytes written are exactly [`generate_artifacts`]'s output, so the static
-/// host and the live server serve byte-identical artifacts.
+/// Idempotent: per-size artifacts are content-addressed, so a larger bundle only adds files.
 pub fn generate(bundle: &Bundle, root: &Path) -> Result<Manifest> {
     let (manifest, artifacts) = generate_artifacts(bundle)?;
     write_artifacts(root, &artifacts)?;
@@ -336,27 +242,20 @@ pub fn generate(bundle: &Bundle, root: &Path) -> Result<Manifest> {
 /// The complete read API for the **account-key** tree as an in-memory map of
 /// **relative path → JSON bytes** (e.g. `"v1/account-keys/sth/latest.json"`),
 /// exactly the content the static subtree would write to disk.
-///
-/// This mirrors [`generate_artifacts`] one level down under
-/// [`ACCOUNT_API_PREFIX`]: the same immutable STH / entries / proofs surface,
-/// plus a precomputed `/verify/account/<user_id>` report for every user in the
-/// bundle. The artifact *bytes* are tenant-agnostic (an STH already carries its
-/// own signature, signed under the account context by the builder); only the
-/// path prefix, the per-user reports, and the manifest shape differ.
+/// Mirrors [`generate_artifacts`] under [`ACCOUNT_API_PREFIX`], plus a
+/// `/verify/account/<user_id>` report per user.
 pub fn generate_account_artifacts(
     bundle: &Bundle,
 ) -> Result<(AccountManifest, BTreeMap<String, Vec<u8>>)> {
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let prefix = ACCOUNT_API_PREFIX;
 
-    // /v1/account-keys/public_key.json
     insert_json(
         &mut map,
         format!("{prefix}/public_key.json"),
         &bundle.public_key_doc(),
     )?;
 
-    // /v1/account-keys/sth/<size>.json for every head, plus latest.json.
     let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
     for sth in &bundle.sths {
         insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
@@ -370,13 +269,11 @@ pub fn generate_account_artifacts(
         insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
     }
 
-    // /v1/account-keys/entries.json and /v1/account-keys/entries/<index>.json
     insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
     for (i, entry) in bundle.entries.iter().enumerate() {
         insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
     }
 
-    // /v1/account-keys/proof/inclusion/<tree_size>/<leaf_index>.json
     let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
     for check in &bundle.inclusion {
         let ts = check.proof.tree_size;
@@ -392,7 +289,6 @@ pub fn generate_account_artifacts(
         });
     }
 
-    // /v1/account-keys/proof/consistency/<first>-<second>.json
     let mut consistency_refs: Vec<ConsistencyRef> = Vec::with_capacity(bundle.consistency.len());
     for check in &bundle.consistency {
         let f = check.proof.first_size;
@@ -408,34 +304,26 @@ pub fn generate_account_artifacts(
         });
     }
 
-    // /verify/account/<user_id> — a precomputed report for every distinct user
-    // in the bundle's account-key entries. The bytes are compact JSON of the
-    // shared [`verify_account_in_bundle`] verdict, so a future live
-    // `GET /verify/account/<id>` endpoint serving the same core returns
-    // byte-identical responses. The file has no extension — its path is the
-    // endpoint URL verbatim.
+    // A precomputed compact-JSON report per user; the path is the endpoint URL verbatim.
     let users: Vec<String> = bundle
         .entries
         .iter()
         .filter(|e| e.tenant == ACCOUNT_TENANT)
         .filter_map(|e| AccountKeyLeaf::decode(&e.data).ok())
         .map(|leaf| leaf.user_id)
-        // A report is one path segment under `verify/account/`; reject anything
-        // that could escape it. Real user ids are ULID-shaped and always pass —
-        // this only guards against malformed source data.
+        // Reject anything that could escape `verify/account/`.
         .filter(|id| is_safe_segment(id))
         .collect::<BTreeSet<String>>()
         .into_iter()
         .collect();
     for user in &users {
         let report = verify_account_in_bundle(bundle, user);
-        // Compact (not pretty) to match a live endpoint's `to_string`.
+        // Compact to match a live endpoint's `to_string`.
         let bytes = serde_json::to_vec(&report)?;
         map.insert(format!("verify/account/{user}"), bytes);
     }
 
-    // /v1/account-keys/index.json — the discovery manifest, built last so it
-    // only ever advertises artifacts already present in the map.
+    // Built last so it only advertises artifacts already in the map.
     let manifest = AccountManifest {
         format_version: FORMAT_VERSION,
         version: API_VERSION.to_string(),
@@ -456,12 +344,6 @@ pub fn generate_account_artifacts(
 /// Write the account-key tree's static subtree for `account_bundle` under
 /// `root`, returning the [`AccountManifest`] published at
 /// `/v1/account-keys/index.json`.
-///
-/// `root` is the *same* output root as [`generate`] — the account subtree lives
-/// alongside the commit-log tree under it, never overlapping any commit-log
-/// path. Existing files are overwritten; like the commit-log tree every
-/// per-size artifact is content-addressed, so a larger bundle only ever adds
-/// files.
 pub fn generate_account(account_bundle: &Bundle, root: &Path) -> Result<AccountManifest> {
     let (manifest, artifacts) = generate_account_artifacts(account_bundle)?;
     write_artifacts(root, &artifacts)?;
@@ -469,36 +351,27 @@ pub fn generate_account(account_bundle: &Bundle, root: &Path) -> Result<AccountM
 }
 
 /// Path prefix the binaries tree's artifacts live under — a third sibling of the
-/// commit-log `/v1` surface and the account-key subtree, one level down in its
-/// own subtree (`v1/binaries/...`), never overlapping either.
+/// commit-log `/v1` surface and the account-key subtree.
 pub const BINARIES_API_PREFIX: &str = "v1/binaries";
 
 /// The complete read API for the **binaries** tree (binary transparency) as an
 /// in-memory map of **relative path → JSON bytes** (e.g.
 /// `"v1/binaries/sth/latest.json"`), exactly the content the static subtree would
 /// write to disk.
-///
-/// This mirrors [`generate_account_artifacts`] one level down under
-/// [`BINARIES_API_PREFIX`]: the same immutable STH / entries / proofs surface,
-/// plus a precomputed `/verify/release/<tag>` report for every release tag in the
-/// bundle. Like the account tree the artifact *bytes* are tenant-agnostic (each
-/// STH already carries its own signature, signed under the binaries context by
-/// the builder); only the path prefix, the per-release reports, and the manifest
-/// shape differ.
+/// Mirrors [`generate_account_artifacts`] under [`BINARIES_API_PREFIX`], plus a
+/// `/verify/release/<tag>` report per tag.
 pub fn generate_binaries_artifacts(
     bundle: &Bundle,
 ) -> Result<(BinaryManifest, BTreeMap<String, Vec<u8>>)> {
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let prefix = BINARIES_API_PREFIX;
 
-    // /v1/binaries/public_key.json
     insert_json(
         &mut map,
         format!("{prefix}/public_key.json"),
         &bundle.public_key_doc(),
     )?;
 
-    // /v1/binaries/sth/<size>.json for every head, plus latest.json.
     let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
     for sth in &bundle.sths {
         insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
@@ -512,13 +385,11 @@ pub fn generate_binaries_artifacts(
         insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
     }
 
-    // /v1/binaries/entries.json and /v1/binaries/entries/<index>.json
     insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
     for (i, entry) in bundle.entries.iter().enumerate() {
         insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
     }
 
-    // /v1/binaries/proof/inclusion/<tree_size>/<leaf_index>.json
     let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
     for check in &bundle.inclusion {
         let ts = check.proof.tree_size;
@@ -534,7 +405,6 @@ pub fn generate_binaries_artifacts(
         });
     }
 
-    // /v1/binaries/proof/consistency/<first>-<second>.json
     let mut consistency_refs: Vec<ConsistencyRef> = Vec::with_capacity(bundle.consistency.len());
     for check in &bundle.consistency {
         let f = check.proof.first_size;
@@ -550,33 +420,26 @@ pub fn generate_binaries_artifacts(
         });
     }
 
-    // /verify/release/<tag> — a precomputed report for every distinct release tag
-    // in the bundle's binary entries. The bytes are compact JSON of the shared
-    // [`verify_release_in_bundle`] verdict, so the CLI (`pollis-verify release`)
-    // and a future live endpoint serving the same core return byte-identical
-    // responses. The file has no extension — its path is the endpoint URL verbatim.
+    // A precomputed compact-JSON report per release tag; the path is the endpoint URL verbatim.
     let tags: Vec<String> = bundle
         .entries
         .iter()
         .filter(|e| e.tenant == BINARIES_TENANT)
         .filter_map(|e| BinaryRecord::decode(&e.data).ok())
         .map(|r| r.release_tag)
-        // A report is one path segment under `verify/release/`; reject anything
-        // that could escape it. Real tags are `vX.Y.Z`-shaped and always pass —
-        // this only guards against malformed source data.
+        // Reject anything that could escape `verify/release/`.
         .filter(|t| is_safe_segment(t))
         .collect::<BTreeSet<String>>()
         .into_iter()
         .collect();
     for tag in &tags {
         let report = verify_release_in_bundle(bundle, tag);
-        // Compact (not pretty) to match a live endpoint's `to_string`.
+        // Compact to match a live endpoint's `to_string`.
         let bytes = serde_json::to_vec(&report)?;
         map.insert(format!("verify/release/{tag}"), bytes);
     }
 
-    // /v1/binaries/index.json — the discovery manifest, built last so it only
-    // ever advertises artifacts already present in the map.
+    // Built last so it only advertises artifacts already in the map.
     let manifest = BinaryManifest {
         format_version: FORMAT_VERSION,
         version: API_VERSION.to_string(),
@@ -596,12 +459,6 @@ pub fn generate_binaries_artifacts(
 
 /// Write the binaries tree's static subtree for `binaries_bundle` under `root`,
 /// returning the [`BinaryManifest`] published at `/v1/binaries/index.json`.
-///
-/// `root` is the *same* output root as [`generate`] — the binaries subtree lives
-/// alongside the commit-log and account-key trees under it, never overlapping any
-/// of their paths. Existing files are overwritten; like the other trees every
-/// per-size artifact is content-addressed, so a larger bundle only ever adds
-/// files.
 pub fn generate_binaries(binaries_bundle: &Bundle, root: &Path) -> Result<BinaryManifest> {
     let (manifest, artifacts) = generate_binaries_artifacts(binaries_bundle)?;
     write_artifacts(root, &artifacts)?;
@@ -617,8 +474,7 @@ pub fn load_bundle(path: &Path) -> Result<Bundle> {
 }
 
 /// Is `id` safe to use as the single `verify/group/<id>` path segment? Rejects
-/// empty ids, `.`/`..`, and anything containing a path separator so a malformed
-/// conversation id can never write outside the output directory.
+/// empty ids, `.`/`..`, and path separators.
 fn is_safe_segment(id: &str) -> bool {
     !id.is_empty() && id != "." && id != ".." && !id.contains('/') && !id.contains('\\')
 }
@@ -664,9 +520,7 @@ mod key_set_artifact_tests {
         assert!(map.contains_key(&format!("{API_VERSION}/key-set.json")));
     }
 
-    // The gate: a statement the pinned root did not sign must never reach the
-    // published tree. A client that cannot validate the key set trusts nothing, so
-    // serving a bad one takes the whole log down rather than just this file.
+    // A statement the pinned root did not sign must never reach the published tree.
     #[test]
     fn a_statement_the_root_did_not_sign_is_refused() {
         let other = SigningKey::<MlDsa44>::from_seed(&[9u8; 32].into());
@@ -677,8 +531,7 @@ mod key_set_artifact_tests {
         assert!(map.is_empty(), "nothing may be written when verification fails");
     }
 
-    /// The builder names the successor's path inside the signed reset statement;
-    /// the layout serves the tree there. They must be the same string.
+    /// The builder's successor path and the layout's must be the same string.
     #[test]
     fn the_successor_path_matches_the_one_the_reset_statement_names() {
         assert_eq!(

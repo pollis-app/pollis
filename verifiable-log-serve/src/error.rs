@@ -1,6 +1,4 @@
-//! Serve-layer error type. Every path here returns `Result` and never panics;
-//! the only `panic!`-shaped exit is the CLI mapping an error to a non-zero
-//! process code.
+//! Serve-layer error type. Every path here returns `Result` and never panics.
 
 use thiserror::Error;
 
@@ -19,11 +17,7 @@ pub enum ServeError {
     Http(String),
 
     /// The served log is published in a wire format newer than this build
-    /// understands. This is **version skew, not tampering**: the verifier is too
-    /// old for the log and must be upgraded. Kept distinct from every other
-    /// variant precisely so `pollis-verify` can report "upgrade your verifier"
-    /// with its own exit code instead of "verification failed" — the same
-    /// false-alarm failure mode #668 ruled out for the missing log pin.
+    /// understands: version skew, not tampering, so `pollis-verify` says "upgrade your verifier".
     #[error(
         "log format v{served} is newer than this verifier understands (up to v{supported}) — \
          your pollis-verify is too old for this log; upgrade it"

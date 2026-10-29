@@ -1,8 +1,4 @@
 //! #1579: minting the reset statement that retires the first commit-log tree.
-//!
-//! The committed `commit-log-retirement.json` must describe itself consistently,
-//! the mint must refuse unless it matches what is served, and the CLI must write
-//! a statement that verifies only under the reset domain.
 #![cfg(feature = "db-source")]
 
 use std::collections::BTreeMap;
@@ -83,20 +79,16 @@ fn the_mint_accepts_facts_that_match_what_is_served() {
 fn the_mint_refuses_facts_that_disagree_with_what_is_served() {
     let (facts, mut served) = fixture();
     let k = key();
-    // A listed head that is not served.
     let mut missing = served.clone();
     missing.remove(&3);
     assert!(check_against_served(&facts, &missing, &candidates(&k)).is_err());
-    // A served chain head with another root.
     served.insert(3, Sth::create(&k, 3, [9u8; 32], TS));
     assert!(check_against_served(&facts, &served, &candidates(&k)).is_err());
-    // A fork signed by a key the log does not hold.
     let (facts, mut served) = fixture();
     let stranger = SigningKey::from_seed(&[42u8; 32].into());
     let f = served[&4].clone();
     served.insert(4, Sth::create(&stranger, 4, f.root_bytes().unwrap(), TS));
     assert!(check_against_served(&facts, &served, &candidates(&k)).is_err());
-    // A served head the facts leave out.
     let (facts, mut served) = fixture();
     served.insert(5, Sth::create(&k, 5, [8u8; 32], TS));
     assert!(check_against_served(&facts, &served, &candidates(&k)).is_err());
@@ -131,8 +123,7 @@ fn the_committed_retirement_facts_are_self_consistent() {
 /// Run against the maintainer's saved copy of what verify.pollis.com serves
 /// (`POLLIS_1579_EVIDENCE=<dir with v1/sth/*.json and v1/public_key.json>`):
 /// every listed head is served with its root, and every chain and fork head
-/// verifies under the served (pinned) log key. CI runs the same check for real,
-/// against the live heads, before it signs.
+/// verifies under the served (pinned) log key.
 #[test]
 #[ignore = "needs the saved #1579 evidence; set POLLIS_1579_EVIDENCE"]
 fn the_committed_retirement_facts_match_the_saved_evidence() {
@@ -197,7 +188,6 @@ fn the_cli_mints_a_statement_that_verifies_only_as_a_reset() {
     st.verify_any(&candidates(&key())).unwrap();
     assert_eq!(st.statement.successor.genesis_root_hash, hex::encode(first.leaf_hash()));
 
-    // No successor leaves yet: refused, nothing half-written is trusted.
     let empty = dir.path().join("empty.json");
     std::fs::write(&empty, "[]").unwrap();
     assert!(!run(&empty).status.success());

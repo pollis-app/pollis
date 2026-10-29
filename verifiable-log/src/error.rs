@@ -1,11 +1,8 @@
-//! Error and result types. The verification paths never panic — every
-//! fallible operation returns a `Result` so a monitor can fail a proof
-//! cleanly instead of crashing.
+//! Error and result types. Verification paths return errors, never panic.
 
 use thiserror::Error;
 
-/// A per-tenant invariant rejected an append. Carries the tenant id and a
-/// human-readable reason so a monitor can produce an actionable report.
+/// A per-tenant invariant rejected an append.
 #[derive(Debug, Clone, Error)]
 #[error("tenant `{tenant}` invariant violated: {message}")]
 pub struct InvariantViolation {
@@ -53,16 +50,12 @@ pub enum Error {
     BadSignature,
 
     /// A key-set statement that is malformed, unsupported, or does not verify.
-    /// Carries a message because these failures are operator-facing: "which key,
-    /// and why" is the difference between a five-minute fix and an incident.
     #[error("invalid key-set statement: {0}")]
     KeySet(String),
 
-    /// A reset statement (#1579) that is malformed, contradicts itself, or does
-    /// not verify.
+    /// A reset statement (#1579) that is malformed, contradicts itself, or fails.
     #[error("invalid reset statement: {0}")]
     Reset(String),
 }
 
-/// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, Error>;

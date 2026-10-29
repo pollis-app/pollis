@@ -208,8 +208,7 @@ fn run_generate(
     root_key_hex: Option<&str>,
     out: &std::path::Path,
 ) -> Result<()> {
-    // The first commit-log tree, directly under /v1. Retired in production
-    // (#1579): CI omits --bundle so none of its frozen files is rewritten.
+    // The retired first commit-log tree (#1579); CI omits --bundle so it stays frozen.
     if let Some(bundle_path) = bundle_path {
         let bundle = layout::load_bundle(bundle_path)?;
         let manifest = layout::generate(&bundle, out)?;
@@ -256,10 +255,7 @@ fn run_generate(
         }
     }
 
-    // Publish the root-signed key set alongside the trees (#754). Verified against
-    // the pinned root FIRST: a statement that does not verify is not a degraded
-    // artifact, it is one that takes the whole log down for every client, because a
-    // client that cannot validate the key set trusts no signer at all.
+    // Verified against the pinned root first: a bad key set takes the whole log down.
     if let (Some(path), Some(root_hex)) = (key_set_path, root_key_hex) {
         let raw = std::fs::read_to_string(path)?;
         let statement: verifiable_log_serve::KeySetStatement = serde_json::from_str(&raw)
@@ -279,7 +275,7 @@ fn run_generate(
             );
         }
     }
-    // Account-key tree (separate tree, domain-separated STH) — only when asked.
+    // Account-key tree, only when asked.
     if let Some(account_path) = account_bundle_path {
         let account_bundle = layout::load_bundle(account_path)?;
         let account_manifest = layout::generate_account(&account_bundle, out)?;
@@ -294,8 +290,7 @@ fn run_generate(
         );
     }
 
-    // Binaries tree (binary transparency — a third separate tree, domain-
-    // separated STH) — only when asked.
+    // Binaries tree, only when asked.
     if let Some(binaries_path) = binaries_bundle_path {
         let binaries_bundle = layout::load_bundle(binaries_path)?;
         let binaries_manifest = layout::generate_binaries(&binaries_bundle, out)?;
@@ -332,9 +327,7 @@ fn run_live(
 ) -> Result<()> {
     let db = db.or_else(|| std::env::var("TURSO_DATABASE_URL").ok());
 
-    // The live server reads ONLY `mls_commit_log`, so it must read from the log
-    // DB. Resolve it from (1) --log-db, (2) LOG_DB_URL, (3) the main --db /
-    // TURSO_DATABASE_URL (single-DB / pre-cutover behaviour).
+    // Log DB: --log-db, then LOG_DB_URL, then the main --db.
     let log_db = log_db
         .or_else(|| std::env::var("LOG_DB_URL").ok())
         .or_else(|| db.clone())
@@ -344,15 +337,12 @@ fn run_live(
                     .into(),
             )
         })?;
-    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
-    // tests, and pre-cutover all behave exactly as before. A local file path
-    // ignores the token entirely.
+    // The log DB has its own token; falls back to TURSO_AUTH_TOKEN.
     let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
         .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
         .unwrap_or_default();
 
-    // Resolve the signing key BEFORE binding so a missing key fails fast — the
-    // live server refuses to start without one (same loader as the builder).
+    // Resolve the signing key before binding so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
     let server = LiveServer::spawn(

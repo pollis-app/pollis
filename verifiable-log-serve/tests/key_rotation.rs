@@ -1,30 +1,8 @@
 //! Rotation-overlap acceptance across **every** verify path (#875).
 //!
-//! The rotation design (`docs/sth-signing-key-custody.md` §5) says a signing-key
-//! changeover must be invisible: during the overlap window the log publishes the
-//! new active key *and* the retiring one (with its `not_after`), and a head
-//! signed by either is honest. `public_key.json` and `sth/latest.json` are
-//! separate artifacts on separate cache policies, and the rotation runbook (§7
-//! step 5) syncs them in two passes — so there is a real, expected window in
-//! which the served key document already names the successor while the served
-//! head is still signed by the retiring key. That is exactly the state modelled
-//! here.
-//!
-//! Four verify paths must agree about it:
-//!
-//! * `remote::verify_remote`      — the `pollis-verify verify` whole-log audit
-//! * `group::verify_group`        — `pollis-verify group` / the live endpoint
-//! * `account::verify_account`    — the in-app self/peer key audit
-//! * `release::verify_release`    — the in-app "verify my build" check
-//!
-//! Before #875 only the first applied the overlap set: the other three rebuilt a
-//! `Bundle` with `retired_keys: Vec::new()` and verified against the single
-//! active key, so an honest mid-rotation log made a shipped client raise a hard
-//! `AuditStatus::Alarm` — a client screaming "tampering" at an honest server.
-//!
-//! The negatives are the teeth: a key whose overlap window has **closed**, and a
-//! key that was **never published at all**, must still be rejected by all four.
-//! A fix that makes everything pass would be worse than the bug.
+//! During the overlap window the served key document names the successor while heads are still
+//! signed by the retiring key; every verify path must accept that, and reject closed or
+//! unpublished keys.
 
 use std::path::Path;
 
@@ -43,14 +21,12 @@ fn old_key() -> SigningKey {
     SigningKey::from_seed(&[9u8; 32].into())
 }
 
-/// The successor the served key document names as active. It signs nothing in
-/// these fixtures: that asymmetry IS the rotation window.
+/// The successor the served key document names as active; it signs nothing here.
 fn new_key() -> SigningKey {
     SigningKey::from_seed(&[7u8; 32].into())
 }
 
-/// A third key that was never published by this log — the control for "accepts
-/// anything with a `keys` array".
+/// A third key that was never published by this log.
 fn stranger_key() -> SigningKey {
     SigningKey::from_seed(&[3u8; 32].into())
 }
@@ -159,8 +135,7 @@ fn public_key_paths(root: &Path) -> Vec<std::path::PathBuf> {
 
 /// Rewrite every served `public_key.json` to announce `active` as the current
 /// signer with `retiring` still inside an overlap window that ends at
-/// `not_after`. This is the published state of a log mid-rotation; the heads on
-/// disk are untouched and stay signed by whoever signed them.
+/// `not_after`. The heads on disk are untouched.
 fn publish_key_set(root: &Path, active: &SigningKey, retiring: &SigningKey, not_after: u64) {
     let doc = PublicKeyDoc {
         public_key: hex_of(active),
@@ -202,8 +177,7 @@ fn window_closed() -> u64 {
 }
 
 /// Serve a log whose heads are signed by the OLD key while the published key
-/// document has already moved to the successor and lists the old one as
-/// retiring-but-live. This is an honest log mid-rotation.
+/// document has moved to the successor, listing the old one as retiring.
 fn with_mid_rotation_log(f: impl FnOnce(&str)) {
     let dir = tempfile::tempdir().unwrap();
     generate_all_trees(dir.path(), &old_key());
@@ -214,14 +188,7 @@ fn with_mid_rotation_log(f: impl FnOnce(&str)) {
     server.shutdown();
 }
 
-// ── The decisive case, one test per verify path ──────────────────────────────
-//
-// Split per path deliberately: before #875 the first of these passed and the
-// other three failed, and that asymmetry IS the bug. A single combined test
-// would hide which paths disagree.
-
-/// The whole-log audit (`pollis-verify verify`) — already applied the overlap
-/// set before #875, and must keep doing so.
+/// The whole-log audit (`pollis-verify verify`).
 #[test]
 fn rotation_overlap_is_accepted_by_the_whole_log_audit() {
     with_mid_rotation_log(|base| {
@@ -234,8 +201,7 @@ fn rotation_overlap_is_accepted_by_the_whole_log_audit() {
     });
 }
 
-/// The per-group verifier (`pollis-verify group`, the static endpoint and the
-/// live endpoint all end here).
+/// The per-group verifier.
 #[test]
 fn rotation_overlap_is_accepted_by_group_verify() {
     with_mid_rotation_log(|base| {
@@ -249,9 +215,7 @@ fn rotation_overlap_is_accepted_by_group_verify() {
     });
 }
 
-/// The per-account verifier — the one the shipped client runs for
-/// `self_audit_account_key` / `audit_peer_account_key`. A false negative here is
-/// a hard `AuditStatus::Alarm` against an honest log.
+/// The per-account verifier (`self_audit_account_key` / `audit_peer_account_key`).
 #[test]
 fn rotation_overlap_is_accepted_by_account_verify() {
     with_mid_rotation_log(|base| {
@@ -265,9 +229,7 @@ fn rotation_overlap_is_accepted_by_account_verify() {
     });
 }
 
-/// The per-release verifier — the one the shipped client runs for
-/// `verify_own_build`. A false negative here tells a user their genuine binary
-/// is not one Pollis published.
+/// The per-release verifier (`verify_own_build`).
 #[test]
 fn rotation_overlap_is_accepted_by_release_verify() {
     with_mid_rotation_log(|base| {
@@ -281,10 +243,7 @@ fn rotation_overlap_is_accepted_by_release_verify() {
     });
 }
 
-// ── The negatives: the overlap set must not become a blank cheque ────────────
-
-/// The same log once the overlap window has CLOSED. Expiry is a deadline, not a
-/// suggestion: every path must now refuse the head.
+/// Once the overlap window has closed, every path must refuse the head.
 #[test]
 fn a_head_signed_by_a_key_past_its_window_is_rejected_everywhere() {
     let dir = tempfile::tempdir().unwrap();
@@ -326,14 +285,11 @@ fn a_head_signed_by_a_key_past_its_window_is_rejected_everywhere() {
 }
 
 /// A head signed by a key the log never published at all — the control that the
-/// overlap machinery still anchors trust in the *published* set and has not
-/// degenerated into "accept any signature".
+/// overlap machinery has not become "accept any signature".
 #[test]
 fn a_head_signed_by_an_unpublished_key_is_rejected_everywhere() {
     let dir = tempfile::tempdir().unwrap();
-    // Signed by a stranger...
     generate_all_trees(dir.path(), &stranger_key());
-    // ...while the published set names two entirely different keys, both live.
     publish_key_set(dir.path(), &new_key(), &old_key(), window_open());
 
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
@@ -359,8 +315,7 @@ fn a_head_signed_by_an_unpublished_key_is_rejected_everywhere() {
     server.shutdown();
 }
 
-/// No rotation in flight: the ordinary single-key log must keep verifying
-/// everywhere, unchanged. The overlap plumbing must not cost the common case.
+/// No rotation in flight: a single-key log keeps verifying everywhere.
 #[test]
 fn a_log_with_no_rotation_still_verifies_everywhere() {
     let dir = tempfile::tempdir().unwrap();
@@ -377,11 +332,8 @@ fn a_log_with_no_rotation_still_verifies_everywhere() {
     server.shutdown();
 }
 
-// ── Serde shape: a dropped field is how this happened ────────────────────────
-
 /// The served key document must round-trip its `keys` array — entries, order and
-/// `not_after` intact. A stand-in struct that keeps only `public_key` silently
-/// discards the overlap set, which is precisely the failure #875 is about.
+/// `not_after` intact; dropping it is the #875 failure.
 #[test]
 fn public_key_doc_round_trips_its_key_set() {
     let doc = PublicKeyDoc {
@@ -409,13 +361,10 @@ fn public_key_doc_round_trips_its_key_set() {
     assert_eq!(back.keys, doc.keys);
     assert_eq!(back.keys[1].not_after, Some(1_800_000_000_000));
 
-    // The active key carries no expiry and the retiring one does — the shape the
-    // overlap window depends on.
     assert!(back.keys[0].not_after.is_none());
 }
 
-/// The generated artifact really does carry the key set on disk (not only in
-/// memory), so a client that parses it sees the overlap.
+/// The generated artifact carries the key set on disk.
 #[test]
 fn the_served_document_carries_the_key_set_on_disk() {
     let dir = tempfile::tempdir().unwrap();
@@ -435,8 +384,7 @@ fn the_served_document_carries_the_key_set_on_disk() {
 }
 
 /// A document written before the key set existed (`keys` absent) still resolves
-/// to its single `public_key` — the backward-compatibility path every shipped
-/// verifier depends on.
+/// to its single `public_key`.
 #[test]
 fn a_legacy_document_without_keys_resolves_to_its_single_key() {
     let json = format!(r#"{{"public_key":"{}"}}"#, hex_of(&old_key()));
@@ -451,8 +399,7 @@ fn a_legacy_document_without_keys_resolves_to_its_single_key() {
 
 /// A bundle rebuilt on the verification side from a served document must carry
 /// the overlap set through to the verdict core, and hand back the same key set
-/// when asked for the document again. This is the round trip the three
-/// `verify_*_via` paths perform on every call.
+/// the `verify_*_via` paths perform on every call.
 #[test]
 fn a_verification_side_bundle_preserves_the_overlap_set() {
     let doc = PublicKeyDoc {
@@ -487,13 +434,11 @@ fn a_verification_side_bundle_preserves_the_overlap_set() {
         consistency: Vec::new(),
     };
 
-    // Both keys are candidates while the window is open...
     let candidates = bundle.key_candidates(now_ms());
     assert_eq!(candidates.len(), 2);
     assert!(candidates.iter().any(|(id, _)| *id == key_id_of(&old_key())));
     assert!(candidates.iter().any(|(id, _)| *id == key_id_of(&new_key())));
 
-    // ...and only the active one once it has closed.
     let after = bundle.key_candidates(window_open() + 1);
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].0, key_id_of(&new_key()));

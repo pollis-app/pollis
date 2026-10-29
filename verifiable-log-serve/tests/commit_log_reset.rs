@@ -1,12 +1,8 @@
 //! #1579: `pollis-verify remote` over a log whose first commit-log tree has been
 //! retired by a signed reset statement and continued as `commit-log-2`.
 //!
-//! The fixture mirrors production: a retired `/v1/...` tree with a consistent
-//! chain of heads, a forked head that its frozen `latest.json` and `index.json`
-//! point at, a superseded head, and a successor tree built from persisted
-//! leaves. A remote verify must PASS with the retired tree reported as RETIRED
-//! and the fork as KNOWN, and must FAIL on any head the statement does not list,
-//! on a tampered statement, and on any inconsistency in the successor.
+//! The fixture mirrors production; any unlisted head, tampered statement or successor
+//! inconsistency must FAIL.
 
 use std::path::Path;
 
@@ -68,8 +64,7 @@ fn fixture() -> Fixture {
         log.append(e.clone()).unwrap();
     }
 
-    // The fork: the publish that rebuilt from a pruned table. Its generated
-    // /v1 tree is what is "frozen" in place, as in production.
+    // The fork: the publish that rebuilt from a pruned table, frozen in place.
     let fork_rows: Vec<CommitRow> = (40..46).map(|s| row(s, &format!("f{s}"), 0)).collect();
     let fork_bundle: Bundle = serde_json::from_value(
         serde_json::to_value(build_bundle_from_leaves(&leaves(&fork_rows), &k, TS + 9).unwrap())
@@ -80,7 +75,6 @@ fn fixture() -> Fixture {
     let fork_head = fork_bundle.sths.last().unwrap().clone();
     let fork_mid = fork_bundle.sths.first().unwrap().clone();
 
-    // The consistent chain's heads, still served beside it.
     let chain_head = |n: usize| Sth::create(&k, n as u64, log.root_at(n).unwrap(), TS + n as u64);
     let heads: Vec<Sth> = [4usize, 5, 10].iter().map(|n| chain_head(*n)).collect();
     for h in &heads {
@@ -109,7 +103,6 @@ fn fixture() -> Fixture {
         },
     };
 
-    // The successor, seeded from what is live and signed under its own context.
     let succ_rows: Vec<CommitRow> = (60..64).map(|s| row(s, "s", s - 60)).collect();
     let successor: Bundle = serde_json::from_value(
         serde_json::to_value(build_commit_log_2_bundle(&leaves(&succ_rows), &k, TS + 99).unwrap())
@@ -227,7 +220,6 @@ fn a_statement_signed_by_another_key_fails() {
 fn any_inconsistency_in_the_successor_fails() {
     let f = fixture();
     let root = f.dir.path();
-    // Rewrite a published successor leaf.
     let mut e: Entry = f.successor.entries[1].clone();
     e.data.push(b' ');
     write_json(root, "v1/commit-log-2/entries/1.json", &e);

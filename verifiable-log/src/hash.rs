@@ -1,17 +1,10 @@
 //! SHA-256 hashing primitives for an RFC 6962-style Merkle tree.
-//!
-//! RFC 6962 domain-separates leaves from interior nodes so that no leaf can
-//! ever be confused with an internal node (a second-preimage defence):
-//!
-//! * leaf hash     = SHA-256(0x00 || entry_bytes)
-//! * interior node = SHA-256(0x01 || left_hash || right_hash)
 
 use sha2::{Digest, Sha256};
 
 use crate::error::Error;
 
-/// A 32-byte SHA-256 digest. The fundamental currency of the tree: leaf
-/// hashes, interior nodes, and roots are all `Hash` values.
+/// A 32-byte SHA-256 digest.
 pub type Hash = [u8; 32];
 
 /// Domain-separation prefix for leaf hashes (RFC 6962 §2.1).
@@ -19,8 +12,7 @@ const LEAF_PREFIX: u8 = 0x00;
 /// Domain-separation prefix for interior node hashes (RFC 6962 §2.1).
 const NODE_PREFIX: u8 = 0x01;
 
-/// Hash of the empty string. Per RFC 6962 the Merkle tree hash of an empty
-/// list of entries is `SHA-256()`.
+/// Hash of the empty string, the RFC 6962 root of an empty tree.
 pub fn empty_root() -> Hash {
     Sha256::digest([]).into()
 }
@@ -49,8 +41,7 @@ pub fn to_hex(hash: &Hash) -> String {
     hex::encode(hash)
 }
 
-/// Decode a lowercase-hex string into a 32-byte hash, rejecting anything that
-/// is not exactly 32 bytes.
+/// Decode lowercase hex into a hash, rejecting anything not exactly 32 bytes.
 pub fn from_hex(s: &str) -> Result<Hash, Error> {
     let bytes = hex::decode(s)?;
     if bytes.len() != 32 {

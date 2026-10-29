@@ -2,24 +2,7 @@
 //! #453) — the P1 acceptance criterion: `pollis-verify release <tag>` verifies a
 //! fixture binaries tree against a synthetic STH.
 //!
-//! It mirrors `account_e2e.rs` for the third tenant, but drives the shared
-//! verdict core directly: fixtures are built with the REAL builder
-//! (`build_binaries_bundle`, STHs signed under the binaries domain context —
-//! exactly what production emits), round-tripped into the serve crate's wire
-//! shape, and handed to [`release::verify_release_in_bundle`] — the one function
-//! the CLI (`pollis-verify release`) and the static `/verify/release/<tag>`
-//! report both call, so their verdicts can never diverge.
-//!
-//! Coverage:
-//! * POSITIVE — a well-formed tag verifies: `chain_valid`, `found`, the expected
-//!   artifacts + hashes, and the STH size/root are all correct.
-//! * NEGATIVE (the teeth):
-//!   (a) an STH signed under the WRONG domain context (the account-key tree's)
-//!   is rejected as an untrustworthy head;
-//!   (b) a tampered leaf is rejected;
-//!   (c) a tag with no artifacts reports `found == false`;
-//!   (d) a forked tree (same released unit, different bytes) is caught on the
-//!   verifier's independent invariant replay.
+//! Fixtures come from the real builder and go through the shared verdict core.
 
 use std::path::Path;
 
@@ -73,7 +56,7 @@ fn record(
 }
 
 /// One release, three platforms, with payload+signed pairs on macOS and Windows
-/// and a payload-only Linux AppImage — five artifact leaves for `v1.3.0`.
+/// and a payload-only Linux AppImage.
 fn fixture_records() -> Vec<BinaryRecord> {
     vec![
         record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x11, 0x11),
@@ -85,7 +68,7 @@ fn fixture_records() -> Vec<BinaryRecord> {
 }
 
 /// Round-trip a builder bundle into the serve crate's identical wire shape (the
-/// same trick `account_e2e` uses), so the fixture is genuine production output.
+/// same trick `account_e2e` uses).
 fn to_serve_bundle(b: &verifiable_log_builder::Bundle) -> Bundle {
     serde_json::from_slice(&serde_json::to_vec(b).unwrap()).unwrap()
 }
@@ -108,16 +91,7 @@ fn resign_sths_under(bundle: &mut Bundle, key: &SigningKey, context: &[u8]) {
 
 /// #944: the recipe recorded in each leaf must survive into the report, verbatim.
 ///
-/// This is what lets `rebuild-verify.yml` tell "the shipped binary does not match
-/// its source" apart from "this rebuild ran on a different CI runner image than
-/// the release, and an AppImage vendors that image's system libraries". Without
-/// it the rebuilder has only a hash comparison, and a byte divergence caused by a
-/// runner re-image is indistinguishable from tampering — which is exactly how
-/// v1.9.3 came to be published as an unexplained non-reproduction.
-///
-/// The value must reach the report through the SAME verified path as the hashes
-/// (a leaf whose inclusion proof checked out against the signed head), because it
-/// is the one field that can talk the verdict OUT of an accusation.
+/// It must reach the report through the same verified path as the hashes.
 #[test]
 fn the_recorded_build_recipe_reaches_the_report() {
     let builder_bundle = build_binaries_bundle(&fixture_records(), &signing_key(), TS).unwrap();
@@ -136,8 +110,6 @@ fn the_recorded_build_recipe_reaches_the_report() {
         );
     }
 
-    // Specifically the field the rebuilder keys on, reachable by the same
-    // selector the workflow uses (linux + appimage + payload).
     let linux = report
         .artifacts
         .iter()
@@ -145,8 +117,7 @@ fn the_recorded_build_recipe_reaches_the_report() {
         .expect("the Linux AppImage payload leaf is the reproducible unit");
     assert_eq!(linux.toolchain.runner_image, "ubuntu-24.04@sha256:abc");
 
-    // And it must be present in the SERIALIZED report, since that JSON — not the
-    // Rust struct — is what `pollis-verify release --json` hands the workflow.
+    // It must be in the serialized report, which is what `--json` hands the workflow.
     let json = serde_json::to_value(&report).unwrap();
     let runner_image = json["artifacts"]
         .as_array()
@@ -173,16 +144,13 @@ fn wellformed_release_verifies_with_expected_artifacts() {
     );
     assert!(report.violations.is_empty());
 
-    // The head everything was checked against is the size-5 final STH.
     assert_eq!(report.sth_tree_size, 5);
     assert_eq!(report.root_hex, expected_root);
 
-    // All five artifacts are listed, in publish order, each provably included.
     assert_eq!(report.artifacts.len(), 5);
     assert!(report.artifacts.iter().all(|a| a.included));
 
-    // Spot-check the macOS signed wrapper: it wraps the reproducible payload
-    // (shared payload_sha256) but ships different signed bytes.
+    // The macOS signed wrapper shares the payload hash but ships different bytes.
     let mac_signed = report
         .artifacts
         .iter()
@@ -192,7 +160,6 @@ fn wellformed_release_verifies_with_expected_artifacts() {
     assert_eq!(mac_signed.artifact_sha256, hex::encode([0x1au8; 32]));
     assert_eq!(mac_signed.bundle, "dmg");
 
-    // The Linux AppImage is a payload-only leaf (artifact == payload hash).
     let linux = report
         .artifacts
         .iter()
@@ -205,14 +172,12 @@ fn wellformed_release_verifies_with_expected_artifacts() {
 #[test]
 fn sth_signed_under_wrong_domain_context_is_rejected() {
     let mut bundle = fixture_bundle();
-    // Forge the head under the ACCOUNT-KEY tree's context: same key, same tree,
-    // but a binaries verifier must refuse a head minted for a sibling tree.
+    // Forge the head under the account-key context: a binaries verifier must refuse it.
     resign_sths_under(&mut bundle, &signing_key(), ACCOUNT_STH_CONTEXT);
 
     let report = release::verify_release_in_bundle(&bundle, "v1.3.0");
 
-    // The tag's leaves are still present, but the trust anchor is invalid, so the
-    // whole tree is untrustworthy.
+    // The leaves are present, but the trust anchor is invalid.
     assert!(report.found, "the entries are still there...");
     assert!(
         !report.chain_valid,
@@ -231,9 +196,7 @@ fn sth_signed_under_wrong_domain_context_is_rejected() {
 #[test]
 fn tampered_leaf_is_rejected() {
     let mut bundle = fixture_bundle();
-    // Corrupt one committed leaf's bytes: its leaf hash no longer matches the STH
-    // root the inclusion proof reconstructs (and its replay may also break the
-    // invariant) — either way the tree is no longer trustworthy.
+    // A corrupted leaf no longer matches the STH root.
     bundle.entries[0].data[20] ^= 0xff;
 
     let report = release::verify_release_in_bundle(&bundle, "v1.3.0");
@@ -256,11 +219,7 @@ fn unknown_tag_reports_not_found() {
 
 #[test]
 fn forked_tree_fails_the_verifiers_independent_replay() {
-    // Two leaves describing the SAME released unit (tag/platform/arch/bundle/layer)
-    // but different artifact bytes. The BUILDER would refuse to seal this (covered
-    // in binaries_build.rs); here we assemble a signed tree that hides the fork —
-    // no invariant registered — and prove the VERIFIER catches it on replay, the
-    // independent re-check that keeps the CLI and the app honest.
+    // A forked tree the builder would refuse; the verifier must catch it on replay.
     let key = signing_key();
     let forked = vec![
         record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x11, 0x11),
@@ -271,12 +230,10 @@ fn forked_tree_fails_the_verifiers_independent_replay() {
     let mut entries: Vec<Entry> = Vec::new();
     for r in &forked {
         let entry = r.to_entry().unwrap();
-        // No BinaryInvariant registered — the fork is admitted into the tree.
         log.append(entry.clone()).unwrap();
         entries.push(entry);
     }
     let size = log.size();
-    // A genuine, correctly-signed binaries STH over the forked tree.
     let sth = Sth::create_with_context(&key, size as u64, log.root(), TS, binaries::STH_CONTEXT);
     let inclusion = (0..size)
         .map(|i| InclusionCheck {
@@ -308,11 +265,8 @@ fn forked_tree_fails_the_verifiers_independent_replay() {
     );
 }
 
-// ── Static-tree generation + remote self-audit (the P2 publish/verify path) ──
-
 /// `verify_remote`'s prerequisites are the commit-log tree's `public_key.json` +
-/// `index.json`, so a minimal (empty) commit-log tree must exist for a
-/// whole-log audit to run. Emit one alongside whatever else the test writes.
+/// `index.json`, so a minimal commit-log tree must exist.
 fn generate_commit_tree(root: &Path) {
     let empty: Vec<CommitRow> = Vec::new();
     let builder_bundle = build_bundle(&empty, &signing_key(), TS).unwrap();
@@ -333,19 +287,16 @@ fn binaries_tree_generates_documented_files() {
     generate_binaries_tree(dir.path());
 
     let bin = dir.path().join("v1").join("binaries");
-    // The binaries subtree mirrors the other trees one level down.
     assert!(bin.join("public_key.json").is_file());
     assert!(bin.join("index.json").is_file());
     assert!(bin.join("sth").join("latest.json").is_file());
     assert!(bin.join("entries.json").is_file());
-    // A five-leaf fixture → a midpoint + final STH and a consistency proof.
     assert!(bin.join("sth").join("5.json").is_file());
 
-    // The precomputed per-release report exists with no extension (file IS URL).
+    // The per-release report has no extension (the file is the URL).
     let report_path = dir.path().join("verify").join("release").join("v1.3.0");
     assert!(report_path.is_file());
 
-    // The manifest advertises the release tag and enforces the binaries invariant.
     let manifest: verifiable_log_serve::BinaryManifest =
         serde_json::from_str(&std::fs::read_to_string(bin.join("index.json")).unwrap()).unwrap();
     assert_eq!(manifest.entry_count, fixture_records().len() as u64);
@@ -353,7 +304,6 @@ fn binaries_tree_generates_documented_files() {
     assert_eq!(manifest.enforce_unique, vec![binaries::TENANT.to_string()]);
     assert_eq!(manifest.latest_tree_size, Some(5));
 
-    // The precomputed report is byte-identical to the shared verdict core.
     let served: release::ReleaseReport =
         serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
     assert!(served.chain_valid && served.found);
@@ -363,14 +313,11 @@ fn binaries_tree_generates_documented_files() {
 #[test]
 fn remote_verify_covers_the_binaries_tree() {
     let dir = tempfile::tempdir().unwrap();
-    // The commit-log tree is a prerequisite for whole-log remote verification;
-    // the binaries tree is the third tenant served alongside it.
     generate_commit_tree(dir.path());
     generate_binaries_tree(dir.path());
 
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
 
-    // Whole-log remote verification now covers the binaries tree and passes.
     let report = remote::verify_remote(&server.base_url()).unwrap();
     assert!(report.ok, "all trees should verify; checks: {:?}", report.checks);
     let binaries_checks = report
@@ -379,14 +326,12 @@ fn remote_verify_covers_the_binaries_tree() {
         .filter(|(_, label)| label.starts_with("binaries:"))
         .count();
     assert!(binaries_checks >= 4, "expected binaries checks, got {binaries_checks}");
-    // Present tree → no "absent" note about binaries.
     assert!(
         !report.notes.iter().any(|n| n.contains("binaries")),
         "unexpected binaries note: {:?}",
         report.notes
     );
 
-    // And the CLI's per-release verifier passes over HTTP against the same tree.
     let release_report = release::verify_release(&server.base_url(), "v1.3.0").unwrap();
     assert!(
         release_report.chain_valid,
@@ -399,13 +344,11 @@ fn remote_verify_covers_the_binaries_tree() {
 #[test]
 fn remote_verify_notes_absent_binaries_tree() {
     let dir = tempfile::tempdir().unwrap();
-    // Only the commit-log tree — no binaries subtree published yet.
     generate_commit_tree(dir.path());
 
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
     let report = remote::verify_remote(&server.base_url()).unwrap();
 
-    // An absent binaries tree is a note, not a failure.
     assert!(report.ok, "absent binaries tree must not fail the audit");
     assert!(
         report.notes.iter().any(|n| n.contains("binaries")),
@@ -415,10 +358,7 @@ fn remote_verify_notes_absent_binaries_tree() {
 }
 
 /// One leaf of a mobile over-the-air JS update (#1250), in the exact shape
-/// `mobile/scripts/ota/lib.ts` `attestedFiles` writes: platform `ios`/`android`,
-/// `arch` = the runtime version (the native binary the update targets),
-/// `bundle` = `ota-manifest` | `ota-bundle` | `ota-assets` | `ota-directive`,
-/// payload layer only (nothing re-signs the bytes after they are logged).
+/// `mobile/scripts/ota/lib.ts` `attestedFiles` writes.
 fn ota_record(group: &str, platform: &str, runtime_version: &str, bundle: &str, digest: u8) -> BinaryRecord {
     let tag = format!("mobile-ota-{group}");
     let artifact_name = format!("pollis-ota-{group}-{platform}.{bundle}");
@@ -438,10 +378,7 @@ fn ota_record(group: &str, platform: &str, runtime_version: &str, bundle: &str, 
 }
 
 /// OTA updates share the binaries tree with desktop releases without any change
-/// to the frozen leaf contract: a publish, a rollback naming two runtime
-/// versions of one platform, and a republish of the first publish's bytes
-/// (same hashes, new tag) all satisfy the invariant, and `pollis-verify release
-/// mobile-ota-<group>` reports exactly that group's leaves.
+/// to the frozen leaf contract: publishes, rollbacks and republishes all pass.
 #[test]
 fn ota_update_groups_verify_alongside_desktop_releases() {
     let rv_ios = "376466c81d9428da79f80525da44567b98aa4e4a";
@@ -460,7 +397,6 @@ fn ota_update_groups_verify_alongside_desktop_releases() {
     records.push(ota_record(rollback, "ios", rv_ios, "ota-directive", 0x60));
     records.push(ota_record(rollback, "ios", rv_ios_old, "ota-directive", 0x61));
     for (platform, rv, base) in [("ios", rv_ios, 0x40u8), ("android", rv_android, 0x50u8)] {
-        // A republish is a new manifest (new update id) over the same bytes.
         records.push(ota_record(republish, platform, rv, "ota-manifest", base + 8));
         records.push(ota_record(republish, platform, rv, "ota-bundle", base + 1));
         records.push(ota_record(republish, platform, rv, "ota-assets", base + 2));
@@ -483,12 +419,9 @@ fn ota_update_groups_verify_alongside_desktop_releases() {
     assert!(rolled.chain_valid, "violations: {:?}", rolled.violations);
     assert_eq!(rolled.artifacts.len(), 2);
 
-    // The desktop release is untouched by the mobile leaves around it.
     assert!(release::verify_release_in_bundle(&bundle, "v1.3.0").chain_valid);
 
-    // Appending a group twice (a re-run without the accumulator's idempotency
-    // check) is out of publish order once another tag has followed it, which
-    // is why `ota-publish.ts log-append` skips a tag already present.
+    // A group appended twice is out of publish order, so `log-append` skips present tags.
     let mut twice = records.clone();
     twice.push(ota_record(publish, "ios", rv_ios, "ota-manifest", 0x40));
     let err = build_binaries_bundle(&twice, &signing_key(), TS).unwrap_err();

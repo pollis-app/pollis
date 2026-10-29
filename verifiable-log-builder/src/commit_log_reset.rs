@@ -1,23 +1,10 @@
 //! Minting the commit log's **reset statement** (#1579).
 //!
-//! The first commit-log tree (`/v1/...`, STH context
-//! [`verifiable_log::STH_CONTEXT_COMMIT_LOG`]) is retired: after the DS began
-//! pruning `mls_commit_log`, the publisher signed heads that do not extend its own
-//! earlier history. Its successor, `commit-log-2`, is built from the persisted
-//! leaves ([`crate::commit_leaves`]) and signed under
-//! [`verifiable_log::STH_CONTEXT_COMMIT_LOG_2`].
-//!
-//! The facts about the retired tree (its last consistent head, the leaf hashes
-//! that head commits to, and every other served head with its root) were
-//! recovered from what is served and are committed to the repository as
-//! `commit-log-retirement.json`, so they are reviewed like code. The CI publish
-//! mints the signed statement from that file, because it is the only place the
-//! signing key exists:
-//!
+//! The retired tree's facts live in `commit-log-retirement.json`, reviewed like code; CI signs
+//! them:
 //! 1. [`check_against_served`] refuses unless every head the file lists is
 //!    actually served with that root, and every chain or fork head verifies under
-//!    the signing key in the retired context. A statement that disagreed with what
-//!    is served would be worse than none.
+//!    the signing key in the retired context.
 //! 2. [`build_body`] adds the successor's identity and its genesis (the hash of
 //!    its first persisted leaf).
 //! 3. [`verifiable_log::ResetStatement::create`] validates the whole body and
@@ -35,8 +22,7 @@ use crate::error::{BuilderError, Result};
 
 /// The successor tree's name, as in [`verifiable_log::STH_CONTEXTS`].
 pub const SUCCESSOR_TREE: &str = "commit-log-2";
-/// The successor tree's URL path. Matches `verifiable_log_serve::layout`'s
-/// `COMMIT_LOG_2_API_PREFIX`; a test there holds the two together.
+/// The successor tree's URL path; a test in `verifiable_log_serve::layout` pins it.
 pub const SUCCESSOR_PATH: &str = "v1/commit-log-2";
 
 /// The committed description of the retired tree (`commit-log-retirement.json`).
@@ -108,8 +94,7 @@ pub fn check_against_served(
             )));
         }
     }
-    // Every served head must be described: a head the file leaves out would make
-    // the statement incomplete on the day it is signed.
+    // Every served head must be described, or the statement is incomplete on signing.
     for (size, sth) in served {
         if body.classify(*size, &sth.root_hash) == HeadClass::Unlisted {
             return Err(refuse(format!("the served head at size {size} is not listed")));

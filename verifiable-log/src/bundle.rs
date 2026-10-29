@@ -1,18 +1,5 @@
 //! The **monitor bundle** wire contract: the single JSON document the builder
 //! emits, the serve layer publishes, and the `monitor` CLI verifies.
-//!
-//! This type lives in the core crate rather than beside either of its users
-//! because it is the *joint* between them, and a joint restated in two places is
-//! a joint that drifts. It already had: the monitor carried a private stand-in
-//! `Bundle` with no `retired_keys` field, so serde silently dropped the rotation
-//! overlap set and the monitor reported FAIL for every head an honest log minted
-//! under a retiring key — a "tampering" verdict produced by a missing struct
-//! field. A verifier that can be wrong in *that* direction is worse than no
-//! verifier, so the shape a verifier parses is defined exactly once.
-//!
-//! `verifiable-log-builder` re-exports these types. `verifiable-log-serve` still
-//! carries its own parallel copy (`serve::bundle::Bundle`); pointing it here is
-//! the remaining step of the same consolidation.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,24 +8,20 @@ use crate::sth::{key_id_for, verifying_key_from_hex, Sth, VerifyingKey};
 use crate::Entry;
 
 /// The signed monitor bundle. Field names and order are the frozen wire
-/// contract (see `verifiable-log/README.md`); every section except `public_key`
-/// deserializes from absent, so a minimal fixture still parses.
+/// contract; every section except `public_key` deserializes from absent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
-    /// ML-DSA-44 log public key, lowercase hex (1312 bytes) — the **active**
-    /// signing key.
+    /// ML-DSA-44 log public key, lowercase hex: the **active** signing key.
     pub public_key: String,
     /// Keys that no longer sign but must still be accepted until their
     /// `not_after` (ms since epoch) — the rotation overlap window that keeps a
-    /// key change from being a flag day. Empty outside a rotation; serialized
-    /// only when non-empty so bundles stay byte-identical to before otherwise.
+    /// key change from being a flag day. Serialized only when non-empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retired_keys: Vec<PublicKeyEntry>,
     /// Signed Tree Heads, oldest first.
     #[serde(default)]
     pub sths: Vec<Sth>,
-    /// Full ordered log contents. When present, replayed to confirm each STH's
-    /// root and to run the tenant invariants.
+    /// Full ordered log contents, replayed to confirm each STH root and tenant invariants.
     #[serde(default)]
     pub entries: Vec<Entry>,
     /// Tenants whose invariant a verifier enforces on replay.
@@ -56,11 +39,9 @@ pub struct Bundle {
 /// rotation-overlap window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicKeyEntry {
-    /// [`key_id_for`] of `public_key`. A selection hint, never a trust input —
-    /// the signature still has to verify under the key bytes.
+    /// [`key_id_for`] of `public_key`. A selection hint, never a trust input.
     pub key_id: String,
-    /// Signature algorithm, e.g. `"ML-DSA-44"`. Present so a future algorithm
-    /// migration is a data change rather than another flag day.
+    /// Signature algorithm, e.g. `"ML-DSA-44"`.
     pub algorithm: String,
     /// The public key, lowercase hex.
     pub public_key: String,
@@ -89,12 +70,7 @@ impl Bundle {
     /// Every key a head in this bundle may verify under at `now_ms`, as
     /// `(key_id, key)` pairs ready for [`Sth::verify_any_with_context`]: the
     /// active key first, then each retired key still inside its overlap window.
-    ///
-    /// Expiry is applied here so a retired key stops being accepted on schedule
-    /// even against a bundle nobody has republished — the overlap window is a
-    /// deadline, not a suggestion. Entries whose hex does not decode are
-    /// dropped rather than failing the whole set: one malformed published entry
-    /// must not disarm the keys that are fine.
+    /// Expiry applies even to stale bundles; undecodable entries are dropped, not fatal.
     pub fn key_candidates(&self, now_ms: u64) -> Vec<(String, VerifyingKey)> {
         let mut out = Vec::with_capacity(1 + self.retired_keys.len());
         if let Ok(active) = verifying_key_from_hex(&self.public_key) {

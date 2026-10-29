@@ -9,11 +9,7 @@
 //! (d) when the account tree is absent, `verify_remote` warns and still passes
 //!     the commit log.
 //!
-//! The fixtures are built with the REAL builder (`build_bundle` /
-//! `build_account_bundle`) so the entries are genuine `CommitLeaf` /
-//! `AccountKeyLeaf` payloads and the account STHs are signed under the account
-//! context — exactly what production emits. Nothing here reimplements any
-//! verification.
+//! The fixtures come from the real builder.
 
 use std::path::Path;
 
@@ -102,7 +98,7 @@ fn to_serve_bundle(b: &verifiable_log_builder::Bundle) -> Bundle {
     serde_json::from_slice(&serde_json::to_vec(b).unwrap()).unwrap()
 }
 
-/// Generate the commit-log tree into `root`. Returns the conversation id used.
+/// Generate the commit-log tree into `root`.
 fn generate_commit_tree(root: &Path) {
     let builder_bundle = build_bundle(&commit_rows(), &signing_key(), TS).unwrap();
     let bundle = to_serve_bundle(&builder_bundle);
@@ -125,23 +121,19 @@ fn both_trees_generate_documented_files() {
     let v1 = dir.path().join("v1");
     let acct = v1.join("account-keys");
 
-    // The commit-log tree is untouched and complete.
     assert!(v1.join("public_key.json").is_file());
     assert!(v1.join("index.json").is_file());
     assert!(v1.join("sth").join("latest.json").is_file());
     assert!(v1.join("entries.json").is_file());
 
-    // The account-key subtree mirrors it one level down.
     assert!(acct.join("public_key.json").is_file());
     assert!(acct.join("index.json").is_file());
     assert!(acct.join("sth").join("latest.json").is_file());
     assert!(acct.join("entries.json").is_file());
 
-    // Precomputed per-user reports exist with no extension (file IS the URL).
     assert!(dir.path().join("verify").join("account").join("u-alice").is_file());
     assert!(dir.path().join("verify").join("account").join("u-bob").is_file());
 
-    // The account manifest advertises both users.
     let manifest: verifiable_log_serve::AccountManifest = serde_json::from_str(
         &std::fs::read_to_string(acct.join("index.json")).unwrap(),
     )
@@ -159,30 +151,24 @@ fn remote_verifies_both_trees_and_account_chain() {
 
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
 
-    // Whole-log remote verification covers BOTH trees and passes.
     let report = remote::verify_remote(&server.base_url()).unwrap();
     assert!(report.ok, "both trees should verify; checks: {:?}", report.checks);
-    // The account-keys tree actually contributed checks (not just the commit log).
     let account_checks = report
         .checks
         .iter()
         .filter(|(_, label)| label.starts_with("account-keys:"))
         .count();
     assert!(account_checks >= 4, "expected account-keys checks, got {account_checks}");
-    // No "absent" note about the account tree when it is present. (The binaries
-    // tree — a third tenant — is not generated in this test, so its own absent
-    // note is expected and does not concern the account-tree assertion here.)
+    // No absent-note about the account tree (the binaries one is expected here).
     assert!(
         !report.notes.iter().any(|n| n.contains("account")),
         "unexpected account-tree note: {:?}",
         report.notes
     );
 
-    // One user's full key history verifies.
     let alice = account::verify_account(&server.base_url(), "u-alice").unwrap();
     assert!(alice.found);
     assert!(alice.chain_valid, "violations: {:?}", alice.violations);
-    // Alice rotated to version 3 — three versions, strictly increasing.
     assert_eq!(alice.keys.len(), 3);
     assert_eq!(
         alice.keys.iter().map(|k| k.identity_version).collect::<Vec<_>>(),
@@ -199,10 +185,7 @@ fn tampered_account_tree_fails_while_commit_log_still_passes() {
     generate_commit_tree(dir.path());
     generate_account_tree(dir.path());
 
-    // Corrupt the account tree's trust anchor: flip a hex nibble in the latest
-    // account STH signature. Everything downstream is anchored to this head, so
-    // the whole account tree is now untrustworthy — while the commit-log tree,
-    // signed independently, is unaffected.
+    // Flip a nibble in the latest account STH signature; the commit-log tree is unaffected.
     let latest_path = dir
         .path()
         .join("v1")
@@ -218,12 +201,10 @@ fn tampered_account_tree_fails_while_commit_log_still_passes() {
 
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
 
-    // The overall verdict fails because the account tree is broken...
     let report = remote::verify_remote(&server.base_url()).unwrap();
     assert!(!report.ok, "tampered account tree must fail overall verification");
 
-    // ...but every NON-account check (i.e. the whole commit-log tree) still
-    // passes — the trees are independent.
+    // Every non-account check still passes: the trees are independent.
     let commit_failures: Vec<&String> = report
         .checks
         .iter()
@@ -235,11 +216,9 @@ fn tampered_account_tree_fails_while_commit_log_still_passes() {
         "commit-log checks must still pass; failures: {commit_failures:?}"
     );
 
-    // The account chain itself is now invalid...
     let alice = account::verify_account(&server.base_url(), "u-alice").unwrap();
     assert!(!alice.chain_valid, "tampered account chain must be invalid");
 
-    // ...while the commit-log group chain is still valid.
     let conv = group::verify_group(&server.base_url(), "conv-1").unwrap();
     assert!(conv.chain_valid, "violations: {:?}", conv.violations);
 
@@ -249,21 +228,17 @@ fn tampered_account_tree_fails_while_commit_log_still_passes() {
 #[test]
 fn absent_account_tree_warns_and_commit_log_still_passes() {
     let dir = tempfile::tempdir().unwrap();
-    // Only the commit-log tree — no account tree at all.
     generate_commit_tree(dir.path());
 
     let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
     let report = remote::verify_remote(&server.base_url()).unwrap();
 
-    // The commit log verifies fine; the absent account tree is a warning, not a
-    // failure.
     assert!(report.ok, "commit log should verify; checks: {:?}", report.checks);
     assert!(
         report.notes.iter().any(|n| n.contains("absent")),
         "expected an 'absent' note; notes: {:?}",
         report.notes
     );
-    // No account-keys checks ran (only a note).
     assert!(report
         .checks
         .iter()

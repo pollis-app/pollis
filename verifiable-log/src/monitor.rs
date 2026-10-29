@@ -1,24 +1,4 @@
 //! The monitor's verification pass, as a library.
-//!
-//! Everything the `monitor` CLI does to a [`Bundle`] lives here so it can be
-//! *called* rather than re-implemented. Before #875 it existed only inside the
-//! binary, so the builder's account-key and binaries gate suites each carried a
-//! hand-written copy of the loop — and both copies asserted the CLI's own
-//! limitation (it could only ever check the commit-log context) as though it
-//! were the intended behaviour. A verifier whose logic exists in three places is
-//! a verifier whose three answers can disagree.
-//!
-//! The pass is deliberately parameterised on the two things that differ between
-//! trees and callers:
-//!
-//! * `context` — the STH domain separation. There is no default: verifying an
-//!   account-key head under the commit-log context fails, and a FAIL that means
-//!   "you asked the wrong question" is indistinguishable from one that means
-//!   "this log is lying".
-//! * `invariants` — the tenant rules replayed over `entries`. The concrete
-//!   tenant invariants live in `verifiable-log-builder`, above this crate, so
-//!   the caller supplies them; [`unique_invariants`] is the generic fallback the
-//!   CLI uses when it only has the bundle's `enforce_unique` list.
 
 use crate::bundle::Bundle;
 use crate::log::{TenantInvariant, UniqueDataInvariant, VerifiableLog};
@@ -30,18 +10,12 @@ pub struct VerifyOptions<'a> {
     /// STH domain-separation context — one of [`crate::sth::STH_CONTEXTS`].
     pub context: &'a [u8],
     /// Wall-clock milliseconds, used only to expire rotation-overlap keys.
-    ///
-    /// A verifier is allowed a clock (the builder is not — its output must be
-    /// deterministic). A clock wrong in the past keeps a retired key trusted
-    /// slightly too long; one wrong in the future retires it early and degrades
-    /// to "cannot verify", never to a false accusation of tampering.
+    /// A clock error degrades to "cannot verify", never to a false tampering verdict.
     pub now_ms: u64,
 }
 
 /// [`UniqueDataInvariant`] for every named tenant — the generic replay rule a
-/// verifier can apply knowing nothing about a tenant beyond "leaves don't
-/// repeat". Weaker than a tenant's real invariant (which lives in the builder),
-/// and deliberately so: this crate must not grow tenant knowledge.
+/// verifier can apply knowing nothing about a tenant beyond "leaves do not repeat".
 pub fn unique_invariants(tenants: &[String]) -> Vec<(String, Box<dyn TenantInvariant>)> {
     tenants
         .iter()
@@ -53,9 +27,6 @@ pub fn unique_invariants(tenants: &[String]) -> Vec<(String, Box<dyn TenantInvar
 }
 
 /// Run every check the monitor performs and return the overall verdict.
-///
-/// `report` is called once per check with `(passed, label)` so a CLI can print a
-/// running PASS/FAIL log while a test can ignore it entirely.
 pub fn verify_bundle(
     bundle: &Bundle,
     opts: &VerifyOptions<'_>,
@@ -70,9 +41,7 @@ pub fn verify_bundle(
         }
     };
 
-    // The rotation-overlap key set: the active key plus any retired key still
-    // inside its window. Using `public_key` alone makes an honest log mid-
-    // rotation look tampered with.
+    // Includes retired keys still inside their window, or mid-rotation logs look tampered.
     let candidates = bundle.key_candidates(opts.now_ms);
     check(
         !candidates.is_empty(),
