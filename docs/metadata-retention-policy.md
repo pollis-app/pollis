@@ -375,6 +375,20 @@ Three trees are published, all signed under one key with distinct context string
 The Signed Tree Head is `{tree_size, root_hash, timestamp, signature}` — ML-DSA-44 over
 `context || tree_size || root_hash || timestamp`.
 
+**The log of record is the persisted leaves, not the DS table (#1579).** The Delivery Service prunes
+`mls_commit_log` below its retention floor (§1, #539), so that table is only a window onto the commit log.
+The leaves the publisher has published are kept, append-only, in the transparency bucket at
+`internal/commit-log-leaves.json` (with a copy per size under `internal/commit-log-leaves/<size>.json`),
+the same way `internal/binary-records.json` holds the binaries tree. Each publish appends only the rows
+above the last persisted `seq`, so pruning a row never changes or removes a published leaf, and a missing,
+shrunk or rewritten leaves file stops the commit-log publish instead of rebuilding the tree. The two
+retention rules therefore do not conflict: the DS keeps a commit's bytes only as long as members need them,
+while the ledger keeps the commit's public leaf (pseudonyms, epoch, `seq`, `sha256(commit_data)`) forever.
+The persisted file holds exactly the pseudonymous leaves `/v1/entries.json` serves and no real
+`conversation_id` or `sender_id`, so keeping it adds no retention beyond what the public ledger already
+holds. Before #1579 the tree was rebuilt from the live table on every publish, and once the DS began
+pruning, two heads were published that are not consistent with the earlier history; #1579 records them.
+
 **Former exposure and the #701 mitigation, stated plainly:** the commit-log leaf *used to* publish a
 **stable `conversation_id` and a real `sender_id` in the clear**, so anyone could build a longitudinal
 activity map — which groups exist, how often each changes, and who commits to them — with no access to

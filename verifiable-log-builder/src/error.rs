@@ -24,6 +24,11 @@ pub enum BuilderError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// The persisted commit-log leaves (#1579) are missing, shrunk, rewritten,
+    /// or disagree with the live rows below their head. Always fails closed.
+    #[error("commit-log leaves refused: {0}")]
+    PersistedLeaves(String),
+
     #[error("invalid signing key: {0}")]
     SigningKey(String),
 
