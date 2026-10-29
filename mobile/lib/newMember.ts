@@ -7,8 +7,9 @@
 export const NEW_MEMBER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Tolerance for a sender whose clock runs behind. Messages genuinely older than
- * the join (a member who left and came back) are not tagged.
+ * Tolerance for a message stamped slightly before `joined_at` by a sender
+ * whose clock runs behind. Messages genuinely older than the join (a member
+ * who left and came back) are not tagged.
  */
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -16,8 +17,9 @@ const CLOCK_SKEW_MS = 5 * 60 * 1000;
 const SQLITE_UTC = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/;
 
 /**
- * Epoch ms, or null. A zone-less value is UTC (what the DS writes); `new Date()`
- * would read it in the viewer's zone and shift the window.
+ * Epoch ms of a server timestamp, or null when it does not parse. A zone-less
+ * value is UTC: that is what the DS writes, and `new Date()` would otherwise
+ * read it in the viewer's zone and shift the window by their offset.
  */
 export function parseServerTimestamp(value: string | null | undefined): number | null {
   if (!value) {
@@ -33,8 +35,9 @@ export function parseServerTimestamp(value: string | null | undefined): number |
 }
 
 /**
- * user id → joined-at ms. The group's creator is excluded, or they would wear
- * the tag on every message of a brand-new group's first week.
+ * user id → joined-at ms for every member who can carry the tag. The group's
+ * creator never does: in a brand-new group they would otherwise wear it on
+ * every message for its first week.
  */
 export function newMemberJoins(
   members: ReadonlyArray<{ user_id: string; joined_at: string }>,
@@ -53,6 +56,7 @@ export function newMemberJoins(
   return out;
 }
 
+/** Whether a message sent at `sentAtMs` by `senderId` carries the tag. */
 export function isNewMemberMessage(
   joins: ReadonlyMap<string, number>,
   senderId: string,

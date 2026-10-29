@@ -1,9 +1,17 @@
 /**
- * Localized emoji names and search keywords (#901), from the CLDR tables the
- * generator vendors under `annotations/` (`scripts/generate-emoji-data.py`).
- * Type-only imports keep it out of the startup chunk and loadable by
- * `node --test`. Byte-identical to desktop's copy (`scripts/i18n-check.mjs`
- * fails when the two drift).
+ * Localized emoji names and search keywords (#901).
+ *
+ * The generated table's `name` is the English Unicode name, so on its own the
+ * picker only understood English queries even once its chrome was translated.
+ * CLDR ships a per-locale name and keyword list for every emoji; the generator
+ * vendors them (see `scripts/generate-emoji-data.py`) as one module per locale
+ * under `annotations/`, and this module is the shape the picker consumes them
+ * in.
+ *
+ * Type-only imports on purpose, like `emojiShortcodeQuery.ts`: it keeps the
+ * module out of the startup chunk and lets `node --test` load it directly.
+ * The mobile app carries a byte-identical copy (`scripts/i18n-check.mjs`
+ * fails when the two drift) — edit this one and copy it across.
  */
 
 import type { StandardEmoji } from "./emojiData";
@@ -16,9 +24,14 @@ export interface EmojiAnnotation {
   readonly keywords: readonly string[];
 }
 
+/** One locale's table, keyed by the bare emoji character. */
 export type EmojiAnnotations = ReadonlyMap<string, EmojiAnnotation>;
 
-/** Tables to search, most specific first: the active locale's, then English's. */
+/**
+ * The tables to search, most specific first: the active locale's, then
+ * English's, so an English query keeps working for a bilingual user — the
+ * same rule the page-keyword catalogues follow.
+ */
 export type EmojiAnnotationStack = readonly EmojiAnnotations[];
 
 export const NO_ANNOTATIONS: EmojiAnnotationStack = [];
@@ -31,7 +44,11 @@ export function buildEmojiAnnotations(rows: readonly EmojiAnnotationRow[]): Emoj
   return table;
 }
 
-/** The first table that knows the emoji wins; the Unicode name is the fallback. */
+/**
+ * The name to show for an emoji: the first table that knows it wins, and the
+ * Unicode name is the fallback for a locale with no table (or one not loaded
+ * yet).
+ */
 export function emojiDisplayName(emoji: StandardEmoji, tables: EmojiAnnotationStack): string {
   for (const table of tables) {
     const hit = table.get(emoji.char);
