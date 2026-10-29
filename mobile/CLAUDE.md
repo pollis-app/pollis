@@ -1035,8 +1035,9 @@ shield (`tab-link-device`, "Sign in device") is a shortcut, not a tab: it
 pushes `self/link-device` (Scan to sign in a device, the same page and PIN
 confirm as Self → Security) onto the root stack, so back returns to the tab
 it was tapped from, and it is never the selected cell. `TabBar` matches cells
-to routes by name, never by index, and emits `tabPress` so the focused tab can
-react to a second tap. Global search is not a tab: it sits at the top of Self
+to routes by name, never by index, and a second tap on the focused tab calls
+`emitTabReselect` (`lib/tabReselect.ts`; Self ends a search on it). Global
+search is not a tab: it sits at the top of Self
 under the large title, Settings-style — focusing the field or typing swaps
 the Self menu for `GlobalSearchResults` in place (no navigation); Cancel, the
 clear button, a second tap on the Self tab or Android back restore the menu.

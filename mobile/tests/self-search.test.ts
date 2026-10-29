@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { emitTabReselect, onTabReselect } from "../lib/tabReselect.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
@@ -48,4 +49,24 @@ test("Self swaps its menu for the search results in place", () => {
     read("components/groups/GroupPanel.tsx"),
     /rootRouter\.navigate\(\{ pathname: "\/\(tabs\)\/self", params: \{ search: "1" \} \}\)/,
   );
+});
+
+test("a second tap on the focused tab reaches only that tab's listeners", () => {
+  let self = 0;
+  let groups = 0;
+  const off = onTabReselect("self", () => {
+    self += 1;
+  });
+  onTabReselect("groups", () => {
+    groups += 1;
+  });
+  emitTabReselect("self");
+  assert.equal(self, 1);
+  assert.equal(groups, 0);
+  off();
+  emitTabReselect("self");
+  assert.equal(self, 1);
+  // The bar re-emits only for the focused tab; Self ends its search on it.
+  assert.match(read("components/TabBar.tsx"), /if \(focused\) \{\s*emitTabReselect\(tab\.name\);\s*return;/);
+  assert.match(read("app/(tabs)/self.tsx"), /onTabReselect\("self", endSearch\)/);
 });

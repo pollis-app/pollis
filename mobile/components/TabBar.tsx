@@ -8,6 +8,7 @@ import { useTheme } from "./theme";
 import { Icon } from "./icons";
 import { useBottomInset, PressInPressable } from "./ui";
 import { appStore } from "../stores/appStore";
+import { emitTabReselect } from "../lib/tabReselect";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
 // Groups / Direct / Sign in device / Self (Main.dc.html): 22pt icon over a
@@ -100,15 +101,12 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
           if (!route) {
             return;
           }
-          // Lets the focused tab react to a second tap (Self ends a search).
-          const event = navigation.emit({
-            type: "tabPress",
-            target: route.key,
-            canPreventDefault: true,
-          });
-          if (!focused && !event.defaultPrevented) {
-            navigation.navigate(tab.name);
+          // A second tap on the focused tab lets it react (Self ends a search).
+          if (focused) {
+            emitTabReselect(tab.name);
+            return;
           }
+          navigation.navigate(tab.name);
         };
         return (
           // Switching tabs, and opening the shortcut's page, are free to

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BackHandler, View, Text, type TextInput } from "react-native";
-import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import {
@@ -26,6 +26,7 @@ import { languageOption } from "../../i18n/languages";
 import { useUserProfile, useLogout, useUserDevices } from "../../hooks/queries";
 import { autoLockLabel, useAutoLockMinutes, useLockNow } from "../../lib/autolock";
 import { appStore } from "../../stores/appStore";
+import { onTabReselect } from "../../lib/tabReselect";
 
 const GLYPH = 22;
 
@@ -45,7 +46,6 @@ function Self() {
   // Settings do it: focusing the field or typing swaps the menu below for
   // results in place, and Cancel, the clear button or a second tap on the
   // Self tab brings the menu back. No navigation either way.
-  const navigation = useNavigation();
   const params = useLocalSearchParams<{ search?: string }>();
   const searchRef = useRef<TextInput>(null);
   const [q, setQ] = useState("");
@@ -63,29 +63,22 @@ function Self() {
   };
 
   // A second tap on the Self tab ends a search, like a tab root popping.
-  useEffect(() => {
-    return navigation.addListener("tabPress" as never, () => {
-      if (navigation.isFocused()) {
-        endSearch();
-      }
-    });
-  }, [navigation]);
+  useEffect(() => onTabReselect("self", endSearch), []);
 
   // Android back ends a search before it leaves Self. Only while Self is the
   // focused screen: a page pushed on top keeps its own back.
-  useEffect(() => {
-    if (!searching) {
-      return;
-    }
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (!navigation.isFocused()) {
-        return false;
+  useFocusEffect(
+    useCallback(() => {
+      if (!searching) {
+        return undefined;
       }
-      endSearch();
-      return true;
-    });
-    return () => sub.remove();
-  }, [searching, navigation]);
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        endSearch();
+        return true;
+      });
+      return () => sub.remove();
+    }, [searching]),
+  );
 
   // A group's "Search <group>" lands here with `search=1`: open the field.
   useEffect(() => {
