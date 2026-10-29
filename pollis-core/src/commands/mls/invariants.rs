@@ -2,8 +2,7 @@
 //! functions so they can be (1) called by the real runtime paths and (2) proved
 //! exhaustively by Kani over symbolic inputs.
 //!
-//! This is the M2 tranche of the machine-checked-correctness program
-//! (`docs/machine-checked-correctness-design.md` §4.2–§4.4):
+//! The M2 tranche (`docs/machine-checked-correctness-design.md` §4.2–§4.4):
 //!
 //! * [`may_rejoin`] — I5, the recovery gate (§4.4): a revoked *or* removed device
 //!   never takes an external-join recovery path back into the tree.
@@ -13,45 +12,23 @@
 //! * [`classify`] — I1, client-side gap detection (§4.2): replay never `Apply`s a
 //!   commit across an epoch gap.
 //!
-//! The DS-side head arithmetic (I1's `MAX(epoch)+1`) is proved in
-//! `pollis-delivery::commit` (a pure `head_epoch_of` + its own Kani harness),
-//! since that code lives in the Delivery Service crate.
+//! The DS-side head arithmetic is proved in `pollis-delivery::commit`.
 //!
 //! ## Kani discipline (learned in M1 — see `messages/watermark.rs`)
 //!
-//! CBMC models heap allocation (`Vec`, `String`) at ruinous memory cost and OOMs
-//! a small box. Every harness here therefore uses FIXED-SIZE stack arrays
-//! `[T; N]` + a symbolic valid length, keeps symbolic domains tiny (bytes/epochs
-//! in `0..=3`), bounds loops with `#[kani::unwind(N)]`, and uses
-//! `#[kani::should_panic]` for the negative (mutant) harnesses.
-
-// ─── I5: recovery gate ───────────────────────────────────────────────────────
+//! CBMC OOMs on heap allocation, so harnesses use fixed-size arrays, tiny domains and bounded unwinds.
 
 /// Both cooperative gates on the external-join *recovery* paths, as a pure
 /// predicate: this device is still `registered` (not revoked) AND its user
 /// `is_member` of the group. A `false` from either means "do not rebuild/rejoin".
-///
-/// This is the exact `local_device_registered ∧ local_user_is_member` conjunction
-/// that `group_state::may_rejoin_via_external_join` gates recovery on. Lifting it
-/// to a free function lets Kani prove the whole (2-bit) truth table: the only
-/// input that admits a rejoin is `(true, true)`. A revoked or removed device can
-/// never climb back into the tree — the membership / forward-secrecy leak of
-/// fuzzer-finding #2, proved impossible.
 pub fn may_rejoin(registered: bool, is_member: bool) -> bool {
     registered && is_member
 }
 
-// ─── I6: Welcome-vs-external-join recovery arbitration ────────────────────────
-
 /// What a device with NO local MLS group does when it finds pending commits for a
 /// conversation it cannot yet open.
 ///
-/// The recipient of a freshly-created DM has TWO ways into the group: the inbound
-/// Welcome (`apply_welcome`) and, once the creator publishes GroupInfo, the
-/// external-join *recovery* path. Both do "delete stale local group → (re)join",
-/// so running them concurrently makes the device race its own Welcome and can
-/// clobber the freshly-joined group — stranding the member with
-/// `no GroupInfo stored — cannot external-join`.
+/// A fresh DM recipient has two ways in (Welcome, external join); running both races its own Welcome.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum JoinRecovery {
     /// An undelivered Welcome for this device targets this conversation — defer to
@@ -69,25 +46,12 @@ pub enum JoinRecovery {
 /// this conversation), `may_rejoin` (the I5 gate: registered ∧ member), and
 /// `group_info_available` (the group has a published GroupInfo to join onto).
 ///
-/// **Welcome-first.** Whenever a Welcome is pending we defer to it, REGARDLESS of
-/// the rejoin gate — the Welcome is the canonical, cheaper join, and
-/// `apply_welcome` marks the row delivered even on failure, so a stuck Welcome
-/// self-heals into the external-join path on a later pass (once `welcome_pending`
-/// is false). Only when no Welcome is available does the I5 gate decide
-/// external-join vs stay-out.
+/// **Welcome-first**: a pending Welcome always wins; a failed one is acked, so later passes fall through to the I5 gate.
 ///
 /// The Kani harness proves two load-bearing properties:
 ///
-/// * **`ExternalJoin` ⟹ `!welcome_pending`** — a device with a pending Welcome
-///   NEVER external-joins, so the two concurrent join mechanisms can never both
-///   run for one fresh membership (the DM-accept convergence race).
-/// * **`ExternalJoin` ⟹ `group_info_available`** (#832) — the gate never selects
-///   an external join that cannot succeed. Without this the runtime retried
-///   `no GroupInfo stored — cannot external-join` once per pass through the entire
-///   pre-establishment window.
-///
-/// This is the pure core of the gate in
-/// `group_state::process_pending_commits_locked_impl`.
+/// * **`ExternalJoin` ⟹ `!welcome_pending`**
+/// * **`ExternalJoin` ⟹ `group_info_available`** (#832)
 pub fn join_recovery(
     welcome_pending: bool,
     may_rejoin: bool,
@@ -96,18 +60,9 @@ pub fn join_recovery(
     if welcome_pending {
         JoinRecovery::AwaitWelcome
     } else if !group_info_available {
-        // An external join is a commit built ON the group's published GroupInfo.
-        // With no `mls_group_info` row there is nothing to build on, so choosing
-        // ExternalJoin here does not fail gracefully — it retries an operation
-        // that CANNOT succeed until someone else publishes, once per pass,
-        // burning the window in which the Welcome would have landed. That is the
-        // pre-establishment window: a device can see it is a member (membership
-        // is a plain remote row) before the creator has published anything.
+        // An external join needs a published GroupInfo; without one only a Welcome can get us in, so wait.
         //
-        // The only way into a group with no GroupInfo is a Welcome, so wait for
-        // one. If it never comes, a later pass finds GroupInfo published (by the
-        // creator's `heal_group_info` backstop) and external-join proceeds then —
-        // strictly later than today, but reachable, and never futile.
+        // If none comes, a later pass finds GroupInfo (via `heal_group_info`) and joins then.
         JoinRecovery::AwaitWelcome
     } else if may_rejoin {
         JoinRecovery::ExternalJoin
@@ -116,11 +71,7 @@ pub fn join_recovery(
     }
 }
 
-// ─── I2: own-commit canonicalization (#411) ──────────────────────────────────
-
-/// The outcome of submitting a commit through the delivery seam, as the pure
-/// decision sees it. Mirrors the three real cases the reconcile / external-join
-/// paths branch on:
+/// The submit outcome, as the pure decision sees it:
 /// * `Committed` — the DS confirmed our insert (our bytes are canonical at this
 ///   epoch by construction).
 /// * `LostRace` — the DS reported someone else committed this epoch first
@@ -128,9 +79,7 @@ pub fn join_recovery(
 /// * `Failed` — the submit errored (network / stream eviction); the response was
 ///   lost, so whether our commit landed is *ambiguous*.
 ///
-/// `LostRace` and `Failed` are both ambiguous — a stale `LostRace` can be a retry
-/// of our OWN accepted commit, and a `Failed` can hide a commit that landed with
-/// only the response lost — so both are resolved against the canonical log.
+/// `LostRace` and `Failed` are both ambiguous, so both are resolved against the canonical log.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SubmitOutcome {
     Committed,
@@ -151,18 +100,13 @@ pub enum Resolution {
 /// (the bytes the canonical log actually holds at this epoch, or `None` if the
 /// log has no row / the read failed).
 ///
-/// This is the #411 correctness core (`reconcile.rs` `our_commit_is_canonical` +
-/// the adopt/rollback branch), lifted to a pure function so Kani can prove both
-/// directions:
+/// The #411 core; Kani proves:
 /// * **`Adopt` ⟹ `stored_at_epoch == Some(ours)`** — never adopt a foreign
 ///   commit (no phantom epoch, no fork).
 /// * **`Rollback` ⟹ `stored_at_epoch != Some(ours)`** — never discard a landed
 ///   own commit (no wedge).
 ///
-/// A `Committed` outcome always adopts: the DS only returns `Committed` when it
-/// wrote *our* bytes at this epoch, so they are canonical there by construction
-/// (the Kani harness encodes that coupling). The ambiguous `LostRace` / `Failed`
-/// outcomes adopt IFF the log's bytes at this epoch are byte-for-byte ours.
+/// `Committed` always adopts; `LostRace`/`Failed` adopt IFF the log holds our exact bytes.
 pub fn resolve(outcome: SubmitOutcome, ours: &[u8], stored_at_epoch: Option<&[u8]>) -> Resolution {
     match outcome {
         // The DS confirmed our insert — canonical by construction.
@@ -178,8 +122,6 @@ pub fn resolve(outcome: SubmitOutcome, ours: &[u8], stored_at_epoch: Option<&[u8
         }
     }
 }
-
-// ─── I1: client-side gap detection ───────────────────────────────────────────
 
 /// What the replay loop should do with the next commit row, given where the
 /// local group currently is.
@@ -201,40 +143,21 @@ pub enum ReplayStep {
 /// `group_state::process_pending_commits_locked_impl` exactly:
 /// `if commit.epoch != current_epoch → gap-recover, else apply`.
 ///
-/// The Kani harness proves the load-bearing property: **replay never `Apply`s
-/// across a gap** — `Apply` is returned ONLY when the next row's epoch is exactly
-/// `current_epoch`. A missing bridge (higher epoch present) always yields
-/// `GapRecover`, never a silent skip that would wedge a member.
-///
-/// NOTE (deviation from the design sketch `§4.2`, which typed this as
-/// `classify(current_epoch, next_row_epoch, head)`): the real client gap detector
-/// consults neither the log head nor any other state — its decision is purely
-/// `next_row_epoch == current_epoch`. Threading an unused `head` would be less
-/// faithful, so it is omitted here. The head arithmetic the design attaches to I1
-/// is the *DS-side* concern and is proved separately as
-/// `pollis_delivery::commit::head_epoch_of`.
+/// Kani proves replay never `Apply`s across a gap.
 pub fn classify(current_epoch: u64, next_row_epoch: Option<u64>) -> ReplayStep {
     match next_row_epoch {
-        // Out of rows: nothing left to replay this pass.
         None => ReplayStep::Wait,
-        // The next row bridges current_epoch → current_epoch + 1: apply it.
         Some(e) if e == current_epoch => ReplayStep::Apply,
-        // The bridging commit is missing while a different (higher, by the log's
-        // ascending order) epoch is present: a permanent gap — recover.
+        // Missing bridge: a permanent gap.
         Some(_) => ReplayStep::GapRecover,
     }
 }
-
-// ─── I1b: what a gap is allowed to destroy ───────────────────────────────────
 
 /// What a replay pass does when the next commit row does not bridge the local
 /// group's epoch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GapRecovery {
-    /// The server DECLARED why the bridging commit is absent — a retention prune
-    /// whose floor is above us, or a hole it detected while checking contiguity
-    /// inside the snapshot transaction. The commit is genuinely unreachable, so
-    /// drop the local MLS state and rebuild by external join.
+    /// The server DECLARED the commit absent (pruned floor above us, or a snapshot hole): rebuild by external join.
     Rebuild,
     /// The batch is non-contiguous with no declared explanation. Hold position:
     /// advance nothing, delete nothing, retry on the next pass.
@@ -248,24 +171,13 @@ pub enum GapRecovery {
 /// and `pruned_floor` its retention floor (`pruned_below`); both come from the
 /// same read transaction as the batch.
 ///
-/// The destructive action is the point. `forget_local_mls_group_at` deletes the
-/// only keys that can still open envelopes sealed on this lineage, and every
-/// un-ingested envelope below the rejoin epoch is then classified handled and
-/// lost — a loss mode outside the three CLAUDE.md sanctions. Before this gate a
-/// batch that merely LOOKED non-contiguous was enough to trigger it, so a single
-/// malformed response destroyed state. Now the server has to have declared,
-/// in the same transaction that served the batch, an explanation that actually
-/// covers the epoch we are missing:
+/// Rebuilding deletes the only keys for this lineage, so a gap licenses it only when the server declared a covering cause:
 ///
 /// * `pruned_floor > current_epoch` — the bridging commit was retention-collected;
 /// * `hole_expected == current_epoch` — the DS's own contiguity check found
 ///   exactly this epoch missing.
 ///
-/// Anything else — including a hole declared at some OTHER epoch, which is a
-/// response that contradicts itself — holds position. Holding is not a wedge:
-/// nothing is deleted, the group keeps its keys, and the next pass re-reads. A
-/// log that really has lost the commit keeps saying so and the rebuild happens
-/// on the pass after; a transport or server glitch simply heals.
+/// Anything else holds position: nothing is deleted and the next pass re-reads.
 pub fn gap_recovery(
     current_epoch: u64,
     hole_expected: Option<u64>,
@@ -279,8 +191,6 @@ pub fn gap_recovery(
     }
     GapRecovery::HoldPosition
 }
-
-// ─── I7: who is allowed to found the lineage we adopt ────────────────────────
 
 /// The standing of the leaf that SIGNED a GroupInfo, against the roster's
 /// cross-signing material — [`super::device::LeafVerdict`] with its payloads
@@ -312,34 +222,16 @@ pub enum LineageAdoption {
 /// Decide whether the device that signed a GroupInfo is allowed to have founded
 /// the lineage we are about to adopt (#1161 M6 residual).
 ///
-/// A `GroupId` is a name, not a capability: anyone can stand up an MLS group
-/// with an arbitrary one, so pinning the name (`build_external_commit`'s
-/// `mls_group_id` check) says nothing about who built the group behind it. The
-/// signer's leaf credential and signature key ARE available before adoption —
-/// the GroupInfo is signed by a member and carries the ratchet tree — and a
-/// Delivery Service holds no account identity key, so it cannot produce a leaf
-/// that the roster's cross-signing material certifies. That asymmetry is the
-/// whole of what this gate rests on.
+/// A `GroupId` is only a name; a DS holds no account key, so it cannot forge a leaf the roster's cross-signing certifies.
 ///
-/// `signer_on_roster` is `None` when the roster could not be read, NOT when the
-/// signer is absent from it — the two must stay distinguishable, because only
-/// the second is evidence.
+/// `signer_on_roster` is `None` when the roster could not be read, which is not evidence.
 ///
-/// **The failure bias is the load-bearing half.** `Unverifiable` means the
-/// inputs are missing (cert rows not yet published, a device row still
-/// replicating), which is an ordinary race on a legitimate migration; refusing
-/// on it would leave real users unable to follow their conversation onto its
-/// successor lineage, which is a worse outcome than the attack. So this refuses
-/// only on POSITIVE evidence, exactly as the eviction rule does:
+/// **The failure bias is load-bearing:** `Unverifiable` is an ordinary race, so refuse only on POSITIVE evidence:
 ///
 /// * `Uncertified` — the cross-signing chain is present and says no;
 /// * a signer whose claimed user is demonstrably not on the roster.
 ///
-/// Everything else adopts. A DS that wants past this has to either publish a
-/// leaf that a member's own account key certified (it holds no account identity
-/// key, so it cannot) or keep the conversation's cross-signing material
-/// permanently unreadable — which shows up as a conversation whose leaves never
-/// certify, and is what the eviction sweep acts on.
+/// Everything else adopts.
 pub fn lineage_adoption(
     signer_on_roster: Option<bool>,
     standing: SignerStanding,
@@ -353,7 +245,6 @@ pub fn lineage_adoption(
     LineageAdoption::Adopt
 }
 
-// ─── Kani proof harnesses ────────────────────────────────────────────────────
 #[cfg(kani)]
 mod proofs {
     use super::*;
@@ -381,9 +272,7 @@ mod proofs {
         }
     }
 
-    /// I5: a revoked (`!registered`) OR removed (`!is_member`) device NEVER
-    /// rejoins — the exhaustive 2-bit truth table. `registered`/`is_member` are
-    /// `bool`, so `kani::any()` covers all four combinations with no unwind.
+    /// I5: a revoked or removed device NEVER rejoins (all four inputs).
     #[kani::proof]
     fn i5_gate_never_leaks() {
         let registered: bool = kani::any();
@@ -403,13 +292,9 @@ mod proofs {
         }
     }
 
-    /// Negative harness: a deliberately-broken gate that uses OR instead of AND
-    /// (fail-open) lets a removed-but-registered device rejoin. `should_panic`:
-    /// this PASSES exactly when Kani finds the leak the real `&&` avoids — a green
-    /// run certifies the harness has teeth.
+    /// Negative harness: OR instead of AND fails open; `should_panic` proves the harness has teeth.
     fn may_rejoin_mutant(registered: bool, is_member: bool) -> bool {
-        // BUG: OR fails open — a removed member (is_member = false) but still
-        // registered device would rejoin the tree.
+        // BUG: OR fails open.
         registered || is_member
     }
 
@@ -426,13 +311,7 @@ mod proofs {
         }
     }
 
-    // ── I6: Welcome-vs-external-join recovery arbitration ─────────────────────
-
-    /// I6: a device with a pending Welcome NEVER external-joins — the exhaustive
-    /// 2-bit truth table. This is what makes the DM-accept dual-path race
-    /// unrepresentable: `ExternalJoin` is admitted ONLY when no Welcome is
-    /// pending, so the Welcome-apply and external-join recovery can never both
-    /// fire for one fresh membership.
+    /// I6: a device with a pending Welcome NEVER external-joins.
     #[kani::proof]
     fn i6_welcome_first_never_double_joins() {
         let welcome_pending: bool = kani::any();
@@ -459,19 +338,13 @@ mod proofs {
         }
     }
 
-    /// Negative harness: a broken arbiter that external-joins whenever the rejoin
-    /// gate passes, IGNORING a pending Welcome — the exact dual-path that strands
-    /// a DM recipient. `should_panic`: Kani must find the double-join the real
-    /// Welcome-first guard prevents.
+    /// Negative harness: external-joins despite a pending Welcome; Kani must find the double-join.
     fn join_recovery_mutant(
         welcome_pending: bool,
         may_rejoin: bool,
         _group_info_available: bool,
     ) -> JoinRecovery {
-        // BUG: checks the rejoin gate BEFORE the Welcome, so a device with a
-        // pending Welcome still external-joins and races its own Welcome. It also
-        // ignores `group_info_available` entirely — the #832 shape, where the gate
-        // selects an external join that cannot succeed.
+        // BUG: rejoin gate before the Welcome, and ignores `group_info_available` (#832).
         if may_rejoin {
             JoinRecovery::ExternalJoin
         } else if welcome_pending {
@@ -498,10 +371,7 @@ mod proofs {
         }
     }
 
-    // ── I2: own-commit canonicalization (#411) ───────────────────────────────
-    //
-    // Small fixed-size byte arrays (N = 3, bytes 0..=1) + a symbolic Some/None
-    // stored value + a symbolic outcome. Proves both directions of `resolve`.
+    // Fixed-size arrays (N = 3, bytes 0..=1), symbolic stored value and outcome.
     const N: usize = 3;
 
     /// I2: `resolve` never adopts a foreign commit and never rolls back our own
@@ -521,9 +391,7 @@ mod proofs {
         };
         let outcome: SubmitOutcome = kani::any();
 
-        // DS contract: a `Committed` result means the DS wrote OUR exact bytes at
-        // this epoch, so they are canonical there. Model that coupling so the
-        // `Committed → Adopt` branch is only exercised in states the DS produces.
+        // DS contract: `Committed` means it wrote OUR bytes; model that coupling.
         if outcome == SubmitOutcome::Committed {
             kani::assume(stored == Some(&ours[..]));
         }
@@ -536,10 +404,7 @@ mod proofs {
         }
     }
 
-    /// Negative harness: a broken `resolve` that adopts an ambiguous outcome
-    /// UNCONDITIONALLY (even when the log holds a foreign commit or nothing).
-    /// `should_panic`: Kani must find the no-foreign-adopt violation the real
-    /// `== Some(ours)` guard prevents.
+    /// Negative harness: adopts an ambiguous outcome unconditionally.
     fn resolve_mutant(outcome: SubmitOutcome, _ours: &[u8], _stored: Option<&[u8]>) -> Resolution {
         match outcome {
             SubmitOutcome::Committed => Resolution::Adopt,
@@ -571,12 +436,6 @@ mod proofs {
             assert!(stored == Some(&ours[..]));
         }
     }
-
-    // ── I1: client-side gap detection ────────────────────────────────────────
-    //
-    // Symbolic current_epoch + next_row_epoch over the tiny domain 0..=3 (Some or
-    // None). The no-gap-apply property is universal, so the small domain loses no
-    // generality while keeping CBMC fast.
 
     fn symbolic_epoch_opt() -> Option<u64> {
         if kani::any() {
@@ -610,10 +469,7 @@ mod proofs {
         }
     }
 
-    /// Negative harness: a broken classifier that applies ANY present row (even a
-    /// non-bridging one) — the exact gap-skip that wedges a member. `should_panic`:
-    /// Kani must find the `Apply` across a gap that the real `e == current_epoch`
-    /// guard prevents.
+    /// Negative harness: applies any present row, across a gap.
     fn classify_mutant(current_epoch: u64, next_row_epoch: Option<u64>) -> ReplayStep {
         match next_row_epoch {
             None => ReplayStep::Wait,
@@ -639,25 +495,14 @@ mod proofs {
     }
 }
 
-// ─── cargo-test unit coverage ─────────────────────────────────────────────────
-//
-// The Kani harnesses above prove these predicates exhaustively, but Kani is not
-// run by `cargo test`. These plain tests pin the load-bearing decisions under the
-// normal test suite too, so a regression is caught even without a Kani pass.
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// I6, the DM-accept convergence invariant: a device with a pending Welcome
-    /// ALWAYS defers to it and NEVER external-joins, regardless of the rejoin
-    /// gate. This is the chokepoint that stops the recipient of a fresh DM from
-    /// racing its own inbound Welcome against external-join recovery (the two
-    /// concurrent "delete stale group → rejoin" paths that stranded the accept).
+    /// I6: a pending Welcome ALWAYS wins, so a fresh DM recipient never races its own Welcome.
     #[test]
     fn join_recovery_welcome_first_never_double_joins() {
-        // A pending Welcome always wins — even when the device is a full member
-        // that COULD external-join. This is the exact state a fresh DM recipient
-        // is in, and the one that used to strand it.
+        // A pending Welcome wins even for a member that could external-join.
         assert_eq!(join_recovery(true, true, true), JoinRecovery::AwaitWelcome);
         assert_eq!(join_recovery(true, false, true), JoinRecovery::AwaitWelcome);
 
@@ -667,9 +512,7 @@ mod tests {
         // ...and a revoked/removed device stays out (never climbs back in).
         assert_eq!(join_recovery(false, false, true), JoinRecovery::StayOut);
 
-        // The headline property over the whole 3-bit space: ExternalJoin ⟹ no
-        // Welcome pending. If this ever holds with a Welcome pending, the dual-path
-        // race is back.
+        // ExternalJoin ⟹ no Welcome pending, over the whole 3-bit space.
         for welcome_pending in [false, true] {
             for may_rejoin in [false, true] {
                 for group_info in [false, true] {
@@ -686,10 +529,7 @@ mod tests {
         }
     }
 
-    /// #832: the state that actually shipped. A registered, current member with no
-    /// Welcome pending and NO published GroupInfo used to be told to external-join
-    /// — an operation that cannot succeed, retried once per pass for the whole
-    /// pre-establishment window. It must wait for the Welcome instead.
+    /// #832: no Welcome and NO GroupInfo must wait, not external-join.
     #[test]
     fn no_group_info_never_selects_an_impossible_external_join() {
         assert_eq!(
@@ -723,8 +563,6 @@ mod tests {
             }
         }
     }
-
-    // ── I1b: a gap only destroys crypto state when the server explained it ────
 
     /// The headline property: `Rebuild` implies the server declared an
     /// explanation that covers the epoch we are missing.
@@ -768,10 +606,7 @@ mod tests {
 
     /// #1161 M6 residual: the whole 3×3 truth table of [`lineage_adoption`].
     ///
-    /// Refusal is exactly the two POSITIVE cases. Enumerated rather than
-    /// asserted case-by-case so a later edit that widens refusal into the
-    /// `Unverifiable` column — the edit that would brick legitimate migrations
-    /// — fails here rather than in production.
+    /// Refusal is exactly the two POSITIVE cases; widening it into `Unverifiable` would brick migrations.
     #[test]
     fn a_lineage_is_refused_only_on_positive_evidence() {
         for roster in [None, Some(true), Some(false)] {

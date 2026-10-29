@@ -1,15 +1,6 @@
 //! Client seam for submitting MLS commits to the log.
 //!
-//! Submission routes through the deployed Delivery Service, which is the *sole
-//! writer* and serializes commits per conversation authoritatively (race-free,
-//! gap-free, append-only — see the `pollis-delivery` crate). The DS writes the
-//! commit + its resulting-epoch GroupInfo + the added members' Welcomes
-//! atomically on a win, returning a [`SubmitResult`].
-//!
-//! Scope: the commit, its resulting-epoch GroupInfo, and the added members'
-//! Welcomes land as ONE unit through this seam. `submit_commit` OWNS all three —
-//! the committer no longer writes Welcomes inline or republishes GroupInfo after
-//! the merge.
+//! Routes through the Delivery Service, the sole writer, which stores commit, GroupInfo and Welcomes atomically.
 
 use std::sync::Arc;
 
@@ -24,25 +15,16 @@ pub enum SubmitResult {
     LostRace,
 }
 
-/// One Welcome destined for a device added by this commit. The recipient
-/// (user_id + device_id) plus the TLS-serialized MLS Welcome blob. Mirrors the
-/// DS `WelcomeBody`.
+/// One Welcome for a device this commit added; mirrors the DS `WelcomeBody`.
 pub struct WelcomeOut {
     pub recipient_id: String,
     pub recipient_device_id: String,
     pub welcome: Vec<u8>,
 }
 
-/// Submit one commit at `epoch` of suite `generation` for `conversation_id`,
-/// together with the resulting-epoch `group_info` (if any) and the `welcomes`
-/// for any devices the commit added. On a win, all three are written as one unit
-/// (atomically by the DS; mirrored by the Direct path). See the module docs.
+/// Submit one commit plus its resulting GroupInfo and Welcomes, written as one unit on a win.
 ///
-/// `closes_epoch` is set **only** by a migration opening generation `N + 1`
-/// (#454 P4): it names the head of generation `N` that the migration closes,
-/// which is what turns "open a lineage" into a compare-and-swap on the old one.
-/// Every other caller passes `None`, and the DS rejects a `closes_epoch` on a
-/// same-generation commit.
+/// `closes_epoch` is set only by a migration opening generation N+1 (#454): the head of N it closes.
 #[allow(clippy::too_many_arguments)]
 pub async fn submit_commit(
     state: &Arc<AppState>,
@@ -108,9 +90,6 @@ async fn http_submit(
         group_info: group_info.map(b64),
         welcomes: welcomes_json,
     };
-    // Signed POST: attaches the four `X-Pollis-*` auth headers. When the DS has
-    // auth disabled the headers are ignored, so behavior is identical to the
-    // previous unsigned submit.
     let resp = super::ds_client::ds_post(state, &body).await?;
     match resp.status() {
         s if s.is_success() => Ok(SubmitResult::Committed),

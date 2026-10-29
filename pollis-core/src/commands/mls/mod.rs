@@ -1,7 +1,4 @@
-//! MLS commands — split into cohesive submodules. Public surface is
-//! preserved via the `pub use` re-exports below so every external caller
-//! (Tauri shims, sibling `commands::*` modules, integration tests) keeps
-//! resolving names at `pollis_core::commands::mls::*`.
+//! MLS commands, re-exported at `pollis_core::commands::mls::*`.
 
 mod delivery;
 mod device;
@@ -13,8 +10,7 @@ pub mod invariants;
 mod join_branch;
 mod key_packages;
 mod migrate;
-// `pub(crate)` because the media-only voice key export builds its own provider
-// outside this module.
+// `pub(crate)`: the media-only voice key export builds its own provider.
 pub(crate) mod provider;
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_surface;
@@ -23,30 +19,25 @@ mod self_update;
 mod sweep;
 mod welcomes;
 
-// ── Provider / credential helpers ────────────────────────────────────────────
 pub use provider::{
     make_credential, parse_credential_device_id, parse_credential_user_id, PollisProvider,
 };
-// Out-of-module MLS crypto (voice key export). Only the `media` build has such
-// a call site.
+// Voice key export; media builds only.
 #[cfg(feature = "media")]
 pub(crate) use provider::MlsProvider;
 pub(crate) use join_branch::{
     entitled_since, first_join, parse_ds_instant, record_first_join, Entitlement,
 };
-// The one seam the flows harness needs to exercise suite migration now that
-// production ships a single suite (#669) — see `provider::current_suite`.
+// Suite-migration seam for the flows harness (#669).
 #[cfg(feature = "test-harness")]
 pub use provider::set_current_suite_override;
 
-// ── Per-device signing keys + cross-signing ──────────────────────────────────
 pub use device::{
     ensure_device_cert, load_device_cert_pubs, load_device_pq_signing_key,
     load_or_create_device_signer, resign_stale_device_certs, stale_cert_candidates,
     AddedLeaf, IdentityDirectory, LeafVerdict,
 };
 
-// ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
 pub(crate) use ds_client::{
     current_user_id, decode_response, ds_claim_key_package, ds_livekit_send_data,
     ds_livekit_token, ds_post, ds_post_envelope, ds_post_json, ds_post_ok, ds_post_plain,
@@ -55,51 +46,40 @@ pub(crate) use ds_client::{
 // Desktop-only (voice roster); mobile has no Rust-side participants path.
 #[cfg(feature = "media")]
 pub(crate) use ds_client::ds_livekit_participants;
-// #836 identity resolution is media-only: the headless/mobile build drives
-// LiveKit through the native SDK and never sees a Rust-side participant
-// identity, so neither the resolver nor its cache exists there.
+// #836 identity resolution is media-only.
 #[cfg(feature = "media")]
 pub(crate) use ds_client::ds_livekit_identities;
 
-// ── Key packages ─────────────────────────────────────────────────────────────
 pub use key_packages::{ensure_mls_key_package, validate_key_package};
-// A KeyPackage that claims a `user:device` credential with a key the user never
-// certified — the flows suite's model of a DS substituting an attacker's package.
+// An uncertified-key KeyPackage: the flows suite's malicious-DS model.
 #[cfg(feature = "test-harness")]
 pub use key_packages::forge_key_package_for;
 
-// ── Welcomes ─────────────────────────────────────────────────────────────────
 pub use welcomes::{
     apply_welcome, poll_mls_welcomes, poll_mls_welcomes_inner, reset_welcome_delivery,
 };
 
-// ── Group lifecycle / encrypt / decrypt / commit processing ──────────────────
 pub use group_state::{
     envelope_lineage, external_join_group, forget_local_mls_group, has_local_group, init_mls_group,
     process_pending_commits, process_pending_commits_inner, process_pending_commits_inner_with_hook,
     publish_group_info, try_mls_decrypt, try_mls_decrypt_why, try_mls_encrypt, DecryptFailure,
     DecryptFailureKind, MlsDecryptor, ReplayBound,
 };
-// Deterministic interleavings of the Welcome and external-join paths for the
-// flows suite (#1041) — see `group_state::rendezvous`.
+// Welcome/external-join interleavings for the flows suite (#1041).
 #[cfg(feature = "test-harness")]
 pub use group_state::rendezvous;
 
-// ── Cold-launch / post-reconnect sweep ──────────────────────────────────────
 pub use sweep::catch_up_all_mls_groups;
 pub use sweep::{backstop_before_seal, reconcile_backstop_all, reconcile_backstop_one, BackstopReport};
 pub use sweep::apply_membership_wake;
 
-// ── Own-leaf rotation (post-join merge + periodic PCS) ───────────────────────
 pub use self_update::{self_update_group, self_update_if_due};
 
-// ── Reconcile + self-repair ──────────────────────────────────────────────────
 pub use reconcile::{
     reconcile_group_mls_core, reconcile_group_mls_core_staged, reconcile_group_mls_impl,
     ReconcileCommitData, ReconcileOutcome,
 };
-// Leaf cross-signing seams for the flows suite: play a pre-fix committer, and
-// read the local tree back to assert what was admitted or evicted.
+// Leaf cross-signing seams for the flows suite.
 #[cfg(feature = "test-harness")]
 pub use reconcile::{local_epoch_and_pending, local_tree_members, set_skip_committer_leaf_check};
 
@@ -111,10 +91,7 @@ mod tests;
 mod merge_site_tests {
     use std::path::{Path, PathBuf};
 
-    /// The `(file, enclosing fn)` pairs allowed to call
-    /// `merge_pending_commit`. Each one is a place where the commit log's answer
-    /// is already known, or where the caller holds the per-conversation MLS lock
-    /// and is about to stage its own commit:
+    /// The `(file, enclosing fn)` pairs allowed to call `merge_pending_commit`:
     ///
     /// | site | why it may merge |
     /// |---|---|
@@ -131,28 +108,7 @@ mod merge_site_tests {
         ("commands/mls/group_state.rs", "apply_one_commit"),
     ];
 
-    /// Merging a staged commit advances this device's epoch, so it is a decision
-    /// about which branch of history this device is on — and only the commit log
-    /// gets to make it.
-    ///
-    /// `load_group_with_signer` used to merge unconditionally, which put that
-    /// decision behind a function whose job is "give me this group". The
-    /// consequence was #1079: `try_mls_encrypt`, reached from
-    /// `receipts::emit_receipt` (which by design takes no MLS lock and runs at
-    /// the end of every DM catch-up), merged a committer's staged commit
-    /// mid-flight. On a lost race the device sat at a phantom epoch on a branch
-    /// the log never held, invisible to `invariants::resolve`; on a won one
-    /// `sweep_before_merge` opened its decryptor at the already-advanced lineage
-    /// and skipped every envelope sealed at the closing epoch — the exact
-    /// committer-arm loss #1041 exists to prevent.
-    ///
-    /// The fix was to move the merge to the callers that have the log's answer.
-    /// This test is what keeps it there: a refactor that reintroduces a merge
-    /// anywhere else fails here rather than in production, six months later, as
-    /// a message that silently never arrived.
-    ///
-    /// A source-shape guard, not a proof — it cannot see a merge reached through
-    /// a function pointer or a macro. It closes the case that actually happened.
+    /// Merging a staged commit advances the epoch, so only a site that knows the log's answer may do it (#1079).
     #[test]
     fn no_new_site_merges_a_pending_commit() {
         let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -165,8 +121,7 @@ mod merge_site_tests {
             src_root.display()
         );
 
-        // Split so this file's own source does not contain the needle and match
-        // itself. `concat!` is compile-time, so the check is exact.
+        // Split so this file does not match itself.
         let needle = concat!("merge_pending", "_commit(");
 
         let mut offenders = Vec::new();
@@ -176,8 +131,7 @@ mod merge_site_tests {
                 .unwrap_or(file)
                 .to_string_lossy()
                 .replace('\\', "/");
-            // `tests.rs` is `#[cfg(test)]`: a test driving openmls directly is
-            // not a production epoch advance.
+            // `tests.rs` is `#[cfg(test)]`.
             if rel.ends_with("/tests.rs") || rel.ends_with("tests.rs") {
                 continue;
             }
@@ -232,13 +186,7 @@ mod merge_site_tests {
         }
     }
 
-    /// Every merge leaves an epoch, and with it the only exporter that opens a
-    /// file key ring wrapped there (#1382). A merge site that does not keep
-    /// the epoch's file KEK first strands a device that had not adopted the
-    /// ring yet: it can then open the stored wrap only once a key holder comes
-    /// online and re-wraps — in a 1:1 DM, never while the other person is
-    /// away. So each merge must be preceded, within its function, by
-    /// `file_keys::keep_epoch_kek`.
+    /// Each merge must first keep the epoch's file KEK (`file_keys::keep_epoch_kek`, #1382), or a device yet to adopt the ring is stranded.
     #[test]
     fn every_merge_site_keeps_the_file_kek() {
         let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
