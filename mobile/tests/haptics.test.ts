@@ -146,7 +146,7 @@ test("every mutation hook declares its haptic, or is a listed exemption", () => 
         continue;
       }
       const body = fn.slice(fn.indexOf("useMutation("));
-      const tagged = /^useMutation\(\{\s*\/\/[^\n]*\n\s*meta: \{ haptic:/.test(body);
+      const tagged = /^useMutation\(\{\s*(?:\/\/[^\n]*\n\s*)*meta: \{ haptic:/.test(body);
       if (!tagged && !NO_HAPTIC.has(name)) {
         missing.push(`${f}: ${name}`);
       }
