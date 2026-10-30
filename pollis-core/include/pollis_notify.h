@@ -63,7 +63,12 @@ void pollis_set_keychain_access_group(const char *group);
 uint64_t pollis_app_suspend_ticket(void);
 bool pollis_app_will_suspend(uint64_t ticket, uint32_t timeout_ms);
 
-// App only: back in the foreground. Opens the gate and reopens the database.
+// App only: the background task's expiration handler. Releases state.lock and closes the
+// database now (bounded, about a second) even if the drain is still running; end the task after.
+void pollis_app_suspend_expired(uint64_t ticket);
+
+// App only: back in the foreground. Never blocks (main thread): the gate opens at once and the
+// database reopens off-thread, or on the next command, whichever comes first.
 void pollis_app_did_resume(void);
 
 #ifdef __cplusplus

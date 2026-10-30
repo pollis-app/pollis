@@ -2,21 +2,23 @@ import { useMemo } from "react";
 import { View } from "react-native";
 import Svg, { Path, Rect } from "react-native-svg";
 import QRCode from "qrcode";
+import { semantic, r, space } from "../theme/tokens";
 
-// Keep the polarity, DARK on LIGHT: inverted codes fail some decoders.
-const DARK = "#000000";
-const LIGHT = "#ffffff";
 const QUIET = 2;
 
-/** A QR code drawn with react-native-svg from `qrcode`'s module matrix (#1207). */
+/**
+ * A QR code drawn with react-native-svg from `qrcode`'s module matrix (#1207), themed like
+ * desktop's ThemedQr (#1607): a rounded accent tile, modules in the background colour.
+ * Dark modules on the light accent keep normal polarity; inverted codes fail some decoders.
+ */
 export function QrCode({
   value,
   size,
   testID,
-  dark = DARK,
-  light = LIGHT,
-  frame = 0,
-  radius = 0,
+  dark = semantic.bg,
+  light = semantic.accent,
+  frame = space.lg,
+  radius = r.lg,
 }: {
   value: string;
   size: number;

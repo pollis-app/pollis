@@ -712,6 +712,12 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         }
     };
     if probe.as_ref().is_some_and(|p| !p.exists) {
+        // Said out loud (#1599): a session that silently vanished looked like a migration bug,
+        // when the install had been signed in against a different DS.
+        crate::diag!(
+            "[session] the DS has no account {}; removing it from this device's list",
+            profile.id
+        );
         let _ = crate::accounts::remove_account(&profile.id);
         return Ok(None);
     }

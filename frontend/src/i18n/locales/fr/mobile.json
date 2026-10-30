@@ -405,6 +405,17 @@
         "showInlineTimestamps": "Afficher l'heure dans les messages",
         "showMemberAvatars": "Afficher les avatars des membres"
       },
+      "notificationContent": {
+        "description": "Les aperçus sont déchiffrés uniquement sur cet appareil.",
+        "full": "Nom et message",
+        "fullSub": "Affiche l'expéditeur et ce qu'il a écrit.",
+        "heading": "Contenu des notifications",
+        "name": "Nom uniquement",
+        "nameSub": "Affiche l'expéditeur, pas ce qu'il a écrit.",
+        "none": "Rien",
+        "noneSub": "Indique seulement qu'un message est arrivé.",
+        "pinNote": "Avec Rien, votre code PIN reste la seule clé des messages de cet appareil."
+      },
       "notificationsOffSettings": "Désactivées. Activez-les dans les Réglages du système",
       "notificationsOffTap": "Désactivées. Touchez pour activer",
       "notificationsOn": "Activées",

@@ -413,6 +413,28 @@ message previewed twice, group create/forget waiting on the lock, escrow
 deletion by logout and PIN lockout);
 unit tests in `notify::*` and `db::local`.
 
+### The Notification content setting (mobile UI)
+
+What a rich push shows: **Name and message** (`full`, the default), **Name
+only** (`name`) or **Nothing** (`none`, the generic text every push showed
+before #1599).
+
+- **Mobile UI:** Self → Preferences, right after the Notifications group: a
+  "Notification content" group holding a vertical radio list — one full-width
+  `RadioRow` (`mobile/components/RadioRow.tsx`, shared with the report screen's
+  reasons) per choice, each with a one-line description. The selected row takes
+  the accent tint, bold label and a trailing check; no borders. Under it, two
+  notes: previews are decrypted on this device only, and choosing Nothing keeps
+  the PIN as the only key to this device's messages (the escrow above).
+  `NotificationContentSetting` in `mobile/app/self/preferences.tsx`, hook
+  `useNotificationContent` over the bridge arms above. The write is optimistic
+  and rolls back on failure; the client reads any unrecognised value as `none`,
+  never `full`. Maestro: `notification-content.yaml`.
+- **Desktop has no equivalent and needs none yet:** its OS banners never carry
+  message text — they name the sender and the room (`chat:notify.newMessageBody`)
+  — and desktop receives no push, so there is nothing for `full`/`name` to
+  change. A desktop "hide the sender too" option would be a separate feature.
+
 ## Rich push on iOS (#1599) — the Notification Service Extension
 
 The wire stays `{h}` plus the generic title and body. A binary that has the
@@ -443,6 +465,7 @@ dismissal still work by `data.h`. Build, signing and portal details:
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
 | `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508) |
 | `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
+| `mobile/app/self/preferences.tsx` · `mobile/hooks/queries/useNotificationContent.ts` | The notification-content radio list (#1599); rows are `mobile/components/RadioRow.tsx` |
 | `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
 | `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
 | `mobile/plugins/withNotificationServiceExtension.js` · `mobile/plugins/notification-service/` | iOS NSE target, entitlements, Localizable.strings, and the Swift rewrite (#1599) |

@@ -1389,6 +1389,15 @@ Current state:
   edit in the core's edit outbox before posting and the row reads back with
   `edit_state` until the DS confirms; `MessageRow` labels a failed one
   "(edit not sent)" (`editUnsent`), and the same drain delivers it.
+- **Android notification small icon (#1606):** `assets/notification-icon.png`,
+  the expo-notifications plugin's `icon` (tinted with its `color` in the shade).
+  Prebuild writes it as `@drawable/notification_icon` and points both the FCM
+  and the expo local-notification `default_notification_icon` meta-data at it;
+  anything posting its own notifications natively should read that meta-data.
+  The lock glyph alone, white on transparency, 96px (xxxhdpi 24dp) with its tall
+  side 22dp — without it Android fell back to the launcher icon, safe-zone padding
+  and all, and the status-bar lock was tiny. Generated from the SVG by
+  `scripts/gen-icons.sh`; `tests/android-notification-icon.test.ts` pins it.
 - **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a

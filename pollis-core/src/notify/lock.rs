@@ -199,8 +199,10 @@ impl SharedStateLock {
             {
                 let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
                 // Joining an existing hold is always allowed, even while suspending: the joiner
-                // may be nested inside the very section the suspend is waiting to drain.
-                if inner.holders > 0 {
+                // may be nested inside the very section the suspend is waiting to drain. A hold
+                // whose file lock was force-released (#1599, `force_release`) is not joined: it
+                // no longer excludes anyone, so the file lock is taken again first.
+                if inner.holders > 0 && inner.lock.is_some() {
                     inner.holders += 1;
                     return Ok(SharedStateGuard {
                         owner: Some(self.clone()),
@@ -209,7 +211,7 @@ impl SharedStateLock {
                 if !suspend::is_suspending() {
                     if let Some(lock) = StateLock::try_acquire_in(data_dir)? {
                         inner.lock = Some(lock);
-                        inner.holders = 1;
+                        inner.holders += 1;
                         suspend::hold_started();
                         return Ok(SharedStateGuard {
                             owner: Some(self.clone()),
@@ -240,6 +242,16 @@ impl SharedStateLock {
     #[cfg(test)]
     pub fn holders(&self) -> usize {
         self.inner.lock().unwrap().holders
+    }
+
+    /// Drop the file lock now, whoever still shares the hold (#1599: the app's background time
+    /// is expiring and it must not be suspended holding it). Sections still running lose their
+    /// exclusion; the next acquisition takes the file lock again. Never blocks on the file.
+    pub fn force_release(&self) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if inner.lock.take().is_some() {
+            suspend::hold_ended();
+        }
     }
 
     fn release(&self) {
@@ -501,6 +513,29 @@ mod tests {
         assert!(suspend::is_current(new), "the newer suspension stands");
         suspend::end();
         assert!(!suspend::is_suspending());
+    }
+
+    #[tokio::test]
+    async fn a_force_release_frees_the_file_and_the_next_section_retakes_it() {
+        let d = dir();
+        let shared = SharedStateLock::new(LockPolicy::PerSection);
+        let in_flight = shared.acquire(d.path(), Duration::from_millis(50)).await.unwrap();
+        shared.force_release();
+        let other = StateLock::try_acquire_in(d.path())
+            .unwrap()
+            .expect("the file lock is gone although a section still runs");
+        // A new section does not join the released hold; it waits for the file lock.
+        let s2 = shared.clone();
+        let path = d.path().to_path_buf();
+        let next = tokio::spawn(async move {
+            s2.acquire(&path, Duration::from_secs(5)).await.map(drop)
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!next.is_finished(), "it must not run unexcluded");
+        drop(other);
+        next.await.unwrap().expect("retook the file lock");
+        drop(in_flight);
+        assert!(StateLock::try_acquire_in(d.path()).unwrap().is_some(), "all released");
     }
 
     #[tokio::test]

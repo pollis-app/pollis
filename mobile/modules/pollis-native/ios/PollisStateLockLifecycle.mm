@@ -5,9 +5,11 @@
 // where `state.lock` and the SQLCipher database (whose WAL keeps fcntl locks on -shm) live.
 // On entering the background this asks for background time and lets the core stop new
 // `state.lock` holds, drain the open ones, checkpoint and close the database
-// (pollis_app_will_suspend). On returning it reopens them (pollis_app_did_resume). The ticket,
-// taken synchronously, makes a drain that only starts after a quick return a no-op, so the app
-// can never stay gated.
+// (pollis_app_will_suspend). If the background time runs out first, the expiration handler
+// force-releases both (pollis_app_suspend_expired) before ending the task. On returning,
+// pollis_app_did_resume opens the gate without blocking the main thread; the database reopens
+// off-thread. The ticket, taken synchronously, makes a drain that only starts after a quick
+// return a no-op, so the app can never stay gated.
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -15,6 +17,7 @@
 // From pollis-core/include/pollis_notify.h (not on this pod's header path).
 extern "C" uint64_t pollis_app_suspend_ticket(void);
 extern "C" bool pollis_app_will_suspend(uint64_t ticket, uint32_t timeout_ms);
+extern "C" void pollis_app_suspend_expired(uint64_t ticket);
 extern "C" void pollis_app_did_resume(void);
 
 // Below the ~30 s iOS grants a background task, leaving room to end it cleanly.
@@ -50,6 +53,10 @@ static const uint32_t kDrainTimeoutMs = 25000;
   __block UIBackgroundTaskIdentifier task = UIBackgroundTaskInvalid;
   task = [app beginBackgroundTaskWithName:@"pollis.state-lock"
                         expirationHandler:^{
+                          // Time is up while the drain may still be waiting: release the lock
+                          // and close the database now (bounded), and only then end the task,
+                          // so the app is never suspended holding either.
+                          pollis_app_suspend_expired(ticket);
                           [app endBackgroundTask:task];
                           task = UIBackgroundTaskInvalid;
                         }];
