@@ -178,6 +178,27 @@
       "version": "1.0.23",
       "commit": "6d7a2c9ccce13edd0cf8ac502259719c740f8ccb",
       "runtimeVersion": "ddcb9ff17d41f34600138ea49575f62df511e60d"
+    },
+    {
+      "platform": "android",
+      "channel": "play",
+      "version": "1.0.24",
+      "commit": "2ee3840392d41678dd10b978ffa20b10a6a49714",
+      "runtimeVersion": "667a166680516092158d454826a6bcfbe556b634"
+    },
+    {
+      "platform": "android",
+      "channel": "sideload",
+      "version": "1.0.24",
+      "commit": "2ee3840392d41678dd10b978ffa20b10a6a49714",
+      "runtimeVersion": "667a166680516092158d454826a6bcfbe556b634"
+    },
+    {
+      "platform": "ios",
+      "channel": "app-store",
+      "version": "1.0.24",
+      "commit": "2ee3840392d41678dd10b978ffa20b10a6a49714",
+      "runtimeVersion": "67c14fb218166e66935488b28ac2e06c72fda443"
     }
   ]
 }
