@@ -604,6 +604,8 @@ pub fn is_expo_push_token(token: &str) -> bool {
 /// * **Shape.** Non-Expo strings are refused.
 /// * **Device binding.** Only the registering device may re-register a token (legacy rows adopt).
 /// * **Cap.** At most [`PUSH_TOKENS_PER_USER`], oldest evicted first.
+///
+/// `caps` (#1599) is reduced to the known capabilities; anything else is dropped.
 pub async fn apply_register_push_token(
     conn: &Connection,
     authed: Option<&str>,
@@ -644,20 +646,24 @@ pub async fn apply_register_push_token(
         }
     }
 
+    // #1599: `caps` is overwritten on every register, never merged, so an install
+    // that goes back to a build without the capability goes back to today's payload.
     conn.execute(
-        "INSERT INTO push_token (token, user_id, platform, updated_at, device_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5) \
+        "INSERT INTO push_token (token, user_id, platform, updated_at, device_id, caps) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
          ON CONFLICT(token) DO UPDATE SET \
              user_id = excluded.user_id, \
              platform = excluded.platform, \
              updated_at = excluded.updated_at, \
-             device_id = COALESCE(excluded.device_id, push_token.device_id)",
+             device_id = COALESCE(excluded.device_id, push_token.device_id), \
+             caps = excluded.caps",
         libsql::params![
             body.token.clone(),
             actor.clone(),
             body.platform.clone(),
             body.updated_at.clone(),
             device_id.map(|d| d.to_string()),
+            crate::push::PushCaps::from_wire(&body.caps).bits(),
         ],
     )
     .await?;

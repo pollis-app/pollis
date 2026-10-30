@@ -269,6 +269,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "key_package_last_resort",
         include_str!("../migrations/000042_key_package_last_resort.sql"),
     ),
+    (
+        43,
+        "push_token_caps",
+        include_str!("../migrations/000043_push_token_caps.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

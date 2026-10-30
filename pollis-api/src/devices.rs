@@ -58,7 +58,19 @@ pub struct PushTokenBody {
     pub updated_at: String,
     #[serde(default)]
     pub user_id: Option<String>,
+    /// What this install can do with a push (#1599), e.g. [`PUSH_CAP_RICH`].
+    ///
+    /// Missing = none: every client before #1599 gets exactly the payload it always did.
+    /// Unknown values are ignored by the DS. Omitted on the wire when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub caps: Vec<String>,
 }
+
+/// #1599: the client rewrites the notification itself after decrypting on device.
+///
+/// iOS: a Notification Service Extension, so the DS adds `mutableContent`.
+/// Android: a data-push handler, so the DS sends a data-only `{h}` message.
+pub const PUSH_CAP_RICH: &str = "rich";
 
 /// The MLS code point of `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`
 /// — the post-quantum suite, and since #669 the only suite Pollis uses. It is
