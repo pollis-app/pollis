@@ -1,0 +1,59 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# LIVE MESSAGE (#1610), part 2 of 3. The peer is accepted and the DM is open.
+#
+# 1. A message sent into the open conversation shows within 2 s of the DS
+#    having it (target < 1 s; the rest is Maestro's own polling). It used to
+#    take 3.5 s on iOS and 5.4 s on Android: the screen waited for the whole
+#    ingest, and on Android behind the push fetch's exclusive lock.
+# 2. Leave for the Direct list; the peer sends; once the list row shows it,
+#    opening the conversation shows it straight away from the local store,
+#    with no loading line and no network wait.
+
+# The first message after the peer accepts lands at the epoch its join opened,
+# so this device applies that commit first: not the steady state measured here.
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "warm up"
+- extendedWaitUntil:
+    visible: ".*: warm up, .*"
+    timeout: 20000
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "live while you read"
+- extendedWaitUntil:
+    visible: ".*: live while you read, .*"
+    timeout: 2000
+- takeScreenshot: live-message-01-open-conversation
+
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "stored before you open"
+- extendedWaitUntil:
+    visible: ".*stored before you open.*"
+    timeout: 10000
+- tapOn:
+    id: "row-dm-.*"
+- extendedWaitUntil:
+    visible: ".*: stored before you open, .*"
+    timeout: 1000
+- assertNotVisible:
+    text: "Loading messages…"
+- takeScreenshot: live-message-02-opened-from-list
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- pressKey: Home
