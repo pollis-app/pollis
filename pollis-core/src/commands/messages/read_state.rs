@@ -950,10 +950,10 @@ mod tests {
     fn a_device_is_ahead_only_when_it_holds_a_position_the_account_lacks() {
         let older = cursor("2026-01-01T00:00:01Z", "m1");
         let newer = cursor("2026-01-01T00:00:09Z", "m9");
-        assert!(!is_ahead_of(&[], &[newer.clone()]));
-        assert!(!is_ahead_of(&[newer.clone()], &[newer.clone()]));
-        assert!(!is_ahead_of(&[older.clone()], &[newer.clone()]), "a stale device must not push");
-        assert!(is_ahead_of(&[newer.clone()], &[older.clone()]));
+        assert!(!is_ahead_of(&[], std::slice::from_ref(&newer)));
+        assert!(!is_ahead_of(std::slice::from_ref(&newer), std::slice::from_ref(&newer)));
+        assert!(!is_ahead_of(std::slice::from_ref(&older), std::slice::from_ref(&newer)), "a stale device must not push");
+        assert!(is_ahead_of(std::slice::from_ref(&newer), std::slice::from_ref(&older)));
         let elsewhere = ReadCursor {
             conversation_id: "c2".into(),
             ..older.clone()
