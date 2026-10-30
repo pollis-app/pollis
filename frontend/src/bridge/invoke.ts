@@ -63,6 +63,42 @@ export function deviceWasRevoked(): void {
   noticeDeviceRevoked("device_revoked");
 }
 
+// #1611: a DS 426 (or a cached block) fails every command with `upgrade_required`; noticed here.
+let upgradeRequiredHandler: (() => void | Promise<void>) | null = null;
+let upgradeRequiredRunning = false;
+
+export function isUpgradeRequiredError(error: unknown): boolean {
+  const message =
+    typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+  return message === "upgrade_required" || message.endsWith(": upgrade_required");
+}
+
+/** Register what to do when this build turns out to be below the minimum. Returns an unsubscribe. */
+export function onUpgradeRequired(handler: () => void | Promise<void>): () => void {
+  upgradeRequiredHandler = handler;
+  return () => {
+    if (upgradeRequiredHandler === handler) {
+      upgradeRequiredHandler = null;
+    }
+  };
+}
+
+function noticeUpgradeRequired(error: unknown): void {
+  if (!isUpgradeRequiredError(error) || !upgradeRequiredHandler || upgradeRequiredRunning) {
+    return;
+  }
+  upgradeRequiredRunning = true;
+  const handler = upgradeRequiredHandler;
+  queueMicrotask(() => {
+    void Promise.resolve()
+      .then(handler)
+      .catch((e) => console.warn("[upgrade_required] handler failed", e))
+      .finally(() => {
+        upgradeRequiredRunning = false;
+      });
+  });
+}
+
 export function invoke<T>(
   cmd: string,
   args?: InvokeArgs,
@@ -70,6 +106,7 @@ export function invoke<T>(
 ): Promise<T> {
   return tauriInvoke<T>(cmd, args, options).catch((error: unknown) => {
     noticeDeviceRevoked(error);
+    noticeUpgradeRequired(error);
     throw error;
   });
 }

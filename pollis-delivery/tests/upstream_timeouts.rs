@@ -106,7 +106,7 @@ async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
 /// Every upstream variant must carry a sane deadline.
 #[test]
 fn every_upstream_declares_a_sane_deadline() {
-    for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::ExpoPush] {
+    for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::ExpoPush, Upstream::ClientPolicy] {
         let t = upstream.timeout();
         assert!(
             t >= Duration::from_secs(1),
@@ -122,7 +122,7 @@ fn every_upstream_declares_a_sane_deadline() {
     }
 }
 
-/// Only `util::http_post` may make outbound requests, so nobody may reach for `reqwest` directly.
+/// Only `util::http_post` / `util::http_get` may make outbound requests, so nobody may reach for `reqwest` directly.
 #[test]
 fn no_delivery_source_builds_its_own_http_client() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

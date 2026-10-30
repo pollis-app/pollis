@@ -39,6 +39,31 @@ where
     }
 }
 
+/// The exit status of a build below the published minimum (#1611): distinct from a failure (1)
+/// and a bad argument (2), so a script can tell "update pollis" from "something broke".
+pub const EXIT_UPGRADE_REQUIRED: u8 = 3;
+
+/// How a user updates the terminal client.
+pub const UPDATE_COMMAND: &str = "curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash";
+
+/// What a blocked build prints instead of starting (#1611): what happened, and the one thing to do.
+pub fn upgrade_required_text(status: &pollis_core::client_policy::ClientPolicyStatus) -> String {
+    let installed = status.version.as_deref().unwrap_or(env!("CARGO_PKG_VERSION"));
+    let required = match status.minimum.as_deref() {
+        Some(min) => format!(" Update to {min} or later to keep using it."),
+        None => " Update to the latest version to keep using it.".to_string(),
+    };
+    let mut out = format!("pollis: this version ({installed}) is no longer supported.{required}\n");
+    if let Some(message) = status.message.as_deref() {
+        out.push_str(message);
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "\nUpdate:\n    {UPDATE_COMMAND}\n\nYour keys and messages stay on this device.\nhttps://pollis.com"
+    ));
+    out
+}
+
 /// `pollis --version`.
 pub fn version_text() -> String {
     format!("pollis {}", env!("CARGO_PKG_VERSION"))
@@ -134,6 +159,30 @@ mod tests {
         for needle in ["--help", "--version", "POLLIS_DATA_DIR", "pollis-tui.log"] {
             assert!(help.contains(needle), "help is missing {needle}:\n{help}");
         }
+    }
+
+    fn status(minimum: Option<&str>, message: Option<&str>) -> pollis_core::client_policy::ClientPolicyStatus {
+        pollis_core::client_policy::ClientPolicyStatus {
+            blocked: true,
+            platform: Some(pollis_api::client_policy::ClientPlatform::Cli),
+            version: Some("1.16.0".into()),
+            minimum: minimum.map(str::to_string),
+            message: message.map(str::to_string),
+            source: pollis_core::client_policy::PolicySource::Network,
+        }
+    }
+
+    #[test]
+    fn the_upgrade_message_says_what_happened_and_what_to_do() {
+        let text = upgrade_required_text(&status(Some("1.17.0"), None));
+        assert!(text.contains("this version (1.16.0) is no longer supported"), "{text}");
+        assert!(text.contains("Update to 1.17.0 or later"), "{text}");
+        assert!(text.contains(UPDATE_COMMAND), "{text}");
+        let text = upgrade_required_text(&status(None, Some("1.16 corrupts drafts.")));
+        assert!(text.contains("Update to the latest version"), "{text}");
+        assert!(text.contains("1.16 corrupts drafts."), "{text}");
+        assert_ne!(EXIT_UPGRADE_REQUIRED, 1);
+        assert_ne!(EXIT_UPGRADE_REQUIRED, 2);
     }
 
     #[test]

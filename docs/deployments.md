@@ -215,7 +215,7 @@ stop someone moving the tag that fires it.
 - **Failed-request log (#1305).** `curl -H "Authorization: Bearer $POLLIS_DS_METRICS_TOKEN" https://api.pollis.com/v1/ops/errors` (or api-dev) lists the DS's failed requests, newest first: route, status, `error`, the `warn!`/`error!` lines behind a 5xx, and the client's `request_id` — match it to a `[ds] … req=<id>` line in a user's copied diagnostics. Kept 72 h / 500 rows by migration `000035`'s trigger, so check soon after a report. Same token gate as below (404 when unset).
 - **Push outcomes (#1423).** `curl -H "Authorization: Bearer $POLLIS_DS_METRICS_TOKEN" https://api.pollis.com/v1/ops/push` (or api-dev) answers `{now, pending_receipts, counts}`. `counts` is everything the content-free fan-out learned from Expo since the process started: `messages_sent`; `send_request_failures` plus `send_request_errors` by Expo code (e.g. `PUSH_TOO_MANY_EXPERIENCE_IDS`); `tickets_ok` and `ticket_errors` by class (`DeviceNotRegistered`, `MessageRateExceeded`, `MessageTooBig`, `MismatchSenderId`, `InvalidCredentials`, `Other`); `receipts_ok`, `receipt_errors` by the same classes, and `receipt_request_failures`; `tickets_expired` (no receipt within 24 h); and `tokens_pruned` (`push_token` rows deleted on `DeviceNotRegistered`). Counts only: no token, user, conversation or IP, and the `warn!` lines the fan-out writes carry only the class. `pending_receipts` is the `push_ticket` row count (migration `000037`): accepted tickets the GC sweep has not yet asked Expo about (`POLLIS_DS_GC_SWEEP_SECS`, hourly by default; rows are dropped once answered or after 24 h). The counts live in memory, so they reset on every deploy and every idle sleep; read them soon after a report. Same token gate as the routes around it (404 when unset). A rising `InvalidCredentials` means the FCM/APNs credentials held by EAS are wrong; `DeviceNotRegistered` is routine (uninstalls and token rotations) and prunes itself.
 - **`POLLIS_DS_METRICS_TOKEN` (#720) — set it to enable retention metrics.** It gates `GET /v1/retention/metrics` (identity-free `message_envelope` growth snapshot). The endpoint is **default-closed**: **unset → the route 404s and no metrics are served** (fail-closed, because the snapshot is a pollable aggregate activity meter, not health-check-class data); set → the owner's scraper must send `Authorization: Bearer <token>` (`curl -H "Authorization: Bearer $TOKEN" https://api.pollis.com/v1/retention/metrics`). It is a **secret** (an access credential), so it lives in Doppler alongside the other DS secrets, not the wrangler `vars`. Alert *routing* (thresholds/paging) is still the owner's console — the DS only emits the numbers.
-- **Rotating a DS secret** (Turso token, LiveKit key, etc. — no code change): update Doppler, then run the deploy workflow with **`force_restart: true`**. CF Containers do **not** restart on a secret-only change (the running instance keeps the old value until a new *image digest* deploys), so `force_restart` builds with a unique `--build-arg BUILD_NONCE` **and** pushes/deploys under a unique image tag (`<SHA>-r<run_id>`) → new digest + new reference → the container rolls and re-reads the Secrets Store on restart (`worker/index.ts` `resolveSecretEnv` runs on every start). A normal code deploy rolls via the new `<SHA>` tag and needs no flag. (The `BUILD_NONCE` arg in the Dockerfile is a runtime no-op; self-hosters running the image directly ignore it.)
+- **Rotating a DS secret** (Turso token, LiveKit key, etc. — no code change): update Doppler, then run the deploy workflow with **`force_restart: true`**. CF Containers do **not** restart on a secret-only change (the running instance keeps the old value until a new *image digest* deploys), so `force_restart` builds with a unique `--build-arg BUILD_NONCE` **and** pushes/deploys under a unique image tag (`<SHA>-r<run_id>`) → new digest + new reference → the container rolls. **A roll alone does not refresh the environment** (#1611): the platform starts the replacement instance with the environment the previous start passed, which is why `POLLIS_CLIENT_POLICY_URL` never reached api-dev's container while every older var did. Since #1611 each start records a SHA-256 fingerprint of the environment it passed (Durable Object storage; never the values), and the first request a freshly deployed Durable Object handles restarts the container if the deployed environment differs (`worker/container-env.ts`) — so a new var, a changed var or a rotated secret lands on the next deploy, at the cost of one container restart. Both deploy workflows then assert `GET /v1/client-policy` is not 404 (the #760 pattern), and `GET /v1/config` reports `client_policy_url`. A normal code deploy rolls via the new `<SHA>` tag and needs no flag. (The `BUILD_NONCE` arg in the Dockerfile is a runtime no-op; self-hosters running the image directly ignore it.)
 - **Container lifecycle (why deploys are reliable):** the DS traps **SIGTERM** and exits within ~5s (`pollis-delivery/src/main.rs` `shutdown_signal`, with a hard-exit backstop). This matters because with `max_instances: 1` CF does **stop-first / drain-then-replace** — it SIGTERMs the old instance (grace up to 15 min) before starting the new one. The DS runs as **PID 1**, which ignores unhandled signals, so without the handler the old instance would squat the whole grace window and the swap/verify would stall (the original "container won't swap" bug). Stop-first is the correct strategy for a single-writer service — it never runs two writers — and a momentary overlap would be harmless anyway: the commit-log **CAS insert** (`commit.rs`: `INSERT … WHERE epoch = MAX(epoch)+1 … ON CONFLICT DO NOTHING` in an `IMMEDIATE` txn, backed by `UNIQUE(conversation_id, epoch)`) rejects any stale/out-of-order write. The ~1–3s deploy blip is retryable 503s; clients already retry.
 - **Required CI config** (per GH environment `delivery-dev` / `delivery-prod`): secrets `CLOUDFLARE_API_TOKEN` (scoped: Workers Scripts\:Edit + Containers + Secrets Store write — **not** the broad R2/DNS token) and `DOPPLER_TOKEN` (service token for that env's config); vars `CLOUDFLARE_ACCOUNT_ID` and `SECRETS_STORE_ID`. (`CLOUDFLARE_ACCOUNT_ID` is a **var**, not a secret — both workflows have always read `vars.CLOUDFLARE_ACCOUNT_ID`; since #696 it is also substituted into the container image reference, so a missing value now fails the `wrangler containers push` step outright.)
 - **Header budget — any proxy in front of the DS needs ≥ 8 KiB (#668):** request auth signs with the device's ML-DSA-44 key, so `X-Pollis-Signature` is base64 of a 2420-byte signature — **~3228 characters**, up from 88 in the Ed25519 era. That fits every default on the current path (hyper's 16 KiB per-header limit, Cloudflare's 16 KiB total), so nothing needs changing today — but it is a hard constraint on anything inserted in front of the DS later (an nginx `large_client_header_buffers`, an ALB, a self-hoster's reverse proxy): **configure no header budget below 8 KiB**, or every authenticated write 400s/431s.
@@ -291,6 +291,7 @@ stop someone moving the tag that fires it.
 
 - **Turso** (libSQL) — two databases: the **main** DB (users, groups, membership, public keys, encrypted envelopes) and the **commit-log** DB (`mls_commit_log` / `mls_group_info` / `mls_welcome`). Schema is applied **migrate-then-ship** by whichever deploy touches prod first: the `apply-migrations` job in `desktop-release.yml` (client releases) **and** the `delivery-deploy-{dev,prod}.yml` deploys (DS releases) both run `db-apply.sh` before shipping. It's idempotent (tracks `schema_migrations`), so overlap is harmless, and additive-only migrations make early application safe for the still-running old code. Nobody applies to prod by hand. Numbered migrations in `pollis-schema/migrations/`; dev also auto-applies on merge via `db-migrate-dev.yml`.
 - **Cloudflare R2** — object storage behind **cdn.pollis.com**: desktop + CLI releases, the Android sideload APK (`releases/android/`), OTA provenance (`releases/mobile-ota/`), the mobile OTA update store under **`ota/`** (content-addressed `ota/assets/`, live `ota/current/` pointers, the `ota/updates/` + `ota/groups/` archive — served to phones by the DS Worker at `api.pollis.com/updates/`), install scripts, and the transparency-log static tree.
+- **Client minimum-version policy (#1611)** — `cdn.pollis.com/client-policy.json` (prod builds) and `cdn.pollis.com/dev/client-policy.json` (builds pointed at a non-prod DS), next to `releases/latest.json` in the same `pollis` bucket. Every client fetches it at launch, before unlock, and shows a full-screen "update Pollis" page when its version is below `minimum[platform]`; the DS mirrors it and answers requests from a known-too-old build with **426**. Format, rule and client behaviour: `.codesight/wiki/client-policy.md`. Runbook below ("Client minimum version").
 - **Who holds all of the above, and what breaks in what order if they stop:** `docs/operational-continuity.md` (#877). It carries the singly-held asset register (every account and signing key in this file), the degradation ladder, and §4 on the failure mode specific to this design — a stalled transparency log being indistinguishable from a withheld one. The legal half (ownership, succession, escrow) is deferred to #723 and marked as such rather than answered.
 
 ---
@@ -368,6 +369,81 @@ or media.
 | a DB migration in `pollis-schema/migrations/` | applied by whichever runs first: a DS deploy (`delivery-deploy-{dev,prod}.yml`) or `desktop-release.yml` (`apply-migrations`) — both migrate-then-ship, idempotent; dev also auto-applies on merge via `db-migrate-dev.yml` |
 | `verifiable-log*` (published-tree behavior) | `transparency-publish.yml` (also runs daily) |
 | `verifiable-log-serve` (`pollis-verify` CLI) | `verifier-release.yml` |
+| nothing — retire old client builds (raise or clear a platform's minimum) | `scripts/client-policy.mjs` (dry run → diff → `--apply`); see "Client minimum version" below. Never hand-edit the file in R2 |
+
+---
+
+## Client minimum version — retiring old builds (#1611)
+
+**What it is.** One static JSON file per environment, written only by `scripts/client-policy.mjs`:
+
+```json
+{ "v": 1,
+  "minimum": { "ios": "1.0.21", "android-play": "1.0.21", "android-sideload": "1.0.21",
+               "macos": "1.17.0", "windows": "1.17.0", "linux": "1.17.0", "cli": "1.17.0" },
+  "message": null }
+```
+
+A build is blocked iff its version is below its platform's minimum (semver); a missing key means no
+minimum. `message` replaces the built-in body text on the blocked screen (≤ 500 characters, one
+language — leave it `null` unless there is something specific to say). Mobile compares the store
+binary's native version, never the OTA bundle. The parser and the rule are
+`pollis-api/src/client_policy.rs`, shared by every client (through `pollis-core`), the DS and the
+script, which runs it as `cargo run -p pollis-api --example client-policy`.
+
+**Changing it.**
+
+```bash
+node scripts/client-policy.mjs --env prod                                  # what is published
+node scripts/client-policy.mjs --env prod --set macos=1.18.0 --set windows=1.18.0 --set linux=1.18.0
+doppler run -p pollis -c prd_prod -- \
+  node scripts/client-policy.mjs --env prod --set macos=1.18.0 --apply    # asks you to type "prod"
+```
+
+The default is a dry run: it validates with the strict parser (unknown platform keys and fields are
+refused — a typo would otherwise set no minimum), prints a per-platform diff against what is
+published, and refuses a minimum above the latest published release of that platform
+(`releases/latest.json`, `releases/cli/latest.json`, `releases/android/latest.json`; `--force`
+overrides). iOS and Play are checked against the sideload APK's version; confirm that store build
+is live and approved first. `--apply` uploads with `aws s3 cp` to `s3://pollis/client-policy.json` (or `dev/…`),
+`--content-type application/json --cache-control no-cache` — the exact mechanism of
+`desktop-release.yml`'s "Publish latest.json to R2" — then re-fetches the CDN URL and compares.
+`--unset <platform>` removes a minimum; `--clear-message` restores the built-in text.
+`scripts/test-client-policy.sh` tests the script offline (fake CDN, stub `aws`).
+
+**Where it takes effect.** Launch, foreground/focus (re-checked at most every 5 minutes) and the
+Retry button fetch the file directly. The DS re-reads it (`POLLIS_CLIENT_POLICY_URL`, set per
+environment in `wrangler.{dev,prod}.jsonc`) lazily, at most once a minute, triggered by traffic,
+and 426s requests whose `X-Pollis-Client-{Platform,Version}` headers name a blocked build;
+`GET /v1/client-policy` shows what it is enforcing. So a publish reaches every running client
+within about five minutes, sooner on the next request.
+
+**Dev builds.** Unstamped desktop and CLI builds report the workspace placeholder `1.1.0` (only
+CI's `bump-version.sh` stamps a real version) and read the **dev** file, so any dev minimum above
+`1.1.0` for `macos` / `windows` / `linux` / `cli` blocks every dev build — the script warns. Mobile
+dev builds carry the real `mobile/package.json` version.
+
+**Guards that fail closed.** A release manifest that can't be read, a minimum above the latest
+release, and an invalid published file are all refused unless `--force`. `ios` and `android-play`
+are bounded by the sideload APK's version (one `mobile/package.json` version ships everywhere); it
+still can't see store review, so confirm the build is live first.
+
+**Rollout rules.**
+
+1. **Ship clients with no minimums first.** The check only exists in builds that contain it (desktop
+   and CLI from the release after #1611, mobile from the store build after it). Older builds never
+   fetch the file and send no version header, so the DS lets them through and they can never show
+   the blocked page.
+2. **Only raise a minimum to a version that has this feature**, and only once that version is
+   what you want to require. A build older than the feature that is below the minimum is not
+   blocked at all (no header, no check); if it ever did meet a 426, it would surface as an ordinary
+   error.
+3. **Store builds lag.** Raise `ios` / `android-play` only after the build is live in the store (not
+   just uploaded), and expect review delays; raise the desktop platforms only after the release is
+   on the CDN and the updater manifests point at it. Keep `android-play` and `android-sideload`
+   separate: they ship through different channels and cannot update each other.
+4. **Undo is the same command.** `--unset`, or a lower version, takes effect on the next check;
+   clients that cached the block unblock as soon as they fetch the new file.
 
 ---
 

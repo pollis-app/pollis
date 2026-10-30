@@ -36,6 +36,11 @@ pub enum Error {
     #[error("device_revoked")]
     DeviceRevoked,
 
+    /// This build is below the published minimum (#1611): the launch check, its cache or a DS 426.
+    /// Renderers match the exact text, like `device_revoked`.
+    #[error("upgrade_required")]
+    UpgradeRequired,
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }

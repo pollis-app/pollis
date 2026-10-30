@@ -1,5 +1,5 @@
 import { makeAutoObservable } from 'mobx';
-import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant } from '../types';
+import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant, ClientPolicyStatus } from '../types';
 import type { ShareAudioState, VoiceState, VoiceGateState } from '../types/voice-state';
 import { VOICE_GATE_INITIAL } from '../types/voice-state';
 import type { SourceList } from '../screenshare/screenShareSession';
@@ -55,6 +55,9 @@ class AppStore implements AppState {
   pendingEnrollmentApproval: EnrollmentApproval | null = null;
 
   updateRequired = false;
+
+  // #1611: this build is below the published minimum; the whole window is the blocked page.
+  clientBlocked: ClientPolicyStatus | null = null;
 
   // Version the in-app poller found; null = none.
   availableUpdateVersion: string | null = null;
@@ -484,6 +487,10 @@ class AppStore implements AppState {
 
   setUpdateRequired(v: boolean) {
     this.updateRequired = v;
+  }
+
+  setClientBlocked(status: ClientPolicyStatus | null) {
+    this.clientBlocked = status;
   }
 
   setAvailableUpdateVersion(v: string | null) {

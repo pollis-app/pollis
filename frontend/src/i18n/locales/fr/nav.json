@@ -156,6 +156,24 @@
     "readOnlyTranslocatedHealed": "macOS exécute Pollis depuis un emplacement temporaire en lecture seule laissé par une mise à jour précédente. C'est corrigé. Quittez Pollis et rouvrez-le depuis le dossier Applications.",
     "readOnlyGeneric": "Pollis ne peut pas se mettre à jour car son emplacement est en lecture seule. Quittez Pollis, vérifiez qu'il se trouve dans Applications (déplacé avec le Finder) et rouvrez-le."
   },
+  "clientBlocked": {
+    "title": "Mise à jour requise",
+    "body": "Cette version de Pollis n'est plus prise en charge. Mettez-la à jour pour continuer. Vos messages et réglages restent sur cet appareil.",
+    "versions": "Installée {{version}} · Requise {{minimum}} ou ultérieure",
+    "installed": "Installée {{version}}",
+    "updateNow": "Mettre à jour",
+    "updating": "Mise à jour…",
+    "download": "Télécharger la dernière version",
+    "updateFailed": "La mise à jour n'a pas abouti. Téléchargez plutôt la dernière version.",
+    "packageManager": "Pollis a été installé avec {{source}}. Mettez-le à jour depuis là :",
+    "openAppStore": "Ouvrir l'App Store",
+    "openPlay": "Ouvrir Google Play",
+    "openTestflight": "Ouvrir TestFlight",
+    "openWebsite": "Ouvrir pollis.com",
+    "openFailed": "Impossible d'ouvrir le lien. Allez sur {{url}}",
+    "retry": "Vérifier à nouveau",
+    "checking": "Vérification…"
+  },
   "home": {
     "groups": "Groupes",
     "groupsDescription": "Communautés, organisations, équipes et discussions de groupe trop ambitieuses",

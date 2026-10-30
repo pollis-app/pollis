@@ -673,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**174 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**175 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -682,8 +682,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **main** — `frontend/src/main.tsx`
 - **router** — `frontend/src/router.tsx`
 
-### `components` (6)
+### `components` (7)
 
+- **ClientBlockedScreen** — `frontend/src/components/ClientBlockedScreen.tsx`
 - **ErrorBoundary** — `frontend/src/components/ErrorBoundary.tsx`
 - **SearchPanel** — props: isOpen, onClose — `frontend/src/components/SearchPanel.tsx`. Selection moves by arrows, Tab/Shift-Tab, and the rebindable `search.next` / `search.prev` commands (defaults `mod+j` / `mod+k`, vim's direction). Those two register at priority 10 and only while the menu is open, which is what lets `mod+k` move the selection instead of re-firing `app.toggleSearch` and closing the menu the user just opened — Esc already closes it. All three routes call the same wrapping `selectNext` / `selectPrev`, and the hint row renders the live combos via `useShortcutLabel`, so a rebind shows up there.
 - **TerminalApp** — props: onLogout, onLock, onDeleteAccount — `frontend/src/components/TerminalApp.tsx`

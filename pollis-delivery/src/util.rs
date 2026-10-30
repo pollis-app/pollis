@@ -25,6 +25,8 @@ pub enum Upstream {
     Resend,
     /// Expo push (#987); nobody waits on it, hence the tightest deadline.
     ExpoPush,
+    /// The published client policy on the CDN (#1611); refreshed in the background.
+    ClientPolicy,
 }
 
 impl Upstream {
@@ -34,6 +36,7 @@ impl Upstream {
             Upstream::LiveKit => 5,
             Upstream::Resend => 10,
             Upstream::ExpoPush => 5,
+            Upstream::ClientPolicy => 5,
         })
     }
 
@@ -43,6 +46,7 @@ impl Upstream {
             Upstream::LiveKit => "livekit",
             Upstream::Resend => "resend",
             Upstream::ExpoPush => "expo-push",
+            Upstream::ClientPolicy => "client-policy",
         }
     }
 }
@@ -51,6 +55,11 @@ impl Upstream {
 /// mandatory [`Upstream`] deadline; there is no un-timed alternative.
 pub fn http_post(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
     http_client().post(url).timeout(upstream.timeout())
+}
+
+/// [`http_post`]'s GET twin, with the same mandatory deadline.
+pub fn http_get(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
+    http_client().get(url).timeout(upstream.timeout())
 }
 
 /// The shared outbound HTTP client. **Private** — go through [`http_post`], which

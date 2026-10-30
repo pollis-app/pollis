@@ -150,6 +150,24 @@
     "readOnlyTranslocatedHealed": "macOS 正在从上一次更新遗留的临时只读位置运行 Pollis。该问题已修复。请退出 Pollis，然后从“应用程序”重新打开。",
     "readOnlyGeneric": "Pollis 无法自行更新，因为它所在的位置是只读的。请退出 Pollis，确认它位于“应用程序”文件夹中（用访达移入），然后重新打开。"
   },
+  "clientBlocked": {
+    "title": "需要更新",
+    "body": "此版本的 Pollis 已不再受支持。请更新后继续使用。你的消息和设置会保留在此设备上。",
+    "versions": "已安装 {{version}} · 需要 {{minimum}} 或更高版本",
+    "installed": "已安装 {{version}}",
+    "updateNow": "立即更新",
+    "updating": "正在更新…",
+    "download": "下载最新版本",
+    "updateFailed": "更新未完成。请改为下载最新版本。",
+    "packageManager": "Pollis 是通过 {{source}} 安装的。请在那里更新：",
+    "openAppStore": "打开 App Store",
+    "openPlay": "打开 Google Play",
+    "openTestflight": "打开 TestFlight",
+    "openWebsite": "打开 pollis.com",
+    "openFailed": "无法打开链接。请前往 {{url}}",
+    "retry": "重新检查",
+    "checking": "正在检查…"
+  },
   "home": {
     "groups": "群组",
     "groupsDescription": "社区、组织、团队，以及野心过大的群聊",

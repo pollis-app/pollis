@@ -226,3 +226,26 @@ jobs:
           APP_ID="$(pnpm exec wrangler containers list --json 2>/dev/null | jq -r --arg n "$APP" '.[]|select(.name==$n).id' 2>/dev/null || echo '')"
           [ -n "$APP_ID" ] && pnpm exec wrangler containers instances "$APP_ID" || true
           exit 1
+
+      # #1611: a rolled container can keep the PREVIOUS start's environment, so a var added in
+      # this deploy may never reach it (worker/container-env.ts restarts such a container on the
+      # first request). GET /v1/client-policy answers 404 only when the DS has no
+      # POLLIS_CLIENT_POLICY_URL — the same "config never crossed the boundary" tell as #760.
+      # 200 (mirrored) or 503 (configured, first fetch pending) passes.
+      - name: Verify the client-policy URL reached the container (#1611)
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          set -uo pipefail
+          KEY="$(doppler secrets get POLLIS_DEV_ACCESS_KEY --plain)"
+          echo "::add-mask::$KEY"
+          for i in $(seq 1 30); do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 15 -H "X-Pollis-Dev-Key: $KEY" https://api-dev.pollis.com/v1/client-policy || echo 000)"
+            case "$CODE" in
+              200|503) echo "✓ /v1/client-policy answers $CODE — POLLIS_CLIENT_POLICY_URL reached the DS."; exit 0 ;;
+            esac
+            echo "[$((i*6))s] /v1/client-policy → $CODE"; sleep 6
+          done
+          echo "::error::/v1/client-policy still answers $CODE: POLLIS_CLIENT_POLICY_URL did not reach the container."
+          exit 1

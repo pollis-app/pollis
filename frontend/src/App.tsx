@@ -5,7 +5,7 @@ import React, {
   useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke, listen, onDeviceRevoked, deviceWasRevoked } from "./bridge";
+import { invoke, listen, onDeviceRevoked, deviceWasRevoked, onUpgradeRequired } from "./bridge";
 import { observer } from "mobx-react-lite";
 import { appStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
@@ -19,7 +19,8 @@ import { TitleBar } from "./components/Layout/TitleBar";
 import { DotMatrix } from "./components/ui/DotMatrix";
 import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
-import type { ManagedInstallInfo } from "./types";
+import { ClientBlockedScreen } from "./components/ClientBlockedScreen";
+import type { ManagedInstallInfo, ClientPolicyStatus } from "./types";
 import * as api from "./services/api";
 import { getPreference, applyPreferences, applyDeviceFontSize, useApplyPreferences, usePreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
@@ -69,6 +70,7 @@ function MainApp() {
     setPendingEnrollmentApproval,
   } = appStore;
   const updateRequired = appStore.updateRequired;
+  const clientBlocked = appStore.clientBlocked;
 
   const [appState, setAppState] = useState<AppState>("initializing");
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
@@ -118,6 +120,32 @@ function MainApp() {
 
   const checkStoredSession = useCallback(async () => {
     try {
+      // #1611: the minimum-version check comes first — before the updater, unlock or any DS
+      // traffic. A cache that already allows this build lets launch go on while a fresh check
+      // runs behind it (a block it finds still lands); a cached block, or no cache, waits for the
+      // check, which the core bounds to a few seconds and fails open.
+      const cached = await invoke<ClientPolicyStatus>("peek_client_policy").catch(() => null);
+      if (cached && !cached.blocked && cached.source === "cache") {
+        invoke<ClientPolicyStatus>("check_client_policy", { force: true })
+          .then((status) => {
+            if (status.blocked) {
+              appStore.setClientBlocked(status);
+            }
+          })
+          .catch((e) => console.warn("[App] client policy check failed:", e));
+      } else {
+        const policy = await invoke<ClientPolicyStatus>("check_client_policy", { force: true }).catch(
+          (e) => {
+            console.warn("[App] client policy check failed:", e);
+            return null;
+          },
+        );
+        if (policy?.blocked) {
+          appStore.setClientBlocked(policy);
+          return;
+        }
+      }
+
       // Launch-time auto-update, skipped for package-manager installs and dev builds.
       if (!import.meta.env.DEV) {
         const managed = await invoke<ManagedInstallInfo | null>(
@@ -190,6 +218,34 @@ function MainApp() {
     restoreWindowState();
     checkStoredSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // #1611: a 426 (or a cached block) refuses every command with `upgrade_required`; show why.
+  useEffect(
+    () =>
+      onUpgradeRequired(async () => {
+        // Only the core's verdict blocks: a late or stray rejection after an unblock must not.
+        const status = await invoke<ClientPolicyStatus>("get_client_policy_status").catch(() => null);
+        if (status?.blocked) {
+          appStore.setClientBlocked(status);
+        }
+      }),
+    [],
+  );
+
+  // #1611: a long-running window is re-checked when it regains focus; the core throttles it.
+  useEffect(() => {
+    const recheck = () => {
+      invoke<ClientPolicyStatus>("check_client_policy", { force: false })
+        .then((status) => {
+          if (status.blocked) {
+            appStore.setClientBlocked(status);
+          }
+        })
+        .catch((e) => console.warn("[App] client policy re-check failed:", e));
+    };
+    window.addEventListener("focus", recheck);
+    return () => window.removeEventListener("focus", recheck);
   }, []);
 
   useEffect(() => {
@@ -457,6 +513,21 @@ function MainApp() {
       }),
     [t],
   );
+
+  if (clientBlocked) {
+    return (
+      <ClientBlockedScreen
+        status={clientBlocked}
+        onUnblocked={() => {
+          appStore.setClientBlocked(null);
+          // Blocked at launch: carry on with the launch sequence it stopped.
+          if (appState === "initializing") {
+            void checkStoredSession();
+          }
+        }}
+      />
+    );
+  }
 
   if (appState === "update-required" || updateRequired) {
     return (

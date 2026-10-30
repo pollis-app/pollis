@@ -1,0 +1,113 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# MINIMUM APP VERSION (#1611) — a build below the published minimum shows one
+# full-screen "Update required" page, before any sign-in or PIN screen, with
+# the update destination and Check again; nothing else is reachable.
+# Desktop's equivalent is e2e/client-policy.spec.ts.
+#
+# The policy comes from the dev-build override link
+#   pollis://dev/client-policy?policy=<urlencoded JSON> | ?url=<url> | ?clear=1
+# which pollis-core honours only for a debug build or one pointed at a non-prod
+# DS (a Maestro build is the latter). The override persists until cleared, and
+# its verdict is used as if fetched but NEVER cached: the cache answers only for
+# the published file, so a test override cannot outlive itself. Clearing it
+# re-fetches the dev CDN file, which is not published: a 404 means "no
+# minimums", so the app unblocks. (The cached-block-offline case is covered by
+# the pollis-core and CLI tests, which control a real policy URL.)
+# No sign-in: the check runs before it.
+
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 30000
+
+# --- Blocked while running: a policy whose minimum is above every build ---
+- openLink: "pollis://dev/client-policy?policy=%7B%22v%22%3A1%2C%22minimum%22%3A%7B%22ios%22%3A%22999.0.0%22%2C%22android-play%22%3A%22999.0.0%22%2C%22android-sideload%22%3A%22999.0.0%22%7D%7D"
+# iOS asks before an app opens its own scheme from outside.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible:
+      id: "screen-client-blocked"
+    timeout: 15000
+- assertVisible: "Update required"
+- assertVisible:
+    id: "client-blocked-versions"
+    text: "Installed [0-9.]+ · Required 999\\.0\\.0 or later"
+# A Maestro build is the dev channel, so it updates from pollis.com.
+- assertVisible:
+    id: "btn-client-blocked-open"
+    text: "Open pollis.com"
+- assertVisible:
+    id: "btn-client-blocked-retry"
+- assertNotVisible:
+    id: "screen-auth-email"
+- takeScreenshot: client-policy-01-blocked
+
+# Back goes nowhere (Android); the page stays.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+      - assertVisible:
+          id: "screen-client-blocked"
+
+# --- Cold launch: blocked before any sign-in screen (the override is still set) ---
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-client-blocked"
+    timeout: 30000
+- assertNotVisible:
+    id: "screen-auth-email"
+- takeScreenshot: client-policy-02-cold-launch
+
+# Check again while the policy still blocks: busy, then back on the page.
+- tapOn:
+    id: "btn-client-blocked-retry"
+- extendedWaitUntil:
+    visible:
+      id: "btn-client-blocked-retry"
+      text: "Check again"
+    timeout: 15000
+- assertVisible:
+    id: "screen-client-blocked"
+
+# --- Unblocked: the override cleared, the unpublished dev file (404) has no minimums ---
+- openLink: "pollis://dev/client-policy?clear=1"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- runFlow:
+    when:
+      visible:
+        id: "screen-client-blocked"
+    commands:
+      - tapOn:
+          id: "btn-client-blocked-retry"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 15000
+- assertNotVisible:
+    id: "screen-client-blocked"
+- takeScreenshot: client-policy-03-unblocked
+
+# And it stays unblocked across a cold launch.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 30000

@@ -30,6 +30,13 @@ pub struct Config {
     ///
     /// **Runtime env only, never `option_env!`.** Attach only via [`Config::dev_access_key_for_ds`].
     pub dev_access_key: Option<String>,
+    /// Which build this is (#1611): sent to the DS as `X-Pollis-Client-{Platform,Version}` and
+    /// checked against the published minimum. Set by the host (desktop, CLI, mobile init);
+    /// `None` sends no headers and skips the check (tests, the notification extension).
+    pub client: Option<crate::client_policy::ClientIdentity>,
+    /// Where the minimum-version policy is fetched (`POLLIS_CLIENT_POLICY_URL_OVERRIDE`, honoured only by a debug build or one pointed at a non-prod DS); `None` derives it
+    /// from the DS host ([`crate::client_policy::policy_url`]). An override for tests and dev.
+    pub client_policy_url: Option<String>,
 }
 
 /// The production DS host. The dev gate key is never sent here.
@@ -64,6 +71,17 @@ impl Config {
             return None;
         }
         Some(key)
+    }
+
+    /// True unless the configured DS is a parseable non-prod URL; no DS configured counts as prod.
+    pub fn ds_is_prod(&self) -> bool {
+        let Some(ds) = self.pollis_delivery_url.as_deref() else {
+            return true;
+        };
+        match reqwest::Url::parse(ds.trim()).ok().and_then(|u| u.host_str().map(str::to_string)) {
+            Some(host) => host.trim_end_matches('.').eq_ignore_ascii_case(PROD_DS_HOST),
+            None => true,
+        }
     }
 }
 
@@ -105,6 +123,12 @@ impl Config {
             dev_access_key: std::env::var("POLLIS_DEV_ACCESS_KEY")
                 .ok()
                 .filter(|s| !s.trim().is_empty()),
+            // The host says which build it is.
+            client: None,
+            // Runtime only: a test override, never baked into a release.
+            client_policy_url: std::env::var("POLLIS_CLIENT_POLICY_URL_OVERRIDE")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
         })
     }
 }
@@ -140,6 +164,8 @@ impl Config {
             overlay_directory_url: None,
             overlay_directory_key: None,
             dev_access_key: None,
+            client: None,
+            client_policy_url: None,
         })
     }
 }

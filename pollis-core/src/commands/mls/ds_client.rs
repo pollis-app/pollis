@@ -86,6 +86,7 @@ async fn ds_post_bytes(
     // Resolved before the identity lookups below so a missing URL still reports
     // as "not configured" rather than "not signed in".
     let base = delivery_base(state)?;
+    refuse_if_outdated(state)?;
 
     let user_id = current_user_id(state).await?;
     let device_id = state
@@ -130,7 +131,7 @@ async fn ds_post_bytes(
     let url = format!("{base}{path}");
     // First-party DS write — route through the overlay when it is on (§14.2).
     let overlay = state.overlay_handle();
-    let request = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
+    let request = ds_headers(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header("X-Pollis-User", &user_id)
         .header("X-Pollis-Device", &device_id)
         .header("X-Pollis-Timestamp", timestamp.to_string())
@@ -140,6 +141,7 @@ async fn ds_post_bytes(
     let resp = send_ds_resending(path, request, idempotent)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {}", error_chain(&e))))?;
+    let resp = screen_upgrade_required(state, path, resp).await?;
     if is_device_revoked_response(&resp) {
         if note_revoked_response(state, &user_id, &device_id).await {
             crate::diag!("[ds] {path}: this device was revoked from the account; signing out");
@@ -585,14 +587,46 @@ fn delivery_base(state: &Arc<AppState>) -> Result<&str> {
 /// Checked by the dev Worker (`pollis-delivery/worker/dev-gate.ts`).
 pub(crate) const DEV_KEY_HEADER: &str = "X-Pollis-Dev-Key";
 
-/// Attach the dev DS gate key (#1242) when the configured DS is not prod.
+/// The headers every DS request carries: the dev DS gate key (#1242) when the configured DS is
+/// not prod, and this build's platform and version (#1611) when the host set them.
 /// Every DS request goes through one of the three builders in this file, and
-/// each calls this, so desktop, CLI and mobile all send it from one place; see
+/// each calls this, so desktop, CLI and mobile all send them from one place; see
 /// [`crate::config::Config::dev_access_key_for_ds`] for the host scoping.
-fn with_dev_key(state: &AppState, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+fn ds_headers(state: &AppState, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let request = match &state.config.client {
+        Some(client) => request
+            .header(pollis_api::client_policy::CLIENT_PLATFORM_HEADER, client.platform.as_str())
+            .header(pollis_api::client_policy::CLIENT_VERSION_HEADER, &client.version),
+        None => request,
+    };
     match state.config.dev_access_key_for_ds() {
         Some(key) => request.header(DEV_KEY_HEADER, key),
         None => request,
+    }
+}
+
+/// Fail locally once this build is known to be below the minimum (#1611).
+fn refuse_if_outdated(state: &AppState) -> Result<()> {
+    crate::client_policy::refuse_if_blocked(state)
+}
+
+/// The DS's typed `426 Upgrade Required` (#1611) blocks this build from here on. A 426 without
+/// that body is an ordinary refusal; anything else passes through.
+async fn screen_upgrade_required(state: &AppState, path: &str, resp: reqwest::Response) -> Result<reqwest::Response> {
+    if resp.status() != reqwest::StatusCode::UPGRADE_REQUIRED {
+        return Ok(resp);
+    }
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    match crate::client_policy::record_upgrade_required(state, &body) {
+        Some(blocked) => {
+            crate::diag!(
+                "[ds] {path}: the DS requires a newer build (minimum {})",
+                blocked.minimum.as_deref().unwrap_or("unknown")
+            );
+            Err(Error::UpgradeRequired)
+        }
+        None => Err(DsRefused::error("ds", path, status, body)),
     }
 }
 
@@ -675,13 +709,15 @@ async fn ds_post_plain_bytes(
     body_bytes: Vec<u8>,
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
+    refuse_if_outdated(state)?;
     let overlay = state.overlay_handle();
-    let request = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
+    let request = ds_headers(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body_bytes);
-    send_ds(path, request)
+    let resp = send_ds(path, request)
         .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_plain {path}: {e}")))
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_plain {path}: {e}")))?;
+    screen_upgrade_required(state, path, resp).await
 }
 
 /// Sign-free sibling of [`ds_post`] for OTP-session-gated bootstrap writes (`X-Pollis-Session` bearer).
@@ -703,14 +739,16 @@ async fn ds_post_session_bytes(
     body_bytes: Vec<u8>,
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
+    refuse_if_outdated(state)?;
     let overlay = state.overlay_handle();
-    let request = with_dev_key(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
+    let request = ds_headers(state, crate::net::overlay::http_client(overlay.as_deref()).post(&url))
         .header("X-Pollis-Session", session_token)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(body_bytes);
-    send_ds(path, request)
+    let resp = send_ds(path, request)
         .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session {path}: {e}")))
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session {path}: {e}")))?;
+    screen_upgrade_required(state, path, resp).await
 }
 
 /// [`ds_post_session`] for bootstrap writes that must NOT silently fail: any
@@ -793,7 +831,7 @@ mod dev_key_tests {
     }
 
     /// Every DS request is built in this file, and every builder here goes
-    /// through `with_dev_key`. A new builder that calls `http_client` directly
+    /// through `ds_headers`. A new builder that calls `http_client` directly
     /// would silently skip the dev gate; this makes it a test failure.
     #[test]
     fn every_ds_request_builder_attaches_the_dev_key() {
@@ -802,9 +840,9 @@ mod dev_key_tests {
         let src = include_str!("ds_client.rs");
         let calls = src.matches(concat!("http_client", "(overlay")).count();
         let wrapped = src
-            .matches(concat!("with_dev_key(state, crate::net::overlay::http_client", "(overlay"))
+            .matches(concat!("ds_headers(state, crate::net::overlay::http_client", "(overlay"))
             .count();
-        assert_eq!(calls, wrapped, "a DS request builder skips with_dev_key");
+        assert_eq!(calls, wrapped, "a DS request builder skips ds_headers");
         assert_eq!(wrapped, 3);
         // ...and every one of them sends through `send_ds`, which stamps the
         // request id (#1305).
@@ -942,6 +980,107 @@ mod tests {
             assert!(pollis_api::vault::DeleteVaultMessageBody::IDEMPOTENT);
             assert!(!pollis_api::messages::SendMessageBody::IDEMPOTENT);
             assert!(!pollis_api::commit::SubmitBody::IDEMPOTENT);
+        }
+    }
+}
+
+#[cfg(test)]
+mod client_policy_tests {
+    use super::*;
+    use crate::client_policy::{ClientIdentity, PolicySource};
+    use crate::config::Config;
+    use crate::keystore::{InMemoryKeystore, Keystore};
+    use pollis_api::client_policy::{ClientPlatform, CLIENT_PLATFORM_HEADER, CLIENT_VERSION_HEADER};
+    use std::sync::Mutex as StdMutex;
+
+    type Seen = Arc<StdMutex<Vec<(Option<String>, Option<String>)>>>;
+
+    /// A DS that records the client headers and answers `status` with `body`.
+    async fn ds(status: u16, body: &'static str) -> (String, Seen) {
+        use axum::{http::HeaderMap, http::StatusCode, routing::post, Router};
+        let seen: Seen = Arc::default();
+        let log = seen.clone();
+        let app = Router::new().fallback(post(move |headers: HeaderMap| {
+            let log = log.clone();
+            async move {
+                let get = |h: &str| headers.get(h).and_then(|v| v.to_str().ok()).map(str::to_string);
+                log.lock().unwrap().push((get(CLIENT_PLATFORM_HEADER), get(CLIENT_VERSION_HEADER)));
+                (StatusCode::from_u16(status).unwrap(), body)
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn state(ds: String, client: Option<ClientIdentity>) -> Arc<AppState> {
+        let mut config = Config::for_test().unwrap();
+        config.pollis_delivery_url = Some(ds);
+        config.client = client;
+        let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
+        Arc::new(AppState::new_with_parts(config, keystore))
+    }
+
+    fn body() -> pollis_api::otp::RequestOtpBody {
+        pollis_api::otp::RequestOtpBody { email: "a@example.com".into() }
+    }
+
+    #[tokio::test]
+    async fn every_request_names_the_build_when_the_host_set_it() {
+        let (url, seen) = ds(200, "{}").await;
+        let mac = ClientIdentity { platform: ClientPlatform::Macos, version: "1.17.0".into() };
+        ds_post_plain(&state(url.clone(), Some(mac)), &body()).await.unwrap();
+        ds_post_session(&state(url.clone(), Some(ClientIdentity::cli())), "s", &body()).await.unwrap();
+        // A build that does not say (tests, older hosts) sends nothing, and the DS lets it pass.
+        ds_post_plain(&state(url, None), &body()).await.unwrap();
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                (Some("macos".into()), Some("1.17.0".into())),
+                (Some("cli".into()), Some(env!("CARGO_PKG_VERSION").into())),
+                (None, None),
+            ]
+        );
+    }
+
+    const UPGRADE: &str = r#"{"error":"upgrade_required","platform":"ios","version":"1.0.3","minimum":"1.0.21","message":"Please update.","policy":{"v":1,"minimum":{"ios":"1.0.21"},"message":"Please update."}}"#;
+
+    /// A 426 blocks the build: that call and every later one fail with `upgrade_required`, the
+    /// later ones without reaching the DS.
+    #[tokio::test]
+    async fn a_426_blocks_the_build_from_then_on() {
+        let (url, seen) = ds(426, UPGRADE).await;
+        let ios = ClientIdentity { platform: ClientPlatform::Ios, version: "1.0.3".into() };
+        let state = state(url, Some(ios));
+        let err = ds_post_plain(&state, &body()).await.unwrap_err();
+        assert_eq!(err.to_string(), "upgrade_required");
+        let status = crate::client_policy::current(&state);
+        assert!(status.blocked);
+        assert_eq!(status.source, PolicySource::Ds);
+        assert_eq!(status.minimum.as_deref(), Some("1.0.21"));
+        assert_eq!(status.message.as_deref(), Some("Please update."));
+
+        let err = ds_post_session(&state, "s", &body()).await.unwrap_err();
+        assert_eq!(err.to_string(), "upgrade_required");
+        assert_eq!(seen.lock().unwrap().len(), 1, "a blocked build no longer reaches the DS");
+    }
+
+    /// Only the DS's typed body blocks: a proxy's or edge's 426 is an ordinary error.
+    #[tokio::test]
+    async fn an_untyped_426_is_an_ordinary_error() {
+        for reply in ["nope", r#"{"error":"something_else","platform":"cli","version":"1.0.0","minimum":"2.0.0","policy":{"v":1}}"#] {
+            let (url, seen) = ds(426, reply).await;
+            let state = state(url, Some(ClientIdentity::cli()));
+            let err = ds_post_plain(&state, &body()).await.unwrap_err().to_string();
+            assert_ne!(err, "upgrade_required", "{reply}");
+            assert!(err.contains("426"), "{err}");
+            assert!(!crate::client_policy::current(&state).blocked, "{reply}");
+            // Not latched: the next request still reaches the DS.
+            let _ = ds_post_plain(&state, &body()).await;
+            assert_eq!(seen.lock().unwrap().len(), 2, "{reply}");
         }
     }
 }

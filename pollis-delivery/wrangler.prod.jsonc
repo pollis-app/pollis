@@ -40,6 +40,9 @@
     // 12, not the code default of 6 — see docs/metadata-retention-policy.md §1.
     // "0" would disable the bound entirely.
     "POLLIS_DS_WATERMARK_STALE_MONTHS": "12",
+    // #1611: the minimum-client-version policy this DS mirrors and enforces (426). Written only
+    // by scripts/client-policy.mjs; docs/deployments.md → "Client minimum version".
+    "POLLIS_CLIENT_POLICY_URL": "https://cdn.pollis.com/client-policy.json",
     // #658: prod's LONG-STANDING container object. Prod is fast — ~47ms on
     // `/version` and ~65ms on a signed request including its Turso read — and dev,
     // on identical code and images, is not (~280ms / ~1.4s). WHY is unexplained;

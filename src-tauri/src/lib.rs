@@ -266,7 +266,9 @@ pub fn run() {
             #[cfg(debug_assertions)]
             let _ = dotenvy::from_filename(".env.development");
 
-            let config = Config::from_env().map_err(|e| e.to_string())?;
+            let mut config = Config::from_env().map_err(|e| e.to_string())?;
+            // #1611: which build this is, for the minimum-version check and the DS's 426.
+            config.client = Some(pollis_core::client_policy::ClientIdentity::desktop());
 
             let tray_handle = app.handle().clone();
 
@@ -556,6 +558,9 @@ pub fn run() {
             commands::update::mark_update_required,
             commands::update::is_update_required,
             commands::update::get_update_check_plan,
+            commands::client_policy::check_client_policy,
+            commands::client_policy::get_client_policy_status,
+            commands::client_policy::peek_client_policy,
             commands::install_kind::detect_managed_install,
             commands::install_kind::detect_read_only_location,
             commands::voice::subscribe_voice_events,

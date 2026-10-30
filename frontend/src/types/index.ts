@@ -8,6 +8,19 @@ export type ManagedInstallInfo = {
   update_command: string | null;
 };
 
+/** Mirrors `ClientPolicyStatus` in `pollis-core/src/client_policy.rs` (#1611). */
+export type ClientPolicyStatus = {
+  blocked: boolean;
+  platform: string | null;
+  /** This build's version. */
+  version: string | null;
+  /** The platform's minimum, when one is set. */
+  minimum: string | null;
+  /** The manifest's message, shown instead of the built-in text when set. */
+  message: string | null;
+  source: "network" | "cache" | "ds" | "none";
+};
+
 export interface User {
   id: string;
   clerk_id: string; // Legacy Clerk field, unused — kept for compatibility

@@ -136,7 +136,7 @@ test("a failed startup sweep does not block boot", async () => {
 test("the root layout sweeps before rendering; the re-enterable boot screen never does", () => {
   const layout = read("app/_layout.tsx");
   assert.match(layout, /sweepStalePlaintext\(\)\.finally\(\(\) => setSweepReady\(true\)\)/);
-  assert.match(layout, /if \(!loaded \|\| !bridgeReady \|\| !languageReady \|\| !sweepReady\)/);
+  assert.match(layout, /if \(!loaded \|\| !bridgeReady \|\| !languageReady \|\| !sweepReady\b/);
   // app/index.tsx is re-entered mid-session.
   for (const rel of ["app/index.tsx", "app/invite/[token].tsx"]) {
     assert.doesNotMatch(read(rel), /sweepStalePlaintext|clearMediaCache/, `${rel} must not sweep`);

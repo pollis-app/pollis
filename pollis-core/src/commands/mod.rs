@@ -3,6 +3,8 @@ pub mod auth;
 pub mod pin;
 pub mod autolock;
 pub mod blocks;
+// The minimum-version check (#1611).
+pub mod client_policy;
 pub mod bookmarks;
 pub mod device_enrollment;
 pub mod device_link;

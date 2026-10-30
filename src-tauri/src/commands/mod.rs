@@ -30,6 +30,7 @@ pub mod staging;
 pub mod terminal;
 pub mod transparency;
 pub mod update;
+pub mod client_policy;
 pub mod user;
 pub mod vault;
 

@@ -17,6 +17,7 @@ import {
   type GateInputs,
   type GateMode,
 } from "./dev-gate";
+import { ENV_FINGERPRINT_KEY, envFingerprint, needsRestart } from "./container-env";
 
 // WHERE the DS container physically runs (#658).
 // A DO is placed near whoever first created it, permanently; `enam` matches the Turso primary.
@@ -115,6 +116,8 @@ type Env = {
   PORT: string;
   POLLIS_DS_REQUIRE_AUTH: string;
   POLLIS_DS_WATERMARK_STALE_MONTHS?: string;
+  // #1611: the published minimum-client-version policy the DS mirrors and enforces.
+  POLLIS_CLIENT_POLICY_URL?: string;
   // The object hosting this environment's container; per environment so dev can be re-placed alone.
   DS_SINGLETON_NAME?: string;
   // Mobile OTA updates (#1250): prod only; dev answers /updates/ with 404.
@@ -196,6 +199,26 @@ export class PollisDelivery extends Container<Env> {
       .join("");
   }
 
+  // Once per Durable Object instance (each deploy restarts it): a container a rollout restarted
+  // with the previous start's environment is restarted with the current one (container-env.ts).
+  private envReconciled?: Promise<void>;
+
+  private async reconcileEnv(): Promise<void> {
+    try {
+      if (!this.ctx.container?.running) {
+        return;
+      }
+      const current = await envFingerprint({ ...this.envVars, ...(await this.resolveSecretEnv()) });
+      const recorded = await this.ctx.storage.get<string>(ENV_FINGERPRINT_KEY);
+      if (needsRestart(true, recorded, current)) {
+        await this.destroy();
+      }
+    } catch {
+      // The Worker logs nothing (no_client_ip_exposure); a failed check just skips the restart.
+      return;
+    }
+  }
+
   // The dev gate first, so a refused request never wakes the container; then bucket the client IP.
   override async fetch(request: Request): Promise<Response> {
     const gateMode = gateModeFrom(this.env.DEV_GATE_MODE);
@@ -219,6 +242,8 @@ export class PollisDelivery extends Container<Env> {
     if (ip) {
       headers.set(CLIENT_BUCKET_HEADER, await this.clientBucket(ip));
     }
+    this.envReconciled ??= this.reconcileEnv();
+    await this.envReconciled;
     return super.fetch(new Request(request, { headers }));
   }
 
@@ -229,6 +254,10 @@ export class PollisDelivery extends Container<Env> {
     // #720: a wrangler `var` binds to the Worker, not the container, so forward it explicitly.
     ...(this.env.POLLIS_DS_WATERMARK_STALE_MONTHS
       ? { POLLIS_DS_WATERMARK_STALE_MONTHS: this.env.POLLIS_DS_WATERMARK_STALE_MONTHS }
+      : {}),
+    // #1611: forwarded like the watermark; unset leaves the minimum-version check off.
+    ...(this.env.POLLIS_CLIENT_POLICY_URL
+      ? { POLLIS_CLIENT_POLICY_URL: this.env.POLLIS_CLIENT_POLICY_URL }
       : {}),
     // Per-environment rate-limit tunables (TUNABLE_VAR_KEYS), only those set.
     ...tunableVarEnv(this.env),
@@ -281,15 +310,18 @@ export class PollisDelivery extends Container<Env> {
     }
 
     const secretEnv = await this.resolveSecretEnv();
+    const envVars: Record<string, string> = {
+      ...this.envVars,
+      ...secretEnv,
+      ...resolvedStart?.envVars,
+    };
     // Positional form, preserving ports + cancellation.
     await super.startAndWaitForPorts(ports, resolvedCancellation, {
       ...resolvedStart,
-      envVars: {
-        ...this.envVars,
-        ...secretEnv,
-        ...resolvedStart?.envVars,
-      },
+      envVars,
     });
+    // What this start passed, so the next deploy can tell a stale container (container-env.ts).
+    await this.ctx.storage.put(ENV_FINGERPRINT_KEY, await envFingerprint(envVars));
   }
 }
 

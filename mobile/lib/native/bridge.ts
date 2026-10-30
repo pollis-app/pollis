@@ -5,6 +5,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as pollisNative from "pollis-native";
 import { plainBridgeError } from "./bridgeError";
 import { noticeDeviceRevoked } from "../deviceRevoked";
+import { noticeUpgradeRequired } from "../clientPolicy";
 
 export interface NativeBridge {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
@@ -55,6 +56,8 @@ const pollisNativeBridge: NativeBridge = {
     } catch (err) {
       const failure = plainBridgeError(err);
       noticeDeviceRevoked(failure);
+      // #1611: a DS 426 blocks the app; the root layout swaps in the update screen.
+      noticeUpgradeRequired(failure);
       throw failure;
     }
     if (resultJson === "" || resultJson === "null") {
@@ -80,6 +83,9 @@ export interface InitConfig {
   pollisDeliveryUrl?: string;
   // The dev DS gate key (#1242): dev builds only.
   devAccessKey?: string;
+  // #1611: this build's policy key and its NATIVE version (never the OTA bundle's).
+  clientPlatform?: string;
+  clientVersion?: string | null;
 }
 
 let initialized = false;
@@ -102,6 +108,8 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     livekit_url: config.livekitUrl ?? "",
     pollis_delivery_url: config.pollisDeliveryUrl ?? "",
     dev_access_key: config.devAccessKey ?? "",
+    client_platform: config.clientPlatform ?? null,
+    client_version: config.clientVersion ?? null,
   });
   try {
     await pollisNative.initPollis(configJson);

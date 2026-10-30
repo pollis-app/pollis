@@ -52,6 +52,8 @@ on:
       - ".github/workflows/cli-release.yml"
       - ".github/workflows/rebuild-verify.yml"
       - "pollis-core/src/config.rs"
+      - "pollis-api/src/client_policy.rs"
+      - "pollis-api/examples/client-policy.rs"
   push:
     branches: [main]
     paths:
@@ -89,6 +91,8 @@ on:
       - ".github/workflows/cli-release.yml"
       - ".github/workflows/rebuild-verify.yml"
       - "pollis-core/src/config.rs"
+      - "pollis-api/src/client_policy.rs"
+      - "pollis-api/examples/client-policy.rs"
 
 permissions:
   contents: read
@@ -176,6 +180,11 @@ jobs:
       # against genuine, cross-platform, wrong-builder and junk responses.
       - name: cli-install.sh attestation match accepts genuine and refuses the rest
         run: ./scripts/test-cli-install-verify.sh
+
+      # #1611: the only writer of cdn.pollis.com/client-policy.json. Offline: a fake CDN and a
+      # stub `aws`; the validator is pollis-api's own parser, so it builds that crate (serde only).
+      - name: client-policy.mjs validates, diffs, guards and publishes like latest.json
+        run: ./scripts/test-client-policy.sh
 
       # The e2e commit-log migration applier. Two silent failures shipped in it:
       # a stale migrations path that made it apply ZERO statements and exit 0,

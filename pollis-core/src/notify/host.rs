@@ -55,6 +55,10 @@ pub fn load_config(data_dir: &Path) -> Option<Config> {
         overlay_directory_url: None,
         overlay_directory_key: None,
         dev_access_key: c.dev_access_key.filter(|s| !s.trim().is_empty()),
+        // No version headers (#1611): the app's last-launch version may be older than the binary
+        // now running this extension, and a stale one would earn a rich push a 426.
+        client: None,
+        client_policy_url: None,
     })
 }
 
@@ -305,6 +309,8 @@ mod tests {
             overlay_directory_url: None,
             overlay_directory_key: None,
             dev_access_key: None,
+            client: None,
+            client_policy_url: None,
         };
         save_config(t.path(), &config);
         let back = load_config(t.path()).unwrap();

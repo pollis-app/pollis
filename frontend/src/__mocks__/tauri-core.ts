@@ -227,7 +227,28 @@ interface MockStore {
   keyChangeNotices: Array<{ id: number; peer_user_id: string; detected_at: string }>;
   /** `is_permission_granted`'s answer; off by default, as on a fresh install. */
   notificationPermission: boolean;
+  /** The minimum-version check (#1611): what `check_client_policy` answers, and what a 426 left. */
+  clientPolicy: MockClientPolicyStatus;
 }
+
+/** Mirrors `ClientPolicyStatus` in `pollis-core/src/client_policy.rs`. */
+interface MockClientPolicyStatus {
+  blocked: boolean;
+  platform: string | null;
+  version: string | null;
+  minimum: string | null;
+  message: string | null;
+  source: 'network' | 'cache' | 'ds' | 'none';
+}
+
+const ALLOWED_POLICY: MockClientPolicyStatus = {
+  blocked: false,
+  platform: 'macos',
+  version: '1.17.0',
+  minimum: null,
+  message: null,
+  source: 'none',
+};
 
 // Only `core` and `/event` are aliased; real modules like `/window` throw without __TAURI_INTERNALS__.
 (window as any).__TAURI_INTERNALS__ = (window as any).__TAURI_INTERNALS__ ?? {
@@ -250,6 +271,7 @@ const PRIMARY_HOOKS = [
   '__tauriFailSends',
   '__tauriRevokeDevice',
   '__tauriRejectWith',
+  '__tauriSetClientPolicy',
   '__tauriInvokeCounts',
   '__resetTauriInvokeCounts',
   '__tauriLastArgs',
@@ -333,6 +355,7 @@ const store: MockStore = {
   keyChangeNotices:
     (preload.keyChangeNotices as MockStore['keyChangeNotices'] | undefined) ?? [],
   notificationPermission: preload.notificationPermission === true,
+  clientPolicy: { ...ALLOWED_POLICY, ...(preload.clientPolicy ?? {}) },
 };
 
 (window as any).__tauriMock = store;
@@ -367,6 +390,11 @@ const WORKS_WHEN_REVOKED = new Set([
   store.deviceRevoked = true;
 };
 
+/** What the next `check_client_policy` answers (#1611); `get_client_policy_status` too. */
+(window as any).__tauriSetClientPolicy = (status: Partial<MockClientPolicyStatus>) => {
+  store.clientPolicy = { ...ALLOWED_POLICY, ...status };
+};
+
 /** Reject every `cmd` call with `message` until cleared, without revoking (#1338). */
 const rejectWith = new Map<string, string>();
 (window as any).__tauriRejectWith = (cmd: string, message: string | null) => {
@@ -395,6 +423,10 @@ const lastInvokeArgs: Record<string, unknown> = {};
     heldReplies.set(command, []);
   }
 };
+// Commands a spec parks from the first call (`holdCommands` preload), e.g. the launch policy check.
+for (const command of (preload.holdCommands ?? []) as string[]) {
+  heldReplies.set(command, []);
+}
 (window as any).__tauriRelease = (command: string) => {
   const waiting = heldReplies.get(command) ?? [];
   heldReplies.delete(command);
@@ -861,6 +893,14 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'detect_managed_install':
       return preload.managedInstall ?? null;
+
+    case 'check_client_policy':
+    case 'get_client_policy_status':
+      return { ...store.clientPolicy };
+
+    // The cache-only verdict launch reads first (#1611); none unless a spec seeds one.
+    case 'peek_client_policy':
+      return { ...ALLOWED_POLICY, ...(preload.clientPolicyCache ?? {}) };
 
     case 'detect_read_only_location':
       return null;
