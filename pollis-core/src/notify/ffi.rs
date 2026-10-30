@@ -1,19 +1,32 @@
-//! The plain C ABI. See `pollis-core/include/pollis_notify.h`.
+//! The plain C ABI (#1599). Declared in `pollis-core/include/pollis_notify.h`.
+//!
+//! Every function here is callable from any thread, before or without `init_pollis`, and never
+//! returns NULL from a string-returning call.
 
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, CStr, CString};
+use std::time::Duration;
 
-/// Fetch, decrypt and preview pending messages. Returns an owned JSON string;
-/// free it with [`pollis_string_free`]. Never returns NULL, never unwinds.
+/// Budget used when the host passes 0.
+const DEFAULT_BUDGET_MS: u32 = 20_000;
+
+const INTERNAL: &str = r#"{"ok":false,"reason":"internal"}"#;
+
+/// Fetch, decrypt and preview pending messages. Returns an owned JSON string; free it with
+/// [`pollis_string_free`].
 ///
 /// # Safety
-/// `data_dir` must be a valid NUL-terminated UTF-8 string; `handle` may be NULL.
+/// `data_dir` must be NULL or a valid NUL-terminated string; so must `handle`.
 #[no_mangle]
 pub unsafe extern "C" fn pollis_notify_fetch(
-    _data_dir: *const c_char,
-    _handle: *const c_char,
-    _budget_ms: u32,
+    data_dir: *const c_char,
+    handle: *const c_char,
+    budget_ms: u32,
 ) -> *mut c_char {
-    to_c(r#"{"ok":false,"reason":"internal"}"#.to_string())
+    let data_dir = opt_str(data_dir);
+    let handle = opt_str(handle);
+    let json = std::panic::catch_unwind(move || fetch_json(data_dir, handle, budget_ms))
+        .unwrap_or_else(|_| INTERNAL.to_string());
+    to_c(json)
 }
 
 /// Free a string returned by this library. NULL is a no-op.
@@ -28,8 +41,98 @@ pub unsafe extern "C" fn pollis_string_free(s: *mut c_char) {
     drop(CString::from_raw(s));
 }
 
+/// Relocate the data dir (iOS: the App Group container) without changing the keystore
+/// namespace. The app calls it before `init_pollis`; `init_pollis` then migrates once.
+///
+/// # Safety
+/// `dir` must be NULL (ignored) or a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn pollis_set_data_dir_override(dir: *const c_char) {
+    if let Some(dir) = opt_str(dir).filter(|d| !d.is_empty()) {
+        crate::db::local::set_data_dir_override(dir);
+    }
+}
+
+/// iOS: the keychain access group shared with the extension, e.g.
+/// `"<TEAMID>.com.pollis.shared"`. Overrides the `PollisKeychainAccessGroup` Info.plist key.
+/// A no-op elsewhere.
+///
+/// # Safety
+/// `group` must be NULL (ignored) or a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn pollis_set_keychain_access_group(group: *const c_char) {
+    #[cfg(target_os = "ios")]
+    if let Some(group) = opt_str(group) {
+        crate::keystore::set_ios_keychain_access_group(&group);
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = group;
+}
+
+fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) -> String {
+    let Some(data_dir) = data_dir.filter(|d| !d.is_empty()) else {
+        return INTERNAL.to_string();
+    };
+    let data_dir = std::path::PathBuf::from(data_dir);
+    let budget = Duration::from_millis(u64::from(if budget_ms == 0 {
+        DEFAULT_BUDGET_MS
+    } else {
+        budget_ms
+    }));
+
+    super::host::adopt_data_dir(&data_dir);
+    // An extension never mints a keystore key; see `keystore::forbid_key_creation`. Only when
+    // the app is not running in this process (Android may call this in-process).
+    if !crate::bridge::is_initialized() {
+        crate::keystore::forbid_key_creation();
+    }
+    let Some(config) = super::host::load_config(&data_dir) else {
+        // The app has never started on this build: nothing is set up for a headless fetch.
+        return super::fetch::Outcome::Failed(super::fetch::Reason::NotLoggedIn).to_json();
+    };
+    let params = super::fetch::Params {
+        keystore: crate::keystore::default_os_keystore(),
+        config,
+        handle,
+        budget,
+        #[cfg(feature = "test-harness")]
+        local_dir: None,
+    };
+    // The bridge's big-stack workers: an extension thread's stack is far too small for
+    // SQLCipher and MLS, and one shared runtime keeps the HTTP pool consistent in-process.
+    let rt = crate::bridge::worker_runtime();
+    match rt.block_on(rt.spawn(super::fetch::run(params))) {
+        Ok(outcome) => outcome.to_json(),
+        Err(_) => INTERNAL.to_string(),
+    }
+}
+
+unsafe fn opt_str(p: *const c_char) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    CStr::from_ptr(p).to_str().ok().map(str::to_string)
+}
+
 fn to_c(s: String) -> *mut c_char {
     CString::new(s)
-        .unwrap_or_else(|_| CString::new(r#"{"ok":false,"reason":"internal"}"#).unwrap())
+        .unwrap_or_else(|_| CString::new(INTERNAL).expect("no NUL in a literal"))
         .into_raw()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_null_data_dir_is_internal_not_a_crash() {
+        // SAFETY: NULL is allowed for both; the result is freed once.
+        unsafe {
+            let out = pollis_notify_fetch(std::ptr::null(), std::ptr::null(), 10);
+            assert!(!out.is_null());
+            assert_eq!(CStr::from_ptr(out).to_str().unwrap(), INTERNAL);
+            pollis_string_free(out);
+            pollis_string_free(std::ptr::null_mut());
+        }
+    }
 }

@@ -110,6 +110,7 @@ pub use types::{
 
 pub use send::{send_message, send_message_with_id};
 pub use send::test_hooks;
+pub(crate) use send::direct_mentions;
 
 pub use outbox::{
     discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,

@@ -233,6 +233,8 @@ async fn nuke_wrapped(
     let _ = keystore
         .delete_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, user_id)
         .await;
+    // The notification escrow is the same key unwrapped (#1599); a lockout must take it too.
+    let _ = crate::notify::escrow::delete_escrow(keystore, user_id).await;
     Ok(())
 }
 
@@ -332,6 +334,8 @@ pub async fn set_pin(
         Some(crate::media_server::fresh_token());
 
     let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
+    // Rich notifications (#1599): escrow or drop the key per the setting. Mobile only.
+    crate::notify::escrow::refresh_after_unlock(state, &user_id, &db_key).await;
 
     // Bind first: an `if let` scrutinee guard would hold `device_id` across awaits.
     let device_id = state.device_id.lock().await.clone();
@@ -514,6 +518,8 @@ pub async fn unlock(
         .await;
 
     let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
+    // Rich notifications (#1599): escrow or drop the key per the setting. Mobile only.
+    crate::notify::escrow::refresh_after_unlock(state, &user_id, &db_key).await;
 
     // Bind first, as in `set_pin`.
     let device_id = state.device_id.lock().await.clone();

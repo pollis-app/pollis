@@ -23,6 +23,8 @@ pub mod sink;
 pub mod state;
 pub mod util;
 
+pub use db::local::set_data_dir_override;
+
 // Re-exported so downstream crates can name screenshare types without a direct dep.
 pub use pollis_capture_proto;
 

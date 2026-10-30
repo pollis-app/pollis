@@ -49,7 +49,7 @@ static APP_STATE: OnceCell<Arc<AppState>> = OnceCell::const_new();
 /// By spawning the real work onto these big-stack workers and only
 /// `await`ing the join handle on the JS thread, the JS thread does nothing
 /// stack-hungry and the parser gets the headroom it needs.
-fn worker_runtime() -> &'static tokio::runtime::Runtime {
+pub(crate) fn worker_runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
@@ -176,6 +176,8 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 overlay_directory_key: None,
                 dev_access_key: parsed.dev_access_key.filter(|s| !s.trim().is_empty()),
             };
+            // What a notification extension needs to reach the DS (#1599).
+            crate::notify::host::save_config(&crate::db::local::dirs_path(), &config);
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))
         })
@@ -208,8 +210,19 @@ fn android_bootstrap(data_dir: Option<&str>) -> Result<(), BridgeError> {
 #[cfg(target_os = "ios")]
 fn ios_bootstrap() -> Result<(), BridgeError> {
     let dir = crate::db::local::dirs_path();
-    crate::ios_storage::prepare(&dir)
-        .map_err(|e| BridgeError::Bridge(format!("ios data dir at {}: {e}", dir.display())))
+    // #1599: with an App Group override, the first launch moves the old directory into it.
+    let prepared = if crate::db::local::data_dir_override().as_deref() == Some(dir.as_path()) {
+        crate::ios_storage::migrate_into_override(&dir)
+    } else {
+        crate::ios_storage::prepare(&dir)
+    };
+    prepared.map_err(|e| BridgeError::Bridge(format!("ios data dir at {}: {e}", dir.display())))
+}
+
+/// Whether the app's `init_pollis` has run in this process (#1599: Android may run a headless
+/// fetch inside the running app).
+pub(crate) fn is_initialized() -> bool {
+    APP_STATE.get().is_some()
 }
 
 fn state() -> Result<Arc<AppState>, BridgeError> {
@@ -280,6 +293,15 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
 
         "get_session" => ok(auth::get_session(&state()?).await?),
+        // Rich notifications (#1599): what a notification may show; also writes or drops the key escrow.
+        "get_notification_content" => ok(
+            crate::notify::escrow::get_notification_content(&state()?).await?.as_str()
+        ),
+        "set_notification_content" => {
+            let mode: String = arg(&args, "mode")?;
+            crate::notify::escrow::set_notification_content(&state()?, &mode).await?;
+            ok(())
+        }
         "request_otp" => {
             let email: String = arg(&args, "email")?;
             auth::request_otp(&state()?, email).await?;

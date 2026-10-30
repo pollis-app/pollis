@@ -306,7 +306,7 @@ pub async fn external_join_group(
     conversation_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(conversation_id).await;
+    let _guard = state.mls_group_lock(conversation_id).await?;
     external_join_group_inner(state, conversation_id, user_id).await
 }
 
@@ -1064,7 +1064,7 @@ pub async fn process_pending_commits_inner(
     mls_group_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(mls_group_id).await;
+    let _guard = state.mls_group_lock(mls_group_id).await?;
     process_pending_commits_locked(state, mls_group_id, user_id).await
 }
 
@@ -1151,7 +1151,7 @@ pub async fn process_pending_commits_inner_with_hook(
     on_epoch: &mut (dyn FnMut(&rusqlite::Connection, i64, u64) + Send),
     bound: Option<ReplayBound>,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(mls_group_id).await;
+    let _guard = state.mls_group_lock(mls_group_id).await?;
     process_pending_commits_locked_impl(state, mls_group_id, user_id, Some(on_epoch), bound).await
 }
 
