@@ -11,6 +11,7 @@ import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
+import androidx.core.graphics.drawable.IconCompat
 import androidx.core.content.ContextCompat
 import com.pollisnative.R
 
@@ -120,11 +121,13 @@ class RichPushNotifier(private val context: Context) {
       m.extras.getString(EXTRA_MESSAGE_ID)?.let { seen.add(it) }
       stacked.add(m)
     }
+    // The app's own letter avatar, drawn locally: no network, a few ms per distinct sender.
+    val people = HashMap<String, Person>()
     for (m in plan.messages) {
       if (m.messageId.isNotEmpty() && !seen.add(m.messageId)) {
         continue
       }
-      val sender = Person.Builder().setName(m.sender).build()
+      val sender = people.getOrPut(m.sender) { person(m.sender) }
       val message = NotificationCompat.MessagingStyle.Message(text(m.text), now, sender)
       if (m.messageId.isNotEmpty()) {
         message.extras.putString(EXTRA_MESSAGE_ID, m.messageId)
@@ -136,7 +139,16 @@ class RichPushNotifier(private val context: Context) {
     }
     val last = plan.messages.last()
     val extras = Bundle().apply { putString(EXTRA_CONVERSATION, plan.conversationId) }
-    return base(handle, data, messageId, sentTime)
+    val builder = base(handle, data, messageId, sentTime)
+    // The conversation's icon: a group's rounded letter avatar (as Search draws groups), or the
+    // DM sender's round one. Collapsed and grouped rows show only this, not the Person icons.
+    val icon = if (!plan.isDm && plan.conversationTitle != null) {
+      safeAvatar(plan.conversationTitle, rounded = true)
+    } else {
+      safeAvatar(last.sender, rounded = false)
+    }
+    icon?.let { builder.setLargeIcon(it) }
+    return builder
       .setStyle(style)
       .setContentTitle(
         if (plan.isDm || plan.conversationTitle == null) {
@@ -148,6 +160,18 @@ class RichPushNotifier(private val context: Context) {
       .setContentText(text(last.text))
       .addExtras(extras)
       .build()
+  }
+
+  private fun safeAvatar(label: String, rounded: Boolean): android.graphics.Bitmap? = try {
+    LetterAvatar.bitmap(context, label, rounded)
+  } catch (e: Exception) {
+    null
+  }
+
+  private fun person(name: String): Person {
+    val builder = Person.Builder().setName(name)
+    safeAvatar(name, rounded = false)?.let { builder.setIcon(IconCompat.createWithBitmap(it)) }
+    return builder.build()
   }
 
   /** Messages of the notification already showing for this conversation, which is then removed. */
@@ -206,8 +230,15 @@ class RichPushNotifier(private val context: Context) {
     null
   }
 
-  /** The icon FCM itself would use for a system-posted notification. */
+  /**
+   * The app's monochrome notification glyph: the `notification_icon` drawable the expo-notifications
+   * plugin's `icon` option generates; else whatever FCM itself would use for a system-posted one.
+   */
   private fun smallIcon(): Int {
+    val glyph = context.resources.getIdentifier("notification_icon", "drawable", context.packageName)
+    if (glyph != 0) {
+      return glyph
+    }
     val meta = metaData()
     val configured = meta?.getInt("com.google.firebase.messaging.default_notification_icon", 0) ?: 0
     if (configured != 0) {

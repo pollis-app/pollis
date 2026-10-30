@@ -39,7 +39,9 @@ bindings:
 # Generated once, then extended by hand, so `--and-generate` must leave them
 # alone (#1599): cpp-adapter.cpp carries the PollisNotify JNI shim the rich-push
 # handler calls, build.gradle that handler's Firebase / expo-notifications /
-# androidx dependencies.
+# androidx dependencies, PollisNativePackage.kt the PollisPushState module that
+# tells it which conversation is on screen.
 noOverwrite:
   - android/cpp-adapter.cpp
   - android/build.gradle
+  - android/src/main/java/com/pollisnative/PollisNativePackage.kt

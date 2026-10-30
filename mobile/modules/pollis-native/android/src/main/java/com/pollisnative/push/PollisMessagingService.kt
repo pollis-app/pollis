@@ -1,6 +1,5 @@
 package com.pollisnative.push
 
-import android.app.ActivityManager
 import android.util.Log
 import com.pollisnative.BuildConfig
 import com.google.firebase.messaging.RemoteMessage
@@ -28,18 +27,12 @@ class PollisMessagingService : ExpoFirebaseMessagingService() {
       return
     }
     RichPushHandler.handle(this, handle, data, remoteMessage.messageId, remoteMessage.sentTime)
-    if (isForeground()) {
+    if (OpenConversation.isAppInForeground()) {
       // Let JS see it, as it sees every push in the foreground (`addNotificationReceivedListener`
       // ingests that conversation). Its handler shows nothing for a title-less push, so this
       // never posts a second, blank notification. In the background expo would only start a
       // headless JS task here for nothing, so it is skipped.
       super.onMessageReceived(remoteMessage)
     }
-  }
-
-  private fun isForeground(): Boolean {
-    val info = ActivityManager.RunningAppProcessInfo()
-    ActivityManager.getMyMemoryState(info)
-    return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
   }
 }

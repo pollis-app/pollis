@@ -9,7 +9,26 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pushCapsFor, RICH_PUSH_CAP } from "../lib/push/caps.ts";
-import { isTitleless } from "../lib/push/presentation.ts";
+import { isTitleless, nativeOpenConversation } from "../lib/push/presentation.ts";
+
+test("native hears of the open chat only while the app is active", () => {
+  assert.equal(nativeOpenConversation("c1", "active"), "c1");
+  assert.equal(nativeOpenConversation("c1", "background"), null);
+  assert.equal(nativeOpenConversation("c1", "inactive"), null);
+  assert.equal(nativeOpenConversation(null, "active"), null);
+});
+
+test("the open-chat sync is started by the push hook and registered natively", () => {
+  const hook = readFileSync(join(MOBILE, "hooks/usePushNotifications.ts"), "utf8");
+  assert.match(hook, /syncOpenConversationToNative\(\)/);
+  const pkg = readFileSync(
+    join(MOBILE, "modules/pollis-native/android/src/main/java/com/pollisnative/PollisNativePackage.kt"),
+    "utf8",
+  );
+  assert.match(pkg, /PollisPushStateModule\.NAME -> PollisPushStateModule/);
+  const cfg = readFileSync(join(MOBILE, "modules/pollis-native/ubrn.config.yaml"), "utf8");
+  assert.match(cfg, /- android\/src\/main\/java\/com\/pollisnative\/PollisNativePackage\.kt/);
+});
 
 const require = createRequire(import.meta.url);
 const { removeExpoMessagingService, EXPO_SERVICE } = require("../plugins/withRichPush.js");

@@ -396,8 +396,23 @@ so the app, not the system, posts the notification.
   placeholders become fixed positional `%1$s` args per key, `ARGS`; `--check`;
   `mobile/tests/rich-push.test.ts` fails when stale). They follow the device
   locale, not the in-app language choice, which native code cannot read.
+- **The chat on screen posts nothing.** JS reports the open conversation
+  (`appStore.openConversationId`, only while the app is active) to the
+  `PollisPushState` bridge module (`lib/push/openConversation.ts`, started by
+  `usePushNotifications`); with the app in the foreground, a rich push for that
+  conversation posts nothing (and drops a generic one already posted at the
+  deadline), instead of a heads-up #1508 would clear seconds later. Any other
+  conversation, or the app in the background, posts as usual.
+- **Avatars.** Mobile shows letter avatars only, so the notification draws the
+  same one natively (`LetterAvatar`: the initial on `semantic.high` in
+  `semantic.dim`, from `theme/derive.ts`'s recipe; a circle per sender as the
+  `Person` icon and the DM's large icon, a rounded square for a group's). JS
+  saves the live accent/background (`setThemeColors`) to SharedPreferences
+  when leaving the app, so a cold process matches a custom accent. No network.
+  The small icon is the `notification_icon` drawable (expo-notifications
+  `icon` option) when present.
 - **Test hook (debug builds only).** `RichPushTestReceiver`:
-  `adb shell am broadcast -a com.pollis.mobile.debug.RICH_PUSH -p com.pollis.mobile --es body '{"h":"<22 chars>"}' [--es fake '<fetch JSON>']`
+  `adb shell am broadcast -a com.pollis.mobile.debug.RICH_PUSH -p com.pollis.mobile --es body '{"h":"<22 chars>"}' [--es fake '<fetch JSON>'] [--es open <conversation id>]`
   runs the same path as an FCM delivery; `fake` substitutes the core's reply.
 
 ## Rich push, decrypted on the device (#1599) — the core half

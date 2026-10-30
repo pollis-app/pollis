@@ -110,6 +110,31 @@ class RichPushTest {
   }
 
   @Test
+  fun theChatOnScreenPostsNothingInTheForegroundOnly() {
+    val plan = RichPush.plan(reply("full", item(conv = "c1")))
+    assertTrue(RichPush.suppressForOpenConversation(plan, foreground = true, openConversationId = "c1"))
+    // Another conversation, the app in the background, or no chat open: post as usual.
+    assertEquals(false, RichPush.suppressForOpenConversation(plan, foreground = true, openConversationId = "c2"))
+    assertEquals(false, RichPush.suppressForOpenConversation(plan, foreground = false, openConversationId = "c1"))
+    assertEquals(false, RichPush.suppressForOpenConversation(plan, foreground = true, openConversationId = null))
+    // Generic means the conversation is unknown: never suppressed.
+    assertEquals(false, RichPush.suppressForOpenConversation(RichPush.Plan.Generic, foreground = true, openConversationId = "c1"))
+  }
+
+  @Test
+  fun letterAvatarMatchesTheAppTheme() {
+    // derive.ts with the defaults (#fabf5a on #0a0907): high = #332c20, dim = #c8b698 (theme/derive.ts).
+    val (fill, fg) = LetterAvatar.colors(LetterAvatar.DEFAULT_ACCENT, LetterAvatar.DEFAULT_BG)
+    assertEquals(0x332C20, fill)
+    assertEquals(0xC8B698, fg)
+    assertEquals("A", LetterAvatar.initial("  ana"))
+    assertEquals("😀", LetterAvatar.initial("😀 smile"))
+    assertNull(LetterAvatar.initial("   "))
+    assertEquals(0xFABF5A, LetterAvatar.parseHex("#fabf5a"))
+    assertNull(LetterAvatar.parseHex("nope"))
+  }
+
+  @Test
   fun noSenderIsGeneric() {
     assertEquals(RichPush.Plan.Generic, RichPush.plan(reply("full", item(sender = ""))))
   }

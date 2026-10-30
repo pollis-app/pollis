@@ -10,7 +10,7 @@ import android.util.Log
  * services, so this feeds the same [RichPush.richHandle] + [RichPushHandler] path from adb.
  *
  *   adb shell am broadcast -a com.pollis.mobile.debug.RICH_PUSH -p com.pollis.mobile \
- *     --es body '{"h":"AAAAAAAAAAAAAAAAAAAAAA"}' [--es fake '<fetch JSON>']
+ *     --es body '{"h":"AAAAAAAAAAAAAAAAAAAAAA"}' [--es fake '<fetch JSON>'] [--es open <conversation id>]
  *
  * Every string extra except `fake` becomes FCM data. `fake` replaces the core call with a canned
  * reply, to exercise each rendering path without an account.
@@ -20,12 +20,16 @@ class RichPushTestReceiver : BroadcastReceiver() {
     val extras = intent.extras ?: return
     val data = HashMap<String, String>()
     for (key in extras.keySet()) {
-      if (key == "fake") {
+      if (key == "fake" || key == "open") {
         continue
       }
       extras.getString(key)?.let { data[key] = it }
     }
     val fake = extras.getString("fake")
+    // Stands in for JS's report of the conversation on screen ("" clears it).
+    if (extras.containsKey("open")) {
+      OpenConversation.id = extras.getString("open")?.takeIf { it.isNotEmpty() }
+    }
     val handle = RichPush.richHandle(data, false)
     if (handle == null) {
       Log.i("PollisRichPush", "test push is not a rich push; ignored")

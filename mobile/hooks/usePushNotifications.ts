@@ -10,6 +10,7 @@ import {
   takeLaunchNotificationData,
 } from "../lib/push";
 import { createTapGate, type TapGate } from "../lib/push/tapGate";
+import { syncOpenConversationToNative } from "../lib/push/openConversation";
 import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
 import { useOpenConversation } from "./useOpenConversation";
@@ -86,6 +87,14 @@ export function usePushNotifications() {
   useEffect(() => {
     gate.setReady(ready);
   }, [ready, gate]);
+
+  // #1599: Android posts nothing for a push about the chat on screen.
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+    return syncOpenConversationToNative();
+  }, [userId]);
 
   usePushRegistration(userId);
 }

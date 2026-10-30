@@ -71,6 +71,15 @@ object RichPush {
     }
   }
 
+  /**
+   * True when the user is already looking at this push's conversation: the app is in the foreground
+   * and that conversation is the one on screen. Posting would only flash a heads-up that #1508 then
+   * clears; the open chat shows the message itself. A generic plan (conversation unknown) and any
+   * other conversation still post.
+   */
+  fun suppressForOpenConversation(plan: Plan, foreground: Boolean, openConversationId: String?): Boolean =
+    foreground && openConversationId != null && plan is Plan.Rich && plan.conversationId == openConversationId
+
   private fun bodyKey(raw: String?): BodyKey? = when (raw) {
     "attachment" -> BodyKey.ATTACHMENT
     "image" -> BodyKey.IMAGE

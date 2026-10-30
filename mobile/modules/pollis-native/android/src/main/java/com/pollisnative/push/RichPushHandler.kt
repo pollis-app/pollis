@@ -85,6 +85,12 @@ object RichPushHandler {
 
   private fun post(notifier: RichPushNotifier, handle: String, json: String, data: Map<String, String>, messageId: String?, sentTime: Long) {
     val plan = RichPush.plan(json)
+    if (RichPush.suppressForOpenConversation(plan, OpenConversation.isAppInForeground(), OpenConversation.id)) {
+      // The chat is on screen: show nothing (and drop a generic one posted at the deadline).
+      Log.i(TAG, "suppressed: conversation on screen")
+      notifier.post(handle, RichPush.Plan.Silent, data, messageId, sentTime)
+      return
+    }
     // Only the outcome class, never content.
     Log.i(TAG, "posting ${plan.outcome}")
     try {
