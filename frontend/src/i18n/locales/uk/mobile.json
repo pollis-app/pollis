@@ -329,7 +329,18 @@
     "title": "Посилання на повідомлення"
   },
   "push": {
-    "channelMessages": "Повідомлення"
+    "channelMessages": "Повідомлення",
+    "notification": {
+      "genericTitle": "Нове повідомлення",
+      "genericBody": "У вас нове повідомлення",
+      "nameOnlyBody": "Надіслав(ла) повідомлення",
+      "groupTitle": "{{sender}} · {{conversation}}",
+      "attachment": "📎 Вкладення",
+      "image": "📷 Фото",
+      "video": "🎬 Відео",
+      "voice": "🎤 Голосове повідомлення",
+      "sensitive": "🔒 Делікатний вміст"
+    }
   },
   "search": {
     "channels": "Канали",

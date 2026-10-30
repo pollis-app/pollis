@@ -322,7 +322,18 @@
     "unpinA11y": "Unpin message from {{author}}"
   },
   "push": {
-    "channelMessages": "Messages"
+    "channelMessages": "Messages",
+    "notification": {
+      "genericTitle": "New message",
+      "genericBody": "You have a new message",
+      "nameOnlyBody": "Sent a message",
+      "groupTitle": "{{sender}} · {{conversation}}",
+      "attachment": "📎 Attachment",
+      "image": "📷 Photo",
+      "video": "🎬 Video",
+      "voice": "🎤 Voice message",
+      "sensitive": "🔒 Sensitive media"
+    }
   },
   "search": {
     "channels": "Channels",

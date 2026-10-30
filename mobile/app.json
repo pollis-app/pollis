@@ -164,6 +164,12 @@
         }
       ],
       [
+        "./plugins/withNotificationServiceExtension",
+        {
+          "teamId": "8JT3WH45NZ"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",

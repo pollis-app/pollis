@@ -313,7 +313,18 @@
     "title": "Enlace al mensaje"
   },
   "push": {
-    "channelMessages": "Mensajes"
+    "channelMessages": "Mensajes",
+    "notification": {
+      "genericTitle": "Mensaje nuevo",
+      "genericBody": "Tienes un mensaje nuevo",
+      "nameOnlyBody": "Te envió un mensaje",
+      "groupTitle": "{{sender}} · {{conversation}}",
+      "attachment": "📎 Archivo adjunto",
+      "image": "📷 Foto",
+      "video": "🎬 Vídeo",
+      "voice": "🎤 Mensaje de voz",
+      "sensitive": "🔒 Contenido sensible"
+    }
   },
   "search": {
     "channels": "Canales",

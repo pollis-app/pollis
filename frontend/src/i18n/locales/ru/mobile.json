@@ -329,7 +329,18 @@
     "title": "Ссылка на сообщение"
   },
   "push": {
-    "channelMessages": "Сообщения"
+    "channelMessages": "Сообщения",
+    "notification": {
+      "genericTitle": "Новое сообщение",
+      "genericBody": "У вас новое сообщение",
+      "nameOnlyBody": "Отправил(а) сообщение",
+      "groupTitle": "{{sender}} · {{conversation}}",
+      "attachment": "📎 Вложение",
+      "image": "📷 Фото",
+      "video": "🎬 Видео",
+      "voice": "🎤 Голосовое сообщение",
+      "sensitive": "🔒 Деликатный контент"
+    }
   },
   "search": {
     "channels": "Каналы",
