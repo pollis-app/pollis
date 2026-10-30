@@ -338,6 +338,9 @@ pub async fn apply_remove_emoji(
         return Ok(EmojiOutcome::Ok);
     };
     let content_hash: String = row.get(0)?;
+    // Before the transaction: a live SELECT keeps its read snapshot into the
+    // writes, which fail `database is locked` after a concurrent write (#1618).
+    drop(rows);
 
     let tx = conn.transaction().await?;
     tx.execute(

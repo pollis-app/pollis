@@ -97,6 +97,10 @@ pub async fn apply_report_user(
     if rows.next().await?.is_none() {
         return Ok(ReportOutcome::UnknownAccount);
     }
+    // A shadowed `rows` is not dropped: its unfinished SELECT would hold a read
+    // snapshot into the INSERT, which then fails `database is locked` if another
+    // connection wrote in between (#1618). Drop each one before writing.
+    drop(rows);
     let recent = count(
         conn,
         "SELECT COUNT(*) FROM user_report \
@@ -118,6 +122,7 @@ pub async fn apply_report_user(
         Some(row) => row.get(0)?,
         None => 0,
     };
+    drop(rows);
     let report_id = ulid::Ulid::new().to_string();
     conn.execute(
         "INSERT INTO user_report (id, reporter_id, reported_id, reason, conversation_id, message_id) \
