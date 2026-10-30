@@ -85,22 +85,49 @@ On detected mismatch, the helper:
 1. `UPDATE contact_verification SET account_id_pub = ?, identity_version = ?,
    verified = 0, updated_at = datetime('now')` — the pin is refreshed in place
    to the new key, and the verified flag is cleared.
-2. Emits `RealtimeEvent::KeyChanged { peer_user_id, peer_identity_version }`
-   on the local sink. Frontend listeners (`useLiveKitRealtime.ts` →
-   `useKeyChangeStore`) flag the peer, invalidate the
-   `peerVerificationKeys.all` query, and render the inline banner in every
-   open conversation.
-3. Returns success. **Sends are not blocked.** The policy is
-   advisory-with-acknowledge: the banner is the user-facing signal; the user
-   chooses whether to re-verify before continuing. Hard-blocking a 50-person
-   group on one rotated key would wreck UX without adding security (the
-   warning is the security).
+2. **The local DB records a durable notice (#1605).** The trigger
+   `contact_verification_key_change` (`db/local_schema.sql`) inserts a
+   `key_change_notice` row (`peer_user_id`, old + new key, `detected_at` UTC
+   with ms) whenever a pinned `account_id_pub` actually changes. No Rust writes
+   it, so every re-pin path records it — DM ingest, group reconcile, the
+   headless notification fetch (iOS Notification Service Extension, Android
+   FCM service), and Mark verified re-pinning a newer key. The WHEN clause
+   compares the row's OLD value under SQLite's write lock, so the same change
+   seen by the extension and then the app writes ONE row (the second UPDATE
+   sets the key it already has); a `CHECK` refuses a notice whose old and new
+   keys match. Tests: `commands::safety::tests` (unit) and
+   `flows::rich_push::a_key_change_seen_headless_shows_once_in_the_app`.
+3. Emits `RealtimeEvent::KeyChanged { peer_user_id, peer_identity_version }`
+   on the local sink, when there is one (the desktop app). It is only a
+   refetch hint now: desktop invalidates the notices and
+   `peerVerificationKeys.all`. A headless fetch has no sink, which is why the
+   notice, not the event, is the record.
+4. Returns success. **Sends are not blocked.** The policy is advisory: the
+   line in the timeline is the user-facing signal; the user chooses whether to
+   re-verify. Hard-blocking a 50-person group on one rotated key would wreck
+   UX without adding security (the warning is the security).
 
-The user-visible signal in the UI is the cleared `verified` flag, not the
-`key_changed` boolean from `list_peer_verifications`. The boolean only fires
-when the local pin is *stale* (server moved, local hasn't synced yet); after
-the helper runs, both sides match and the boolean returns to false. The
-cleared verified flag is what persists as evidence the swap happened.
+**Where it shows (Signal-style).** `list_key_change_notices(peer_user_ids)`
+returns a DM's notices; both clients place each one as a system line in every
+DM with that peer — "Your safety number with @x changed. Verify it" — at
+`detected_at` among the messages (`placeKeyChangeNotices`, one rule in
+`frontend/src/utils/keyChangeTimeline.ts` and `mobile/lib/keyChangeTimeline.ts`,
+pinned by `frontend/tests/key-change-timeline.test.ts`). A notice older than the
+loaded page waits for that page. Desktop: `KeyChangeNoticeRow` in `MessageList`,
+"Verify it" opens the safety-number panel; mobile: `components/chat/KeyChangeNoticeRow`
+in `chat/[id]`, the whole line opens `dm/safety`. Notices are per PEER, not per
+conversation: the path that noticed the change may be a group reconcile, and
+the DM must still show it. They are history, not dismissable warnings (the
+in-memory banner and `keyChangeStore` they replaced lost every change made
+while the app was closed). The 1:1 DM header carries the verified shield only
+while `verified = 1` (desktop `dm-header-verified` / `dm-header-unverified`,
+mobile `icon-dm-verified`). Playwright `e2e/safety-number.spec.ts`; Maestro
+`scripts/maestro-key-change.sh` (peer `pollis-tui/examples/key_change_peer.rs`).
+
+The `key_changed` boolean from `list_peer_verifications` only fires when the
+local pin is *stale* (server moved, local hasn't synced yet); after the helper
+runs, both sides match and the boolean returns to false. The cleared verified
+flag and the notice are what persist as evidence the swap happened.
 
 ## Verification UX
 
@@ -170,7 +197,7 @@ group's admins can revoke (`revoke_group_invite`) — see
 
 | Attack | Detection | Action |
 |---|---|---|
-| Turso swaps a peer's `account_id_pub` | Next DM ingest OR next group reconcile via TOFU helper; permanently visible in the account-key transparency log (#330) | Pin refreshed, verified cleared, KeyChanged event surfaces inline banner; swap is absent from / accountable in the published log (`pollis-verify account`, `audit_peer_account_key`) |
+| Turso swaps a peer's `account_id_pub` | Next DM ingest OR next group reconcile via TOFU helper; permanently visible in the account-key transparency log (#330) | Pin refreshed, verified cleared, a durable key-change line in every DM with them (#1605); swap is absent from / accountable in the published log (`pollis-verify account`, `audit_peer_account_key`) |
 | Turso adds a rogue device under an existing user (account-key unchanged), or substitutes an attacker's KeyPackage at claim time | Leaf cross-signing (`mls/device.rs::IdentityDirectory::leaf_verdict`) on the committer — every claimed KeyPackage's leaf key must be the device key the user's account certified — and on every replaying member, from the commit's own Add proposals | Committer refuses the add (package burnt, `refused_uncertified`); a leaf a rogue committer added anyway is recorded as an `uncertified_mls_leaf` security event and evicted by the next honest reconcile (see whitepaper §5.3 / §13.2 for the residual) |
 | Turso adds a rogue device under a *swapped* account-key | Both layers fire: TOFU detects the key swap; cross-sign detects the cert mismatch | Banner + warning |
 | Network MITM between two clients (no Turso write) | MLS cipher integrity (ChaCha20-Poly1305 AEAD) | Decryption fails — cannot impersonate anyone |
@@ -381,7 +408,7 @@ makes every user's full history auditable by anyone.
 Statuses are `ok` / `pending` / `alarm` / `unavailable`. The log's public key is
 pinned in the client; a served key ≠ the pin is a hard `alarm` (any key can sign
 a self-consistent forged tree). All checks are **advisory** — they alert, they
-never block a send, the same policy as the key-change banner above.
+never block a send, the same policy as the key-change line above.
 
 **UI surfacing.** Both commands are wrapped by React Query hooks in
 `frontend/src/hooks/queries/useTransparency.ts` (`useSelfAuditAccountKey`,
