@@ -129,5 +129,10 @@
     "done": "Gracias. Revisamos todas las denuncias.",
     "doneBlocked": "Gracias. Revisamos todas las denuncias. También bloqueaste a {{name}}.",
     "close": "Listo"
+  },
+  "keyChange": {
+    "notice": "Tu número de seguridad con {{name}} ha cambiado.",
+    "verify": "Verifícalo",
+    "defaultName": "este contacto"
   }
 }

@@ -24,3 +24,11 @@ pub async fn list_peer_verifications(
 ) -> Result<Vec<pollis_core::commands::safety::PeerVerificationEntry>> {
     pollis_core::commands::safety::list_peer_verifications(&state).await
 }
+
+#[tauri::command]
+pub async fn list_key_change_notices(
+    peer_user_ids: Vec<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<pollis_core::commands::safety::KeyChangeNotice>> {
+    pollis_core::commands::safety::list_key_change_notices(peer_user_ids, &state).await
+}

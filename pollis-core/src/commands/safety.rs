@@ -196,6 +196,53 @@ pub async fn list_peer_verifications(
     Ok(out)
 }
 
+/// One recorded change of a peer's pinned account key (#1605); a system line in every DM with them.
+#[derive(Debug, Serialize)]
+pub struct KeyChangeNotice {
+    pub id: i64,
+    pub peer_user_id: String,
+    /// When this device noticed the change (UTC, ISO 8601 with milliseconds); the timeline position.
+    pub detected_at: String,
+}
+
+/// Every key-change notice for `peer_user_ids`, oldest first. Local only: no network.
+pub async fn list_key_change_notices(
+    peer_user_ids: Vec<String>,
+    state: &Arc<AppState>,
+) -> Result<Vec<KeyChangeNotice>> {
+    if peer_user_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+    key_change_notices_for(db.conn(), &peer_user_ids)
+}
+
+fn key_change_notices_for(
+    conn: &rusqlite::Connection,
+    peer_user_ids: &[String],
+) -> Result<Vec<KeyChangeNotice>> {
+    let ids = serde_json::to_string(peer_user_ids)
+        .map_err(|e| Error::Other(anyhow::anyhow!("encode peer ids: {e}")))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, peer_user_id, detected_at FROM key_change_notice \
+         WHERE peer_user_id IN (SELECT value FROM json_each(?1)) \
+         ORDER BY detected_at, id",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![ids], |r| {
+            Ok(KeyChangeNotice {
+                id: r.get(0)?,
+                peer_user_id: r.get(1)?,
+                detected_at: r.get(2)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+    Ok(rows)
+}
+
 /// Mark a contact (un)verified, pinning their current key.
 pub async fn set_contact_verified(
     peer_user_id: String,
@@ -406,6 +453,105 @@ mod tests {
             fingerprint(&[3u8; 32], b"pollis"),
             "182206983802156935973920110564"
         );
+    }
+
+    fn pin(conn: &rusqlite::Connection, peer: &str, key: &[u8]) {
+        conn.execute(
+            "INSERT INTO contact_verification (peer_user_id, account_id_pub, identity_version, verified) \
+             VALUES (?1, ?2, 1, 1)",
+            rusqlite::params![peer, key],
+        )
+        .unwrap();
+    }
+
+    /// The exact statement the TOFU helpers run on a mismatch.
+    fn repin(conn: &rusqlite::Connection, peer: &str, key: &[u8]) {
+        conn.execute(
+            "UPDATE contact_verification SET account_id_pub = ?2, identity_version = 2, \
+               verified = 0, updated_at = datetime('now') WHERE peer_user_id = ?1",
+            rusqlite::params![peer, key],
+        )
+        .unwrap();
+    }
+
+    fn notices(conn: &rusqlite::Connection, peer: &str) -> usize {
+        key_change_notices_for(conn, &[peer.to_string()]).unwrap().len()
+    }
+
+    /// #1605: a re-pin to a new key leaves exactly one durable notice, a re-pin to the key it
+    /// already has (the second process to see the change) leaves none, and a first pin is no change.
+    #[test]
+    fn a_key_change_leaves_exactly_one_notice() {
+        let db = crate::db::local::LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        pin(conn, "bob", &[1u8; 32]);
+        assert_eq!(notices(conn, "bob"), 0, "a first pin is not a change");
+
+        repin(conn, "bob", &[1u8; 32]);
+        assert_eq!(notices(conn, "bob"), 0, "the same key is not a change");
+
+        repin(conn, "bob", &[2u8; 32]);
+        assert_eq!(notices(conn, "bob"), 1);
+        // The app ingests after the extension already re-pinned: same key, no second notice.
+        repin(conn, "bob", &[2u8; 32]);
+        assert_eq!(notices(conn, "bob"), 1, "one change, one notice");
+
+        // A key that changes back is a second, real change.
+        repin(conn, "bob", &[1u8; 32]);
+        assert_eq!(notices(conn, "bob"), 2);
+
+        // Mark verified re-pins with an upsert; it records a change the same way.
+        conn.execute(
+            "INSERT INTO contact_verification (peer_user_id, account_id_pub, identity_version, verified) \
+             VALUES ('bob', ?1, 3, 1) ON CONFLICT(peer_user_id) DO UPDATE SET \
+               account_id_pub = excluded.account_id_pub, verified = excluded.verified",
+            rusqlite::params![vec![3u8; 32]],
+        )
+        .unwrap();
+        assert_eq!(notices(conn, "bob"), 3);
+
+        // Verifying again without a key change records nothing.
+        conn.execute(
+            "UPDATE contact_verification SET verified = 1 WHERE peer_user_id = 'bob'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(notices(conn, "bob"), 3);
+    }
+
+    /// The notice is keyed by peer: another peer's change never shows, and an empty set is empty.
+    #[test]
+    fn notices_are_per_peer_and_ordered() {
+        let db = crate::db::local::LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        pin(conn, "bob", &[1u8; 32]);
+        pin(conn, "carol", &[1u8; 32]);
+        repin(conn, "bob", &[2u8; 32]);
+        repin(conn, "carol", &[2u8; 32]);
+        repin(conn, "bob", &[3u8; 32]);
+
+        let bob = key_change_notices_for(conn, &["bob".to_string()]).unwrap();
+        assert_eq!(bob.len(), 2);
+        assert!(bob.iter().all(|n| n.peer_user_id == "bob"));
+        assert!(bob[0].id < bob[1].id, "oldest first");
+        assert!(bob[0].detected_at.ends_with('Z'), "{}", bob[0].detected_at);
+
+        let both =
+            key_change_notices_for(conn, &["bob".to_string(), "carol".to_string()]).unwrap();
+        assert_eq!(both.len(), 3);
+        assert!(key_change_notices_for(conn, &["dave".to_string()]).unwrap().is_empty());
+    }
+
+    /// The table refuses a "change" to the same key, whoever writes it.
+    #[test]
+    fn a_notice_for_an_unchanged_key_cannot_exist() {
+        let db = crate::db::local::LocalDb::open_in_memory().unwrap();
+        let err = db.conn().execute(
+            "INSERT INTO key_change_notice (peer_user_id, old_account_id_pub, new_account_id_pub) \
+             VALUES ('bob', ?1, ?1)",
+            rusqlite::params![vec![1u8; 32]],
+        );
+        assert!(err.is_err(), "CHECK must refuse old == new");
     }
 
     #[test]

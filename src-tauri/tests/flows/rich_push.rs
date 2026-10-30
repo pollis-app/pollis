@@ -532,3 +532,74 @@ async fn logout_and_a_pin_lockout_delete_the_escrow() {
     }
     assert!(!escrowed(&carol).await, "a PIN lockout drops the escrow with the wrapped keys");
 }
+
+/// #1605: a safety-number change found by the headless fetch reaches the user. The extension
+/// re-pins the peer's changed key (clearing `verified`) and records the durable notice; when the
+/// app opens the DM afterwards, its own ingest sees the key already pinned, so there is exactly
+/// one notice, not one per process.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_key_change_seen_headless_shows_once_in_the_app() {
+    use serde_json::json;
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.send_channel_message(&dm, "before the change").await;
+    bob.fetch_dm_messages(&dm).await;
+
+    let ask = json!({ "peerUserIds": [alice_p.id] });
+    let notices = bob.invoke_json("list_key_change_notices", ask.clone()).await;
+    assert_eq!(
+        notices.as_array().map(|a| a.len()),
+        Some(0),
+        "first sight of a key is a pin, not a change: {notices}"
+    );
+    bob.invoke_json(
+        "set_contact_verified",
+        json!({ "peerUserId": alice_p.id, "verified": true }),
+    )
+    .await;
+
+    // The server swaps alice's account key.
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE users SET account_id_pub = ?1, identity_version = identity_version + 1 WHERE id = ?2",
+        libsql::params![vec![9u8; 32], alice_p.id.clone()],
+    )
+    .await
+    .expect("swap alice account_id_pub");
+
+    // A push arrives; the extension's ingest re-pins with no live listener at all.
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    assert!(matches!(out, Outcome::Ok { .. }), "{out:?}");
+
+    // The app opens: the notice is there, and verified is cleared.
+    let found = bob.invoke_json("list_key_change_notices", ask.clone()).await;
+    let found = found.as_array().cloned().expect("array");
+    assert_eq!(found.len(), 1, "the headless re-pin left one notice: {found:?}");
+    assert_eq!(found[0]["peer_user_id"], alice_p.id);
+    let listed = bob.invoke_json("list_peer_verifications", json!({})).await;
+    let entry = listed
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|e| e["peer_user_id"] == alice_p.id)
+        .cloned()
+        .expect("alice is pinned");
+    assert_eq!(entry["verified"], false, "the change cleared verified");
+
+    // The app's own ingest of the same DM sees the key already pinned: still one notice.
+    bob.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+    let again = bob.invoke_json("list_key_change_notices", ask).await;
+    let again = again.as_array().cloned().expect("array");
+    assert_eq!(again.len(), 1, "one change, one notice: {again:?}");
+    assert_eq!(again[0]["id"], found[0]["id"]);
+}

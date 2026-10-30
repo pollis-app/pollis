@@ -352,13 +352,6 @@
     "eventsEmptyFiltered": "لا توجد أحداث من هذا النوع بعد.",
     "eventsLoadMore": "تحميل الأحداث الأقدم"
   },
-  "keyChange": {
-    "heading": "تغيّر رقم الأمان",
-    "body": "— مفتاح هوية {{name}} يختلف عن المفتاح المثبَّت سابقًا. تحقق عبر قناة خارجية قبل الوثوق بهذه المحادثة.",
-    "defaultName": "جهة الاتصال هذه",
-    "verifyButton": "تحقّق",
-    "dismissLabel": "إخفاء تحذير رقم الأمان"
-  },
   "changePin": {
     "title": "تغيير رمز PIN",
     "headingOld": "رمز PIN الحالي",

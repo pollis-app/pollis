@@ -41,6 +41,9 @@ import type { Message } from "../../types";
 import { collapseUndecryptable } from "../../utils/collapseUndecryptable";
 import { isNewMemberMessage, newMemberJoins } from "../../utils/newMember";
 import { EmptyState } from "../ui/EmptyState";
+import { KeyChangeNoticeRow } from "./KeyChangeNoticeRow";
+import { useKeyChangeNotices, type KeyChangeNotice } from "../../hooks/queries/useUserProfile";
+import { placeKeyChangeNotices } from "../../utils/keyChangeTimeline";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
@@ -114,6 +117,8 @@ interface MessageListProps {
   focusComposer?: () => void;
   /** Channel or DM id pins are recorded against (#99), not the MLS group id. */
   pinsConversationId?: string | null;
+  /** Opens a peer's safety number from a key-change line (#1605). */
+  onVerifyKeyChange?: (peerUserId: string) => void;
 }
 
 export const MessageList: React.FC<MessageListProps> = observer(({
@@ -138,6 +143,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   onLoadNewer,
   windowEpoch = 0,
   focusComposer,
+  onVerifyKeyChange,
 }) => {
   probeRender("MessageList");
   const { t } = useTranslation("chat");
@@ -235,17 +241,68 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return map;
   }, [sortedMessages]);
 
-  type TimelineItem = { kind: "message"; key: string; ts: number; message: Message };
-  const timeline: TimelineItem[] = useMemo(
-    () =>
-      sortedMessages.map((message) => ({
-        kind: "message",
-        key: `msg:${message.id}`,
-        ts: toMs(message.created_at),
-        message,
-      })),
-    [sortedMessages],
-  );
+  // Safety-number changes (#1605): durable notices from any ingest path, DMs only.
+  const dmPeers = useMemo(() => {
+    if (!isDm) {
+      return [];
+    }
+    return dmConversations.find((c) => c.id === selectedConversationId)?.peers ?? [];
+  }, [isDm, dmConversations, selectedConversationId]);
+  const dmPeerIds = useMemo(() => dmPeers.map((p) => p.user_id), [dmPeers]);
+  const { data: keyChangeNotices } = useKeyChangeNotices(dmPeerIds);
+  const peerLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of dmPeers) {
+      if (p.username) {
+        map.set(p.user_id, `@${p.username}`);
+      }
+    }
+    return map;
+  }, [dmPeers]);
+  const onVerifyRef = useRef(onVerifyKeyChange);
+  onVerifyRef.current = onVerifyKeyChange;
+  const verifyKeyChange = useCallback((peerUserId: string) => {
+    onVerifyRef.current?.(peerUserId);
+  }, []);
+
+  type TimelineItem =
+    | { kind: "message"; key: string; ts: number; message: Message }
+    | { kind: "keyChange"; key: string; ts: number; notice: KeyChangeNotice };
+  const timeline: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = sortedMessages.map((message) => ({
+      kind: "message",
+      key: `msg:${message.id}`,
+      ts: toMs(message.created_at),
+      message,
+    }));
+    if (!keyChangeNotices?.length) {
+      return items;
+    }
+    const placed = placeKeyChangeNotices(
+      keyChangeNotices,
+      items.length ? items[0].ts : null,
+      items.length ? items[items.length - 1].ts : null,
+      !!hasMore,
+      hasNewer,
+    );
+    if (placed.length === 0) {
+      return items;
+    }
+    const merged: TimelineItem[] = [];
+    let i = 0;
+    for (const { notice, at } of placed) {
+      while (i < items.length && items[i].ts <= at) {
+        merged.push(items[i]);
+        i += 1;
+      }
+      merged.push({ kind: "keyChange", key: `key-change:${notice.id}`, ts: at, notice });
+    }
+    while (i < items.length) {
+      merged.push(items[i]);
+      i += 1;
+    }
+    return merged;
+  }, [sortedMessages, keyChangeNotices, hasMore, hasNewer]);
 
   // Windowing (#874). Rows are keyed, so a prepend keeps measured heights.
   const timelineRef = useRef(timeline);
@@ -625,15 +682,36 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     const prev = idx > 0 ? timeline[idx - 1] : null;
     const currentDay = startOfLocalDay(new Date(item.ts));
     const prevDay = prev ? startOfLocalDay(new Date(prev.ts)) : null;
-    const showDivider =
-      item.kind === "message" && (prevDay === null || prevDay !== currentDay);
+    const showDivider = prevDay === null || prevDay !== currentDay;
 
+    if (item.kind === "keyChange") {
+      return (
+        <>
+          {showDivider && (
+            <DayDivider
+              label={formatDayDivider(item.ts)}
+              refined={skin === "refined"}
+            />
+          )}
+          <KeyChangeNoticeRow
+            noticeId={item.notice.id}
+            peerUserId={item.notice.peer_user_id}
+            peerLabel={peerLabels.get(item.notice.peer_user_id)}
+            at={item.ts}
+            skin={skin}
+            onVerify={verifyKeyChange}
+          />
+        </>
+      );
+    }
+
+    // A system line breaks a sender's group, like a day divider does.
     const isGroupStart =
-      item.kind === "message" &&
-      (prev === null ||
-        showDivider ||
-        prev.message.sender_id !== item.message.sender_id ||
-        item.ts - prev.ts > GROUP_GAP_MS);
+      prev === null ||
+      showDivider ||
+      prev.kind !== "message" ||
+      prev.message.sender_id !== item.message.sender_id ||
+      item.ts - prev.ts > GROUP_GAP_MS;
 
     const { message } = item;
     const rendered = blockedIds.has(message.sender_id) ? (
@@ -698,7 +776,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       <>
         {showDivider && (
           <DayDivider
-            label={formatDayDivider(toMs(message.created_at))}
+            label={formatDayDivider(item.ts)}
             refined={skin === "refined"}
           />
         )}

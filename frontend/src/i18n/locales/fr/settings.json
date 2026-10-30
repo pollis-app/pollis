@@ -304,13 +304,6 @@
     "eventsEmptyFiltered": "Aucun événement de ce type pour l'instant.",
     "eventsLoadMore": "Charger les événements plus anciens"
   },
-  "keyChange": {
-    "heading": "Numéro de sécurité modifié",
-    "body": "— la clé d'identité de {{name}} diffère de celle qui avait été épinglée. Vérifiez-la par un autre moyen avant de faire confiance à cette conversation.",
-    "defaultName": "ce contact",
-    "verifyButton": "Vérifier",
-    "dismissLabel": "Ignorer l'avertissement de numéro de sécurité"
-  },
   "changePin": {
     "title": "Changer le code PIN",
     "headingOld": "Code PIN actuel",

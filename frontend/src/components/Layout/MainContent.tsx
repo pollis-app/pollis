@@ -142,7 +142,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     selectedConversationId
   );
   const sendMessageMutation = useSendMessage();
-  const { openThread } = useRightPanel();
+  const { openThread, setSafety } = useRightPanel();
   const { data: threadSummaries } = useThreadSummaries(
     selectedChannelId ?? selectedConversationId ?? null,
   );
@@ -743,6 +743,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             adminUserIds={selectedGroupId ? adminUserIds : undefined}
             viewerIsAdmin={viewerIsAdmin}
             onOpenThread={openThread}
+            onVerifyKeyChange={setSafety}
             threadReplyCounts={threadReplyCounts}
             onReply={handleReply}
             onEdit={handleEdit}

@@ -415,6 +415,7 @@ pub fn run() {
             commands::safety::get_safety_number,
             commands::safety::set_contact_verified,
             commands::safety::list_peer_verifications,
+            commands::safety::list_key_change_notices,
             commands::transparency::self_audit_account_key,
             commands::transparency::audit_peer_account_key,
             commands::transparency::verify_own_build,
