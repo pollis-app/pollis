@@ -51,6 +51,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
 | `(auth)/email` | `screen-auth-email` | `input-email`, `btn-submit-email`, `btn-sign-in-with-device` (→ `(auth)/link`), `text-legal`, `text-session-notice` (why the last session ended — e.g. this device was removed from the account, #1338) |
+| (root layout, #1611) `ClientBlockedScreen` | `screen-client-blocked` | `client-blocked-body`, `client-blocked-versions` ("Installed x · Required y or later"), `btn-client-blocked-open` (the update destination), `btn-client-blocked-retry` (`-busy` while checking), `client-blocked-open-failed`. Replaces the whole navigator while this build is below the published minimum |
 | `(auth)/link` | `screen-auth-link` | `link-camera`, `btn-link-allow-camera`, `btn-link-toggle-manual`, `input-link-code`, `btn-link-submit`, `link-claiming`, `link-error`; show this phone's own code (#1361): `btn-link-show-code`, `link-offer`, `link-offer-qr`, `link-offer-payload` (the v2 code as text, zero-width spaces between characters), `link-offer-status`, `btn-link-offer-refresh`, `link-offer-error`; the top back chevron is `btn-link-use-email` (back to email sign-in), not `btn-back` |
 | `(auth)/otp` | `screen-auth-otp` | `input-otp`, `btn-submit-otp` |
 | `(auth)/pin` | `screen-auth-pin` | keypad `btn-pin-0`…`btn-pin-9`, `btn-pin-back`, `btn-pin-signout`; `pin-busy` (spinner + "Unlocking…" / "Saving…" from the fourth digit of an unlock or confirm until the screen navigates or the call fails) |

@@ -26,6 +26,10 @@ export default defineConfig({
         alias: {
           '@tauri-apps/api/core': path.resolve(__dirname, './src/__mocks__/tauri-core.ts'),
           '@tauri-apps/api/event': path.resolve(__dirname, './src/__mocks__/tauri-event.ts'),
+          // #1611: the blocked screen's Update now / download link, scripted by the spec.
+          '@tauri-apps/plugin-updater': path.resolve(__dirname, './src/__mocks__/tauri-updater.ts'),
+          '@tauri-apps/plugin-process': path.resolve(__dirname, './src/__mocks__/tauri-process.ts'),
+          '@tauri-apps/plugin-shell': path.resolve(__dirname, './src/__mocks__/tauri-shell.ts'),
         },
       }
     : undefined,

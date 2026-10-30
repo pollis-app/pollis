@@ -156,6 +156,24 @@
     "readOnlyTranslocatedHealed": "macOS está ejecutando Pollis desde una ubicación temporal de solo lectura dejada por una actualización anterior. Ya está corregido. Cierra Pollis y ábrelo de nuevo desde Aplicaciones.",
     "readOnlyGeneric": "Pollis no puede actualizarse porque su ubicación es de solo lectura. Cierra Pollis, asegúrate de que esté en la carpeta Aplicaciones (movido con el Finder) y ábrelo de nuevo."
   },
+  "clientBlocked": {
+    "title": "Actualización necesaria",
+    "body": "Esta versión de Pollis ya no es compatible. Actualízala para seguir usándola. Tus mensajes y ajustes se quedan en este dispositivo.",
+    "versions": "Instalada {{version}} · Necesaria {{minimum}} o posterior",
+    "installed": "Instalada {{version}}",
+    "updateNow": "Actualizar ahora",
+    "updating": "Actualizando…",
+    "download": "Descargar la última versión",
+    "updateFailed": "La actualización no terminó. Descarga la última versión.",
+    "packageManager": "Pollis se instaló con {{source}}. Actualízalo desde ahí:",
+    "openAppStore": "Abrir App Store",
+    "openPlay": "Abrir Google Play",
+    "openTestflight": "Abrir TestFlight",
+    "openWebsite": "Abrir pollis.com",
+    "openFailed": "No se pudo abrir el enlace. Ve a {{url}}",
+    "retry": "Comprobar de nuevo",
+    "checking": "Comprobando…"
+  },
   "home": {
     "groups": "Grupos",
     "groupsDescription": "Comunidades, organizaciones, equipos y chats de grupo demasiado ambiciosos",

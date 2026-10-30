@@ -10,6 +10,8 @@ export {
   onDeviceRevoked,
   isDeviceRevokedError,
   deviceWasRevoked,
+  onUpgradeRequired,
+  isUpgradeRequiredError,
   type InvokeArgs,
   type InvokeOptions,
 } from "./bridge/invoke";

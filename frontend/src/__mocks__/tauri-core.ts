@@ -225,7 +225,28 @@ interface MockStore {
   securityEvents: MockSecurityEvent[];
   /** `is_permission_granted`'s answer; off by default, as on a fresh install. */
   notificationPermission: boolean;
+  /** The minimum-version check (#1611): what `check_client_policy` answers, and what a 426 left. */
+  clientPolicy: MockClientPolicyStatus;
 }
+
+/** Mirrors `ClientPolicyStatus` in `pollis-core/src/client_policy.rs`. */
+interface MockClientPolicyStatus {
+  blocked: boolean;
+  platform: string | null;
+  version: string | null;
+  minimum: string | null;
+  message: string | null;
+  source: 'network' | 'cache' | 'ds' | 'none';
+}
+
+const ALLOWED_POLICY: MockClientPolicyStatus = {
+  blocked: false,
+  platform: 'macos',
+  version: '1.17.0',
+  minimum: null,
+  message: null,
+  source: 'none',
+};
 
 // Only `core` and `/event` are aliased; real modules like `/window` throw without __TAURI_INTERNALS__.
 (window as any).__TAURI_INTERNALS__ = (window as any).__TAURI_INTERNALS__ ?? {
@@ -248,6 +269,7 @@ const PRIMARY_HOOKS = [
   '__tauriFailSends',
   '__tauriRevokeDevice',
   '__tauriRejectWith',
+  '__tauriSetClientPolicy',
   '__tauriInvokeCounts',
   '__resetTauriInvokeCounts',
   '__tauriLastArgs',
@@ -329,6 +351,7 @@ const store: MockStore = {
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
   securityEvents: (preload.securityEvents as MockSecurityEvent[] | undefined) ?? [],
   notificationPermission: preload.notificationPermission === true,
+  clientPolicy: { ...ALLOWED_POLICY, ...(preload.clientPolicy ?? {}) },
 };
 
 (window as any).__tauriMock = store;
@@ -361,6 +384,11 @@ const WORKS_WHEN_REVOKED = new Set([
 ]);
 (window as any).__tauriRevokeDevice = () => {
   store.deviceRevoked = true;
+};
+
+/** What the next `check_client_policy` answers (#1611); `get_client_policy_status` too. */
+(window as any).__tauriSetClientPolicy = (status: Partial<MockClientPolicyStatus>) => {
+  store.clientPolicy = { ...ALLOWED_POLICY, ...status };
 };
 
 /** Reject every `cmd` call with `message` until cleared, without revoking (#1338). */
@@ -857,6 +885,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'detect_managed_install':
       return preload.managedInstall ?? null;
+
+    case 'check_client_policy':
+    case 'get_client_policy_status':
+      return { ...store.clientPolicy };
 
     case 'detect_read_only_location':
       return null;

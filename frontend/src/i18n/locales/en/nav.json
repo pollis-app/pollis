@@ -157,6 +157,24 @@
     "readOnlyTranslocatedHealed": "macOS is running Pollis from a temporary read-only location left behind by an earlier update. That has been fixed. Quit Pollis and open it again from Applications.",
     "readOnlyGeneric": "Pollis can't update itself because its location is read-only. Quit Pollis, make sure it is in your Applications folder (moved there with Finder), and open it again."
   },
+  "clientBlocked": {
+    "title": "Update required",
+    "body": "This version of Pollis is no longer supported. Update to keep using it. Your messages and settings stay on this device.",
+    "versions": "Installed {{version}} · Required {{minimum}} or later",
+    "installed": "Installed {{version}}",
+    "updateNow": "Update now",
+    "updating": "Updating…",
+    "download": "Download the latest version",
+    "updateFailed": "The update didn't finish. Download the latest version instead.",
+    "packageManager": "Pollis was installed with {{source}}. Update it there:",
+    "openAppStore": "Open the App Store",
+    "openPlay": "Open Google Play",
+    "openTestflight": "Open TestFlight",
+    "openWebsite": "Open pollis.com",
+    "openFailed": "Couldn't open the link. Go to {{url}}",
+    "retry": "Check again",
+    "checking": "Checking…"
+  },
   "home": {
     "groups": "Groups",
     "groupsDescription": "Communities, Organizations, Teams, and overly-ambitious group chats",

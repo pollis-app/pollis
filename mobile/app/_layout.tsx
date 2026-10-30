@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Stack } from "expo-router";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { AppState, Linking, Platform } from "react-native";
+import { Stack, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -28,8 +29,58 @@ import i18n, { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 import { endSession, sweepStalePlaintext } from "../lib/session";
 import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
+import { getBuildInfo } from "../lib/buildInfo";
+import {
+  clientPlatformFor,
+  getClientPolicy,
+  onUpgradeRequired,
+  parseDevPolicyLink,
+  setClientPolicy,
+  subscribeClientPolicy,
+  type ClientPolicyStatus,
+} from "../lib/clientPolicy";
+import { ClientBlockedScreen } from "../components/ClientBlockedScreen";
 
 SplashScreen.preventAutoHideAsync();
+
+// #1611: fetch the published minimum and record the verdict. `force` skips the core's 5-minute
+// throttle (launch, Retry, a dev override). Never throws: a failure leaves the last verdict.
+async function checkClientPolicy(force: boolean): Promise<void> {
+  try {
+    const status = await invoke<ClientPolicyStatus>("check_client_policy", { force });
+    setClientPolicy(status);
+  } catch (e) {
+    console.warn("[client-policy] check failed:", e);
+  }
+}
+
+// Dev builds only (Maestro): pollis://dev/client-policy?policy=…|url=…|clear=1.
+async function applyDevPolicyLink(url: string | null): Promise<void> {
+  const link = url ? parseDevPolicyLink(url) : null;
+  if (!link || !(__DEV__ || getBuildInfo().channel === "dev")) {
+    return;
+  }
+  try {
+    if (link.kind === "clear") {
+      await invoke("set_client_policy_override", {});
+    } else {
+      await invoke("set_client_policy_override", { url: link.url ?? null, policy: link.policy ?? null });
+    }
+  } catch (e) {
+    console.warn("[client-policy] dev override refused:", e);
+    return;
+  }
+  await checkClientPolicy(true);
+}
+
+// After an unblock the navigator mounts again; land it on the boot router (PIN / sign-in).
+function BootReset() {
+  useEffect(() => {
+    const id = setTimeout(() => router.replace("/"), 0);
+    return () => clearTimeout(id);
+  }, []);
+  return null;
+}
 
 // App-level signed-in services; each is a no-op until a user is signed in.
 function SignedInServicesGate() {
@@ -73,6 +124,21 @@ export default function RootLayout() {
   const [bridgeError, setBridgeError] = useState<Error | null>(null);
   const [languageReady, setLanguageReady] = useState(false);
   const [sweepReady, setSweepReady] = useState(false);
+  const [policyReady, setPolicyReady] = useState(false);
+  const policy = useSyncExternalStore(subscribeClientPolicy, getClientPolicy);
+  const blocked = policy?.blocked === true;
+  // Set once a block lifts, so the navigator that mounts again re-runs boot routing.
+  const wasBlocked = useRef(false);
+  const [resetBoot, setResetBoot] = useState(false);
+  useEffect(() => {
+    if (blocked) {
+      wasBlocked.current = true;
+      setResetBoot(false);
+    } else if (wasBlocked.current) {
+      wasBlocked.current = false;
+      setResetBoot(true);
+    }
+  }, [blocked]);
 
   // Sweep plaintext a killed run left on disk (#1256), once per process, before any session restores.
   useEffect(() => {
@@ -103,7 +169,21 @@ export default function RootLayout() {
     [],
   );
 
+  // #1611: a DS 426 on any command blocks at once; fetch what the core recorded for the screen.
+  useEffect(
+    () =>
+      onUpgradeRequired(async () => {
+        const status = await invoke<ClientPolicyStatus>("get_client_policy_status");
+        // The core answers blocked after a 426; a stale answer never unblocks from here.
+        if (status.blocked) {
+          setClientPolicy(status);
+        }
+      }),
+    [],
+  );
+
   useEffect(() => {
+    const build = getBuildInfo();
     initializeNativeBridge({
       r2Endpoint: process.env.EXPO_PUBLIC_R2_ENDPOINT,
       r2PublicUrl: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
@@ -111,22 +191,48 @@ export default function RootLayout() {
       pollisDeliveryUrl: process.env.EXPO_PUBLIC_POLLIS_DELIVERY_URL,
       // Dev builds only (#1242).
       devAccessKey: process.env.EXPO_PUBLIC_POLLIS_DEV_ACCESS_KEY,
+      // #1611: the store binary's own version, never the OTA bundle's.
+      clientPlatform: clientPlatformFor(Platform.OS === "ios" ? "ios" : "android", build.channel),
+      clientVersion: build.version,
     })
+      // Before unlock or sign-in: the minimum-version check (the core bounds it to a few seconds).
+      .then(async () => {
+        await checkClientPolicy(true);
+        await applyDevPolicyLink(await Linking.getInitialURL().catch(() => null));
+      })
       .then(() => setBridgeReady(true))
       .catch((e) => {
         console.error("[bridge] initializeNativeBridge failed:", e);
         setBridgeError(e);
         setBridgeReady(true);
-      });
+      })
+      .finally(() => setPolicyReady(true));
   }, []);
 
+  // Re-check on the way back to the foreground (throttled in the core); no timers.
   useEffect(() => {
-    if (loaded && bridgeReady && languageReady && sweepReady) {
+    if (!policyReady || bridgeError) {
+      return;
+    }
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") {
+        void checkClientPolicy(false);
+      }
+    });
+    const links = Linking.addEventListener("url", ({ url }) => void applyDevPolicyLink(url));
+    return () => {
+      sub.remove();
+      links.remove();
+    };
+  }, [policyReady, bridgeError]);
+
+  useEffect(() => {
+    if (loaded && bridgeReady && languageReady && sweepReady && policyReady) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, bridgeReady, languageReady, sweepReady]);
+  }, [loaded, bridgeReady, languageReady, sweepReady, policyReady]);
 
-  if (!loaded || !bridgeReady || !languageReady || !sweepReady) {
+  if (!loaded || !bridgeReady || !languageReady || !sweepReady || !policyReady) {
     return null;
   }
 
@@ -141,6 +247,11 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <StatusBar style="light" />
+            {/* #1611: a blocked build sees only this; no navigator, nothing behind it. */}
+            {blocked && policy ? (
+              <ClientBlockedScreen status={policy} onRetry={() => checkClientPolicy(true)} />
+            ) : (
+            <>
             <SignedInServicesGate />
             {/* Auto-lock (#899). */}
             <AutoLockProvider>
@@ -206,13 +317,17 @@ export default function RootLayout() {
                 options={settingsPage}
               />
               <Stack.Screen name="m/[...permalink]" />
+              <Stack.Screen name="dev/client-policy" options={{ animation: "none" }} />
               <Stack.Screen name="approve-device" options={settingsPage} />
               <Stack.Screen
                 name="self/delete-account"
                 options={settingsPage}
               />
             </RootStack>
+            {resetBoot ? <BootReset /> : null}
             </AutoLockProvider>
+            </>
+            )}
           </ThemeProvider>
         </QueryClientProvider>
         </KeyboardProvider>

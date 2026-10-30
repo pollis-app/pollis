@@ -180,6 +180,24 @@
     "readOnlyTranslocatedHealed": "يشغّل macOS تطبيق Pollis من موقع مؤقت للقراءة فقط خلّفه تحديث سابق. تم إصلاح ذلك. أغلق Pollis وافتحه مجددًا من مجلد التطبيقات.",
     "readOnlyGeneric": "لا يستطيع Pollis تحديث نفسه لأن موقعه للقراءة فقط. أغلق Pollis، وتأكد من وجوده في مجلد التطبيقات (منقولًا باستخدام Finder)، ثم افتحه مجددًا."
   },
+  "clientBlocked": {
+    "title": "يلزم التحديث",
+    "body": "لم يعد هذا الإصدار من Pollis مدعومًا. حدّثه لتواصل استخدامه. تبقى رسائلك وإعداداتك على هذا الجهاز.",
+    "versions": "المثبّت {{version}} · المطلوب {{minimum}} أو أحدث",
+    "installed": "المثبّت {{version}}",
+    "updateNow": "حدّث الآن",
+    "updating": "جارٍ التحديث…",
+    "download": "نزّل أحدث إصدار",
+    "updateFailed": "لم يكتمل التحديث. نزّل أحدث إصدار بدلًا من ذلك.",
+    "packageManager": "ثُبّت Pollis باستخدام {{source}}. حدّثه من هناك:",
+    "openAppStore": "افتح App Store",
+    "openPlay": "افتح Google Play",
+    "openTestflight": "افتح TestFlight",
+    "openWebsite": "افتح pollis.com",
+    "openFailed": "تعذّر فتح الرابط. انتقل إلى {{url}}",
+    "retry": "تحقّق مجددًا",
+    "checking": "جارٍ التحقق…"
+  },
   "home": {
     "groups": "المجموعات",
     "groupsDescription": "مجتمعات ومؤسسات وفرق ومحادثات جماعية طموحة أكثر من اللازم",
