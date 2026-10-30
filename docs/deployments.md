@@ -291,6 +291,7 @@ stop someone moving the tag that fires it.
 
 - **Turso** (libSQL) — two databases: the **main** DB (users, groups, membership, public keys, encrypted envelopes) and the **commit-log** DB (`mls_commit_log` / `mls_group_info` / `mls_welcome`). Schema is applied **migrate-then-ship** by whichever deploy touches prod first: the `apply-migrations` job in `desktop-release.yml` (client releases) **and** the `delivery-deploy-{dev,prod}.yml` deploys (DS releases) both run `db-apply.sh` before shipping. It's idempotent (tracks `schema_migrations`), so overlap is harmless, and additive-only migrations make early application safe for the still-running old code. Nobody applies to prod by hand. Numbered migrations in `pollis-schema/migrations/`; dev also auto-applies on merge via `db-migrate-dev.yml`.
 - **Cloudflare R2** — object storage behind **cdn.pollis.com**: desktop + CLI releases, the Android sideload APK (`releases/android/`), OTA provenance (`releases/mobile-ota/`), the mobile OTA update store under **`ota/`** (content-addressed `ota/assets/`, live `ota/current/` pointers, the `ota/updates/` + `ota/groups/` archive — served to phones by the DS Worker at `api.pollis.com/updates/`), install scripts, and the transparency-log static tree.
+- **Client minimum-version policy (#1611)** — `cdn.pollis.com/client-policy.json` (prod builds) and `cdn.pollis.com/dev/client-policy.json` (builds pointed at a non-prod DS), next to `releases/latest.json` in the same `pollis` bucket. Every client fetches it at launch, before unlock, and shows a full-screen "update Pollis" page when its version is below `minimum[platform]`; the DS mirrors it and answers requests from a known-too-old build with **426**. Format, rule and client behaviour: `.codesight/wiki/client-policy.md`. Runbook below ("Client minimum version").
 - **Who holds all of the above, and what breaks in what order if they stop:** `docs/operational-continuity.md` (#877). It carries the singly-held asset register (every account and signing key in this file), the degradation ladder, and §4 on the failure mode specific to this design — a stalled transparency log being indistinguishable from a withheld one. The legal half (ownership, succession, escrow) is deferred to #723 and marked as such rather than answered.
 
 ---
@@ -368,6 +369,71 @@ or media.
 | a DB migration in `pollis-schema/migrations/` | applied by whichever runs first: a DS deploy (`delivery-deploy-{dev,prod}.yml`) or `desktop-release.yml` (`apply-migrations`) — both migrate-then-ship, idempotent; dev also auto-applies on merge via `db-migrate-dev.yml` |
 | `verifiable-log*` (published-tree behavior) | `transparency-publish.yml` (also runs daily) |
 | `verifiable-log-serve` (`pollis-verify` CLI) | `verifier-release.yml` |
+| nothing — retire old client builds (raise or clear a platform's minimum) | `scripts/client-policy.mjs` (dry run → diff → `--apply`); see "Client minimum version" below. Never hand-edit the file in R2 |
+
+---
+
+## Client minimum version — retiring old builds (#1611)
+
+**What it is.** One static JSON file per environment, written only by `scripts/client-policy.mjs`:
+
+```json
+{ "v": 1,
+  "minimum": { "ios": "1.0.21", "android-play": "1.0.21", "android-sideload": "1.0.21",
+               "macos": "1.17.0", "windows": "1.17.0", "linux": "1.17.0", "cli": "1.17.0" },
+  "message": null }
+```
+
+A build is blocked iff its version is below its platform's minimum (semver); a missing key means no
+minimum. `message` replaces the built-in body text on the blocked screen (≤ 500 characters, one
+language — leave it `null` unless there is something specific to say). Mobile compares the store
+binary's native version, never the OTA bundle. The parser and the rule are
+`pollis-api/src/client_policy.rs`, shared by every client (through `pollis-core`), the DS and the
+script, which runs it as `cargo run -p pollis-api --example client-policy`.
+
+**Changing it.**
+
+```bash
+node scripts/client-policy.mjs --env prod                                  # what is published
+node scripts/client-policy.mjs --env prod --set macos=1.18.0 --set windows=1.18.0 --set linux=1.18.0
+doppler run -p pollis -c prd_prod -- \
+  node scripts/client-policy.mjs --env prod --set macos=1.18.0 --apply    # asks you to type "prod"
+```
+
+The default is a dry run: it validates with the strict parser (unknown platform keys and fields are
+refused — a typo would otherwise set no minimum), prints a per-platform diff against what is
+published, and refuses a minimum above the latest published release of that platform
+(`releases/latest.json`, `releases/cli/latest.json`, `releases/android/latest.json`; `--force`
+overrides). iOS and Play have no manifest to check: confirm that store build is live and approved
+first. `--apply` uploads with `aws s3 cp` to `s3://pollis/client-policy.json` (or `dev/…`),
+`--content-type application/json --cache-control no-cache` — the exact mechanism of
+`desktop-release.yml`'s "Publish latest.json to R2" — then re-fetches the CDN URL and compares.
+`--unset <platform>` removes a minimum; `--clear-message` restores the built-in text.
+`scripts/test-client-policy.sh` tests the script offline (fake CDN, stub `aws`).
+
+**Where it takes effect.** Launch, foreground/focus (re-checked at most every 5 minutes) and the
+Retry button fetch the file directly. The DS re-reads it (`POLLIS_CLIENT_POLICY_URL`, set per
+environment in `wrangler.{dev,prod}.jsonc`) lazily, at most once a minute, triggered by traffic,
+and 426s requests whose `X-Pollis-Client-{Platform,Version}` headers name a blocked build;
+`GET /v1/client-policy` shows what it is enforcing. So a publish reaches every running client
+within about five minutes, sooner on the next request.
+
+**Rollout rules.**
+
+1. **Ship clients with no minimums first.** The check only exists in builds that contain it (desktop
+   and CLI from the release after #1611, mobile from the store build after it). Older builds never
+   fetch the file and send no version header, so the DS lets them through and they can never show
+   the blocked page.
+2. **Only raise a minimum to a version that has this feature**, and only once that version is
+   what you want to require. A build older than the feature that is below the minimum is not
+   blocked at all (no header, no check); if it ever did meet a 426, it would surface as an ordinary
+   error.
+3. **Store builds lag.** Raise `ios` / `android-play` only after the build is live in the store (not
+   just uploaded), and expect review delays; raise the desktop platforms only after the release is
+   on the CDN and the updater manifests point at it. Keep `android-play` and `android-sideload`
+   separate: they ship through different channels and cannot update each other.
+4. **Undo is the same command.** `--unset`, or a lower version, takes effect on the next check;
+   clients that cached the block unblock as soon as they fetch the new file.
 
 ---
 
