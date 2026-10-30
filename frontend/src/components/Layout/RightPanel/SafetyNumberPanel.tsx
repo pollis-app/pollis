@@ -2,13 +2,13 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import {
   useSafetyNumber,
   useSetContactVerified,
 } from "../../../hooks/queries/useUserProfile";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { Button } from "../../ui/Button";
+import { ThemedQr } from "../../ui/ThemedQr";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 
 interface SafetyNumberPanelProps {
@@ -66,12 +66,9 @@ export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
             </span>
           </div>
           <div className="flex justify-center" data-testid="safety-number-qr">
-            <QRCodeSVG
+            <ThemedQr
               value={safety.safety_number}
               size={136}
-              bgColor="#ffffff"
-              fgColor="#000000"
-              marginSize={2}
               title={t("safety.qrLabel", { name: peerLabel })}
             />
           </div>

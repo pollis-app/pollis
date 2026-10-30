@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { QRCodeSVG } from "qrcode.react";
 import { observer } from "mobx-react-lite";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { InputOtp } from "../components/ui/InputOtp";
 import { LoadingSpinner } from "../components/ui/LoaderSpinner";
+import { ThemedQr } from "../components/ui/ThemedQr";
 import { writeClipboardText } from "../bridge";
 import { appStore } from "../stores/appStore";
 import * as api from "../services/api";
@@ -266,10 +266,8 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
         </Button>
       </div>
       {mode === "qr" ? (
-        <div className="self-start p-3 rounded-lg bg-accent" data-testid="link-device-showing">
-          {/* Dark modules on the accent: themed, and still normal polarity
-              (dark on light), which every camera decoder reads. */}
-          <QRCodeSVG data-testid="link-device-qr" value={handle.qr_payload} size={208} bgColor="var(--c-accent)" fgColor="var(--c-bg)" marginSize={2} level="M" />
+        <div className="self-start" data-testid="link-device-showing">
+          <ThemedQr data-testid="link-device-qr" value={handle.qr_payload} size={208} />
         </div>
       ) : (
         <button
