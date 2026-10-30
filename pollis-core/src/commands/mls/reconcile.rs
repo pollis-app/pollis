@@ -943,7 +943,7 @@ async fn reconcile_pass(
         .await;
 
     // Serialize MLS mutations per conversation, except the lost-race converge, which drops the lock for the interleaved catch-up.
-    let _mls_guard = state.mls_group_lock(&conversation_id).await;
+    let _mls_guard = state.mls_group_lock(&conversation_id).await?;
 
     // 1. Roster, from the one server-side definition `migrate` also uses (#987).
     let roster_user_ids: std::collections::HashSet<String> =
