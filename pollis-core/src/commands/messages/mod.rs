@@ -7,6 +7,7 @@ pub(crate) mod framing;
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_surface;
 mod ingest;
+pub(crate) mod ingest_guard;
 pub(crate) mod loss;
 mod outbox;
 pub mod persisted;
@@ -134,6 +135,11 @@ pub use ingest::{
     catch_up_mls_group_interleaved, ingest_channel_envelopes, ingest_channel_envelopes_inner,
     ingest_dm_envelopes, ingest_dm_envelopes_inner,
 };
+// What ingest tried to open, and what it reported (#1629).
+#[cfg(feature = "test-harness")]
+pub use ingest::logged_decrypt_failures;
+#[cfg(feature = "test-harness")]
+pub use ingest_guard::{decrypt_attempts, forget_decrypt_attempts};
 // The committer's pre-merge sweep (#1041), for the MLS publish path only.
 pub(crate) use ingest::{sweep_current_epoch, SweptEnvelopes};
 

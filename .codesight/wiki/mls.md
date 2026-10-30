@@ -481,6 +481,30 @@ envelope id per process and again only if the reason changes
 (`ingest::first_sighting`). `try_mls_decrypt` keeps its `Option` shape;
 `try_mls_decrypt_why` returns the reason.
 
+**Each envelope is opened once (#1629).** Two things used to put a second
+decrypt on a fetched envelope and log a `[decrypt]` failure for nothing:
+
+- A fetch returns this device's own receipts and edits. openmls answers
+  `OwnPrivateMessage` for them (its own sender ratchet only encrypts), which was
+  folded into "not an application message". It is now `own envelope`, a quiet
+  skip that is never logged and never a loss.
+- `catch_up_once` reads past the watermark first and posts the new watermark
+  last, so a second catch-up of the same group in between (a wake racing a
+  send's catch-up or a page load) fetched the same envelopes and hit `secret
+  reuse` on every one the first had opened.
+
+`decrypt_and_persist_one` now skips any envelope `ingest_guard::already_held`
+finds (a `known_envelope` record, own or opened, or a real row; a placeholder
+does not count) before decrypting. `catch_up_mls_group_interleaved` runs its
+passes through `ingest_guard::coalesced`, which is single-flight per group: a
+caller that arrives during a pass waits for it, then runs a pass of its own
+only if none has started since it asked, so a burst costs at most one more
+pass. It is keyed on `AppState::catch_up_flights`, with no polling or timers.
+A pass that re-enters its own group's catch-up runs in place (a task-local
+records the groups the task is running), so it cannot wait on itself. What
+still logs is a real fault. `secret reuse` on an id this device never opened
+means the sender reused a ratchet generation, and the line says so.
+
 **A late join is not a new device (#1571).** The pre-join pass above is right
 for a NEW device (loss #2) and for what was sent before the USER joined (loss
 #1). It was wrong for a device that was registered before its user became a

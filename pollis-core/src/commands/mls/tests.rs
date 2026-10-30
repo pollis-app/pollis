@@ -3269,6 +3269,20 @@ fn a_replayed_ciphertext_fails_as_secret_reuse() {
     assert_eq!(again.kind, DecryptFailureKind::SecretReuse);
 }
 
+/// The sender's own envelope fanned back is told apart from a proposal or commit (#1629): it
+/// read as "not an application message", logged for every receipt and edit this device sent.
+#[test]
+fn an_own_envelope_fanned_back_is_an_own_envelope() {
+    let conv_id = "01JT1629OWNENVELOPEFANNEDBK";
+    let (alice_db, _bob_db) = alice_and_bob(conv_id);
+    let ct = try_mls_encrypt(&alice_db, conv_id, b"my own receipt").unwrap();
+
+    let mut decryptor = MlsDecryptor::open(&alice_db, conv_id).expect("group is stored");
+    let why = decryptor.decrypt(&ct).expect_err("a sender cannot open its own envelope");
+    assert_eq!(why.kind, DecryptFailureKind::OwnEnvelope, "got {why}");
+    assert_eq!(why.sealed_at, why.group_at);
+}
+
 /// An envelope from another generation of the same conversation's group is a
 /// foreign lineage; one from another group entirely is a group-id mismatch.
 /// Both are refused before `process_message`, and told apart.
