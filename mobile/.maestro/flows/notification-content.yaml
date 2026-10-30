@@ -1,6 +1,6 @@
 appId: ${MAESTRO_APP_ID}
 ---
-# NOTIFICATION CONTENT (#1599) — the three-way picker in Preferences →
+# NOTIFICATION CONTENT (#1599) — the three-row radio list in Preferences →
 # Notifications. The choice is written to the core's local DB (where the push
 # extension reads it), so leaving and re-entering the screen re-reads it from
 # there. Self-contained; ends back on the default.
@@ -15,20 +15,20 @@ appId: ${MAESTRO_APP_ID}
     id: "screen-self-preferences"
 - scrollUntilVisible:
     element:
-      id: "chip-notification-content-none"
+      id: "radio-notification-content-none"
     direction: DOWN
 - assertVisible:
-    id: "chip-notification-content-full"
+    id: "radio-notification-content-full"
     selected: true
 - takeScreenshot: notification-content-01-default
 
 - tapOn:
-    id: "chip-notification-content-name"
+    id: "radio-notification-content-name"
 - assertVisible:
-    id: "chip-notification-content-name"
+    id: "radio-notification-content-name"
     selected: true
 - assertVisible:
-    id: "chip-notification-content-full"
+    id: "radio-notification-content-full"
     selected: false
 
 # Re-enter: the screen reads the value back from the core.
@@ -38,22 +38,22 @@ appId: ${MAESTRO_APP_ID}
     id: "row-self-preferences"
 - scrollUntilVisible:
     element:
-      id: "chip-notification-content-none"
+      id: "radio-notification-content-none"
     direction: DOWN
 - assertVisible:
-    id: "chip-notification-content-name"
+    id: "radio-notification-content-name"
     selected: true
 - takeScreenshot: notification-content-02-name-only
 
 - tapOn:
-    id: "chip-notification-content-none"
+    id: "radio-notification-content-none"
 - assertVisible:
-    id: "chip-notification-content-none"
+    id: "radio-notification-content-none"
     selected: true
 
 # Back to the default so later flows see stock behaviour.
 - tapOn:
-    id: "chip-notification-content-full"
+    id: "radio-notification-content-full"
 - assertVisible:
-    id: "chip-notification-content-full"
+    id: "radio-notification-content-full"
     selected: true

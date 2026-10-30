@@ -37,19 +37,31 @@ test("the bridge's arms take the hook's argument names", () => {
   assert.match(bridge, /"set_notification_content" => \{[\s\S]*?arg\(&args, "mode"\)/);
 });
 
-test("the picker sits in the notifications group, one chip per choice", () => {
+test("the setting is a radio list, one row per choice, after the permission row", () => {
   const screen = read("../app/self/preferences.tsx");
-  assert.match(screen, /<NotificationsSetting \/>\s*<NotificationContentSetting \/>/);
-  assert.match(screen, /testID=\{`chip-notification-content-\$\{opt\}`\}/);
+  assert.match(screen, /<NotificationsSetting \/>\s*<\/Group>\s*<NotificationContentSetting \/>/);
+  assert.match(screen, /<RadioRow[\s\S]*?testID=\{`radio-notification-content-\$\{opt\}`\}/);
   assert.match(screen, /accessibilityRole="radiogroup"/);
+  assert.doesNotMatch(screen, /ChoiceChip/);
+  assert.match(screen, /notificationContent\.description/);
   assert.match(screen, /notificationContent\.pinNote/);
+});
+
+test("a radio row is spoken as a radio and selection is not colour alone", () => {
+  const row = read("../components/RadioRow.tsx");
+  assert.match(row, /accessibilityRole="radio"/);
+  assert.match(row, /accessibilityState=\{\{ checked: selected, selected \}\}/);
+  assert.match(row, /selected \? <Icon\.check/);
+  assert.match(row, /fontFamily: selected \? fonts\.bold/);
+  // Controls are never bordered (design rule): selection is a fill.
+  assert.doesNotMatch(row, /border(Width|Start|Left|Color|Style)/);
 });
 
 test("every locale carries the copy", () => {
   for (const lng of ["en", "ar", "es", "fr", "ru", "uk", "zh"]) {
     const cat = JSON.parse(read(`../../frontend/src/i18n/locales/${lng}/mobile.json`));
     const nc = cat.self.preferences.notificationContent;
-    for (const k of ["heading", "description", "full", "name", "none", "pinNote"]) {
+    for (const k of ["heading", "description", "full", "fullSub", "name", "nameSub", "none", "noneSub", "pinNote"]) {
       assert.ok(typeof nc?.[k] === "string" && nc[k].length > 0, `${lng}: ${k}`);
     }
   }
