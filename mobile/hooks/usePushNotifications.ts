@@ -96,5 +96,7 @@ export function usePushNotifications() {
     return syncOpenConversationToNative();
   }, [userId]);
 
-  usePushRegistration(userId);
+  // #1620: registering needs a DS signature, so it waits for `ready` (past the PIN). On a cold
+  // start `isLocked` is false until the PIN screen mounts, so the lock flag alone is not enough.
+  usePushRegistration(userId, ready);
 }

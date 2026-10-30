@@ -1405,7 +1405,12 @@ Current state:
   `hooks/usePushRegistration.ts`, `tests/push-registration.test.ts`) a user counts
   as registered only after the DS accepted the token, and the app also registers
   without prompting on sign-in/unlock and every return to the foreground, and
-  re-registers on `Notifications.addPushTokenListener` (token rotation). Push covers backgrounded/closed delivery;
+  re-registers on `Notifications.addPushTokenListener` (token rotation). None of
+  that runs before the device is past the PIN (#1620, `createRegistrationTriggers`):
+  registering is DS-signed, and on a cold start `appStore.isLocked` reads false
+  until the PIN screen mounts, so the hook waits for `isInSignedInApp`, not the
+  lock flag alone. A rotation on the PIN screen is kept for the unlock, and a
+  failed attempt is retried only by the next trigger, never by itself. Push covers backgrounded/closed delivery;
   foreground delivery is the realtime path above. A tap is held
   (`lib/push/tapGate.ts`) until the device is past the PIN, and the tap that
   cold-started the app is picked up with `getLastNotificationResponse` (#1422):

@@ -101,6 +101,56 @@ export function createPushRegistrar(deps: RegistrationDeps): PushRegistrar {
 }
 
 /**
+ * What may ask for a registration, and when (#1620). Registering needs a DS signature, which the
+ * device can make only past the PIN, so nothing asks while the session is locked or before sign-in:
+ * on a cold start the PIN screen sat under a registration that failed, and before #1610 under a
+ * loop of them. Each attempt answers one event, and a failure is retried only by the next one.
+ *
+ * - `setUser`: the signed-in, unlocked user, or null. Becoming non-null (sign-in, unlock) registers
+ *   once; the same user again (a re-render) does nothing.
+ * - `foreground`: a return to the foreground, which retries a failed registration.
+ * - `rotation`: the OS rotated the token. While locked it is remembered and refreshed on the unlock.
+ */
+export interface RegistrationTriggers {
+  setUser(userId: string | null): void;
+  foreground(): void;
+  rotation(): void;
+}
+
+export function createRegistrationTriggers(
+  ensure: (userId: string, options: EnsureOptions) => unknown,
+): RegistrationTriggers {
+  let user: string | null = null;
+  let rotatedWhileAway = false;
+  return {
+    setUser(next) {
+      if (next === user) {
+        return;
+      }
+      user = next;
+      if (next === null) {
+        return;
+      }
+      const refresh = rotatedWhileAway;
+      rotatedWhileAway = false;
+      void ensure(next, { prompt: false, refresh });
+    },
+    foreground() {
+      if (user !== null) {
+        void ensure(user, { prompt: false });
+      }
+    },
+    rotation() {
+      if (user === null) {
+        rotatedWhileAway = true;
+        return;
+      }
+      void ensure(user, { prompt: false, refresh: true });
+    },
+  };
+}
+
+/**
  * Tells a real token rotation from the echo of our own request (#1610). expo-notifications fires
  * its push-token event on EVERY registration, including the one `getToken` itself triggers on
  * iOS, so a listener that re-registered on each event looped for as long as the app ran: event,
