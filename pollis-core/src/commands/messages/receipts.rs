@@ -171,7 +171,10 @@ pub(crate) async fn emit_receipt(
         }
     }
 
-    // Wake the peers; a receipt already looks like a message on the wire, so this leaks nothing extra.
+    // Wake the peers. Deliberately the same `new_message` wake as a message (#1628): realtime
+    // data packets are not end-to-end encrypted (RoomOptions::default()), so a distinct type
+    // would tell the LiveKit server which wakes are receipts. A receiver's ingest reports that
+    // it stored no news, so the wake neither alerts nor counts.
     if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
         state,
         conversation_id,

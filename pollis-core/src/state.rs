@@ -98,6 +98,8 @@ pub struct AppState {
     pub mls_group_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Per-group single-flight for the ingesting catch-up (#1629), so overlapping triggers never fetch and open the same envelopes twice.
     pub catch_up_flights: crate::commands::messages::ingest_guard::CatchUpFlights,
+    /// Inbound messages each catch-up pass newly stored, for realtime wakes to announce once (#1628).
+    pub inbound_news: crate::commands::messages::news::SharedLedger,
     /// Per-message outbox locks (#1335): never post the same message twice at once.
     pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Held during a KeyPackage top-up (#1412); `try_lock` so a drain never publishes a second batch.
@@ -170,6 +172,7 @@ impl AppState {
             shutdown_signal: Arc::new(Notify::new()),
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
             catch_up_flights: Arc::default(),
+            inbound_news: Arc::default(),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             key_package_refill: Arc::new(Mutex::new(())),
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),

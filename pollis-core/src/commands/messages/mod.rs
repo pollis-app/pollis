@@ -8,6 +8,7 @@ pub(crate) mod framing;
 pub mod fuzz_surface;
 mod ingest;
 pub(crate) mod ingest_guard;
+pub mod news;
 pub(crate) mod loss;
 mod outbox;
 pub mod persisted;
@@ -150,7 +151,8 @@ pub(crate) use edit_delete::{parse_attachment_refs, spawn_attachment_ref_backfil
 pub use edit_delete::{delete_message_body, edit_message_as, send_redaction_as};
 
 pub use read_state::{
-    get_unread_counts, mark_conversation_read, sync_read_cursors, ReadCursor, UnreadCount,
+    get_unread_counts, mark_conversation_read, refresh_read_cursors, sync_read_cursors, ReadCursor,
+    UnreadCount,
 };
 pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts};
 

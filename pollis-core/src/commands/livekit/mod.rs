@@ -227,6 +227,13 @@ pub(super) fn dispatch_data(
             }
             let _ = channel.send(RealtimeEvent::ChannelMutesChanged);
         }
+        Some("read_cursors_changed") => {
+            // DS-originated only (#1628), like `channel_mutes_changed`.
+            if sender.is_some() {
+                return None;
+            }
+            let _ = channel.send(RealtimeEvent::ReadCursorsChanged);
+        }
         Some("call_invite") => {
             // The caller is the attributed actor — a ring with no attributable
             // caller is dropped, never shown as "from" whoever the body names.
@@ -493,6 +500,19 @@ mod tests {
         let payload = serde_json::json!({ "type": "channel_mutes_changed" });
         let events = run(payload.clone(), None);
         assert!(matches!(events[..], [RealtimeEvent::ChannelMutesChanged]));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #1628: the read-cursor nudge is forwarded from the DS, dropped from a participant.
+    #[test]
+    fn read_cursors_changed_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "read_cursors_changed" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(events[..], [RealtimeEvent::ReadCursorsChanged]));
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

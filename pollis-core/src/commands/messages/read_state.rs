@@ -108,9 +108,9 @@ pub(crate) fn all_read_cursors(conn: &Connection) -> Result<Vec<ReadCursor>> {
 
 /// Apply another device's cursors, keeping whichever position is newer.
 ///
-/// Returns how many actually moved this device forward.
-pub(crate) fn merge_read_cursors(conn: &Connection, incoming: &[ReadCursor]) -> Result<usize> {
-    let mut moved = 0;
+/// Returns the conversations whose cursor actually moved this device forward.
+pub(crate) fn merge_read_cursors(conn: &Connection, incoming: &[ReadCursor]) -> Result<Vec<String>> {
+    let mut moved = Vec::new();
     for c in incoming {
         if advance_read_cursor(
             conn,
@@ -118,10 +118,28 @@ pub(crate) fn merge_read_cursors(conn: &Connection, incoming: &[ReadCursor]) -> 
             &c.last_read_at,
             &c.last_read_message_id,
         )? {
-            moved += 1;
+            moved.push(c.conversation_id.clone());
         }
     }
     Ok(moved)
+}
+
+/// Does `local` hold a position `remote` lacks? Only then is a push worth a DS write (#1628):
+/// pushing a set the account already has would rewrite it for nothing and nudge every device.
+pub(crate) fn is_ahead_of(local: &[ReadCursor], remote: &[ReadCursor]) -> bool {
+    let theirs: std::collections::HashMap<&str, (&str, &str)> = remote
+        .iter()
+        .map(|c| {
+            (
+                c.conversation_id.as_str(),
+                (c.last_read_at.as_str(), c.last_read_message_id.as_str()),
+            )
+        })
+        .collect();
+    local.iter().any(|c| match theirs.get(c.conversation_id.as_str()) {
+        None => true,
+        Some(&at) => is_newer((&c.last_read_at, &c.last_read_message_id), at),
+    })
 }
 
 /// Unread counts for every conversation this device holds messages for.
@@ -159,6 +177,60 @@ pub(crate) fn unread_counts(conn: &Connection, user_id: &str) -> Result<Vec<Unre
         out.push(r.map_err(|e| Error::Other(anyhow::anyhow!("row: {e}")))?);
     }
     Ok(out)
+}
+
+/// Of the messages an ingest just stored, the ones a wake may announce (#1628): per
+/// conversation, the newest that is someone else's, not deleted, and past the read cursor.
+///
+/// Anything else a wake carries — a receipt, an edit, a replay of what is held, a message
+/// already read on another device — announces nothing. Returns message ids, newest first.
+pub(crate) fn newest_unread_of(
+    conn: &Connection,
+    user_id: &str,
+    stored: &[(String, Vec<String>)],
+) -> Result<Vec<String>> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (conversation_id, ids) in stored {
+        let mut best: Option<(String, String)> = None;
+        // `?1` conversation, `?2` user, then the id list.
+        for chunk in crate::db::chunk::bind_chunks(ids, 2) {
+            let sql = format!(
+                "SELECT m.sent_at, m.id
+                 FROM message m
+                 LEFT JOIN read_cursor c ON c.conversation_id = m.conversation_id
+                 WHERE m.conversation_id = ?1
+                   AND m.sender_id != ?2
+                   AND m.deleted_at IS NULL
+                   AND m.undecryptable IS NULL
+                   AND m.id IN ({})
+                   AND (
+                         c.conversation_id IS NULL
+                         OR (m.sent_at, m.id) > (c.last_read_at, c.last_read_message_id)
+                       )
+                 ORDER BY m.sent_at DESC, m.id DESC
+                 LIMIT 1",
+                crate::db::chunk::placeholders(chunk.len(), 3)
+            );
+            let mut params: Vec<&dyn rusqlite::ToSql> = vec![conversation_id, &user_id];
+            for id in chunk {
+                params.push(id);
+            }
+            let found: Option<(String, String)> = conn
+                .query_row(&sql, params.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
+                .optional()
+                .map_err(|e| Error::Other(anyhow::anyhow!("fresh unread lookup: {e}")))?;
+            if let Some(f) = found {
+                if best.as_ref().is_none_or(|b| is_newer((&f.0, &f.1), (&b.0, &b.1))) {
+                    best = Some(f);
+                }
+            }
+        }
+        if let Some(b) = best {
+            out.push(b);
+        }
+    }
+    out.sort_by(|a, b| b.cmp(a));
+    Ok(out.into_iter().map(|(_, id)| id).collect())
 }
 
 /// Unread counts to hydrate the UI with at startup.
@@ -302,23 +374,20 @@ async fn account_seed(state: &Arc<AppState>, user_id: &str) -> Result<Zeroizing<
     Ok(Zeroizing::new(key.to_seed().to_vec()))
 }
 
-/// Upload every cursor this device holds, encrypted.
-/// The whole set each time: the merge is a `max()`, and a delta would need server-side ordering.
-pub(crate) async fn push_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<()> {
-    let cursors = {
-        let guard = state.local_db.lock().await;
-        let db = guard
-            .as_ref()
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-        all_read_cursors(db.conn())?
-    };
+/// Upload `cursors`, encrypted. The whole set each time: the merge is a `max()`, and a delta
+/// would need server-side ordering. Only [`converge_read_cursors`] calls it, with the set it
+/// has just merged the account's blob into, so it never drops a position another device wrote.
+async fn push_read_cursors(
+    state: &Arc<AppState>,
+    user_id: &str,
+    cursors: &[ReadCursor],
+) -> Result<()> {
     // Nothing read yet: don't overwrite another device's blob with an empty list.
     if cursors.is_empty() {
         return Ok(());
     }
-
     let seed = account_seed(state, user_id).await?;
-    let (nonce, blob) = seal_cursors(&seed, user_id, &cursors)?;
+    let (nonce, blob) = seal_cursors(&seed, user_id, cursors)?;
     let body = pollis_api::profile::SaveReadCursorsBody {
         user_id: user_id.to_string(),
         nonce: b64(&nonce),
@@ -327,29 +396,61 @@ pub(crate) async fn push_read_cursors(state: &Arc<AppState>, user_id: &str) -> R
     crate::commands::mls::ds_post_ok(state, &body).await
 }
 
-/// Fetch the account's blob and merge the positions it carries into this device.
+/// The account's cursor set as the DS holds it; empty when there is none yet.
 ///
-/// Returns how many local cursors actually moved.
-pub(crate) async fn pull_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<usize> {
+/// A blob this device cannot open is treated as empty, so the next push replaces it rather
+/// than wedging sync for good (it was sealed under this account's key, so only corruption
+/// gets here).
+async fn fetch_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<Vec<ReadCursor>> {
     let resp = crate::commands::ds_reads::read_cursors(state, user_id).await?;
     let Some(stored) = resp.cursors else {
-        return Ok(0);
+        return Ok(Vec::new());
     };
     let nonce = crate::commands::ds_reads::decode_b64("read-cursor nonce", &stored.nonce)?;
     let blob = crate::commands::ds_reads::decode_b64("read-cursor blob", &stored.blob)?;
-
     let seed = account_seed(state, user_id).await?;
-    let incoming = open_cursors(&seed, user_id, &nonce, &blob)?;
-
-    let guard = state.local_db.lock().await;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    merge_read_cursors(db.conn(), &incoming)
+    match open_cursors(&seed, user_id, &nonce, &blob) {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            crate::diag!("[read-cursor] the account's blob would not open; replacing it: {e}");
+            Ok(Vec::new())
+        }
+    }
 }
 
-/// Queue a debounced push, unless one is already queued.
-/// Fire-and-forget: a failed push only clears a badge late elsewhere; the next advance retries.
+/// One device converges at a time: a launch sync, a nudge and a debounced push may overlap.
+static CONVERGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Pull the account's cursors, merge them in, and push only if this device then holds a
+/// position the account lacks (#1628).
+///
+/// Pull before push is what stops a device that has been running for days from rewinding
+/// reads made since on the account's other devices: the blob is last-writer-wins, so a push
+/// of this device's set alone would replace theirs.
+///
+/// Returns the conversations whose cursor moved here.
+pub(crate) async fn converge_read_cursors(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<Vec<String>> {
+    let _one = CONVERGE.lock().await;
+    let remote = fetch_read_cursors(state, user_id).await?;
+    let (moved, local) = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let moved = merge_read_cursors(db.conn(), &remote)?;
+        (moved, all_read_cursors(db.conn())?)
+    };
+    if is_ahead_of(&local, &remote) {
+        push_read_cursors(state, user_id, &local).await?;
+    }
+    Ok(moved)
+}
+
+/// Queue a debounced converge, unless one is already queued.
+/// Fire-and-forget: a failed one only clears a badge late elsewhere; the next advance retries.
 fn schedule_read_cursor_push(state: &Arc<AppState>, user_id: &str) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
@@ -364,17 +465,23 @@ fn schedule_read_cursor_push(state: &Arc<AppState>, user_id: &str) {
         // Cleared BEFORE the push reads the table, so an advance that lands
         // during the upload schedules the next one instead of being swallowed.
         PUSH_SCHEDULED.store(false, Ordering::SeqCst);
-        if let Err(e) = push_read_cursors(&state, &user_id).await {
+        if let Err(e) = converge_read_cursors(&state, &user_id).await {
             crate::diag!("[read-cursor] push failed (will retry on the next advance): {e}");
         }
     });
 }
 
-/// Pull the other devices' read positions, merge them, and push the result.
+/// Pull the other devices' read positions, merge them, and push the result if it adds anything.
+/// Returns how many local cursors moved (the launch path's shape).
 pub async fn sync_read_cursors(user_id: String, state: &Arc<AppState>) -> Result<usize> {
-    let merged = pull_read_cursors(state, &user_id).await?;
-    push_read_cursors(state, &user_id).await?;
-    Ok(merged)
+    Ok(converge_read_cursors(state, &user_id).await?.len())
+}
+
+/// Re-sync on focus, resume, a realtime reconnect, or the DS's `read_cursors_changed` nudge
+/// (#1628): the same converge, returning the conversations read elsewhere so the caller can
+/// refetch unread counts, clear an alert for them and dismiss their notifications.
+pub async fn refresh_read_cursors(user_id: String, state: &Arc<AppState>) -> Result<Vec<String>> {
+    converge_read_cursors(state, &user_id).await
 }
 
 #[cfg(test)]
@@ -574,9 +681,9 @@ mod tests {
     fn merging_the_same_cursors_twice_changes_nothing() {
         let conn = db();
         let c = vec![cursor("2026-01-01T00:00:05Z", "m5")];
-        assert_eq!(merge_read_cursors(&conn, &c).unwrap(), 1);
+        assert_eq!(merge_read_cursors(&conn, &c).unwrap().len(), 1);
         assert_eq!(
-            merge_read_cursors(&conn, &c).unwrap(),
+            merge_read_cursors(&conn, &c).unwrap().len(),
             0,
             "a replayed sync moved the cursor again"
         );
@@ -594,7 +701,7 @@ mod tests {
                 last_read_message_id: "n1".into(),
             },
         ];
-        assert_eq!(merge_read_cursors(&conn, &incoming).unwrap(), 1);
+        assert_eq!(merge_read_cursors(&conn, &incoming).unwrap(), vec!["c2".to_string()]);
     }
 
     #[test]
@@ -608,7 +715,7 @@ mod tests {
         let back: Vec<ReadCursor> = serde_json::from_str(&json).unwrap();
 
         let fresh = db();
-        assert_eq!(merge_read_cursors(&fresh, &back).unwrap(), 2);
+        assert_eq!(merge_read_cursors(&fresh, &back).unwrap().len(), 2);
         assert_eq!(all_read_cursors(&fresh).unwrap(), all);
     }
 
@@ -753,11 +860,11 @@ mod tests {
         let b = db();
         advance_read_cursor(&b, CONV, "2026-01-01T00:00:01Z", "m1").unwrap();
         let incoming = open_cursors(SEED, ME, &nonce, &ct).unwrap();
-        assert_eq!(merge_read_cursors(&b, &incoming).unwrap(), 2);
+        assert_eq!(merge_read_cursors(&b, &incoming).unwrap().len(), 2);
         assert_eq!(all_read_cursors(&b).unwrap(), all_read_cursors(&a).unwrap());
 
         // And it is idempotent: replaying the same blob moves nothing.
-        assert_eq!(merge_read_cursors(&b, &incoming).unwrap(), 0);
+        assert_eq!(merge_read_cursors(&b, &incoming).unwrap().len(), 0);
     }
 
     /// A stale blob from a device that is behind must not rewind this device.
@@ -773,11 +880,85 @@ mod tests {
         let here = db();
         advance_read_cursor(&here, CONV, "2026-01-01T00:00:09Z", "m9").unwrap();
         let incoming = open_cursors(SEED, ME, &nonce, &ct).unwrap();
-        assert_eq!(merge_read_cursors(&here, &incoming).unwrap(), 0);
+        assert_eq!(merge_read_cursors(&here, &incoming).unwrap().len(), 0);
         assert_eq!(
             all_read_cursors(&here).unwrap()[0].last_read_message_id,
             "m9"
         );
+    }
+
+    fn stored(ids: &[&str]) -> Vec<(String, Vec<String>)> {
+        vec![(CONV.to_string(), ids.iter().map(|s| s.to_string()).collect())]
+    }
+
+    // #1628: a wake whose ingest stored nothing (a receipt, a replay) announces nothing.
+    #[test]
+    fn a_wake_that_stored_nothing_announces_nothing() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        assert!(newest_unread_of(&conn, ME, &[]).unwrap().is_empty());
+        assert!(newest_unread_of(&conn, ME, &stored(&[])).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_wake_announces_the_newest_message_it_stored() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        msg(&conn, "m2", THEM, "2026-01-01T00:00:02Z");
+        msg(&conn, "m3", THEM, "2026-01-01T00:00:03Z");
+        assert_eq!(newest_unread_of(&conn, ME, &stored(&["m1", "m2"])).unwrap(), vec!["m2"]);
+    }
+
+    // The reported bug: a message the phone already read must not alert the desktop.
+    #[test]
+    fn a_stored_message_already_read_elsewhere_announces_nothing() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        msg(&conn, "m2", THEM, "2026-01-01T00:00:02Z");
+        advance_read_cursor(&conn, CONV, "2026-01-01T00:00:02Z", "m2").unwrap();
+        assert!(newest_unread_of(&conn, ME, &stored(&["m1", "m2"])).unwrap().is_empty());
+    }
+
+    #[test]
+    fn own_and_deleted_messages_are_never_news() {
+        let conn = db();
+        msg(&conn, "mine", ME, "2026-01-01T00:00:01Z");
+        msg(&conn, "gone", THEM, "2026-01-01T00:00:02Z");
+        conn.execute("UPDATE message SET deleted_at = 'x' WHERE id = 'gone'", [])
+            .unwrap();
+        assert!(newest_unread_of(&conn, ME, &stored(&["mine", "gone"])).unwrap().is_empty());
+    }
+
+    #[test]
+    fn news_is_reported_per_conversation_newest_first() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+             VALUES ('n1', 'c2', ?1, X'00', 'body', '2026-01-01T00:00:05Z')",
+            rusqlite::params![THEM],
+        )
+        .unwrap();
+        let both = vec![
+            (CONV.to_string(), vec!["m1".to_string()]),
+            ("c2".to_string(), vec!["n1".to_string()]),
+        ];
+        assert_eq!(newest_unread_of(&conn, ME, &both).unwrap(), vec!["n1", "m1"]);
+    }
+
+    #[test]
+    fn a_device_is_ahead_only_when_it_holds_a_position_the_account_lacks() {
+        let older = cursor("2026-01-01T00:00:01Z", "m1");
+        let newer = cursor("2026-01-01T00:00:09Z", "m9");
+        assert!(!is_ahead_of(&[], &[newer.clone()]));
+        assert!(!is_ahead_of(&[newer.clone()], &[newer.clone()]));
+        assert!(!is_ahead_of(&[older.clone()], &[newer.clone()]), "a stale device must not push");
+        assert!(is_ahead_of(&[newer.clone()], &[older.clone()]));
+        let elsewhere = ReadCursor {
+            conversation_id: "c2".into(),
+            ..older.clone()
+        };
+        assert!(is_ahead_of(&[newer.clone(), elsewhere], &[newer]));
     }
 
     /// Naive substring search over bytes — no `str` conversion, because the

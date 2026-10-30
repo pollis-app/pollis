@@ -322,6 +322,43 @@ pub(crate) fn last_messages_sql(n: usize) -> String {
     )
 }
 
+/// The rows [`super::read_state::newest_unread_of`] picks from what an ingest stored,
+/// hydrated like any page (#1628): what a realtime wake may announce.
+pub(crate) async fn fresh_unread_messages(
+    state: &Arc<AppState>,
+    user_id: &str,
+    stored: &[(String, Vec<String>)],
+) -> Result<Vec<ChannelMessage>> {
+    if stored.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut messages: Vec<ChannelMessage> = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let ids = super::read_state::newest_unread_of(db.conn(), user_id, stored)?;
+        let mut out: Vec<ChannelMessage> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let row = db
+                .conn()
+                .query_row(
+                    "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable, send_state
+                     FROM message WHERE id = ?1",
+                    rusqlite::params![id],
+                    row_to_channel_message,
+                )
+                .optional()?;
+            if let Some(m) = row {
+                out.push(m);
+            }
+        }
+        out
+    };
+    hydrate_rows(state, &mut messages).await?;
+    Ok(messages)
+}
+
 /// The newest message in each of `conversation_ids`, in ONE round trip (#874).
 /// Conversations with no local messages are absent from the result.
 pub async fn read_last_messages(
