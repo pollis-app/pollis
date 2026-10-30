@@ -345,6 +345,30 @@ crashed on the first silent push to a killed app).
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.
 
+## Notification content setting (#1599)
+
+What a rich push shows once the phone has decrypted it on the device:
+**Name and message** (`full`, the default), **Name only** (`name`) or
+**Nothing** (`none`, the generic text every push showed before #1599).
+
+- **Stored in the core, not in JS.** `pollis_core::notify::settings::{get, set}`
+  read and write the `kv` key `notification_content` in the account's local DB,
+  so the headless fetch (`pollis_notify_fetch`, run by the iOS Notification
+  Service Extension and the Android data-push handler) reads exactly what the
+  app wrote. It is device-local, never synced: each phone decides for itself.
+- **Invalid values cannot land.** The only writer takes the
+  `NotificationContent` enum, and the bridge parses `value` into it, so
+  anything but the three strings is refused before the DB. A stored value this
+  build does not recognise reads as `none` (fail closed), never as `full`.
+- **Mobile UI:** Self → Preferences → Notifications, a three-chip
+  `ChoiceGrid` under the OS-permission row (`NotificationContentSetting` in
+  `mobile/app/self/preferences.tsx`, hook `useNotificationContent`). The write
+  is optimistic and rolls back on failure. Maestro: `notification-content.yaml`.
+- **Desktop has no equivalent and needs none yet:** its OS banners never carry
+  message text — they name the sender and the room (`chat:notify.newMessageBody`)
+  — and desktop receives no push, so there is nothing for `full`/`name` to
+  change. A desktop "hide the sender too" option would be a separate feature.
+
 ## Files
 
 | File | Role |
@@ -357,7 +381,8 @@ above, so reading on desktop clears the phone.
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
 | `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508) |
-| `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
+| `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508), `get/set_notification_content` (#1599) |
+| `pollis-core/src/notify/settings.rs` | The notification-content setting (#1599): enum, `kv` key, fail-closed read |
 | `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
 | `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |

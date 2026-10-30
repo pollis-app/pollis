@@ -435,6 +435,13 @@
         "showInlineTimestamps": "إظهار الطوابع الزمنية داخل السطر",
         "showMemberAvatars": "إظهار الصور الرمزية للأعضاء"
       },
+      "notificationContent": {
+        "description": "يُفكّ تشفير المعاينات على هذا الجهاز فقط.",
+        "full": "الاسم والرسالة",
+        "heading": "محتوى الإشعارات",
+        "name": "الاسم فقط",
+        "none": "لا شيء"
+      },
       "notificationsOffSettings": "متوقفة. فعّلها من إعدادات النظام",
       "notificationsOffTap": "متوقفة. انقر للتفعيل",
       "notificationsOn": "مفعّلة",

@@ -415,6 +415,13 @@
         "showInlineTimestamps": "Показывать время рядом с сообщениями",
         "showMemberAvatars": "Показывать аватары участников"
       },
+      "notificationContent": {
+        "description": "Превью расшифровываются только на этом устройстве.",
+        "full": "Имя и сообщение",
+        "heading": "Содержимое уведомлений",
+        "name": "Только имя",
+        "none": "Ничего"
+      },
       "notificationsOffSettings": "Выключены. Включите в системных настройках",
       "notificationsOffTap": "Выключены. Нажмите, чтобы включить",
       "notificationsOn": "Включены",

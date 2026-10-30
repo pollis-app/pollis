@@ -1,4 +1,4 @@
-import { ScrollView, View } from "react-native";
+import { ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useObserver } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -6,13 +6,18 @@ import { Screen, Header, Group } from "../../components/ui";
 import { LanguageSection } from "../../components/LanguageSection";
 import { AccentSwatch } from "../../components/self/AccentSwatch";
 import { ChoiceGrid } from "../../components/self/ChoiceGrid";
+import { ChoiceChip } from "../../components/self/ChoiceChip";
 import { ToggleRow } from "../../components/self/ToggleRow";
 import { accentPresetLabel } from "../../components/self/accentName";
 import { useNotificationPermission } from "../../components/self/useNotificationPermission";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { useTheme } from "../../components/theme";
-import { space, ACCENT_PRESETS } from "../../theme/tokens";
-import { usePreferences } from "../../hooks/queries";
+import { semantic, type as ty, fonts, space, ACCENT_PRESETS } from "../../theme/tokens";
+import { usePreferences, useNotificationContent } from "../../hooks/queries";
+import {
+  NOTIFICATION_CONTENT_OPTIONS,
+  type NotificationContent,
+} from "../../lib/notificationContent";
 import { appStore } from "../../stores/appStore";
 import { ensurePushRegistration, openNotificationSettings } from "../../lib/push";
 import type { TFunction } from "i18next";
@@ -75,6 +80,55 @@ function NotificationsSetting() {
       on={granted}
       onToggle={onPress}
     />
+  );
+}
+
+function notificationContentLabel(t: TFunction, value: NotificationContent): string {
+  switch (value) {
+    case "full":
+      return t("mobile:self.preferences.notificationContent.full");
+    case "name":
+      return t("mobile:self.preferences.notificationContent.name");
+    case "none":
+      return t("mobile:self.preferences.notificationContent.none");
+  }
+}
+
+// #1599: what a push shows. The extension decrypts on the device and reads this from the core DB.
+function NotificationContentSetting() {
+  const { t } = useTranslation("settings");
+  const { value, set } = useNotificationContent();
+  // An even grid that loses columns as Dynamic Type grows, like auto-lock.
+  const { fontScale } = useWindowDimensions();
+  const columns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
+  const heading = t("mobile:self.preferences.notificationContent.heading");
+
+  return (
+    <View testID="pref-notification-content" style={{ padding: space.xxl, gap: space.md }}>
+      <View style={{ gap: 2 }}>
+        <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: semantic.text }}>
+          {heading}
+        </Text>
+        <Text style={ty.secondary}>
+          {t("mobile:self.preferences.notificationContent.description")}
+        </Text>
+      </View>
+      <ChoiceGrid columns={columns} accessibilityRole="radiogroup" accessibilityLabel={heading}>
+        {NOTIFICATION_CONTENT_OPTIONS.map((opt) => (
+          <ChoiceChip
+            key={opt}
+            testID={`chip-notification-content-${opt}`}
+            label={notificationContentLabel(t, opt)}
+            selected={value === opt}
+            onPress={() => {
+              if (value !== opt) {
+                set.mutate(opt);
+              }
+            }}
+          />
+        ))}
+      </ChoiceGrid>
+    </View>
   );
 }
 
@@ -171,6 +225,7 @@ export default function Preferences() {
         <View onLayout={sectionLayout("notifications")}>
           <Group title={t("notifications.heading")}>
             <NotificationsSetting />
+            <NotificationContentSetting />
           </Group>
         </View>
       </ScrollView>

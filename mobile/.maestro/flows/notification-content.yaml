@@ -1,0 +1,59 @@
+appId: ${MAESTRO_APP_ID}
+---
+# NOTIFICATION CONTENT (#1599) — the three-way picker in Preferences →
+# Notifications. The choice is written to the core's local DB (where the push
+# extension reads it), so leaving and re-entering the screen re-reads it from
+# there. Self-contained; ends back on the default.
+
+- runFlow: ../subflows/sign-in.yaml
+
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "chip-notification-content-none"
+    direction: DOWN
+- assertVisible:
+    id: "chip-notification-content-full"
+    selected: true
+- takeScreenshot: notification-content-01-default
+
+- tapOn:
+    id: "chip-notification-content-name"
+- assertVisible:
+    id: "chip-notification-content-name"
+    selected: true
+- assertVisible:
+    id: "chip-notification-content-full"
+    selected: false
+
+# Re-enter: the screen reads the value back from the core.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "chip-notification-content-none"
+    direction: DOWN
+- assertVisible:
+    id: "chip-notification-content-name"
+    selected: true
+- takeScreenshot: notification-content-02-name-only
+
+- tapOn:
+    id: "chip-notification-content-none"
+- assertVisible:
+    id: "chip-notification-content-none"
+    selected: true
+
+# Back to the default so later flows see stock behaviour.
+- tapOn:
+    id: "chip-notification-content-full"
+- assertVisible:
+    id: "chip-notification-content-full"
+    selected: true

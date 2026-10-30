@@ -395,6 +395,13 @@
         "showInlineTimestamps": "Mostrar la hora junto a cada mensaje",
         "showMemberAvatars": "Mostrar los avatares de los miembros"
       },
+      "notificationContent": {
+        "description": "Las vistas previas se descifran solo en este dispositivo.",
+        "full": "Nombre y mensaje",
+        "heading": "Contenido de las notificaciones",
+        "name": "Solo el nombre",
+        "none": "Nada"
+      },
       "notificationsOffSettings": "Desactivadas. Actívalas en Ajustes del sistema",
       "notificationsOffTap": "Desactivadas. Toca para activar",
       "notificationsOn": "Activadas",

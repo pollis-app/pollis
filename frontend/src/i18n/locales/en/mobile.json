@@ -406,6 +406,13 @@
         "showInlineTimestamps": "Show inline timestamps",
         "showMemberAvatars": "Show member avatars"
       },
+      "notificationContent": {
+        "description": "Previews are decrypted on this device only.",
+        "full": "Name and message",
+        "heading": "Notification content",
+        "name": "Name only",
+        "none": "Nothing"
+      },
       "notificationsOffSettings": "Off. Turn on in system Settings",
       "notificationsOffTap": "Off. Tap to turn on",
       "notificationsOn": "On",

@@ -415,6 +415,13 @@
         "showInlineTimestamps": "Показувати час поруч із повідомленнями",
         "showMemberAvatars": "Показувати аватари учасників"
       },
+      "notificationContent": {
+        "description": "Попередній перегляд розшифровується лише на цьому пристрої.",
+        "full": "Ім'я та повідомлення",
+        "heading": "Вміст сповіщень",
+        "name": "Лише ім'я",
+        "none": "Нічого"
+      },
       "notificationsOffSettings": "Вимкнено. Увімкніть у системних налаштуваннях",
       "notificationsOffTap": "Вимкнено. Натисніть, щоб увімкнути",
       "notificationsOn": "Увімкнено",

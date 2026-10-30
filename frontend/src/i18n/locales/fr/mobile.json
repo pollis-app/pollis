@@ -395,6 +395,13 @@
         "showInlineTimestamps": "Afficher l'heure dans les messages",
         "showMemberAvatars": "Afficher les avatars des membres"
       },
+      "notificationContent": {
+        "description": "Les aperçus sont déchiffrés uniquement sur cet appareil.",
+        "full": "Nom et message",
+        "heading": "Contenu des notifications",
+        "name": "Nom uniquement",
+        "none": "Rien"
+      },
       "notificationsOffSettings": "Désactivées. Activez-les dans les Réglages du système",
       "notificationsOffTap": "Désactivées. Touchez pour activer",
       "notificationsOn": "Activées",
