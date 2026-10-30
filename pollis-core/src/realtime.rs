@@ -86,6 +86,9 @@ pub enum RealtimeEvent {
     },
     /// This account's channel mutes changed (#1431); re-read them over the signed channel.
     ChannelMutesChanged,
+    /// Another of this account's devices pushed read cursors (#1628); converge them
+    /// (`refresh_read_cursors`). DS-originated and content-free.
+    ReadCursorsChanged,
     /// Sent after a room's event stream recovers; missed events are not replayed, so resync.
     RealtimeReconnected {
         room_id: String,

@@ -1057,6 +1057,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(messages::sync_read_cursors(user_id, &state()?).await?)
         }
+        "refresh_read_cursors" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(messages::refresh_read_cursors(user_id, &state()?).await?)
+        }
         "read_thread_messages" => {
             let thread_id: String = arg(&args, "threadId")?;
             ok(messages::read_thread_messages(thread_id, &state()?).await?)
@@ -1080,8 +1084,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "ingest_channel_envelopes" => {
             let user_id: String = arg(&args, "userId")?;
             let channel_id: String = arg(&args, "channelId")?;
-            messages::ingest_channel_envelopes(user_id, channel_id, &state()?).await?;
-            ok(())
+            ok(messages::ingest_channel_envelopes(user_id, channel_id, &state()?).await?)
         }
         "add_reaction" => {
             let message_id: String = arg(&args, "messageId")?;
@@ -1125,8 +1128,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "ingest_dm_envelopes" => {
             let user_id: String = arg(&args, "userId")?;
             let dm_channel_id: String = arg(&args, "dmChannelId")?;
-            messages::ingest_dm_envelopes(user_id, dm_channel_id, &state()?).await?;
-            ok(())
+            ok(messages::ingest_dm_envelopes(user_id, dm_channel_id, &state()?).await?)
         }
 
         // Device-local (#854); no DS endpoint backs these.
@@ -1531,6 +1533,7 @@ mod tests {
             "get_unread_counts",
             "mark_conversation_read",
             "sync_read_cursors",
+            "refresh_read_cursors",
             "list_security_events",
             "delete_account",
             "wipe_local_data",

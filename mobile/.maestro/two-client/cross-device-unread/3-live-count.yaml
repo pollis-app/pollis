@@ -1,0 +1,33 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# CROSS-DEVICE UNREAD (#1628), part 3 of 6. The sender wrote twice while the Direct tab was on
+# screen: the live wakes ingest them and the row counts exactly 2, read from the core's counts.
+# iOS merges the row into one accessibility element ("…, 2 unread, …"), so the count is read
+# from its label there and from the count's child text on Android.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "unread-.*"
+            containsChild:
+              text: "2"
+          timeout: 60000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "row-dm-.*"
+            text: ".*, 2 unread, .*"
+          timeout: 60000
+- assertVisible:
+    id: "badge-direct"
+- takeScreenshot: cross-device-unread-03-two-unread

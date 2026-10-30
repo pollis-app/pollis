@@ -69,35 +69,42 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
 |---|---|---|---|
 | `sound` | Plays a sfx (`'ping'`/`'join'`/`'leave'`) via the `play_sfx` Rust command | `allow_sound_effects` | Cooldownable |
 | `osNotif` | Fires an OS notification banner via the bridge's `sendNotification` (→ `tauri-plugin-notification`) | `allow_desktop_notifications` + OS permission | Cooldownable |
-| `badge` | Increments the per-room unread count (`appStore.incrementUnread`) | none | Drives dock/taskbar badge via `useBadge` |
-| `alert` | Sets the blinking status-bar alert (`appStore.setStatusBarAlert`) | none | Cleared on navigation |
+| `alert` | Sets the blinking status-bar alert (`appStore.setStatusBarAlert`) | none | Cleared on navigation; a message alert (`direct_message`, `user_mention`) also clears when a cursor sync shows its conversation read on another device (#1628) |
 | `overlay` | Sets `pendingEnrollmentApproval` so the UI takes over | none | Used only by enrollment |
 | `honorsRingtonePref` | Gates the ringtone on the **device-local** call-ringtone toggle, independent of the account-level `allow_sound_effects` | `allowCallRingtone` | Used only by `incoming_call` |
 | `cooldownMs` | Suppresses repeat sound + OS-notif within the window | — | Keyed by `(cooldownGroup ?? category, roomId)` |
 | `mutable` | Silenced (sound + OS notif) while `payload.roomId` is a muted channel (#1431); the badge still counts | `setMutedChannels` | `channel_message`, `all_mention` |
+
+There is no `badge` field any more (#1628). Unread counts are Rust's (`get_unread_counts`, derived from the read cursor), refetched after every ingest, read and cursor sync and copied into `appStore.unreadCounts` whole; a local `incrementUnread` drifted from them and was never corrected, so it is gone (a guard in `frontend/tests/message-wake.test.ts` keeps it gone).
 | `cooldownGroup` | Categories sharing a group share one cooldown per room | — | `channel`: the `new_message` and the mention ping one @mention raises make one sound and one banner |
 
 ### Conventions
 
 1. **Anything with `osNotif: true` should also have `sound: 'ping'`.** Users always hear every system notification. Don't ship a silent OS banner. The one exception is `incoming_call`, which has no `sound` because it plays a *ringtone* on its own device-local gate (`honorsRingtonePref`) rather than a one-shot sfx — muting ringing on one device must not silence every other alert on it.
 2. **Channel chatter pings by default; a noisy room is muted, not ignored (#1431).** Every channel message also pushes every other member's phones, so desktop matches: `channel_message` pings and raises an OS notification. A user who finds a channel too loud mutes it (per channel, per account, stored on the DS — see "Per-channel mute" below); a muted channel's chatter and `@all` only update the badge, while a direct `@username` still gets through. The account-wide `allow_desktop_notifications` preference still silences every OS banner on the device.
-3. **`badge` and `alert` are never cooldown-gated.** The unread count must stay accurate; only sound and OS notifications dedupe.
+3. **`alert` is never cooldown-gated.** Only sound and OS notifications dedupe.
 
 ## Categorization (the call site)
 
 The "which category does this event belong to" decision lives at the call site, not in the table. This keeps the table flat and event-shaped predicates (`isSelected`, `isOwnVoiceChannel`, own-message) out of the config.
 
-In `useLiveKitRealtime.ts`, the `new_message` handler categorizes. The wake-up names no sender (§5), so "is this my own message, sent from my other device?" is answered AFTER ingest: `read_last_messages` reads the newest local row back, and `shouldAlertForWake` (`frontend/src/utils/messageWake.ts`, tested in `frontend/tests/message-wake.test.ts`) suppresses the alert and the badge when its MLS-attributed `sender_id` is ours. The message itself is ingested and shown either way. (The old `isOwnMessage` read `event.sender_id`, which the payload stopped carrying, so it was always false: a message from your other device raised "New message from Someone" and bumped the badge.) Mobile applies the same rule to its unread count (`mobile/lib/messageWake.ts` `shouldCountUnread`). On mobile that bump is only the instant path: the badges come from the persisted read cursors (`get_unread_counts`, #1422, `mobile/hooks/queries/useUnread.ts`), re-read after the bump and after every ingest, so a message that arrived while the app was backgrounded or closed — the push case, which no live wake-up saw — still badges.
+In `useLiveKitRealtime.ts`, the `new_message` handler categorizes. The wake-up names no sender (§5) and is not always a message: a delivered or read receipt (#857) publishes the same `new_message` wake on purpose, because realtime data packets are not end-to-end encrypted (`RoomOptions::default()`), so a distinct type would tell the LiveKit server which wakes are receipts. So the handler announces only what the ingest itself reports as news (#1628): `ingest_*_envelopes` returns, per conversation, the newest message it stored for the first time that is someone else's, not deleted and past the read cursor. `runMessageWake` / `wakeAlerts` (`frontend/src/utils/messageWake.ts`, tested in `frontend/tests/message-wake.test.ts`) drop the conversation on screen and announce the rest; a channel ingest covers the whole group, so a sibling channel can be announced too. Before #1628 the handler read the newest local row back and alerted unless it was ours, so every receipt — and every device launch emits delivered receipts for its catch-up — re-announced an old message, even one already read on another device, and bumped a badge that never came back down.
 
 ```ts
-if (isSelected || !incomingId) return;
-await ingested;
-const latest = (await invoke('read_last_messages', { conversationIds: [incomingId] }))[0];
-if (!shouldAlertForWake({ latest, selfId, isSelected: false })) return;
-// `title` / `body` fall back to `chat:notify.newMessageTitle` / `.newMessageBody`
-// when the room name or preview is unavailable — see the localization note below.
-notify(conversationId ? 'direct_message' : 'channel_message', { roomId, title, body, senderUsername });
+await runMessageWake({
+  ingest: () => ingestAndInvalidate(channelId, conversationId), // also refetches unread counts
+  refreshUnread: () => {},
+  selfId,
+  isSelected: (id) => id === selectedChannelId || id === selectedConversationId,
+  // `title` / `body` fall back to `chat:notify.newMessageTitle` / `.newMessageBody`
+  // when the room name or preview is unavailable — see the localization note below.
+  announce: (m) => notify(conversationId ? 'direct_message' : 'channel_message', { roomId: m.conversation_id, title, body, senderUsername }),
+});
 ```
+
+Mobile's wake (`useInboxRealtime`) only ingests: the ingest re-reads `get_unread_counts` (#1422, `mobile/hooks/queries/useUnread.ts`), and nothing is bumped locally, so a receipt or a message read elsewhere never badges; alerts on a phone are push notifications.
+
+**Reads made on another device (#1628).** A running app learns them on window focus (desktop) / return to the foreground (mobile), on `realtime_reconnected`, and on the DS's `read_cursors_changed` nudge, which follows every cursor push: all run `refresh_read_cursors` (see `commands.md` → "Read state"), refetch the counts, and for each conversation that moved clear a status-bar message alert whose conversation is now read (desktop, `appStore.clearAlertIfRead`) or call `dismissConversationNotifications` (mobile). Playwright: `e2e/cross-device-unread.spec.ts`.
 
 The voice handler categorizes:
 
@@ -289,7 +296,7 @@ read, unless it was the very notification the user tapped: opening the
 conversation from the list, Search or a link, or reading it on desktop or
 another phone, left it there. Slack/Discord behaviour is now the rule — once a
 conversation is read on **any** client, its notifications leave **every**
-phone's tray. Three paths, all matching on the notification's opaque handle `h`
+phone's tray. Four paths, all matching on the notification's opaque handle `h`
 (#1122), never on a conversation id:
 
 1. **This phone read it.** `markConversationRead` (`mobile/hooks/queries/useUnread.ts`,
@@ -315,6 +322,12 @@ phone's tray. Three paths, all matching on the notification's opaque handle `h`
    handles to `dismissed_push_handles` → `POST /v1/push/dismissed` and clears
    the ones the DS recorded as read. It never guesses from local unread counts:
    a message not yet ingested on this device would look read.
+4. **A running phone learns the read from the cursor sync (#1628).** When
+   `refresh_read_cursors` — on the DS's `read_cursors_changed` nudge, a
+   realtime reconnect, landing in the app or a return to the foreground —
+   moves a conversation's cursor, `refreshReadCursors` calls
+   `dismissConversationNotifications` for it. This keys on the cursor having
+   moved, which only a read on another device does, never on local counts.
 
 **Finding a notification's handle in the tray.** iOS keeps the payload on a
 delivered notification, so `data.h` is there. On Android a notification the

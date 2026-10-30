@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
+import { unreadQueryKeys } from "./useUnread";
 import { useObserver } from "mobx-react-lite";
 import type { AttachmentKeyScope, ContentOrigin, Message, DMConversation } from "../../types";
 import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
@@ -287,6 +288,8 @@ export function useMessages(channelId: string | null, conversationId: string | n
           ingestInflight.current = null;
         }
         queryClient.invalidateQueries({ queryKey });
+        // A channel ingest stores its siblings' messages too; their badges come from Rust (#1628).
+        queryClient.invalidateQueries({ queryKey: unreadQueryKeys.all });
       });
   }, [targetId, isChannel, currentUser?.id]);
 

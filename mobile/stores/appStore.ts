@@ -169,13 +169,6 @@ class AppStore implements AppState {
     this.unreadCounts = next;
   }
 
-  incrementUnread(id: string) {
-    this.unreadCounts = {
-      ...this.unreadCounts,
-      [id]: (this.unreadCounts[id] ?? 0) + 1,
-    };
-  }
-
   logout() {
     this.currentUser = null;
     this.username = null;

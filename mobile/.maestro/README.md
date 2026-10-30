@@ -295,9 +295,20 @@ peer and goes to the background (`two-client/unread/1-open-dm.yaml`); the peer
 sends two; on resume the Direct tab badge and the row's count must read 2
 (`2-resume.yaml`), then the app is closed; the peer sends a third; after a cold
 start and the PIN the count must read 3, opening the DM clears it, and it stays
-cleared after another relaunch (`3-cold-start.yaml`). Reading on one device
-clearing the count on another is pinned by the core's cursor-merge tests, not
-here: it needs a second device of the same account.
+cleared after another relaunch (`3-cold-start.yaml`).
+
+**A read on the account's other device (automated, #1628):**
+`mobile/scripts/maestro-cross-device-unread.sh <device>` — `pollis-tui`'s
+`cross_read_peer` example plays the account's first device (`owner`, whose
+recovery key enrolls the phone) and a person writing to it (`sender`). With the
+Direct tab on screen the sender writes twice (the row reads 2), the owner device
+fetches them and its delivered receipts wake the phone (still 2), then the owner
+device reads the DM — a read receipt plus a cursor push — and the DS's
+`read_cursors_changed` nudge clears the row count and tab badge with no
+navigation (`two-client/cross-device-unread/1…5`). On Android it then sends the
+app to the background: the sender writes once, the notification arrives, the
+owner device reads it, and the tray must empty (#1508) before the app resumes
+with nothing unread (`6-resume.yaml`).
 
 **A peer's safety number changes (automated, #1605):** `mobile/scripts/maestro-key-change.sh <device>`
 — `pollis-tui`'s `key_change_peer` example, run as two devices of one account.

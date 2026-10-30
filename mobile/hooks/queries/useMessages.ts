@@ -737,11 +737,6 @@ export function useDeleteMessage(
   });
 }
 
-export interface IngestOptions {
-  // Default true. The live wake-up passes false: it bumps the badge itself.
-  refreshUnread?: boolean;
-}
-
 /** One ingest per conversation at a time; requests mid-run share one trailing run (#1610). */
 const ingestFlights = createSingleFlight();
 
@@ -754,7 +749,6 @@ export function useIngestConversation() {
     async (
       conversationId: string,
       kind: ConversationKind,
-      opts: IngestOptions = {},
     ) => {
       if (!currentUser) {
         return;
@@ -791,9 +785,8 @@ export function useIngestConversation() {
         queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
         // Any ingest may have re-pinned a changed key (#1605); the notices are local, so cheap.
         queryClient.invalidateQueries({ queryKey: keyChangeNoticeKeys.all });
-        if (opts.refreshUnread !== false) {
-          refreshUnread(queryClient);
-        }
+        // Badges come from Rust's counts after every ingest, never a local bump (#1628).
+        refreshUnread(queryClient);
       } catch (e) {
         console.warn("[useIngestConversation] ingest failed:", e);
       }

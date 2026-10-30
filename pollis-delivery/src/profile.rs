@@ -249,9 +249,18 @@ pub async fn save_read_cursors(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    profile_outcome_response::<SaveReadCursorsBody>(
-        apply_save_read_cursors(&conn, authed.as_deref(), &parsed).await?,
-    )
+    let outcome = apply_save_read_cursors(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, ReadCursorOutcome::Ok) {
+        // #1628: nudge the account's other running devices to pull the new reads. Content-free,
+        // like `channel_mutes_changed`; the write it follows already tells the DS the timing.
+        let user = authed.clone().unwrap_or_else(|| parsed.user_id.clone());
+        let inbox = format!("inbox-{user}");
+        let event = serde_json::json!({ "type": "read_cursors_changed" });
+        if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
+            tracing::warn!("read-cursor inbox notify failed (non-fatal): {e}");
+        }
+    }
+    profile_outcome_response::<SaveReadCursorsBody>(outcome)
 }
 
 /// UPSERT the account's encrypted read-cursor blob (#844).

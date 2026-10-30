@@ -1,0 +1,48 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# CROSS-DEVICE UNREAD (#1628), part 1 of 6 — driven by scripts/maestro-cross-device-unread.sh.
+# The owner peer (this account's FIRST device) signed up ${MAESTRO_EMAIL} and printed its
+# recovery key. Join that account as its second device and stay in the app on the Direct tab.
+
+- clearState
+- launchApp
+- assertVisible:
+    id: "screen-auth-email"
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-otp"
+    timeout: 20000
+- inputText: "${MAESTRO_OTP}"
+- tapOn:
+    id: "btn-submit-otp"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-enrollment"
+    timeout: 20000
+- tapOn:
+    id: "btn-enroll-recovery"
+- tapOn:
+    id: "input-recovery-key"
+- inputText: "${MAESTRO_RECOVERY_KEY}"
+- tapOn:
+    id: "btn-submit-recovery"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 30000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-direct"
+    timeout: 60000
+- tapOn:
+    id: "tab-direct"
+- takeScreenshot: cross-device-unread-01-enrolled

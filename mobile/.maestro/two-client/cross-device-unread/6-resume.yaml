@@ -1,0 +1,29 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# CROSS-DEVICE UNREAD (#1628), part 6 of 6 (Android). While the app was in the background the
+# sender wrote once and the owner device read it; the script saw the notification arrive and
+# leave the tray. Back in the foreground nothing is unread.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible:
+      id: "unread-.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "badge-direct"
+- takeScreenshot: cross-device-unread-06-resumed

@@ -9,12 +9,7 @@ import { invoke } from "../lib/native";
 import { useSegments } from "expo-router";
 import { isRoomOpen, subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
-import {
-  catchUpTargets,
-  roomCatchUpTarget,
-  shouldCountUnread,
-  type WakeLatest,
-} from "../lib/messageWake";
+import { catchUpTargets, roomCatchUpTarget } from "../lib/messageWake";
 import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
 import { groupQueryKeys, useUserGroupsWithChannels } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
@@ -24,7 +19,7 @@ import {
   messageQueryKeys,
   useIngestConversation,
 } from "./queries/useMessages";
-import { refreshUnread } from "./queries/useUnread";
+import { refreshReadCursors } from "./queries/useUnread";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 import { catchUpThenBackstop } from "../lib/mlsBackstop";
@@ -83,37 +78,14 @@ export function useInboxRealtime() {
       const qc = qcRef.current;
       switch (event.type) {
         case "new_message": {
-          // No sender in the payload (§5); own-account messages are never counted unread.
+          // No sender in the payload (§5), and it may be only a receipt (#1628): ingest, then
+          // re-read the counts Rust derives from the read cursor. Nothing is bumped locally, so a
+          // receipt or a message already read on another device never badges.
           const id = event.channel_id ?? event.conversation_id;
           if (!id) {
             break;
           }
-          const kind = event.channel_id ? "channel" : "dm";
-          // Unread: never for the conversation on screen.
-          const isOpen =
-            appStore.selectedChannelId === id ||
-            appStore.selectedConversationId === id ||
-            appStore.openConversationId === id;
-          // The bump below is the instant badge; counts are re-read after it, so they cannot double.
-          void ingestRef.current(id, kind, { refreshUnread: false }).then(async () => {
-            if (isOpen) {
-              refreshUnread(qc);
-              return;
-            }
-            let latest: WakeLatest | null = null;
-            try {
-              const rows = await invoke<WakeLatest[]>("read_last_messages", {
-                conversationIds: [id],
-              });
-              latest = rows?.[0] ?? null;
-            } catch (e) {
-              console.warn("[realtime] read_last_messages failed:", e);
-            }
-            if (shouldCountUnread({ latest, selfId: userId, isOpen })) {
-              appStore.incrementUnread(id);
-            }
-            refreshUnread(qc);
-          });
+          void ingestRef.current(id, event.channel_id ? "channel" : "dm");
           break;
         }
         case "realtime_reconnected": {
@@ -122,6 +94,8 @@ export function useInboxRealtime() {
             void ingestRef.current(target.id, target.kind);
           }
           void flushOutbox(qc);
+          // #1628: reads made elsewhere during the outage; their nudge was lost too.
+          void refreshReadCursors(userId, qc);
           break;
         }
         case "edited_message":
@@ -178,6 +152,10 @@ export function useInboxRealtime() {
         case "channel_mutes_changed":
           void qc.invalidateQueries({ queryKey: groupQueryKeys.mutedChannels(userId) });
           break;
+        case "read_cursors_changed":
+          // #1628: another device read something; converge, re-badge, clear its notifications.
+          void refreshReadCursors(userId, qc);
+          break;
         case "enrollment_requested":
           // #1360; `useEnrollmentApprovals` opens the approval screen.
           noticeEnrollmentRequested(event);
@@ -225,7 +203,7 @@ export function useInboxRealtime() {
       // now, from the local store, before any round trip (#1610).
       void qcRef.current.invalidateQueries({ queryKey: messageQueryKeys.all, refetchType: "all" });
       void qcRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
-      refreshUnread(qcRef.current);
+      // Counts and the cross-device cursor converge are `useUnreadSync`'s resume handler.
       // Re-open rooms whose connect failed.
       const handler = handlerRef.current;
       if (handler) {

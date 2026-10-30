@@ -36,13 +36,13 @@ enum DeleteResolution {
     Pending,
 }
 
-/// One conversation's pass: its watermark and newly decrypted inbound messages (#857).
+/// One conversation's pass: its watermark and newly decrypted inbound messages (#857, #1628).
 struct ConvIngest {
     conversation_id: String,
     /// The cursor this device may advance to: `(seq, sent_at)` of the highest handled envelope (#1087).
     watermark: Option<(i64, String)>,
     /// Ids of messages persisted for the FIRST time on this pass, authored by
-    /// someone else. Empty for group channels, which never emit receipts.
+    /// someone else: the receipts a DM owes (#857), and the news a wake may announce (#1628).
     newly_delivered: Vec<String>,
 }
 
@@ -50,7 +50,7 @@ struct ConvIngest {
 #[derive(Debug, PartialEq, Eq)]
 enum Ingested {
     /// Opened — or already held, or nothing to open. Carries the message id
-    /// when this persisted a NEW inbound DM message (the receipt batch, #857).
+    /// when this persisted a NEW inbound message (DM receipts #857, wake news #1628).
     Opened(Option<String>),
     /// The bytes would not open at the epoch they claim; carries why (#1520).
     Failed(crate::commands::mls::DecryptFailure),
@@ -316,6 +316,14 @@ async fn catch_up_once(
         bound,
     )
     .await?;
+
+    // Whichever caller runs the pass records what it stored (#1628), so a wake that joined
+    // this pass instead of running its own still finds its news in the ledger.
+    super::news::record(
+        state,
+        mls_group_id,
+        results.iter().map(|r| (r.conversation_id.as_str(), r.newly_delivered.as_slice())),
+    );
 
     // Advance each watermark via the DS (best-effort). Envelope GC runs server-side (#689).
     // Independent posts, so they and the receipts go out together (#1610).
@@ -909,7 +917,7 @@ fn record_losses(
 /// epoch.
 /// Infallible: a failure leaves nothing persisted, for a later retry.
 ///
-/// Returns the id of a new inbound DM message (what a receipt acknowledges, #857); `None` otherwise.
+/// Returns the id of a new inbound message (a DM's receipt batch #857, wake news #1628); `None` otherwise.
 /// The ratchet step and the row insert share one savepoint (#1524), so a death can't spend a key without a row.
 fn decrypt_and_persist_one(
     conn: &rusqlite::Connection,
@@ -1065,8 +1073,9 @@ fn open_and_persist(
                                 });
                             }
                         };
-                        // Delivered (#857): fetched, decrypted and stored, first time, someone else's, DM only.
-                        if inserted > 0 && is_dm && cred_sender != user_id {
+                        // New inbound: stored for the first time and someone else's. Only a DM
+                        // acknowledges it (#857); any conversation's wake may announce it (#1628).
+                        if inserted > 0 && cred_sender != user_id {
                             return Ingested::Opened(Some(id.clone()));
                         }
                     }
@@ -1128,7 +1137,7 @@ fn open_and_persist(
         }
         _ => {}
     }
-    // Only the "persisted a new inbound DM message" path above returns an id;
+    // Only the "persisted a new inbound message" path above returns an id;
     // every other outcome is nothing to acknowledge.
     Ingested::Opened(None)
 }
@@ -1136,12 +1145,23 @@ fn open_and_persist(
 /// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints
 /// and channel-focus pre-warm paths that want to persist new envelopes without
 /// reading a page.
+///
+/// Returns the news a wake may announce (#1628), from [`super::news`]: per conversation of the
+/// group, the newest message some pass stored since this call began — this call's own, or the
+/// one it joined — that is someone else's, not deleted, past the read cursor, and not already
+/// announced. Empty when the wake brought nothing new (a receipt, an edit, a replay).
 pub async fn ingest_channel_envelopes(
     user_id: String,
     channel_id: String,
     state: &Arc<AppState>,
-) -> Result<()> {
-    ingest_channel_envelopes_inner(state, &user_id, &channel_id).await
+) -> Result<Vec<super::types::ChannelMessage>> {
+    let mark = super::news::mark(state);
+    ingest_channel_envelopes_inner(state, &user_id, &channel_id).await?;
+    let Some(group) = cached_channel_group(&channel_id) else {
+        // Not resolved means not a member: nothing was stored.
+        return Ok(Vec::new());
+    };
+    super::news::take(state, &user_id, &group, mark).await
 }
 
 /// Pull new envelopes for a DM from remote, decrypt, and persist into the local
@@ -1197,13 +1217,16 @@ pub async fn ingest_dm_envelopes_inner(
     fetched
 }
 
-/// Frontend-triggerable ingest for a DM channel.
+/// Frontend-triggerable ingest for a DM channel; returns the news a wake may announce, as
+/// [`ingest_channel_envelopes`] does (#1628). A DM's MLS group id is its conversation id.
 pub async fn ingest_dm_envelopes(
     user_id: String,
     dm_channel_id: String,
     state: &Arc<AppState>,
-) -> Result<()> {
-    ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await
+) -> Result<Vec<super::types::ChannelMessage>> {
+    let mark = super::news::mark(state);
+    ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await?;
+    super::news::take(state, &user_id, &dm_channel_id, mark).await
 }
 
 #[cfg(test)]

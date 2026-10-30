@@ -73,6 +73,10 @@ export type RealtimeEvent =
       type: "channel_mutes_changed";
     }
   | {
+      // DS-only (#1628): another of this account's devices pushed read cursors; converge.
+      type: "read_cursors_changed";
+    }
+  | {
       // LOCAL, never on the wire: the room reconnected and wake-ups were lost.
       type: "realtime_reconnected";
       room: string;
@@ -91,6 +95,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "device_revoked",
   "enrollment_requested",
   "channel_mutes_changed",
+  "read_cursors_changed",
 ]);
 
 /** Decode a data-channel payload; `null` for anything malformed or unknown. */
@@ -127,7 +132,11 @@ export function decodeRealtimeEvent(
 
 /** `enrollment_requested` with a participant is a spoof (DS sends arrive with none). */
 export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean): boolean {
-  if (event.type === "enrollment_requested" || event.type === "channel_mutes_changed") {
+  if (
+    event.type === "enrollment_requested" ||
+    event.type === "channel_mutes_changed" ||
+    event.type === "read_cursors_changed"
+  ) {
     return !fromParticipant;
   }
   return true;

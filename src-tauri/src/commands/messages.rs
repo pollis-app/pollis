@@ -82,12 +82,12 @@ pub async fn list_thread_summaries(conversation_id: String, state: State<'_, Arc
 }
 
 #[tauri::command]
-pub async fn ingest_channel_envelopes(user_id: String, channel_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+pub async fn ingest_channel_envelopes(user_id: String, channel_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<ChannelMessage>> {
     pollis_core::commands::messages::ingest_channel_envelopes(user_id, channel_id, &state).await
 }
 
 #[tauri::command]
-pub async fn ingest_dm_envelopes(user_id: String, dm_channel_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+pub async fn ingest_dm_envelopes(user_id: String, dm_channel_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<ChannelMessage>> {
     pollis_core::commands::messages::ingest_dm_envelopes(user_id, dm_channel_id, &state).await
 }
 
@@ -144,6 +144,11 @@ pub async fn mark_conversation_read(conversation_id: String, user_id: String, st
 #[tauri::command]
 pub async fn sync_read_cursors(user_id: String, state: State<'_, Arc<AppState>>) -> Result<usize> {
     pollis_core::commands::messages::sync_read_cursors(user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn refresh_read_cursors(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<String>> {
+    pollis_core::commands::messages::refresh_read_cursors(user_id, &state).await
 }
 
 #[tauri::command]

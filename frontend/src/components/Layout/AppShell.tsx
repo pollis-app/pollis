@@ -47,7 +47,7 @@ const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 export const AppShell: React.FC = observer(() => {
   // Unread badges from the persisted read cursor (#844).
   useHydrateUnread(appStore.currentUser?.id ?? null);
-  // Converge with other devices' reads once, at startup (#844).
+  // Converge with other devices' reads at startup and on focus (#844, #1628).
   useSyncReadCursors(appStore.currentUser?.id ?? null);
   const { t } = useTranslation("nav");
   probeRender("AppShell");
@@ -733,6 +733,7 @@ export const AppShell: React.FC = observer(() => {
           </div>
         ) : statusBarAlert ? (
           <button
+            data-testid="status-bar-alert"
             className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
             style={{ color: barInk, background: "none", padding: 0 }}
             onClick={() => {

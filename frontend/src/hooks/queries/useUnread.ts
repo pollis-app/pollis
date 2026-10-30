@@ -1,6 +1,6 @@
 /** Unread counts derived in Rust from the persisted read cursor (#844); copied to the store in an effect. */
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 
@@ -15,14 +15,17 @@ export const unreadQueryKeys = {
   counts: (userId: string | null) => ["unread", "counts", userId] as const,
 };
 
+async function readUnreadCounts(userId: string | null): Promise<UnreadCount[]> {
+  return (await invoke<UnreadCount[]>("get_unread_counts", { userId })) ?? [];
+}
+
 /** Conversations with something unread; the rest are absent. */
 export function useUnreadCounts(userId: string | null) {
   return useQuery({
     queryKey: unreadQueryKeys.counts(userId),
-    queryFn: async (): Promise<UnreadCount[]> =>
-      (await invoke<UnreadCount[]>("get_unread_counts", { userId })) ?? [],
+    queryFn: () => readUnreadCounts(userId),
     enabled: !!userId,
-    // Invalidated by ingest and the dispatcher; no periodic refetch.
+    // Invalidated after every ingest, read and cursor sync (#1628); no periodic refetch.
     staleTime: 1000 * 30,
   });
 }
@@ -37,27 +40,61 @@ export function useHydrateUnread(userId: string | null) {
   }, [data]);
 }
 
-/** Merge read cursors with the account once at startup (#844); never on a timer. */
+let inFlight: Promise<string[]> | null = null;
+let again = false;
+
+/**
+ * Converge read cursors with the account's other devices (pull, merge, push only if ahead) and
+ * show the result (#1628): fresh unread counts, and no alert for a conversation now read.
+ * Concurrent callers share one run plus at most one trailing run. Resolves to the conversations
+ * whose cursor moved here.
+ */
+export function refreshReadCursors(queryClient: QueryClient, userId: string): Promise<string[]> {
+  if (inFlight) {
+    again = true;
+    return inFlight;
+  }
+  inFlight = (async () => {
+    const moved: string[] = [];
+    do {
+      again = false;
+      try {
+        moved.push(...((await invoke<string[]>("refresh_read_cursors", { userId })) ?? []));
+      } catch (e) {
+        // Offline or locked; the next focus, reconnect or nudge retries.
+        console.warn("read-cursor sync skipped", e);
+      }
+    } while (again);
+    if (moved.length > 0) {
+      const counts = await queryClient.fetchQuery({
+        queryKey: unreadQueryKeys.counts(userId),
+        queryFn: () => readUnreadCounts(userId),
+        staleTime: 0,
+      });
+      appStore.hydrateUnread(counts);
+      appStore.clearAlertIfRead(moved);
+    }
+    return moved;
+  })().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+/** Learn reads made on the account's other devices: at startup and on every window focus (#1628). */
 export function useSyncReadCursors(userId: string | null) {
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!userId) {
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const moved = await invoke<number>("sync_read_cursors", { userId });
-        if (!cancelled && moved) {
-          void queryClient.invalidateQueries({ queryKey: unreadQueryKeys.all });
-        }
-      } catch (e) {
-        // Offline or PIN not entered; local cursors stand until the next launch.
-        console.warn("read-cursor sync skipped", e);
-      }
-    })();
+    void refreshReadCursors(queryClient, userId);
+    const onFocus = () => {
+      void refreshReadCursors(queryClient, userId);
+    };
+    window.addEventListener("focus", onFocus);
     return () => {
-      cancelled = true;
+      window.removeEventListener("focus", onFocus);
     };
   }, [userId, queryClient]);
 }
