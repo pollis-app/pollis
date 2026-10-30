@@ -2,7 +2,7 @@
 """Render the Android adaptive-icon foreground + monochrome layers from the logo SVG.
 
     uv run --with resvg-py --with pillow scripts/gen-android-adaptive-icon.py \
-        assets/pollis-logo.svg <foreground.png> <monochrome.png>
+        assets/pollis-logo.svg <foreground.png> <monochrome.png> [<notification.png>]
 
 An adaptive layer is 108dp square; the launcher shows the central 72dp through
 its mask (circle, squircle, ...) and only the central 66dp circle is safe on
@@ -20,6 +20,14 @@ Nothing is upscaled from a bitmap, and no edge of the tile is left behind.
 trimmed, but the tile's anti-aliased edge survived the key, so the trim kept
 the whole 870px tile and the lock came out 58dp tall / 38dp wide, and the
 themed (monochrome) icon carried a faint outline of the tile.
+
+The optional third output is the Android notification small icon (#1606): the
+status bar draws it as an alpha-only silhouette in a 24dp box. Without one,
+expo-notifications falls back to the launcher icon, whose safe-zone padding
+leaves the lock tiny. This one is the glyph alone, white on transparency,
+rendered straight from the vector at xxxhdpi (96px = 24dp) with its tall side
+filling the box less a NOTIF_MARGIN_DP margin each side. Expo derives the
+lower densities from it.
 """
 import io
 import math
@@ -35,15 +43,20 @@ SIZE = 1024
 # safe zone, so no mask shape can clip it. The lock is tall, so this is set by
 # the body's lower corners, and the glyph comes out ~62dp tall.
 MAX_RADIUS_DP = 33
+# Notification small icon: 24dp at xxxhdpi, and the optical margin kept clear
+# on each side of the glyph's tall side (Material's keyline is 2dp; 1dp reads
+# visibly larger in the status bar, which is the point).
+NOTIF_SIZE = 96
+NOTIF_MARGIN_DP = 1
 # The logo's two colours: the amber (tile and lock interior) and the ink.
 AMBER = (250, 191, 90)
 INK = (50, 50, 50)
 
 
-def render(svg: str, view: tuple[float, float, float, float]) -> Image.Image:
+def render(svg: str, view: tuple[float, float, float, float], size: int = SIZE) -> Image.Image:
     x, y, w, h = view
     doc = svg.replace('viewBox="0 0 1024 1024"', f'viewBox="{x} {y} {w} {h}"', 1)
-    png = resvg_py.svg_to_bytes(svg_string=doc, width=SIZE, height=SIZE)
+    png = resvg_py.svg_to_bytes(svg_string=doc, width=size, height=size)
     return Image.open(io.BytesIO(bytes(png))).convert("RGBA")
 
 
@@ -68,6 +81,7 @@ def ink_alpha(im: Image.Image) -> Image.Image:
 
 def main() -> None:
     src, fg_out, mono_out = sys.argv[1:4]
+    notif_out = sys.argv[4] if len(sys.argv) > 4 else None
     svg = open(src, encoding="utf-8").read()
     colours = set(re.findall(r"(?:fill|stroke): rgb\(([^)]*)\)", svg))
     if 'viewBox="0 0 1024 1024"' not in svg or colours != {"250, 191, 90", "50, 50, 50"}:
@@ -99,6 +113,21 @@ def main() -> None:
     b = alpha.getbbox()
     print(f"glyph {(b[2]-b[0])/SIZE*108:.1f} x {(b[3]-b[1])/SIZE*108:.1f} dp of 108 "
           f"({(b[2]-b[0])/SIZE:.1%} x {(b[3]-b[1])/SIZE:.1%})")
+
+    if notif_out:
+        # The glyph's ink bounds in viewBox units, from the full-artwork probe.
+        x0, y0, x1, y1 = Image.frombytes("L", (SIZE, SIZE), bytes(
+            probe[x, y] for y in range(SIZE) for x in range(SIZE)
+        )).getbbox()
+        live = NOTIF_SIZE - 2 * NOTIF_MARGIN_DP * NOTIF_SIZE / 24
+        side = max(x1 - x0, y1 - y0) * NOTIF_SIZE / live
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        n_alpha = ink_alpha(render(svg, (cx - side / 2, cy - side / 2, side, side), NOTIF_SIZE))
+        notif = Image.new("RGBA", n_alpha.size, (255, 255, 255, 0))
+        notif.putalpha(n_alpha)
+        notif.save(notif_out, optimize=True)
+        nb = n_alpha.getbbox()
+        print(f"notification glyph {(nb[2]-nb[0])/NOTIF_SIZE*24:.1f} x {(nb[3]-nb[1])/NOTIF_SIZE*24:.1f} dp of 24")
 
 
 if __name__ == "__main__":
