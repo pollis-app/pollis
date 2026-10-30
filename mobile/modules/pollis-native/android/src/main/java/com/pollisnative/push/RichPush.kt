@@ -35,6 +35,52 @@ object RichPush {
     return if (h != null && HANDLE.matches(h)) h else null
   }
 
+  /** The FCM key expo-notifications' lifecycle listener requires before it treats a launch intent as a tap. */
+  const val GOOGLE_MESSAGE_ID = "google.message_id"
+  const val GOOGLE_SENT_TIME = "google.sent_time"
+
+  /**
+   * The string extras of the tap intent behind EVERY notification this handler posts (rich,
+   * name-only, generic, the deadline fallback and its late replacement), so a tap routes the same
+   * whichever one is showing (#1614).
+   *
+   * The shape is FCM's own system notification's: the push's data plus `google.message_id`
+   * (`google.sent_time` goes as a long, beside these). expo-notifications turns it into the tap
+   * response: a JSON `body` becomes `content.data` (the Expo push service's envelope), anything
+   * else is copied as is. Either way `h` must end up in `data`, so it is written into whichever
+   * of the two expo will read, never left to whatever the delivery happened to carry.
+   */
+  fun tapExtras(handle: String, data: Map<String, String>, messageId: String?): Map<String, String> {
+    val out = LinkedHashMap(data)
+    val envelope = data["body"]?.let { jsonObject(it) }
+    if (envelope != null) {
+      if (envelope.optString("h", "") != handle) {
+        envelope.put("h", handle)
+        out["body"] = envelope.toString()
+      }
+    } else {
+      out["h"] = handle
+    }
+    out[GOOGLE_MESSAGE_ID] = messageId?.takeIf { it.isNotEmpty() } ?: handle
+    return out
+  }
+
+  private fun jsonObject(s: String): JSONObject? = try {
+    JSONObject(s)
+  } catch (e: Exception) {
+    null
+  }
+
+  /** The core's failure reason (`not_logged_in`, `timeout`, …) or the mode for an empty reply; never content. */
+  fun outcomeDetail(json: String?): String {
+    val root = jsonObject(json ?: return "no reply") ?: return "unparseable"
+    if (!root.optBoolean("ok", false)) {
+      return "reason=" + root.optString("reason", "unknown")
+    }
+    val items = root.optJSONArray("items")?.length() ?: 0
+    return "mode=" + root.optString("mode", "full") + " items=" + items
+  }
+
   enum class BodyKey { ATTACHMENT, IMAGE, VIDEO, VOICE, SENSITIVE }
 
   sealed class Text {

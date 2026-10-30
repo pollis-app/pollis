@@ -201,25 +201,23 @@ class RichPushNotifier(private val context: Context) {
   }
 
   /**
-   * The tap opens the launcher activity with the push's data as extras plus `google.message_id`,
-   * which is exactly what FCM's own system notification does, so expo-notifications'
-   * `ExpoNotificationLifecycleListener` turns it into the same response and JS routes it by `h`.
+   * The ONE tap intent, shared by every notification posted here (rich, name-only, generic, the
+   * deadline fallback and its late replacement), so all of them route alike (#1614). It opens
+   * [PushTapActivity] with the push's data plus `google.message_id`, the extras FCM's own system
+   * notification carries; that activity gives them to expo-notifications, which turns them into
+   * the tap response JS routes by `h`, cold or warm.
    */
-  private fun tapIntent(handle: String, data: Map<String, String>, messageId: String?, sentTime: Long): PendingIntent? {
-    val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return null
-    launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-    for ((k, v) in data) {
-      launch.putExtra(k, v)
+  private fun tapIntent(handle: String, data: Map<String, String>, messageId: String?, sentTime: Long): PendingIntent {
+    val tap = Intent(context, PushTapActivity::class.java)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+    for ((k, v) in RichPush.tapExtras(handle, data, messageId)) {
+      tap.putExtra(k, v)
     }
-    if (!data.containsKey("h") && !data.containsKey("body")) {
-      launch.putExtra("h", handle)
-    }
-    launch.putExtra("google.message_id", messageId ?: handle)
-    launch.putExtra("google.sent_time", sentTime)
+    tap.putExtra(RichPush.GOOGLE_SENT_TIME, sentTime)
     return PendingIntent.getActivity(
       context,
       handle.hashCode(),
-      launch,
+      tap,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
   }

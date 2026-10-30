@@ -1,5 +1,6 @@
 package com.pollisnative.push
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -139,10 +140,108 @@ class RichPushTest {
     assertEquals(RichPush.Plan.Generic, RichPush.plan(reply("full", item(sender = ""))))
   }
 
+  // #1614: every natively posted notification shares one tap intent; these are its extras.
+
+  @Test
+  fun tapOfAnExpoEnvelopePushRoutesByItsHandle() {
+    val data = mapOf("body" to """{"h":"$h"}""", "scopeKey" to "@pollis/mobile", "experienceId" to "@pollis/mobile")
+    val extras = RichPush.tapExtras(h, data, "0:123%abc")
+    // The delivery's data rides along unchanged, plus the key expo requires.
+    assertEquals(data["body"], extras["body"])
+    assertEquals("@pollis/mobile", extras["scopeKey"])
+    assertEquals("0:123%abc", extras[RichPush.GOOGLE_MESSAGE_ID])
+    assertEquals(h, routedHandle(extras))
+  }
+
+  @Test
+  fun tapOfARawFcmPushRoutesByItsHandle() {
+    val extras = RichPush.tapExtras(h, mapOf("h" to h), "m1")
+    assertEquals(h, extras["h"])
+    assertEquals(h, routedHandle(extras))
+  }
+
+  @Test
+  fun tapWithoutAMessageIdStillCountsAsAPushTap() {
+    // The debug hook (and any delivery FCM gave no id) has none: expo would drop the tap without one.
+    for (id in listOf(null, "")) {
+      val extras = RichPush.tapExtras(h, mapOf("body" to """{"h":"$h"}"""), id)
+      assertEquals(h, extras[RichPush.GOOGLE_MESSAGE_ID])
+      assertEquals(h, routedHandle(extras))
+    }
+  }
+
+  @Test
+  fun theHandleIsWrittenWhereExpoWillReadIt() {
+    // A JSON body without `h` (the handle came top level): expo reads only the body, so it goes in there.
+    val mixed = RichPush.tapExtras(h, mapOf("h" to h, "body" to """{"x":1}"""), "m")
+    assertEquals(h, routedHandle(mixed))
+    // A body that is not JSON: expo copies the extras, so a top-level `h` is enough.
+    val plain = RichPush.tapExtras(h, mapOf("body" to "hello"), "m")
+    assertEquals(h, plain["h"])
+    assertEquals(h, routedHandle(plain))
+    // No data at all.
+    assertEquals(h, routedHandle(RichPush.tapExtras(h, emptyMap(), "m")))
+  }
+
+  @Test
+  fun routedHandleModelsWhatExpoAndJsDo() {
+    // Without google.message_id expo's lifecycle listener ignores the intent.
+    assertNull(routedHandle(mapOf("h" to h)))
+    assertNull(routedHandle(mapOf(RichPush.GOOGLE_MESSAGE_ID to "m")))
+    // A JSON body hides top-level keys.
+    assertNull(routedHandle(mapOf(RichPush.GOOGLE_MESSAGE_ID to "m", "h" to h, "body" to """{"x":1}""")))
+    assertNull(routedHandle(mapOf(RichPush.GOOGLE_MESSAGE_ID to "m", "h" to h, "body" to "[1]")))
+  }
+
+  @Test
+  fun outcomeDetailNamesTheReasonNeverContent() {
+    assertEquals("reason=not_logged_in", RichPush.outcomeDetail("""{"ok":false,"reason":"not_logged_in"}"""))
+    assertEquals("mode=none items=0", RichPush.outcomeDetail(reply("none")))
+    assertEquals("mode=full items=1", RichPush.outcomeDetail(reply("full", item(body = "secret"))))
+    assertEquals("no reply", RichPush.outcomeDetail(null))
+  }
+
   @Test
   fun outcomeLabelsSurviveMinification() {
     assertEquals("silent", RichPush.Plan.Silent.outcome)
     assertEquals("generic", RichPush.Plan.Generic.outcome)
     assertEquals("rich", RichPush.Plan.Rich("c", true, null, emptyList()).outcome)
+  }
+
+  private fun obj(s: String): JSONObject? = try {
+    JSONObject(s)
+  } catch (e: Exception) {
+    null
+  }
+
+  /**
+   * The handle JS will route a tap by, given the intent's string extras: expo-notifications'
+   * `toResponseBundleFromExtras` (JSON `body` → data, else the extras) followed by
+   * `lib/push/routing.ts` `readPayloadRouting` (`data.h`). Null = the tap opens the app only.
+   */
+  private fun routedHandle(extras: Map<String, String>): String? {
+    if (!extras.containsKey(RichPush.GOOGLE_MESSAGE_ID)) {
+      // expo ignores a launch intent without it: no response at all.
+      return null
+    }
+    val body = extras["body"]
+    val envelope = body?.let { obj(it) }
+    val h = if (envelope != null) {
+      if (envelope.has("h") && !envelope.isNull("h")) envelope.opt("h") as? String else null
+    } else if (body != null && isJson(body)) {
+      // A JSON array: expo still takes it as the data, which has no `h`.
+      null
+    } else {
+      extras["h"]
+    }
+    return h?.takeIf { it.isNotEmpty() }
+  }
+
+  /** expo-notifications' `isValidJSONString`: a JSON object or array. */
+  private fun isJson(s: String): Boolean = obj(s) != null || try {
+    org.json.JSONArray(s)
+    true
+  } catch (e: Exception) {
+    false
   }
 }

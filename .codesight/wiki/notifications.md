@@ -387,9 +387,25 @@ so the app, not the system, posts the notification.
   `message_id`. Muted (never set for an @mention) → nothing; "Name only" → the
   sender with `push.nameOnlyBody`; failure, no items, or mode "none" (the
   user's "Nothing", or no escrowed key yet) → the generic "New message / You
-  have a new message". The tap opens the launcher activity with the push's data plus
-  `google.message_id` as extras, exactly what FCM's system notification does,
-  so expo's lifecycle listener and `lib/push` route it by `h` as before.
+  have a new message". The fetch's reason or mode is logged with the outcome
+  (`posting generic (reason=not_logged_in)`, `(mode=none items=0)`), never content.
+- **Tap (#1614).** Every notification posted here (rich, name-only, generic,
+  the deadline fallback and its late replacement) carries the ONE tap intent
+  built in `RichPushNotifier.base()`: `PushTapActivity` (invisible, out of
+  Recents) with the push's data plus `google.message_id`, the extras FCM's own
+  notification carries (`RichPush.tapExtras`, which also makes sure `h` sits
+  where expo will read it). The activity hands them to
+  `expo.modules.notifications…NotificationManager.onNotificationResponseFromExtras`
+  — the call expo's own lifecycle listener makes — then brings the app forward
+  with a plain launcher intent. A running app gets the response event; a cold
+  one gets it from `getLastNotificationResponse` (`lib/push/launchTap.ts`), and
+  `lib/push` routes it by `h` after the PIN. Why not open MainActivity with the
+  extras, as FCM does: when the process is gone but the task is still in
+  Recents (Android reclaimed the backgrounded app), Android re-creates
+  MainActivity from the task's original intent and passes the tap to
+  `onNewIntent`, which expo's `ReactActivityDelegateWrapper` drops while
+  expo-updates is still picking the bundle; the app then opened on Groups.
+  Tests: `RichPushTest.kt` (extras), `tests/push-cold-start.test.ts`.
 - **Copy** is Android string resources (`pollis-native/android/src/main/res/values*/pollis_push_strings.xml`),
   generated from the shared `mobile.push.*` keys by
   `node scripts/mobile-android-push-strings.mjs` (`{{sender}}`-style
