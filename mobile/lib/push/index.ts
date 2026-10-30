@@ -11,15 +11,21 @@ import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
 import { pushCapsFor } from "./caps";
 import { embeddedExtra } from "../buildInfo";
+import { isTitleless } from "./presentation";
 
 // Content-free foreground presentation (no sound, no badge). Safe at module load.
+// A title-less push (an Android rich push the native handler already posted, a `{d}` dismissal)
+// is never presented, or it would show as a second, blank notification.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const show = !isTitleless(notification.request.content);
+    return {
+      shouldShowBanner: show,
+      shouldShowList: show,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 /** Android 8+ drops notifications with no channel. Idempotent. */
