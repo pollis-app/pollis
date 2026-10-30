@@ -92,8 +92,17 @@ pub extern "C" fn pollis_app_will_suspend(ticket: u64, timeout_ms: u32) -> bool 
     .unwrap_or(false)
 }
 
-/// The app is back in the foreground: holds may start again and the database reopens.
-/// Blocks briefly (the reopen); safe on any thread.
+/// The background task's expiration handler: release `state.lock` and close the database
+/// now, whatever is still in flight, within about a second, then the host ends the task.
+/// Does nothing if [`pollis_app_did_resume`] ran since `ticket`.
+#[no_mangle]
+pub extern "C" fn pollis_app_suspend_expired(ticket: u64) {
+    let _ = std::panic::catch_unwind(|| crate::bridge::force_release_for_suspend(ticket));
+}
+
+/// The app is back in the foreground: holds may start again at once, and the database
+/// reopens off the calling thread (or on the next command, whichever is first). Never blocks;
+/// call it on the main thread.
 #[no_mangle]
 pub extern "C" fn pollis_app_did_resume() {
     let _ = std::panic::catch_unwind(crate::bridge::resume_after_suspend);
