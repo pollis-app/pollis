@@ -55,6 +55,8 @@ pub struct Item {
     pub body: String,
     pub body_key: Option<&'static str>,
     pub muted: bool,
+    /// A channel message that @mentions this user by name (additive to the #1599 contract).
+    pub mention: bool,
 }
 
 /// Why there is nothing to show; the host falls back to the generic text.
@@ -302,14 +304,16 @@ async fn finish(
             NotificationContent::Full => (body, key.map(|k| k.as_str())),
             NotificationContent::Name | NotificationContent::None => (String::new(), None),
         };
-        // A channel mute is overridden by a direct @mention, exactly as the DS decides whom to wake.
-        let muted = !is_dm
-            && mutes.contains(&row.conversation_id)
-            && crate::commands::messages::direct_mentions(
+        // A channel mute is overridden by a direct @username mention, exactly as the DS decides
+        // whom to wake (`push_recipients` keeps a muted member only if `audience.mentioned`
+        // names them, and that set is `send::direct_mentions`; `@all` does not pierce a mute).
+        let mention = !is_dm
+            && !crate::commands::messages::direct_mentions(
                 &row.content,
                 &[(user_id.to_string(), my_name.clone())],
             )
             .is_empty();
+        let muted = !is_dm && !mention && mutes.contains(&row.conversation_id);
         items.push(Item {
             conversation_id: row.conversation_id,
             message_id: row.id,
@@ -323,6 +327,7 @@ async fn finish(
             body,
             body_key,
             muted,
+            mention,
         });
     }
     Outcome::Ok { mode, items }
@@ -510,6 +515,7 @@ mod tests {
                 body: "hi".into(),
                 body_key: None,
                 muted: false,
+                mention: false,
             }],
         };
         let v: serde_json::Value = serde_json::from_str(&ok.to_json()).unwrap();

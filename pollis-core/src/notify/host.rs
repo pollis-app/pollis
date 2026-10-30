@@ -112,10 +112,23 @@ pub(crate) fn migrate_dir(old_dir: &Path, new_dir: &Path) -> std::io::Result<()>
             crate::diag!("[storage] moved the data directory to its override location");
             return Ok(());
         }
-        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {}
+        Err(e) if is_cross_device(&e) => {}
         Err(e) => return Err(e),
     }
     copy_then_swap(old_dir, new_dir)
+}
+
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+fn is_cross_device(e: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        e.raw_os_error() == Some(libc::EXDEV)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = e;
+        false
+    }
 }
 
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]

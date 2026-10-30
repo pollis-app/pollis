@@ -356,7 +356,14 @@ async fn a_muted_channel_is_marked_unless_it_mentions_you() {
     let shown = items(&out);
     let chatter = shown.iter().find(|i| i.body == "ordinary chatter").expect("decrypted");
     assert!(chatter.muted, "a muted channel's message is muted: {chatter:?}");
+    assert!(!chatter.mention);
     assert!(!chatter.is_dm);
+
+    // `@all` alone does not pierce a mute (the DS does not wake a muted member for it either).
+    alice.send_channel_message(&general, "@all standup").await;
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &general, "channel").await), Duration::from_secs(20)).await;
+    let everyone = items(&out).into_iter().find(|i| i.body == "@all standup").expect("decrypted");
+    assert!(everyone.muted && !everyone.mention, "{everyone:?}");
 
     let mention = format!("@{} look", bob_p.username);
     alice.send_channel_message(&general, &mention).await;
@@ -364,6 +371,13 @@ async fn a_muted_channel_is_marked_unless_it_mentions_you() {
     let shown = items(&out);
     let pinged = shown.iter().find(|i| i.body == mention).expect("decrypted");
     assert!(!pinged.muted, "a direct mention pierces the mute: {pinged:?}");
+    assert!(pinged.mention, "and is flagged as a mention: {pinged:?}");
+
+    // The same message's push really was sent to bob despite the mute: the two rules agree.
+    let pushed = crate::harness::sent_push_audience(&pinged.message_id).expect("send reached the DS");
+    let audience = pollis_delivery::push::PushAudience::from_send(pushed.push_to, pushed.push_mentions)
+        .expect("a channel send asks for a push");
+    assert!(audience.mentioned.contains(&bob_p.id));
 }
 
 /// Every path that must drop the escrow does: logout, and the PIN-lockout nuke. ("Nothing" is

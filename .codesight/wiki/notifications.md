@@ -345,6 +345,59 @@ crashed on the first silent push to a killed app).
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.
 
+## Rich push, decrypted on the device (#1599) — the core half
+
+The push payload is still only `{ h }`. A capable phone wakes on it, fetches
+the ciphertext itself, decrypts and stores it, and rewrites the notification
+with the sender and a preview. The iOS Notification Service Extension and the
+Android FCM handler both call one plain C function in `pollis-core`
+(`pollis-core/include/pollis_notify.h`, `src/notify/`):
+
+- `pollis_notify_fetch(data_dir, h, budget_ms)` → JSON. It resolves `h`
+  (`resolve_push_handle`), then runs the app's own
+  `ingest_dm_envelopes_inner` / `ingest_channel_envelopes_inner` on a headless
+  `AppState`: no realtime, no LiveKit, no media server, the database opened
+  with `LocalDb::open_existing_for_user_in`, which never creates, migrates or
+  wipes. It returns the inbound messages that run stored, plus any stored in the
+  last two minutes in that conversation (so a push whose message the app
+  already ingested still shows it). At most 5, oldest first, body ≤ 200 chars
+  with markdown markers removed (`notify/preview.rs`). Attachments become a
+  placeholder plus `body_key` (`image|video|voice|attachment|sensitive`).
+  `muted` is a muted channel with no direct `@username` of this user
+  (`mention`), the same rule `push_recipients` uses. Failures are reasons
+  (`not_logged_in|lock_busy|timeout|network|decrypt|internal`); the host then
+  shows the generic text.
+- **Setting.** `get_notification_content` / `set_notification_content {mode}`
+  (`full|name|none`, `ui_state` key `notification_content`, default `full`),
+  bridge arms only (mobile-only).
+- **Key escrow (security-relevant).** The DB key is PIN-wrapped, so the
+  extension could not open the database at all. On mobile, while the setting
+  is not `none`, the core keeps the unwrapped key in keystore slot
+  `notify_db_key`. Whitepaper §3.8 has the trade-off. Desktop never escrows.
+- **Cross-process lock.** Every MLS-mutating step (all `mls_group_lock`
+  sections, welcome drains, KeyPackage top-ups, receipt seals) also holds
+  `flock(<data_dir>/state.lock)` (`notify/lock.rs`). The app shares one hold
+  across its sections; the extension holds it for its whole run with a
+  deadline of 40% of its budget. On iOS the host calls
+  `pollis_app_will_suspend` / `pollis_app_did_resume`
+  (`mobile/modules/pollis-native/ios/PollisStateLockLifecycle.mm`) so the app
+  never sits suspended holding it (`0xdead10cc`).
+- **iOS data dir + keychain.** `pollis_set_data_dir_override` (App Group
+  container) relocates the data dir without changing the keystore namespace,
+  and `init_pollis` moves the old `Application Support/pollis` there once
+  (`notify/host.rs::migrate_dir`). The keystore KEK moves into the access group
+  from `pollis_set_keychain_access_group` / Info.plist
+  `PollisKeychainAccessGroup` (read old, write new, read back, delete old). The
+  extension never mints one. Files are kept at Data Protection class C
+  (readable after first unlock).
+- **Connection config.** `init_pollis` writes `<data_dir>/notify-config.json`
+  (DS URL, R2 origins; the dev gate key in dev builds only) for the extension.
+
+Tests: `src-tauri/tests/flows/rich_push.rs` (app/extension race with no loss
+or rollback, deterministic exclusion while the app holds a staged commit,
+fallbacks, modes, mute + mention, escrow deletion by logout and PIN lockout);
+unit tests in `notify::*` and `db::local`.
+
 ## Files
 
 | File | Role |

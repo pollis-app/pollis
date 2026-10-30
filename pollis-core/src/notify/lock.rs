@@ -193,24 +193,36 @@ impl SharedStateLock {
         if self.policy == LockPolicy::HeldByCaller {
             return Ok(SharedStateGuard { owner: None });
         }
-        let deadline = Instant::now() + wait;
+        let mut deadline = Instant::now() + wait;
         let mut logged = false;
         loop {
             {
                 let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+                // Joining an existing hold is always allowed, even while suspending: the joiner
+                // may be nested inside the very section the suspend is waiting to drain.
                 if inner.holders > 0 {
                     inner.holders += 1;
                     return Ok(SharedStateGuard {
                         owner: Some(self.clone()),
                     });
                 }
-                if let Some(lock) = StateLock::try_acquire_in(data_dir)? {
-                    inner.lock = Some(lock);
-                    inner.holders = 1;
-                    return Ok(SharedStateGuard {
-                        owner: Some(self.clone()),
-                    });
+                if !suspend::is_suspending() {
+                    if let Some(lock) = StateLock::try_acquire_in(data_dir)? {
+                        inner.lock = Some(lock);
+                        inner.holders = 1;
+                        suspend::hold_started();
+                        return Ok(SharedStateGuard {
+                            owner: Some(self.clone()),
+                        });
+                    }
                 }
+            }
+            if suspend::is_suspending() {
+                // Going to the background: start no new hold until the host says we are back.
+                // Time spent here is not time another process kept the lock.
+                deadline = Instant::now() + wait;
+                tokio::time::sleep(RETRY).await;
+                continue;
             }
             if !logged {
                 crate::diag!("[state-lock] another process holds {LOCK_FILE}; waiting");
@@ -233,9 +245,65 @@ impl SharedStateLock {
     fn release(&self) {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         inner.holders = inner.holders.saturating_sub(1);
-        if inner.holders == 0 {
-            inner.lock = None;
+        if inner.holders == 0 && inner.lock.take().is_some() {
+            suspend::hold_ended();
         }
+    }
+}
+
+/// The app going to the background (#1599, iOS `0xdead10cc`).
+///
+/// iOS kills a suspended app that still holds a file lock in an App Group container. The host
+/// calls [`begin`](suspend::begin) when the app enters the background (inside a background-task
+/// assertion) and [`end`](suspend::end) when it returns: in between no NEW hold starts, and
+/// `begin`'s caller waits for the holds in flight to finish. A hold in flight may still be doing
+/// network I/O (each DS request is bounded by the shared client's 10 s connect and 30 s
+/// read-stall timeouts), so `begin` waits with a deadline and reports whether it drained.
+pub mod suspend {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    static SUSPENDING: AtomicBool = AtomicBool::new(false);
+    /// App-side holds of `state.lock` currently open, across every `AppState` in the process.
+    static OPEN_HOLDS: AtomicUsize = AtomicUsize::new(0);
+
+    pub(super) fn is_suspending() -> bool {
+        SUSPENDING.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn hold_started() {
+        OPEN_HOLDS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(super) fn hold_ended() {
+        OPEN_HOLDS.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// Stop starting holds, then block up to `timeout` for the open ones to end. `true` when
+    /// none is open, i.e. it is safe to be suspended.
+    pub fn begin(timeout: Duration) -> bool {
+        SUSPENDING.store(true, Ordering::SeqCst);
+        let deadline = Instant::now() + timeout;
+        loop {
+            if OPEN_HOLDS.load(Ordering::SeqCst) == 0 {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                crate::diag!("[state-lock] still held as the app goes to the background");
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    /// Back in the foreground: holds may start again.
+    pub fn end() {
+        SUSPENDING.store(false, Ordering::SeqCst);
+    }
+
+    /// Open app-side holds. Diagnostics and tests.
+    pub fn open_holds() -> usize {
+        OPEN_HOLDS.load(Ordering::SeqCst)
     }
 }
 
@@ -334,6 +402,35 @@ mod tests {
         assert!(!waiter.is_finished(), "the app waits while the extension holds the lock");
         drop(headless);
         waiter.await.unwrap().expect("acquired once the extension let go");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn going_to_the_background_drains_holds_and_starts_none() {
+        let d = dir();
+        let shared = SharedStateLock::new(LockPolicy::PerSection);
+        let held = shared.acquire(d.path(), Duration::from_secs(1)).await.unwrap();
+        assert!(suspend::open_holds() >= 1);
+        let releaser = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            drop(held);
+        });
+        let drained = tokio::task::spawn_blocking(|| suspend::begin(Duration::from_secs(5)))
+            .await
+            .unwrap();
+        releaser.await.unwrap();
+        assert!(drained, "the in-flight hold ended");
+        assert!(StateLock::try_acquire_in(d.path()).unwrap().is_some(), "nothing holds the file");
+
+        // While suspended a new hold waits, without timing out, until the app is back.
+        let s2 = shared.clone();
+        let path = d.path().to_path_buf();
+        let waiter = tokio::spawn(async move {
+            s2.acquire(&path, Duration::from_millis(50)).await.map(|_| ())
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!waiter.is_finished(), "no new hold while suspended");
+        suspend::end();
+        waiter.await.unwrap().expect("acquired after resume");
     }
 
     #[tokio::test]

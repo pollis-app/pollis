@@ -69,6 +69,25 @@ pub unsafe extern "C" fn pollis_set_keychain_access_group(group: *const c_char) 
     let _ = group;
 }
 
+/// The app is entering the background (iOS: call from `applicationDidEnterBackground` inside a
+/// `beginBackgroundTask` assertion, on a background queue, since it blocks). Stops new holds of
+/// `state.lock` and waits up to `timeout_ms` for open ones to end. Returns true when none is
+/// open, so the app can be suspended without holding a lock in the App Group container
+/// (`0xdead10cc`).
+#[no_mangle]
+pub extern "C" fn pollis_app_will_suspend(timeout_ms: u32) -> bool {
+    std::panic::catch_unwind(|| {
+        super::lock::suspend::begin(Duration::from_millis(u64::from(timeout_ms)))
+    })
+    .unwrap_or(false)
+}
+
+/// The app is back in the foreground: `state.lock` holds may start again.
+#[no_mangle]
+pub extern "C" fn pollis_app_did_resume() {
+    super::lock::suspend::end();
+}
+
 fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) -> String {
     let Some(data_dir) = data_dir.filter(|d| !d.is_empty()) else {
         return INTERNAL.to_string();
