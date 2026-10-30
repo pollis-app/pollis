@@ -83,13 +83,13 @@ export function ensurePushRegistration(
   return registrar.ensure(userId, { prompt: true, ...options });
 }
 
-/** Re-register when the OS rotates the push token (#1423). Returns a disposer. */
-export function addPushTokenRotationListener(userId: string): () => void {
+/** Calls `onRotation` when the OS rotates the push token (#1423), never for our own request's echo. Returns a disposer. */
+export function addPushTokenRotationListener(onRotation: () => void): () => void {
   const sub = Notifications.addPushTokenListener((token) => {
     if (!tokenEcho.isRotation(String(token.data))) {
       return;
     }
-    void ensurePushRegistration(userId, { prompt: false, refresh: true });
+    onRotation();
   });
   return () => {
     sub.remove();

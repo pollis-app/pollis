@@ -1,21 +1,20 @@
-// Keep this device's push token registered while signed in (#1423), never prompting: landing, foreground, rotation.
+// Keep this device's push token registered while signed in and unlocked (#1423, #1620), never
+// prompting: on unlock, on a return to the foreground and on rotation. Rules in createRegistrationTriggers.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { useObserver } from "mobx-react-lite";
-import { appStore } from "../stores/appStore";
 import { addPushTokenRotationListener, ensurePushRegistration } from "../lib/push";
+import { createRegistrationTriggers } from "../lib/push/registration";
 
-export function usePushRegistration(userId: string | null) {
-  const isLocked = useObserver(() => appStore.isLocked);
+/** `userId`: signed in. `unlocked`: past the PIN, in the app, so the device can sign. */
+export function usePushRegistration(userId: string | null, unlocked: boolean) {
+  const [triggers] = useState(() => createRegistrationTriggers(ensurePushRegistration));
 
   useEffect(() => {
-    if (!userId || isLocked) {
-      return;
-    }
-    void ensurePushRegistration(userId, { prompt: false });
-  }, [userId, isLocked]);
+    triggers.setUser(userId && unlocked ? userId : null);
+  }, [triggers, userId, unlocked]);
 
+  // Subscribed while signed in, locked or not, so a rotation on the PIN screen is not lost.
   useEffect(() => {
     if (!userId) {
       return;
@@ -24,15 +23,16 @@ export function usePushRegistration(userId: string | null) {
     const appStateSub = AppState.addEventListener("change", (next) => {
       const resumed = previous !== "active" && next === "active";
       previous = next;
-      if (!resumed || appStore.isLocked) {
-        return;
+      if (resumed) {
+        triggers.foreground();
       }
-      void ensurePushRegistration(userId, { prompt: false });
     });
-    const disposeRotation = addPushTokenRotationListener(userId);
+    const disposeRotation = addPushTokenRotationListener(() => {
+      triggers.rotation();
+    });
     return () => {
       appStateSub.remove();
       disposeRotation();
     };
-  }, [userId]);
+  }, [userId, triggers]);
 }
