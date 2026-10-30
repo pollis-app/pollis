@@ -1,0 +1,12 @@
+<!-- Debug builds only: a test hook for the rich-push handler (#1599). Release builds never have it. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <receiver
+      android:name="com.pollisnative.push.RichPushTestReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="com.pollis.mobile.debug.RICH_PUSH" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

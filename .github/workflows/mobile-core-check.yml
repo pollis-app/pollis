@@ -84,6 +84,7 @@ on:
       - 'frontend/src/**'
       - 'website/android.html'
       - 'scripts/mobile-i18n-resources.mjs'
+      - 'scripts/mobile-android-push-strings.mjs'
       - 'scripts/i18n-check.mjs'
       - 'pollis-delivery/worker/**'
       - 'pollis-delivery/worker-tests/**'
@@ -151,6 +152,7 @@ jobs:
               - 'frontend/src/**'
               - 'website/android.html'
               - 'scripts/mobile-i18n-resources.mjs'
+              - 'scripts/mobile-android-push-strings.mjs'
               - 'scripts/i18n-check.mjs'
               # OTA updates (#1250): the update routes in the DS front-door
               # Worker and the release workflows the mobile tests pin.

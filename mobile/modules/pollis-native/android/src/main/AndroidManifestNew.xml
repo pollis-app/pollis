@@ -1,0 +1,14 @@
+<!-- The manifest AGP >= 7.3 builds this library with (build.gradle `supportsNamespace`). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- #1599: the app's only FCM service. It subclasses expo-notifications' service, whose own
+         declaration plugins/withRichPush.js removes from the app manifest. -->
+    <service
+      android:name="com.pollisnative.push.PollisMessagingService"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>
