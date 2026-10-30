@@ -31,6 +31,7 @@
     "finish_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code."
   },
   "missing_from_cli": {
+    "list_key_change_notices": "The terminal client has no safety-number surface at all (get_safety_number / list_peer_verifications / set_contact_verified are known debt below); the notices (#1605) are recorded by pollis-core on every client and belong with that surface when it lands.",
     "create_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
     "await_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
     "cancel_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",

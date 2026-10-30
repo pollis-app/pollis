@@ -298,6 +298,20 @@ cleared after another relaunch (`3-cold-start.yaml`). Reading on one device
 clearing the count on another is pinned by the core's cursor-merge tests, not
 here: it needs a second device of the same account.
 
+**A peer's safety number changes (automated, #1605):** `mobile/scripts/maestro-key-change.sh <device>`
+— `pollis-tui`'s `key_change_peer` example, run as two devices of one account.
+`first` signs up, accepts the device's DM and sends a message; the device
+verifies its safety number and the DM header shows `icon-dm-verified`, with no
+key-change line (`two-client/key-change/1-verify.yaml`). `reset` then signs in
+to the same account on a new device and recovers it with a NEW account key
+(same user id) and opens a new DM. Accepting and opening it must show ONE
+`row-key-change-<id>` ("Your safety number with @peer changed. Verify it"),
+no verified shield, and the line opens `dm/safety` reading "Mark verified";
+after a cold start the line is still there, once (`2-changed.yaml`). The
+headless path (Notification Service Extension / FCM) writes the same row
+through the same trigger; `simctl push` cannot start an extension, so that path
+is pinned by the flows test `rich_push::a_key_change_seen_headless_shows_once_in_the_app`.
+
 **Tab badges for pending requests and invites (automated, #1561):** `mobile/scripts/maestro-pending-badges.sh <device>`
 — `pollis-tui`'s `pending_badge_peer` example, run as three fresh accounts.
 The device signs up with no badge on either tab

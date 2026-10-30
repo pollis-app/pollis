@@ -17,17 +17,31 @@ function member(userId: string, username: string) {
   return { user_id: userId, username, added_by: ME.id, added_at: "" };
 }
 
-function message(conversationId: string, id: string, senderId: string) {
+function message(
+  conversationId: string,
+  id: string,
+  senderId: string,
+  sentAt = "2026-08-01T10:00:00.000Z",
+  content = "hi",
+) {
   return {
     id,
     conversation_id: conversationId,
     sender_id: senderId,
-    content: "hi",
-    sent_at: "2026-08-01T10:00:00.000Z",
+    content,
+    sent_at: sentAt,
   };
 }
 
-async function boot(page: Page, skin: Skin) {
+const LATER_MSG = "01HQ7Z3K9M2P5R8T1V4W6Y0DM2";
+
+interface BootExtras {
+  /** Safety-number change notices already in the local DB (#1605). */
+  keyChangeNotices?: Array<{ id: number; peer_user_id: string; detected_at: string }>;
+  verifiedPeers?: string[];
+}
+
+async function boot(page: Page, skin: Skin, extras: BootExtras = {}) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
@@ -67,8 +81,13 @@ async function boot(page: Page, skin: Skin) {
         ],
       },
     ],
+    keyChangeNotices: extras.keyChangeNotices ?? [],
+    verifiedPeers: extras.verifiedPeers ?? [],
     messages: {
-      [DM_ID]: [message(DM_ID, DM_MSG, "u-bob")],
+      [DM_ID]: [
+        message(DM_ID, DM_MSG, "u-bob"),
+        message(DM_ID, LATER_MSG, "u-bob", "2026-08-01T12:00:00.000Z", "after the change"),
+      ],
       [GROUP_DM_ID]: [message(GROUP_DM_ID, GROUP_DM_MSG, "u-carol")],
     },
   });
@@ -146,6 +165,49 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("safety-number")).toHaveCount(0);
       await expect(page.getByTestId("safety-number-digits")).toHaveCount(0);
       await expect(page.getByTestId("safety-verify-toggle")).toHaveCount(0);
+    });
+
+    test("a key change recorded while closed is a line in the DM, and the header is not verified (#1605)", async ({ page }) => {
+      // As a headless notification fetch leaves it: re-pinned, verified cleared, notice stored.
+      await boot(page, skin, {
+        keyChangeNotices: [
+          { id: 1, peer_user_id: "u-bob", detected_at: "2026-08-01T11:00:00.000Z" },
+        ],
+      });
+      await openConversation(page, DM_ID, DM_MSG);
+
+      const notice = page.getByTestId("key-change-notice-1");
+      await expect(notice).toBeVisible();
+      await expect(page.getByTestId("key-change-notice-text")).toHaveText(
+        "Your safety number with @bob changed. Verify it",
+      );
+      // Exactly once, between the message before the change and the one after it.
+      await expect(page.locator("[data-testid^='key-change-notice-'][data-peer-user-id]")).toHaveCount(1);
+      const before = await page.getByTestId(`message-${DM_MSG}`).boundingBox();
+      const line = await notice.boundingBox();
+      const after = await page.getByTestId(`message-${LATER_MSG}`).boundingBox();
+      expect(before && line && after).toBeTruthy();
+      expect(line!.y).toBeGreaterThan(before!.y);
+      expect(after!.y).toBeGreaterThan(line!.y);
+
+      await expect(page.getByTestId("dm-header-unverified")).toBeVisible();
+      await expect(page.getByTestId("dm-header-verified")).toHaveCount(0);
+
+      // "Verify it" opens the pair's safety number; verifying again restores the badge.
+      await page.getByTestId("key-change-notice-verify").click();
+      await expect(page.getByTestId("safety-panel-title")).toHaveText("You & @bob");
+      await page.getByTestId("safety-verify-toggle").click();
+      await expect(page.getByTestId("safety-status")).toHaveText("Verified");
+      await expect(page.getByTestId("dm-header-verified")).toBeVisible();
+      // The notice is history, not a dismissable warning: it stays.
+      await expect(notice).toBeVisible();
+    });
+
+    skinAgnosticTest(skin)("a verified peer with no change shows the verified badge and no line", async ({ page }) => {
+      await boot(page, skin, { verifiedPeers: ["u-bob"] });
+      await openConversation(page, DM_ID, DM_MSG);
+      await expect(page.getByTestId("dm-header-verified")).toBeVisible();
+      await expect(page.locator("[data-testid^='key-change-notice-'][data-peer-user-id]")).toHaveCount(0);
     });
   });
 }

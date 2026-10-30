@@ -123,5 +123,10 @@
     "done": "谢谢。我们会审核每一条举报。",
     "doneBlocked": "谢谢。我们会审核每一条举报。你也已屏蔽 {{name}}。",
     "close": "完成"
+  },
+  "keyChange": {
+    "notice": "你与 {{name}} 的安全号码已更改。",
+    "verify": "去验证",
+    "defaultName": "此联系人"
   }
 }

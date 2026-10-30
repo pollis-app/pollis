@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Phone, PhoneCall, Pin } from "lucide-react";
+import { Phone, PhoneCall, Pin, Shield, ShieldCheck } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import type { PendingDmRequest } from "../components/Layout/MainContent";
@@ -13,7 +13,7 @@ import { useMarkConversationRead } from "../hooks/queries/useUnread";
 import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "../bridge";
 import { voiceSession } from "../voice";
-import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
+import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { useReadReceipts } from "../hooks/useReadReceipts";
 import { useSendReadReceipts } from "../hooks/queries/usePreferences";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
@@ -92,7 +92,9 @@ export const DMPage: React.FC = observer(() => {
   const isOtherOnline = otherPresence === "online";
   // Offline peers fail at the handshake.
   const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
-  const { togglePins } = useRightPanel();
+  const { togglePins, setSafety } = useRightPanel();
+  const verificationByPeer = usePeerVerificationMap();
+  const peerVerified = otherUserId ? verificationByPeer.get(otherUserId)?.verified === true : false;
 
   // Pre-warm the LiveKit connection for a callable DM.
   useEffect(() => {
@@ -166,6 +168,22 @@ export const DMPage: React.FC = observer(() => {
             t("conversation.fallbackTitle")
           )}
         </span>
+        {isOneOnOne && otherUserId && (
+          // Verified only while `verified = 1`; a key change clears it, the timeline says why (#1605).
+          <PressButton
+            data-testid={peerVerified ? "dm-header-verified" : "dm-header-unverified"}
+            onClick={() => setSafety(otherUserId)}
+            aria-label={peerVerified ? t("list.verified") : t("safety.verify")}
+            title={peerVerified ? t("list.verified") : t("safety.verify")}
+            className={`icon-btn-sm flex-shrink-0 padding-0 me-2 ${peerVerified ? "text-accent" : ""}`}
+          >
+            {peerVerified ? (
+              <ShieldCheck size={14} aria-hidden="true" />
+            ) : (
+              <Shield size={14} aria-hidden="true" />
+            )}
+          </PressButton>
+        )}
         <PressButton
           data-testid="dm-pins-trigger"
           onClick={togglePins}
@@ -223,7 +241,6 @@ export const DMPage: React.FC = observer(() => {
           );
         })()}
       </div>
-      <KeyChangeBanner peerUserId={otherUserId} peerLabel={username ? `@${username}` : undefined} />
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         <MainContent pendingDmRequest={pendingDmRequest} />
       </div>

@@ -13,7 +13,10 @@ import {
 } from "../../components/chat/dates";
 import { DaySeparator } from "../../components/chat/DaySeparator";
 import { UndecryptableRow } from "../../components/chat/UndecryptableRow";
+import { KeyChangeNoticeRow } from "../../components/chat/KeyChangeNoticeRow";
 import { collapseUndecryptable } from "../../lib/collapseUndecryptable";
+import { placeKeyChangeNotices } from "../../lib/keyChangeTimeline";
+import { useQueryClient } from "@tanstack/react-query";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
 import { Composer } from "../../components/chat/Composer";
@@ -45,6 +48,10 @@ import {
   useTogglePinnedMessage,
   useUserGroupsWithChannels,
   useGroupMembers,
+  useDMChannel,
+  useKeyChangeNotices,
+  usePeerVerifications,
+  type KeyChangeNotice,
   flattenPages,
   markConversationRead,
   type ConversationKind,
@@ -83,7 +90,8 @@ type ChatViewProps = {
 
 type ChatListItem =
   | { type: "sep"; key: string; label: string }
-  | { type: "msg"; key: string; message: Message; continued: boolean };
+  | { type: "msg"; key: string; message: Message; continued: boolean }
+  | { type: "keyChange"; key: string; notice: KeyChangeNotice; at: number };
 
 function TextChat(props: ChatViewProps = {}) {
   const { accentHex } = useTheme();
@@ -149,6 +157,40 @@ function TextChat(props: ChatViewProps = {}) {
     isDm && sendReadReceipts,
   );
   const peerCount = 1;
+
+  // Safety numbers (#1605): durable change notices + this DM's verified state.
+  const { data: dmChannel } = useDMChannel(isDm ? conversationId : null);
+  const dmPeers = useMemo(
+    () => (dmChannel?.members ?? []).filter((m) => m.user_id !== currentUser?.id),
+    [dmChannel, currentUser?.id],
+  );
+  const dmPeerIds = useMemo(() => dmPeers.map((p) => p.user_id), [dmPeers]);
+  const { data: keyChangeNotices } = useKeyChangeNotices(dmPeerIds);
+  const { data: peerVerifications } = usePeerVerifications();
+  const queryClient = useQueryClient();
+  // A new notice means a key was just re-pinned and `verified` cleared: refresh the badge.
+  const newestNoticeId = keyChangeNotices?.length
+    ? keyChangeNotices[keyChangeNotices.length - 1].id
+    : null;
+  useEffect(() => {
+    if (newestNoticeId === null) {
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["safety", "list"] });
+  }, [newestNoticeId, queryClient]);
+  const onePeer = dmPeers.length === 1 ? dmPeers[0] : null;
+  const peerVerified =
+    !!onePeer &&
+    (peerVerifications ?? []).some(
+      (v) => v.peer_user_id === onePeer.user_id && v.verified,
+    );
+  const peerLabel = useCallback(
+    (userId: string) => {
+      const p = dmPeers.find((m) => m.user_id === userId);
+      return p?.username ? `@${p.username}` : undefined;
+    },
+    [dmPeers],
+  );
   const sendMessage = useSendMessage(conversationId, kind);
   const retryMessage = useRetryMessage(conversationId, kind);
   const discardUnsent = useDiscardUnsent(conversationId, kind);
@@ -320,7 +362,34 @@ function TextChat(props: ChatViewProps = {}) {
     const out: ChatListItem[] = [];
     let lastKey = "";
     let prev: Message | null = null;
+    // Safety-number changes (#1605) at the time they were detected; a system line breaks a group.
+    const placed = placeKeyChangeNotices(
+      keyChangeNotices ?? [],
+      chrono.length ? chrono[0].created_at : null,
+      chrono.length ? chrono[chrono.length - 1].created_at : null,
+      !!hasNextPage,
+      false,
+    );
+    let next = 0;
+    const emitNotice = (n: (typeof placed)[number]) => {
+      const k = dayKey(n.at);
+      if (k !== lastKey) {
+        out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(n.at) });
+        lastKey = k;
+      }
+      out.push({
+        type: "keyChange",
+        key: `key-change-${n.notice.id}`,
+        notice: n.notice,
+        at: n.at,
+      });
+      prev = null;
+    };
     for (const m of chrono) {
+      while (next < placed.length && placed[next].at < m.created_at) {
+        emitNotice(placed[next]);
+        next += 1;
+      }
       const k = dayKey(m.created_at);
       if (k !== lastKey) {
         out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(m.created_at) });
@@ -336,9 +405,13 @@ function TextChat(props: ChatViewProps = {}) {
       out.push({ type: "msg", key: m.id, message: m, continued });
       prev = m;
     }
+    while (next < placed.length) {
+      emitNotice(placed[next]);
+      next += 1;
+    }
     out.reverse();
     return out;
-  }, [messages]);
+  }, [messages, keyChangeNotices, hasNextPage]);
 
   const repliedTo = useMemo(() => replyTargets(messages), [messages]);
 
@@ -520,6 +593,25 @@ function TextChat(props: ChatViewProps = {}) {
       if (item.type === "sep") {
         return <DaySeparator label={item.label} />;
       }
+      if (item.type === "keyChange") {
+        const label = peerLabel(item.notice.peer_user_id);
+        return (
+          <KeyChangeNoticeRow
+            noticeId={item.notice.id}
+            peerLabel={label}
+            time={timeLabel(item.at)}
+            onVerify={() =>
+              router.push({
+                pathname: "/dm/safety",
+                params: {
+                  peerId: item.notice.peer_user_id,
+                  ...(label ? { name: label } : {}),
+                },
+              })
+            }
+          />
+        );
+      }
       const m = item.message;
       if (m.undecryptable) {
         return (
@@ -626,6 +718,7 @@ function TextChat(props: ChatViewProps = {}) {
       retryMessage,
       discardUnsent,
       newMemberJoinMs,
+      peerLabel,
       t,
     ],
   );
@@ -640,6 +733,15 @@ function TextChat(props: ChatViewProps = {}) {
         titleIcon={
           kind === "channel" ? (
             <Icon.hash size={15} color={semantic.dim} />
+          ) : peerVerified ? (
+            // Only while `verified = 1`: a key change clears it and the timeline says why (#1605).
+            <View
+              testID="icon-dm-verified"
+              accessible
+              accessibilityLabel={t("dms:list.verified")}
+            >
+              <Icon.shieldCheck size={15} color={semantic.accent} />
+            </View>
           ) : undefined
         }
         // Each action only opens a page or sheet: touch-down (#1529).

@@ -308,7 +308,7 @@ For the audit: a KeyPackage whose leaf the claimed account did not certify is ne
 
 Cross-signing protects the tree against rogue devices under an unchanged account key. It does not help if the server swaps the account key itself. Two mechanisms cover that:
 
-- **TOFU pinning.** `batch_check_and_pin_account_keys` (`pollis-core/src/commands/safety.rs`) runs on every inbound DM message and every group reconcile, before roster devices are added. It pins first-seen `account_id_pub` values and emits a `KeyChanged` event on mismatch, which shows an inline banner in every conversation with that peer and clears their verified shield. The committer's leaf check (§5.3) uses the pin as its root.
+- **TOFU pinning.** `batch_check_and_pin_account_keys` (`pollis-core/src/commands/safety.rs`) runs on every inbound DM message and every group reconcile, before roster devices are added. It pins first-seen `account_id_pub` values and on mismatch clears their verified shield and records a durable notice in the local DB (#1605), shown as a "safety number changed" line in every DM with that peer, whichever path (app or headless notification fetch) saw the change. The committer's leaf check (§5.3) uses the pin as its root.
 - **Safety numbers.** A 60-digit number (twelve 5-digit blocks, SHA-512-derived from both parties' account keys, plus a QR payload) for out-of-band comparison. Verification is per user and applies everywhere that user appears.
 - The account-key transparency log (§6.9) makes the full key history of every user publicly checkable, not just the keys this device has seen.
 

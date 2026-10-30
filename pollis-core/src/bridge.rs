@@ -1268,6 +1268,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
         "list_peer_verifications" => ok(safety::list_peer_verifications(&state()?).await?),
+        "list_key_change_notices" => {
+            let peer_user_ids: Vec<String> = arg(&args, "peerUserIds")?;
+            ok(safety::list_key_change_notices(peer_user_ids, &state()?).await?)
+        }
 
         "list_dm_requests" => {
             let user_id: String = arg(&args, "userId")?;

@@ -1431,7 +1431,7 @@ ciphertext — see [`read_cursor_sync`](#read_cursor_sync-migration-000018-844).
 - `identity_version` INTEGER NOT NULL
 - `verified` INTEGER NOT NULL DEFAULT 0 _(1 once the user confirms the safety number)_
 - `first_seen_at`, `updated_at` TEXT NOT NULL DEFAULT now
-- **Why it is local.** This is the pin that makes a malicious Turso write to `users.account_id_pub` *detectable*. Storing it remotely would let the same attacker rewrite the evidence. Written by `batch_check_and_pin_account_keys` (`commands/safety.rs`) on every group reconcile and DM ingest; a mismatch emits a `KeyChanged` realtime event and clears `verified`.
+- **Why it is local.** This is the pin that makes a malicious Turso write to `users.account_id_pub` *detectable*. Storing it remotely would let the same attacker rewrite the evidence. Written by `batch_check_and_pin_account_keys` (`commands/safety.rs`) on every group reconcile and DM ingest; a mismatch clears `verified`, and the `contact_verification_key_change` trigger records a `key_change_notice` row (#1605; see safety.md).
 - The pin is per **user**, not per conversation, so verifying a peer once shields them everywhere they appear.
 
 ### mls_generation _(suite-migration lineage, #454 P4)_

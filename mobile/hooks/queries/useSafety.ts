@@ -68,6 +68,35 @@ export function useSetContactVerified() {
   });
 }
 
+/** One recorded change of a peer's pinned key (#1605); mirrors `KeyChangeNotice` in safety.rs. */
+export interface KeyChangeNotice {
+  id: number;
+  peer_user_id: string;
+  /** UTC ISO 8601 with milliseconds: where the line sits in the timeline. */
+  detected_at: string;
+}
+
+export const keyChangeNoticeKeys = {
+  all: ["safety", "key-change-notices"] as const,
+  forPeers: (peerUserIds: string[]) =>
+    ["safety", "key-change-notices", [...peerUserIds].sort().join(",")] as const,
+};
+
+/** A DM's safety-number change notices, whichever path recorded them (app, iOS extension, Android FCM). Local only. */
+export function useKeyChangeNotices(peerUserIds: string[]) {
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useQuery({
+    queryKey: keyChangeNoticeKeys.forPeers(peerUserIds),
+    queryFn: async (): Promise<KeyChangeNotice[]> => {
+      return await invoke<KeyChangeNotice[]>("list_key_change_notices", {
+        peerUserIds,
+      });
+    },
+    enabled: !!currentUser && peerUserIds.length > 0,
+    staleTime: 1000 * 30,
+  });
+}
+
 export function usePeerVerifications() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({

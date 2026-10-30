@@ -319,13 +319,6 @@
     "eventsEmptyFiltered": "No events of this type yet.",
     "eventsLoadMore": "Load older events"
   },
-  "keyChange": {
-    "heading": "Safety number changed",
-    "body": "— {{name}}'s identity key is different from what was pinned. Verify out-of-band before trusting this conversation.",
-    "defaultName": "this contact",
-    "verifyButton": "Verify",
-    "dismissLabel": "Dismiss safety number warning"
-  },
   "changePin": {
     "title": "Change PIN",
     "headingOld": "Current PIN",

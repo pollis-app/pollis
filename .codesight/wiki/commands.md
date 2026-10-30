@@ -748,7 +748,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `save_media_to_path`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
 - **`staging`** — `discard_staged_attachment`, `stage_attachment`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
-- **`safety`** — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
+- **`safety`** — `get_safety_number`, `list_key_change_notices`, `list_peer_verifications`, `set_contact_verified`
 - **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
 - **`sfx`** — `play_sfx`, `start_ring`, `stop_ring`
 - **`terminal`** — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
@@ -788,7 +788,7 @@ than hand-edit.
 
 **`device_link`** (11) — `accept_device_offer`, `approve_device_link`, `await_device_link`, `await_device_offer`, `cancel_device_link`, `cancel_device_offer`, `claim_device_link`, `create_device_link`, `create_device_offer`, `finish_device_offer`, `poll_device_link`
 
-**`safety`** (3) — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
+**`safety`** (4) — `get_safety_number`, `list_key_change_notices`, `list_peer_verifications`, `set_contact_verified`
 
 **`transparency`** (3) — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 

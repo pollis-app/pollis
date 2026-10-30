@@ -304,13 +304,6 @@
     "eventsEmptyFiltered": "Todavía no hay eventos de este tipo.",
     "eventsLoadMore": "Cargar eventos anteriores"
   },
-  "keyChange": {
-    "heading": "El número de seguridad ha cambiado",
-    "body": "— la clave de identidad de {{name}} es distinta de la que estaba fijada. Verifícala por otro canal antes de confiar en esta conversación.",
-    "defaultName": "este contacto",
-    "verifyButton": "Verificar",
-    "dismissLabel": "Descartar el aviso del número de seguridad"
-  },
   "changePin": {
     "title": "Cambiar el PIN",
     "headingOld": "PIN actual",
