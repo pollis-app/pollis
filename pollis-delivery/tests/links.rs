@@ -100,11 +100,16 @@ async fn a_link_session_cannot_reach_the_otp_only_gates() {
     let link_session = body["session_token"].as_str().unwrap().to_string();
     let otp_session = state.sessions.mint(USER, "alice@x.com", PHONE, 600, pollis_delivery::util::now_unix());
 
-    for path in ["/v1/account/rotate-identity", "/v1/account/reset-recover", "/v1/auth/establish-identity"] {
+    for path in [
+        "/v1/account/rotate-identity",
+        "/v1/account/reset-recover",
+        "/v1/auth/establish-identity",
+        "/v1/read/account-status",
+    ] {
         let (link_status, _) = send(&state, path, serde_json::json!({}), Some(&link_session)).await;
         assert_eq!(link_status, StatusCode::UNAUTHORIZED, "{path}: a device-link session must be refused at the gate");
         let (otp_status, _) = send(&state, path, serde_json::json!({}), Some(&otp_session)).await;
-        assert_ne!(otp_status, StatusCode::UNAUTHORIZED, "{path}: an OTP session passes the gate (and then fails on the empty body)");
+        assert_ne!(otp_status, StatusCode::UNAUTHORIZED, "{path}: an OTP session passes the gate");
     }
 }
 
@@ -205,7 +210,12 @@ async fn an_offer_yields_one_enrollment_only_session_after_it_is_accepted() {
     let (again, _) = poll(&state, "offer-a", &secret).await;
     assert_eq!(again, StatusCode::UNAUTHORIZED);
 
-    for path in ["/v1/account/rotate-identity", "/v1/account/reset-recover", "/v1/auth/establish-identity"] {
+    for path in [
+        "/v1/account/rotate-identity",
+        "/v1/account/reset-recover",
+        "/v1/auth/establish-identity",
+        "/v1/read/account-status",
+    ] {
         let (status, _) = send(&state, path, serde_json::json!({}), Some(&session)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}: a device-offer session must be refused at the gate");
     }

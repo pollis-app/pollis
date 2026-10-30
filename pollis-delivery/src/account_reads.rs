@@ -6,6 +6,7 @@
 //!     when no credential of any kind exists (#987 §6.5).
 //!   * [`enrollment`] is gated on POSSESSION OF `request_id` (a session would expire first).
 //!   * [`recovery_blob`] accepts an OTP SESSION ONLY (no device yet).
+//!   * [`account_status`] also accepts an OTP session (a fresh device's soft reset, #1616).
 //!
 //! Everything here supplies INPUTS; cryptographic judgements stay on the client.
 
@@ -18,7 +19,7 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::reads::authed_user;
+use crate::reads::{authed_user, authed_user_or_session};
 use crate::writes::{bad_request, ok_response, RawRequest};
 use crate::AppState;
 use crate::util::{BIND_CHUNK, b64, placeholders};
@@ -545,6 +546,10 @@ pub async fn recovery_blob(
 ///
 /// Self-scoped by construction: the id in the body is only the no-auth path's
 /// input and a mismatch is a 403, because `email` is on this row.
+///
+/// **Device-signed or OTP session** (#1616): a fresh device's soft reset reads
+/// it before it has a device to sign with. The session already proves the
+/// account's email, so the row it unlocks discloses nothing new.
 pub async fn account_status(
     State(state): State<AppState>,
     req: RawRequest,
@@ -553,7 +558,7 @@ pub async fn account_status(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
+    let who = match authed_user_or_session(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };

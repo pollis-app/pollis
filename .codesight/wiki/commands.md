@@ -73,7 +73,7 @@ Four properties are load-bearing and easy to lose in a refactor:
    silently inverts one of them — and HTTP makes those failures common where a
    libsql read failure was rare.
 
-Three reads run with no device signature, because the caller provably has no
+Four reads can run with no device signature, because the caller provably has no
 credential at that moment (#987 §6.5):
 
 | endpoint | credential | why |
@@ -81,6 +81,7 @@ credential at that moment (#987 §6.5):
 | `POST /v1/auth/account-probe` | none (IP rate-limited, tightest tier) | runs pre-PIN at every launch: local DB closed, no signer, no `device_id`, no OTP session. Answers `{ exists, has_identity }` for a 128-bit ULID the caller read out of its own `accounts.json`. |
 | `POST /v1/read/enrollment` | possession of `request_id` | the enrolling device has no key (that is what it is enrolling for) and its OTP session is *guaranteed* expired — both TTLs are 600s and the session is minted at `verify-otp`, strictly before the request exists. The payload is sealed to an ephemeral X25519 key, so the id confers a status and an unopenable blob. Asking for the approval columns (`verification_code`) requires a full device signature. |
 | `POST /v1/read/recovery-blob` | OTP session | the caller is recovering an account on a device with nothing. Every fetch writes a `recovery_blob_fetched` security event. |
+| `POST /v1/read/account-status` | device signature **or** OTP session (#1616) | normally device-signed; a fresh device's soft reset (`reset_identity_and_recover`) reads its own row with the OTP session before it can sign. A request carrying a signature header stands on that signature; a device-link session is refused; a body naming another account is a 403. |
 
 ### Every DS write body must NAME ITS ACTOR (#875)
 
@@ -575,7 +576,7 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 
   The approving UI is `EnrollmentApprovalPrompt` (desktop) and the pending card on `self/security` (mobile): an eight-character field, approve disabled until it is full, submitted verbatim, cleared on a mismatch. The input rule — upper-case, drop anything outside Rust's Crockford-style alphabet, never map a lookalike (`O`→`0` would let a mis-read code compare equal), truncate to eight — is `frontend/src/utils/enrollmentSas.ts` and its mobile twin `mobile/lib/enrollmentSas.ts`, each pinned against the Rust constants by a unit test. Proofs: `e2e/enrollment-approval.spec.ts` (desktop, five specs; four of them fail if the code is pre-filled) and `mobile/.maestro/flows/enrollment-approval.yaml` (two-client).
 - `recover_with_secret_key(user_id, secret_key)` — same handoff pattern as the approval path.
-- `reset_identity_and_recover(user_id, email)` — soft recovery; `reset_identity` populates `AppState.unlock` with the new keypair before this command's local-DB cleanup runs.
+- `reset_identity_and_recover(user_id, email)` — soft recovery, callable from a fresh not-yet-enrolled device (every DS call on its path is device-signed when it can sign, OTP-session when it cannot, #1616); `reset_identity` populates `AppState.unlock` with the new keypair before this command's local-DB cleanup runs.
 - `finalize_device_enrollment(user_id)` — call after `set_pin` completes. Publishes the device cert + a fresh MLS key package, then external-joins every existing group / DM the device isn't in yet. Idempotent for fresh signup.
 - `list_user_devices(user_id)` → `DeviceInfo[]`
 - `revoke_device(user_id, device_id)` — tombstones the device (`POST /v1/devices/revoke`), writes the `device_revoked` security event, sends the `device_revoked` inbox nudge, and **returns**. Removing its leaf from every group and DM tree (one reconcile commit per conversation) runs detached afterwards (`spawn_revoked_leaf_removal`), four conversations at a time, and revokes coalesce: one made while a pass runs only queues one more pass, and each pass removes every device revoked by then, so clearing many stale devices costs about two passes. The tombstone is what cuts the device off, since the DS refuses everything it signs from then on, and every member's MLS sweep evicts a revoked leaf anyway. It used to wait for all of those commits, which held "Revoking…" for minutes on a slow link and made clearing several stale devices impractical.
