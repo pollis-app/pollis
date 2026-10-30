@@ -102,6 +102,46 @@ impl Outcome {
     }
 }
 
+/// The fetch for a push that arrives while the app itself runs in this process and is unlocked
+/// (Android's FCM service lives in the app's process, #1610). `None` when it is not: the caller
+/// then runs the headless [`run`].
+///
+/// It works on the app's own state: its open database, its MLS locks and its share of the
+/// cross-process lock, the same as any of the app's ingests. The headless path would take the
+/// EXCLUSIVE `state.lock` for its whole run instead, and the app's own ingest of the same
+/// message, started by the realtime wake-up that arrives with the push, waited behind it for
+/// seconds. Nothing is opened or closed here, and no escrowed key is read.
+pub async fn run_in_app(app: &Arc<AppState>, handle: Option<&str>, budget: Duration) -> Option<Outcome> {
+    let started = Instant::now();
+    let user_id = app.unlock.lock().await.as_ref()?.user_id.clone();
+    let (mode, floor) = {
+        let guard = app.local_db.lock().await;
+        let db = guard.as_ref()?;
+        let floor: i64 = db
+            .conn()
+            .query_row("SELECT COALESCE(MAX(rowid), 0) FROM message", [], |r| r.get(0))
+            .unwrap_or(0);
+        (escrow::read_mode(db.conn()), floor)
+    };
+    // "Nothing" means nothing: no fetch, no decrypt, no name. The app's realtime path stores it.
+    if mode == NotificationContent::None {
+        return Some(Outcome::Ok {
+            mode,
+            items: Vec::new(),
+        });
+    }
+    let deadline = started + budget;
+    let result = tokio::time::timeout_at(deadline.into(), ingest_for_handle(app, &user_id, handle)).await;
+    Some(match result {
+        Ok(Ok(target)) => finish(app, &user_id, mode, floor, target, deadline, None).await,
+        Ok(Err(reason)) => {
+            crate::diag!("[notify] in-app ingest failed: {reason:?}");
+            finish(app, &user_id, mode, floor, None, deadline, Some(reason)).await
+        }
+        Err(_) => finish(app, &user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await,
+    })
+}
+
 /// Run one fetch. Never panics on its own account; every failure is a [`Reason`].
 pub async fn run(p: Params) -> Outcome {
     let started = Instant::now();

@@ -368,6 +368,16 @@ Android FCM handler both call one plain C function in `pollis-core`
   (`mention`), the same rule `push_recipients` uses. Failures are reasons
   (`not_logged_in|lock_busy|timeout|network|decrypt|internal`); the host then
   shows the generic text.
+- **In the app's own process (Android, #1610).** The FCM service runs inside
+  the app's process. When the app has initialised there and is unlocked,
+  `pollis_notify_fetch` runs `notify::fetch::run_in_app` instead: the same
+  resolve, ingest and preview, on the app's own `AppState` (its open database,
+  its MLS locks, its share of `state.lock`), with no escrowed key read and
+  nothing opened or closed. The headless path takes `state.lock` exclusively
+  for its whole run, and the app's own ingest of the same message (started by
+  the realtime wake-up that arrives with the push) used to wait seconds behind
+  it. A locked app, or no app in the process, falls back to the headless path.
+  Test: `rich_push::an_in_process_fetch_shares_the_apps_lock_instead_of_excluding_it`.
 - **Setting.** `get_notification_content` / `set_notification_content {mode}`
   (`full|name|none`, `ui_state` key `notification_content`, default `full`),
   bridge arms only (mobile-only).

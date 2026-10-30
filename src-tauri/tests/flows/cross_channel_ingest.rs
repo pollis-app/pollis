@@ -180,3 +180,59 @@ async fn the_senders_own_phone_catches_up_through_a_faulty_resume() {
     assert_reads_all(&bob, "bob", &x, &want_x).await;
     assert_reads_all(&bob, "bob", &y, &want_y).await;
 }
+
+/// #1610: the store-write feed mobile waits on names every conversation an ingest stored into,
+/// including a sibling channel it was not asked about (one MLS group backs both), so the app
+/// re-reads that one too; and a parked wait is woken by the ingest, not by any timer.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_persisted_feed_names_each_conversation_an_ingest_stored_into() {
+    use pollis_core::commands::messages::persisted;
+    wipe().await;
+
+    let mut desk = TestClient::new().await;
+    desk.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let group = desk.create_group("Feed").await;
+    let x = desk.general_channel_id(&group).await;
+    let y = desk.create_channel(&group, "other").await;
+    desk.invite(&group, &bob_p.username).await;
+    let invite = bob.first_pending_invite().await.expect("invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite).await;
+    bob.poll().await;
+    desk.process_commits_for(&x).await;
+    ingest(&bob, &x).await;
+
+    desk.send_channel_message(&x, "in x").await;
+    desk.send_channel_message(&y, "in y").await;
+
+    // Parked before the ingest starts; only the ingest's store can wake it. Other tests in this
+    // binary share the process-wide feed, so it waits until both of OUR channels were named.
+    let after = persisted::position();
+    let waiter = {
+        let (x, y) = (x.clone(), y.clone());
+        tokio::spawn(async move {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut at = after;
+            while !(seen.contains(&x) && seen.contains(&y)) {
+                let got = persisted::wait(at).await;
+                at = got.seq;
+                seen.extend(got.conversation_ids);
+            }
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!waiter.is_finished(), "woken with nothing stored");
+
+    // Bob ingests only x; y's message arrives in the same pass.
+    ingest(&bob, &x).await;
+    tokio::time::timeout(std::time::Duration::from_secs(10), waiter)
+        .await
+        .expect("the feed must name x and its sibling y")
+        .expect("waiter");
+    assert_reads_all(&bob, "bob", &y, &["in y".to_string()]).await;
+}

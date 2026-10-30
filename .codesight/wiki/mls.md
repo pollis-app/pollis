@@ -1082,6 +1082,16 @@ query-SHAPE changes only — no cache, no new trust:
 - **DM TOFU re-check** (`messages/ingest.rs`, `dm.rs`): one Turso query per peer
   on EVERY ingest pass → `safety::batch_check_and_pin_account_keys`, which
   already existed and was already used by `mls::reconcile`.
+- **Round trips before the store write** (`messages/ingest.rs`, #1610): a DM
+  ingest used to run membership lookup → welcome drain → TOFU re-check →
+  envelope fetch one after another (about 1.2 s against the dev DS before
+  anything was stored). Now two chains run side by side: lookup → TOFU re-check,
+  and welcome drain → catch-up (which checks membership itself). A channel's
+  group lookup runs alongside the welcome drain, and its result is kept in
+  memory (`CHANNEL_GROUPS`: a channel never changes group), so a later ingest
+  of that channel skips it. Watermark posts and delivery receipts go out
+  together after the replay. The welcome drain still precedes the catch-up, so
+  a just-joined device has its group first.
 - **Added-leaf verification** (`mls/device.rs::IdentityDirectory`): the cert
   rows for every user the batch's add hints name arrive WITH the commit batch
   (`added_identities`), one directory per replay pass, instead of one query per

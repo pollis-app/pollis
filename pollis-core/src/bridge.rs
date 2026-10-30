@@ -363,6 +363,11 @@ pub(crate) fn is_initialized() -> bool {
     APP_STATE.get().is_some()
 }
 
+/// The app's state, if `init_pollis` has run in this process (#1610: Android's in-process fetch).
+pub(crate) fn app_state() -> Option<Arc<AppState>> {
+    APP_STATE.get().cloned()
+}
+
 fn state() -> Result<Arc<AppState>, BridgeError> {
     APP_STATE.get().cloned().ok_or_else(|| {
         BridgeError::Bridge(
@@ -433,6 +438,12 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "get_diagnostics" => {
             let app_version: Option<String> = arg_opt(&args, "appVersion")?;
             ok(crate::commands::diagnostics::get_diagnostics(app_version))
+        }
+
+        // #1610: parks until the ingest stores rows, then names the conversations (no polling).
+        "wait_persisted" => {
+            let after: Option<u64> = arg_opt(&args, "after")?;
+            ok(messages::persisted::wait(after.unwrap_or(0)).await)
         }
 
         "get_session" => ok(auth::get_session(&state()?).await?),

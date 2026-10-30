@@ -9,6 +9,7 @@ pub mod fuzz_surface;
 mod ingest;
 pub(crate) mod loss;
 mod outbox;
+pub mod persisted;
 mod reactions;
 mod read;
 mod read_state;

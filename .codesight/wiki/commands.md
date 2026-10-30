@@ -558,6 +558,8 @@ Only three MLS commands are registered (`src-tauri/src/commands/mls.rs`):
 - `poll_mls_welcomes(user_id)`
 - `catch_up_all_mls_groups(user_id)`
 
+Mobile-only bridge arm (`pollis-core/src/bridge.rs`, no Tauri shim): `wait_persisted({ after })` → `{ seq, conversationIds }` (#1610). Parks until the ingest stores rows (`commands/messages/persisted.rs`: noted per epoch run mid-replay, before the commit fetch, backstops, watermark and receipts that still follow, and again after tombstones and loss placeholders), then names the conversations written since `after`. `mobile/hooks/usePersistedFeed.ts` keeps one call parked while signed in and re-reads those conversations' cached pages, on screen or not, so a message shows when it is stored, whichever path stored it (the conversation's ingest, a catch-up sweep, Android's in-process push fetch). Event-driven: one outstanding call, no timer. Desktop has realtime events and re-reads after each ingest returns, so it has no shim.
+
 Mobile-only bridge arm (`pollis-core/src/bridge.rs`, no Tauri shim — desktop runs the full sweep above): `reconcile_backstop_all(userId)` → `{ checked, reconciled }` (#1571). The sweep's reconcile backstop for every conversation without its catch-up, run by `useInboxRealtime` after the landing and resume ingest pass (`mobile/lib/mlsBackstop.ts`), so a device missing from a conversation's tree is re-added on an all-mobile roster too.
 
 Corrected 2026-08-03 (#714):
