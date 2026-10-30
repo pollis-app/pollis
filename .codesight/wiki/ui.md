@@ -673,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**173 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**174 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -798,7 +798,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 
-### `components/ui` (30)
+### `components/ui` (31)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -830,6 +830,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`
 - **TextArea** — props: label, value, onChange, placeholder, description, error, disabled, rows, className, id, onKeyDown — `frontend/src/components/ui/TextArea.tsx`
 - **TextInput** — props: label, ariaLabel, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
+- **ThemedQr** — props: value, size, title — `frontend/src/components/ui/ThemedQr.tsx`
 
 ### `components/Voice` (8)
 
