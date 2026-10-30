@@ -78,7 +78,7 @@ fn attachment_envelope(content: &str) -> Option<(String, BodyKey)> {
     let key = if sensitive {
         BodyKey::Sensitive
     } else {
-        let ct = list[0].get("ct").and_then(|v| v.as_str()).unwrap_or_default();
+        let ct = list.first().and_then(|a| a.get("ct")).and_then(|v| v.as_str()).unwrap_or_default();
         if ct.starts_with("image/") {
             BodyKey::Image
         } else if ct.starts_with("video/") {

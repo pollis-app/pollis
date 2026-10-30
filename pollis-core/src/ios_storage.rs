@@ -34,14 +34,19 @@ pub fn prepare(dir: &Path) -> std::io::Result<()> {
 /// The app's side of the #1599 relocation: on the first launch with an override, move the old
 /// `Library/Application Support/pollis` into it, then [`prepare`] it.
 ///
-/// Runs only when the override directory holds nothing yet and the old one exists. Same volume
-/// (the usual case: the app and App Group containers share the data partition) is one atomic
-/// `rename`. Otherwise the tree is copied into a sibling staging directory, fsynced, and renamed
-/// into place, and only then is the old tree removed, so an interruption leaves the old
-/// directory whole and the next launch starts over.
+/// The rules are [`crate::notify::host::migrate_dir`]'s. If the move fails, this launch stays
+/// on the old directory (the override is pointed back at it, which keeps the keystore
+/// namespace) and the next launch tries again; init never fails on a move.
 pub fn migrate_into_override(new_dir: &Path) -> std::io::Result<()> {
     let old_dir = data_dir();
-    crate::notify::host::migrate_dir(&old_dir, new_dir)?;
+    if let Err(e) = crate::notify::host::migrate_dir(&old_dir, new_dir) {
+        crate::diag!(
+            "[storage] could not move the data directory to the App Group ({e}); \
+             staying on the old one for this launch"
+        );
+        crate::db::local::set_data_dir_override(&old_dir);
+        return prepare(&old_dir);
+    }
     prepare(new_dir)
 }
 

@@ -69,6 +69,45 @@ pub unsafe extern "C" fn pollis_set_keychain_access_group(group: *const c_char) 
     let _ = group;
 }
 
+/// The app is entering the background: call SYNCHRONOUSLY in `applicationDidEnterBackground`,
+/// before dispatching anything, and pass the result to [`pollis_app_will_suspend`].
+#[no_mangle]
+pub extern "C" fn pollis_app_suspend_ticket() -> u64 {
+    super::lock::suspend::ticket()
+}
+
+/// Off the main thread, inside a `beginBackgroundTask` assertion (it blocks up to
+/// `timeout_ms`): stop new holds of `state.lock`, wait for the open ones, then checkpoint and
+/// close the app's database connection, so the suspended app holds no lock in the App Group
+/// container (`0xdead10cc`). Does nothing if [`pollis_app_did_resume`] ran since `ticket`.
+/// Returns true when nothing is held.
+#[no_mangle]
+pub extern "C" fn pollis_app_will_suspend(ticket: u64, timeout_ms: u32) -> bool {
+    std::panic::catch_unwind(|| {
+        let drained =
+            super::lock::suspend::begin(ticket, Duration::from_millis(u64::from(timeout_ms)));
+        let closed = crate::bridge::quiesce_for_suspend(ticket);
+        drained && closed
+    })
+    .unwrap_or(false)
+}
+
+/// The background task's expiration handler: release `state.lock` and close the database
+/// now, whatever is still in flight, within about a second, then the host ends the task.
+/// Does nothing if [`pollis_app_did_resume`] ran since `ticket`.
+#[no_mangle]
+pub extern "C" fn pollis_app_suspend_expired(ticket: u64) {
+    let _ = std::panic::catch_unwind(|| crate::bridge::force_release_for_suspend(ticket));
+}
+
+/// The app is back in the foreground: holds may start again at once, and the database
+/// reopens off the calling thread (or on the next command, whichever is first). Never blocks;
+/// call it on the main thread.
+#[no_mangle]
+pub extern "C" fn pollis_app_did_resume() {
+    let _ = std::panic::catch_unwind(crate::bridge::resume_after_suspend);
+}
+
 fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) -> String {
     let Some(data_dir) = data_dir.filter(|d| !d.is_empty()) else {
         return INTERNAL.to_string();
@@ -95,7 +134,7 @@ fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) 
         config,
         handle,
         budget,
-        #[cfg(feature = "test-harness")]
+        #[cfg(any(test, feature = "test-harness"))]
         local_dir: None,
     };
     // The bridge's big-stack workers: an extension thread's stack is far too small for
@@ -116,7 +155,7 @@ unsafe fn opt_str(p: *const c_char) -> Option<String> {
 
 fn to_c(s: String) -> *mut c_char {
     CString::new(s)
-        .unwrap_or_else(|_| CString::new(INTERNAL).expect("no NUL in a literal"))
+        .unwrap_or_else(|_| c"{\"ok\":false,\"reason\":\"internal\"}".to_owned())
         .into_raw()
 }
 
