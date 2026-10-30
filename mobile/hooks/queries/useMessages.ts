@@ -15,6 +15,7 @@ import { useObserver } from "mobx-react-lite";
 import type { MessageAttachment } from "../../types";
 import { searchQueryKeys } from "./useSearch";
 import { refreshUnread } from "./useUnread";
+import { keyChangeNoticeKeys } from "./useSafety";
 import { aliasAttachment } from "../../lib/media/viewer";
 import {
   outgoingAttachments,
@@ -718,6 +719,8 @@ export function useIngestConversation() {
         });
         queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
         queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+        // Any ingest may have re-pinned a changed key (#1605); the notices are local, so cheap.
+        queryClient.invalidateQueries({ queryKey: keyChangeNoticeKeys.all });
         if (opts.refreshUnread !== false) {
           refreshUnread(queryClient);
         }

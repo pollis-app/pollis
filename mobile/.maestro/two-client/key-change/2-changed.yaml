@@ -1,0 +1,102 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# SAFETY-NUMBER CHANGE (#1605), part 2 of 2. The peer recovered its account on
+# a new device (a new account key under the same user id: a safety-number
+# change) and opened a new DM, ${MAESTRO_NEW_DM}. Accepting and opening it
+# ingests the DM, which re-pins the changed key: the timeline must carry ONE
+# "Your safety number with @peer changed. Verify it" line, the header must lose
+# its verified shield (verified = 0), and the line must open "You & @peer"
+# reading "Mark verified". The line is durable: it is still there, once, after
+# a cold start.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-requests"
+    timeout: 90000
+- tapOn:
+    id: "row-dm-requests"
+- extendedWaitUntil:
+    visible:
+      id: "btn-accept-request-${MAESTRO_NEW_DM}"
+    timeout: 30000
+- tapOn:
+    id: "btn-accept-request-${MAESTRO_NEW_DM}"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-accept-request-${MAESTRO_NEW_DM}"
+    timeout: 30000
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-${MAESTRO_NEW_DM}"
+    timeout: 30000
+- tapOn:
+    id: "row-dm-${MAESTRO_NEW_DM}"
+
+- extendedWaitUntil:
+    visible:
+      id: "row-key-change-.*"
+      text: "Your safety number with @${MAESTRO_PEER_HANDLE} changed\\. Verify it.*"
+    timeout: 60000
+- assertNotVisible:
+    id: "row-key-change-.*"
+    index: 1
+- assertNotVisible:
+    id: "icon-dm-verified"
+- takeScreenshot: key-change-02-line
+
+- tapOn:
+    id: "row-key-change-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-dm-safety"
+    timeout: 15000
+- assertVisible:
+    text: "You & @${MAESTRO_PEER_HANDLE}"
+- extendedWaitUntil:
+    visible:
+      id: "btn-verify"
+      text: "Mark verified"
+    timeout: 20000
+- takeScreenshot: key-change-03-safety
+- tapOn:
+    id: "btn-back"
+
+# Durable: a cold start re-reads it from the local DB, still exactly once.
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-${MAESTRO_NEW_DM}"
+    timeout: 30000
+- tapOn:
+    id: "row-dm-${MAESTRO_NEW_DM}"
+- extendedWaitUntil:
+    visible:
+      id: "row-key-change-.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "row-key-change-.*"
+    index: 1
+- takeScreenshot: key-change-04-after-relaunch
