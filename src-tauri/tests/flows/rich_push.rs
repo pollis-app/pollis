@@ -227,6 +227,125 @@ async fn the_extension_cannot_enter_while_the_app_is_mid_mls_step() {
         .any(|(_, c)| c == "sent while bob was mid-commit"));
 }
 
+/// #1610: Android's FCM service runs inside the app's process. While the app is unlocked there,
+/// a push is fetched on the app's own state, sharing its hold on `state.lock` like any of its
+/// ingests. The headless path would take the lock exclusively, so the app's own ingest of the
+/// same message (started by the realtime wake-up that comes with the push) waited seconds
+/// behind it, and the message reached the open chat that much later.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_in_process_fetch_shares_the_apps_lock_instead_of_excluding_it() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+
+    alice.send_channel_message(&dm, "while the app is mid-step").await;
+    let handle = handle_for(&bob_p.id, &dm, "dm").await;
+
+    // The app is inside an MLS section: it holds its share of the cross-process lock.
+    bob.activate();
+    let app_section = bob.state.cross_process_lock().await.expect("the app's share");
+
+    // A headless fetch is locked out until the app's section ends...
+    let out = headless(&bob, Some(handle.clone()), Duration::from_millis(1500)).await;
+    assert_eq!(out, Outcome::Failed(Reason::LockBusy));
+
+    // ...but the in-process fetch runs alongside it, and stores and shows the message.
+    bob.activate();
+    let out = fetch::run_in_app(&bob.state, Some(&handle), Duration::from_secs(20))
+        .await
+        .expect("the app is unlocked in this process");
+    let shown = items(&out);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(shown[0].body, "while the app is mid-step");
+    assert_eq!(shown[0].sender_name, alice_p.username);
+    drop(app_section);
+
+    // Stored once, and the app reads it from its own store.
+    let view = contents(&bob.fetch_dm_messages(&dm).await);
+    assert_eq!(
+        view.iter().filter(|(_, c)| c == "while the app is mid-step").count(),
+        1,
+        "{view:?}"
+    );
+
+    // A locked app has no state to share: the host falls back to the headless fetch.
+    bob.activate();
+    pollis_core::commands::pin::lock(&bob.state).await.expect("lock");
+    assert!(fetch::run_in_app(&bob.state, Some(&handle), Duration::from_secs(5))
+        .await
+        .is_none());
+}
+
+/// #1610: the in-process fetch and the app's own ingest of the same conversation, truly at the
+/// same time (the push and its realtime wake-up arrive together), several rounds with alice
+/// sending between them. Every message is stored exactly once, none is a placeholder, nothing is
+/// recorded as lost (the harness asserts that on drop), and both directions still decrypt after,
+/// so neither path rolled the shared MLS state back under the other.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_in_process_fetch_and_the_apps_ingest_race_on_one_conversation() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+
+    let mut sent: Vec<String> = Vec::new();
+    for round in 0..4 {
+        for i in 0..3 {
+            let text = format!("race r{round} m{i}");
+            alice.send_channel_message(&dm, &text).await;
+            sent.push(text);
+        }
+        let handle = handle_for(&bob_p.id, &dm, "dm").await;
+        bob.activate();
+        let app_ingest = bob.invoke_json(
+            "ingest_dm_envelopes",
+            serde_json::json!({ "userId": bob_p.id, "dmChannelId": dm }),
+        );
+        let in_app = fetch::run_in_app(&bob.state, Some(&handle), Duration::from_secs(20));
+        let (_, outcome) = tokio::join!(app_ingest, in_app);
+        let outcome = outcome.expect("the app is unlocked in this process");
+        assert!(matches!(outcome, Outcome::Ok { .. }), "round {round}: {outcome:?}");
+    }
+
+    let page = bob.fetch_dm_messages(&dm).await;
+    let undecryptable = page.iter().filter(|m| m["undecryptable"] == true).count();
+    assert_eq!(undecryptable, 0, "a placeholder means an MLS failure: {page:#?}");
+    let view = contents(&page);
+    for text in &sent {
+        let n = view.iter().filter(|(_, c)| c == text).count();
+        assert_eq!(n, 1, "bob holds {text:?} exactly once: {view:?}");
+    }
+    let ids: HashSet<&String> = view.iter().map(|(id, _)| id).collect();
+    assert_eq!(ids.len(), view.len(), "no duplicate rows");
+
+    // Both directions still work: no MLS state was rolled back.
+    bob.send_channel_message(&dm, "bob after the race").await;
+    alice.send_channel_message(&dm, "alice after the race").await;
+    assert!(contents(&alice.fetch_dm_messages(&dm).await)
+        .iter()
+        .any(|(_, c)| c == "bob after the race"));
+    assert!(contents(&bob.fetch_dm_messages(&dm).await)
+        .iter()
+        .any(|(_, c)| c == "alice after the race"));
+}
+
 /// The fallback reasons, and the three settings.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -531,4 +650,75 @@ async fn logout_and_a_pin_lockout_delete_the_escrow() {
             .await;
     }
     assert!(!escrowed(&carol).await, "a PIN lockout drops the escrow with the wrapped keys");
+}
+
+/// #1605: a safety-number change found by the headless fetch reaches the user. The extension
+/// re-pins the peer's changed key (clearing `verified`) and records the durable notice; when the
+/// app opens the DM afterwards, its own ingest sees the key already pinned, so there is exactly
+/// one notice, not one per process.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_key_change_seen_headless_shows_once_in_the_app() {
+    use serde_json::json;
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.send_channel_message(&dm, "before the change").await;
+    bob.fetch_dm_messages(&dm).await;
+
+    let ask = json!({ "peerUserIds": [alice_p.id] });
+    let notices = bob.invoke_json("list_key_change_notices", ask.clone()).await;
+    assert_eq!(
+        notices.as_array().map(|a| a.len()),
+        Some(0),
+        "first sight of a key is a pin, not a change: {notices}"
+    );
+    bob.invoke_json(
+        "set_contact_verified",
+        json!({ "peerUserId": alice_p.id, "verified": true }),
+    )
+    .await;
+
+    // The server swaps alice's account key.
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE users SET account_id_pub = ?1, identity_version = identity_version + 1 WHERE id = ?2",
+        libsql::params![vec![9u8; 32], alice_p.id.clone()],
+    )
+    .await
+    .expect("swap alice account_id_pub");
+
+    // A push arrives; the extension's ingest re-pins with no live listener at all.
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    assert!(matches!(out, Outcome::Ok { .. }), "{out:?}");
+
+    // The app opens: the notice is there, and verified is cleared.
+    let found = bob.invoke_json("list_key_change_notices", ask.clone()).await;
+    let found = found.as_array().cloned().expect("array");
+    assert_eq!(found.len(), 1, "the headless re-pin left one notice: {found:?}");
+    assert_eq!(found[0]["peer_user_id"], alice_p.id);
+    let listed = bob.invoke_json("list_peer_verifications", json!({})).await;
+    let entry = listed
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|e| e["peer_user_id"] == alice_p.id)
+        .cloned()
+        .expect("alice is pinned");
+    assert_eq!(entry["verified"], false, "the change cleared verified");
+
+    // The app's own ingest of the same DM sees the key already pinned: still one notice.
+    bob.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+    let again = bob.invoke_json("list_key_change_notices", ask).await;
+    let again = again.as_array().cloned().expect("array");
+    assert_eq!(again.len(), 1, "one change, one notice: {again:?}");
+    assert_eq!(again[0]["id"], found[0]["id"]);
 }

@@ -44,7 +44,7 @@ Source: `pollis-core/src/commands/mls/`
 
 Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
-2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
+2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, records a `key_change_notice` (local trigger, #1605), and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
 3. **Find devices** with unclaimed KeyPackages for roster users — filtered to `revoked_at IS NULL`, so a revoked device's leftover KeyPackages are never claimed. A device's last-resort package (#1571) keeps it on this list after its pool is spent
 3a. **Diff every registered roster device against the tree (#1571)** — `reconcile::unaddable_devices`: a device in `registered_devices` with no leaf and NOTHING to claim used to be absent from step 3's list and so was left out with no trace. It is now logged and returned in `ReconcileOutcome::skipped_no_suite_kp` (also on a pass that commits nothing). A claim REQUEST that fails skips that one device the same way instead of aborting the pass, which used to throw away every package already claimed for the devices before it
 3b. **Read the roster's cross-signing material** — one `POST /v1/read/roster-identities` (`ds_reads::roster_identities`): every roster user's `account_id_pub` plus all their `user_device` cert rows, revoked included. `reconcile::load_pinned_identities` then pins it: the actor's own account key is replaced by the one in the device keystore, and a peer whose reported key differs from the local `contact_verification` pin has its key **dropped** (every leaf of theirs verdicts `Unverifiable`). The result is a `device::IdentityDirectory`; a failed read is an error, never a partial directory
@@ -1082,6 +1082,16 @@ query-SHAPE changes only — no cache, no new trust:
 - **DM TOFU re-check** (`messages/ingest.rs`, `dm.rs`): one Turso query per peer
   on EVERY ingest pass → `safety::batch_check_and_pin_account_keys`, which
   already existed and was already used by `mls::reconcile`.
+- **Round trips before the store write** (`messages/ingest.rs`, #1610): a DM
+  ingest used to run membership lookup → welcome drain → TOFU re-check →
+  envelope fetch one after another (about 1.2 s against the dev DS before
+  anything was stored). Now two chains run side by side: lookup → TOFU re-check,
+  and welcome drain → catch-up (which checks membership itself). A channel's
+  group lookup runs alongside the welcome drain, and its result is kept in
+  memory (`CHANNEL_GROUPS`: a channel never changes group), so a later ingest
+  of that channel skips it. Watermark posts and delivery receipts go out
+  together after the replay. The welcome drain still precedes the catch-up, so
+  a just-joined device has its group first.
 - **Added-leaf verification** (`mls/device.rs::IdentityDirectory`): the cert
   rows for every user the batch's add hints name arrive WITH the commit batch
   (`added_identities`), one directory per replay pass, instead of one query per

@@ -345,7 +345,17 @@
     "title": "رابط الرسالة"
   },
   "push": {
-    "channelMessages": "الرسائل"
+    "channelMessages": "الرسائل",
+    "genericTitle": "رسالة جديدة",
+    "genericBody": "لديك رسالة جديدة",
+    "you": "أنت",
+    "bodyAttachment": "مرفق",
+    "bodyImage": "صورة",
+    "bodyVideo": "فيديو",
+    "bodyVoice": "رسالة صوتية",
+    "bodySensitive": "محتوى حساس",
+    "nameOnlyBody": "أرسل رسالة",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "القنوات",
@@ -434,6 +444,17 @@
         "reduceMotion": "تقليل الحركة",
         "showInlineTimestamps": "إظهار الطوابع الزمنية داخل السطر",
         "showMemberAvatars": "إظهار الصور الرمزية للأعضاء"
+      },
+      "notificationContent": {
+        "description": "يُفكّ تشفير المعاينات على هذا الجهاز فقط.",
+        "full": "الاسم والرسالة",
+        "fullSub": "يعرض المرسل وما كتبه.",
+        "heading": "محتوى الإشعارات",
+        "name": "الاسم فقط",
+        "nameSub": "يعرض المرسل دون ما كتبه.",
+        "none": "لا شيء",
+        "noneSub": "يعرض فقط أن رسالة قد وصلت.",
+        "pinNote": "اختيار «لا شيء» يُبقي رمز PIN المفتاح الوحيد لرسائل هذا الجهاز."
       },
       "notificationsOffSettings": "متوقفة. فعّلها من إعدادات النظام",
       "notificationsOffTap": "متوقفة. انقر للتفعيل",

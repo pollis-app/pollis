@@ -66,7 +66,9 @@ export function createPushRegistrar(deps: RegistrationDeps): PushRegistrar {
     try {
       await deps.register(userId, token);
     } catch (e) {
-      // Not marked: retried next time.
+      // Not marked, and any earlier success is forgotten too: the DS may still hold an older
+      // token (a rotation whose register failed), so the next foreground retries (#1610).
+      registered.delete(userId);
       deps.warn("[push] register_push_token failed:", e);
       return null;
     }
@@ -94,6 +96,45 @@ export function createPushRegistrar(deps: RegistrationDeps): PushRegistrar {
     ensure,
     registeredToken(userId) {
       return registered.get(userId);
+    },
+  };
+}
+
+/**
+ * Tells a real token rotation from the echo of our own request (#1610). expo-notifications fires
+ * its push-token event on EVERY registration, including the one `getToken` itself triggers on
+ * iOS, so a listener that re-registered on each event looped for as long as the app ran: event,
+ * getToken, event... (on the simulator, where the DS refuses the token, a signed DS call about
+ * every 170 ms).
+ *
+ * A token is a rotation unless it is the one our latest request obtained (its echo) or the last
+ * one the DS ACCEPTED, which only a successful register records. A rotation whose register fails
+ * is therefore not retried from its own echo (that was the loop) but by the next foreground: the
+ * registrar forgets the user's registration on any failed register.
+ */
+export interface TokenEchoFilter {
+  /** The device token our own request just obtained. */
+  noteOwn(deviceToken: string): void;
+  /** The DS accepted the token of our latest request. */
+  confirmOwn(): void;
+  /** Whether an event's token is new. Records nothing. */
+  isRotation(deviceToken: string): boolean;
+}
+
+export function createTokenEchoFilter(): TokenEchoFilter {
+  let own: string | null = null;
+  let accepted: string | null = null;
+  return {
+    noteOwn(deviceToken) {
+      own = deviceToken;
+    },
+    confirmOwn() {
+      if (own !== null) {
+        accepted = own;
+      }
+    },
+    isRotation(deviceToken) {
+      return deviceToken !== own && deviceToken !== accepted;
     },
   };
 }

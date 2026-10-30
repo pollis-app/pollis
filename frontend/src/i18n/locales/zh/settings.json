@@ -292,13 +292,6 @@
     "eventsEmptyFiltered": "还没有这类事件。",
     "eventsLoadMore": "加载更早的事件"
   },
-  "keyChange": {
-    "heading": "安全号码已更改",
-    "body": "— {{name}} 的身份密钥与此前固定的不同。请通过其他渠道验证后再信任此对话。",
-    "defaultName": "此联系人",
-    "verifyButton": "验证",
-    "dismissLabel": "忽略安全号码警告"
-  },
   "changePin": {
     "title": "更改 PIN 码",
     "headingOld": "当前 PIN 码",

@@ -521,6 +521,21 @@ pub async fn ds_post_signed_or_session_ok<B: ClientRequest>(
     Ok(())
 }
 
+/// [`ds_post_signed_or_session`] plus decoding the endpoint's declared response,
+/// for the reads a not-yet-enrolled device also makes (#1616). Any non-2xx is an `Err`.
+pub async fn ds_post_signed_or_session_json<B: ClientRequest>(
+    state: &Arc<AppState>,
+    body: &B,
+) -> Result<B::Response> {
+    let resp = reject_non_2xx(
+        ds_post_signed_or_session(state, body).await?,
+        B::PATH,
+        "ds_post",
+    )
+    .await?;
+    decode_response::<B>(resp).await
+}
+
 /// Report this device's applied MLS `since` epoch (`POST /v1/commits/since`); the retention floor is the MIN across members (#539).
 ///
 /// **Device-SIGNED**: the report raises the floor, so its values ride in the signed body (#681).

@@ -42,6 +42,7 @@ import {
   type ClientPolicyStatus,
 } from "../lib/clientPolicy";
 import { ClientBlockedScreen } from "../components/ClientBlockedScreen";
+import { usePersistedFeed } from "../hooks/usePersistedFeed";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -91,6 +92,7 @@ function SignedInServicesGate() {
   useEnrollmentApprovals();
   useUnreadSync();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
+  usePersistedFeed(userId);
   useEffect(() => {
     if (userId) {
       void adoptUserLanguage(userId);

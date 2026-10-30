@@ -120,6 +120,7 @@
     "plugins": [
       "./plugins/withReleaseSigning",
       "./plugins/withAbiSplits",
+      "./plugins/withRichPush",
       "expo-secure-store",
       "expo-router",
       [
@@ -162,6 +163,12 @@
           "icon": "./assets/notification-icon.png",
           "color": "#e6b65a",
           "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      [
+        "./plugins/withNotificationServiceExtension",
+        {
+          "teamId": "8JT3WH45NZ"
         }
       ],
       [

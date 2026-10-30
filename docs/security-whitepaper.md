@@ -308,7 +308,7 @@ For the audit: a KeyPackage whose leaf the claimed account did not certify is ne
 
 Cross-signing protects the tree against rogue devices under an unchanged account key. It does not help if the server swaps the account key itself. Two mechanisms cover that:
 
-- **TOFU pinning.** `batch_check_and_pin_account_keys` (`pollis-core/src/commands/safety.rs`) runs on every inbound DM message and every group reconcile, before roster devices are added. It pins first-seen `account_id_pub` values and emits a `KeyChanged` event on mismatch, which shows an inline banner in every conversation with that peer and clears their verified shield. The committer's leaf check (§5.3) uses the pin as its root.
+- **TOFU pinning.** `batch_check_and_pin_account_keys` (`pollis-core/src/commands/safety.rs`) runs on every inbound DM message and every group reconcile, before roster devices are added. It pins first-seen `account_id_pub` values and on mismatch clears their verified shield and records a durable notice in the local DB (#1605), shown as a "safety number changed" line in every DM with that peer, whichever path (app or headless notification fetch) saw the change. The committer's leaf check (§5.3) uses the pin as its root.
 - **Safety numbers.** A 60-digit number (twelve 5-digit blocks, SHA-512-derived from both parties' account keys, plus a QR payload) for out-of-band comparison. Verification is per user and applies everywhere that user appears.
 - The account-key transparency log (§6.9) makes the full key history of every user publicly checkable, not just the keys this device has seen.
 
@@ -537,10 +537,11 @@ The client used to open a libSQL connection with a read-only token baked into th
 - **POST, never GET.** The signed message is `{METHOD}\n{PATH}\n{TIMESTAMP}\n{hex sha256(body)}`, and PATH excludes the query string, so query parameters on a GET would be unauthenticated. That was the #681 bug: an unauthenticated `GET /v1/commits` could wipe a commit log. Read parameters go in the signed JSON body.
 - **The server decides what a caller may read,** using the same predicate as for writes (`pollis_schema::authz::GROUP_ROLE_SQL`, shared by both crates). With auth on, `user_id` and `device_id` come from the verified signature; body-supplied values are used only when auth is off.
 - **The MLS control plane is one snapshot.** `POST /v1/mls/conversation-state` returns GroupInfo, the pending-Welcome flag, lineage heads, the commit batch and both membership gates from one read transaction, and refuses to serve a non-contiguous commit batch. Both are correctness requirements: a torn GroupInfo/Welcome pair strands a device permanently, and a gap in a batch makes the client delete its MLS state. Tests: `pollis-delivery/tests/conversation_snapshot.rs`.
-- **Three reads have no device signature, because no device credential exists yet:**
+- **Four reads can run without a device signature, because no device credential exists yet:**
   - `POST /v1/auth/account-probe` runs before unlock and answers `{ exists, has_identity, identity_version }` for a ULID the caller read from its own `accounts.json`. This rests on the id being unguessable and the file being non-sensitive (§1.1.1). It has its own per-IP `probe` rate-limit tier.
   - `POST /v1/read/enrollment` is gated on knowing the enrollment `request_id`. A session cannot gate it: the DS session TTL and enrollment TTL are both 600 s and the session is minted first, so a session-gated poll would always 401 before the request expired. The payload is sealed to an ephemeral X25519 key that the id does not confer.
   - `POST /v1/read/recovery-blob` requires the OTP session and records a security event per fetch.
+  - `POST /v1/read/account-status` also accepts the OTP session, so a fresh device can run the soft reset before it can sign. It returns only the session's own account row, whose email the session has already proved; a request with a signature header is judged on the signature alone.
 
 ### 8.3 What an attacker gets from a built binary
 

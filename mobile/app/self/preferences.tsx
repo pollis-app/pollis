@@ -1,4 +1,4 @@
-import { ScrollView, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useObserver } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -7,12 +7,17 @@ import { LanguageSection } from "../../components/LanguageSection";
 import { AccentSwatch } from "../../components/self/AccentSwatch";
 import { ChoiceGrid } from "../../components/self/ChoiceGrid";
 import { ToggleRow } from "../../components/self/ToggleRow";
+import { RadioRow } from "../../components/RadioRow";
 import { accentPresetLabel } from "../../components/self/accentName";
 import { useNotificationPermission } from "../../components/self/useNotificationPermission";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { useTheme } from "../../components/theme";
-import { space, ACCENT_PRESETS } from "../../theme/tokens";
-import { usePreferences } from "../../hooks/queries";
+import { type as ty, space, ACCENT_PRESETS } from "../../theme/tokens";
+import { usePreferences, useNotificationContent } from "../../hooks/queries";
+import {
+  NOTIFICATION_CONTENT_OPTIONS,
+  type NotificationContent,
+} from "../../lib/notificationContent";
 import { appStore } from "../../stores/appStore";
 import { ensurePushRegistration, openNotificationSettings } from "../../lib/push";
 import type { TFunction } from "i18next";
@@ -75,6 +80,68 @@ function NotificationsSetting() {
       on={granted}
       onToggle={onPress}
     />
+  );
+}
+
+function notificationContentLabel(t: TFunction, value: NotificationContent): string {
+  switch (value) {
+    case "full":
+      return t("mobile:self.preferences.notificationContent.full");
+    case "name":
+      return t("mobile:self.preferences.notificationContent.name");
+    case "none":
+      return t("mobile:self.preferences.notificationContent.none");
+  }
+}
+
+function notificationContentSub(t: TFunction, value: NotificationContent): string {
+  switch (value) {
+    case "full":
+      return t("mobile:self.preferences.notificationContent.fullSub");
+    case "name":
+      return t("mobile:self.preferences.notificationContent.nameSub");
+    case "none":
+      return t("mobile:self.preferences.notificationContent.noneSub");
+  }
+}
+
+// #1599: what a push shows. The extension decrypts on the device and reads this from the core DB.
+function NotificationContentSetting() {
+  const { t } = useTranslation("settings");
+  const { value, set } = useNotificationContent();
+  const heading = t("mobile:self.preferences.notificationContent.heading");
+
+  return (
+    <View
+      testID="pref-notification-content"
+      accessibilityRole="radiogroup"
+      accessibilityLabel={heading}
+      style={{ gap: space.sm }}
+    >
+      <Group title={heading}>
+        {NOTIFICATION_CONTENT_OPTIONS.map((opt) => (
+          <RadioRow
+            key={opt}
+            testID={`radio-notification-content-${opt}`}
+            label={notificationContentLabel(t, opt)}
+            sub={notificationContentSub(t, opt)}
+            selected={value === opt}
+            onPress={() => {
+              if (value !== opt) {
+                set.mutate(opt);
+              }
+            }}
+          />
+        ))}
+      </Group>
+      {/* #1231: "left" is the start edge under RTL. */}
+      <Text style={[ty.meta, { textAlign: "left" }]}>
+        {t("mobile:self.preferences.notificationContent.description")}
+      </Text>
+      <Text style={[ty.meta, { textAlign: "left" }]}>
+        {t("mobile:self.preferences.notificationContent.pinNote")}
+      </Text>
+    </View>
   );
 }
 
@@ -168,10 +235,11 @@ export default function Preferences() {
           </Group>
         </View>
 
-        <View onLayout={sectionLayout("notifications")}>
+        <View onLayout={sectionLayout("notifications")} style={{ gap: space.xxxl }}>
           <Group title={t("notifications.heading")}>
             <NotificationsSetting />
           </Group>
+          <NotificationContentSetting />
         </View>
       </ScrollView>
     </Screen>

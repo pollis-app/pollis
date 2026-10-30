@@ -345,6 +345,76 @@ crashed on the first silent push to a killed app).
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.
 
+## Android rich push (#1599)
+
+A capable Android build registers its token with `caps: ["rich"]`
+(`mobile/lib/push/caps.ts`, only when the binary's embedded config has
+`extra.richPush.android`, which `mobile/plugins/withRichPush.js` sets). The DS
+then sends it a **data-only**, high-priority `{h}` instead of the generic alert,
+so the app, not the system, posts the notification.
+
+- **One FCM service.** `com.pollisnative.push.PollisMessagingService`
+  (pollis-native module) *subclasses* expo-notifications'
+  `ExpoFirebaseMessagingService`, and `withRichPush.js` removes expo's own
+  `<service>` from the app manifest (`tools:node="remove"`), so FCM has exactly
+  one `MESSAGING_EVENT` target instead of two services ranked by intent-filter
+  priority (expo's is `-1`). `RichPush.richHandle` claims a message only when it
+  has no notification block, no Expo `title`/`message`, and an `h` (top level,
+  or inside the Expo push service's JSON `body`). Everything else — today's
+  alert pushes, the `{d}` dismissals, `onNewToken`, `onDeletedMessages` — goes to
+  `super`, i.e. expo, unchanged. In the foreground a rich push also goes to
+  `super` so JS's received listener still ingests; the JS handler presents no
+  title-less push (`mobile/lib/push/presentation.ts`), so nothing doubles.
+- **Fetch.** `RichPushHandler` calls `pollis_notify_fetch` through the JNI shim
+  in `pollis-native/android/cpp-adapter.cpp` (`PollisNotify.nativeFetch`,
+  UTF-8 bytes back, not a modified-UTF-8 jstring), with data dir =
+  `filesDir + "/"` — exactly what `lib/native/bridge.ts` gives `init_pollis`.
+  The same `.so` serves the JSI bridge, so a warm process shares the app's core
+  and a cold one (FCM started it, no React) initialises it headless; the core's
+  `state.lock` keeps the two from racing. Budget: the whole handler finishes in
+  8.5 s (FCM allows ~10 s for a high-priority data message), the core gets that
+  minus 0.7 s and minus any time queued behind the previous push (one fetch at a
+  time). Not WorkManager: an expedited job adds a dependency and quota, and
+  before Android 12 needs a foreground service, which the app blocks. If the
+  fetch overruns, the generic text is posted at the deadline and a late result
+  replaces it in place (same tag, `setOnlyAlertOnce`).
+- **Post.** `RichPushNotifier`: `MessagingStyle` on channel `default`, **tag =
+  `h`, id 0** (what FCM used), so all three #1508 paths keep finding it through
+  the foreign identifier. One notification per conversation: a new one folds the
+  messages of the one already showing for that conversation and replaces it
+  (the newest handle is the one a read clears); a message already in the stack
+  (core's one-time fallback re-returns the newest one) is not added twice, by
+  `message_id`. Muted (never set for an @mention) → nothing; "Name only" → the
+  sender with `push.nameOnlyBody`; failure, no items, or mode "none" (the
+  user's "Nothing", or no escrowed key yet) → the generic "New message / You
+  have a new message". The tap opens the launcher activity with the push's data plus
+  `google.message_id` as extras, exactly what FCM's system notification does,
+  so expo's lifecycle listener and `lib/push` route it by `h` as before.
+- **Copy** is Android string resources (`pollis-native/android/src/main/res/values*/pollis_push_strings.xml`),
+  generated from the shared `mobile.push.*` keys by
+  `node scripts/mobile-android-push-strings.mjs` (`{{sender}}`-style
+  placeholders become fixed positional `%1$s` args per key, `ARGS`; `--check`;
+  `mobile/tests/rich-push.test.ts` fails when stale). They follow the device
+  locale, not the in-app language choice, which native code cannot read.
+- **The chat on screen posts nothing.** JS reports the open conversation
+  (`appStore.openConversationId`, only while the app is active) to the
+  `PollisPushState` bridge module (`lib/push/openConversation.ts`, started by
+  `usePushNotifications`); with the app in the foreground, a rich push for that
+  conversation posts nothing (and drops a generic one already posted at the
+  deadline), instead of a heads-up #1508 would clear seconds later. Any other
+  conversation, or the app in the background, posts as usual.
+- **Avatars.** Mobile shows letter avatars only, so the notification draws the
+  same one natively (`LetterAvatar`: the initial on `semantic.high` in
+  `semantic.dim`, from `theme/derive.ts`'s recipe; a circle per sender as the
+  `Person` icon and the DM's large icon, a rounded square for a group's). JS
+  saves the live accent/background (`setThemeColors`) to SharedPreferences
+  when leaving the app, so a cold process matches a custom accent. No network.
+  The small icon is the `notification_icon` drawable (expo-notifications
+  `icon` option) when present.
+- **Test hook (debug builds only).** `RichPushTestReceiver`:
+  `adb shell am broadcast -a com.pollis.mobile.debug.RICH_PUSH -p com.pollis.mobile --es body '{"h":"<22 chars>"}' [--es fake '<fetch JSON>'] [--es open <conversation id>]`
+  runs the same path as an FCM delivery; `fake` substitutes the core's reply.
+
 ## Rich push, decrypted on the device (#1599) — the core half
 
 The push payload is still only `{ h }`. A capable phone wakes on it, fetches
@@ -368,6 +438,16 @@ Android FCM handler both call one plain C function in `pollis-core`
   (`mention`), the same rule `push_recipients` uses. Failures are reasons
   (`not_logged_in|lock_busy|timeout|network|decrypt|internal`); the host then
   shows the generic text.
+- **In the app's own process (Android, #1610).** The FCM service runs inside
+  the app's process. When the app has initialised there and is unlocked,
+  `pollis_notify_fetch` runs `notify::fetch::run_in_app` instead: the same
+  resolve, ingest and preview, on the app's own `AppState` (its open database,
+  its MLS locks, its share of `state.lock`), with no escrowed key read and
+  nothing opened or closed. The headless path takes `state.lock` exclusively
+  for its whole run, and the app's own ingest of the same message (started by
+  the realtime wake-up that arrives with the push) used to wait seconds behind
+  it. A locked app, or no app in the process, falls back to the headless path.
+  Test: `rich_push::an_in_process_fetch_shares_the_apps_lock_instead_of_excluding_it`.
 - **Setting.** `get_notification_content` / `set_notification_content {mode}`
   (`full|name|none`, `ui_state` key `notification_content`, default `full`),
   bridge arms only (mobile-only).
@@ -413,6 +493,45 @@ message previewed twice, group create/forget waiting on the lock, escrow
 deletion by logout and PIN lockout);
 unit tests in `notify::*` and `db::local`.
 
+### The Notification content setting (mobile UI)
+
+What a rich push shows: **Name and message** (`full`, the default), **Name
+only** (`name`) or **Nothing** (`none`, the generic text every push showed
+before #1599).
+
+- **Mobile UI:** Self → Preferences, right after the Notifications group: a
+  "Notification content" group holding a vertical radio list — one full-width
+  `RadioRow` (`mobile/components/RadioRow.tsx`, shared with the report screen's
+  reasons) per choice, each with a one-line description. The selected row takes
+  the accent tint, bold label and a trailing check; no borders. Under it, two
+  notes: previews are decrypted on this device only, and choosing Nothing keeps
+  the PIN as the only key to this device's messages (the escrow above).
+  `NotificationContentSetting` in `mobile/app/self/preferences.tsx`, hook
+  `useNotificationContent` over the bridge arms above. The write is optimistic
+  and rolls back on failure; the client reads any unrecognised value as `none`,
+  never `full`. Maestro: `notification-content.yaml`.
+- **Desktop has no equivalent and needs none yet:** its OS banners never carry
+  message text — they name the sender and the room (`chat:notify.newMessageBody`)
+  — and desktop receives no push, so there is nothing for `full`/`name` to
+  change. A desktop "hide the sender too" option would be a separate feature.
+
+## Rich push on iOS (#1599) — the Notification Service Extension
+
+The wire stays `{h}` plus the generic title and body. A binary that has the
+Notification Service Extension registers its token with `caps: ["rich"]`. It
+claims this from its *embedded* `extra.richPush.ios`, set by the config plugin,
+never from OTA'd JS (`mobile/lib/push/caps.ts`). The DS then adds
+`mutableContent`, so APNs wakes `PollisNotificationService`. The extension calls
+`pollis_notify_fetch(<App Group>/pollis, h, 20000)`, which fetches, decrypts and
+stores the pending envelopes, then rewrites the title (sender, or
+"sender · conversation"), body and `threadIdentifier` (conversation id). It
+also attaches an `INSendMessageIntent` carrying no message text, for the
+Messages-style look. Setting "Nothing", an all-muted fetch or an empty fetch
+gives the localised generic text. Any failure or `serviceExtensionTimeWillExpire`
+delivers the push untouched. `userInfo` is never modified, so taps and #1508
+dismissal still work by `data.h`. Build, signing and portal details:
+`mobile/CLAUDE.md` → "Notification Service Extension".
+
 ## Files
 
 | File | Role |
@@ -426,8 +545,13 @@ unit tests in `notify::*` and `db::local`.
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
 | `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508) |
 | `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
+| `mobile/app/self/preferences.tsx` · `mobile/hooks/queries/useNotificationContent.ts` | The notification-content radio list (#1599); rows are `mobile/components/RadioRow.tsx` |
 | `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
+| `mobile/modules/pollis-native/android/src/main/java/com/pollisnative/push/` · `PollisNotify.kt` · `cpp-adapter.cpp` | Android rich push: FCM service, fetch with deadline, MessagingStyle posting, JNI shim (#1599) |
+| `mobile/plugins/withRichPush.js` | Replaces expo's FCM service with ours; marks the binary rich-capable (#1599) |
 | `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
+| `mobile/plugins/withNotificationServiceExtension.js` · `mobile/plugins/notification-service/` | iOS NSE target, entitlements, Localizable.strings, and the Swift rewrite (#1599) |
+| `mobile/modules/pollis-native/ios/PollisAppGroup.mm` | Points the core at the App Group data dir + shared keychain group before init (#1599) |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/voice/voiceBridge.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions (was `hooks/useVoiceChannel.ts`, deleted) |
@@ -442,4 +566,5 @@ unit tests in `notify::*` and `db::local`.
 - #843 — per-user `@username` mentions that notify the mentioned user.
 - #1431 — channel messages push by default; per-channel, per-account mute.
 - #1508 — a read on any client clears that conversation's push notifications from every phone.
+- #1599 — rich push: the device decrypts and shows sender + preview (Android half above).
 - #186 — original audit + dispatcher refactor (PR #202).

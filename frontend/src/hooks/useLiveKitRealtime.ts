@@ -21,8 +21,7 @@ import { logIgnored } from '../utils/log';
 import { shouldAlertForWake, type WakeLatest } from '../utils/messageWake';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
 import { presenceStore } from '../stores/presenceStore';
-import { keyChangeStore } from '../stores/keyChangeStore';
-import { peerVerificationKeys } from './queries/useUserProfile';
+import { keyChangeNoticeKeys, peerVerificationKeys } from './queries/useUserProfile';
 import { listPendingEnrollmentRequests } from '../services/api';
 import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
 import i18n from '../i18n';
@@ -570,8 +569,10 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'key_changed') {
-        // Advisory safety-number change; sends are unaffected.
-        keyChangeStore.flagChanged(event.peer_user_id, event.peer_identity_version);
+        // Advisory; the durable notice is already in the local DB (#1605), so refetch it.
+        queryClientRef.current.invalidateQueries({
+          queryKey: keyChangeNoticeKeys.all,
+        });
         queryClientRef.current.invalidateQueries({
           queryKey: peerVerificationKeys.all,
         });

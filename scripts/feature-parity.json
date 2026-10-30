@@ -32,6 +32,7 @@
     "set_client_policy_override": "Dev-build-only test override (#1611) behind the pollis://dev/client-policy link the Maestro flow drives. Desktop's Playwright scripts the mocked check instead, and the desktop and CLI take POLLIS_CLIENT_POLICY_URL_OVERRIDE from the environment."
   },
   "missing_from_cli": {
+    "list_key_change_notices": "The terminal client has no safety-number surface at all (get_safety_number / list_peer_verifications / set_contact_verified are known debt below); the notices (#1605) are recorded by pollis-core on every client and belong with that surface when it lands.",
     "create_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
     "await_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
     "cancel_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",

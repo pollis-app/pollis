@@ -261,6 +261,43 @@ CREATE TABLE IF NOT EXISTS contact_verification (
     updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Safety-number change notices (#1605): one row per actual change of a pinned
+-- key, durable, so a change found by ANY ingest path (the app, the iOS
+-- Notification Service Extension, the Android FCM service) reaches the user.
+-- The live `KeyChanged` event only has a listener while the desktop app runs;
+-- a headless fetch has none, so the event alone lost those changes.
+--
+-- Written by the TRIGGER below, never by Rust: every path that re-pins a key
+-- (batch TOFU on ingest and reconcile, the single-peer helper, Mark verified
+-- re-pinning the current key) goes through `contact_verification`, so the
+-- notice cannot be forgotten by a new call site. The WHEN clause compares the
+-- row's OLD value at write time, under SQLite's write lock, so two processes
+-- that both saw the old pin (the extension, then the app) write one notice:
+-- the second UPDATE sets the key it already has and the trigger does not fire.
+-- A first pin is an INSERT and is not a change.
+--
+-- Per PEER, not per conversation: the change is to the person's key, and the
+-- path that noticed it may be a group reconcile. Every DM timeline with that
+-- peer shows it at `detected_at` (Signal does the same).
+CREATE TABLE IF NOT EXISTS key_change_notice (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_user_id       TEXT NOT NULL,
+    old_account_id_pub BLOB NOT NULL,
+    new_account_id_pub BLOB NOT NULL CHECK (new_account_id_pub != old_account_id_pub),
+    detected_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_key_change_notice_peer
+    ON key_change_notice(peer_user_id, detected_at);
+
+CREATE TRIGGER IF NOT EXISTS contact_verification_key_change
+AFTER UPDATE OF account_id_pub ON contact_verification
+WHEN OLD.account_id_pub IS NOT NEW.account_id_pub
+BEGIN
+    INSERT INTO key_change_notice (peer_user_id, old_account_id_pub, new_account_id_pub)
+    VALUES (NEW.peer_user_id, OLD.account_id_pub, NEW.account_id_pub);
+END;
+
 
 -- Saved / bookmarked messages (#854).
 --

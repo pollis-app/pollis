@@ -6,18 +6,26 @@ import Constants from "expo-constants";
 import { invoke } from "../native";
 import i18n from "../../i18n";
 import { readPayloadRouting } from "./routing";
-import { createPushRegistrar, type EnsureOptions } from "./registration";
+import { createPushRegistrar, createTokenEchoFilter, type EnsureOptions } from "./registration";
 import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
+import { pushCapsFor } from "./caps";
+import { embeddedExtra } from "../buildInfo";
+import { isTitleless } from "./presentation";
 
 // Content-free foreground presentation (no sound, no badge). Safe at module load.
+// A title-less push (an Android rich push the native handler already posted, a `{d}` dismissal)
+// is never presented, or it would show as a second, blank notification.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const show = !isTitleless(notification.request.content);
+    return {
+      shouldShowBanner: show,
+      shouldShowList: show,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 /** Android 8+ drops notifications with no channel. Idempotent. */
@@ -32,6 +40,9 @@ async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
+// Our own token requests, so their echo on the token event is not taken for a rotation (#1610).
+const tokenEcho = createTokenEchoFilter();
+
 // Marks a user registered only once register_push_token succeeded (#1423).
 const registrar = createPushRegistrar({
   getPermissions: () => Notifications.getPermissionsAsync(),
@@ -45,14 +56,19 @@ const registrar = createPushRegistrar({
       console.warn("[push] no EAS projectId — skipping push token registration");
       return null;
     }
-    return (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    const devicePushToken = await Notifications.getDevicePushTokenAsync();
+    tokenEcho.noteOwn(String(devicePushToken.data));
+    return (await Notifications.getExpoPushTokenAsync({ projectId, devicePushToken })).data;
   },
   register: async (userId, token) => {
     await invoke("register_push_token", {
       userId,
       token,
       platform: Platform.OS,
+      // #1599: sent on every register, since the DS replaces the stored caps each time.
+      caps: pushCapsFor(embeddedExtra(), Platform.OS),
     });
+    tokenEcho.confirmOwn();
   },
   warn: (message, error) => {
     console.warn(message, error);
@@ -69,7 +85,10 @@ export function ensurePushRegistration(
 
 /** Re-register when the OS rotates the push token (#1423). Returns a disposer. */
 export function addPushTokenRotationListener(userId: string): () => void {
-  const sub = Notifications.addPushTokenListener(() => {
+  const sub = Notifications.addPushTokenListener((token) => {
+    if (!tokenEcho.isRotation(String(token.data))) {
+      return;
+    }
     void ensurePushRegistration(userId, { prompt: false, refresh: true });
   });
   return () => {

@@ -223,6 +223,8 @@ interface MockStore {
   mutedChannels: string[];
   /** Security-event log (#1548), any order. */
   securityEvents: MockSecurityEvent[];
+  /** Safety-number change notices (#1605), as a headless fetch would have left them. */
+  keyChangeNotices: Array<{ id: number; peer_user_id: string; detected_at: string }>;
   /** `is_permission_granted`'s answer; off by default, as on a fresh install. */
   notificationPermission: boolean;
   /** The minimum-version check (#1611): what `check_client_policy` answers, and what a 426 left. */
@@ -350,6 +352,8 @@ const store: MockStore = {
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
   securityEvents: (preload.securityEvents as MockSecurityEvent[] | undefined) ?? [],
+  keyChangeNotices:
+    (preload.keyChangeNotices as MockStore['keyChangeNotices'] | undefined) ?? [],
   notificationPermission: preload.notificationPermission === true,
   clientPolicy: { ...ALLOWED_POLICY, ...(preload.clientPolicy ?? {}) },
 };
@@ -907,8 +911,19 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_message_retention':
       return 0;
 
-    // `= []` defaults don't cover `null`, so return lists.
     case 'list_peer_verifications':
+      return [...verifiedPeers].map((id) => ({
+        peer_user_id: id,
+        verified: true,
+        key_changed: false,
+      }));
+
+    case 'list_key_change_notices': {
+      const { peerUserIds } = args as { peerUserIds: string[] };
+      return store.keyChangeNotices.filter((n) => peerUserIds.includes(n.peer_user_id));
+    }
+
+    // `= []` defaults don't cover `null`, so return lists.
     case 'list_pending_invites':
     case 'list_dm_requests':
     case 'list_join_requests':
@@ -1996,7 +2011,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
 let stagedAttachmentCount = 0;
 
-const verifiedPeers = new Set<string>();
+const verifiedPeers = new Set<string>((preload.verifiedPeers as string[] | undefined) ?? []);
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (primaryInvoke) {

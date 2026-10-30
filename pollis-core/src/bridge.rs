@@ -375,6 +375,11 @@ pub(crate) fn is_initialized() -> bool {
     APP_STATE.get().is_some()
 }
 
+/// The app's state, if `init_pollis` has run in this process (#1610: Android's in-process fetch).
+pub(crate) fn app_state() -> Option<Arc<AppState>> {
+    APP_STATE.get().cloned()
+}
+
 fn state() -> Result<Arc<AppState>, BridgeError> {
     APP_STATE.get().cloned().ok_or_else(|| {
         BridgeError::Bridge(
@@ -463,6 +468,12 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let policy: Option<String> = arg_opt(&args, "policy")?;
             crate::commands::client_policy::set_client_policy_override(&state()?, url, policy).await?;
             ok(())
+        }
+
+        // #1610: parks until the ingest stores rows, then names the conversations (no polling).
+        "wait_persisted" => {
+            let after: Option<u64> = arg_opt(&args, "after")?;
+            ok(messages::persisted::wait(after.unwrap_or(0)).await)
         }
 
         "get_session" => ok(auth::get_session(&state()?).await?),
@@ -1287,6 +1298,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
         "list_peer_verifications" => ok(safety::list_peer_verifications(&state()?).await?),
+        "list_key_change_notices" => {
+            let peer_user_ids: Vec<String> = arg(&args, "peerUserIds")?;
+            ok(safety::list_key_change_notices(peer_user_ids, &state()?).await?)
+        }
 
         "list_dm_requests" => {
             let user_id: String = arg(&args, "userId")?;

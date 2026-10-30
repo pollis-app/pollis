@@ -211,11 +211,11 @@ export class PollisDelivery extends Container<Env> {
       const current = await envFingerprint({ ...this.envVars, ...(await this.resolveSecretEnv()) });
       const recorded = await this.ctx.storage.get<string>(ENV_FINGERPRINT_KEY);
       if (needsRestart(true, recorded, current)) {
-        console.log("container env differs from the deployed config; restarting the container");
         await this.destroy();
       }
-    } catch (e) {
-      console.warn("container env check failed", e);
+    } catch {
+      // The Worker logs nothing (no_client_ip_exposure); a failed check just skips the restart.
+      return;
     }
   }
 
