@@ -33,11 +33,13 @@ cp "$MASTER" "$WORK/mark.png"
 magick "$WORK/mark.png" -background "$AMBER" -flatten -alpha off "$WORK/fullbleed.png"
 # Key out the amber → just the dark lock glyph on transparency.
 magick "$WORK/mark.png" -fuzz 25% -transparent "$AMBER" "$WORK/fg.png"
-# Android adaptive foreground + monochrome, rendered from the SVG so the glyph
+# Android adaptive foreground + monochrome (and the notification small icon),
+# rendered from the SVG so the glyph
 # fills the 66dp safe zone. Not from $MASTER: keying the amber out of a bitmap
 # leaves the tile's anti-aliased edge, which a -trim then keeps (#1406).
 uv run -q --with resvg-py --with pillow scripts/gen-android-adaptive-icon.py \
-  assets/pollis-logo.svg "$WORK/fg-adaptive.png" "$WORK/mono-white.png"
+  assets/pollis-logo.svg "$WORK/fg-adaptive.png" "$WORK/mono-white.png" \
+  mobile/assets/notification-icon.png
 # Monochrome tray glyph (keep alpha, recolor the glyph).
 magick "$WORK/fg.png"          -channel RGB -fill black -colorize 100 +channel "$WORK/mono-black.png"
 # Solid amber background layer for Android adaptive.
