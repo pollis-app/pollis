@@ -390,7 +390,8 @@
         "full": "名称和消息",
         "heading": "通知内容",
         "name": "仅名称",
-        "none": "不显示"
+        "none": "不显示",
+        "pinNote": "选择“不显示”时，你的 PIN 码仍是这台设备上消息的唯一钥匙。"
       },
       "notificationsOffSettings": "已关闭。请在系统设置中开启",
       "notificationsOffTap": "已关闭。点按开启",

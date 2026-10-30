@@ -400,7 +400,8 @@
         "full": "Nombre y mensaje",
         "heading": "Contenido de las notificaciones",
         "name": "Solo el nombre",
-        "none": "Nada"
+        "none": "Nada",
+        "pinNote": "Si eliges Nada, tu PIN sigue siendo la única llave de los mensajes de este dispositivo."
       },
       "notificationsOffSettings": "Desactivadas. Actívalas en Ajustes del sistema",
       "notificationsOffTap": "Desactivadas. Toca para activar",

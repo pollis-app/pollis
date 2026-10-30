@@ -351,15 +351,17 @@ What a rich push shows once the phone has decrypted it on the device:
 **Name and message** (`full`, the default), **Name only** (`name`) or
 **Nothing** (`none`, the generic text every push showed before #1599).
 
-- **Stored in the core, not in JS.** `pollis_core::notify::settings::{get, set}`
-  read and write the `kv` key `notification_content` in the account's local DB,
-  so the headless fetch (`pollis_notify_fetch`, run by the iOS Notification
-  Service Extension and the Android data-push handler) reads exactly what the
-  app wrote. It is device-local, never synced: each phone decides for itself.
-- **Invalid values cannot land.** The only writer takes the
-  `NotificationContent` enum, and the bridge parses `value` into it, so
-  anything but the three strings is refused before the DB. A stored value this
-  build does not recognise reads as `none` (fail closed), never as `full`.
+- **Stored by the core, not in JS.** The mobile bridge commands
+  `get_notification_content` → `"full" | "name" | "none"` and
+  `set_notification_content { mode }` (pollis-core, the #1599 core half) keep
+  it under `notification_content` in the local DB, where the headless fetch
+  (`pollis_notify_fetch`, run by the iOS Notification Service Extension and the
+  Android data-push handler) reads it. Device-local, never synced. The client
+  reads anything it does not recognise as `none` (fail closed), never `full`.
+- **Nothing keeps the PIN the only key.** The picker's second line tells the
+  user that choosing Nothing keeps their PIN as the only key to this device's
+  message store; the key escrow behind the other two choices is the core
+  half's (see the core PR for #1599).
 - **Mobile UI:** Self → Preferences → Notifications, a three-chip
   `ChoiceGrid` under the OS-permission row (`NotificationContentSetting` in
   `mobile/app/self/preferences.tsx`, hook `useNotificationContent`). The write
@@ -381,8 +383,8 @@ What a rich push shows once the phone has decrypted it on the device:
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
 | `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508) |
-| `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508), `get/set_notification_content` (#1599) |
-| `pollis-core/src/notify/settings.rs` | The notification-content setting (#1599): enum, `kv` key, fail-closed read |
+| `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
+| `mobile/app/self/preferences.tsx` · `mobile/hooks/queries/useNotificationContent.ts` | The notification-content picker (#1599) |
 | `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
 | `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |

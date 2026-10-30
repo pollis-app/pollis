@@ -128,6 +128,9 @@ function NotificationContentSetting() {
           />
         ))}
       </ChoiceGrid>
+      <Text style={ty.secondary}>
+        {t("mobile:self.preferences.notificationContent.pinNote")}
+      </Text>
     </View>
   );
 }

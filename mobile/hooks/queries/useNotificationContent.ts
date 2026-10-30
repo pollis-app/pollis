@@ -1,4 +1,4 @@
-// Notification content (#1599): device-local, in the core's local DB so the push extension reads it.
+// Notification content (#1599): device-local, stored by pollis-core (`notification_content`) so the push extension reads it.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
@@ -31,7 +31,7 @@ export function useNotificationContent() {
     // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "toggle" } },
     mutationFn: async (value: NotificationContent) => {
-      await invoke("set_notification_content", { value });
+      await invoke("set_notification_content", { mode: value });
       return value;
     },
     onMutate: async (value) => {

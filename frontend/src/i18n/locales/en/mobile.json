@@ -411,7 +411,8 @@
         "full": "Name and message",
         "heading": "Notification content",
         "name": "Name only",
-        "none": "Nothing"
+        "none": "Nothing",
+        "pinNote": "Choosing Nothing also keeps your PIN as the only key to this device's messages."
       },
       "notificationsOffSettings": "Off. Turn on in system Settings",
       "notificationsOffTap": "Off. Tap to turn on",
