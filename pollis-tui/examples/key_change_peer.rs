@@ -1,54 +1,63 @@
 //! Dev-DS peer for the mobile Maestro `key-change` flow (#1605).
 //!
-//! Two invocations, each in its own `POLLIS_DATA_DIR` (a separate device):
-//!
-//! * `first <email>` signs up a fresh account on the DS named by
-//!   `POLLIS_DELIVERY_URL` (the dev DS, which fixes the OTP), prints its handle,
-//!   waits for the phone to open a DM with it, accepts, sends one message and
-//!   prints `PEER_READY dm=<id>`.
-//! * `reset <email> <phone-email>` signs in to the SAME account from a new
-//!   device and takes the soft-recovery path (`reset_identity_and_recover`):
-//!   a new account key under the same user id, which is exactly a safety-number
-//!   change for everyone who pinned the old one. Recovery drops the account's
-//!   memberships, so it then opens a new DM with the phone and prints
-//!   `PEER_RESET dm=<id>`. The phone's ingest of that DM re-pins the key and
-//!   must show the change as a line in the timeline.
+//! Signs up a fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev
+//! DS, which fixes the OTP), prints its handle, waits for the phone to open a
+//! DM with it, accepts, sends one message and prints `PEER_READY dm=<id>`.
+//! When the script touches `go` in `KEY_CHANGE_PEER_SIGNAL_DIR` (after the
+//! phone verified this peer's safety number), it rotates its account identity
+//! in place (`reset_identity`: a new account key under the same user id, the
+//! DM membership kept), which is exactly a safety-number change for everyone
+//! who pinned the old key, and prints `PEER_RESET`. The phone's next ingest of
+//! the DM re-pins the key and must show the change as a line in the timeline.
 //!
 //! Not a shipping binary: examples build against pollis-tui's dev-dependencies.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
-//!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example key_change_peer -- first <email>
+//!   KEY_CHANGE_PEER_SIGNAL_DIR=$(mktemp -d) POLLIS_DEV_ACCESS_KEY=… \
+//!   cargo run -p pollis-tui --example key_change_peer -- <email>
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use pollis_core::commands::{dm, messages, user};
+use pollis_core::commands::{account_identity, dm, messages};
 use pollis_core::config::Config;
 use pollis_core::state::AppState;
 
 /// The dev DS's fixed OTP (`DEV_OTP`); override with `POLLIS_DEV_OTP`.
 const DEFAULT_OTP: &str = "000000";
-/// How long to wait for the phone at each step.
+/// How long to wait for the phone, or the script, at each step.
 const WAIT: Duration = Duration::from_secs(300);
 
-async fn state() -> Result<Arc<AppState>> {
+async fn wait_for_signal(dir: &Path, name: &str) -> Result<()> {
+    let started = Instant::now();
+    let path = dir.join(name);
+    while !path.exists() {
+        if started.elapsed() > WAIT {
+            bail!("no {name} signal within {WAIT:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    Ok(())
+}
+
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> Result<()> {
+    let email = std::env::args().nth(1).context("usage: key_change_peer <email>")?;
+    let signals: PathBuf = std::env::var("KEY_CHANGE_PEER_SIGNAL_DIR")
+        .context("KEY_CHANGE_PEER_SIGNAL_DIR is required")?
+        .into();
+    let otp = std::env::var("POLLIS_DEV_OTP").unwrap_or_else(|_| DEFAULT_OTP.to_string());
     let config = Config::from_env().context("POLLIS_DELIVERY_URL (the dev DS) is required")?;
     let ds = config.pollis_delivery_url.clone().unwrap_or_default();
     if !ds.contains("api-dev") && !ds.contains("localhost") {
         bail!("refusing to run against {ds:?} — dev DS only");
     }
-    Ok(Arc::new(AppState::new(config).await.context("AppState")?))
-}
+    let state = Arc::new(AppState::new(config).await.context("AppState")?);
 
-fn otp() -> String {
-    std::env::var("POLLIS_DEV_OTP").unwrap_or_else(|_| DEFAULT_OTP.to_string())
-}
-
-async fn first(email: &str) -> Result<()> {
-    let state = state().await?;
-    pollis_tui::auth::request_otp(&state, email).await?;
-    let me = pollis_tui::auth::verify_otp(&state, email, &otp()).await?;
+    pollis_tui::auth::request_otp(&state, &email).await?;
+    let me = pollis_tui::auth::verify_otp(&state, &email, &otp).await?;
     pollis_tui::auth::set_pin_and_init(&state, &me.id, "0000").await?;
     println!("PEER_HANDLE={}", me.username);
 
@@ -76,40 +85,13 @@ async fn first(email: &str) -> Result<()> {
     .await
     .context("send before the change")?;
     println!("PEER_READY dm={dm_id}");
+
+    wait_for_signal(&signals, "go").await?;
+    account_identity::reset_identity(&state, &me.id)
+        .await
+        .context("rotate the account identity")?;
+    println!("PEER_RESET");
     // Wake-ups are sent on spawned tasks; let them leave before exiting.
     tokio::time::sleep(Duration::from_secs(5)).await;
     Ok(())
-}
-
-async fn reset(email: &str, phone: &str) -> Result<()> {
-    let state = state().await?;
-    pollis_tui::auth::request_otp(&state, email).await?;
-    let me = pollis_tui::auth::verify_otp(&state, email, &otp()).await?;
-    pollis_tui::enroll::reset_and_recover(&state, me.id.clone(), email.to_string())
-        .await
-        .context("reset_identity_and_recover")?;
-    pollis_tui::enroll::set_pin_and_finalize(&state, &me.id, "0000")
-        .await
-        .context("set_pin_and_finalize after the reset")?;
-
-    let phone_id = user::search_user_by_username(phone.to_string(), &state)
-        .await?
-        .map(|p| p.id)
-        .context("the phone's account")?;
-    let made = dm::create_dm_channel(me.id.clone(), vec![phone_id], &state)
-        .await
-        .context("open a DM with the phone")?;
-    println!("PEER_RESET dm={}", made.id);
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    Ok(())
-}
-
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.as_slice() {
-        [mode, email] if mode == "first" => first(email).await,
-        [mode, email, phone] if mode == "reset" => reset(email, phone).await,
-        _ => bail!("usage: key_change_peer first <email> | reset <email> <phone-email>"),
-    }
 }

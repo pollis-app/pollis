@@ -4,13 +4,13 @@
 #   mobile/scripts/maestro-key-change.sh <device-id>
 #
 # The peer is `pollis-tui`'s `key_change_peer` example (a test-harness build
-# that never ships), run twice as two devices of one account:
-#   1. `first` signs up, accepts the device's DM, sends a message; the device
+# that never ships):
+#   1. it signs up, accepts the device's DM and sends a message; the device
 #      verifies the peer's safety number (1-verify.yaml);
-#   2. `reset` signs in to the same account from a new device and recovers it
-#      with a NEW account key (same user id), then opens a new DM; the device
-#      must show one durable key-change line, lose the verified shield, and
-#      open the safety number from the line (2-changed.yaml).
+#   2. on this script's signal it rotates its account identity in place (a NEW
+#      account key, same user id, the DM kept); after a cold start the device
+#      must show one durable key-change line in the DM, lose the verified
+#      shield, and open the safety number from the line (2-changed.yaml).
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled
 # in, and POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler
@@ -50,45 +50,43 @@ echo "==> building the peer"
 (cd "$REPO" && cargo build -q -p pollis-tui --example key_change_peer)
 PEER_BIN="$REPO/target/debug/examples/key_change_peer"
 PEER_DIR="$(mktemp -d)"
+PEER_OUT="$PEER_DIR/peer.out"
+export KEY_CHANGE_PEER_SIGNAL_DIR="$PEER_DIR/signals"
+mkdir -p "$KEY_CHANGE_PEER_SIGNAL_DIR"
 trap 'kill "${PEER_PID:-}" 2>/dev/null || true; rm -rf "$PEER_DIR"' EXIT
 
-# Wait (up to $3 seconds) for a line peer $1 prints; fail if it dies first.
+# Wait (up to $2 seconds) for a line the peer prints; fail if it dies first.
 await_peer() {
-  local out="$PEER_DIR/$1.out"
-  for _ in $(seq 1 "$3"); do
-    grep -q "^$2" "$out" 2>/dev/null && return 0
-    kill -0 "$PEER_PID" 2>/dev/null || { grep -q "^$2" "$out" 2>/dev/null && return 0; cat "$PEER_DIR/$1.err" >&2; exit 1; }
+  for _ in $(seq 1 "$2"); do
+    grep -q "^$1" "$PEER_OUT" 2>/dev/null && return 0
+    kill -0 "$PEER_PID" 2>/dev/null || { cat "$PEER_DIR/peer.err" >&2; exit 1; }
     sleep 1
   done
-  echo "peer $1 never printed $2" >&2
-  cat "$PEER_DIR/$1.err" >&2
+  echo "peer never printed $1" >&2
+  cat "$PEER_DIR/peer.err" >&2
   exit 1
 }
 
 echo "==> peer signs up ($PEER_EMAIL)"
-POLLIS_DATA_DIR="$PEER_DIR/first" "$PEER_BIN" first "$PEER_EMAIL" \
-  >"$PEER_DIR/first.out" 2>"$PEER_DIR/first.err" &
+POLLIS_DATA_DIR="$PEER_DIR/data" "$PEER_BIN" "$PEER_EMAIL" >"$PEER_OUT" 2>"$PEER_DIR/peer.err" &
 PEER_PID=$!
-await_peer first PEER_HANDLE= 60
-HANDLE="$(sed -n 's/^PEER_HANDLE=//p' "$PEER_DIR/first.out")"
+await_peer PEER_HANDLE= 60
+HANDLE="$(sed -n 's/^PEER_HANDLE=//p' "$PEER_OUT")"
 echo "    peer handle: $HANDLE"
 
 echo "==> 1/2 device opens a DM with the peer and verifies its safety number"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/1-verify.yaml"
-await_peer first PEER_READY 300
-wait "$PEER_PID" || { cat "$PEER_DIR/first.err" >&2; exit 1; }
+await_peer PEER_READY 300
+DM="$(sed -n 's/^PEER_READY dm=//p' "$PEER_OUT")"
 
-echo "==> peer recovers its account with a new key and opens a new DM"
-POLLIS_DATA_DIR="$PEER_DIR/reset" "$PEER_BIN" reset "$PEER_EMAIL" "$PRIMARY_EMAIL" \
-  >"$PEER_DIR/reset.out" 2>"$PEER_DIR/reset.err" &
-PEER_PID=$!
-await_peer reset PEER_RESET 180
-NEW_DM="$(sed -n 's/^PEER_RESET dm=//p' "$PEER_DIR/reset.out")"
-wait "$PEER_PID" || { cat "$PEER_DIR/reset.err" >&2; exit 1; }
+echo "==> peer rotates its account key (same user id, DM kept)"
+touch "$KEY_CHANGE_PEER_SIGNAL_DIR/go"
+await_peer PEER_RESET 120
+wait "$PEER_PID" || { cat "$PEER_DIR/peer.err" >&2; exit 1; }
 PEER_PID=""
 
 echo "==> 2/2 device: one key-change line, verified cleared, line opens the safety number"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_PEER_HANDLE="$HANDLE" \
-  -e MAESTRO_NEW_DM="$NEW_DM" "$FLOWS/2-changed.yaml"
+  -e MAESTRO_DM="$DM" "$FLOWS/2-changed.yaml"
 echo "==> key-change passed"

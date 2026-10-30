@@ -2,17 +2,17 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# SAFETY-NUMBER CHANGE (#1605), part 2 of 2. The peer recovered its account on
-# a new device (a new account key under the same user id: a safety-number
-# change) and opened a new DM, ${MAESTRO_NEW_DM}. Accepting and opening it
-# ingests the DM, which re-pins the changed key: the timeline must carry ONE
-# "Your safety number with @peer changed. Verify it" line, the header must lose
-# its verified shield (verified = 0), and the line must open "You & @peer"
-# reading "Mark verified". The line is durable: it is still there, once, after
-# a cold start.
+# SAFETY-NUMBER CHANGE (#1605), part 2 of 2. While the app sat in the
+# background the peer rotated its account identity (a new account key under
+# the same user id: a safety-number change). The app cold-starts and opens the
+# DM ${MAESTRO_DM}; its ingest re-pins the changed key. The timeline must carry
+# ONE "Your safety number with @peer changed. Verify it" line, the header must
+# lose its verified shield (verified = 0), and the line must open "You & @peer"
+# reading "Mark verified". The line is durable: after another cold start it is
+# still there, once.
 
-- launchApp:
-    stopApp: false
+- stopApp
+- launchApp
 - runFlow:
     when:
       visible:
@@ -23,28 +23,10 @@ tags:
     id: "tab-direct"
 - extendedWaitUntil:
     visible:
-      id: "row-dm-requests"
-    timeout: 90000
-- tapOn:
-    id: "row-dm-requests"
-- extendedWaitUntil:
-    visible:
-      id: "btn-accept-request-${MAESTRO_NEW_DM}"
+      id: "row-dm-${MAESTRO_DM}"
     timeout: 30000
 - tapOn:
-    id: "btn-accept-request-${MAESTRO_NEW_DM}"
-- extendedWaitUntil:
-    notVisible:
-      id: "btn-accept-request-${MAESTRO_NEW_DM}"
-    timeout: 30000
-- tapOn:
-    id: "btn-back"
-- extendedWaitUntil:
-    visible:
-      id: "row-dm-${MAESTRO_NEW_DM}"
-    timeout: 30000
-- tapOn:
-    id: "row-dm-${MAESTRO_NEW_DM}"
+    id: "row-dm-${MAESTRO_DM}"
 
 - extendedWaitUntil:
     visible:
@@ -54,8 +36,11 @@ tags:
 - assertNotVisible:
     id: "row-key-change-.*"
     index: 1
-- assertNotVisible:
-    id: "icon-dm-verified"
+- assertVisible: ".*before the change.*"
+- extendedWaitUntil:
+    notVisible:
+      id: "icon-dm-verified"
+    timeout: 15000
 - takeScreenshot: key-change-02-line
 
 - tapOn:
@@ -88,10 +73,10 @@ tags:
     id: "tab-direct"
 - extendedWaitUntil:
     visible:
-      id: "row-dm-${MAESTRO_NEW_DM}"
+      id: "row-dm-${MAESTRO_DM}"
     timeout: 30000
 - tapOn:
-    id: "row-dm-${MAESTRO_NEW_DM}"
+    id: "row-dm-${MAESTRO_DM}"
 - extendedWaitUntil:
     visible:
       id: "row-key-change-.*"
