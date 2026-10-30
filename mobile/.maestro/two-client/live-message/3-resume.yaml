@@ -1,0 +1,34 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# LIVE MESSAGE (#1610), part 3 of 3. The app has been in the background for
+# over 30 s (the script waits), long enough for iOS to suspend it and drop the
+# realtime connection. The peer sends, the app comes back, and the message
+# must be in the conversation within 3 s of opening it, without waiting for the
+# realtime reconnect. (On a phone with rich push the notification step has
+# already stored it, and it shows on the first frame; a simulator has no APNs,
+# so here the resume catch-up fetches it.)
+
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "sent while you were away"
+- launchApp:
+    stopApp: false
+# Auto-lock may have engaged while away; unlock if so.
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-dm-.*"
+- extendedWaitUntil:
+    visible: ".*: sent while you were away, .*"
+    timeout: 3000
+- takeScreenshot: live-message-03-after-resume

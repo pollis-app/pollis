@@ -1304,3 +1304,132 @@ async fn using_a_device_moves_its_last_seen_past_its_creation() {
         "last_seen moves past created_at once the device is used: {current}"
     );
 }
+
+/// Users-row `(identity_version, account_id_pub)` straight from the DS's DB.
+async fn identity_row(user_id: &str) -> (i64, Vec<u8>) {
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT identity_version, account_id_pub FROM users WHERE id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await
+        .expect("users select");
+    let row = rows.next().await.expect("rows").expect("user row");
+    (
+        row.get(0).expect("identity_version"),
+        row.get::<Option<Vec<u8>>>(1).unwrap().expect("account_id_pub"),
+    )
+}
+
+/// #1616: a brand-new device, holding only its OTP session, recovers the account
+/// with the soft reset, then finishes enrollment and uses the account.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn reset_identity_and_recover_from_a_fresh_device() {
+    wipe().await;
+
+    let email = "fresh-reset@test.local";
+    let mut old = TestClient::new().await;
+    let user_id = old.sign_up(email).await.id;
+    let group_id = old.create_group("before the reset").await;
+    let (old_version, old_pub) = identity_row(&user_id).await;
+
+    // A device that has never been enrolled: OTP only, no PIN, no local DB.
+    let mut fresh = TestClient::new().await;
+    invoke::<()>(&fresh.webview, "request_otp", json!({ "email": email }))
+        .await
+        .expect("request_otp on the fresh device");
+    let profile: pollis_lib::commands::auth::UserProfile = invoke(
+        &fresh.webview,
+        "verify_otp",
+        json!({ "email": email, "code": crate::harness::DEV_OTP }),
+    )
+    .await
+    .expect("verify_otp on the fresh device");
+    assert!(profile.enrollment_required, "the fresh device must land on enrollment");
+    assert!(
+        fresh.state.local_db.lock().await.is_none(),
+        "the fresh device must hold no local DB, so it cannot device-sign"
+    );
+    fresh.profile = Some(profile.clone());
+
+    // A wrong confirmation is refused before anything rotates.
+    let wrong = invoke::<String>(
+        &fresh.webview,
+        "reset_identity_and_recover",
+        json!({ "userId": user_id, "confirmEmail": "someone-else@test.local" }),
+    )
+    .await;
+    assert!(
+        wrong.as_ref().is_err_and(|e| e.contains("does not match")),
+        "a mismatched email must be refused by the email check: {wrong:?}"
+    );
+    assert_eq!(
+        identity_row(&user_id).await,
+        (old_version, old_pub.clone()),
+        "a refused reset must not rotate the identity"
+    );
+
+    // Case and padding are not part of the address.
+    let secret_key: String = invoke(
+        &fresh.webview,
+        "reset_identity_and_recover",
+        json!({ "userId": user_id, "confirmEmail": " FRESH-RESET@test.local " }),
+    )
+    .await
+    .expect("reset_identity_and_recover from a fresh device");
+    assert!(!secret_key.trim().is_empty(), "the reset must hand back a new Secret Key");
+
+    let (new_version, new_pub) = identity_row(&user_id).await;
+    assert_eq!(new_version, old_version + 1, "the reset rotates the identity once");
+    assert_ne!(new_pub, old_pub, "the reset publishes a new account_id_pub");
+
+    // The App's post-reset tail: set_pin, finalize, initialize_identity.
+    invoke::<()>(
+        &fresh.webview,
+        "set_pin",
+        json!({ "newPin": TEST_PIN, "oldPin": null }),
+    )
+    .await
+    .expect("set_pin after the reset");
+    invoke::<()>(
+        &fresh.webview,
+        "finalize_device_enrollment",
+        json!({ "userId": user_id }),
+    )
+    .await
+    .expect("finalize_device_enrollment after the reset");
+    invoke::<serde_json::Value>(
+        &fresh.webview,
+        "initialize_identity",
+        json!({ "userId": user_id }),
+    )
+    .await
+    .expect("initialize_identity after the reset");
+
+    // The reset left exactly this device, and dropped the old memberships.
+    let fresh_device_id = fresh.state.device_id.lock().await.clone().expect("device_id");
+    let devices: serde_json::Value = fresh
+        .invoke_json("list_user_devices", json!({ "userId": user_id }))
+        .await;
+    let ids: Vec<&str> = devices
+        .as_array()
+        .expect("devices array")
+        .iter()
+        .filter_map(|d| d["device_id"].as_str())
+        .collect();
+    assert_eq!(ids, vec![fresh_device_id.as_str()], "only the recovering device survives");
+    assert!(
+        !fresh.list_group_ids().await.contains(&group_id),
+        "the reset drops the account's memberships"
+    );
+
+    // The recovered device is a working, enrolled device: signed writes succeed.
+    let new_group = fresh.create_group("after the reset").await;
+    assert!(fresh.list_group_ids().await.contains(&new_group));
+
+    drop(fresh);
+    drop(old);
+}

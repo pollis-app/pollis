@@ -144,5 +144,10 @@
     "done": "Thanks. We review every report.",
     "doneBlocked": "Thanks. We review every report. You also blocked {{name}}.",
     "close": "Done"
+  },
+  "keyChange": {
+    "notice": "Your safety number with {{name}} changed.",
+    "verify": "Verify it",
+    "defaultName": "this contact"
   }
 }

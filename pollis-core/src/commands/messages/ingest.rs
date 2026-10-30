@@ -142,25 +142,67 @@ pub async fn ingest_channel_envelopes_inner(
     user_id: &str,
     channel_id: &str,
 ) -> Result<()> {
-    // One round trip resolves the group and membership; unauthorized falls back to local.
-    let resolved =
-        crate::commands::ds_reads::catch_up(state, channel_id, false, false).await?;
-    if !resolved.authorized {
-        return Ok(());
-    }
-    let mls_group_id = resolved.mls_group_id;
-
     let device_id = state.device_id.lock().await.clone();
-
-    // Drain welcomes first so a just-joined member has a local group.
-    if let Some(ref did) = device_id {
-        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
-            crate::diag!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
+    // Drain welcomes first so a just-joined member has a local group. It runs alongside the
+    // group lookup, which it does not depend on (#1610).
+    let welcomes = async {
+        if let Some(ref did) = device_id {
+            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+                crate::diag!("[ingest] poll_mls_welcomes for channel {channel_id}: {e}");
+            }
         }
-    }
+    };
+    let mls_group_id = match cached_channel_group(channel_id) {
+        // Known: the catch-up below checks membership itself, so no lookup is needed.
+        Some(group) => {
+            welcomes.await;
+            group
+        }
+        None => {
+            // One round trip resolves the group and membership; unauthorized falls back to local.
+            let (resolved, ()) = tokio::join!(
+                crate::commands::ds_reads::catch_up(state, channel_id, false, false),
+                welcomes,
+            );
+            let resolved = resolved?;
+            if !resolved.authorized {
+                return Ok(());
+            }
+            remember_channel_group(channel_id, &resolved.mls_group_id);
+            resolved.mls_group_id
+        }
+    };
 
     // Catch up the whole group (all sibling channels) in one epoch-stepped pass.
     catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
+}
+
+/// The MLS group behind each channel this process has resolved (#1610). A channel belongs to
+/// one group for its whole life, so the lookup is needed once, not on every ingest. In memory
+/// only, and bounded: a full map is dropped, costing one lookup per channel.
+static CHANNEL_GROUPS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+const CHANNEL_GROUPS_MAX: usize = 1024;
+
+fn cached_channel_group(channel_id: &str) -> Option<String> {
+    CHANNEL_GROUPS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(channel_id)
+        .cloned()
+}
+
+fn remember_channel_group(channel_id: &str, mls_group_id: &str) {
+    // An empty id is the DS not resolving it; never cache that.
+    if mls_group_id.is_empty() {
+        return;
+    }
+    let mut map = CHANNEL_GROUPS.lock().unwrap_or_else(|p| p.into_inner());
+    if map.len() >= CHANNEL_GROUPS_MAX {
+        map.clear();
+    }
+    map.insert(channel_id.to_string(), mls_group_id.to_string());
 }
 
 /// Group-level interleaved catch-up: advance the SHARED MLS group for
@@ -251,36 +293,41 @@ async fn catch_up_once(
     .await?;
 
     // Advance each watermark via the DS (best-effort). Envelope GC runs server-side (#689).
-    for res in &results {
-        let cid = &res.conversation_id;
-        if let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) {
-            let body = pollis_api::messages::WatermarkBody {
-                conversation_id: cid.clone(),
-                user_id: Some(user_id.to_string()),
-                device_id: did.clone(),
-                // The cursor (#1087). `last_fetched_at` rides along for the
-                // legacy column only; delivery and retention read `last_seq`.
-                last_seq: Some(*seq),
-                last_fetched_at: sent_at.clone(),
-            };
-            if let Err(e) =
-                crate::commands::mls::ds_post_ok(state, &body).await
-            {
+    // Independent posts, so they and the receipts go out together (#1610).
+    let watermarks = futures_util::future::join_all(results.iter().filter_map(|res| {
+        let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) else {
+            return None;
+        };
+        let cid = res.conversation_id.clone();
+        let body = pollis_api::messages::WatermarkBody {
+            conversation_id: cid.clone(),
+            user_id: Some(user_id.to_string()),
+            device_id: did.clone(),
+            // The cursor (#1087). `last_fetched_at` rides along for the
+            // legacy column only; delivery and retention read `last_seq`.
+            last_seq: Some(*seq),
+            last_fetched_at: sent_at.clone(),
+        };
+        Some(async move {
+            if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
                 crate::diag!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
             }
-        }
-    }
+        })
+    }));
 
     // Delivery receipts (#857), batched per conversation; `emit_receipt` re-checks the gates. Best-effort.
-    if is_dm {
-        emit_delivered_batches(
-            state,
-            results
-                .iter()
-                .map(|r| (r.conversation_id.as_str(), r.newly_delivered.as_slice())),
-        )
-        .await;
-    }
+    let receipts = async {
+        if is_dm {
+            emit_delivered_batches(
+                state,
+                results
+                    .iter()
+                    .map(|r| (r.conversation_id.as_str(), r.newly_delivered.as_slice())),
+            )
+            .await;
+        }
+    };
+    tokio::join!(watermarks, receipts);
 
     Ok(())
 }
@@ -571,6 +618,8 @@ async fn ingest_group_envelopes_interleaved(
                         }
                     }
                 }
+                // Stored: tell a waiting host now, not after the rest of the pass (#1610).
+                super::persisted::note(indices.iter().map(|&(ci, _)| per_conv[ci].0.clone()));
             }
         };
         if let Err(e) = crate::commands::mls::process_pending_commits_inner_with_hook(
@@ -686,6 +735,14 @@ async fn ingest_group_envelopes_interleaved(
             },
         );
     }
+    // Tombstones and loss placeholders land after the replay; a pass that touched any
+    // envelope of a conversation re-notes it so those show too (#1610).
+    super::persisted::note(
+        per_conv
+            .iter()
+            .filter(|(_, envs)| !envs.is_empty())
+            .map(|(cid, _)| cid.clone()),
+    );
     Ok(out)
 }
 
@@ -1063,40 +1120,50 @@ pub async fn ingest_dm_envelopes_inner(
     user_id: &str,
     dm_channel_id: &str,
 ) -> Result<()> {
-    // Membership and peers in one request; the catch-up fetches the envelopes.
-    let resolved =
-        crate::commands::ds_reads::catch_up(state, dm_channel_id, false, true).await?;
-    if !resolved.authorized {
-        return Ok(());
-    }
-
     let device_id = state.device_id.lock().await.clone();
 
-    if let Some(ref did) = device_id {
-        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
-            crate::diag!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
+    // Two independent chains, run side by side (#1610), so the envelopes are fetched and stored
+    // without first waiting on the membership lookup and the key check:
+    // - membership and peers in one request, then each peer's `account_id_pub` re-verified
+    //   against the TOFU pin (a change emits `KeyChanged`);
+    // - this device's welcomes, then the catch-up, which checks membership itself.
+    let keys = async {
+        let resolved =
+            crate::commands::ds_reads::catch_up(state, dm_channel_id, false, true).await?;
+        if !resolved.authorized {
+            return Ok::<(), crate::error::Error>(());
         }
-    }
-
-    // Re-verify each peer's `account_id_pub` against the TOFU pin; a change emits `KeyChanged`.
-    let peer_ids: Vec<String> = resolved
-        .dm
-        .map(|dm| {
-            dm.members
-                .into_iter()
-                .map(|m| m.user_id)
-                .filter(|id| id != user_id)
-                .collect()
-        })
-        .unwrap_or_default();
-    // Batched (#875): one query for the whole peer set.
-    if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(state, &peer_ids).await
-    {
-        crate::diag!("[ingest] batch_check_and_pin_account_keys for {dm_channel_id}: {e}");
-    }
-
-    // A DM's MLS group backs exactly one conversation.
-    catch_up_mls_group_interleaved(state, dm_channel_id, user_id).await
+        let peer_ids: Vec<String> = resolved
+            .dm
+            .map(|dm| {
+                dm.members
+                    .into_iter()
+                    .map(|m| m.user_id)
+                    .filter(|id| id != user_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Batched (#875): one query for the whole peer set.
+        if let Err(e) =
+            crate::commands::safety::batch_check_and_pin_account_keys(state, &peer_ids).await
+        {
+            crate::diag!("[ingest] batch_check_and_pin_account_keys for {dm_channel_id}: {e}");
+        }
+        Ok(())
+    };
+    let fetch = async {
+        if let Some(ref did) = device_id {
+            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+                crate::diag!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
+            }
+        }
+        // A DM's MLS group backs exactly one conversation.
+        Box::pin(catch_up_mls_group_interleaved(state, dm_channel_id, user_id)).await
+    };
+    let (keys, fetched) = tokio::join!(keys, fetch);
+    // A non-member's catch-up is a no-op, so only the lookup's own failure is reported.
+    keys?;
+    fetched
 }
 
 /// Frontend-triggerable ingest for a DM channel.

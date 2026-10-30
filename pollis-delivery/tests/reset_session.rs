@@ -448,3 +448,107 @@ async fn signed_rotation_keeps_memberships_and_is_audited_as_signature() {
         Some("credential=signature,new_identity_version=2"),
     );
 }
+
+/// #1616: a fresh device reads its own account row with its OTP session, which is
+/// all the soft reset needs before it can sign.
+#[tokio::test(flavor = "multi_thread")]
+async fn account_status_accepts_the_callers_own_otp_session() {
+    let db = fresh_db().await;
+    let state = authed_state(Arc::clone(&db));
+    let (user_id, token) = login_established(&state, "alice@example.com", "dev-new").await;
+
+    let (s, body) = send(
+        &state,
+        "/v1/read/account-status",
+        serde_json::json!({ "user_id": user_id }),
+        Some(&token),
+        false,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "an OTP session reads its own row: {body}");
+    assert_eq!(body["account"]["user_id"], serde_json::json!(user_id));
+    assert_eq!(body["account"]["email"], "alice@example.com");
+    assert_eq!(body["account"]["identity_version"], 1);
+
+    // No body id at all: the session alone names the account.
+    let (s, body) = send(&state, "/v1/read/account-status", serde_json::json!({}), Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["account"]["user_id"], serde_json::json!(user_id));
+}
+
+/// The session never widens the read: another account's row (and email) stays a 403.
+#[tokio::test(flavor = "multi_thread")]
+async fn account_status_session_cannot_read_another_account() {
+    let db = fresh_db().await;
+    let state = authed_state(Arc::clone(&db));
+    let (_alice, alice_token) = login_established(&state, "alice@example.com", "dev-1").await;
+    let (bob, _bob_token) = login_established(&state, "bob@example.com", "dev-2").await;
+
+    let (s, body) = send(
+        &state,
+        "/v1/read/account-status",
+        serde_json::json!({ "user_id": bob }),
+        Some(&alice_token),
+        false,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "alice's session must not read bob's row");
+    assert!(
+        !body.to_string().contains("bob@example.com"),
+        "a refused read must not carry the other account's email: {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn account_status_rejects_missing_unknown_and_rescued_credentials() {
+    let db = fresh_db().await;
+    let state = authed_state(Arc::clone(&db));
+    let (user_id, token) = login_established(&state, "alice@example.com", "dev-1").await;
+    let body = serde_json::json!({ "user_id": user_id });
+
+    let (s, _) = send(&state, "/v1/read/account-status", body.clone(), None, false).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "no credential must be rejected");
+
+    let (s, _) = send(&state, "/v1/read/account-status", body.clone(), Some("nonsense"), false).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "an unknown session must be rejected");
+
+    let (s, _) = send(&state, "/v1/read/account-status", body, Some(&token), true).await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "a request offering a device signature must stand on that signature"
+    );
+}
+
+/// Enrolled clients (every shipped build) keep reading it device-signed.
+#[tokio::test(flavor = "multi_thread")]
+async fn account_status_still_answers_a_device_signature() {
+    let db = fresh_db().await;
+    let state = authed_state(Arc::clone(&db));
+    let (user_id, _token) = login_established(&state, "alice@example.com", "dev-enrolled").await;
+    seed_account_state(&db, &user_id, "dev-enrolled").await;
+
+    let sk = gen_signing_key();
+    {
+        let conn = db.conn().await.unwrap();
+        conn.execute(
+            "UPDATE user_device SET mls_signature_pub_pq = ?1 \
+             WHERE device_id = 'dev-enrolled' AND user_id = ?2",
+            libsql::params![sk.verifying_key().encode().to_vec(), user_id.clone()],
+        )
+        .await
+        .unwrap();
+    }
+
+    let (s, body) = send_signed(
+        &state,
+        "/v1/read/account-status",
+        serde_json::json!({ "user_id": user_id }),
+        &user_id,
+        "dev-enrolled",
+        &sk,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "a device-signed read still 200s: {body}");
+    assert_eq!(body["account"]["email"], "alice@example.com");
+}

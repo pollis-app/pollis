@@ -119,6 +119,19 @@ fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) 
         budget_ms
     }));
 
+    let rt = crate::bridge::worker_runtime();
+    // The app runs in this process and is unlocked (Android): fetch on its own state rather
+    // than locking it out of its own ingest (#1610).
+    if let Some(app) = crate::bridge::app_state() {
+        let h = handle.clone();
+        let in_app = rt.block_on(rt.spawn(async move {
+            super::fetch::run_in_app(&app, h.as_deref(), budget).await
+        }));
+        if let Ok(Some(outcome)) = in_app {
+            return outcome.to_json();
+        }
+    }
+
     super::host::adopt_data_dir(&data_dir);
     // An extension never mints a keystore key; see `keystore::forbid_key_creation`. Only when
     // the app is not running in this process (Android may call this in-process).
@@ -139,7 +152,6 @@ fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) 
     };
     // The bridge's big-stack workers: an extension thread's stack is far too small for
     // SQLCipher and MLS, and one shared runtime keeps the HTTP pool consistent in-process.
-    let rt = crate::bridge::worker_runtime();
     match rt.block_on(rt.spawn(super::fetch::run(params))) {
         Ok(outcome) => outcome.to_json(),
         Err(_) => INTERNAL.to_string(),
