@@ -6,6 +6,10 @@
 //!
 //! An opaque per-notification handle `h` (#1122/#1157) and nothing else; on Android also the `tag` (#1508).
 //!
+//! A token registered with the `rich` capability (#1599) gets the same `{h}` in a
+//! different envelope, so its client can decrypt on device and write the text itself:
+//! iOS adds `mutableContent`, Android is data-only. See [`expo_message`].
+//!
 //! A read sends a silent `{ d: [handles] }` push to clear them (#1508); see [`dismiss_push`].
 //!
 //! Best-effort throughout: a push that fails to send must never fail a send that
@@ -158,11 +162,9 @@ pub async fn notify_new_message_at(
 
     let messages: Vec<serde_json::Value> = tokens
         .iter()
-        .map(|(token, platform, user_id)| {
-            expo_message(token, platform.as_deref(), handles.get(user_id))
-        })
+        .map(|t| expo_message(&t.token, t.platform.as_deref(), t.caps, handles.get(&t.user_id)))
         .collect();
-    let push_tokens: Vec<String> = tokens.into_iter().map(|(token, _, _)| token).collect();
+    let push_tokens: Vec<String> = tokens.into_iter().map(|t| t.token).collect();
 
     let auth = expo_token();
     for (chunk, chunk_tokens) in messages
@@ -644,35 +646,121 @@ async fn conversation_recipients(
     Ok(out)
 }
 
-/// `(token, platform, user_id)` per registered device.
+/// What a client registered it can do with a push (#1599), as stored in `push_token.caps`.
+///
+/// Built only from the allowlist in [`PushCaps::from_wire`] or a stored bitmask, so an
+/// unknown capability can neither be stored nor change a payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PushCaps {
+    rich: bool,
+}
+
+impl PushCaps {
+    const RICH: i64 = 1;
+
+    /// The registration's `caps`, reduced to the ones this DS knows. Missing or unknown = none.
+    pub fn from_wire(caps: &[String]) -> Self {
+        Self {
+            rich: caps.iter().any(|c| c == pollis_api::devices::PUSH_CAP_RICH),
+        }
+    }
+
+    /// The stored column. Bits this DS does not know are ignored.
+    pub fn from_bits(bits: i64) -> Self {
+        Self {
+            rich: bits & Self::RICH != 0,
+        }
+    }
+
+    pub fn bits(self) -> i64 {
+        if self.rich {
+            Self::RICH
+        } else {
+            0
+        }
+    }
+
+    /// The client rewrites the notification itself after decrypting on device.
+    pub fn rich(self) -> bool {
+        self.rich
+    }
+}
+
+/// One registered device a send may wake.
+struct PushTarget {
+    token: String,
+    platform: Option<String>,
+    user_id: String,
+    caps: PushCaps,
+}
+
+/// Every registered device of `user_ids`.
 ///
 /// The handle is minted per RECIPIENT USER (#1122), so it names no conversation.
-async fn push_tokens(
-    conn: &Connection,
-    user_ids: &[String],
-) -> anyhow::Result<Vec<(String, Option<String>, String)>> {
+async fn push_tokens(conn: &Connection, user_ids: &[String]) -> anyhow::Result<Vec<PushTarget>> {
     let mut out = Vec::new();
     for chunk in user_ids.chunks(BIND_CHUNK) {
         let placeholders = placeholders(chunk.len(), 1);
         let sql = format!(
-            "SELECT token, platform, user_id FROM push_token WHERE user_id IN ({placeholders})"
+            "SELECT token, platform, user_id, caps FROM push_token \
+             WHERE user_id IN ({placeholders})"
         );
         let params: Vec<libsql::Value> = chunk.iter().map(|u| u.clone().into()).collect();
         let mut rows = conn.query(&sql, params).await?;
         while let Some(row) = rows.next().await? {
-            out.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            out.push(PushTarget {
+                token: row.get(0)?,
+                platform: row.get(1)?,
+                user_id: row.get(2)?,
+                caps: PushCaps::from_bits(row.get(3)?),
+            });
         }
     }
     Ok(out)
 }
 
-/// One Expo message, built from nothing but the token, the platform and the
-/// handle — so what leaves this process can be asserted on directly.
+/// One Expo message, built from nothing but the token, the platform, the
+/// registered capabilities and the handle — so what leaves this process can be
+/// asserted on directly.
 ///
 /// **The `data` blob is the whole privacy surface:** the opaque handle and NOTHING else (#1157).
 ///
 /// A `None` handle (minting failed) still sends the buzz, unrouted, never naming the conversation.
+///
+/// A `rich` token (#1599) with a handle gets the same `{h}` in another envelope:
+///
+/// * **iOS:** today's message plus `mutableContent`, so the Notification Service
+///   Extension may rewrite it. The generic title and body stay as what shows if it can't.
+/// * **Android:** data-only, high priority: no title, body, channel or tag, so no
+///   system notification exists and the app posts its own (tagged `h`, on its own channel).
+///
+/// A `rich` token with no handle gets today's message: there is nothing for the
+/// client to fetch by, and the user is still told.
 fn expo_message(
+    token: &str,
+    platform: Option<&str>,
+    caps: PushCaps,
+    handle: Option<&String>,
+) -> serde_json::Value {
+    if let (true, Some(h)) = (caps.rich(), handle) {
+        if platform == Some("android") {
+            return serde_json::json!({
+                "to": token,
+                "priority": "high",
+                "data": { "h": h },
+            });
+        }
+        if platform == Some("ios") {
+            let mut msg = generic_message(token, platform, Some(h));
+            msg["mutableContent"] = serde_json::Value::Bool(true);
+            return msg;
+        }
+    }
+    generic_message(token, platform, handle)
+}
+
+/// Today's visible "New message" push, unchanged since #1508.
+fn generic_message(
     token: &str,
     platform: Option<&str>,
     handle: Option<&String>,
@@ -977,10 +1065,10 @@ pub async fn send_dismissals(
     };
     let mut messages = Vec::new();
     let mut message_tokens = Vec::new();
-    for (token, platform, _) in &tokens {
+    for t in &tokens {
         for chunk in handles.chunks(DISMISS_HANDLES_PER_PUSH) {
-            messages.push(expo_dismiss_message(token, platform.as_deref(), chunk));
-            message_tokens.push(token.clone());
+            messages.push(expo_dismiss_message(&t.token, t.platform.as_deref(), chunk));
+            message_tokens.push(t.token.clone());
         }
     }
     let auth = expo_token();
@@ -1143,7 +1231,7 @@ mod tests {
     #[test]
     fn the_payload_data_carries_only_the_handle() {
         let handle = "Zm9vYmFyMTIzNDU2Nzg5".to_string();
-        let msg = expo_message("ExponentPushToken[abc]", Some("ios"), Some(&handle));
+        let msg = expo_message("ExponentPushToken[abc]", Some("ios"), NONE, Some(&handle));
 
         let data = msg.get("data").expect("data blob");
         let obj = data.as_object().expect("data is an object");
@@ -1168,7 +1256,7 @@ mod tests {
     /// no routing — never a conversation id as a consolation prize.
     #[test]
     fn a_missing_handle_degrades_to_no_routing() {
-        let msg = expo_message("ExponentPushToken[abc]", None, None);
+        let msg = expo_message("ExponentPushToken[abc]", None, NONE, None);
         assert!(msg["data"]["h"].is_null());
         assert_eq!(msg["title"].as_str(), Some("New message"));
         let wire = serde_json::to_string(&msg).unwrap();
@@ -1180,10 +1268,195 @@ mod tests {
     fn the_android_channel_survives_the_payload_change() {
         let h = "aGFuZGxl".to_string();
         assert_eq!(
-            expo_message("t", Some("android"), Some(&h))["channelId"].as_str(),
+            expo_message("t", Some("android"), NONE, Some(&h))["channelId"].as_str(),
             Some("default")
         );
-        assert!(expo_message("t", Some("ios"), Some(&h)).get("channelId").is_none());
+        assert!(expo_message("t", Some("ios"), NONE, Some(&h)).get("channelId").is_none());
+    }
+
+    const NONE: PushCaps = PushCaps { rich: false };
+    const RICH: PushCaps = PushCaps { rich: true };
+
+    /// Every combination a send can build, so the privacy checks cover them all.
+    fn every_variant(handle: &String) -> Vec<(String, serde_json::Value)> {
+        let mut out = Vec::new();
+        for platform in [Some("ios"), Some("android"), None, Some("web")] {
+            for (caps_name, caps) in [("none", NONE), ("rich", RICH)] {
+                for h in [Some(handle), None] {
+                    let label = format!("{platform:?}/{caps_name}/{}", h.is_some());
+                    out.push((label, expo_message("ExponentPushToken[abc]", platform, caps, h)));
+                }
+            }
+        }
+        out
+    }
+
+    /// #1157 holds for every #1599 envelope: `data` is `{h}` and nothing else.
+    #[test]
+    fn every_payload_variant_carries_only_the_handle() {
+        let handle = "Zm9vYmFyMTIzNDU2Nzg5".to_string();
+        for (label, msg) in every_variant(&handle) {
+            let obj = msg["data"].as_object().expect("data is an object");
+            assert_eq!(obj.keys().collect::<Vec<_>>(), vec!["h"], "{label}: {msg}");
+            let wire = serde_json::to_string(&msg).unwrap();
+            for forbidden in ["conversationId", "conversation_id", "kind", "senderId", "sender"] {
+                assert!(!wire.contains(forbidden), "{label}: `{forbidden}` in {wire}");
+            }
+            // The only keys any variant may use at the top level.
+            for key in msg.as_object().unwrap().keys() {
+                assert!(
+                    [
+                        "to",
+                        "title",
+                        "body",
+                        "priority",
+                        "data",
+                        "channelId",
+                        "tag",
+                        "mutableContent"
+                    ]
+                    .contains(&key.as_str()),
+                    "{label}: unexpected key `{key}` in {msg}"
+                );
+            }
+        }
+    }
+
+    /// A token without capabilities gets exactly the pre-#1599 bytes, on every platform.
+    #[test]
+    fn a_token_without_caps_gets_todays_payload_byte_for_byte() {
+        let h = "aGFuZGxl".to_string();
+        let ios = serde_json::to_string(&expo_message("T", Some("ios"), NONE, Some(&h))).unwrap();
+        assert_eq!(
+            ios,
+            r#"{"body":"You have a new message","data":{"h":"aGFuZGxl"},"priority":"high","title":"New message","to":"T"}"#
+        );
+        let android =
+            serde_json::to_string(&expo_message("T", Some("android"), NONE, Some(&h))).unwrap();
+        assert_eq!(
+            android,
+            r#"{"body":"You have a new message","channelId":"default","data":{"h":"aGFuZGxl"},"priority":"high","tag":"aGFuZGxl","title":"New message","to":"T"}"#
+        );
+        let unrouted = serde_json::to_string(&expo_message("T", None, NONE, None)).unwrap();
+        assert_eq!(
+            unrouted,
+            r#"{"body":"You have a new message","data":{"h":null},"priority":"high","title":"New message","to":"T"}"#
+        );
+        for platform in [Some("ios"), Some("android"), None] {
+            for handle in [Some(&h), None] {
+                assert_eq!(
+                    expo_message("T", platform, NONE, handle),
+                    generic_message("T", platform, handle),
+                );
+            }
+        }
+    }
+
+    /// iOS + rich: today's visible message (the fallback text) plus `mutableContent`.
+    #[test]
+    fn a_rich_ios_token_lets_the_extension_rewrite_the_notification() {
+        let h = "aGFuZGxl".to_string();
+        let msg = expo_message("T", Some("ios"), RICH, Some(&h));
+        let mut expected = generic_message("T", Some("ios"), Some(&h));
+        expected["mutableContent"] = serde_json::Value::Bool(true);
+        assert_eq!(msg, expected);
+        assert_eq!(msg["title"].as_str(), Some("New message"));
+    }
+
+    /// Android + rich: data-only and high priority, so the app (not the system)
+    /// posts it. No channel and no tag: there is no system notification for them to describe.
+    #[test]
+    fn a_rich_android_token_gets_a_data_only_message() {
+        let h = "aGFuZGxl".to_string();
+        let msg = expo_message("T", Some("android"), RICH, Some(&h));
+        assert_eq!(
+            msg,
+            serde_json::json!({ "to": "T", "priority": "high", "data": { "h": "aGFuZGxl" } })
+        );
+    }
+
+    /// No handle (minting failed): a rich client has nothing to fetch by, so it gets
+    /// today's visible message and the user is still told.
+    #[test]
+    fn a_rich_token_without_a_handle_falls_back_to_the_generic_push() {
+        for platform in [Some("ios"), Some("android"), None] {
+            assert_eq!(
+                expo_message("T", platform, RICH, None),
+                generic_message("T", platform, None),
+                "{platform:?}"
+            );
+        }
+        // Rich on a platform with no rich envelope changes nothing.
+        let h = "aGFuZGxl".to_string();
+        assert_eq!(
+            expo_message("T", None, RICH, Some(&h)),
+            generic_message("T", None, Some(&h))
+        );
+    }
+
+    /// Only known capabilities survive registration; unknown bits stored by a
+    /// later DS change nothing here.
+    #[test]
+    fn caps_are_allowlisted() {
+        let wire = |v: &[&str]| {
+            PushCaps::from_wire(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
+        assert_eq!(wire(&[]), NONE);
+        assert_eq!(wire(&["rich"]), RICH);
+        assert_eq!(wire(&["future", "rich", "rich"]), RICH);
+        assert_eq!(wire(&["RICH", "future"]), NONE);
+        assert_eq!(wire(&["rich"]).bits(), 1);
+        assert_eq!(wire(&["future"]).bits(), 0);
+        assert_eq!(PushCaps::from_bits(0), NONE);
+        assert_eq!(PushCaps::from_bits(1), RICH);
+        assert_eq!(PushCaps::from_bits(0b110), NONE);
+        assert_eq!(PushCaps::from_bits(0b111), RICH);
+    }
+
+    /// The real fan-out reads `caps` per token: one user's rich Android and plain
+    /// iOS devices each get their own envelope around the same handle.
+    #[tokio::test]
+    async fn the_fan_out_builds_each_tokens_envelope_from_its_caps() {
+        let c = muted_channel_fixture().await;
+        c.execute(
+            "UPDATE push_token SET caps = 1 WHERE token = 'ExponentPushToken[carol]'",
+            (),
+        )
+        .await
+        .unwrap();
+        c.execute(
+            "INSERT INTO push_token (token, user_id, platform, updated_at) \
+             VALUES ('ExponentPushToken[carol-ios]', 'carol', 'ios', '2026-10-24T00:00:00Z')",
+            (),
+        )
+        .await
+        .unwrap();
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        let audience = PushAudience::from_send(Some(vec![]), None).unwrap();
+        notify_new_message_at(&c, &url, "ch1", "alice", &audience)
+            .await
+            .unwrap();
+        let sent: Vec<serde_json::Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|b| b.as_array().cloned().unwrap_or_default())
+            .collect();
+        let by_token = |t: &str| {
+            sent.iter()
+                .find(|m| m["to"] == t)
+                .cloned()
+                .unwrap_or_else(|| panic!("{t} not pushed: {sent:?}"))
+        };
+        let rich = by_token("ExponentPushToken[carol]");
+        assert!(rich.get("title").is_none() && rich.get("tag").is_none(), "{rich}");
+        let plain = by_token("ExponentPushToken[carol-ios]");
+        assert_eq!(plain["title"].as_str(), Some("New message"));
+        assert!(plain.get("mutableContent").is_none());
+        assert_eq!(rich["data"]["h"], plain["data"]["h"]);
+        for m in &sent {
+            assert_eq!(m["data"].as_object().unwrap().keys().collect::<Vec<_>>(), vec!["h"]);
+        }
     }
 
     async fn conn() -> Connection {
@@ -1425,7 +1698,7 @@ mod tests {
         ];
         let messages: Vec<_> = tokens
             .iter()
-            .map(|t| expo_message(t, Some("android"), None))
+            .map(|t| expo_message(t, Some("android"), NONE, None))
             .collect();
         let stats = PushStats::default();
 
@@ -1464,7 +1737,7 @@ mod tests {
         )
         .await;
         let tokens = vec!["ExponentPushToken[a]".to_string()];
-        let messages = vec![expo_message(&tokens[0], None, None)];
+        let messages = vec![expo_message(&tokens[0], None, NONE, None)];
         let stats = PushStats::default();
 
         send_batch(&c, &url, None, &messages, &tokens, &stats).await;
@@ -1486,7 +1759,7 @@ mod tests {
         let url = format!("http://{}/", listener.local_addr().unwrap());
         drop(listener);
         let tokens = vec!["ExponentPushToken[a]".to_string()];
-        let messages = vec![expo_message(&tokens[0], None, None)];
+        let messages = vec![expo_message(&tokens[0], None, NONE, None)];
         let stats = PushStats::default();
 
         send_batch(&c, &url, None, &messages, &tokens, &stats).await;
@@ -1705,11 +1978,11 @@ mod tests {
     #[test]
     fn an_android_notification_is_tagged_with_its_handle() {
         let h = "aGFuZGxlLXRhZw".to_string();
-        let android = expo_message("t", Some("android"), Some(&h));
+        let android = expo_message("t", Some("android"), NONE, Some(&h));
         assert_eq!(android["tag"].as_str(), Some(h.as_str()));
-        assert!(expo_message("t", Some("ios"), Some(&h)).get("tag").is_none());
+        assert!(expo_message("t", Some("ios"), NONE, Some(&h)).get("tag").is_none());
         // No handle, no tag — never a conversation-derived stand-in.
-        assert!(expo_message("t", Some("android"), None).get("tag").is_none());
+        assert!(expo_message("t", Some("android"), NONE, None).get("tag").is_none());
     }
 
     /// The silent push: `data` is `{ d }` and nothing else, no title or body

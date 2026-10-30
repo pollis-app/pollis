@@ -1144,7 +1144,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             let token: String = arg(&args, "token")?;
             let platform: String = arg(&args, "platform")?;
-            crate::commands::push::register_push_token(user_id, token, platform, &state()?).await?;
+            // #1599: optional, so an older JS bundle (OTA) keeps registering with none.
+            let caps: Vec<String> = arg_opt(&args, "caps")?.unwrap_or_default();
+            crate::commands::push::register_push_token(user_id, token, platform, caps, &state()?)
+                .await?;
             ok(())
         }
 

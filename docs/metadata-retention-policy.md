@@ -303,7 +303,12 @@ client IPs from the first-party services, and is opt-in and off by default. This
   `data: { h }` and nothing else — a random 128-bit handle, minted per notification per recipient.
   Never plaintext, never a sender, never a preview, never the conversation id
   (`pollis-delivery/src/push.rs`; `push::tests::the_payload_data_carries_only_the_handle` asserts it
-  on the serialized blob, which is what the providers actually receive).
+  on the serialized blob, which is what the providers actually receive). A token registered with the
+  `rich` capability (#1599, `push_token.caps`) gets the same `{ h }` in a different envelope — iOS adds
+  `mutableContent`, Android drops the title/body for a data-only message — so the device can decrypt
+  and write the preview itself; nothing new reaches the providers
+  (`push::tests::every_payload_variant_carries_only_the_handle`). The DS learns one bit per token:
+  whether that build supports it.
 - **Handles:** `push_handle` stores `handle → (user_id, conversation_id, kind)` so the client can
   trade the handle for routing information at `POST /v1/push/resolve` over its own authenticated
   channel. Retention is `PUSH_HANDLE_TTL_DAYS` (7), swept on the DS's retention schedule, and rows
