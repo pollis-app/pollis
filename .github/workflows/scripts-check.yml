@@ -186,6 +186,11 @@ jobs:
       - name: client-policy.mjs validates, diffs, guards and publishes like latest.json
         run: ./scripts/test-client-policy.sh
 
+      # #1624: the deploy workflows' client-policy check. Offline, with a stub `curl`: it must ride
+      # out the Worker's env restart (404s, then timeouts) and still fail on a persistent 404.
+      - name: verify-client-policy.sh rides out a restart and fails on a persistent 404
+        run: ./scripts/test-verify-client-policy.sh
+
       # The e2e commit-log migration applier. Two silent failures shipped in it:
       # a stale migrations path that made it apply ZERO statements and exit 0,
       # and a naive `;` split that shredded every `CREATE TRIGGER` body. Both

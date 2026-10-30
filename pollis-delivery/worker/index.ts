@@ -17,7 +17,7 @@ import {
   type GateInputs,
   type GateMode,
 } from "./dev-gate";
-import { ENV_FINGERPRINT_KEY, envFingerprint, needsRestart } from "./container-env";
+import { ENV_FINGERPRINT_KEY, envFingerprint, envVerdict } from "./container-env";
 
 // WHERE the DS container physically runs (#658).
 // A DO is placed near whoever first created it, permanently; `enam` matches the Turso primary.
@@ -199,23 +199,43 @@ export class PollisDelivery extends Container<Env> {
       .join("");
   }
 
-  // Once per Durable Object instance (each deploy restarts it): a container a rollout restarted
-  // with the previous start's environment is restarted with the current one (container-env.ts).
-  private envReconciled?: Promise<void>;
+  // Per Durable Object instance (each deploy restarts it), until a running container is seen with
+  // the current environment: a container a rollout restarted with the previous start's environment
+  // is restarted with the current one (container-env.ts). Concurrent requests share one check.
+  private envSettled = false;
+  private envCheck?: Promise<boolean>;
 
-  private async reconcileEnv(): Promise<void> {
+  // True once settled. A check that found nothing running, restarted the container or failed
+  // leaves it unsettled, so the next request checks again (#1624).
+  private async reconcileEnv(): Promise<boolean> {
     try {
-      if (!this.ctx.container?.running) {
-        return;
+      const running = this.ctx.container?.running ?? false;
+      if (!running) {
+        // "recheck", without paying for the secret reads.
+        return false;
       }
       const current = await envFingerprint({ ...this.envVars, ...(await this.resolveSecretEnv()) });
       const recorded = await this.ctx.storage.get<string>(ENV_FINGERPRINT_KEY);
-      if (needsRestart(true, recorded, current)) {
+      const verdict = envVerdict(running, recorded, current);
+      if (verdict === "restart") {
         await this.destroy();
       }
+      return verdict === "settled";
     } catch {
-      // The Worker logs nothing (no_client_ip_exposure); a failed check just skips the restart.
+      // The Worker logs nothing (no_client_ip_exposure); a failed check skips the restart this time.
+      return false;
+    }
+  }
+
+  private async ensureEnvReconciled(): Promise<void> {
+    if (this.envSettled) {
       return;
+    }
+    this.envCheck ??= this.reconcileEnv().finally(() => {
+      this.envCheck = undefined;
+    });
+    if (await this.envCheck) {
+      this.envSettled = true;
     }
   }
 
@@ -242,8 +262,7 @@ export class PollisDelivery extends Container<Env> {
     if (ip) {
       headers.set(CLIENT_BUCKET_HEADER, await this.clientBucket(ip));
     }
-    this.envReconciled ??= this.reconcileEnv();
-    await this.envReconciled;
+    await this.ensureEnvReconciled();
     return super.fetch(new Request(request, { headers }));
   }
 
