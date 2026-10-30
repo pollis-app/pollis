@@ -760,7 +760,8 @@ export function useIngestConversation() {
       }
       try {
         const userId = currentUser.id;
-        await ingestFlights.run(`${kind}:${conversationId}`, async () => {
+        // Keyed by account too: a trailing run must never reuse another account's closure.
+        await ingestFlights.run(`${userId}:${kind}:${conversationId}`, async () => {
           if (kind === "channel") {
             await invoke("ingest_channel_envelopes", {
               userId,

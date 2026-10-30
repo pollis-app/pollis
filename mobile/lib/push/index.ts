@@ -68,6 +68,7 @@ const registrar = createPushRegistrar({
       // #1599: sent on every register, since the DS replaces the stored caps each time.
       caps: pushCapsFor(embeddedExtra(), Platform.OS),
     });
+    tokenEcho.confirmOwn();
   },
   warn: (message, error) => {
     console.warn(message, error);

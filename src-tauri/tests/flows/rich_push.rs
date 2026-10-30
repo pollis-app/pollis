@@ -285,6 +285,67 @@ async fn an_in_process_fetch_shares_the_apps_lock_instead_of_excluding_it() {
         .is_none());
 }
 
+/// #1610: the in-process fetch and the app's own ingest of the same conversation, truly at the
+/// same time (the push and its realtime wake-up arrive together), several rounds with alice
+/// sending between them. Every message is stored exactly once, none is a placeholder, nothing is
+/// recorded as lost (the harness asserts that on drop), and both directions still decrypt after,
+/// so neither path rolled the shared MLS state back under the other.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_in_process_fetch_and_the_apps_ingest_race_on_one_conversation() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+
+    let mut sent: Vec<String> = Vec::new();
+    for round in 0..4 {
+        for i in 0..3 {
+            let text = format!("race r{round} m{i}");
+            alice.send_channel_message(&dm, &text).await;
+            sent.push(text);
+        }
+        let handle = handle_for(&bob_p.id, &dm, "dm").await;
+        bob.activate();
+        let app_ingest = bob.invoke_json(
+            "ingest_dm_envelopes",
+            serde_json::json!({ "userId": bob_p.id, "dmChannelId": dm }),
+        );
+        let in_app = fetch::run_in_app(&bob.state, Some(&handle), Duration::from_secs(20));
+        let (_, outcome) = tokio::join!(app_ingest, in_app);
+        let outcome = outcome.expect("the app is unlocked in this process");
+        assert!(matches!(outcome, Outcome::Ok { .. }), "round {round}: {outcome:?}");
+    }
+
+    let page = bob.fetch_dm_messages(&dm).await;
+    let undecryptable = page.iter().filter(|m| m["undecryptable"] == true).count();
+    assert_eq!(undecryptable, 0, "a placeholder means an MLS failure: {page:#?}");
+    let view = contents(&page);
+    for text in &sent {
+        let n = view.iter().filter(|(_, c)| c == text).count();
+        assert_eq!(n, 1, "bob holds {text:?} exactly once: {view:?}");
+    }
+    let ids: HashSet<&String> = view.iter().map(|(id, _)| id).collect();
+    assert_eq!(ids.len(), view.len(), "no duplicate rows");
+
+    // Both directions still work: no MLS state was rolled back.
+    bob.send_channel_message(&dm, "bob after the race").await;
+    alice.send_channel_message(&dm, "alice after the race").await;
+    assert!(contents(&alice.fetch_dm_messages(&dm).await)
+        .iter()
+        .any(|(_, c)| c == "bob after the race"));
+    assert!(contents(&bob.fetch_dm_messages(&dm).await)
+        .iter()
+        .any(|(_, c)| c == "alice after the race"));
+}
+
 /// The fallback reasons, and the three settings.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]

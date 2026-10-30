@@ -113,34 +113,52 @@ impl Outcome {
 /// seconds. Nothing is opened or closed here, and no escrowed key is read.
 pub async fn run_in_app(app: &Arc<AppState>, handle: Option<&str>, budget: Duration) -> Option<Outcome> {
     let started = Instant::now();
-    let user_id = app.unlock.lock().await.as_ref()?.user_id.clone();
-    let (mode, floor) = {
-        let guard = app.local_db.lock().await;
-        let db = guard.as_ref()?;
-        let floor: i64 = db
-            .conn()
-            .query_row("SELECT COALESCE(MAX(rowid), 0) FROM message", [], |r| r.get(0))
-            .unwrap_or(0);
-        (escrow::read_mode(db.conn()), floor)
-    };
-    // "Nothing" means nothing: no fetch, no decrypt, no name. The app's realtime path stores it.
-    if mode == NotificationContent::None {
-        return Some(Outcome::Ok {
-            mode,
-            items: Vec::new(),
-        });
-    }
     let deadline = started + budget;
-    let result = tokio::time::timeout_at(deadline.into(), ingest_for_handle(app, &user_id, handle)).await;
-    Some(match result {
-        Ok(Ok(target)) => finish(app, &user_id, mode, floor, target, deadline, None).await,
-        Ok(Err(reason)) => {
-            crate::diag!("[notify] in-app ingest failed: {reason:?}");
-            finish(app, &user_id, mode, floor, None, deadline, Some(reason)).await
+    // The ingest stops short of the deadline so what it stored can still be read back.
+    let ingest_deadline = started + budget.mul_f64(IN_APP_INGEST_SHARE);
+    // Everything, the app's own locks included, runs inside the budget: a host thread waiting
+    // on this must never wait longer than it asked to.
+    let body = async {
+        let user_id = app.unlock.lock().await.as_ref()?.user_id.clone();
+        let (mode, floor) = {
+            let guard = app.local_db.lock().await;
+            let db = guard.as_ref()?;
+            let floor: i64 = db
+                .conn()
+                .query_row("SELECT COALESCE(MAX(rowid), 0) FROM message", [], |r| r.get(0))
+                .unwrap_or(0);
+            (escrow::read_mode(db.conn()), floor)
+        };
+        // "Nothing" means nothing: no fetch, no decrypt, no name. The app's realtime path stores it.
+        if mode == NotificationContent::None {
+            return Some(Outcome::Ok {
+                mode,
+                items: Vec::new(),
+            });
         }
-        Err(_) => finish(app, &user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await,
-    })
+        let result = tokio::time::timeout_at(
+            ingest_deadline.into(),
+            ingest_for_handle(app, &user_id, handle),
+        )
+        .await;
+        Some(match result {
+            Ok(Ok(target)) => finish(app, &user_id, mode, floor, target, deadline, None).await,
+            Ok(Err(reason)) => {
+                crate::diag!("[notify] in-app ingest failed: {reason:?}");
+                finish(app, &user_id, mode, floor, None, deadline, Some(reason)).await
+            }
+            Err(_) => {
+                finish(app, &user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await
+            }
+        })
+    };
+    tokio::time::timeout_at(deadline.into(), body)
+        .await
+        .unwrap_or(Some(Outcome::Failed(Reason::Timeout)))
 }
+
+/// The in-app fetch's share of its budget for the ingest; the rest is for reading back.
+const IN_APP_INGEST_SHARE: f64 = 0.8;
 
 /// Run one fetch. Never panics on its own account; every failure is a [`Reason`].
 pub async fn run(p: Params) -> Outcome {

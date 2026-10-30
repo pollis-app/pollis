@@ -162,13 +162,51 @@ test("the echo of our own token request is not a rotation; a new token is (#1610
   // getToken asked for the device token; iOS then fires the token event with that same token.
   echo.noteOwn("apns-a");
   assert.equal(echo.isRotation("apns-a"), false, "our own request's echo must not re-register");
+  echo.confirmOwn();
   assert.equal(echo.isRotation("apns-a"), false);
   // The OS rotated it.
   assert.equal(echo.isRotation("apns-b"), true);
-  assert.equal(echo.isRotation("apns-b"), false, "a rotation is acted on once");
-  // An event that beats our own request's resolution costs one extra round, then settles.
-  const racy = createTokenEchoFilter();
-  assert.equal(racy.isRotation("fcm-1"), true);
-  racy.noteOwn("fcm-1");
-  assert.equal(racy.isRotation("fcm-1"), false);
+  // The refresh it triggers obtains apns-b; its echo is not another rotation.
+  echo.noteOwn("apns-b");
+  assert.equal(echo.isRotation("apns-b"), false);
+});
+
+test("a rotation whose register fails is re-registered on the next foreground (#1610)", async () => {
+  const f = fake({ token: "ExponentPushToken[one]" });
+  const r = createPushRegistrar(f.deps);
+  const echo = createTokenEchoFilter();
+  const getToken = f.deps.getToken;
+  // The device token tracks the Expo token in this fake.
+  f.deps.getToken = async () => {
+    const t = await getToken();
+    if (t) {
+      echo.noteOwn(`device:${t}`);
+    }
+    return t;
+  };
+  const register = f.deps.register;
+  f.deps.register = async (userId, token) => {
+    await register(userId, token);
+    echo.confirmOwn();
+  };
+
+  // Landing: registered, accepted.
+  await r.ensure("alice", { prompt: false });
+  assert.equal(r.registeredToken("alice"), "ExponentPushToken[one]");
+
+  // The OS rotates the token; the event is a rotation, but the DS refuses the register.
+  f.token = "ExponentPushToken[two]";
+  f.registerFails = true;
+  assert.equal(echo.isRotation("device:ExponentPushToken[two]"), true);
+  assert.equal(await r.ensure("alice", { prompt: false, refresh: true }), null);
+  // Its own echo must not loop it...
+  assert.equal(echo.isRotation("device:ExponentPushToken[two]"), false);
+  // ...and the user is no longer counted registered with the dead token.
+  assert.equal(r.registeredToken("alice"), undefined);
+
+  // Next foreground: a quiet ensure re-registers the new token.
+  f.registerFails = false;
+  assert.equal(await r.ensure("alice", { prompt: false }), "ExponentPushToken[two]");
+  assert.deepEqual(f.registered.at(-1), ["alice", "ExponentPushToken[two]"]);
+  assert.equal(r.registeredToken("alice"), "ExponentPushToken[two]");
 });

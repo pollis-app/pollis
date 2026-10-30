@@ -6,13 +6,20 @@
 //! store when it returns, so a message shows as soon as it is stored, whichever path stored it:
 //! the conversation's own ingest, a catch-up sweep, or Android's in-process push fetch.
 //!
-//! Process-wide, like the store it describes. Notes with no waiter just accumulate (a set of
-//! conversation ids, so bounded by the account's conversations) until the next wait drains them.
+//! Nothing is drained: each conversation keeps the position of its latest note, and every waiter
+//! brings its own cursor (`after`) and gets the conversations noted past it. So two waiters (an
+//! old feed loop still parked across a sign-out and the new one) each see every note, and neither
+//! can swallow the other's. Process-wide, like the store it describes, and bounded by the
+//! account's conversations; past [`MAX_TRACKED`] the map is reset and a waiter whose cursor
+//! predates that is told to re-read everything.
 
-use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use tokio::sync::Notify;
+
+/// Conversations remembered before the map is reset.
+const MAX_TRACKED: usize = 4096;
 
 struct Feed {
     state: Mutex<FeedState>,
@@ -21,9 +28,12 @@ struct Feed {
 
 #[derive(Default)]
 struct FeedState {
-    /// Bumped on every note; a waiter returns once it passes the `after` it was given.
+    /// Bumped on every note.
     seq: u64,
-    pending: BTreeSet<String>,
+    /// Each noted conversation and the position of its latest note.
+    noted: HashMap<String, u64>,
+    /// Notes at or before this position were forgotten by a reset.
+    floor: u64,
 }
 
 static FEED: LazyLock<Feed> = LazyLock::new(|| Feed {
@@ -45,12 +55,17 @@ where
     let mut any = false;
     {
         let mut st = lock();
+        let at = st.seq + 1;
         for id in conversation_ids {
-            st.pending.insert(id.into());
+            if st.noted.len() >= MAX_TRACKED {
+                st.noted.clear();
+                st.floor = st.seq;
+            }
+            st.noted.insert(id.into(), at);
             any = true;
         }
         if any {
-            st.seq += 1;
+            st.seq = at;
         }
     }
     if any {
@@ -58,21 +73,23 @@ where
     }
 }
 
-/// What a wait returns: the position to wait after next, and the conversations noted since.
+/// What a wait returns: the cursor to wait after next, and the conversations noted since.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Persisted {
     pub seq: u64,
     pub conversation_ids: Vec<String>,
+    /// The waiter's cursor predates a reset: re-read every conversation.
+    pub everything: bool,
 }
 
-/// The current position, without waiting or draining.
+/// The current position, without waiting.
 pub fn position() -> u64 {
     lock().seq
 }
 
-/// Wait until something is noted after position `after`, then drain and return it.
-/// Returns at once if that already happened. Meant for one waiter at a time.
+/// Wait until something is noted after cursor `after`, then return what was. Returns at once
+/// if that already happened. Any number of waiters may wait, each with its own cursor.
 pub async fn wait(after: u64) -> Persisted {
     loop {
         // Registered before the check, so a note between the check and the await still wakes us.
@@ -80,11 +97,19 @@ pub async fn wait(after: u64) -> Persisted {
         tokio::pin!(notified);
         notified.as_mut().enable();
         {
-            let mut st = lock();
+            let st = lock();
             if st.seq > after {
+                let mut conversation_ids: Vec<String> = st
+                    .noted
+                    .iter()
+                    .filter(|(_, &at)| at > after)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                conversation_ids.sort();
                 return Persisted {
                     seq: st.seq,
-                    conversation_ids: std::mem::take(&mut st.pending).into_iter().collect(),
+                    conversation_ids,
+                    everything: after < st.floor,
                 };
             }
         }
@@ -97,29 +122,37 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    // One process-wide feed, so the cases run in one test, in order.
+    // One process-wide feed, and other tests in this binary may note too, so only what this
+    // test noted is asserted.
     #[tokio::test]
-    async fn a_waiter_wakes_on_a_note_and_drains_it() {
+    async fn every_waiter_sees_every_note_past_its_own_cursor() {
         let start = position();
         note(["c-old"]);
-        // Already past `start`: returns at once with what is pending.
         let got = wait(start).await;
         assert!(got.seq > start);
         assert!(got.conversation_ids.contains(&"c-old".to_string()));
 
-        // Nothing new: a wait parks until the next note.
+        // Two waiters parked at the same cursor: a stale feed loop and a new one.
         let after = got.seq;
-        let waiter = tokio::spawn(async move { wait(after).await });
+        let stale = tokio::spawn(async move { wait(after).await });
+        let fresh = tokio::spawn(async move { wait(after).await });
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!waiter.is_finished(), "returned with nothing noted");
+        assert!(!stale.is_finished() && !fresh.is_finished(), "returned with nothing noted");
         note(["c-1", "c-2", "c-1"]);
-        let got = tokio::time::timeout(Duration::from_secs(5), waiter)
-            .await
-            .expect("a note must wake the waiter")
-            .expect("join");
-        // Other tests in this binary may note too, so only what we noted is asserted.
-        let ids = got.conversation_ids;
-        assert!(ids.contains(&"c-1".to_string()) && ids.contains(&"c-2".to_string()));
-        assert_eq!(ids.iter().filter(|i| *i == "c-1").count(), 1, "deduplicated");
+        for waiter in [stale, fresh] {
+            let got = tokio::time::timeout(Duration::from_secs(5), waiter)
+                .await
+                .expect("a note must wake every waiter")
+                .expect("join");
+            let ids = got.conversation_ids;
+            assert!(ids.contains(&"c-1".to_string()) && ids.contains(&"c-2".to_string()));
+            assert_eq!(ids.iter().filter(|i| *i == "c-1").count(), 1, "deduplicated");
+            assert!(!ids.contains(&"c-old".to_string()), "nothing from before the cursor");
+        }
+
+        // An empty note is not a change.
+        let at = position();
+        note(Vec::<String>::new());
+        assert_eq!(position(), at);
     }
 }

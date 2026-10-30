@@ -5,11 +5,14 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../lib/native";
-import { refreshStoredConversations } from "./queries/useMessages";
+import { messageQueryKeys, refreshStoredConversations } from "./queries/useMessages";
 
+// Each waiter keeps its own cursor in the core, so a loop left parked across a sign-out sees
+// the same notes as the new one and can never take them from it.
 interface Persisted {
   seq: number;
   conversationIds: string[];
+  everything: boolean;
 }
 
 export function usePersistedFeed(userId: string | null) {
@@ -36,6 +39,10 @@ export function usePersistedFeed(userId: string | null) {
           return;
         }
         after = got.seq;
+        if (got.everything) {
+          // Our cursor predates a reset of the core's list: re-read every conversation.
+          void queryClient.invalidateQueries({ queryKey: messageQueryKeys.all, refetchType: "all" });
+        }
         refreshStoredConversations(queryClient, got.conversationIds);
       }
     })();
