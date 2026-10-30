@@ -8,10 +8,14 @@ use crate::error::Result;
 use crate::state::AppState;
 
 /// Upsert a device's Expo push token, keyed on the token so re-registering reassigns it.
+///
+/// `caps` (#1599): what this build can do with a push, e.g. `["rich"]`. Sent on every
+/// register, since the DS replaces the stored set; empty = today's payload.
 pub async fn register_push_token(
     user_id: String,
     token: String,
     platform: String,
+    caps: Vec<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -21,6 +25,7 @@ pub async fn register_push_token(
         platform,
         updated_at: now,
         user_id: Some(user_id),
+        caps,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
     Ok(())

@@ -31,7 +31,19 @@ fn body(token: &str) -> PushTokenBody {
         platform: "ios".to_string(),
         updated_at: "2026-01-01T00:00:00.000000000+00:00".to_string(),
         user_id: None,
+        caps: Vec::new(),
     }
+}
+
+async fn caps_of(conn: &libsql::Connection, token: &str) -> i64 {
+    let mut rows = conn
+        .query(
+            "SELECT caps FROM push_token WHERE token = ?1",
+            libsql::params![token.to_string()],
+        )
+        .await
+        .unwrap();
+    rows.next().await.unwrap().unwrap().get(0).unwrap()
 }
 
 async fn owner_of(conn: &libsql::Connection, token: &str) -> Option<String> {
@@ -152,4 +164,77 @@ async fn tokens_per_user_are_capped_oldest_first() {
         owner_of(&conn, &format!("ExponentPushToken[tok{}]", n - 1)).await.is_some(),
         "newest kept"
     );
+}
+
+/// #1599: a body from a client before `caps` (no such key at all) still parses and
+/// registers with no capabilities.
+#[tokio::test]
+async fn a_registration_without_caps_has_none() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let old: PushTokenBody = serde_json::from_str(
+        r#"{"token":"ExponentPushToken[abc123def456]","platform":"ios","updated_at":"t"}"#,
+    )
+    .expect("a pre-#1599 body parses");
+    assert!(old.caps.is_empty());
+    let out = apply_register_push_token(&conn, Some(VICTIM), Some("p"), &old)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert_eq!(caps_of(&conn, TOKEN).await, 0);
+    // An empty `caps` never reaches the wire, so such a client's body is unchanged.
+    assert!(!serde_json::to_string(&body(TOKEN)).unwrap().contains("caps"));
+}
+
+/// `rich` is stored; unknown values are dropped, not stored and not refused.
+#[tokio::test]
+async fn known_caps_are_stored_and_unknown_ones_ignored() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let mut b = body(TOKEN);
+    b.caps = vec!["future-thing".into(), "rich".into()];
+    let out = apply_register_push_token(&conn, Some(VICTIM), Some("p"), &b)
+        .await
+        .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert_eq!(caps_of(&conn, TOKEN).await, 1);
+
+    b.caps = vec!["future-thing".into()];
+    apply_register_push_token(&conn, Some(VICTIM), Some("p"), &b)
+        .await
+        .unwrap();
+    assert_eq!(caps_of(&conn, TOKEN).await, 0, "unknown-only = none");
+}
+
+/// An install that goes back to a build without `rich` goes back to today's payload:
+/// a re-register overwrites `caps`, never merges it.
+#[tokio::test]
+async fn re_registering_without_caps_clears_them() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let mut b = body(TOKEN);
+    b.caps = vec!["rich".into()];
+    apply_register_push_token(&conn, Some(VICTIM), Some("p"), &b)
+        .await
+        .unwrap();
+    assert_eq!(caps_of(&conn, TOKEN).await, 1);
+    apply_register_push_token(&conn, Some(VICTIM), Some("p"), &body(TOKEN))
+        .await
+        .unwrap();
+    assert_eq!(caps_of(&conn, TOKEN).await, 0);
+}
+
+/// The column cannot hold a negative bitmask, whoever writes it.
+#[tokio::test]
+async fn the_caps_column_refuses_a_negative_value() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    let bad = conn
+        .execute(
+            "INSERT INTO push_token (token, user_id, platform, updated_at, caps) \
+             VALUES ('ExponentPushToken[neg]', 'victim-1', 'ios', 't', -1)",
+            (),
+        )
+        .await;
+    assert!(bad.is_err(), "a negative caps must violate the CHECK");
 }

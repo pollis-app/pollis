@@ -1,0 +1,17 @@
+-- #1599: what the install behind a push token can do with a push.
+--
+-- A bitmask, written only by the DS from the allowlisted `caps` on
+-- `POST /v1/push-tokens`:
+--
+--   bit 0 (1) = "rich": the client decrypts on device and rewrites the
+--               notification itself. iOS gets `mutableContent` (a Notification
+--               Service Extension runs); Android gets a data-only `{h}` message
+--               (the app posts it).
+--
+-- Additive and backward-compatible (CLAUDE.md migration rule): NOT NULL with a
+-- DEFAULT of 0, so every existing row, and every row a pre-#1599 client or DS
+-- writes without naming the column, means "no capabilities" and keeps getting
+-- exactly today's payload. The CHECK is satisfied by the default; it keeps the
+-- column a bitmask without fixing the set of bits, so a later capability needs
+-- no schema change.
+ALTER TABLE push_token ADD COLUMN caps INTEGER NOT NULL DEFAULT 0 CHECK (caps >= 0);
