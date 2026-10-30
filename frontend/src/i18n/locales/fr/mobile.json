@@ -321,7 +321,9 @@
     "bodyImage": "Photo",
     "bodyVideo": "Vidéo",
     "bodyVoice": "Message vocal",
-    "bodySensitive": "Contenu sensible"
+    "bodySensitive": "Contenu sensible",
+    "nameOnlyBody": "Vous a envoyé un message",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Canaux",

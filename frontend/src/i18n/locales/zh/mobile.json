@@ -313,7 +313,9 @@
     "bodyImage": "照片",
     "bodyVideo": "视频",
     "bodyVoice": "语音消息",
-    "bodySensitive": "敏感内容"
+    "bodySensitive": "敏感内容",
+    "nameOnlyBody": "发来一条消息",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "频道",

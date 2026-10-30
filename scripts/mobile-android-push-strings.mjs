@@ -24,7 +24,32 @@ export const KEYS = {
   bodyVideo: "pollis_push_body_video",
   bodyVoice: "pollis_push_body_voice",
   bodySensitive: "pollis_push_body_sensitive",
+  nameOnlyBody: "pollis_push_name_only_body",
+  groupTitle: "pollis_push_group_title",
 };
+
+// i18next `{{name}}` placeholders -> positional Android format args, fixed per key so a
+// translation may reorder them (`%2$s … %1$s`). Kotlin passes them in this order.
+export const ARGS = {
+  groupTitle: ["sender", "conversation"],
+};
+
+/** `{{sender}} · {{conversation}}` -> `%1$s · %2$s`; throws on a placeholder the key does not declare. */
+export function toAndroidFormat(key, value) {
+  const args = ARGS[key] ?? [];
+  const found = [...value.matchAll(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g)].map((m) => m[1]);
+  for (const name of found) {
+    if (!args.includes(name)) {
+      throw new Error(`mobile.push.${key}: placeholder {{${name}}} has no Android argument (declare it in ARGS)`);
+    }
+  }
+  if (args.length === 0) {
+    return value;
+  }
+  return value
+    .replace(/%/g, "%%")
+    .replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, name) => `%${args.indexOf(name) + 1}$s`);
+}
 
 /** Android string-resource escaping: XML entities plus aapt's quote/apostrophe/leading-@? rules. */
 export function escapeAndroid(value) {
@@ -55,7 +80,7 @@ export function render(push) {
   for (const [key, name] of Object.entries(KEYS)) {
     const value = push?.[key];
     if (typeof value === "string" && value.length > 0) {
-      lines.push(`    <string name="${name}">${escapeAndroid(value)}</string>`);
+      lines.push(`    <string name="${name}">${escapeAndroid(toAndroidFormat(key, value))}</string>`);
     }
   }
   lines.push("</resources>", "");

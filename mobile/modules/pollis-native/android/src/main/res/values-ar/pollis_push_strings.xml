@@ -10,4 +10,6 @@
     <string name="pollis_push_body_video">فيديو</string>
     <string name="pollis_push_body_voice">رسالة صوتية</string>
     <string name="pollis_push_body_sensitive">محتوى حساس</string>
+    <string name="pollis_push_name_only_body">أرسل رسالة</string>
+    <string name="pollis_push_group_title">%1$s · %2$s</string>
 </resources>

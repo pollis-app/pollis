@@ -382,14 +382,18 @@ so the app, not the system, posts the notification.
   `h`, id 0** (what FCM used), so all three #1508 paths keep finding it through
   the foreign identifier. One notification per conversation: a new one folds the
   messages of the one already showing for that conversation and replaces it
-  (the newest handle is the one a read clears). Muted → nothing; failure, no
-  items or setting "Nothing" → the generic "New message / You have a new
-  message". The tap opens the launcher activity with the push's data plus
+  (the newest handle is the one a read clears); a message already in the stack
+  (core's one-time fallback re-returns the newest one) is not added twice, by
+  `message_id`. Muted (never set for an @mention) → nothing; "Name only" → the
+  sender with `push.nameOnlyBody`; failure, no items, or mode "none" (the
+  user's "Nothing", or no escrowed key yet) → the generic "New message / You
+  have a new message". The tap opens the launcher activity with the push's data plus
   `google.message_id` as extras, exactly what FCM's system notification does,
   so expo's lifecycle listener and `lib/push` route it by `h` as before.
 - **Copy** is Android string resources (`pollis-native/android/src/main/res/values*/pollis_push_strings.xml`),
   generated from the shared `mobile.push.*` keys by
-  `node scripts/mobile-android-push-strings.mjs` (`--check`;
+  `node scripts/mobile-android-push-strings.mjs` (`{{sender}}`-style
+  placeholders become fixed positional `%1$s` args per key, `ARGS`; `--check`;
   `mobile/tests/rich-push.test.ts` fails when stale). They follow the device
   locale, not the in-app language choice, which native code cannot read.
 - **Test hook (debug builds only).** `RichPushTestReceiver`:

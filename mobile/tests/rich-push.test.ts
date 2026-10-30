@@ -99,3 +99,11 @@ test("android string escaping", async () => {
   assert.equal(mod.escapeAndroid("l'été & <b>"), "l\\'été &amp; &lt;b&gt;");
   assert.equal(mod.escapeAndroid("@me"), "\\@me");
 });
+
+test("i18next placeholders become fixed positional Android args, reordering allowed", async () => {
+  const mod = await import(join(ROOT, "scripts/mobile-android-push-strings.mjs"));
+  assert.equal(mod.toAndroidFormat("groupTitle", "{{sender}} · {{conversation}}"), "%1$s · %2$s");
+  assert.equal(mod.toAndroidFormat("groupTitle", "{{conversation}}: {{sender}} 100%"), "%2$s: %1$s 100%%");
+  assert.equal(mod.toAndroidFormat("genericTitle", "New message"), "New message");
+  assert.throws(() => mod.toAndroidFormat("genericTitle", "Hi {{name}}"), /no Android argument/);
+});

@@ -330,7 +330,9 @@
     "bodyImage": "Photo",
     "bodyVideo": "Video",
     "bodyVoice": "Voice message",
-    "bodySensitive": "Sensitive media"
+    "bodySensitive": "Sensitive media",
+    "nameOnlyBody": "Sent a message",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Channels",

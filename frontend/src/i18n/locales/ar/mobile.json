@@ -353,7 +353,9 @@
     "bodyImage": "صورة",
     "bodyVideo": "فيديو",
     "bodyVoice": "رسالة صوتية",
-    "bodySensitive": "محتوى حساس"
+    "bodySensitive": "محتوى حساس",
+    "nameOnlyBody": "أرسل رسالة",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "القنوات",

@@ -10,4 +10,6 @@
     <string name="pollis_push_body_video">Відео</string>
     <string name="pollis_push_body_voice">Голосове повідомлення</string>
     <string name="pollis_push_body_sensitive">Делікатний вміст</string>
+    <string name="pollis_push_name_only_body">Надіслав(ла) повідомлення</string>
+    <string name="pollis_push_group_title">%1$s · %2$s</string>
 </resources>

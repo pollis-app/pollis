@@ -25,6 +25,7 @@ class RichPushNotifier(private val context: Context) {
     const val NOTIFICATION_ID = 0
     /** Local-only: which conversation a posted notification is for, so the next one folds it in. */
     const val EXTRA_CONVERSATION = "pollis.conversation"
+    private const val EXTRA_MESSAGE_ID = "pollis.message_id"
     private const val MAX_STACKED = 7
   }
 
@@ -90,7 +91,7 @@ class RichPushNotifier(private val context: Context) {
 
   private fun text(t: RichPush.Text): String = when (t) {
     is RichPush.Text.Literal -> t.text
-    RichPush.Text.NameOnly -> context.getString(R.string.pollis_push_generic_title)
+    RichPush.Text.NameOnly -> context.getString(R.string.pollis_push_name_only_body)
     is RichPush.Text.Placeholder -> when (t.key) {
       RichPush.BodyKey.ATTACHMENT -> "📎 " + context.getString(R.string.pollis_push_body_attachment)
       RichPush.BodyKey.IMAGE -> "📷 " + context.getString(R.string.pollis_push_body_image)
@@ -112,9 +113,11 @@ class RichPushNotifier(private val context: Context) {
     // replace it. The newest carries the newest handle, which #1508 clears once that conversation
     // is read (a read clears every handle up to the cursor).
     val previous = takePreviousFor(plan.conversationId, handle)
+    // The core may hand back, once, the newest message the app already had: never stack it twice.
     val seen = HashSet<String>()
     val stacked = ArrayList<NotificationCompat.MessagingStyle.Message>()
     for (m in previous) {
+      m.extras.getString(EXTRA_MESSAGE_ID)?.let { seen.add(it) }
       stacked.add(m)
     }
     for (m in plan.messages) {
@@ -122,7 +125,11 @@ class RichPushNotifier(private val context: Context) {
         continue
       }
       val sender = Person.Builder().setName(m.sender).build()
-      stacked.add(NotificationCompat.MessagingStyle.Message(text(m.text), now, sender))
+      val message = NotificationCompat.MessagingStyle.Message(text(m.text), now, sender)
+      if (m.messageId.isNotEmpty()) {
+        message.extras.putString(EXTRA_MESSAGE_ID, m.messageId)
+      }
+      stacked.add(message)
     }
     for (m in stacked.takeLast(MAX_STACKED)) {
       style.addMessage(m)
@@ -131,7 +138,13 @@ class RichPushNotifier(private val context: Context) {
     val extras = Bundle().apply { putString(EXTRA_CONVERSATION, plan.conversationId) }
     return base(handle, data, messageId, sentTime)
       .setStyle(style)
-      .setContentTitle(if (plan.isDm || plan.conversationTitle == null) last.sender else plan.conversationTitle)
+      .setContentTitle(
+        if (plan.isDm || plan.conversationTitle == null) {
+          last.sender
+        } else {
+          context.getString(R.string.pollis_push_group_title, last.sender, plan.conversationTitle)
+        },
+      )
       .setContentText(text(last.text))
       .addExtras(extras)
       .build()
