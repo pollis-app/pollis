@@ -97,3 +97,33 @@ export function createPushRegistrar(deps: RegistrationDeps): PushRegistrar {
     },
   };
 }
+
+/**
+ * Tells a real token rotation from the echo of our own request (#1610). expo-notifications fires
+ * its push-token event on EVERY registration, including the one `getToken` itself triggers on
+ * iOS, so a listener that re-registered on each event looped for as long as the app ran: event,
+ * getToken, event... (on the simulator, where the DS refuses the token, a signed DS call about
+ * every 170 ms). Only a device token not seen before is a rotation.
+ */
+export interface TokenEchoFilter {
+  /** The device token our own request just obtained. */
+  noteOwn(deviceToken: string): void;
+  /** Whether an event's token is new, recording it either way. */
+  isRotation(deviceToken: string): boolean;
+}
+
+export function createTokenEchoFilter(): TokenEchoFilter {
+  let known: string | null = null;
+  return {
+    noteOwn(deviceToken) {
+      known = deviceToken;
+    },
+    isRotation(deviceToken) {
+      if (deviceToken === known) {
+        return false;
+      }
+      known = deviceToken;
+      return true;
+    },
+  };
+}

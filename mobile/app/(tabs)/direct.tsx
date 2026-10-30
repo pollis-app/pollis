@@ -24,6 +24,7 @@ import {
   useLastMessages,
   previewText,
   markConversationRead,
+  usePrefetchConversation,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -42,6 +43,7 @@ import { useThemeRerender } from "../../components/theme";
 function Direct() {
   useThemeRerender();
   const router = useRouter();
+  const prefetch = usePrefetchConversation();
   const { t } = useTranslation("mobile");
   const { data: dms = [], isLoading, isError } = useDMChannels();
   const { data: requests = [] } = useDMRequests();
@@ -215,6 +217,7 @@ function Direct() {
               time={last ? conversationTime(last.created_at) : null}
               unread={unread}
               selected={isRegular && selectedConversationId === d.id}
+              onPressIn={() => prefetch(d.id, "dm")}
               onPress={() => {
                 setSelectedConversationId(d.id);
                 // Re-opening the shown conversation closes any page over it.

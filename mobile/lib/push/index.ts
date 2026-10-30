@@ -6,7 +6,7 @@ import Constants from "expo-constants";
 import { invoke } from "../native";
 import i18n from "../../i18n";
 import { readPayloadRouting } from "./routing";
-import { createPushRegistrar, type EnsureOptions } from "./registration";
+import { createPushRegistrar, createTokenEchoFilter, type EnsureOptions } from "./registration";
 import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
 import { pushCapsFor } from "./caps";
@@ -34,6 +34,9 @@ async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
+// Our own token requests, so their echo on the token event is not taken for a rotation (#1610).
+const tokenEcho = createTokenEchoFilter();
+
 // Marks a user registered only once register_push_token succeeded (#1423).
 const registrar = createPushRegistrar({
   getPermissions: () => Notifications.getPermissionsAsync(),
@@ -47,7 +50,9 @@ const registrar = createPushRegistrar({
       console.warn("[push] no EAS projectId — skipping push token registration");
       return null;
     }
-    return (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    const devicePushToken = await Notifications.getDevicePushTokenAsync();
+    tokenEcho.noteOwn(String(devicePushToken.data));
+    return (await Notifications.getExpoPushTokenAsync({ projectId, devicePushToken })).data;
   },
   register: async (userId, token) => {
     await invoke("register_push_token", {
@@ -73,7 +78,10 @@ export function ensurePushRegistration(
 
 /** Re-register when the OS rotates the push token (#1423). Returns a disposer. */
 export function addPushTokenRotationListener(userId: string): () => void {
-  const sub = Notifications.addPushTokenListener(() => {
+  const sub = Notifications.addPushTokenListener((token) => {
+    if (!tokenEcho.isRotation(String(token.data))) {
+      return;
+    }
     void ensurePushRegistration(userId, { prompt: false, refresh: true });
   });
   return () => {

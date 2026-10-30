@@ -221,6 +221,11 @@ export function useInboxRealtime() {
       if (!resumed) {
         return;
       }
+      // Rows stored while away (iOS's notification extension stores each pushed message) show
+      // now, from the local store, before any round trip (#1610).
+      void qcRef.current.invalidateQueries({ queryKey: messageQueryKeys.all, refetchType: "all" });
+      void qcRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+      refreshUnread(qcRef.current);
       // Re-open rooms whose connect failed.
       const handler = handlerRef.current;
       if (handler) {

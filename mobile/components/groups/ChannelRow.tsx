@@ -12,6 +12,7 @@ export function ChannelRow({
   count,
   value,
   onPress,
+  onPressIn,
   testID,
   accessibilityLabel,
   dimWhenRead = true,
@@ -24,6 +25,8 @@ export function ChannelRow({
   count?: number;
   value?: string;
   onPress: () => void;
+  // Touch down, never an action: a row in a scroller may become a scroll (#1610 prefetch).
+  onPressIn?: () => void;
   testID?: string;
   accessibilityLabel: string;
   dimWhenRead?: boolean;
@@ -41,6 +44,7 @@ export function ChannelRow({
     <Pressable
       testID={testID}
       onPress={onPress}
+      onPressIn={onPressIn}
       accessible
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}

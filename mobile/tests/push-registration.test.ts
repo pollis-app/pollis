@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import {
   createPushRegistrar,
+  createTokenEchoFilter,
   type PushPermission,
   type RegistrationDeps,
 } from "../lib/push/registration.ts";
@@ -154,4 +155,20 @@ test("registration is per user, so switching accounts registers again", async ()
     ["alice", "ExponentPushToken[one]"],
     ["bob", "ExponentPushToken[one]"],
   ]);
+});
+
+test("the echo of our own token request is not a rotation; a new token is (#1610)", () => {
+  const echo = createTokenEchoFilter();
+  // getToken asked for the device token; iOS then fires the token event with that same token.
+  echo.noteOwn("apns-a");
+  assert.equal(echo.isRotation("apns-a"), false, "our own request's echo must not re-register");
+  assert.equal(echo.isRotation("apns-a"), false);
+  // The OS rotated it.
+  assert.equal(echo.isRotation("apns-b"), true);
+  assert.equal(echo.isRotation("apns-b"), false, "a rotation is acted on once");
+  // An event that beats our own request's resolution costs one extra round, then settles.
+  const racy = createTokenEchoFilter();
+  assert.equal(racy.isRotation("fcm-1"), true);
+  racy.noteOwn("fcm-1");
+  assert.equal(racy.isRotation("fcm-1"), false);
 });
