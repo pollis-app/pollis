@@ -449,7 +449,10 @@ xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
   -configuration Release -destination 'generic/platform=iOS' \
   archive -archivePath build/Pollis.xcarchive \
   DEVELOPMENT_TEAM=8JT3WH45NZ CODE_SIGNING_ALLOWED=NO
-# 4. Give the unsigned app its entitlements, or push is silently lost (below).
+# 4. Give the unsigned app AND its extension their entitlements, or push is
+#    silently lost (below). Inner bundle first: signing the app seals PlugIns/.
+codesign -f -s - --entitlements ios/PollisNotificationService/PollisNotificationService.entitlements \
+  build/Pollis.xcarchive/Products/Applications/Pollis.app/PlugIns/PollisNotificationService.appex
 codesign -f -s - --entitlements ios/Pollis/Pollis.entitlements \
   build/Pollis.xcarchive/Products/Applications/Pollis.app
 xcodebuild -exportArchive -archivePath build/Pollis.xcarchive \
@@ -492,7 +495,8 @@ Check the exported `.ipa` before an upload — all held on the 2026-10-02 build
 ```bash
 unzip -q build/export/Pollis.ipa -d /tmp/ipa
 codesign -dvvv /tmp/ipa/Payload/Pollis.app          # Authority=Apple Distribution
-codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false, aps-environment=production
+codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false, aps-environment=production, app group + 8JT3WH45NZ.com.pollis.shared
+codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app/PlugIns/PollisNotificationService.appex   # same app group + keychain group
 /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /tmp/ipa/Payload/Pollis.app/Info.plist
 strings /tmp/ipa/Payload/Pollis.app/main.jsbundle | grep -o 'https://api[a-z.-]*pollis.com'
 jq -r .extra.installChannel /tmp/ipa/Payload/Pollis.app/EXConstants.bundle/app.config   # store
@@ -509,6 +513,105 @@ xcrun altool --upload-app -f build/export/Pollis.ipa -t ios \
   --apiKey "$(doppler secrets get ASC_KEY_ID -p pollis -c prd_prod --plain)" \
   --apiIssuer "$(doppler secrets get ASC_ISSUER_ID -p pollis -c prd_prod --plain)"
 ```
+
+#### Notification Service Extension (#1599)
+
+`plugins/withNotificationServiceExtension.js` adds the `PollisNotificationService`
+app extension (`com.pollis.ios.NotificationService`, Swift in
+`plugins/notification-service/`, deployment target = the app's). It links
+`libpollis_core.a` from the same xcframework the app uses and calls
+`pollis_notify_fetch(<App Group>/pollis, h, 20000)` off the main thread. The
+push carries `aps.mutable-content: 1` (the DS sets Expo's `mutableContent` for
+tokens registered with `caps: ["rich"]`) and `body.h`, where expo-notifications
+puts `data`. What it shows:
+
+| fetch result | banner |
+|---|---|
+| ok, mode `full` | title = sender (group: "sender · conversation"), body = preview or a localised placeholder for `body_key`, `threadIdentifier` = conversation id, and a Messages-style communication notification with the app's letter avatar (a circle for the sender, a rounded square for a group) |
+| ok, mode `name` | the same title, body "Sent a message" |
+| ok, mode `none`, nothing new, or every item muted | localised "New message / You have a new message" |
+| `ok:false` (not logged in, lock busy, timeout, …), no App Group, `serviceExtensionTimeWillExpire` | the push exactly as it arrived |
+
+A muted item still gets the generic text, not silence: dropping a push needs
+Apple's `com.apple.developer.usernotifications.filtering` entitlement, which we
+do not have. The DS already skips muted channels, so this only happens when a
+fetch catches up on a muted conversation alongside the one that pushed. The
+intent carries no message text, so the system's interaction store never holds
+any. `userInfo` is never touched, so a tap routes by `h` exactly as before and
+#1508 still finds the notification by `data.h`. Rich content starts only
+after the first PIN unlock on a build that has the extension, because that
+unlock escrows the DB key for the extension (pollis-core). Until then the fetch
+fails and the push shows as it arrived. Strings come from
+`mobile:push.*` in the shared catalogues (the same keys as the Android handler); the plugin writes
+`<lproj>/Localizable.strings` at prebuild, so the extension follows the iOS
+language, not the in-app choice.
+
+Both targets get the App Group `group.com.pollis.ios` and the keychain access
+group `8JT3WH45NZ.com.pollis.shared`. That is the team spelled out, because the
+unsigned archive leaves `$(AppIdentifierPrefix)` empty. Both are also written to
+the Info.plists as `PollisAppGroup` / `PollisKeychainAccessGroup`. The app also
+gets `com.apple.developer.usernotifications.communication` and
+`NSUserActivityTypes: [INSendMessageIntent]`. `modules/pollis-native/ios/PollisAppGroup.mm`
+calls `pollis_set_data_dir_override` and `pollis_set_keychain_access_group` in
+`+load`, before JS can start the core. `init_pollis` then moves the old
+`Library/Application Support/pollis` into the container once. The binary
+advertises `rich` only through its **embedded** `extra.richPush.ios`
+(`lib/push/caps.ts`), so an OTA bundle cannot claim it for an older binary.
+
+**Developer-portal setup a store build needs first** (team `8JT3WH45NZ`, by
+hand, once):
+
+1. Identifiers → App Groups → register `group.com.pollis.ios`.
+2. Identifiers → `com.pollis.ios` → enable **App Groups** (assign the group
+   above) and **Communication Notifications**. Push stays on. Existing profiles
+   for it become invalid; that is expected, because export re-mints them.
+3. Identifiers → register App ID `com.pollis.ios.NotificationService`
+   (explicit) with **App Groups** (same group). Keychain Sharing needs no
+   capability: a `<team>.<suffix>` group is allowed for every App ID of the team.
+4. Nothing in App Store Connect. The extension ships inside the app's record.
+   No new app record or version is needed.
+
+Then the export (step 4 above, both `codesign` lines) signs both bundles.
+`-allowProvisioningUpdates` with the ASC key mints an App Store profile per
+bundle id. It can probably also register a missing App ID or capability, but
+that is not verified, so do 1–3 by hand. Until they are done, build with
+`POLLIS_IOS_NSE=off` for the prebuild: no extension, no new entitlements, and no
+`rich` capability. That binary behaves exactly like 1.0.23. Simulator builds
+need none of this. The sim neither enforces App Groups nor needs a profile.
+
+Size: the extension statically links the core a second time, but dead-stripped
+to what `pollis_notify_fetch` reaches. On the 2026-10-29 Release simulator
+build that came to 10.8 MB of binary: 6.8 MB `__TEXT`, 0.6 MB `__DATA_CONST`
+and 48 KB `__DATA`. Code pages are clean and file-backed, so they do not count
+against the ~24 MB extension memory limit. What counts is the fetch's heap
+(SQLCipher cache, MLS state, TLS), and that is not measured yet: see "Testing
+the extension".
+
+**Testing the extension.** `xcrun simctl push` (Xcode 27) posts the request
+straight to the notification center through CoreSimulatorBridge and never
+starts a service extension. The log shows `mutableContent: YES` on the trigger,
+but no `PollisNotificationService` process. Only a real APNs delivery runs it.
+So the Swift is tested by `plugins/notification-service/harness/run.sh`, which
+compiles the real `NotificationService.swift` for macOS against a stub core and
+checks every row of the table above. `tests/notification-service-extension.test.ts`
+covers the plugin.
+
+**Avatars.** `LetterAvatar.swift` draws the app's letter avatar with CoreGraphics:
+the initial in bold at 0.38 of the size, `semantic.dim` on `semantic.high`,
+using the `theme/derive.ts` recipe (the same one as Android's
+`LetterAvatar.kt`). The colours come from the live accent and background.
+`components/theme.tsx` writes them on start and on every change through
+`PollisPushState.setThemeColors`
+(`modules/pollis-native/ios/PollisPushState.mm`) into the App Group's
+UserDefaults, as `pollis.theme.accent` and `pollis.theme.bg`; without them the
+defaults are used. The intent is a combination iOS will donate: sender,
+recipients (this user, plus the sender for a group) and the conversation id.
+
+The extension logs outcomes only (mode, reason, item count, ms and `peakKB`, the
+process's peak physical footprint), never content, under subsystem
+`com.pollis.ios.NotificationService`:
+`log stream --predicate 'subsystem == "com.pollis.ios.NotificationService"'`.
+<!-- measured numbers: see PR #1599-ios-nse -->
 
 **Deployment target: iOS 16.4.** Expo SDK 56 raised the minimum
 (`ExpoModulesCore.podspec` requires 16.4), so the app **no longer supports
@@ -1286,6 +1389,15 @@ Current state:
   edit in the core's edit outbox before posting and the row reads back with
   `edit_state` until the DS confirms; `MessageRow` labels a failed one
   "(edit not sent)" (`editUnsent`), and the same drain delivers it.
+- **Android notification small icon (#1606):** `assets/notification-icon.png`,
+  the expo-notifications plugin's `icon` (tinted with its `color` in the shade).
+  Prebuild writes it as `@drawable/notification_icon` and points both the FCM
+  and the expo local-notification `default_notification_icon` meta-data at it;
+  anything posting its own notifications natively should read that meta-data.
+  The lock glyph alone, white on transparency, 96px (xxxhdpi 24dp) with its tall
+  side 22dp — without it Android fell back to the launcher icon, safe-zone padding
+  and all, and the status-bar lock was tiny. Generated from the SVG by
+  `scripts/gen-icons.sh`; `tests/android-notification-icon.test.ts` pins it.
 - **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
   permission (asked on first conversation open, not at login), token registration
   (`register_push_token`, best-effort), content-free tap/data handlers, and a

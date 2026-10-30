@@ -113,7 +113,7 @@ fn retired_path(old_dir: &Path) -> std::path::PathBuf {
 ///   An interruption before the swap leaves the old directory whole and the next launch starts
 ///   over; a `.migrated` leftover is deleted, best-effort, on every later launch.
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
-pub(crate) fn migrate_dir(old_dir: &Path, new_dir: &Path) -> std::io::Result<()> {
+pub fn migrate_dir(old_dir: &Path, new_dir: &Path) -> std::io::Result<()> {
     let retired = retired_path(old_dir);
     if retired.exists() {
         if let Err(e) = std::fs::remove_dir_all(&retired) {

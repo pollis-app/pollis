@@ -13,7 +13,7 @@ import {
   SectionTitle,
   Txt,
 } from "../components/ui";
-import { ReasonRow } from "../components/direct/ReasonRow";
+import { RadioRow } from "../components/RadioRow";
 import { semantic, space } from "../theme/tokens";
 import { invoke } from "../lib/native";
 import { useReportUser, type ReportReason } from "../hooks/queries";
@@ -127,7 +127,7 @@ export default function ReportScreen() {
           </SectionTitle>
           <Group>
             {REASONS.map((value) => (
-              <ReasonRow
+              <RadioRow
                 key={value}
                 testID={`report-reason-${value}`}
                 label={t(`report.reason.${value}`)}

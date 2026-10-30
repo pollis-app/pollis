@@ -416,6 +416,17 @@
         "showInlineTimestamps": "Show inline timestamps",
         "showMemberAvatars": "Show member avatars"
       },
+      "notificationContent": {
+        "description": "Previews are decrypted on this device only.",
+        "full": "Name and message",
+        "fullSub": "Shows who sent it and what they said.",
+        "heading": "Notification content",
+        "name": "Name only",
+        "nameSub": "Shows who sent it, not what they said.",
+        "none": "Nothing",
+        "noneSub": "Shows only that a message arrived.",
+        "pinNote": "Choosing Nothing also keeps your PIN as the only key to this device's messages."
+      },
       "notificationsOffSettings": "Off. Turn on in system Settings",
       "notificationsOffTap": "Off. Tap to turn on",
       "notificationsOn": "On",
