@@ -6,7 +6,7 @@ import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { Screen, Header, Body, Card, Chip, Txt } from "../../components/ui";
 import { QrCode } from "../../components/QrCode";
 import { Icon } from "../../components/icons";
-import { semantic, fonts, space, r } from "../../theme/tokens";
+import { semantic, fonts, space } from "../../theme/tokens";
 import { invoke } from "../../lib/native";
 import { useSafetyNumber, useSetContactVerified } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
@@ -87,8 +87,6 @@ function DMSafetyNumber() {
                 testID="img-safety-qr"
                 value={safety.data.safety_number}
                 size={176}
-                frame={space.md}
-                radius={r.md}
               />
             </View>
             <Text
