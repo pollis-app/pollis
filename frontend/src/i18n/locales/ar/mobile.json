@@ -345,7 +345,15 @@
     "title": "رابط الرسالة"
   },
   "push": {
-    "channelMessages": "الرسائل"
+    "channelMessages": "الرسائل",
+    "genericTitle": "رسالة جديدة",
+    "genericBody": "لديك رسالة جديدة",
+    "you": "أنت",
+    "bodyAttachment": "مرفق",
+    "bodyImage": "صورة",
+    "bodyVideo": "فيديو",
+    "bodyVoice": "رسالة صوتية",
+    "bodySensitive": "محتوى حساس"
   },
   "search": {
     "channels": "القنوات",
