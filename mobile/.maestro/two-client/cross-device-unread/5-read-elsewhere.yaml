@@ -1,0 +1,19 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# CROSS-DEVICE UNREAD (#1628), part 5 of 6 — the prod repro. The owner device read the DM: its
+# read receipt woke this phone (adding nothing), and its cursor push made the DS nudge this
+# phone's inbox. The phone converges and the row count and tab badge clear on their own — no
+# navigation, no trip to the background.
+
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    notVisible:
+      id: "unread-.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "badge-direct"
+- takeScreenshot: cross-device-unread-05-read-elsewhere
+- pressKey: Home

@@ -8,7 +8,7 @@ import { useSegments } from "expo-router";
 import { invoke } from "../../lib/native";
 import { queryClient as sharedQueryClient } from "../../lib/queryClient";
 import { isInSignedInApp } from "../../lib/enrollmentPrompt";
-import { resumedToForeground, type UnreadCount } from "../../lib/unread";
+import { createReadCursorConverge, resumedToForeground, type UnreadCount } from "../../lib/unread";
 import { appStore } from "../../stores/appStore";
 import { dismissConversationNotifications, reconcileReadNotifications } from "../../lib/push";
 
@@ -52,15 +52,29 @@ export function markConversationRead(conversationId: string): void {
     .finally(() => refreshUnread());
 }
 
-/** Converge read positions with the account's other devices (a `max()` merge). */
-async function syncReadCursors(userId: string): Promise<number> {
-  try {
-    return (await invoke<number>("sync_read_cursors", { userId })) ?? 0;
-  } catch (e) {
-    // Nothing is lost: retried on the next unlock or foreground.
-    console.warn("[unread] read-cursor sync skipped:", e);
-    return 0;
+const converges = new Map<string, () => Promise<string[]>>();
+
+/**
+ * Converge read cursors with the account's other devices (pull, `max()` merge, push only if
+ * ahead), then show it (#1628): re-read the badges, and clear this device's notifications for
+ * every conversation read elsewhere (#1508's chain, for a running app). Resolves to the
+ * conversations whose cursor moved.
+ */
+export function refreshReadCursors(
+  userId: string,
+  qc: QueryClient = sharedQueryClient,
+): Promise<string[]> {
+  let run = converges.get(userId);
+  if (!run) {
+    run = createReadCursorConverge({
+      refresh: () => invoke<string[]>("refresh_read_cursors", { userId }),
+      refreshUnread: () => refreshUnread(qc),
+      dismiss: (id) => dismissConversationNotifications(id),
+      warn: (message, e) => console.warn(message, e),
+    });
+    converges.set(userId, run);
   }
+  return run();
 }
 
 export function useUnreadSync() {
@@ -83,18 +97,10 @@ export function useUnreadSync() {
     if (!userId) {
       return;
     }
-    let cancelled = false;
     refreshUnread(qc);
-    void syncReadCursors(userId).then((moved) => {
-      if (!cancelled && moved > 0) {
-        refreshUnread(qc);
-      }
-    });
+    void refreshReadCursors(userId, qc);
     // #1508: clear what was read elsewhere while this device missed the silent push.
     void reconcileReadNotifications(userId);
-    return () => {
-      cancelled = true;
-    };
   }, [userId, qc]);
 
   useEffect(() => {
@@ -109,11 +115,7 @@ export function useUnreadSync() {
         return;
       }
       refreshUnread(qc);
-      void syncReadCursors(userId).then((moved) => {
-        if (moved > 0) {
-          refreshUnread(qc);
-        }
-      });
+      void refreshReadCursors(userId, qc);
       void reconcileReadNotifications(userId);
     });
     return () => {

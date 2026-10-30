@@ -1,32 +1,7 @@
-// What a `new_message` wake-up, or a missed one, should do (mirrors desktop's messageWake.ts). Own messages show but never count unread. Pure.
+// Which ingests a wake-up, a resume or a reconnect runs. Pure. A wake never counts unread itself
+// (#1628): Rust's ingest stores what is new and the badges are re-read from Rust's counts.
 
 import type { ConversationKind } from "../hooks/queries/useMessages";
-
-export interface WakeLatest {
-  sender_id: string;
-}
-
-export function isOwnLatest(
-  latest: WakeLatest | null | undefined,
-  selfId: string | null | undefined,
-): boolean {
-  if (!latest || !selfId) {
-    return false;
-  }
-  return latest.sender_id === selfId;
-}
-
-/** Never for the conversation on screen or our own message; counts when nothing could be read back. */
-export function shouldCountUnread(args: {
-  latest: WakeLatest | null | undefined;
-  selfId: string | null | undefined;
-  isOpen: boolean;
-}): boolean {
-  if (args.isOpen) {
-    return false;
-  }
-  return !isOwnLatest(args.latest, args.selfId);
-}
 
 export interface CatchUpTarget {
   id: string;

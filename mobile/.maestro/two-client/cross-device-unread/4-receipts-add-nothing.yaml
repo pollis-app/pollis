@@ -1,0 +1,34 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# CROSS-DEVICE UNREAD (#1628), part 4 of 6. The owner device fetched the two messages, so its
+# delivered receipts woke this phone with the same `new_message` wake a message uses. Before
+# #1628 each one added to the count; the ingest stores nothing new, so it stays 2.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: "unread-.*"
+          containsChild:
+            text: "2"
+      - assertNotVisible:
+          id: "unread-.*"
+          containsChild:
+            text: "3"
+      - assertNotVisible:
+          id: "unread-.*"
+          containsChild:
+            text: "4"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: "row-dm-.*"
+          text: ".*, 2 unread, .*"
+- takeScreenshot: cross-device-unread-04-still-two

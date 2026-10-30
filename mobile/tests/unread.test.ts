@@ -81,7 +81,7 @@ test("the persisted counts are read with the desktop command shapes", () => {
   const hook = read("hooks/queries/useUnread.ts");
   assert.match(hook, /invoke<UnreadCount\[\]>\("get_unread_counts", \{ userId \}\)/);
   assert.match(hook, /invoke<boolean>\("mark_conversation_read", \{ conversationId, userId \}\)/);
-  assert.match(hook, /invoke<number>\("sync_read_cursors", \{ userId \}\)/);
+  assert.match(hook, /invoke<string\[\]>\("refresh_read_cursors", \{ userId \}\)/);
   assert.doesNotMatch(hook, /refetchInterval|setInterval/);
   // An equal answer must still re-hydrate: the store may have moved.
   assert.match(hook, /structuralSharing: false/);
@@ -89,12 +89,10 @@ test("the persisted counts are read with the desktop command shapes", () => {
   assert.match(hook, /AppState\.addEventListener\("change"/);
 });
 
-test("every ingest re-reads the counts unless the caller bumps them itself", () => {
+test("every ingest re-reads the counts; nothing bumps them locally (#1628)", () => {
   const messages = read("hooks/queries/useMessages.ts");
-  assert.match(messages, /if \(opts\.refreshUnread !== false\) \{\s*refreshUnread\(queryClient\);/);
-  const realtime = read("hooks/useInboxRealtime.ts");
-  assert.match(realtime, /ingestRef\.current\(id, kind, \{ refreshUnread: false \}\)/);
-  assert.match(realtime, /appStore\.incrementUnread\(id\);\s*\}\s*refreshUnread\(qc\);/);
+  assert.match(messages, /never a local bump \(#1628\)\.\s*refreshUnread\(queryClient\);/);
+  assert.doesNotMatch(read("hooks/useInboxRealtime.ts"), /incrementUnread/);
 });
 
 test("every place that cleared a badge also advances the persisted cursor", () => {

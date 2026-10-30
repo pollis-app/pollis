@@ -1466,8 +1466,11 @@ Current state:
   `mark_conversation_read`) replaces every bare `appStore.markRead`; the chat
   screen marks itself read on focus, on blur and as messages arrive, and
   records itself in `appStore.openConversationId`, which never badges.
-  `sync_read_cursors` runs on unlock and resume, so reading on one device
-  clears the others. The `useInboxRealtime` bump stays as the instant path.
+  `refresh_read_cursors` (pull, merge, push only if ahead; #1628) runs on
+  unlock, resume, `realtime_reconnected` and the DS's `read_cursors_changed`
+  nudge, so reading on one device clears the others' badges and, through
+  `dismissConversationNotifications`, their tray. A live wake never bumps a
+  badge: it ingests and the counts are re-read from Rust (#1628).
   Maestro: `scripts/maestro-unread.sh` (dev-DS peer `unread_peer`).
   The tab badges also count what is waiting on the user (#1561,
   `lib/tabBadges.ts`): Direct adds pending message requests

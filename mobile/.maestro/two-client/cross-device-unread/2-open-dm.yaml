@@ -1,0 +1,40 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# CROSS-DEVICE UNREAD (#1628), part 2 of 6. The sender (${MAESTRO_PEER_HANDLE}) opened a DM with
+# the account and the owner device accepted it. Open it once while it is still empty, so the app
+# asks for notification permission (it asks on the first conversation opened), then go back to
+# the Direct tab and stay there.
+
+- extendedWaitUntil:
+    visible: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 60000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+# The OS notification prompt (Android 13+ / iOS) comes up over the conversation, and on iOS it
+# hides the composer from the accessibility tree, so answer it first.
+- extendedWaitUntil:
+    visible: "Allow"
+    timeout: 8000
+    optional: true
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "unread-.*"
+- takeScreenshot: cross-device-unread-02-dm-empty
