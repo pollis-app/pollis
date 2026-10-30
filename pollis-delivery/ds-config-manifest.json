@@ -43,7 +43,7 @@
 
   "container_vars": {
     "$comment": "Non-secret config that must reach the CONTAINER. Must appear in both wrangler configs' `vars` AND be forwarded through `envVars` in worker/index.ts. Forgetting the forward is the #720 bug.",
-    "keys": ["PORT", "POLLIS_DS_REQUIRE_AUTH", "POLLIS_DS_WATERMARK_STALE_MONTHS"]
+    "keys": ["PORT", "POLLIS_DS_REQUIRE_AUTH", "POLLIS_DS_WATERMARK_STALE_MONTHS", "POLLIS_CLIENT_POLICY_URL"]
   },
 
   "optional_container_vars": {

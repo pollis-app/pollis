@@ -115,6 +115,8 @@ type Env = {
   PORT: string;
   POLLIS_DS_REQUIRE_AUTH: string;
   POLLIS_DS_WATERMARK_STALE_MONTHS?: string;
+  // #1611: the published minimum-client-version policy the DS mirrors and enforces.
+  POLLIS_CLIENT_POLICY_URL?: string;
   // The object hosting this environment's container; per environment so dev can be re-placed alone.
   DS_SINGLETON_NAME?: string;
   // Mobile OTA updates (#1250): prod only; dev answers /updates/ with 404.
@@ -229,6 +231,10 @@ export class PollisDelivery extends Container<Env> {
     // #720: a wrangler `var` binds to the Worker, not the container, so forward it explicitly.
     ...(this.env.POLLIS_DS_WATERMARK_STALE_MONTHS
       ? { POLLIS_DS_WATERMARK_STALE_MONTHS: this.env.POLLIS_DS_WATERMARK_STALE_MONTHS }
+      : {}),
+    // #1611: forwarded like the watermark; unset leaves the minimum-version check off.
+    ...(this.env.POLLIS_CLIENT_POLICY_URL
+      ? { POLLIS_CLIENT_POLICY_URL: this.env.POLLIS_CLIENT_POLICY_URL }
       : {}),
     // Per-environment rate-limit tunables (TUNABLE_VAR_KEYS), only those set.
     ...tunableVarEnv(this.env),

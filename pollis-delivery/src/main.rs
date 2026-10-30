@@ -77,6 +77,11 @@ async fn main() -> Result<()> {
 
     // Built first so the sweep and the router share one `retention_metrics` cell (#720).
     let state = build_app_state(Arc::clone(&db), log_db);
+    // Load the client policy now rather than on the first request (#1611).
+    {
+        let mirror = state.client_policy.clone();
+        tokio::spawn(async move { mirror.refresh().await });
+    }
 
     // Envelope-GC sweep (#689); started before the router so it also runs on a scale-to-zero wake.
     spawn_envelope_gc_sweep(Arc::clone(&db), state.retention_metrics.clone());

@@ -61,6 +61,9 @@
     // 12, not the code default of 6 — see docs/metadata-retention-policy.md §1.
     // "0" would disable the bound entirely.
     "POLLIS_DS_WATERMARK_STALE_MONTHS": "12",
+    // #1611: the minimum-client-version policy this DS mirrors and enforces (426). Written only
+    // by scripts/client-policy.mjs; docs/deployments.md → "Client minimum version".
+    "POLLIS_CLIENT_POLICY_URL": "https://cdn.pollis.com/dev/client-policy.json",
     // #658: dev's container object. The `-enam` suffix records an EXPERIMENT THAT
     // FAILED, kept because the name is now load-bearing (renaming it again means
     // repeating the staged migration below for no benefit).

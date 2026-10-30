@@ -14,6 +14,7 @@ pub mod auth;
 pub mod bootstrap;
 pub mod broker;
 pub mod cert;
+pub mod client_policy;
 pub mod commit;
 pub mod db;
 pub mod devices;
@@ -98,6 +99,8 @@ pub struct AppState {
     pub ops_log: Option<ops_log::OpsLog>,
     /// Write budget for the failed-request log ([`error_log`], #1305).
     pub error_log: error_log::ErrorLog,
+    /// The published minimum-client-version policy (#1611); disabled unless `main` configures it.
+    pub client_policy: client_policy::PolicyMirror,
 }
 
 impl AppState {
@@ -128,6 +131,7 @@ impl AppState {
             // Default-off, like the metrics token: `main` opts in from env.
             ops_log: None,
             error_log: error_log::ErrorLog::default(),
+            client_policy: client_policy::PolicyMirror::default(),
         }
     }
 
@@ -152,6 +156,12 @@ impl AppState {
     /// Set the operator token for `GET /v1/retention/metrics`; `None` leaves it 404.
     pub fn with_metrics_token(mut self, token: Option<String>) -> Self {
         self.metrics_token = token;
+        self
+    }
+
+    /// Mirror and enforce a client policy ([`client_policy`], #1611).
+    pub fn with_client_policy(mut self, mirror: client_policy::PolicyMirror) -> Self {
+        self.client_policy = mirror;
         self
     }
 
@@ -233,7 +243,18 @@ pub fn build_app_state(db: Arc<Db>, log_db: Arc<Db>) -> AppState {
              recorded by client pseudonym; GET /v1/ops/otp-requests (operator token)"
         );
     }
+    let client_policy = client_policy::PolicyMirror::from_env();
+    tracing::info!(
+        url = client_policy.url().unwrap_or("-"),
+        "pollis-delivery client policy: {}",
+        if client_policy.url().is_some() {
+            "mirrored; POSTs from builds below their platform's minimum get 426"
+        } else {
+            "DISABLED (POLLIS_CLIENT_POLICY_URL unset) — no minimum version is enforced"
+        }
+    );
     AppState::new_with_log_db(db, log_db, require_auth)
+        .with_client_policy(client_policy)
         .with_otp_config(otp::OtpConfig::from_env())
         .with_broker_config(broker::BrokerConfig::from_env())
         .with_ratelimit_config(ratelimit::RateLimitConfig::from_env())
@@ -259,6 +280,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
         .route("/v1/ops/errors", get(error_log::list))
         .route("/v1/ops/push", get(push::ops_push))
+        // The client-policy mirror (#1611): open, like `/version`.
+        .route(pollis_api::client_policy::CLIENT_POLICY_PATH, get(client_policy::get_policy))
         .route(<SubmitBody as DsRequest>::PATH, post(submit))
         .route(<CommitSinceReport as DsRequest>::PATH, post(report_commit_since))
         .route(<writes::GroupInfoBody as DsRequest>::PATH, post(writes::group_info))
@@ -414,6 +437,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<account_reads::AccountProbeBody as DsRequest>::PATH, post(account_reads::account_probe))
         // Failed-request log (#1305): a ROUTE layer (matched patterns only), inside the limiter.
         .route_layer(from_fn_with_state(state.clone(), error_log::record))
+        // #1611: 426 a POST from a build below its platform's minimum, before any handler runs.
+        .layer(from_fn_with_state(state.clone(), client_policy::enforce))
         // Hardening (#345): rate limiting inner; security headers wrap everything, 429s included.
         .layer(from_fn_with_state(state.clone(), ratelimit::rate_limit))
         .layer(from_fn(headers::security_headers))

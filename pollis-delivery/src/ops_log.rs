@@ -45,8 +45,8 @@ const EMAIL_DOMAIN_MAX_CHARS: usize = 64;
 /// axum's default `Bytes` limit, so buffering rejects exactly what the handler would.
 const BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
-/// An optional client-version header; no Pollis client sends one yet.
-pub const CLIENT_VERSION_HEADER: &str = "x-pollis-client-version";
+/// The client-version header every Pollis client sends since #1611 (older builds send none).
+pub const CLIENT_VERSION_HEADER: &str = pollis_api::client_policy::CLIENT_VERSION_HEADER;
 
 /// Parse the gate's value. Only an explicit on value enables it; anything else,
 /// including a typo, leaves it off.
