@@ -27,6 +27,7 @@ import {
 } from "../theme/accentStore";
 import { deviceAccentBackend } from "../theme/deviceAccent";
 import { usePreferences } from "../hooks/queries/usePreferences";
+import { saveThemeForExtension } from "../lib/push/extensionTheme";
 
 type ThemeCtx = {
   accentHex: string;
@@ -99,6 +100,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setBackgroundRgb(hexToRgbTriplet(hex));
     setBackgroundHex(hex);
   }, []);
+
+  // #1599: the notification extension draws its avatars in the same colours (iOS).
+  useEffect(() => {
+    saveThemeForExtension(accentHex, backgroundHex);
+  }, [accentHex, backgroundHex]);
 
   const value = useMemo(
     () => ({ accentHex, setAccent, backgroundHex, setBackground }),

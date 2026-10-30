@@ -161,6 +161,12 @@ module.exports = {
       contents: rustCoreDigest().contents,
       reasons: ["pollis-core (uniffi bridge)"],
     },
+    // The NSE's Swift (#1599): fingerprint hashes the plugin's .js, not the files it copies in.
+    {
+      type: "dir",
+      filePath: "plugins/notification-service",
+      reasons: ["iOS Notification Service Extension sources"],
+    },
     {
       type: "contents",
       id: "ota-code-signing-certificate",

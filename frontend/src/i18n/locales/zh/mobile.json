@@ -305,7 +305,17 @@
     "title": "消息链接"
   },
   "push": {
-    "channelMessages": "消息"
+    "channelMessages": "消息",
+    "genericTitle": "新消息",
+    "genericBody": "你有一条新消息",
+    "you": "你",
+    "bodyAttachment": "附件",
+    "bodyImage": "照片",
+    "bodyVideo": "视频",
+    "bodyVoice": "语音消息",
+    "bodySensitive": "敏感内容",
+    "nameOnlyBody": "发来一条消息",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "频道",

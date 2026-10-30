@@ -313,7 +313,17 @@
     "title": "Enlace al mensaje"
   },
   "push": {
-    "channelMessages": "Mensajes"
+    "channelMessages": "Mensajes",
+    "genericTitle": "Mensaje nuevo",
+    "genericBody": "Tienes un mensaje nuevo",
+    "you": "Tú",
+    "bodyAttachment": "Adjunto",
+    "bodyImage": "Foto",
+    "bodyVideo": "Vídeo",
+    "bodyVoice": "Mensaje de voz",
+    "bodySensitive": "Contenido sensible",
+    "nameOnlyBody": "Te envió un mensaje",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Canales",

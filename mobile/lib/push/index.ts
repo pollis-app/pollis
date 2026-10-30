@@ -9,6 +9,8 @@ import { readPayloadRouting } from "./routing";
 import { createPushRegistrar, type EnsureOptions } from "./registration";
 import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
+import { pushCapsFor } from "./caps";
+import { embeddedExtra } from "../buildInfo";
 
 // Content-free foreground presentation (no sound, no badge). Safe at module load.
 Notifications.setNotificationHandler({
@@ -52,6 +54,8 @@ const registrar = createPushRegistrar({
       userId,
       token,
       platform: Platform.OS,
+      // #1599: sent on every register, since the DS replaces the stored caps each time.
+      caps: pushCapsFor(embeddedExtra(), Platform.OS),
     });
   },
   warn: (message, error) => {

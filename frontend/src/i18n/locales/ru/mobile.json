@@ -329,7 +329,17 @@
     "title": "Ссылка на сообщение"
   },
   "push": {
-    "channelMessages": "Сообщения"
+    "channelMessages": "Сообщения",
+    "genericTitle": "Новое сообщение",
+    "genericBody": "У вас новое сообщение",
+    "you": "Вы",
+    "bodyAttachment": "Вложение",
+    "bodyImage": "Фото",
+    "bodyVideo": "Видео",
+    "bodyVoice": "Голосовое сообщение",
+    "bodySensitive": "Деликатный контент",
+    "nameOnlyBody": "Отправил(а) сообщение",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Каналы",
