@@ -76,6 +76,20 @@ test("the Swift reads exactly the keys the plugin writes", () => {
   assert.match(swift, /forInfoDictionaryKey: "PollisAppGroup"/);
 });
 
+test("the app saves the theme where the extension's avatars read it", () => {
+  const src = (p: string) => fs.readFileSync(path.join(import.meta.dirname, p), "utf8");
+  const swift = src("../plugins/notification-service/LetterAvatar.swift");
+  const objc = src("../modules/pollis-native/ios/PollisPushState.mm");
+  for (const key of ["pollis.theme.accent", "pollis.theme.bg"]) {
+    assert.ok(swift.includes(`"${key}"`), `LetterAvatar.swift reads ${key}`);
+    assert.ok(objc.includes(`@"${key}"`), `PollisPushState.mm writes ${key}`);
+  }
+  assert.match(objc, /initWithSuiteName:group/);
+  assert.match(src("../components/theme.tsx"), /saveThemeForExtension\(accentHex, backgroundHex\)/);
+  // The plugin compiles the avatar renderer into the extension.
+  assert.match(src("../plugins/withNotificationServiceExtension.js"), /"LetterAvatar\.swift"/);
+});
+
 test("POLLIS_IOS_NSE=off leaves the config alone", () => {
   assert.equal(plugin.isEnabled({ POLLIS_IOS_NSE: "off" }), false);
   assert.equal(plugin.isEnabled({}), true);

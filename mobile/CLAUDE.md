@@ -527,7 +527,7 @@ puts `data`. What it shows:
 
 | fetch result | banner |
 |---|---|
-| ok, mode `full` | title = sender (group: "sender · conversation"), body = preview or a localised placeholder for `body_key`, `threadIdentifier` = conversation id, Messages-style communication notification |
+| ok, mode `full` | title = sender (group: "sender · conversation"), body = preview or a localised placeholder for `body_key`, `threadIdentifier` = conversation id, and a Messages-style communication notification with the app's letter avatar (a circle for the sender, a rounded square for a group) |
 | ok, mode `name` | the same title, body "Sent a message" |
 | ok, mode `none`, nothing new, or every item muted | localised "New message / You have a new message" |
 | `ok:false` (not logged in, lock busy, timeout, …), no App Group, `serviceExtensionTimeWillExpire` | the push exactly as it arrived |
@@ -594,8 +594,22 @@ but no `PollisNotificationService` process. Only a real APNs delivery runs it.
 So the Swift is tested by `plugins/notification-service/harness/run.sh`, which
 compiles the real `NotificationService.swift` for macOS against a stub core and
 checks every row of the table above. `tests/notification-service-extension.test.ts`
-covers the plugin. The extension logs outcomes only (mode, reason, item count,
-ms), never content, under subsystem `com.pollis.ios.NotificationService`:
+covers the plugin.
+
+**Avatars.** `LetterAvatar.swift` draws the app's letter avatar with CoreGraphics:
+the initial in bold at 0.38 of the size, `semantic.dim` on `semantic.high`,
+using the `theme/derive.ts` recipe (the same one as Android's
+`LetterAvatar.kt`). The colours come from the live accent and background.
+`components/theme.tsx` writes them on start and on every change through
+`PollisPushState.setThemeColors`
+(`modules/pollis-native/ios/PollisPushState.mm`) into the App Group's
+UserDefaults, as `pollis.theme.accent` and `pollis.theme.bg`; without them the
+defaults are used. The intent is a combination iOS will donate: sender,
+recipients (this user, plus the sender for a group) and the conversation id.
+
+The extension logs outcomes only (mode, reason, item count, ms and `peakKB`, the
+process's peak physical footprint), never content, under subsystem
+`com.pollis.ios.NotificationService`:
 `log stream --predicate 'subsystem == "com.pollis.ios.NotificationService"'`.
 <!-- measured numbers: see PR #1599-ios-nse -->
 

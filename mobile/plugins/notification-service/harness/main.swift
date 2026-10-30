@@ -107,5 +107,45 @@ let noMuted = "{\"conversation_id\":\"c1\",\"sender_name\":\"Ana\",\"body\":\"x\
 c = run("{\"ok\":true,\"mode\":\"full\",\"items\":[\(noMuted)]}")
 check("an item without `muted` is not shown", c.title == L10n.genericTitle, c.title)
 
+// Letter avatars (Android's LetterAvatar.kt pins the same numbers).
+let defaults = LetterAvatar.colors(accent: LetterAvatar.defaultAccent, background: LetterAvatar.defaultBackground)
+check("avatar fill = semantic.high", defaults.fill == 0x332C20, String(defaults.fill, radix: 16))
+check("avatar letter = semantic.dim", defaults.letter == 0xC8B698, String(defaults.letter, radix: 16))
+check("initial: first character, upper-cased", LetterAvatar.initial("  ana") == "A")
+check("initial: an emoji stays whole", LetterAvatar.initial("😀 smile") == "😀")
+check("initial: blank has none", LetterAvatar.initial("   ") == nil)
+check("hex parses", LetterAvatar.parseHex("#fabf5a") == 0xFABF5A && LetterAvatar.parseHex("nope") == nil)
+let suite = UserDefaults(suiteName: "pollis.harness.\(getpid())")
+check("no saved theme: defaults", LetterAvatar.theme(suite) == (LetterAvatar.defaultAccent, LetterAvatar.defaultBackground))
+suite?.set("#5ad1fa", forKey: LetterAvatar.accentKey)
+suite?.set("#101010", forKey: LetterAvatar.backgroundKey)
+check("saved theme is read", LetterAvatar.theme(suite) == (0x5AD1FA, 0x101010))
+let png = LetterAvatar.png(label: "Ana", rounded: false, theme: (LetterAvatar.defaultAccent, LetterAvatar.defaultBackground))
+check("avatar renders a PNG", png?.starts(with: [0x89, 0x50, 0x4E, 0x47]) == true, "\(png?.count ?? 0) bytes")
+// NSE_AVATAR_OUT=<dir> writes the two shapes, to look at.
+if let dir = ProcessInfo.processInfo.environment["NSE_AVATAR_OUT"] {
+  try? png?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("person.png"))
+  try? LetterAvatar.png(label: "Team", rounded: true, theme: (LetterAvatar.defaultAccent, LetterAvatar.defaultBackground))?
+    .write(to: URL(fileURLWithPath: dir).appendingPathComponent("group.png"))
+}
+check("no letter, no avatar", LetterAvatar.png(label: " ", rounded: true, theme: (0, 0)) == nil)
+
+// The intent is a combination iOS donates: sender, recipients, conversation id; images set.
+let theme = (accent: LetterAvatar.defaultAccent, background: LetterAvatar.defaultBackground)
+let dmItem = try! JSONDecoder().decode(PollisNotifyItem.self, from: Data(item("").utf8))
+let dmIntent = NotificationService.messageIntent(for: dmItem, groupName: nil, theme: theme)
+check("DM intent: me as the one recipient", dmIntent.recipients?.count == 1 && dmIntent.recipients?.first?.isMe == true)
+check("DM intent: sender with avatar", dmIntent.sender?.displayName == "Ana" && dmIntent.sender?.image != nil)
+check("DM intent: conversation id, no group", dmIntent.conversationIdentifier == "c1" && dmIntent.speakableGroupName == nil)
+let groupItem = try! JSONDecoder().decode(PollisNotifyItem.self, from: Data(group.utf8))
+let groupIntent = NotificationService.messageIntent(for: groupItem, groupName: "Team", theme: theme)
+check("group intent: two recipients", groupIntent.recipients?.count == 2)
+// The group image is set with setImage(forParameterNamed:), iOS-only API; here, its PNG renders.
+check("group intent: named", groupIntent.speakableGroupName?.spokenPhrase == "Team")
+check("group avatar renders", LetterAvatar.png(label: "Team", rounded: true, theme: theme) != nil)
+check("group intent: conversation id", groupIntent.conversationIdentifier == "g1")
+
+check("peak footprint is measured", PollisShared.peakFootprintKB() > 0, "\(PollisShared.peakFootprintKB()) KB")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

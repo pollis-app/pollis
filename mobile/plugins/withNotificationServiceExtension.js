@@ -25,7 +25,7 @@ const {
 
 const TARGET = "PollisNotificationService";
 const SOURCE_DIR = path.join(__dirname, "notification-service");
-const SWIFT = "NotificationService.swift";
+const SWIFT_SOURCES = ["NotificationService.swift", "LetterAvatar.swift"];
 const BRIDGING_HEADER = `${TARGET}-Bridging-Header.h`;
 const INFO_PLIST = `${TARGET}-Info.plist`;
 const ENTITLEMENTS = `${TARGET}.entitlements`;
@@ -155,7 +155,9 @@ function extensionInfoPlist(config, { group, keychain }) {
 function writeExtensionFiles(config, ids, iosDir) {
   const dir = path.join(iosDir, TARGET);
   fs.mkdirSync(dir, { recursive: true });
-  fs.copyFileSync(path.join(SOURCE_DIR, SWIFT), path.join(dir, SWIFT));
+  for (const file of SWIFT_SOURCES) {
+    fs.copyFileSync(path.join(SOURCE_DIR, file), path.join(dir, file));
+  }
   fs.copyFileSync(path.join(SOURCE_DIR, BRIDGING_HEADER), path.join(dir, BRIDGING_HEADER));
   fs.writeFileSync(path.join(dir, INFO_PLIST), plist.build(extensionInfoPlist(config, ids)));
   fs.writeFileSync(path.join(dir, ENTITLEMENTS), plist.build(sharedEntitlements({}, ids)));
@@ -233,7 +235,10 @@ function addExtensionTarget(config, ids, project) {
   const resources = project.addBuildPhase([], "PBXResourcesBuildPhase", "Resources", target.uuid);
   const frameworks = project.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid);
 
-  const swiftRef = fileRef(project, { name: SWIFT, path: SWIFT, type: "sourcecode.swift" });
+  const swiftRefs = SWIFT_SOURCES.map((file) => ({
+    file,
+    ref: fileRef(project, { name: file, path: file, type: "sourcecode.swift" }),
+  }));
   const headerRef = fileRef(project, {
     name: BRIDGING_HEADER,
     path: BRIDGING_HEADER,
@@ -274,7 +279,9 @@ function addExtensionTarget(config, ids, project) {
     "Localizable.strings",
   );
 
-  buildFile(project, swiftRef, SWIFT, sources.uuid, "PBXSourcesBuildPhase", "Sources");
+  for (const { file, ref } of swiftRefs) {
+    buildFile(project, ref, file, sources.uuid, "PBXSourcesBuildPhase", "Sources");
+  }
   buildFile(project, variantUuid, "Localizable.strings", resources.uuid, "PBXResourcesBuildPhase", "Resources");
   buildFile(
     project,
@@ -293,7 +300,7 @@ function addExtensionTarget(config, ids, project) {
     {
       isa: "PBXGroup",
       children: [
-        { value: swiftRef, comment: SWIFT },
+        ...swiftRefs.map(({ file, ref }) => ({ value: ref, comment: file })),
         { value: headerRef, comment: BRIDGING_HEADER },
         { value: plistRef, comment: INFO_PLIST },
         { value: entRef, comment: ENTITLEMENTS },

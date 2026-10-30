@@ -4,6 +4,7 @@
 // pollis_notify_fetch opens the shared data dir, fetches and decrypts pending envelopes, stores
 // them as the app would, and returns previews. Any failure delivers the push as it arrived.
 
+import Darwin
 import Intents
 import os
 import UserNotifications
@@ -38,10 +39,11 @@ final class NotificationService: UNNotificationServiceExtension {
       let started = Date()
       let result = PollisNotifyResult.fetch(dataDir: dataDir.path, handle: handle, budgetMs: Self.budgetMs)
       let ms = Int(Date().timeIntervalSince(started) * 1000)
+      let peakKB = PollisShared.peakFootprintKB()
       if let result, result.ok {
-        log.info("fetch ok mode=\(result.mode ?? "?", privacy: .public) items=\(result.items?.count ?? 0, privacy: .public) ms=\(ms, privacy: .public)")
+        log.info("fetch ok mode=\(result.mode ?? "?", privacy: .public) items=\(result.items?.count ?? 0, privacy: .public) ms=\(ms, privacy: .public) peakKB=\(peakKB, privacy: .public)")
       } else {
-        log.info("fetch failed reason=\(result?.reason ?? "unparsable", privacy: .public) ms=\(ms, privacy: .public)")
+        log.info("fetch failed reason=\(result?.reason ?? "unparsable", privacy: .public) ms=\(ms, privacy: .public) peakKB=\(peakKB, privacy: .public)")
       }
       Self.rewrite(request.content, with: result) { content in
         self.deliver(content)
@@ -127,52 +129,25 @@ final class NotificationService: UNNotificationServiceExtension {
     return content
   }
 
-  // The Messages-style look (sender monogram, group name). Needs the Communication Notifications
-  // capability; without it `updating(from:)` throws and the plain rewrite is delivered instead.
-  // The intent carries no message text, so the system's interaction store never holds any.
+  // The Messages-style look: the sender's (or group's) letter avatar and the group name. Needs
+  // the Communication Notifications capability; without it `updating(from:)` throws and the
+  // plain rewrite is delivered instead. The intent carries no message text, so the system's
+  // interaction store never holds any.
   static func communicationContent(
     _ content: UNMutableNotificationContent,
     item: PollisNotifyItem,
     groupName: String?,
     completion: @escaping (UNNotificationContent) -> Void
   ) {
-    let sender = INPerson(
-      personHandle: INPersonHandle(value: item.senderName, type: .unknown),
-      nameComponents: nil,
-      displayName: item.senderName,
-      image: nil,
-      contactIdentifier: nil,
-      customIdentifier: nil
-    )
-    var recipients: [INPerson]?
-    var speakableGroupName: INSpeakableString?
-    if let groupName {
-      // A group renders as one only with a group name and more than one recipient.
-      let me = INPerson(
-        personHandle: INPersonHandle(value: "me", type: .unknown),
-        nameComponents: nil,
-        displayName: nil,
-        image: nil,
-        contactIdentifier: nil,
-        customIdentifier: nil,
-        isMe: true
-      )
-      recipients = [me, sender]
-      speakableGroupName = INSpeakableString(spokenPhrase: groupName)
-    }
-    let intent = INSendMessageIntent(
-      recipients: recipients,
-      outgoingMessageType: .outgoingMessageText,
-      content: nil,
-      speakableGroupName: speakableGroupName,
-      conversationIdentifier: item.conversationId,
-      serviceName: nil,
-      sender: sender,
-      attachments: nil
+    let intent = messageIntent(
+      for: item, groupName: groupName, theme: LetterAvatar.theme(PollisShared.defaults())
     )
     let interaction = INInteraction(intent: intent, response: nil)
     interaction.direction = .incoming
-    interaction.donate { _ in
+    interaction.donate { error in
+      if let error {
+        log.error("intent not donated: \(error.localizedDescription, privacy: .public)")
+      }
       do {
         completion(try content.updating(from: intent))
       } catch {
@@ -180,10 +155,79 @@ final class NotificationService: UNNotificationServiceExtension {
       }
     }
   }
+
+  // A valid incoming combination: sender, recipients (this user, plus the sender for a group,
+  // which also carries its name) and the conversation id. A DM is the group-less conversation
+  // with the sender.
+  static func messageIntent(
+    for item: PollisNotifyItem,
+    groupName: String?,
+    theme: (accent: UInt32, background: UInt32)
+  ) -> INSendMessageIntent {
+    let senderImage = LetterAvatar.png(label: item.senderName, rounded: false, theme: theme)
+      .map { INImage(imageData: $0) }
+    let sender = INPerson(
+      personHandle: INPersonHandle(value: item.senderName, type: .unknown),
+      nameComponents: nil,
+      displayName: item.senderName,
+      image: senderImage,
+      contactIdentifier: nil,
+      customIdentifier: nil
+    )
+    let me = INPerson(
+      personHandle: INPersonHandle(value: "me", type: .unknown),
+      nameComponents: nil,
+      displayName: nil,
+      image: nil,
+      contactIdentifier: nil,
+      customIdentifier: nil,
+      isMe: true
+    )
+    let intent = INSendMessageIntent(
+      recipients: groupName == nil ? [me] : [me, sender],
+      outgoingMessageType: .outgoingMessageText,
+      content: nil,
+      speakableGroupName: groupName.map { INSpeakableString(spokenPhrase: $0) },
+      conversationIdentifier: item.conversationId,
+      serviceName: nil,
+      sender: sender,
+      attachments: nil
+    )
+    #if os(iOS)
+    if let groupName, let data = LetterAvatar.png(label: groupName, rounded: true, theme: theme) {
+      intent.setImage(INImage(imageData: data), forParameterNamed: \.speakableGroupName)
+    }
+    #endif
+    return intent
+  }
 }
 
 enum PollisShared {
   // Written into both Info.plists by plugins/withNotificationServiceExtension.js.
+  static func defaults() -> UserDefaults? {
+    guard let group = Bundle.main.object(forInfoDictionaryKey: "PollisAppGroup") as? String else {
+      return nil
+    }
+    return UserDefaults(suiteName: group)
+  }
+
+  /// Peak physical footprint of this process so far, in KB (what jetsam counts), or -1.
+  static func peakFootprintKB() -> Int {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(
+      MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size
+    )
+    let kr = withUnsafeMutablePointer(to: &info) {
+      $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+        task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+      }
+    }
+    guard kr == KERN_SUCCESS else {
+      return -1
+    }
+    return Int(info.ledger_phys_footprint_peak / 1024)
+  }
+
   static func dataDirectory() -> URL? {
     guard let group = Bundle.main.object(forInfoDictionaryKey: "PollisAppGroup") as? String,
           let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
