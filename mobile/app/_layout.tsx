@@ -34,6 +34,8 @@ import {
   clientPlatformFor,
   getClientPolicy,
   onUpgradeRequired,
+  applyCoreVerdict,
+  launchWaitsForCheck,
   parseDevPolicyLink,
   setClientPolicy,
   subscribeClientPolicy,
@@ -169,15 +171,12 @@ export default function RootLayout() {
     [],
   );
 
-  // #1611: a DS 426 on any command blocks at once; fetch what the core recorded for the screen.
+  // #1611: an `upgrade_required` asks the core; only its own `blocked: true` verdict blocks, so a
+  // late or stray rejection after an unblock never re-blocks.
   useEffect(
     () =>
       onUpgradeRequired(async () => {
-        const status = await invoke<ClientPolicyStatus>("get_client_policy_status");
-        // The core answers blocked after a 426; a stale answer never unblocks from here.
-        if (status.blocked) {
-          setClientPolicy(status);
-        }
+        applyCoreVerdict(await invoke<ClientPolicyStatus>("get_client_policy_status"));
       }),
     [],
   );
@@ -195,9 +194,16 @@ export default function RootLayout() {
       clientPlatform: clientPlatformFor(Platform.OS === "ios" ? "ios" : "android", build.channel),
       clientVersion: build.version,
     })
-      // Before unlock or sign-in: the minimum-version check (the core bounds it to a few seconds).
+      // Before unlock or sign-in: the minimum-version check. A cache that already allows this
+      // build lets launch go on and checks in the background; a cached block or no cache waits
+      // (the core bounds the fetch to a few seconds).
       .then(async () => {
-        await checkClientPolicy(true);
+        const cached = await invoke<ClientPolicyStatus>("peek_client_policy").catch(() => null);
+        if (launchWaitsForCheck(cached)) {
+          await checkClientPolicy(true);
+        } else {
+          void checkClientPolicy(true);
+        }
         await applyDevPolicyLink(await Linking.getInitialURL().catch(() => null));
       })
       .then(() => setBridgeReady(true))

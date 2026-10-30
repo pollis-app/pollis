@@ -61,9 +61,23 @@ ok "a minimum above the latest release is refused"
 run --env prod --set linux=1.18.0 --force >/dev/null || fail "--force overrides the release guard"
 ok "--force overrides the release guard (still a dry run)"
 
-out="$(run --env prod --set ios=1.0.21)"
-grep -q "ios: no release manifest" <<<"$out" || fail "store-only platforms warn"
-ok "store-only platforms warn that they cannot be checked"
+out="$(run --env prod --set ios=1.0.21 --set android-play=1.0.21)"
+grep -q "ios: bounded by the sideload APK (1.0.23)" <<<"$out" || fail "store platforms are bounded by the APK: $out"
+ok "ios and android-play are bounded by the sideload APK's version, with a warning"
+if run --env prod --set ios=1.0.24 >"$WORK/out" 2>&1; then fail "an iOS minimum above the mobile release was accepted"; fi
+grep -q "ios: 1.0.24 is above the latest release (1.0.23)" "$WORK/out" || fail "ios above-latest: $(cat "$WORK/out")"
+ok "an iOS minimum above the latest mobile release is refused"
+
+mv "$WORK/releases/cli/latest.json" "$WORK/releases/cli/latest.json.bak"
+if run --env prod --set cli=1.0.0 >"$WORK/out" 2>&1; then fail "an unreadable release manifest was accepted"; fi
+grep -q "cli: the release manifest for cli could not be read" "$WORK/out" || fail "unreadable manifest: $(cat "$WORK/out")"
+run --env prod --set cli=1.0.0 --force >/dev/null || fail "--force overrides an unreadable manifest"
+mv "$WORK/releases/cli/latest.json.bak" "$WORK/releases/cli/latest.json"
+ok "an unreadable release manifest fails closed unless --force"
+
+out="$(run --env dev --set macos=1.2.0)"
+grep -q "macos: dev desktop/CLI builds report the unstamped 1.1.0" <<<"$out" || fail "dev placeholder warning: $out"
+ok "a dev desktop/CLI minimum above the placeholder warns"
 
 if run --env dev --set macos=1.0.0 --apply 2>"$WORK/err"; then fail "--apply without a terminal or --yes"; fi
 grep -q "needs a terminal" "$WORK/err" || fail "confirm message"
@@ -89,8 +103,10 @@ grep -q '"minimum": {}' "$WORK/next.json" || fail "--out"
 ok "unset and clear-message diff against what is published"
 
 echo '{"v":1,"minimum":{"macos":"soon"}}' > "$WORK/cdn/client-policy.json"
-out="$(run --env prod)"
-grep -q "the published file is invalid" <<<"$out" || fail "an invalid published file is reported: $out"
-ok "an invalid published file is reported, not trusted"
+if run --env prod >"$WORK/out" 2>&1; then fail "an invalid published file was built on"; fi
+grep -q "the published file is invalid" "$WORK/out" || fail "invalid published message: $(cat "$WORK/out")"
+out="$(run --env prod --force)"
+grep -q "the published file is invalid" <<<"$out" || fail "--force still reports it: $out"
+ok "an invalid published file is refused unless --force"
 
 echo "all $pass passed"

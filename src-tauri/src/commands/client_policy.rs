@@ -18,3 +18,9 @@ pub async fn check_client_policy(state: State<'_, Arc<AppState>>, force: Option<
 pub async fn get_client_policy_status(state: State<'_, Arc<AppState>>) -> Result<ClientPolicyStatus> {
     pollis_core::commands::client_policy::get_client_policy_status(&state).await
 }
+
+/// The cached verdict, no network: launch waits for the check only when this is not "allowed".
+#[tauri::command]
+pub async fn peek_client_policy(state: State<'_, Arc<AppState>>) -> Result<ClientPolicyStatus> {
+    pollis_core::commands::client_policy::peek_client_policy(&state).await
+}

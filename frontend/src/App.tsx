@@ -121,16 +121,29 @@ function MainApp() {
   const checkStoredSession = useCallback(async () => {
     try {
       // #1611: the minimum-version check comes first — before the updater, unlock or any DS
-      // traffic. The core bounds it (a few seconds) and fails open; a cached block holds offline.
-      const policy = await invoke<ClientPolicyStatus>("check_client_policy", { force: true }).catch(
-        (e) => {
-          console.warn("[App] client policy check failed:", e);
-          return null;
-        },
-      );
-      if (policy?.blocked) {
-        appStore.setClientBlocked(policy);
-        return;
+      // traffic. A cache that already allows this build lets launch go on while a fresh check
+      // runs behind it (a block it finds still lands); a cached block, or no cache, waits for the
+      // check, which the core bounds to a few seconds and fails open.
+      const cached = await invoke<ClientPolicyStatus>("peek_client_policy").catch(() => null);
+      if (cached && !cached.blocked && cached.source === "cache") {
+        invoke<ClientPolicyStatus>("check_client_policy", { force: true })
+          .then((status) => {
+            if (status.blocked) {
+              appStore.setClientBlocked(status);
+            }
+          })
+          .catch((e) => console.warn("[App] client policy check failed:", e));
+      } else {
+        const policy = await invoke<ClientPolicyStatus>("check_client_policy", { force: true }).catch(
+          (e) => {
+            console.warn("[App] client policy check failed:", e);
+            return null;
+          },
+        );
+        if (policy?.blocked) {
+          appStore.setClientBlocked(policy);
+          return;
+        }
       }
 
       // Launch-time auto-update, skipped for package-manager installs and dev builds.
@@ -211,12 +224,11 @@ function MainApp() {
   useEffect(
     () =>
       onUpgradeRequired(async () => {
+        // Only the core's verdict blocks: a late or stray rejection after an unblock must not.
         const status = await invoke<ClientPolicyStatus>("get_client_policy_status").catch(() => null);
-        appStore.setClientBlocked(
-          status?.blocked
-            ? status
-            : { blocked: true, platform: null, version: null, minimum: null, message: null, source: "ds" },
-        );
+        if (status?.blocked) {
+          appStore.setClientBlocked(status);
+        }
       }),
     [],
   );

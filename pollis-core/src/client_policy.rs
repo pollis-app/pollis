@@ -148,17 +148,29 @@ pub fn resolve(
     }
 }
 
-/// The policy URL for this build: [`Config::client_policy_url`] if set, else the dev file for a
-/// non-prod DS and the prod file otherwise.
-pub fn policy_url(config: &Config) -> String {
-    if let Some(url) = config.client_policy_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        return url.to_string();
-    }
+/// The published policy for this build's DS: the dev file for a non-prod DS, the prod file otherwise.
+pub fn published_url(config: &Config) -> String {
     if config.ds_is_prod() {
         PROD_POLICY_URL.to_string()
     } else {
         DEV_POLICY_URL.to_string()
     }
+}
+
+/// Whether a test override may be honoured: never by a release build talking to the prod DS.
+pub fn overrides_allowed(ds_is_prod: bool, debug_build: bool) -> bool {
+    !ds_is_prod || debug_build
+}
+
+/// The policy URL for this build: [`Config::client_policy_url`]
+/// (`POLLIS_CLIENT_POLICY_URL_OVERRIDE`) where overrides are allowed, else [`published_url`].
+pub fn policy_url(config: &Config) -> String {
+    if overrides_allowed(config.ds_is_prod(), cfg!(debug_assertions)) {
+        if let Some(url) = config.client_policy_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            return url.to_string();
+        }
+    }
+    published_url(config)
 }
 
 /// How a fetch may leave the device; mirrors the updater's overlay plan.
@@ -184,55 +196,88 @@ impl FetchPlan {
     }
 }
 
-/// Fetch and parse the policy once. Any failure (transport, timeout, non-2xx, malformed) is `Err`.
-pub async fn fetch(url: &str, plan: &FetchPlan, timeout: Duration) -> Result<ClientPolicy, String> {
+/// Why a fetch gave no policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchError {
+    /// Transport, timeout, a non-2xx other than 404, or a malformed body: fall back to the cache.
+    Failed(String),
+    /// A format this build does not understand (a future `v`): its rule is unknowable here, so
+    /// the cache is dropped too, and the build is allowed.
+    Unsupported(u32),
+}
+
+fn parse_body(json: &str) -> Result<ClientPolicy, FetchError> {
+    ClientPolicy::parse(json).map_err(|e| match e {
+        pollis_api::client_policy::PolicyError::UnsupportedFormat(v) => FetchError::Unsupported(v),
+        other => FetchError::Failed(other.to_string()),
+    })
+}
+
+/// Fetch and parse the policy once. A 404 is "nothing published": no minimums, as on the DS.
+pub async fn fetch(url: &str, plan: &FetchPlan, timeout: Duration) -> Result<ClientPolicy, FetchError> {
+    let failed = FetchError::Failed;
     if let Some(json) = url.strip_prefix("inline:") {
-        return ClientPolicy::parse(json).map_err(|e| e.to_string());
+        return parse_body(json);
     }
     let mut builder = reqwest::Client::builder().timeout(timeout).connect_timeout(timeout);
     match plan {
         FetchPlan::Direct => {}
         FetchPlan::Proxy(proxy) => {
-            builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|e| e.to_string())?);
+            builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|e| failed(e.to_string()))?);
         }
-        FetchPlan::Skip => return Err("skipped: strict overlay with no circuit".into()),
+        FetchPlan::Skip => return Err(failed("skipped: strict overlay with no circuit".into())),
     }
-    let client = builder.build().map_err(|e| e.to_string())?;
+    let client = builder.build().map_err(|e| failed(e.to_string()))?;
     let resp = client
         .get(url)
         .header(reqwest::header::CACHE_CONTROL, "no-cache")
         .send()
         .await
-        .map_err(|e| crate::commands::mls::ds_client::error_chain(&e))?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        .map_err(|e| failed(crate::commands::mls::ds_client::error_chain(&e)))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(ClientPolicy::empty());
     }
-    let body = resp.text().await.map_err(|e| e.to_string())?;
-    ClientPolicy::parse(&body).map_err(|e| e.to_string())
+    if !resp.status().is_success() {
+        return Err(failed(format!("HTTP {}", resp.status())));
+    }
+    let body = resp.text().await.map_err(|e| failed(e.to_string()))?;
+    parse_body(&body)
 }
 
 #[derive(Serialize, Deserialize)]
 struct CacheFile {
     policy: ClientPolicy,
     fetched_at: u64,
+    /// Where the policy came from; the cache answers only for that same source, so a test
+    /// override's verdict never outlives it. Files without it read as `None`: ignored.
+    #[serde(default)]
+    source: Option<String>,
 }
 
 fn cache_path(data_dir: &Path) -> PathBuf {
     data_dir.join(CACHE_FILE)
 }
 
-/// The cached policy, or `None` if there is none or it does not parse.
-pub fn read_cache(data_dir: &Path) -> Option<ClientPolicy> {
+/// The policy cached for `source`, or `None` if there is none, it is for another source, or it
+/// does not parse.
+pub fn read_cache(data_dir: &Path, source: &str) -> Option<ClientPolicy> {
     let raw = std::fs::read(cache_path(data_dir)).ok()?;
     let file: CacheFile = serde_json::from_slice(&raw).ok()?;
+    if file.source.as_deref() != Some(source) {
+        return None;
+    }
     // Re-validate: a hand-edited or truncated cache must not block anything.
     let json = serde_json::to_string(&file.policy).ok()?;
     ClientPolicy::parse(&json).ok()
 }
 
-/// Replace the cached policy. Best-effort: a failure only loses offline blocking.
-pub fn write_cache(data_dir: &Path, policy: &ClientPolicy) {
-    let file = CacheFile { policy: policy.clone(), fetched_at: crate::util::now_unix() };
+/// Replace the cached policy for `source`. Best-effort: a failure only loses offline blocking.
+pub fn write_cache(data_dir: &Path, source: &str, policy: &ClientPolicy) {
+    let file = CacheFile {
+        policy: policy.clone(),
+        fetched_at: crate::util::now_unix(),
+        source: Some(source.to_string()),
+    };
     let Ok(json) = serde_json::to_vec(&file) else {
         return;
     };
@@ -241,6 +286,11 @@ pub fn write_cache(data_dir: &Path, policy: &ClientPolicy) {
     {
         crate::diag!("[client-policy] cache not written: {e}");
     }
+}
+
+/// Drop the cache (a policy format this build cannot read replaced it).
+pub fn clear_cache(data_dir: &Path) {
+    let _ = std::fs::remove_file(cache_path(data_dir));
 }
 
 /// A dev build's test override: a URL to fetch instead, or a policy to use as if fetched.
@@ -263,7 +313,7 @@ impl PolicyOverride {
 
 /// Persist (or with `None`, clear) the test override. Refused for a build that talks to the prod DS.
 pub fn set_override(config: &Config, data_dir: &Path, value: Option<&PolicyOverride>) -> crate::error::Result<()> {
-    if config.ds_is_prod() {
+    if !overrides_allowed(config.ds_is_prod(), cfg!(debug_assertions)) {
         return Err(crate::error::Error::Other(anyhow::anyhow!(
             "the client policy override is for dev builds only"
         )));
@@ -286,11 +336,39 @@ pub fn set_override(config: &Config, data_dir: &Path, value: Option<&PolicyOverr
 
 /// The override in effect, if any; never for a build that talks to the prod DS.
 fn read_override(config: &Config, data_dir: &Path) -> Option<String> {
-    if config.ds_is_prod() {
+    if !overrides_allowed(config.ds_is_prod(), cfg!(debug_assertions)) {
         return None;
     }
     let raw = std::fs::read(data_dir.join(OVERRIDE_FILE)).ok()?;
     serde_json::from_slice::<PolicyOverride>(&raw).ok()?.source()
+}
+
+/// Where this build reads its policy, and whether that answer may be cached.
+fn source_for(config: &Config, data_dir: &Path) -> (String, bool) {
+    // The env override beats the dev file override; both are gated by [`overrides_allowed`].
+    let env = policy_url(config);
+    if env != published_url(config) {
+        // An env URL is cached under its own name; `inline:` never is.
+        let cacheable = !env.starts_with("inline:");
+        return (env, cacheable);
+    }
+    match read_override(config, data_dir) {
+        // A file override's verdict is never cached: it must not outlive the override.
+        Some(source) => (source, false),
+        None => (env, true),
+    }
+}
+
+/// The verdict from the cache alone, no network: launch uses it to decide whether it can go on
+/// while a fresh check runs in the background.
+pub fn peek(config: &Config, data_dir: &Path) -> ClientPolicyStatus {
+    let identity = config.client.as_ref();
+    if identity.is_none() {
+        return resolve(None, None, None);
+    }
+    let (source, cacheable) = source_for(config, data_dir);
+    let cached = if cacheable { read_cache(data_dir, &source) } else { None };
+    resolve(identity, None, cached.as_ref())
 }
 
 /// Run the check without an [`AppState`] (the CLI, before it opens anything): fetch, fall back to
@@ -300,22 +378,25 @@ pub async fn check(config: &Config, data_dir: &Path, plan: &FetchPlan, timeout: 
     if identity.is_none() {
         return resolve(None, None, None);
     }
-    // The env override (`POLLIS_CLIENT_POLICY_URL`) beats the dev file override.
-    let source = match config.client_policy_url.as_deref().filter(|u| !u.trim().is_empty()) {
-        Some(_) => policy_url(config),
-        None => read_override(config, data_dir).unwrap_or_else(|| policy_url(config)),
-    };
+    let (source, cacheable) = source_for(config, data_dir);
     let fresh = match fetch(&source, plan, timeout).await {
         Ok(policy) => {
-            write_cache(data_dir, &policy);
+            if cacheable {
+                write_cache(data_dir, &source, &policy);
+            }
             Some(policy)
         }
-        Err(e) => {
+        Err(FetchError::Unsupported(v)) => {
+            crate::diag!("[client-policy] format v{v} is not supported by this build; allowed, cache dropped");
+            clear_cache(data_dir);
+            return resolve(identity, Some(&ClientPolicy::empty()), None);
+        }
+        Err(FetchError::Failed(e)) => {
             crate::diag!("[client-policy] fetch failed ({e}); using the cached policy if any");
             None
         }
     };
-    let cached = if fresh.is_none() { read_cache(data_dir) } else { None };
+    let cached = if fresh.is_none() && cacheable { read_cache(data_dir, &source) } else { None };
     resolve(identity, fresh.as_ref(), cached.as_ref())
 }
 
@@ -365,6 +446,11 @@ pub fn current(state: &AppState) -> ClientPolicyStatus {
         .unwrap_or_else(|| ClientPolicyStatus::allowed(state.config.client.as_ref(), PolicySource::None))
 }
 
+/// [`peek`] for a running app.
+pub fn peek_state(state: &AppState) -> ClientPolicyStatus {
+    peek(&state.config, &data_dir())
+}
+
 /// `Err(UpgradeRequired)` once this build is known to be blocked; every DS sender calls it first.
 pub fn refuse_if_blocked(state: &AppState) -> crate::error::Result<()> {
     let blocked = state
@@ -379,34 +465,28 @@ pub fn refuse_if_blocked(state: &AppState) -> crate::error::Result<()> {
 }
 
 /// Record a DS `426 Upgrade Required`: block this process and cache the DS's policy so the block
-/// holds offline and across launches. An unreadable body still blocks: the DS refused us.
-pub fn record_upgrade_required(state: &AppState, body: &str) -> ClientPolicyStatus {
-    let identity = state.config.client.as_ref();
-    let status = match serde_json::from_str::<UpgradeRequiredBody>(body) {
-        Ok(parsed) => {
-            write_cache(&data_dir(), &parsed.policy);
-            ClientPolicyStatus {
-                blocked: true,
-                platform: Some(parsed.platform),
-                version: Some(parsed.version),
-                minimum: Some(parsed.minimum),
-                message: parsed.message.filter(|m| !m.trim().is_empty()),
-                source: PolicySource::Ds,
-            }
-        }
-        Err(_) => ClientPolicyStatus {
-            blocked: true,
-            platform: identity.map(|i| i.platform),
-            version: identity.map(|i| i.version.clone()),
-            minimum: None,
-            message: None,
-            source: PolicySource::Ds,
-        },
+/// holds offline and across launches. Only the DS's typed body counts (`error ==
+/// "upgrade_required"`); any other 426 (a proxy, a misconfigured edge) is an ordinary error, and
+/// `None` is returned.
+pub fn record_upgrade_required(state: &AppState, body: &str) -> Option<ClientPolicyStatus> {
+    let parsed = serde_json::from_str::<UpgradeRequiredBody>(body).ok()?;
+    if parsed.error != pollis_api::client_policy::UPGRADE_REQUIRED_ERROR {
+        return None;
+    }
+    // The DS enforces the published policy for its own host, so cache it under that source.
+    write_cache(&data_dir(), &published_url(&state.config), &parsed.policy);
+    let status = ClientPolicyStatus {
+        blocked: true,
+        platform: Some(parsed.platform),
+        version: Some(parsed.version),
+        minimum: Some(parsed.minimum),
+        message: parsed.message.filter(|m| !m.trim().is_empty()),
+        source: PolicySource::Ds,
     };
     if let Ok(mut rt) = state.client_policy.lock() {
         rt.status = Some(status.clone());
     }
-    status
+    Some(status)
 }
 
 #[cfg(test)]
@@ -498,35 +578,73 @@ mod tests {
         assert_eq!(policy_url(&config(Some("https://api.pollis.com"))), PROD_POLICY_URL);
         assert_eq!(policy_url(&config(Some("https://api-dev.pollis.com"))), DEV_POLICY_URL);
         assert_eq!(policy_url(&config(None)), PROD_POLICY_URL);
-        let mut c = config(Some("https://api.pollis.com"));
+        let mut c = config(Some("https://api-dev.pollis.com"));
         c.client_policy_url = Some("http://127.0.0.1:9/p.json".into());
         assert_eq!(policy_url(&c), "http://127.0.0.1:9/p.json");
+        assert_eq!(published_url(&c), DEV_POLICY_URL);
+    }
+
+    /// Overrides (the env URL and the dev file) only for a debug build or a non-prod DS.
+    #[test]
+    fn overrides_are_refused_by_a_release_build_on_the_prod_ds() {
+        assert!(!overrides_allowed(true, false));
+        assert!(overrides_allowed(true, true));
+        assert!(overrides_allowed(false, false));
+        assert!(overrides_allowed(false, true));
     }
 
     #[test]
     fn the_cache_round_trips_and_refuses_garbage() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(read_cache(dir.path()), None);
+        assert_eq!(read_cache(dir.path(), PROD_POLICY_URL), None);
         let p = policy(&[("linux", "1.17.0")], Some("hi"));
-        write_cache(dir.path(), &p);
-        assert_eq!(read_cache(dir.path()), Some(p));
-        std::fs::write(dir.path().join(CACHE_FILE), b"{\"policy\":{\"v\":1,\"minimum\":{\"linux\":\"x\"}},\"fetched_at\":0}").unwrap();
-        assert_eq!(read_cache(dir.path()), None);
+        write_cache(dir.path(), PROD_POLICY_URL, &p);
+        assert_eq!(read_cache(dir.path(), PROD_POLICY_URL), Some(p));
+        std::fs::write(
+            dir.path().join(CACHE_FILE),
+            format!(r#"{{"policy":{{"v":1,"minimum":{{"linux":"x"}}}},"fetched_at":0,"source":"{PROD_POLICY_URL}"}}"#),
+        )
+        .unwrap();
+        assert_eq!(read_cache(dir.path(), PROD_POLICY_URL), None);
         std::fs::write(dir.path().join(CACHE_FILE), b"garbage").unwrap();
-        assert_eq!(read_cache(dir.path()), None);
+        assert_eq!(read_cache(dir.path(), PROD_POLICY_URL), None);
     }
 
-    /// A one-route server answering `status` + `body`, counting hits; `hang` never answers.
-    async fn serve(status: u16, body: &'static str, hang: bool) -> (String, Arc<AtomicUsize>) {
+    /// The cache answers only for the source it was written from; an unlabelled one never.
+    #[test]
+    fn the_cache_is_ignored_for_another_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let floor = policy(&[("macos", "9.0.0")], None);
+        write_cache(dir.path(), "http://127.0.0.1:9/override.json", &floor);
+        assert_eq!(read_cache(dir.path(), PROD_POLICY_URL), None);
+        assert_eq!(read_cache(dir.path(), "http://127.0.0.1:9/override.json"), Some(floor.clone()));
+        std::fs::write(dir.path().join(CACHE_FILE), br#"{"policy":{"v":1,"minimum":{"macos":"9.0.0"}},"fetched_at":0}"#).unwrap();
+        assert_eq!(read_cache(dir.path(), PROD_POLICY_URL), None);
+        // So an env override's block never blocks the published source.
+        let mut c = config(Some("https://api-dev.pollis.com"));
+        c.client_policy_url = Some("http://127.0.0.1:9/override.json".into());
+        write_cache(dir.path(), "http://127.0.0.1:9/override.json", &floor);
+        assert!(peek(&c, dir.path()).blocked);
+        c.client_policy_url = None;
+        assert!(!peek(&c, dir.path()).blocked);
+    }
+
+    /// What one switchable route answers: status, body, and whether it hangs.
+    type Reply = Arc<std::sync::Mutex<(u16, String, bool)>>;
+
+    /// A one-route server answering whatever `reply` holds at each request, counting hits.
+    async fn serve(status: u16, body: &str) -> (String, Reply, Arc<AtomicUsize>) {
         use axum::{http::StatusCode, routing::get, Router};
         let hits = Arc::new(AtomicUsize::new(0));
-        let h = hits.clone();
+        let reply: Reply = Arc::new(std::sync::Mutex::new((status, body.to_string(), false)));
+        let (h, r) = (hits.clone(), reply.clone());
         let app = Router::new().route(
             "/p.json",
             get(move || {
-                let h = h.clone();
+                let (h, r) = (h.clone(), r.clone());
                 async move {
                     h.fetch_add(1, Ordering::SeqCst);
+                    let (status, body, hang) = r.lock().unwrap().clone();
                     if hang {
                         tokio::time::sleep(Duration::from_secs(60)).await;
                     }
@@ -539,7 +657,11 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        (format!("http://127.0.0.1:{port}/p.json"), hits)
+        (format!("http://127.0.0.1:{port}/p.json"), reply, hits)
+    }
+
+    fn set(reply: &Reply, status: u16, body: &str, hang: bool) {
+        *reply.lock().unwrap() = (status, body.to_string(), hang);
     }
 
     async fn run(url: &str, dir: &Path, version: &str) -> ClientPolicyStatus {
@@ -551,52 +673,101 @@ mod tests {
 
     const FLOOR: &str = r#"{"v":1,"minimum":{"macos":"1.17.0"},"message":null}"#;
     const OPEN: &str = r#"{"v":1,"minimum":{},"message":null}"#;
+    const MALFORMED: &str = r#"{"v":1,"minimum":{"macos":"soon"}}"#;
+    const FUTURE: &str = r#"{"v":2,"minimum":{"macos":"99.0.0"}}"#;
 
-    /// The matrix end to end: fetch, cache, fall back, override.
+    /// The matrix end to end, against one URL whose answer changes: fetch, cache, fall back.
     #[tokio::test]
     async fn the_matrix_over_the_network() {
         let dir = tempfile::tempdir().unwrap();
-        let (floor, _) = serve(200, FLOOR, false).await;
-        let (open, _) = serve(200, OPEN, false).await;
-        let (malformed, _) = serve(200, r#"{"v":1,"minimum":{"macos":"soon"}}"#, false).await;
-        let (missing, _) = serve(404, "", false).await;
-        let (hanging, hits) = serve(200, FLOOR, true).await;
-        let unreachable = "http://127.0.0.1:9/p.json";
+        let (url, reply, hits) = serve(500, "").await;
 
-        // No cache yet: unreachable, 404, timeout and malformed all fail open.
-        for url in [unreachable, missing.as_str(), malformed.as_str()] {
-            let s = run(url, dir.path(), "1.16.0").await;
-            assert!(!s.blocked, "{url}");
-            assert_eq!(s.source, PolicySource::None, "{url}");
+        // No cache yet: a server error, a timeout and a malformed manifest all fail open.
+        for (status, body) in [(500, ""), (200, MALFORMED)] {
+            set(&reply, status, body, false);
+            let s = run(&url, dir.path(), "1.16.0").await;
+            assert!(!s.blocked, "{status} {body}");
+            assert_eq!(s.source, PolicySource::None, "{status} {body}");
         }
+        set(&reply, 200, FLOOR, true);
+        let before = hits.load(Ordering::SeqCst);
         let started = Instant::now();
-        assert!(!run(&hanging, dir.path(), "1.16.0").await.blocked);
+        assert!(!run(&url, dir.path(), "1.16.0").await.blocked);
         assert!(started.elapsed() < Duration::from_secs(3), "the timeout bounds the fetch");
-        assert_eq!(hits.load(Ordering::SeqCst), 1, "a timed-out fetch is never retried");
+        assert_eq!(hits.load(Ordering::SeqCst), before + 1, "a timed-out fetch is never retried");
 
         // At and above the minimum; below it.
-        assert!(!run(&floor, dir.path(), "1.17.0").await.blocked);
-        assert!(!run(&floor, dir.path(), "1.18.1").await.blocked);
-        let s = run(&floor, dir.path(), "1.16.0").await;
+        set(&reply, 200, FLOOR, false);
+        assert!(!run(&url, dir.path(), "1.17.0").await.blocked);
+        assert!(!run(&url, dir.path(), "1.18.1").await.blocked);
+        let s = run(&url, dir.path(), "1.16.0").await;
         assert!(s.blocked);
         assert_eq!(s.source, PolicySource::Network);
 
-        // The block is cached: offline, a timeout or a malformed manifest keep blocking.
-        for url in [unreachable, malformed.as_str(), missing.as_str()] {
-            let s = run(url, dir.path(), "1.16.0").await;
-            assert!(s.blocked, "{url}");
-            assert_eq!(s.source, PolicySource::Cache, "{url}");
+        // The block is cached: a server error, a timeout or a malformed manifest keep blocking.
+        for (status, body, hang) in [(500, "", false), (200, MALFORMED, false), (200, OPEN, true)] {
+            set(&reply, status, body, hang);
+            let s = run(&url, dir.path(), "1.16.0").await;
+            assert!(s.blocked, "{status} {body}");
+            assert_eq!(s.source, PolicySource::Cache, "{status} {body}");
         }
         // A fresh fetch that allows it unblocks, and replaces the cache.
-        assert!(!run(&open, dir.path(), "1.16.0").await.blocked);
-        assert!(!run(unreachable, dir.path(), "1.16.0").await.blocked);
+        set(&reply, 200, OPEN, false);
+        assert!(!run(&url, dir.path(), "1.16.0").await.blocked);
+        set(&reply, 500, "", false);
+        assert!(!run(&url, dir.path(), "1.16.0").await.blocked);
         // An upgraded build is allowed even by a cached block.
-        write_cache(dir.path(), &ClientPolicy::parse(FLOOR).unwrap());
-        assert!(!run(unreachable, dir.path(), "1.17.0").await.blocked);
+        write_cache(dir.path(), &url, &ClientPolicy::parse(FLOOR).unwrap());
+        assert!(!run(&url, dir.path(), "1.17.0").await.blocked);
+    }
+
+    /// A 404 is "nothing published": no minimums, and it replaces a cached block (as on the DS).
+    #[tokio::test]
+    async fn a_404_means_no_minimums_and_lifts_a_cached_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, reply, _) = serve(200, FLOOR).await;
+        assert!(run(&url, dir.path(), "1.16.0").await.blocked);
+        set(&reply, 404, "", false);
+        let s = run(&url, dir.path(), "1.16.0").await;
+        assert!(!s.blocked);
+        assert_eq!(s.source, PolicySource::Network);
+        set(&reply, 500, "", false);
+        assert!(!run(&url, dir.path(), "1.16.0").await.blocked, "the 404 replaced the cache");
+    }
+
+    /// A format this build cannot read is allowed and drops the cache, so a block cannot stick.
+    #[tokio::test]
+    async fn a_future_format_allows_and_clears_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, reply, _) = serve(200, FLOOR).await;
+        assert!(run(&url, dir.path(), "1.16.0").await.blocked);
+        set(&reply, 200, FUTURE, false);
+        assert!(!run(&url, dir.path(), "1.16.0").await.blocked);
+        assert!(!dir.path().join(CACHE_FILE).exists());
+        set(&reply, 500, "", false);
+        assert!(!run(&url, dir.path(), "1.16.0").await.blocked);
+    }
+
+    /// Launch's cache-only answer: blocked or allowed by what was cached, `none` with no cache.
+    #[test]
+    fn peek_reads_only_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = config(Some("https://api-dev.pollis.com"));
+        let s = peek(&c, dir.path());
+        assert!(!s.blocked);
+        assert_eq!(s.source, PolicySource::None);
+        write_cache(dir.path(), DEV_POLICY_URL, &ClientPolicy::parse(FLOOR).unwrap());
+        let s = peek(&c, dir.path());
+        assert!(s.blocked);
+        assert_eq!(s.source, PolicySource::Cache);
+        c.client = Some(mac("1.17.0"));
+        let s = peek(&c, dir.path());
+        assert!(!s.blocked);
+        assert_eq!(s.source, PolicySource::Cache);
     }
 
     #[tokio::test]
-    async fn the_dev_override_is_used_and_refused_for_prod() {
+    async fn the_dev_override_is_used_and_never_cached() {
         let dir = tempfile::tempdir().unwrap();
         let dev = config(Some("http://127.0.0.1:9"));
         let ov = PolicyOverride { url: None, policy: Some(FLOOR.into()) };
@@ -604,25 +775,28 @@ mod tests {
         let s = check(&dev, dir.path(), &FetchPlan::Direct, Duration::from_millis(200)).await;
         assert!(s.blocked);
         assert_eq!(s.source, PolicySource::Network);
+        assert!(!dir.path().join(CACHE_FILE).exists(), "an override's verdict is not cached");
 
-        // A prod build neither writes nor reads one.
-        let prod = config(Some("https://api.pollis.com"));
-        assert!(set_override(&prod, dir.path(), Some(&ov)).is_err());
-        assert_eq!(read_override(&prod, dir.path()), None);
-
-        // Cleared: the cached block from the override holds until a real fetch says otherwise.
+        // Cleared: nothing of it remains; the published file (unreachable here) decides.
         set_override(&dev, dir.path(), None).unwrap();
         set_override(&dev, dir.path(), None).unwrap();
-        let mut offline = dev.clone();
-        offline.client_policy_url = Some("http://127.0.0.1:9/p.json".into());
-        let s = check(&offline, dir.path(), &FetchPlan::Direct, Duration::from_millis(200)).await;
+        let s = check(&dev, dir.path(), &FetchPlan::Direct, Duration::from_millis(200)).await;
+        assert!(!s.blocked);
+        assert!(!peek(&dev, dir.path()).blocked);
+    }
+
+    /// An `inline:` env policy decides but is never cached either.
+    #[tokio::test]
+    async fn an_inline_env_policy_is_not_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = run(&format!("inline:{FLOOR}"), dir.path(), "1.16.0").await;
         assert!(s.blocked);
-        assert_eq!(s.source, PolicySource::Cache);
+        assert!(!dir.path().join(CACHE_FILE).exists());
     }
 
     #[tokio::test]
     async fn a_strict_overlay_without_a_circuit_never_fetches() {
-        let (url, hits) = serve(200, FLOOR, false).await;
+        let (url, _, hits) = serve(200, FLOOR).await;
         assert!(fetch(&url, &FetchPlan::Skip, FETCH_TIMEOUT).await.is_err());
         assert_eq!(hits.load(Ordering::SeqCst), 0);
     }

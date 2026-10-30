@@ -29,7 +29,7 @@
     "bundle_export": "Mobile packages export_archive output into one file for the share sheet; desktop writes the archive to a picked folder.",
     "accept_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code.",
     "finish_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code.",
-    "set_client_policy_override": "Dev-build-only test override (#1611) behind the pollis://dev/client-policy link the Maestro flow drives. Desktop's Playwright scripts the mocked check instead, and the desktop and CLI take POLLIS_CLIENT_POLICY_URL from the environment."
+    "set_client_policy_override": "Dev-build-only test override (#1611) behind the pollis://dev/client-policy link the Maestro flow drives. Desktop's Playwright scripts the mocked check instead, and the desktop and CLI take POLLIS_CLIENT_POLICY_URL_OVERRIDE from the environment."
   },
   "missing_from_cli": {
     "create_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
@@ -38,7 +38,8 @@
     "list_muted_channels": "Per-channel mute (#1431) silences pushes and OS notifications; the terminal client raises neither and has no channel-settings surface. A mute set on desktop or mobile applies to the whole account.",
     "set_channel_muted": "Per-channel mute (#1431) silences pushes and OS notifications; the terminal client raises neither and has no channel-settings surface. A mute set on desktop or mobile applies to the whole account.",
     "check_client_policy": "The CLI runs the same check (#1611) as pollis_core::client_policy::check before it opens AppState — earlier than any command could — and exits with code 3; see pollis-tui/src/main.rs.",
-    "get_client_policy_status": "The CLI reads pollis_core::client_policy::current after each action to leave the UI on a DS 426 (#1611); it does not go through the command layer."
+    "get_client_policy_status": "The CLI reads pollis_core::client_policy::current after each action to leave the UI on a DS 426 (#1611); it does not go through the command layer.",
+    "peek_client_policy": "The CLI calls pollis_core::client_policy::peek directly before it opens AppState (#1611), cache-first like the apps; it does not go through the command layer."
   },
   "patterns": [
     {

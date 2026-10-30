@@ -595,18 +595,24 @@ fn refuse_if_outdated(state: &AppState) -> Result<()> {
     crate::client_policy::refuse_if_blocked(state)
 }
 
-/// A DS `426 Upgrade Required` (#1611) blocks this build from here on; anything else passes through.
+/// The DS's typed `426 Upgrade Required` (#1611) blocks this build from here on. A 426 without
+/// that body is an ordinary refusal; anything else passes through.
 async fn screen_upgrade_required(state: &AppState, path: &str, resp: reqwest::Response) -> Result<reqwest::Response> {
     if resp.status() != reqwest::StatusCode::UPGRADE_REQUIRED {
         return Ok(resp);
     }
+    let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
-    let status = crate::client_policy::record_upgrade_required(state, &body);
-    crate::diag!(
-        "[ds] {path}: the DS requires a newer build (minimum {})",
-        status.minimum.as_deref().unwrap_or("unknown")
-    );
-    Err(Error::UpgradeRequired)
+    match crate::client_policy::record_upgrade_required(state, &body) {
+        Some(blocked) => {
+            crate::diag!(
+                "[ds] {path}: the DS requires a newer build (minimum {})",
+                blocked.minimum.as_deref().unwrap_or("unknown")
+            );
+            Err(Error::UpgradeRequired)
+        }
+        None => Err(DsRefused::error("ds", path, status, body)),
+    }
 }
 
 /// [`send_ds`] plus ONE resend for an idempotent request whose connection died before answering (#1497); never for a non-idempotent one.
@@ -1047,11 +1053,19 @@ mod client_policy_tests {
         assert_eq!(seen.lock().unwrap().len(), 1, "a blocked build no longer reaches the DS");
     }
 
+    /// Only the DS's typed body blocks: a proxy's or edge's 426 is an ordinary error.
     #[tokio::test]
-    async fn an_unreadable_426_still_blocks() {
-        let (url, _) = ds(426, "nope").await;
-        let state = state(url, Some(ClientIdentity::cli()));
-        assert_eq!(ds_post_plain(&state, &body()).await.unwrap_err().to_string(), "upgrade_required");
-        assert!(crate::client_policy::current(&state).blocked);
+    async fn an_untyped_426_is_an_ordinary_error() {
+        for reply in ["nope", r#"{"error":"something_else","platform":"cli","version":"1.0.0","minimum":"2.0.0","policy":{"v":1}}"#] {
+            let (url, seen) = ds(426, reply).await;
+            let state = state(url, Some(ClientIdentity::cli()));
+            let err = ds_post_plain(&state, &body()).await.unwrap_err().to_string();
+            assert_ne!(err, "upgrade_required", "{reply}");
+            assert!(err.contains("426"), "{err}");
+            assert!(!crate::client_policy::current(&state).blocked, "{reply}");
+            // Not latched: the next request still reaches the DS.
+            let _ = ds_post_plain(&state, &body()).await;
+            assert_eq!(seen.lock().unwrap().len(), 2, "{reply}");
+        }
     }
 }

@@ -43,6 +43,20 @@ fn main() -> ExitCode {
         cli::Command::Run => {}
     }
 
+    let stdin_tty = std::io::stdin().is_terminal();
+    let stdout_tty = std::io::stdout().is_terminal();
+    if !stdin_tty || !stdout_tty {
+        // #1611: a non-interactive run pays for no fetch, but a cached block still says so.
+        if let Some(status) = policy_config().map(|c| client_policy::peek(&c, &pollis_core::db::local::dirs_path())) {
+            if status.blocked {
+                eprintln!("{}", cli::upgrade_required_text(&status));
+                return ExitCode::from(cli::EXIT_UPGRADE_REQUIRED);
+            }
+        }
+        eprintln!("{}", cli::not_a_terminal_text(stdin_tty, stdout_tty));
+        return ExitCode::FAILURE;
+    }
+
     // Multi-thread runtime is mandatory: core paths use spawn_blocking (spec §2).
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -55,24 +69,17 @@ fn main() -> ExitCode {
         }
     };
 
-    // #1611: the minimum-version check comes before the terminal check and before anything is
-    // opened, so an interactive and a non-interactive run are refused the same way.
-    if let Some(status) = runtime.block_on(blocked_by_policy()) {
-        eprintln!("{}", cli::upgrade_required_text(&status));
+    // #1611: the minimum-version check, before anything is opened.
+    let launch = runtime.block_on(launch_policy());
+    if let LaunchPolicy::Blocked(status) = &launch {
+        eprintln!("{}", cli::upgrade_required_text(status));
         return ExitCode::from(cli::EXIT_UPGRADE_REQUIRED);
     }
 
-    let stdin_tty = std::io::stdin().is_terminal();
-    let stdout_tty = std::io::stdout().is_terminal();
-    if !stdin_tty || !stdout_tty {
-        eprintln!("{}", cli::not_a_terminal_text(stdin_tty, stdout_tty));
-        return ExitCode::FAILURE;
-    }
-
-    match runtime.block_on(run_client()) {
+    match runtime.block_on(run_client(matches!(launch, LaunchPolicy::RefreshInBackground))) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // A 426 mid-session: the terminal is restored by now, so say it like the launch check.
+            // Blocked while running: the terminal is restored by now, so say it like the launch check.
             if let Some(blocked) = e.downcast_ref::<UpgradeRequired>() {
                 eprintln!("{}", cli::upgrade_required_text(&blocked.0));
                 return ExitCode::from(cli::EXIT_UPGRADE_REQUIRED);
@@ -96,22 +103,48 @@ impl std::fmt::Display for UpgradeRequired {
 
 impl std::error::Error for UpgradeRequired {}
 
-/// The launch check; `Some` when this build is below the published minimum. A config that does
-/// not load is not this check's to report — `run_client` says what is missing.
-async fn blocked_by_policy() -> Option<ClientPolicyStatus> {
+/// The config the policy check runs on; `None` when it does not load (`run_client` reports that).
+fn policy_config() -> Option<Config> {
     let mut config = Config::from_env().ok()?;
     config.client = Some(ClientIdentity::cli());
+    Some(config)
+}
+
+/// What launch does about the minimum version.
+enum LaunchPolicy {
+    /// Below the minimum: print and exit.
+    Blocked(ClientPolicyStatus),
+    /// The cache already allows this build: start now, and check in the background.
+    RefreshInBackground,
+    /// Checked just now (or nothing to check): start.
+    Checked,
+}
+
+/// A cache that allows this build lets the UI start at once; a cached block or no cache waits
+/// for the fetch (bounded by `FETCH_TIMEOUT`).
+async fn launch_policy() -> LaunchPolicy {
+    let Some(config) = policy_config() else {
+        return LaunchPolicy::Checked;
+    };
+    let data_dir = pollis_core::db::local::dirs_path();
+    let cached = client_policy::peek(&config, &data_dir);
+    if !cached.blocked && cached.source == client_policy::PolicySource::Cache {
+        return LaunchPolicy::RefreshInBackground;
+    }
     // No overlay is up yet: strict mode must not go direct, so it falls back to the cache.
     let plan = match config.overlay_mode {
         pollis_core::config::OverlayMode::Strict => FetchPlan::Skip,
         _ => FetchPlan::Direct,
     };
-    let data_dir = pollis_core::db::local::dirs_path();
     let status = client_policy::check(&config, &data_dir, &plan, client_policy::FETCH_TIMEOUT).await;
-    status.blocked.then_some(status)
+    if status.blocked {
+        LaunchPolicy::Blocked(status)
+    } else {
+        LaunchPolicy::Checked
+    }
 }
 
-async fn run_client() -> Result<()> {
+async fn run_client(refresh_policy: bool) -> Result<()> {
     // Built like the desktop app: Config::from_env, the local DB and the device keystore
     // (#882). Everything goes through POLLIS_DELIVERY_URL (#987).
     let mut config = Config::from_env()
@@ -130,6 +163,15 @@ async fn run_client() -> Result<()> {
         eprintln!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
     }
 
+    // #1611: launch went on from a cache that allowed this build; check now, without waiting. A
+    // block lands on `state`, and the UI loop leaves on it.
+    if refresh_policy {
+        let s = Arc::clone(&state);
+        tokio::spawn(async move {
+            client_policy::check_state(&s, true).await;
+        });
+    }
+
     // Redirect fd 2 to a log: stderr here is the UI's terminal, and any write corrupts it.
     let log_path = redirect_stderr_to_log();
 
@@ -140,8 +182,14 @@ async fn run_client() -> Result<()> {
     drop(guard);
 
     if let Some(path) = log_path {
-        if let Err(e) = &result {
-            println!("pollis: {e:#}");
+        match &result {
+            // Stderr is the log by now, so the blocked message goes to the terminal here.
+            Err(e) if e.downcast_ref::<UpgradeRequired>().is_some() => {
+                let status = &e.downcast_ref::<UpgradeRequired>().expect("checked").0;
+                println!("{}", cli::upgrade_required_text(status));
+            }
+            Err(e) => println!("pollis: {e:#}"),
+            Ok(()) => {}
         }
         println!("logs: {}", path.display());
     }
@@ -230,6 +278,12 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
                 None => break,
             },
             _ = refresh.tick() => {
+                // #1611: a background check or a 426 blocked this build.
+                let status = client_policy::current(&policy_state);
+                if status.blocked {
+                    app.shutdown().await;
+                    return Err(UpgradeRequired(status).into());
+                }
                 // Screens re-read on the timer: Home, the enrollment wait and the approvals list.
                 pending = match app.screen {
                     Screen::Home => Some(Action::Refresh),

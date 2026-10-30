@@ -419,6 +419,10 @@ const lastInvokeArgs: Record<string, unknown> = {};
     heldReplies.set(command, []);
   }
 };
+// Commands a spec parks from the first call (`holdCommands` preload), e.g. the launch policy check.
+for (const command of (preload.holdCommands ?? []) as string[]) {
+  heldReplies.set(command, []);
+}
 (window as any).__tauriRelease = (command: string) => {
   const waiting = heldReplies.get(command) ?? [];
   heldReplies.delete(command);
@@ -889,6 +893,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'check_client_policy':
     case 'get_client_policy_status':
       return { ...store.clientPolicy };
+
+    // The cache-only verdict launch reads first (#1611); none unless a spec seeds one.
+    case 'peek_client_policy':
+      return { ...ALLOWED_POLICY, ...(preload.clientPolicyCache ?? {}) };
 
     case 'detect_read_only_location':
       return null;

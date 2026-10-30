@@ -21,9 +21,6 @@ struct HeadlessConfig {
     pollis_delivery_url: Option<String>,
     #[serde(default)]
     dev_access_key: Option<String>,
-    /// The app's build (#1611), so the extension's DS requests carry the same version headers.
-    #[serde(default)]
-    client: Option<crate::client_policy::ClientIdentity>,
 }
 
 /// Record the app's config for the extension. Best-effort.
@@ -34,7 +31,6 @@ pub fn save_config(data_dir: &Path, config: &Config) {
         livekit_url: config.livekit_url.clone(),
         pollis_delivery_url: config.pollis_delivery_url.clone(),
         dev_access_key: config.dev_access_key.clone(),
-        client: config.client.clone(),
     };
     let Ok(json) = serde_json::to_vec(&c) else {
         return;
@@ -59,7 +55,9 @@ pub fn load_config(data_dir: &Path) -> Option<Config> {
         overlay_directory_url: None,
         overlay_directory_key: None,
         dev_access_key: c.dev_access_key.filter(|s| !s.trim().is_empty()),
-        client: c.client,
+        // No version headers (#1611): the app's last-launch version may be older than the binary
+        // now running this extension, and a stale one would earn a rich push a 426.
+        client: None,
         client_policy_url: None,
     })
 }

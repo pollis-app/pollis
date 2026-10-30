@@ -705,6 +705,7 @@ Runtime application of the closed-overlay relay mode (design `docs/relay-overlay
 The minimum-version check; full design in [client-policy.md](./client-policy.md).
 - `check_client_policy({ force })` → `ClientPolicyStatus` — fetch the published policy (4 s bound), fall back to the pre-unlock cache, decide, and record the verdict on `AppState` so a blocked build's DS requests fail locally with `upgrade_required`. `force: false` (focus / resume) reuses a fetch from the last 5 minutes.
 - `get_client_policy_status()` → the last verdict, no network (what a DS 426 left).
+- `peek_client_policy()` → the cache's verdict, no network; launch goes on without waiting when it allows this build and runs the forced check behind it.
 - `set_client_policy_override({ url, policy })` — mobile bridge only, dev builds only (refused for the prod DS): a persisted test override.
 
 ## relay_serving (`commands/relay_serving.rs`)
@@ -733,7 +734,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
 - **`auth`** — `delete_account`, `dev_login`, `get_device_id`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
-- **`client_policy`** — `check_client_policy`, `get_client_policy_status` (#1611)
+- **`client_policy`** — `check_client_policy`, `get_client_policy_status`, `peek_client_policy` (#1611)
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
@@ -773,7 +774,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **229 commands** in 35 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **230 commands** in 35 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -830,7 +831,7 @@ than hand-edit.
 
 **`update`** (3) — `get_update_check_plan`, `is_update_required`, `mark_update_required`
 
-**`client_policy`** (2) — `check_client_policy`, `get_client_policy_status`
+**`client_policy`** (3) — `check_client_policy`, `get_client_policy_status`, `peek_client_policy`
 
 **`install_kind`** (2) — `detect_managed_install`, `detect_read_only_location`
 

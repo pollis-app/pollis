@@ -404,8 +404,8 @@ The default is a dry run: it validates with the strict parser (unknown platform 
 refused — a typo would otherwise set no minimum), prints a per-platform diff against what is
 published, and refuses a minimum above the latest published release of that platform
 (`releases/latest.json`, `releases/cli/latest.json`, `releases/android/latest.json`; `--force`
-overrides). iOS and Play have no manifest to check: confirm that store build is live and approved
-first. `--apply` uploads with `aws s3 cp` to `s3://pollis/client-policy.json` (or `dev/…`),
+overrides). iOS and Play are checked against the sideload APK's version; confirm that store build
+is live and approved first. `--apply` uploads with `aws s3 cp` to `s3://pollis/client-policy.json` (or `dev/…`),
 `--content-type application/json --cache-control no-cache` — the exact mechanism of
 `desktop-release.yml`'s "Publish latest.json to R2" — then re-fetches the CDN URL and compares.
 `--unset <platform>` removes a minimum; `--clear-message` restores the built-in text.
@@ -417,6 +417,16 @@ environment in `wrangler.{dev,prod}.jsonc`) lazily, at most once a minute, trigg
 and 426s requests whose `X-Pollis-Client-{Platform,Version}` headers name a blocked build;
 `GET /v1/client-policy` shows what it is enforcing. So a publish reaches every running client
 within about five minutes, sooner on the next request.
+
+**Dev builds.** Unstamped desktop and CLI builds report the workspace placeholder `1.1.0` (only
+CI's `bump-version.sh` stamps a real version) and read the **dev** file, so any dev minimum above
+`1.1.0` for `macos` / `windows` / `linux` / `cli` blocks every dev build — the script warns. Mobile
+dev builds carry the real `mobile/package.json` version.
+
+**Guards that fail closed.** A release manifest that can't be read, a minimum above the latest
+release, and an invalid published file are all refused unless `--force`. `ios` and `android-play`
+are bounded by the sideload APK's version (one `mobile/package.json` version ships everywhere); it
+still can't see store review, so confirm the build is live first.
 
 **Rollout rules.**
 

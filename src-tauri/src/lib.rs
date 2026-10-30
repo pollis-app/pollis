@@ -559,6 +559,7 @@ pub fn run() {
             commands::update::get_update_check_plan,
             commands::client_policy::check_client_policy,
             commands::client_policy::get_client_policy_status,
+            commands::client_policy::peek_client_policy,
             commands::install_kind::detect_managed_install,
             commands::install_kind::detect_read_only_location,
             commands::voice::subscribe_voice_events,

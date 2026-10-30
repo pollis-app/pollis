@@ -7,11 +7,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  applyCoreVerdict,
   bodyText,
   clientPlatformFor,
   getClientPolicy,
   isBlocked,
   isUpgradeRequiredError,
+  launchWaitsForCheck,
   noticeUpgradeRequired,
   onUpgradeRequired,
   openLabelKey,
@@ -101,37 +103,65 @@ test("the versions line and the manifest message", () => {
   assert.equal(bodyText(status({ message: "Drafts are lost on 1.0.3." }), "built-in"), "Drafts are lost on 1.0.3.");
 });
 
-test("a 426 blocks at once, fetches details once, and a fresh check unblocks", async () => {
+test("an upgrade_required asks the core once; only a blocked verdict blocks", async () => {
   setClientPolicy(status({ blocked: false, minimum: null, source: "network" }));
   let notified = 0;
   const unsubscribe = subscribeClientPolicy(() => {
     notified += 1;
   });
-  let details = 0;
+  // What the core answers to get_client_policy_status.
+  let core: ClientPolicyStatus = status({ blocked: false, minimum: null, source: "network" });
+  let asked = 0;
   const off = onUpgradeRequired(async () => {
-    details += 1;
+    asked += 1;
     await settle();
+    applyCoreVerdict(core);
   });
 
   noticeUpgradeRequired(new Error("network down"));
-  assert.equal(isBlocked(), false, "only upgrade_required blocks");
+  await settle();
+  await settle();
+  assert.equal(asked, 0, "only upgrade_required asks");
 
+  // A stray rejection while the core says allowed (e.g. one landing after an unblock): no block.
+  noticeUpgradeRequired(new Error("upgrade_required"));
+  assert.equal(isBlocked(), false, "the rejection alone never blocks");
+  await settle();
+  await settle();
+  assert.equal(asked, 1);
+  assert.equal(isBlocked(), false, "a not-blocked verdict leaves the store unblocked");
+
+  // A real 426: the core says blocked.
+  core = status({ blocked: true, source: "ds" });
   noticeUpgradeRequired(new Error("upgrade_required"));
   noticeUpgradeRequired("send_message: upgrade_required");
+  await settle();
+  await settle();
+  assert.equal(asked, 2, "many failures ask once");
   assert.equal(isBlocked(), true);
   assert.equal(getClientPolicy()?.source, "ds");
-  // Keeps what it knew about this build.
-  assert.equal(getClientPolicy()?.version, "1.0.3");
-  await settle();
-  await settle();
-  assert.equal(details, 1, "many failures fetch the details once");
 
+  // Nothing else unblocks from here; a fresh check does.
+  applyCoreVerdict(status({ blocked: false }));
+  assert.equal(isBlocked(), true);
+  applyCoreVerdict(null);
+  assert.equal(isBlocked(), true);
   setClientPolicy(status({ blocked: false }));
   assert.equal(isBlocked(), false);
   assert.ok(notified >= 2);
   off();
   unsubscribe();
   setClientPolicy(null);
+});
+
+test("launch waits for the check unless the cache already allows this build", () => {
+  // Allowed by the cache: go on, check in the background.
+  assert.equal(launchWaitsForCheck(status({ blocked: false, source: "cache" })), false);
+  // A cached block, no cache, or no answer at all: wait.
+  assert.equal(launchWaitsForCheck(status({ blocked: true, source: "cache" })), true);
+  assert.equal(launchWaitsForCheck(status({ blocked: false, source: "none" })), true);
+  assert.equal(launchWaitsForCheck(null), true);
+  assert.equal(launchWaitsForCheck(undefined), true);
 });
 
 test("dev override links", () => {
@@ -154,6 +184,9 @@ test("dev override links", () => {
 test("the root layout gates on the check before anything routes, and only dev builds take overrides", () => {
   const layout = readFileSync(join(ROOT, "app/_layout.tsx"), "utf8");
   assert.match(layout, /check_client_policy/);
+  assert.match(layout, /peek_client_policy/, "launch reads the cache first");
+  assert.match(layout, /launchWaitsForCheck\(cached\)/);
+  assert.match(layout, /applyCoreVerdict\(/, "a 426 blocks only on the core's verdict");
   assert.match(layout, /!policyReady\) \{\s*return null;/, "the splash is held until the check lands");
   assert.match(layout, /blocked && policy \? \(\s*<ClientBlockedScreen/, "the blocked screen replaces the navigator");
   assert.match(layout, /__DEV__ \|\| getBuildInfo\(\)\.channel === "dev"/);

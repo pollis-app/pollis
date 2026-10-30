@@ -20,7 +20,9 @@
 //   --from <file>             start from this file instead of what is published
 //   --out <file>              also write the result here
 //   --apply                   upload (asks you to type the env name; --yes skips the prompt)
-//   --force                   allow a minimum above the latest published release
+//   --force                   allow a minimum above the latest published release, one that cannot
+//                             be checked (unreadable release manifest), or replacing an invalid
+//                             published file from empty
 //
 // Upload credentials (only with --apply): R2_ACCESS_KEY_ID, R2_SECRET_KEY, CLOUDFLARE_ACCOUNT_ID,
 // e.g. `doppler run -p pollis -c prd_prod -- node scripts/client-policy.mjs … --apply`.
@@ -42,6 +44,9 @@ const KEYS = { prod: "client-policy.json", dev: "dev/client-policy.json" };
 const CDN_BASE = process.env.CLIENT_POLICY_CDN_BASE || "https://cdn.pollis.com";
 const RELEASES_BASE = process.env.CLIENT_POLICY_RELEASES_BASE || "https://cdn.pollis.com/releases";
 const BUCKET = "pollis";
+// The `[workspace.package] version` in Cargo.toml that only CI's bump-version.sh replaces.
+const DEV_PLACEHOLDER_VERSION = "1.1.0";
+const DESKTOP_AND_CLI = ["macos", "windows", "linux", "cli"];
 
 function die(msg, code = 1) {
   console.error(`client-policy: ${msg}`);
@@ -163,7 +168,9 @@ async function latestReleases() {
   const desktop = await read("latest.json");
   const cli = await read("cli/latest.json");
   const sideload = await read("android/latest.json");
-  return { macos: desktop, windows: desktop, linux: desktop, cli, "android-sideload": sideload, ios: null, "android-play": null };
+  // Mobile ships one version to TestFlight/App Store, Play and the APK (mobile/package.json), and
+  // only the APK has a manifest, so it bounds all three. Store review lags: confirm by hand.
+  return { macos: desktop, windows: desktop, linux: desktop, cli, "android-sideload": sideload, ios: sideload, "android-play": sideload };
 }
 
 async function confirm(env) {
@@ -185,6 +192,10 @@ async function main() {
   let published = null;
   if (publishedRaw !== null) {
     published = validate(publishedRaw, { fatal: false });
+    // Starting from empty would silently drop whatever minimums the broken file meant to hold.
+    if (!published && !opts.force) {
+      die("the published file is invalid; fix it with --from <file> (or --force to start from empty)");
+    }
   }
   console.log(`${opts.env}: ${url}`);
   console.log(published ? "published:" : "published: nothing yet (clients treat that as no minimums)");
@@ -256,16 +267,25 @@ async function main() {
       continue;
     }
     if (!latest[p]) {
-      console.log(`  ! ${p}: no release manifest to check ${min} against — confirm that build is live in its store first`);
+      console.log(`  ! ${p}: the release manifest for ${p} could not be read, so ${min} cannot be checked`);
+      refused = true;
       continue;
     }
     if (below(latest[p], min, p)) {
       console.log(`  ! ${p}: ${min} is above the latest release (${latest[p]}); every ${p} install would be blocked`);
       refused = true;
+      continue;
+    }
+    if (p === "ios" || p === "android-play") {
+      console.log(`  ! ${p}: bounded by the sideload APK (${latest[p]}); confirm ${min} is live in the store, not just uploaded`);
+    }
+    // Unstamped dev desktop/CLI builds report the workspace placeholder; a dev floor above it blocks them all.
+    if (opts.env === "dev" && DESKTOP_AND_CLI.includes(p) && below(DEV_PLACEHOLDER_VERSION, min, p)) {
+      console.log(`  ! ${p}: dev desktop/CLI builds report the unstamped ${DEV_PLACEHOLDER_VERSION}; ${min} blocks every one of them`);
     }
   }
   if (refused && !opts.force) {
-    die("refusing a minimum above the latest release (--force to override)");
+    die("refusing a minimum that cannot be checked or is above the latest release (--force to override)");
   }
 
   if (!opts.apply) {

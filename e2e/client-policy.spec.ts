@@ -23,7 +23,13 @@ type Updater = "none" | "succeed" | "fail";
 
 async function boot(
   page: Page,
-  opts: { clientPolicy?: Record<string, unknown>; updater?: Updater; managedInstall?: unknown } = {},
+  opts: {
+    clientPolicy?: Record<string, unknown>;
+    clientPolicyCache?: Record<string, unknown>;
+    holdCommands?: string[];
+    updater?: Updater;
+    managedInstall?: unknown;
+  } = {},
 ) {
   await page.addInitScript(
     ({ preload, updater }) => {
@@ -51,6 +57,8 @@ async function boot(
         groups: [{ id: GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() }],
         channels: { [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }] },
         clientPolicy: opts.clientPolicy,
+        clientPolicyCache: opts.clientPolicyCache,
+        holdCommands: opts.holdCommands,
         managedInstall: opts.managedInstall,
       },
       updater: opts.updater ?? "none",
@@ -193,4 +201,60 @@ test("an allowed build never sees the page", async ({ page }) => {
   await boot(page, { clientPolicy: { blocked: false, version: "1.17.0", minimum: "1.17.0", source: "network" } });
   await expect(page.getByTestId("sidebar")).toBeVisible();
   await expect(page.getByTestId("client-blocked-screen")).toHaveCount(0);
+});
+
+test("a cache that allows this build does not wait for the check, and a block found later still lands", async ({ page }) => {
+  await boot(page, {
+    clientPolicyCache: { blocked: false, version: "1.16.0", minimum: "1.15.0", source: "cache" },
+    clientPolicy: BLOCKED,
+    holdCommands: ["check_client_policy"],
+  });
+  // The check is parked; launch went on regardless.
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __tauriRelease: (c: string) => void }).__tauriRelease("check_client_policy");
+  });
+  await expectOnlyTheBlockedPage(page);
+});
+
+test("with no cache, launch waits for the check", async ({ page }) => {
+  await boot(page, { holdCommands: ["check_client_policy"] });
+  await expect(page.getByTestId("loading-screen")).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.getByTestId("sidebar")).toHaveCount(0);
+  await page.evaluate(() => {
+    (window as unknown as { __tauriRelease: (c: string) => void }).__tauriRelease("check_client_policy");
+  });
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+});
+
+test("a cached block waits for the check, which can lift it", async ({ page }) => {
+  await boot(page, {
+    clientPolicyCache: { ...BLOCKED, source: "cache" },
+    clientPolicy: { blocked: false, version: "1.16.0", minimum: null, source: "network" },
+  });
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await expect(page.getByTestId("client-blocked-screen")).toHaveCount(0);
+});
+
+test("a stray upgrade_required while the core says allowed never blocks", async ({ page }) => {
+  await boot(page);
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __tauriRejectWith: (c: string, m: string) => void }).__tauriRejectWith(
+      "read_channel_messages",
+      "upgrade_required",
+    );
+  });
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
+  await page.getByTestId("search-panel-input").fill("general");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(500);
+  const counts = await page.evaluate(
+    () => (window as unknown as { __tauriInvokeCounts: Record<string, number> }).__tauriInvokeCounts,
+  );
+  expect(counts["read_channel_messages"] ?? 0, "control: the rejected command ran").toBeGreaterThan(0);
+  expect(counts["get_client_policy_status"] ?? 0, "the core was asked").toBeGreaterThan(0);
+  await expect(page.getByTestId("client-blocked-screen")).toHaveCount(0);
+  await expect(page.getByTestId("sidebar")).toBeVisible();
 });

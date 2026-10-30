@@ -452,6 +452,9 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let force: Option<bool> = arg_opt(&args, "force")?;
             ok(crate::commands::client_policy::check_client_policy(&state()?, force.unwrap_or(false)).await?)
         }
+        "peek_client_policy" => {
+            ok(crate::commands::client_policy::peek_client_policy(&state()?).await?)
+        }
         "get_client_policy_status" => {
             ok(crate::commands::client_policy::get_client_policy_status(&state()?).await?)
         }
@@ -1488,6 +1491,7 @@ mod tests {
             // #1611
             "check_client_policy",
             "get_client_policy_status",
+            "peek_client_policy",
             "set_client_policy_override",
             "revoke_group_invite_link",
             "redeem_group_invite_link",

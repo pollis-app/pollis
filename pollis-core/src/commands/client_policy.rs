@@ -18,6 +18,12 @@ pub async fn get_client_policy_status(state: &Arc<AppState>) -> Result<ClientPol
     Ok(client_policy::current(state))
 }
 
+/// The verdict from the cache alone, no network. Launch goes on without waiting when this says
+/// allowed (and runs [`check_client_policy`] in the background); otherwise it waits for the check.
+pub async fn peek_client_policy(state: &Arc<AppState>) -> Result<ClientPolicyStatus> {
+    Ok(client_policy::peek_state(state))
+}
+
 /// Dev builds only: use `url` or the inline `policy` JSON instead of the published file, until
 /// cleared (both `None`). Refused for a build that talks to the prod DS.
 pub async fn set_client_policy_override(

@@ -34,7 +34,7 @@ pub struct Config {
     /// checked against the published minimum. Set by the host (desktop, CLI, mobile init);
     /// `None` sends no headers and skips the check (tests, the notification extension).
     pub client: Option<crate::client_policy::ClientIdentity>,
-    /// Where the minimum-version policy is fetched (`POLLIS_CLIENT_POLICY_URL`); `None` derives it
+    /// Where the minimum-version policy is fetched (`POLLIS_CLIENT_POLICY_URL_OVERRIDE`, honoured only by a debug build or one pointed at a non-prod DS); `None` derives it
     /// from the DS host ([`crate::client_policy::policy_url`]). An override for tests and dev.
     pub client_policy_url: Option<String>,
 }
@@ -126,7 +126,7 @@ impl Config {
             // The host says which build it is.
             client: None,
             // Runtime only: a test override, never baked into a release.
-            client_policy_url: std::env::var("POLLIS_CLIENT_POLICY_URL")
+            client_policy_url: std::env::var("POLLIS_CLIENT_POLICY_URL_OVERRIDE")
                 .ok()
                 .filter(|s| !s.trim().is_empty()),
         })

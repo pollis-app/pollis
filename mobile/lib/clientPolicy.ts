@@ -100,22 +100,13 @@ export function onUpgradeRequired(next: () => void | Promise<void>): () => void 
   };
 }
 
-/** Called for every bridge failure: a DS 426 blocks the app at once, details follow. */
+/**
+ * Called for every bridge failure. An `upgrade_required` only asks the core; the store blocks
+ * only when the core's own verdict says so (`applyCoreVerdict`), so a late or stray rejection
+ * after an unblock never re-blocks.
+ */
 export function noticeUpgradeRequired(error: unknown): void {
-  if (!isUpgradeRequiredError(error)) {
-    return;
-  }
-  if (!current?.blocked) {
-    setClientPolicy({
-      blocked: true,
-      platform: current?.platform ?? null,
-      version: current?.version ?? null,
-      minimum: null,
-      message: null,
-      source: "ds",
-    });
-  }
-  if (!detailsHandler || detailsRunning) {
+  if (!isUpgradeRequiredError(error) || !detailsHandler || detailsRunning) {
     return;
   }
   detailsRunning = true;
@@ -128,6 +119,21 @@ export function noticeUpgradeRequired(error: unknown): void {
         detailsRunning = false;
       });
   });
+}
+
+/** The core's answer after an `upgrade_required`: only `blocked: true` blocks; anything else is ignored. */
+export function applyCoreVerdict(status: ClientPolicyStatus | null | undefined): void {
+  if (status?.blocked === true) {
+    setClientPolicy(status);
+  }
+}
+
+/**
+ * Launch: a cache that already allows this build lets the app go on while a fresh check runs in
+ * the background; a cached block, or no cache, waits for the check (bounded in the core).
+ */
+export function launchWaitsForCheck(cached: ClientPolicyStatus | null | undefined): boolean {
+  return !(cached && !cached.blocked && cached.source === "cache");
 }
 
 // --- Dev override links (Maestro): pollis://dev/client-policy?policy=…|url=…|clear=1 ---

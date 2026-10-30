@@ -9,12 +9,13 @@ tags:
 #
 # The policy comes from the dev-build override link
 #   pollis://dev/client-policy?policy=<urlencoded JSON> | ?url=<url> | ?clear=1
-# which pollis-core honours only for a build pointed at a non-prod DS (a
-# Maestro build is one). The inline policy is used as if fetched, so it also
-# writes the cache. The dev CDN file is NOT published: a plain `clear`
-# re-fetches it, gets a 404 and falls back to the cached policy — correct
-# behaviour (a failed fetch never lifts a cached block), so the flow unblocks
-# with an inline EMPTY policy first and clears the override after.
+# which pollis-core honours only for a debug build or one pointed at a non-prod
+# DS (a Maestro build is the latter). The override persists until cleared, and
+# its verdict is used as if fetched but NEVER cached: the cache answers only for
+# the published file, so a test override cannot outlive itself. Clearing it
+# re-fetches the dev CDN file, which is not published: a 404 means "no
+# minimums", so the app unblocks. (The cached-block-offline case is covered by
+# the pollis-core and CLI tests, which control a real policy URL.)
 # No sign-in: the check runs before it.
 
 - clearState
@@ -59,17 +60,7 @@ tags:
       - assertVisible:
           id: "screen-client-blocked"
 
-# --- Cached: the policy URL now fails, so only the cache can block ---
-- openLink: "pollis://dev/client-policy?url=http%3A%2F%2F127.0.0.1%3A9%2Fclient-policy.json"
-- runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
-- assertVisible:
-    id: "screen-client-blocked"
-
-# --- Cold launch: blocked before any sign-in screen, from the cache ---
+# --- Cold launch: blocked before any sign-in screen (the override is still set) ---
 - stopApp
 - launchApp
 - extendedWaitUntil:
@@ -80,7 +71,7 @@ tags:
     id: "screen-auth-email"
 - takeScreenshot: client-policy-02-cold-launch
 
-# Check again with the policy still unreachable: still blocked (busy, then back).
+# Check again while the policy still blocks: busy, then back on the page.
 - tapOn:
     id: "btn-client-blocked-retry"
 - extendedWaitUntil:
@@ -91,32 +82,29 @@ tags:
 - assertVisible:
     id: "screen-client-blocked"
 
-# --- Unblocked: a fresh policy with no minimum wins over the cached block ---
-- openLink: "pollis://dev/client-policy?policy=%7B%22v%22%3A1%2C%22minimum%22%3A%7B%7D%7D"
-- runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
-- extendedWaitUntil:
-    visible:
-      id: "screen-auth-email"
-    timeout: 15000
-- assertNotVisible:
-    id: "screen-client-blocked"
+# --- Unblocked: the override cleared, the unpublished dev file (404) has no minimums ---
 - openLink: "pollis://dev/client-policy?clear=1"
 - runFlow:
     when:
       visible: "Open"
     commands:
       - tapOn: "Open"
+- runFlow:
+    when:
+      visible:
+        id: "screen-client-blocked"
+    commands:
+      - tapOn:
+          id: "btn-client-blocked-retry"
 - extendedWaitUntil:
     visible:
       id: "screen-auth-email"
     timeout: 15000
+- assertNotVisible:
+    id: "screen-client-blocked"
 - takeScreenshot: client-policy-03-unblocked
 
-# And it stays unblocked across a cold launch (the cache now allows it).
+# And it stays unblocked across a cold launch.
 - stopApp
 - launchApp
 - extendedWaitUntil:
