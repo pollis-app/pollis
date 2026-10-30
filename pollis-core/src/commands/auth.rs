@@ -897,6 +897,13 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
 
+    // Every logout drops the notification key escrow (#1599); the next unlock re-creates it.
+    if let Some(ref uid) = user_id {
+        if let Err(e) = crate::notify::escrow::delete_escrow(state.keystore.as_ref(), uid).await {
+            crate::diag!("[auth] logout: notification key escrow not deleted: {e}");
+        }
+    }
+
     // Named explicitly: `unload_user_db` already cleared the ambient cache user.
     crate::commands::r2::clear_media_cache(match user_id.as_deref() {
         Some(uid) => crate::commands::r2::CacheScope::User(uid),
@@ -995,6 +1002,7 @@ pub async fn delete_account(
     let _ = state.keystore.delete_for_user("pin_meta", &user_id).await;
     let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, &user_id).await;
     let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, &user_id).await;
+    let _ = crate::notify::escrow::delete_escrow(state.keystore.as_ref(), &user_id).await;
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
@@ -1052,6 +1060,7 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
         "account_id_key_wrapped",
         "pin_meta",
         LOGIN_EMAIL_KEY,
+        crate::notify::escrow::ESCROW_SLOT,
     ];
     for account in &index.accounts {
         for key in &per_user_keys {

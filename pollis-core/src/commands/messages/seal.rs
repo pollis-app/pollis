@@ -172,7 +172,7 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                     );
                 }
                 // Re-take the MLS lock (#1079) only now the catch-up released it.
-                let mls_guard = state.mls_group_lock(mls_group_id).await;
+                let mls_guard = state.mls_group_lock(mls_group_id).await?;
                 let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
                 let guard = state.local_db.lock().await;
                 let db = guard.as_ref().ok_or_else(|| {

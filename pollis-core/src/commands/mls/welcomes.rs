@@ -135,6 +135,9 @@ where
 /// addressed to `user_id`.  Each one is applied locally and then marked
 /// `delivered = 1` so it is not processed again.
 pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, device_id: &str) -> Result<()> {
+    // Fetch-to-ack under the cross-process lock (#1599): a second process draining the same
+    // Welcome would join the group a second time over the first's state.
+    let _cross_process = state.cross_process_lock().await?;
     // The DS scopes the drain to the verified signing device (#987).
     let super::ds_reads::FetchedWelcomes {
         items,

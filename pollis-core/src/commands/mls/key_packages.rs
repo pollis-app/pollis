@@ -260,6 +260,8 @@ pub(super) async fn replenish_key_packages(
     let Ok(_refilling) = state.key_package_refill.try_lock() else {
         return Ok(());
     };
+    // Single-flight across processes too (#1599).
+    let _cross_process = state.cross_process_lock().await?;
 
     let suite_code = i64::from(u16::from(current_suite()));
     // Count only CURRENT-suite packages: a retired suite's are unclaimable.

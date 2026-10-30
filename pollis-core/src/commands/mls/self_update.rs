@@ -121,7 +121,7 @@ pub async fn self_update_group(
     actor_user_id: &str,
 ) -> Result<bool> {
     // Reconcile's per-conversation lock: two commits from one epoch waste one.
-    let mls_guard = state.mls_group_lock(conversation_id).await;
+    let mls_guard = state.mls_group_lock(conversation_id).await?;
 
     let staged = {
         let guard = state.local_db.lock().await;
