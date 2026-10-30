@@ -113,4 +113,11 @@ class RichPushTest {
   fun noSenderIsGeneric() {
     assertEquals(RichPush.Plan.Generic, RichPush.plan(reply("full", item(sender = ""))))
   }
+
+  @Test
+  fun outcomeLabelsSurviveMinification() {
+    assertEquals("silent", RichPush.Plan.Silent.outcome)
+    assertEquals("generic", RichPush.Plan.Generic.outcome)
+    assertEquals("rich", RichPush.Plan.Rich("c", true, null, emptyList()).outcome)
+  }
 }

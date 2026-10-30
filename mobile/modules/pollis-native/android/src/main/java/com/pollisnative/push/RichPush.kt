@@ -47,16 +47,28 @@ object RichPush {
   data class Message(val messageId: String, val sender: String, val text: Text)
 
   sealed class Plan {
+    /**
+     * The outcome class for logs. A literal, not the class name: R8 renames these classes in a
+     * release build, where `javaClass.simpleName` logs "a" / "b".
+     */
+    abstract val outcome: String
+
     /** Every item is muted: post nothing. */
-    object Silent : Plan()
+    object Silent : Plan() {
+      override val outcome = "silent"
+    }
     /** Failure, nothing fetched, or the user's setting is "Nothing": today's text. */
-    object Generic : Plan()
+    object Generic : Plan() {
+      override val outcome = "generic"
+    }
     data class Rich(
       val conversationId: String,
       val isDm: Boolean,
       val conversationTitle: String?,
       val messages: List<Message>,
-    ) : Plan()
+    ) : Plan() {
+      override val outcome = "rich"
+    }
   }
 
   private fun bodyKey(raw: String?): BodyKey? = when (raw) {

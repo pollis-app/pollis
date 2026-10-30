@@ -86,7 +86,7 @@ object RichPushHandler {
   private fun post(notifier: RichPushNotifier, handle: String, json: String, data: Map<String, String>, messageId: String?, sentTime: Long) {
     val plan = RichPush.plan(json)
     // Only the outcome class, never content.
-    Log.i(TAG, "posting ${plan.javaClass.simpleName}")
+    Log.i(TAG, "posting ${plan.outcome}")
     try {
       notifier.post(handle, plan, data, messageId, sentTime)
     } catch (e: Exception) {
