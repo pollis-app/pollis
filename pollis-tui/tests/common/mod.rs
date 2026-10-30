@@ -231,6 +231,8 @@ pub async fn spawn_world() -> World {
         overlay_directory_url: None,
         overlay_directory_key: None,
         dev_access_key: None,
+        client: None,
+        client_policy_url: None,
     };
 
     World {

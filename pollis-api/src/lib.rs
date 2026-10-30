@@ -29,7 +29,7 @@
 //!   - A right-typed WRONG VALUE still compiles; only a test catches it.
 //!   - Version skew with an older deployed DS: wire rules (additive, optional, defaulted) still apply.
 //!   - ERROR bodies (4xx/5xx); `Response` is the SUCCESS body.
-//!   - GETs (`/health`, `/version`, `/v1/config`, `/v1/retention/metrics`), the only GETs the DS serves.
+//!   - GETs (`/health`, `/version`, `/v1/config`, `/v1/retention/metrics`, `/v1/client-policy`), the only GETs the DS serves.
 //!
 //! # Adding an endpoint
 //!
@@ -39,6 +39,7 @@ pub mod account;
 pub mod account_reads;
 pub mod bootstrap;
 pub mod broker;
+pub mod client_policy;
 pub mod commit;
 pub mod devices;
 pub mod directory;

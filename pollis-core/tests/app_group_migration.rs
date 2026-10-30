@@ -28,6 +28,8 @@ fn app(keystore: Arc<dyn pollis_core::keystore::Keystore>) -> Arc<AppState> {
         overlay_directory_url: None,
         overlay_directory_key: None,
         dev_access_key: None,
+        client: None,
+        client_policy_url: None,
     };
     Arc::new(AppState::new_with_parts(config, keystore))
 }

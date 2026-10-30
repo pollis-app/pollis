@@ -56,6 +56,9 @@ pub struct AppState {
     #[cfg(feature = "media")]
     pub camera: Arc<Mutex<CameraState>>,
     pub update_required: Arc<AtomicBool>,
+    /// The minimum-version policy's last verdict for this build (#1611); a blocked one makes every
+    /// DS request fail locally with [`crate::error::Error::UpgradeRequired`].
+    pub client_policy: Arc<std::sync::Mutex<crate::client_policy::PolicyRuntime>>,
     /// The device the DS answered `device_revoked` for (#1338), bound to the signing `(user_id, device_id)` so a late response cannot act on another account.
     pub revoked_device: Arc<std::sync::Mutex<Option<RevokedDevice>>>,
     /// Per-device ULID, kept in the OS keystore so it survives local DB wipes.
@@ -147,6 +150,7 @@ impl AppState {
             #[cfg(feature = "media")]
             camera: Arc::new(Mutex::new(CameraState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
+            client_policy: Arc::default(),
             revoked_device: Arc::new(std::sync::Mutex::new(None)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),

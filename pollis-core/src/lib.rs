@@ -6,6 +6,7 @@ pub mod android_tls;
 #[cfg(target_os = "ios")]
 pub mod ios_storage;
 pub mod bridge;
+pub mod client_policy;
 pub mod commands;
 pub mod config;
 pub mod db;

@@ -129,6 +129,13 @@ struct InitConfig {
     /// sent only to a non-prod DS whatever is passed here.
     #[serde(default)]
     dev_access_key: Option<String>,
+    /// This build's [`pollis_api::client_policy::ClientPlatform`] key (`ios`, `android-play`,
+    /// `android-sideload`), from the binary's install channel (#1611). Absent on builds before it.
+    #[serde(default)]
+    client_platform: Option<String>,
+    /// The store build's native version (`nativeApplicationVersion`), never the OTA bundle's.
+    #[serde(default)]
+    client_version: Option<String>,
 }
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
@@ -175,6 +182,11 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 overlay_directory_url: None,
                 overlay_directory_key: None,
                 dev_access_key: parsed.dev_access_key.filter(|s| !s.trim().is_empty()),
+                client: crate::client_policy::ClientIdentity::from_parts(
+                    parsed.client_platform.as_deref(),
+                    parsed.client_version.as_deref(),
+                ),
+                client_policy_url: None,
             };
             // What a notification extension needs to reach the DS (#1599).
             crate::notify::host::save_config(&crate::db::local::dirs_path(), &config);
@@ -433,6 +445,21 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "get_diagnostics" => {
             let app_version: Option<String> = arg_opt(&args, "appVersion")?;
             ok(crate::commands::diagnostics::get_diagnostics(app_version))
+        }
+
+        // The minimum-version check (#1611); runs before the unlock screen.
+        "check_client_policy" => {
+            let force: Option<bool> = arg_opt(&args, "force")?;
+            ok(crate::commands::client_policy::check_client_policy(&state()?, force.unwrap_or(false)).await?)
+        }
+        "get_client_policy_status" => {
+            ok(crate::commands::client_policy::get_client_policy_status(&state()?).await?)
+        }
+        "set_client_policy_override" => {
+            let url: Option<String> = arg_opt(&args, "url")?;
+            let policy: Option<String> = arg_opt(&args, "policy")?;
+            crate::commands::client_policy::set_client_policy_override(&state()?, url, policy).await?;
+            ok(())
         }
 
         "get_session" => ok(auth::get_session(&state()?).await?),
@@ -1458,6 +1485,10 @@ mod tests {
         for cmd in [
             "create_group_invite_link",
             "list_group_invite_links",
+            // #1611
+            "check_client_policy",
+            "get_client_policy_status",
+            "set_client_policy_override",
             "revoke_group_invite_link",
             "redeem_group_invite_link",
             "list_saved_messages",
