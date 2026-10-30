@@ -20,9 +20,16 @@ use crate::db::local::LocalDb;
 use crate::keystore::Keystore;
 use crate::state::AppState;
 
-/// The DS keeps a push handle for days, and a message the app ingested a moment ago should
-/// still be shown for its own push: an inbound message stored this recently counts as "new".
-const RECENT_SECS: i64 = 120;
+/// How recent a message must be to stand in for a push whose message was already stored by
+/// someone else (the app, or a fetch for a sibling channel). See [`select_rows`].
+const FALLBACK_SECS: i64 = 600;
+
+/// `ui_state` key: the last message offered by that fallback, so it is offered once.
+const FALLBACK_SHOWN_KEY: &str = "notify_fallback_shown";
+
+/// A message a notification may preview: someone else's, real, decrypted, not deleted.
+const LIVE_INBOUND: &str = "sender_id != ?1 AND content IS NOT NULL AND undecryptable IS NULL \
+    AND deleted_at IS NULL AND send_state IS NULL";
 
 /// Most previews one fetch returns.
 const MAX_ITEMS: i64 = 5;
@@ -40,7 +47,7 @@ pub struct Params {
     pub handle: Option<String>,
     pub budget: Duration,
     /// The test harness's per-device directory; production uses `dirs_path()`.
-    #[cfg(feature = "test-harness")]
+    #[cfg(any(test, feature = "test-harness"))]
     pub local_dir: Option<std::path::PathBuf>,
 }
 
@@ -98,7 +105,6 @@ impl Outcome {
 /// Run one fetch. Never panics on its own account; every failure is a [`Reason`].
 pub async fn run(p: Params) -> Outcome {
     let started = Instant::now();
-    let deadline = started + p.budget;
 
     // 1. Who is signed in, and is there a key this process may use?
     let Some(user_id) = crate::accounts::read_accounts_index()
@@ -139,17 +145,36 @@ pub async fn run(p: Params) -> Outcome {
 
     let mut state = AppState::new_with_parts(p.config, p.keystore.clone());
     state.state_lock = SharedStateLock::new(LockPolicy::HeldByCaller);
-    #[cfg(feature = "test-harness")]
+    #[cfg(any(test, feature = "test-harness"))]
     if let Some(dir) = p.local_dir {
         let _ = state.local_dir.set(dir);
     }
     let state = Arc::new(state);
     *state.device_id.lock().await = Some(device_id);
+    let outcome = run_locked(&state, &user_id, &db_key, p.handle.as_deref(), started, p.budget).await;
+
+    // Close the database before returning (#1599): an extension or FCM process must not keep the
+    // App Group file (and its WAL/SHM locks) open after its work is done.
+    let db = state.local_db.lock().await.take();
+    drop(db);
+    outcome
+}
+
+/// Steps 3 to 6 of [`run`], on the headless state.
+async fn run_locked(
+    state: &Arc<AppState>,
+    user_id: &str,
+    db_key: &[u8],
+    handle: Option<&str>,
+    started: Instant,
+    budget: Duration,
+) -> Outcome {
+    let deadline = started + budget;
     let data_dir = state.local_data_dir();
 
-    // 3. The cross-process lock, for the whole run.
-    let lock_deadline = started + p.budget.mul_f64(LOCK_SHARE);
-    let _lock = match StateLock::try_acquire_until_in(&data_dir, lock_deadline).await {
+    // 3. The cross-process lock, for the ingest only.
+    let lock_deadline = started + budget.mul_f64(LOCK_SHARE);
+    let lock = match StateLock::try_acquire_until_in(&data_dir, lock_deadline).await {
         Ok(l) => l,
         Err(LockError::Busy) => return Outcome::Failed(Reason::LockBusy),
         Err(e) => {
@@ -159,7 +184,7 @@ pub async fn run(p: Params) -> Outcome {
     };
 
     // 4. The app's database, opened without any of the app's open-time housekeeping.
-    let db = match LocalDb::open_existing_for_user_in(&data_dir, &user_id, &db_key) {
+    let db = match LocalDb::open_existing_for_user_in(&data_dir, user_id, db_key) {
         Ok(db) => db,
         Err(crate::error::Error::Database(rusqlite::Error::SqliteFailure(f, _)))
             if f.code == rusqlite::ErrorCode::NotADatabase =>
@@ -172,7 +197,21 @@ pub async fn run(p: Params) -> Outcome {
             return Outcome::Failed(Reason::NotLoggedIn);
         }
     };
+
+    // "Nothing" means nothing: no fetch, no decrypt, no name. An escrow that outlived the
+    // setting (a failed delete) is dropped here too.
     let mode = escrow::read_mode(db.conn());
+    if mode == NotificationContent::None {
+        drop(db);
+        drop(lock);
+        if let Err(e) = escrow::delete_escrow(state.keystore.as_ref(), user_id).await {
+            crate::diag!("[notify] stale escrow not deleted: {e}");
+        }
+        return Outcome::Ok {
+            mode,
+            items: Vec::new(),
+        };
+    }
     let floor: i64 = db
         .conn()
         .query_row("SELECT COALESCE(MAX(rowid), 0) FROM message", [], |r| r.get(0))
@@ -180,20 +219,22 @@ pub async fn run(p: Params) -> Outcome {
     *state.local_db.lock().await = Some(db);
 
     // 5. Fetch, decrypt and persist through the app's own path.
-    let ingest = ingest_for_handle(&state, &user_id, p.handle.as_deref());
-    let target = match tokio::time::timeout_at(deadline.into(), ingest).await {
-        Ok(Ok(target)) => Some(target),
+    let ingest = ingest_for_handle(state, user_id, handle);
+    let result = tokio::time::timeout_at(deadline.into(), ingest).await;
+
+    // 6. The state is written; let the app have the lock back before any more round trips
+    // (names, mutes), so a foreground app's own ingest is never stalled behind previews.
+    drop(lock);
+
+    match result {
+        Ok(Ok(target)) => finish(state, user_id, mode, floor, target, deadline, None).await,
         Ok(Err(reason)) => {
-            // Whatever did persist is still shown below; only an empty result fails.
+            // Whatever did persist is still shown; only an empty result fails.
             crate::diag!("[notify] ingest failed: {reason:?}");
-            return finish(&state, &user_id, mode, floor, None, deadline, Some(reason)).await;
+            finish(state, user_id, mode, floor, None, deadline, Some(reason)).await
         }
-        Err(_) => {
-            return finish(&state, &user_id, mode, floor, None, deadline, Some(Reason::Timeout))
-                .await;
-        }
-    };
-    finish(&state, &user_id, mode, floor, target.flatten(), deadline, None).await
+        Err(_) => finish(state, user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await,
+    }
 }
 
 /// The conversation a resolved handle names.
@@ -333,9 +374,13 @@ async fn finish(
     Outcome::Ok { mode, items }
 }
 
-/// Inbound, real, live messages: stored by this run, or (for the handle's conversation) stored
-/// in the last [`RECENT_SECS`] by anyone, so a push whose message the app or a sibling fetch
-/// already ingested still shows it. Oldest first, at most [`MAX_ITEMS`].
+/// What to preview: the inbound, real, live messages THIS call stored (above `floor`), oldest
+/// first, at most [`MAX_ITEMS`]. Each message is therefore returned by at most one fetch.
+///
+/// If this call stored nothing for the handle's conversation (the app, or a fetch for a sibling
+/// channel, already had it), the newest inbound message there from the last
+/// [`FALLBACK_SECS`] is returned instead, at most once ever: its id is remembered in
+/// `ui_state` and never offered again. Hosts may also dedupe by `message_id`.
 async fn select_rows(
     state: &Arc<AppState>,
     user_id: &str,
@@ -346,34 +391,76 @@ async fn select_rows(
     let db = guard
         .as_ref()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no database")))?;
+    let conn = db.conn();
     let conv = target.map(|t| t.conversation_id.as_str());
-    let mut stmt = db.conn().prepare(
-        "SELECT id, conversation_id, sender_id, content FROM message
-         WHERE sender_id != ?1
-           AND content IS NOT NULL AND undecryptable IS NULL
-           AND deleted_at IS NULL AND send_state IS NULL
-           AND (?2 IS NULL OR conversation_id = ?2)
-           AND (rowid > ?3
-                OR (?2 IS NOT NULL AND received_at >= datetime('now', ?4)))
-         ORDER BY rowid DESC LIMIT ?5",
-    )?;
-    let window = format!("-{RECENT_SECS} seconds");
-    let mut rows: Vec<Row> = stmt
-        .query_map(
-            rusqlite::params![user_id, conv, floor, window, MAX_ITEMS],
-            |r| {
+    let read = |sql: &str, params: &[&dyn rusqlite::ToSql]| -> crate::error::Result<Vec<Row>> {
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt
+            .query_map(params, |r| {
                 Ok(Row {
                     id: r.get(0)?,
                     conversation_id: r.get(1)?,
                     sender_id: r.get(2)?,
                     content: r.get(3)?,
                 })
-            },
-        )?
-        .filter_map(|r| r.ok())
-        .collect();
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    };
+    let mut rows = read(
+        &format!(
+            "SELECT id, conversation_id, sender_id, content FROM message
+             WHERE {LIVE_INBOUND}
+               AND (?2 IS NULL OR conversation_id = ?2)
+               AND rowid > ?3
+             ORDER BY rowid DESC LIMIT ?4"
+        ),
+        &[&user_id, &conv, &floor, &MAX_ITEMS],
+    )?;
     rows.reverse();
-    Ok(rows)
+    let remember = |id: &str| {
+        let _ = conn.execute(
+            "INSERT INTO ui_state (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
+            rusqlite::params![FALLBACK_SHOWN_KEY, id],
+        );
+    };
+    if let Some(last) = rows.last() {
+        // So the fallback below never offers this one again.
+        remember(&last.id);
+        return Ok(rows);
+    }
+    if conv.is_none() {
+        return Ok(rows);
+    }
+
+    let window = format!("-{FALLBACK_SECS} seconds");
+    let latest = read(
+        &format!(
+            "SELECT id, conversation_id, sender_id, content FROM message
+             WHERE {LIVE_INBOUND}
+               AND conversation_id = ?2
+               AND received_at >= datetime('now', ?3)
+             ORDER BY rowid DESC LIMIT 1"
+        ),
+        &[&user_id, &conv, &window],
+    )?;
+    let Some(row) = latest.into_iter().next() else {
+        return Ok(Vec::new());
+    };
+    let shown: Option<String> = conn
+        .query_row(
+            "SELECT value FROM ui_state WHERE key = ?1",
+            rusqlite::params![FALLBACK_SHOWN_KEY],
+            |r| r.get(0),
+        )
+        .ok();
+    if shown.as_deref() == Some(row.id.as_str()) {
+        return Ok(Vec::new());
+    }
+    remember(&row.id);
+    Ok(vec![row])
 }
 
 /// `(sender_id, username)`: the local cache first, then one DS lookup for the misses

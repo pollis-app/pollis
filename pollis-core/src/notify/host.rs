@@ -89,23 +89,46 @@ pub fn adopt_data_dir(data_dir: &Path) {
     }
 }
 
+/// Files only the app's own data dir holds. A directory with none of them holds nothing of the
+/// user's: at most a lock or config file some process created before the move.
+const APP_DATA_MARKERS: &[&str] = &["keystore.pks", "dev-keystore.json", "accounts.json"];
+
+fn has_app_data(dir: &Path) -> bool {
+    APP_DATA_MARKERS.iter().any(|m| dir.join(m).is_file())
+}
+
+/// Where a copied-and-swapped old tree is parked until it can be deleted.
+fn retired_path(old_dir: &Path) -> std::path::PathBuf {
+    old_dir.with_extension("migrated")
+}
+
 /// Move `old_dir` to `new_dir` once (#1599).
 ///
-/// Runs only when `new_dir` holds nothing and `old_dir` exists. On one volume this is a single
-/// atomic `rename`. Across volumes the tree is copied into a sibling staging directory, fsynced,
-/// renamed into place, and only then is the old tree removed, so an interruption leaves the old
-/// directory whole and the next launch starts over.
+/// - Nothing happens unless `old_dir` holds the app's data and `new_dir` does not. A populated
+///   `new_dir` is never overwritten, and a populated `old_dir` beside it is never deleted
+///   (it may be newer: a build without the App Group wrote there).
+/// - On one volume this is a single atomic `rename`.
+/// - Across volumes the tree is copied into a sibling staging directory, fsynced and renamed
+///   into place; the old tree is then renamed aside to `<old>.migrated` (atomic) and deleted.
+///   An interruption before the swap leaves the old directory whole and the next launch starts
+///   over; a `.migrated` leftover is deleted, best-effort, on every later launch.
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub(crate) fn migrate_dir(old_dir: &Path, new_dir: &Path) -> std::io::Result<()> {
-    if old_dir == new_dir || !old_dir.is_dir() || !is_empty_or_missing(new_dir)? {
+    let retired = retired_path(old_dir);
+    if retired.exists() {
+        if let Err(e) = std::fs::remove_dir_all(&retired) {
+            crate::diag!("[storage] old data directory not removed yet: {e}");
+        }
+    }
+    if old_dir == new_dir || !has_app_data(old_dir) || has_app_data(new_dir) {
         return Ok(());
     }
     if let Some(parent) = new_dir.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    // An empty placeholder (a host that created the directory) is in the way of a rename.
+    // No user data in the way, only what a process made before the move: clear it for the rename.
     if new_dir.exists() {
-        std::fs::remove_dir(new_dir)?;
+        std::fs::remove_dir_all(new_dir)?;
     }
     match std::fs::rename(old_dir, new_dir) {
         Ok(()) => {
@@ -139,18 +162,15 @@ fn copy_then_swap(old_dir: &Path, new_dir: &Path) -> std::io::Result<()> {
     }
     copy_tree(old_dir, &staging)?;
     std::fs::rename(&staging, new_dir)?;
-    std::fs::remove_dir_all(old_dir)?;
+    // The copy is in place; park the original aside (atomic) so it is never mistaken for live
+    // data, then delete it. A failed delete is retried on the next launch.
+    let retired = retired_path(old_dir);
+    std::fs::rename(old_dir, &retired)?;
+    if let Err(e) = std::fs::remove_dir_all(&retired) {
+        crate::diag!("[storage] old data directory not removed yet: {e}");
+    }
     crate::diag!("[storage] copied the data directory to its override location");
     Ok(())
-}
-
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
-fn is_empty_or_missing(dir: &Path) -> std::io::Result<bool> {
-    match std::fs::read_dir(dir) {
-        Ok(mut it) => Ok(it.next().is_none()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
-        Err(e) => Err(e),
-    }
 }
 
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
@@ -230,6 +250,45 @@ mod tests {
         assert_moved(&new);
         assert!(!old.exists());
         assert!(!new.with_extension("migrating").exists());
+    }
+
+    #[test]
+    fn a_lock_file_made_before_the_move_does_not_block_it() {
+        // The extension (or a lock) may have created the override with no user data in it.
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join("old");
+        let new = t.path().join("new");
+        populate(&old);
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("state.lock"), b"").unwrap();
+        migrate_dir(&old, &new).unwrap();
+        assert_moved(&new);
+        assert!(!old.exists());
+    }
+
+    #[test]
+    fn a_leftover_from_a_finished_copy_is_removed_on_a_later_launch() {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join("old");
+        let new = t.path().join("new");
+        populate(&new);
+        let leftover = retired_path(&old);
+        populate(&leftover);
+        migrate_dir(&old, &new).unwrap();
+        assert!(!leftover.exists(), "the parked copy is deleted");
+        assert_moved(&new);
+    }
+
+    #[test]
+    fn a_populated_old_dir_beside_a_populated_new_one_is_kept() {
+        // Possibly newer data from a build without the App Group: never deleted.
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join("old");
+        let new = t.path().join("new");
+        populate(&old);
+        populate(&new);
+        migrate_dir(&old, &new).unwrap();
+        assert!(old.join("keystore.pks").exists());
     }
 
     #[test]

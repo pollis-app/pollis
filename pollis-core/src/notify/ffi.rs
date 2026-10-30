@@ -69,23 +69,34 @@ pub unsafe extern "C" fn pollis_set_keychain_access_group(group: *const c_char) 
     let _ = group;
 }
 
-/// The app is entering the background (iOS: call from `applicationDidEnterBackground` inside a
-/// `beginBackgroundTask` assertion, on a background queue, since it blocks). Stops new holds of
-/// `state.lock` and waits up to `timeout_ms` for open ones to end. Returns true when none is
-/// open, so the app can be suspended without holding a lock in the App Group container
-/// (`0xdead10cc`).
+/// The app is entering the background: call SYNCHRONOUSLY in `applicationDidEnterBackground`,
+/// before dispatching anything, and pass the result to [`pollis_app_will_suspend`].
 #[no_mangle]
-pub extern "C" fn pollis_app_will_suspend(timeout_ms: u32) -> bool {
+pub extern "C" fn pollis_app_suspend_ticket() -> u64 {
+    super::lock::suspend::ticket()
+}
+
+/// Off the main thread, inside a `beginBackgroundTask` assertion (it blocks up to
+/// `timeout_ms`): stop new holds of `state.lock`, wait for the open ones, then checkpoint and
+/// close the app's database connection, so the suspended app holds no lock in the App Group
+/// container (`0xdead10cc`). Does nothing if [`pollis_app_did_resume`] ran since `ticket`.
+/// Returns true when nothing is held.
+#[no_mangle]
+pub extern "C" fn pollis_app_will_suspend(ticket: u64, timeout_ms: u32) -> bool {
     std::panic::catch_unwind(|| {
-        super::lock::suspend::begin(Duration::from_millis(u64::from(timeout_ms)))
+        let drained =
+            super::lock::suspend::begin(ticket, Duration::from_millis(u64::from(timeout_ms)));
+        let closed = crate::bridge::quiesce_for_suspend(ticket);
+        drained && closed
     })
     .unwrap_or(false)
 }
 
-/// The app is back in the foreground: `state.lock` holds may start again.
+/// The app is back in the foreground: holds may start again and the database reopens.
+/// Blocks briefly (the reopen); safe on any thread.
 #[no_mangle]
 pub extern "C" fn pollis_app_did_resume() {
-    super::lock::suspend::end();
+    let _ = std::panic::catch_unwind(crate::bridge::resume_after_suspend);
 }
 
 fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) -> String {
@@ -114,7 +125,7 @@ fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) 
         config,
         handle,
         budget,
-        #[cfg(feature = "test-harness")]
+        #[cfg(any(test, feature = "test-harness"))]
         local_dir: None,
     };
     // The bridge's big-stack workers: an extension thread's stack is far too small for
@@ -135,7 +146,7 @@ unsafe fn opt_str(p: *const c_char) -> Option<String> {
 
 fn to_c(s: String) -> *mut c_char {
     CString::new(s)
-        .unwrap_or_else(|_| CString::new(INTERNAL).expect("no NUL in a literal"))
+        .unwrap_or_else(|_| c"{\"ok\":false,\"reason\":\"internal\"}".to_owned())
         .into_raw()
 }
 

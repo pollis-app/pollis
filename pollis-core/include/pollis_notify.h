@@ -31,8 +31,11 @@ extern "C" {
 //     "muted":false,"mention":false}]}
 //   {"ok":false,"reason":"not_logged_in|lock_busy|timeout|network|decrypt|internal"}
 //
-// items are oldest first; the last one is the message the push most likely announces. With
-// mode "name" or "none" every body is "" and body_key null. "muted" means the channel is muted
+// items are the messages THIS call stored, oldest first, so a message is returned by at most
+// one call. If the call stored nothing for the handle's conversation (the app already had it),
+// the newest message there from the last 10 minutes is returned once instead; hosts may also
+// dedupe by message_id. With mode "name" every body is "" and body_key null; mode "none"
+// never fetches or decrypts anything and returns no items. "muted" means the channel is muted
 // and the message does not @mention this user (hosts must not show it); "mention" is true when
 // it does. mode "none" with no items means the user chose Nothing, or has not unlocked the app
 // since installing this build: show the generic text.
@@ -52,12 +55,15 @@ void pollis_set_data_dir_override(const char *dir);
 // extension never creates one. No-op on other platforms.
 void pollis_set_keychain_access_group(const char *group);
 
-// App only (iOS 0xdead10cc): call when entering the background, inside a background-task
-// assertion and off the main thread (it blocks up to timeout_ms). No new state.lock hold starts
-// until pollis_app_did_resume; returns true once no hold is open.
-bool pollis_app_will_suspend(uint32_t timeout_ms);
+// App only (iOS 0xdead10cc). In applicationDidEnterBackground take a ticket SYNCHRONOUSLY,
+// then, inside a background-task assertion and off the main thread (it blocks up to
+// timeout_ms), call pollis_app_will_suspend(ticket, ...): no new state.lock hold starts, the
+// open ones are drained, and the database connection is checkpointed and closed. Returns true
+// when nothing is held. A ticket older than the last pollis_app_did_resume does nothing.
+uint64_t pollis_app_suspend_ticket(void);
+bool pollis_app_will_suspend(uint64_t ticket, uint32_t timeout_ms);
 
-// App only: back in the foreground.
+// App only: back in the foreground. Opens the gate and reopens the database.
 void pollis_app_did_resume(void);
 
 #ifdef __cplusplus

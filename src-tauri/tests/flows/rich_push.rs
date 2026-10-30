@@ -164,8 +164,10 @@ async fn the_app_and_a_headless_fetch_race_without_losing_or_rolling_back() {
         .iter()
         .any(|(_, c)| c == "still here"));
 
-    // What the extension showed is alice's text, attributed to her, never bob's own.
+    // What the extension showed is alice's text, attributed to her, never bob's own, each once.
     assert!(!shown.is_empty(), "the extension showed something across three rounds");
+    let ids: HashSet<&String> = shown.iter().map(|i| &i.message_id).collect();
+    assert_eq!(ids.len(), shown.len(), "no message previewed twice: {shown:?}");
     for item in &shown {
         assert_eq!(item.conversation_id, dm);
         assert!(item.is_dm);
@@ -321,6 +323,124 @@ async fn fallbacks_and_modes() {
         escrow::get_notification_content(&bob.state).await.unwrap(),
         NotificationContent::None
     );
+
+    // "Nothing" with an escrow that outlived it (a failed delete): the extension still fetches
+    // and decrypts nothing, and drops the escrow itself.
+    bob.state
+        .keystore
+        .store_for_user(ESCROW_SLOT, &bob_p.id, &good_key(&bob).await)
+        .await
+        .unwrap();
+    alice.send_channel_message(&dm, "still nothing").await;
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    assert_eq!(out, Outcome::Ok { mode: NotificationContent::None, items: vec![] });
+    assert!(!escrowed(&bob).await, "the extension deletes a stale escrow under Nothing");
+    assert!(
+        !stored_contents(&bob).await.iter().any(|c| c == "still nothing"),
+        "Nothing never decrypts in the extension"
+    );
+}
+
+/// The DB key bob's state holds while unlocked, to plant a stale escrow with.
+async fn good_key(client: &TestClient) -> Vec<u8> {
+    client
+        .state
+        .unlock
+        .lock()
+        .await
+        .as_ref()
+        .expect("unlocked")
+        .db_key
+        .to_vec()
+}
+
+/// What bob's local database holds, read directly (no ingest).
+async fn stored_contents(client: &TestClient) -> Vec<String> {
+    let guard = client.state.local_db.lock().await;
+    let db = guard.as_ref().expect("db open");
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT content FROM message WHERE content IS NOT NULL")
+        .unwrap();
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+    rows
+}
+
+/// A message is previewed by one fetch only: a second push for the same conversation shows
+/// nothing new, and a message the app already ingested is offered once, then never again.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_message_is_never_previewed_twice() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+
+    alice.send_channel_message(&dm, "first").await;
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["first".to_string()]);
+    let again = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    assert!(items(&again).is_empty(), "the same message is not shown twice: {again:?}");
+
+    // The app ingests first (foreground, or a sibling fetch): offered once as the fallback.
+    alice.send_channel_message(&dm, "second").await;
+    bob.fetch_dm_messages(&dm).await;
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["second".to_string()]);
+    let again = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    assert!(items(&again).is_empty(), "the fallback is offered once: {again:?}");
+}
+
+/// Creating and forgetting a group are MLS mutations too: they wait for the extension.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn group_creation_and_deletion_wait_for_the_extension() {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+
+    for step in ["init", "forget"] {
+        let extension = StateLock::try_acquire_in(&bob.state.local_data_dir())
+            .expect("lock file")
+            .expect("free");
+        bob.activate();
+        let state = bob.state.clone();
+        let user = bob_p.id.clone();
+        let conv = dm.clone();
+        let task = tokio::spawn(async move {
+            if step == "init" {
+                let _ = pollis_core::commands::mls::init_mls_group(&state, "01JTRICHPUSHINITGROUP00000", &user).await;
+            } else {
+                let _ = pollis_core::commands::mls::forget_local_mls_group(&state, &conv).await;
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(!task.is_finished(), "{step} must wait while the extension holds the lock");
+        drop(extension);
+        tokio::time::timeout(Duration::from_secs(30), task)
+            .await
+            .expect("proceeds once the extension lets go")
+            .expect("task");
+    }
+    // The forgotten DM's history placeholders are not this test's concern.
+    crate::harness::expect_losses();
 }
 
 /// A muted channel's message is marked muted; a direct @mention pierces the mute, as the DS's
