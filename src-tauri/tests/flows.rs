@@ -54,6 +54,8 @@ mod pq_migration;
 mod push_dismiss;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
+#[path = "flows/rich_push.rs"]
+mod rich_push;
 #[path = "flows/reports.rs"]
 mod reports;
 #[path = "flows/sealed_sender.rs"]

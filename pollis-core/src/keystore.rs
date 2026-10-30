@@ -318,110 +318,98 @@ mod ios_kek {
         security_framework::passwords::generic_password(opts)
     }
 
-    /// The access groups holding a KEK item other than `group` (the pre-#1599 default group).
-    fn other_groups(group: &str) -> Vec<String> {
-        use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
-        let found = ItemSearchOptions::new()
-            .class(ItemClass::generic_password())
-            .service(SERVICE)
-            .account(ACCOUNT)
-            .load_attributes(true)
-            .limit(Limit::All)
-            .search();
-        let Ok(found) = found else {
-            return Vec::new();
-        };
-        found
-            .iter()
-            .filter_map(|r| r.simplify_dict())
-            .filter_map(|d| d.get("agrp").cloned())
-            .filter(|g| g != group)
-            .collect()
-    }
-
-    /// Move the KEK from the app's default access group into the shared one (#1599): read old,
-    /// write with the group, read back, only then delete old. Any failure keeps the old item and
-    /// keeps using it, so a build without the entitlement behaves exactly as before.
-    fn migrate_into(group: &str, key: &[u8; 32]) {
+    /// Copy the KEK from the app's own access group into the shared one (#1599): write, then
+    /// read back. The app-only item is KEPT: a later build without the entitlement (or a
+    /// mis-signed one) still finds it, so the identity key and the wrapped DB key it seals can
+    /// never be orphaned by a migration.
+    fn copy_into(group: &str, key: &[u8; 32]) {
         if let Err(e) = store_new(key, Some(group)) {
-            crate::diag!("[keystore] ios kek not moved to the shared access group ({e}); keeping the app-only item");
+            crate::diag!("[keystore] ios kek not copied to the shared access group ({e}); the extension cannot read it yet");
             return;
         }
         match read_in(group) {
             Ok(back) if back.as_slice() == key.as_slice() => {}
-            _ => {
-                crate::diag!("[keystore] ios kek copy in the shared group did not read back; keeping both");
-                return;
-            }
+            _ => crate::diag!("[keystore] ios kek copy in the shared group did not read back"),
         }
-        for old in other_groups(group) {
-            let mut opts = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
-            opts.set_access_group(&old);
-            if let Err(e) = security_framework::passwords::delete_generic_password_options(opts) {
-                crate::diag!("[keystore] old ios kek item not deleted ({e}); harmless, same bytes");
+    }
+
+    fn shared_read(group: Option<&str>) -> super::kek_plan::Read {
+        use super::kek_plan::Read;
+        let Some(g) = group else {
+            return Read::NoGroup;
+        };
+        match read_in(g) {
+            Ok(bytes) => Read::Found(bytes),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Read::NotFound,
+            Err(e) => {
+                // e.g. errSecMissingEntitlement (-34018) on a build signed without the group.
+                crate::diag!("[keystore] shared access group unreadable ({e}); using the app-only item");
+                Read::Error
             }
         }
     }
 
-    /// Get-or-create the 32-byte master key in the iOS Keychain.
+    fn legacy_read() -> super::kek_plan::Read {
+        use super::kek_plan::Read;
+        match get_generic_password(SERVICE, ACCOUNT) {
+            Ok(bytes) => Read::Found(bytes),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Read::NotFound,
+            Err(e) => {
+                crate::diag!("[keystore] ios kek unreadable ({e})");
+                Read::Error
+            }
+        }
+    }
+
+    /// Get-or-create the 32-byte master key in the iOS Keychain. The decision is
+    /// [`super::kek_plan::plan`], host-tested.
     fn master_key() -> Result<[u8; 32]> {
+        use super::kek_plan::{plan, Plan, Read};
         let mut guard = MASTER
             .lock()
             .map_err(|_| Error::Keystore("ios kek mutex poisoned".into()))?;
         if let Some(k) = *guard {
             return Ok(k);
         }
-        let create_allowed = CREATE_ALLOWED.load(std::sync::atomic::Ordering::SeqCst);
         let group = access_group();
-
-        // The shared group first (#1599), where the extension can read it too.
-        if let Some(ref g) = group {
-            match read_in(g) {
-                Ok(bytes) => {
-                    let key = to_key(bytes)?;
-                    *guard = Some(key);
-                    return Ok(key);
-                }
-                Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
-                Err(e) => return Err(keychain_err("read shared kek", e)),
-            }
-            if !create_allowed {
-                return Err(Error::Keystore(
-                    "no keystore key in the shared access group yet; the app has not migrated it".into(),
-                ));
-            }
-        }
-
-        let key: [u8; 32] = match get_generic_password(SERVICE, ACCOUNT) {
-            Ok(bytes) => {
-                let key = to_key(bytes)?;
-                if create_allowed {
+        let shared = shared_read(group.as_deref());
+        // Only consulted when the shared group did not answer.
+        let legacy = if matches!(shared, Read::Found(_)) {
+            Read::NotFound
+        } else {
+            legacy_read()
+        };
+        let decision = plan(
+            shared,
+            legacy,
+            CREATE_ALLOWED.load(std::sync::atomic::Ordering::SeqCst),
+            super::file_backend::store_exists(),
+        );
+        let key = match decision {
+            Plan::Use { key, copy_to_shared } => {
+                let key = to_key(key)?;
+                if copy_to_shared {
                     if let Some(ref g) = group {
-                        migrate_into(g, &key);
+                        copy_into(g, &key);
                     }
                 }
                 key
             }
-            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {
-                if !create_allowed {
-                    return Err(Error::Keystore("no keystore key on this device".into()));
-                }
+            Plan::Mint { into_shared } => {
                 let mut fresh = [0u8; 32];
                 rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut fresh);
-                // Into the shared group when there is one; else (no entitlement) the app's own.
-                let stored = match group.as_deref() {
-                    Some(g) => store_new(&fresh, Some(g)).or_else(|e| {
-                        crate::diag!("[keystore] shared access group unusable ({e}); storing the kek app-only");
-                        store_new(&fresh, None)
-                    }),
-                    None => store_new(&fresh, None),
-                };
-                stored?;
+                // Always app-only, so a build without the entitlement finds it too; and the
+                // shared group when it answered, so the extension can.
+                store_new(&fresh, None)?;
+                if into_shared {
+                    if let Some(ref g) = group {
+                        copy_into(g, &fresh);
+                    }
+                }
                 fresh
             }
-            Err(e) => return Err(keychain_err("read kek", e)),
+            Plan::Refuse(why) => return Err(Error::Keystore(why.into())),
         };
-
         *guard = Some(key);
         Ok(key)
     }
@@ -434,6 +422,125 @@ mod ios_kek {
     /// Decrypt a blob produced by [`seal`].
     pub fn unseal(blob: &[u8]) -> Result<Vec<u8>> {
         kek_envelope::unseal_with(&master_key()?, blob)
+    }
+}
+
+/// Which keystore KEK an iOS process uses, from what the keychain answered (#1599). Pure, so the
+/// rules that decide whether keys can be orphaned are tested on the host.
+#[cfg(any(target_os = "ios", test))]
+mod kek_plan {
+    /// One keychain lookup.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Read {
+        Found(Vec<u8>),
+        NotFound,
+        /// Any other failure, e.g. errSecMissingEntitlement on a build without the group.
+        Error,
+        /// No shared group configured.
+        NoGroup,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Plan {
+        /// Use this key; `copy_to_shared` = also copy it into the shared group (never a move).
+        Use { key: Vec<u8>, copy_to_shared: bool },
+        /// No key exists anywhere and nothing is sealed yet: make one.
+        Mint { into_shared: bool },
+        /// Never mint over existing ciphertext, and never in the extension.
+        Refuse(&'static str),
+    }
+
+    /// `shared`: the shared access group's item. `legacy`: the app-only lookup (any group the
+    /// process can see). `create_allowed`: false in the extension. `store_exists`: a sealed
+    /// `keystore.pks` is already on disk.
+    ///
+    /// There is deliberately no "delete" outcome: the app-only item always survives.
+    pub fn plan(shared: Read, legacy: Read, create_allowed: bool, store_exists: bool) -> Plan {
+        if let Read::Found(key) = shared {
+            return Plan::Use {
+                key,
+                copy_to_shared: false,
+            };
+        }
+        // Copy only when the group answered "not there": an error means we cannot write it either.
+        let group_usable = shared == Read::NotFound;
+        match legacy {
+            Read::Found(key) => Plan::Use {
+                key,
+                copy_to_shared: create_allowed && group_usable,
+            },
+            Read::Error => Plan::Refuse("the keystore key is unreadable"),
+            Read::NotFound | Read::NoGroup => {
+                if !create_allowed {
+                    Plan::Refuse("no keystore key this process may use; the extension never creates one")
+                } else if store_exists {
+                    Plan::Refuse(
+                        "the keystore key is missing but a sealed keystore exists; refusing to mint a new key over it",
+                    )
+                } else {
+                    Plan::Mint {
+                        into_shared: group_usable,
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        const K: &[u8] = &[1u8; 32];
+
+        fn used(key: &[u8], copy_to_shared: bool) -> Plan {
+            Plan::Use {
+                key: key.to_vec(),
+                copy_to_shared,
+            }
+        }
+
+        #[test]
+        fn the_shared_item_wins() {
+            assert_eq!(plan(Read::Found(K.to_vec()), Read::Found(vec![2; 32]), true, true), used(K, false));
+        }
+
+        #[test]
+        fn the_app_only_item_is_copied_never_moved() {
+            assert_eq!(plan(Read::NotFound, Read::Found(K.to_vec()), true, true), used(K, true));
+        }
+
+        #[test]
+        fn a_missing_entitlement_falls_back_to_the_app_only_item() {
+            // errSecMissingEntitlement reading the shared group: use the old item, copy nothing.
+            assert_eq!(plan(Read::Error, Read::Found(K.to_vec()), true, true), used(K, false));
+        }
+
+        #[test]
+        fn a_sealed_store_is_never_orphaned_by_a_fresh_key() {
+            for shared in [Read::NotFound, Read::Error, Read::NoGroup] {
+                let p = plan(shared.clone(), Read::NotFound, true, true);
+                assert!(matches!(p, Plan::Refuse(_)), "{shared:?}: {p:?}");
+            }
+        }
+
+        #[test]
+        fn the_extension_never_mints_or_copies() {
+            for store in [true, false] {
+                assert!(matches!(plan(Read::NotFound, Read::NotFound, false, store), Plan::Refuse(_)));
+            }
+            assert_eq!(plan(Read::NotFound, Read::Found(K.to_vec()), false, true), used(K, false));
+        }
+
+        #[test]
+        fn a_fresh_install_mints_into_the_group_when_it_answers() {
+            assert_eq!(plan(Read::NotFound, Read::NotFound, true, false), Plan::Mint { into_shared: true });
+            assert_eq!(plan(Read::NoGroup, Read::NotFound, true, false), Plan::Mint { into_shared: false });
+            assert_eq!(plan(Read::Error, Read::NotFound, true, false), Plan::Mint { into_shared: false });
+        }
+
+        #[test]
+        fn an_unreadable_app_only_item_is_never_replaced() {
+            assert!(matches!(plan(Read::NotFound, Read::Error, true, false), Plan::Refuse(_)));
+        }
     }
 }
 
@@ -624,6 +731,14 @@ mod file_backend {
     fn store_path() -> PathBuf {
         // The same directory as the local DB, so the two can't drift.
         crate::db::local::dirs_path().join("keystore.pks")
+    }
+
+    /// Whether a keystore file (current or pre-#950) is already on disk (#1599): the iOS KEK
+    /// must never be re-minted over one.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(super) fn store_exists() -> bool {
+        let nonempty = |p: PathBuf| std::fs::metadata(p).map(|m| m.len() > 0).unwrap_or(false);
+        nonempty(store_path()) || nonempty(legacy_store_path())
     }
 
     /// The pre-#950 location; read and migrated, never written.

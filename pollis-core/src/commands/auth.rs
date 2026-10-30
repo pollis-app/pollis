@@ -1044,6 +1044,19 @@ pub async fn list_known_accounts(state: &Arc<AppState>) -> Result<crate::account
 /// entries (device_id, wrapped keys, pin_meta, legacy unwrapped keys),
 /// and the accounts index. Does NOT touch the remote Turso database —
 /// users can re-authenticate on this device later.
+/// Every per-user keystore slot `wipe_local_data` deletes.
+pub(crate) const WIPED_USER_SLOTS: &[&str] = &[
+    DEVICE_ID_KEY,
+    "db_key",
+    "db_key_wrapped",
+    "account_id_key",
+    "account_id_key_wrapped",
+    "pin_meta",
+    LOGIN_EMAIL_KEY,
+    // The notification key escrow (#1599).
+    crate::notify::escrow::ESCROW_SLOT,
+];
+
 pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
     state.unload_user_db().await;
     *state.device_id.lock().await = None;
@@ -1052,18 +1065,8 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
     // A corrupt index is survivable; everything goes anyway.
     let index = crate::accounts::read_accounts_index().unwrap_or_default();
 
-    let per_user_keys = [
-        DEVICE_ID_KEY,
-        "db_key",
-        "db_key_wrapped",
-        "account_id_key",
-        "account_id_key_wrapped",
-        "pin_meta",
-        LOGIN_EMAIL_KEY,
-        crate::notify::escrow::ESCROW_SLOT,
-    ];
     for account in &index.accounts {
-        for key in &per_user_keys {
+        for key in WIPED_USER_SLOTS {
             let _ = state.keystore.delete_for_user(key, &account.user_id).await;
         }
     }

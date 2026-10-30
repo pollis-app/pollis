@@ -99,7 +99,9 @@ pub fn escrow_supported() -> bool {
     }
     #[cfg(any(test, feature = "test-harness"))]
     {
-        if test_support::FORCE_SUPPORTED.with(|f| f.get()) {
+        if test_support::FORCE_SUPPORTED.with(|f| f.get())
+            || test_support::FORCE_SUPPORTED_GLOBALLY.load(std::sync::atomic::Ordering::SeqCst)
+        {
             return true;
         }
     }
@@ -204,9 +206,19 @@ pub mod test_support {
         pub(super) static FORCE_SUPPORTED: Cell<bool> = const { Cell::new(false) };
     }
 
+    /// For the integration harness, whose clients run on a multi-threaded runtime. Never set by
+    /// a unit test, so the "desktop never escrows" test in this crate stays meaningful.
+    pub(super) static FORCE_SUPPORTED_GLOBALLY: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
     /// Treat this thread as a mobile build for escrow purposes. Use with a current-thread runtime.
     pub fn force_escrow_supported(on: bool) {
         FORCE_SUPPORTED.with(|f| f.set(on));
+    }
+
+    /// Treat the whole process as a mobile build for escrow purposes (integration tests).
+    pub fn force_escrow_supported_globally(on: bool) {
+        FORCE_SUPPORTED_GLOBALLY.store(on, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -250,6 +262,14 @@ mod tests {
         sync_escrow(&ks, USER, KEY, NotificationContent::None).await.unwrap();
         assert!(!escrowed(&ks).await, "Nothing deletes the escrow");
         test_support::force_escrow_supported(false);
+    }
+
+    /// The wipe deletes the escrow with the rest of the user's slots. (Logout, account deletion,
+    /// the PIN-lockout nuke and setting "Nothing" are driven end to end in the integration
+    /// suite, `src-tauri/tests/flows/rich_push.rs`.)
+    #[test]
+    fn a_wipe_deletes_the_escrow() {
+        assert!(crate::commands::auth::WIPED_USER_SLOTS.contains(&ESCROW_SLOT));
     }
 
     #[tokio::test(flavor = "current_thread")]
