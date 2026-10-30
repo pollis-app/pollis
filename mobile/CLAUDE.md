@@ -579,9 +579,24 @@ that is not verified, so do 1–3 by hand. Until they are done, build with
 `rich` capability. That binary behaves exactly like 1.0.23. Simulator builds
 need none of this. The sim neither enforces App Groups nor needs a profile.
 
-Size: the extension statically links the core a second time. Its binary is
-about 30 MB on the simulator; that is mapped code, not the ~24 MB memory limit.
-Its dirty memory at launch is a few MB.
+Size: the extension statically links the core a second time, but dead-stripped
+to what `pollis_notify_fetch` reaches. On the 2026-10-29 Release simulator
+build that came to 10.8 MB of binary: 6.8 MB `__TEXT`, 0.6 MB `__DATA_CONST`
+and 48 KB `__DATA`. Code pages are clean and file-backed, so they do not count
+against the ~24 MB extension memory limit. What counts is the fetch's heap
+(SQLCipher cache, MLS state, TLS), and that is not measured yet: see "Testing
+the extension".
+
+**Testing the extension.** `xcrun simctl push` (Xcode 27) posts the request
+straight to the notification center through CoreSimulatorBridge and never
+starts a service extension. The log shows `mutableContent: YES` on the trigger,
+but no `PollisNotificationService` process. Only a real APNs delivery runs it.
+So the Swift is tested by `plugins/notification-service/harness/run.sh`, which
+compiles the real `NotificationService.swift` for macOS against a stub core and
+checks every row of the table above. `tests/notification-service-extension.test.ts`
+covers the plugin. The extension logs outcomes only (mode, reason, item count,
+ms), never content, under subsystem `com.pollis.ios.NotificationService`:
+`log stream --predicate 'subsystem == "com.pollis.ios.NotificationService"'`.
 <!-- measured numbers: see PR #1599-ios-nse -->
 
 **Deployment target: iOS 16.4.** Expo SDK 56 raised the minimum

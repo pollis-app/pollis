@@ -1,7 +1,7 @@
 // #1361: each screen takes only its own direction's QR code.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isNewDeviceCode, isSignInCode, phoneDeviceName, SHOWN_BY_NEW_DEVICE, SHOWN_BY_SIGNED_IN } from "../lib/linkCodes.ts";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -40,7 +40,9 @@ test("a sign-in code is never a link the OS can hand to the app", () => {
   assert.ok(!appJson.includes("pollis-link"), "app.json must not register the pollis-link scheme");
   const schemes = [JSON.parse(appJson).expo.scheme].flat();
   assert.deepEqual(schemes, ["pollis"]);
-  const plugins = readdirSync(new URL("../plugins/", import.meta.url)).map((p) => `../plugins/${p}`);
+  const plugins = readdirSync(new URL("../plugins/", import.meta.url), { recursive: true })
+    .map((p) => `../plugins/${p}`)
+    .filter((p) => statSync(new URL(p, import.meta.url)).isFile());
   for (const f of ["../app.config.js", ...plugins]) {
     assert.ok(!read(f).includes("pollis-link"), `${f} must not register the pollis-link scheme`);
   }
