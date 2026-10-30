@@ -2206,6 +2206,9 @@ pub enum DecryptFailureKind {
     Storage,
     /// Opened, but the content is a proposal or commit, not an application message.
     NotAnApplicationMessage,
+    /// openmls `OwnPrivateMessage`: this device's own envelope, fanned back by the fetch. Its
+    /// sender ratchet only encrypts, so it never opens here, and nothing is lost (#1629).
+    OwnEnvelope,
     /// An openmls error this code does not specifically classify.
     Other,
 }
@@ -2232,6 +2235,7 @@ impl DecryptFailureKind {
             DecryptFailureKind::WrongWireFormat => "wrong wire format",
             DecryptFailureKind::Storage => "storage error",
             DecryptFailureKind::NotAnApplicationMessage => "not an application message",
+            DecryptFailureKind::OwnEnvelope => "own envelope",
             DecryptFailureKind::Other => "unclassified openmls error",
         }
     }
@@ -2386,6 +2390,9 @@ impl<'a> MlsDecryptor<'a> {
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app_msg) => {
                 Ok((app_msg.into_bytes(), sender_user_id))
+            }
+            ProcessedMessageContent::OwnPrivateMessage => {
+                Err(fail(DecryptFailureKind::OwnEnvelope, sealed_at))
             }
             _ => Err(fail(DecryptFailureKind::NotAnApplicationMessage, sealed_at)),
         }

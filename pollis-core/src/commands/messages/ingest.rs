@@ -65,6 +65,17 @@ static LOGGED_FAILURES: std::sync::Mutex<
 /// grown: the worst case is one repeated line per envelope, not a leak.
 const LOGGED_FAILURES_CAP: usize = 4096;
 
+/// Test-harness only (#1629): every envelope whose decrypt failure was logged, and why.
+#[cfg(feature = "test-harness")]
+pub fn logged_decrypt_failures() -> Vec<(String, crate::commands::mls::DecryptFailureKind)> {
+    LOGGED_FAILURES
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .map(|m| m.into_iter().collect())
+        .unwrap_or_default()
+}
+
 /// Whether this failure of envelope `id` is new to this process — never seen,
 /// or seen with a different reason. Records it either way.
 fn first_sighting(id: &str, kind: crate::commands::mls::DecryptFailureKind) -> bool {
@@ -90,8 +101,19 @@ fn note_decrypt_failure(
     id: &str,
     why: &crate::commands::mls::DecryptFailure,
 ) -> Ingested {
+    use crate::commands::mls::DecryptFailureKind;
+    // This device's own envelope fanned back (#1629): nothing to open, and nothing lost.
+    if why.kind == DecryptFailureKind::OwnEnvelope {
+        return Ingested::Opened(None);
+    }
     if first_sighting(id, why.kind) {
-        crate::diag!("[decrypt] {conversation_id}: {env_type} {id} would not open — {why}");
+        // Never opened here (held envelopes are skipped), so a reused key means the sender reused it.
+        let fork = if why.kind == DecryptFailureKind::SecretReuse {
+            " — an envelope this device never opened: the sender reused a ratchet generation"
+        } else {
+            ""
+        };
+        crate::diag!("[decrypt] {conversation_id}: {env_type} {id} would not open — {why}{fork}");
     }
     Ingested::Failed(*why)
 }
@@ -236,10 +258,13 @@ pub async fn catch_up_mls_group_interleaved(
     };
     let held_before = held(state).await;
     // Boxed: the largest future on the receive path (#1571 overflowed a test stack).
-    Box::pin(catch_up_once(state, mls_group_id, user_id)).await?;
+    // Single-flight per group (#1629): an overlapping pass would open the same envelopes again.
+    let flights = &state.catch_up_flights;
+    let once = || Box::pin(catch_up_once(state, mls_group_id, user_id));
+    super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
     // A pass that started with no group could only join; run one more pass now (#1571) to show what it holds.
     if !held_before && held(state).await {
-        Box::pin(catch_up_once(state, mls_group_id, user_id)).await?;
+        super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
         // A just-joined device runs the re-add backstop once (#1571). Boxed: reconcile can re-enter this catch-up.
         if let Err(e) = Box::pin(crate::commands::mls::reconcile_backstop_one(
             state,
@@ -895,6 +920,12 @@ fn decrypt_and_persist_one(
     user_id: &str,
     is_dm: bool,
 ) -> Ingested {
+    // #1629: one this device sealed or already opened cannot open again, so it is never tried.
+    if super::ingest_guard::already_held(conn, &env.0) {
+        return Ingested::Opened(None);
+    }
+    #[cfg(feature = "test-harness")]
+    super::ingest_guard::note_attempt(&env.0);
     let one = OneEnvelope::begin(conn);
     let out = open_and_persist(conn, decryptor, conversation_id, env, bytes, user_id, is_dm);
     one.release();

@@ -42,6 +42,8 @@ mod messages;
 mod model;
 #[path = "flows/outbox.rs"]
 mod outbox;
+#[path = "flows/own_envelopes.rs"]
+mod own_envelopes;
 #[path = "flows/file_keys.rs"]
 mod file_keys;
 #[path = "flows/pinning.rs"]
