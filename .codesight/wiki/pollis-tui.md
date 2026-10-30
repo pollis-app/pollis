@@ -138,6 +138,16 @@ pollis-tui (binary `pollis`)
   it used to exit 1 with `entering raw mode: Device not configured` only in the
   log. `cli-release.yml` stamps the release version in (`scripts/bump-version.sh`)
   so `--version` is the shipped version, not the placeholder.
+- **The minimum-version check comes next (#1611).** After the arguments and
+  before the terminal check (so interactive and non-interactive runs behave the
+  same), `main` runs `pollis_core::client_policy::check` as platform `cli`: a
+  build below the published minimum prints what happened, the operator message
+  if any and the `cli-install.sh` command, opens nothing, and exits **3**
+  (`cli::EXIT_UPGRADE_REQUIRED`). Unreachable or malformed policies fail open; a
+  cached block holds offline. Every DS request carries `X-Pollis-Client-*`, and
+  a DS 426 mid-session leaves the UI and exits the same way. Tests:
+  `tests/client_policy.rs` (including a pty run); design:
+  [client-policy.md](./client-policy.md).
 - **Input isolation.** `crossterm::event::read` is blocking, so it runs on a
   dedicated OS thread that forwards key *presses* over an mpsc channel; the tokio
   loop never blocks on stdin. Only `KeyEventKind::Press` is forwarded (some

@@ -701,6 +701,12 @@ Runtime application of the closed-overlay relay mode (design `docs/relay-overlay
 - `set_overlay_mode(mode)` — parse + APPLY LIVE. Off→non-off builds the `RealRelayFactory` and starts the loopback SOCKS5 shim; publishing the handle IS the routing, because every overlaid caller reads `AppState::overlay_handle()` on its hot path. non-off→Off drops the handle, which aborts the accept loop and returns every caller to direct; Prefer↔Strict flips the shim's policy mode live (no restart). #987 removed the libsql half of this: there are no database handles to reconnect, and the only overlaid protocol left is HTTPS (the DS and R2), which rides reqwest's own SOCKS support. Idempotent — safe to call on every app start / login (the UI calls it after loading the saved preference; boot calls the same `apply_overlay_mode` with `POLLIS_OVERLAY`). On failure to bring the overlay up it rolls back to the previous working state and errors — never a half-routed app; Strict degrades (surfaced error) rather than silently going direct. Config: `POLLIS_OVERLAY` (mode), `POLLIS_OVERLAY_RELAY` (comma-sep relay endpoints — a POOL: `RealRelayFactory` tries them in health order and fails over to the first success, marking a failed relay dead for a cooldown, fail-open if all dead, single-hop), `POLLIS_OVERLAY_RELAY_CERT` (path or base64 DER of the pinned relay QUIC leaf). Persisting the choice is the settings-UI slice's job.
 - **Frontend surface:** Preferences → "Network privacy (relay)" (`PreferencesPage.tsx`) — an Off/Prefer/Strict `radiogroup`. `overlay_mode` lives in `PreferencesData` (`usePreferences.ts`, synced blob, default `off`); selecting a mode persists it (`save_preferences`) and applies it live (`set_overlay_mode`); on login/restart the saved mode is re-applied once, guarded by a `get_overlay_mode` diff so an unchanged mode never restarts the shim. An apply error (e.g. Strict with no relay) surfaces inline and the control reflects the real resulting mode from `get_overlay_mode` — never a silent direct.
 
+## client_policy (`commands/client_policy.rs`, #1611)
+The minimum-version check; full design in [client-policy.md](./client-policy.md).
+- `check_client_policy({ force })` → `ClientPolicyStatus` — fetch the published policy (4 s bound), fall back to the pre-unlock cache, decide, and record the verdict on `AppState` so a blocked build's DS requests fail locally with `upgrade_required`. `force: false` (focus / resume) reuses a fetch from the last 5 minutes.
+- `get_client_policy_status()` → the last verdict, no network (what a DS 426 left).
+- `set_client_policy_override({ url, policy })` — mobile bridge only, dev builds only (refused for the prod DS): a persisted test override.
+
 ## relay_serving (`commands/relay_serving.rs`)
 The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *your* traffic goes through the overlay, this decides whether *other people's* traffic goes through *your* device. Neither implies the other, and this one is off by default behind explicit consent. Engine: `pollis-core/src/net/peer/`.
 - `get_relay_serving_status()` → `RelayServingStatus` — the CURRENT live state, the same role `get_overlay_mode` plays for the mode control. Shape (serde snake_case, mirrored by `frontend/src/hooks/queries/useRelayServing.ts`): `{ config: { enabled, wifi_only, power_only }, state: "off" | "serving" | "waiting" | "unsupported", hold: "metered_network" | "on_battery" | "offline" | "no_inbound_path" | null, on_wifi: bool | null, on_power: bool | null, active_circuits, bytes_forwarded }`. `hold` is non-null exactly when `state == "waiting"`. `on_wifi`/`on_power` are `null` when the platform cannot report them (Linux reads sysfs/procfs, macOS shells out to `pmset`/`route`, Windows reports neither yet) — and **a null signal never satisfies a condition**: if `wifi_only` is set and we cannot tell whether the link is unmetered, the device does not relay. Reading the status re-probes and reconciles, which is how a change (charger unplugged) gets noticed without a poll (CLAUDE.md bans polling).
@@ -727,6 +733,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
 - **`auth`** — `delete_account`, `dev_login`, `get_device_id`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
+- **`client_policy`** — `check_client_policy`, `get_client_policy_status` (#1611)
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
@@ -766,7 +773,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **227 commands** in 34 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **229 commands** in 35 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -822,6 +829,8 @@ than hand-edit.
 **`staging`** (2) — `discard_staged_attachment`, `stage_attachment`
 
 **`update`** (3) — `get_update_check_plan`, `is_update_required`, `mark_update_required`
+
+**`client_policy`** (2) — `check_client_policy`, `get_client_policy_status`
 
 **`install_kind`** (2) — `detect_managed_install`, `detect_read_only_location`
 
