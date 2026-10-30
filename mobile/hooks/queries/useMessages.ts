@@ -30,6 +30,7 @@ import {
   type SendState,
 } from "./pendingMessages";
 import { parseContent } from "../../lib/messageContent";
+import { createSingleFlight } from "../../lib/singleFlight";
 
 export type ConversationKind = "channel" | "dm";
 
@@ -170,6 +171,46 @@ export const lastMessageQueryKeys = {
     ["last-message", "batch", conversationIds.join(",")] as const,
 };
 
+/** Newest page size, and how long a page read from the local store counts as fresh. */
+const PAGE_LIMIT = 50;
+const MESSAGES_STALE_MS = 1000 * 15;
+
+type QueryClient = ReturnType<typeof useQueryClient>;
+
+/** One page of a conversation, read from the local store only; ingest runs separately. */
+async function readMessagePage(
+  queryClient: QueryClient,
+  conversationId: string,
+  kind: ConversationKind,
+  limit: number,
+  pageParam: MessageCursor | null,
+): Promise<DecodedPage> {
+  const cmd = kind === "channel" ? "read_channel_messages" : "read_dm_messages";
+  const args: Record<string, unknown> =
+    kind === "channel"
+      ? { channelId: conversationId, limit }
+      : { dmChannelId: conversationId, limit };
+  if (pageParam) {
+    args.cursor = pageParam;
+  }
+  const page = await invoke<MessagePage>(cmd, args);
+  const messages = (page.messages ?? []).map(transform);
+  // A refetch of the newest page while a send is in flight must not drop
+  // its optimistic stub, which is never in the store (pendingMessages.ts).
+  const newest = pageParam
+    ? messages
+    : carryStubs(
+        messages,
+        queryClient.getQueryData<MessagesData>(
+          messageQueryKeys.conversation(conversationId, kind),
+        )?.pages[0]?.messages,
+      );
+  return {
+    messages: newest,
+    nextCursor: page.next_cursor ?? null,
+  };
+}
+
 /** Infinite query over a conversation's history, newest page first. */
 export function useMessages(
   conversationId: string | null,
@@ -178,7 +219,7 @@ export function useMessages(
 ) {
   const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
-  const limit = opts?.limit ?? 50;
+  const limit = opts?.limit ?? PAGE_LIMIT;
 
   return useInfiniteQuery({
     queryKey: messageQueryKeys.conversation(conversationId, kind),
@@ -187,37 +228,59 @@ export function useMessages(
       if (!conversationId || !kind || !currentUser) {
         return { messages: [], nextCursor: null };
       }
-      // Local-only reads: ingest runs separately and invalidates this query.
-      const cmd =
-        kind === "channel" ? "read_channel_messages" : "read_dm_messages";
-      const args: Record<string, unknown> =
-        kind === "channel"
-          ? { channelId: conversationId, limit }
-          : { dmChannelId: conversationId, limit };
-      if (pageParam) {
-        args.cursor = pageParam;
-      }
-      const page = await invoke<MessagePage>(cmd, args);
-      const messages = (page.messages ?? []).map(transform);
-      // A refetch of the newest page while a send is in flight must not drop
-      // its optimistic stub, which is never in the store (pendingMessages.ts).
-      const newest = pageParam
-        ? messages
-        : carryStubs(
-            messages,
-            queryClient.getQueryData<MessagesData>(
-              messageQueryKeys.conversation(conversationId, kind),
-            )?.pages[0]?.messages,
-          );
-      return {
-        messages: newest,
-        nextCursor: page.next_cursor ?? null,
-      };
+      return readMessagePage(queryClient, conversationId, kind, limit, pageParam);
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: !!(conversationId && kind && currentUser),
-    staleTime: 1000 * 15,
+    staleTime: MESSAGES_STALE_MS,
   });
+}
+
+/**
+ * Read a conversation's newest page into the cache before it opens (#1610), from a row's touch
+ * down: the local read is done by the time the screen mounts, so what the store holds is on its
+ * first frame instead of a loading line. A no-op while the cached page is fresh.
+ */
+export function usePrefetchConversation() {
+  const currentUser = useObserver(() => appStore.currentUser);
+  const queryClient = useQueryClient();
+  return useCallback(
+    (conversationId: string, kind: ConversationKind) => {
+      if (!currentUser) {
+        return;
+      }
+      void queryClient.prefetchInfiniteQuery({
+        queryKey: messageQueryKeys.conversation(conversationId, kind),
+        initialPageParam: null as MessageCursor | null,
+        queryFn: ({ pageParam }) =>
+          readMessagePage(queryClient, conversationId, kind, PAGE_LIMIT, pageParam),
+        getNextPageParam: (lastPage: DecodedPage) => lastPage.nextCursor,
+        staleTime: MESSAGES_STALE_MS,
+      });
+    },
+    [currentUser, queryClient],
+  );
+}
+
+/**
+ * Re-read conversations whose local rows just changed (#1610): every cached page of each,
+ * including conversations not on screen, so opening one later shows it on the first frame.
+ * Local reads only.
+ */
+export function refreshStoredConversations(queryClient: QueryClient, conversationIds: string[]) {
+  if (conversationIds.length === 0) {
+    return;
+  }
+  const ids = new Set(conversationIds);
+  void queryClient.invalidateQueries({
+    predicate: (q) =>
+      q.queryKey[0] === "messages" &&
+      (q.queryKey[1] === "channel" || q.queryKey[1] === "dm") &&
+      ids.has(q.queryKey[2] as string),
+    refetchType: "all",
+  });
+  void queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+  refreshUnread(queryClient);
 }
 
 function mapPages(
@@ -678,6 +741,9 @@ export interface IngestOptions {
   refreshUnread?: boolean;
 }
 
+/** One ingest per conversation at a time; requests mid-run share one trailing run (#1610). */
+const ingestFlights = createSingleFlight();
+
 /** Fire-and-forget ingest, run when the chat screen focuses. */
 export function useIngestConversation() {
   const currentUser = useObserver(() => appStore.currentUser);
@@ -693,17 +759,21 @@ export function useIngestConversation() {
         return;
       }
       try {
-        if (kind === "channel") {
-          await invoke("ingest_channel_envelopes", {
-            userId: currentUser.id,
-            channelId: conversationId,
-          });
-        } else {
-          await invoke("ingest_dm_envelopes", {
-            userId: currentUser.id,
-            dmChannelId: conversationId,
-          });
-        }
+        const userId = currentUser.id;
+        // Keyed by account too: a trailing run must never reuse another account's closure.
+        await ingestFlights.run(`${userId}:${kind}:${conversationId}`, async () => {
+          if (kind === "channel") {
+            await invoke("ingest_channel_envelopes", {
+              userId,
+              channelId: conversationId,
+            });
+          } else {
+            await invoke("ingest_dm_envelopes", {
+              userId,
+              dmChannelId: conversationId,
+            });
+          }
+        });
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.conversation(conversationId, kind),
         });

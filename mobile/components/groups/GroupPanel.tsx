@@ -13,6 +13,7 @@ import {
   useGroupMembers,
   useGroupJoinRequests,
   useMutedChannels,
+  usePrefetchConversation,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import type { Channel } from "../../types";
@@ -47,6 +48,7 @@ function GroupPanelImpl({
   const { t } = useTranslation("mobile");
   const router = useNav();
   const rootRouter = useRouter();
+  const prefetch = usePrefetchConversation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -251,6 +253,7 @@ function GroupPanelImpl({
               unread={unread > 0}
               muted={isMuted}
               accessibilityLabel={label}
+              onPressIn={() => prefetch(c.id, "channel")}
               onPress={() => onOpenChannel(c)}
             />
           );

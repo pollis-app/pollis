@@ -20,6 +20,7 @@ export function ConversationRow({
   unread = 0,
   selected,
   onPress,
+  onPressIn,
   testID,
   unreadTestID,
 }: {
@@ -32,6 +33,8 @@ export function ConversationRow({
   unread?: number;
   selected?: boolean;
   onPress: () => void;
+  // Touch down, never an action: a row in a scroller may become a scroll (#1610 prefetch).
+  onPressIn?: () => void;
   testID?: string;
   unreadTestID?: string;
 }) {
@@ -54,6 +57,7 @@ export function ConversationRow({
     <Pressable
       testID={testID}
       onPress={onPress}
+      onPressIn={onPressIn}
       accessible
       accessibilityRole="button"
       accessibilityLabel={spoken}

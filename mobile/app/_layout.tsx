@@ -28,6 +28,7 @@ import i18n, { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 import { endSession, sweepStalePlaintext } from "../lib/session";
 import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
+import { usePersistedFeed } from "../hooks/usePersistedFeed";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -38,6 +39,7 @@ function SignedInServicesGate() {
   useEnrollmentApprovals();
   useUnreadSync();
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
+  usePersistedFeed(userId);
   useEffect(() => {
     if (userId) {
       void adoptUserLanguage(userId);

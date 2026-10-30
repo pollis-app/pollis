@@ -204,6 +204,14 @@ draft with the keyboard up; the peer then sends into the open channel, twice.
 The composer must still be above the keyboard: the draft is sent by tapping
 Send where it is. Each arrival is screenshotted straight off the device.
 
+**Live message (automated, #1610):** `mobile/scripts/maestro-live-message.sh <device>`
+— one device plus `pollis-tui`'s `live_message_peer` example, which sends when a
+flow asks it over loopback HTTP (`scripts/peer-send.js`), so a step sends and
+then waits with a tight timeout: a message into the open DM is on screen within
+2 s of the DS having it; one stored while on the Direct list shows the moment
+the DM opens, with no loading line; and after 35 s in the background one is in
+the DM within 3 s of opening it on resume.
+
 **Device outside the tree (automated, #1571):** `mobile/scripts/maestro-device-outside-tree.sh <device>`
 — one device plus two dev-DS peers (`pollis-tui`'s `outside_tree_peer`, roles
 `owner` and `creator`). The owner signs up as the account's first device; the
