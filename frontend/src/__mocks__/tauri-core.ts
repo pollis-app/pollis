@@ -221,6 +221,12 @@ interface MockStore {
   failSends: boolean;
   /** Per-channel mute (#1431). */
   mutedChannels: string[];
+  /** #1628: this device's read cursor per conversation (a message id); preloaded messages start read. */
+  readCursors: Record<string, string>;
+  /** #1628: positions another device read and pushed; `refresh_read_cursors` merges them. */
+  readElsewhere: Record<string, string>;
+  /** #1628: message ids an ingest already stored, so a replay or receipt wake reports no news. */
+  ingested: string[];
   /** Security-event log (#1548), any order. */
   securityEvents: MockSecurityEvent[];
   /** Safety-number change notices (#1605), as a headless fetch would have left them. */
@@ -351,6 +357,17 @@ const store: MockStore = {
       : preload.exportSavePath,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  readCursors:
+    (preload.readCursors as Record<string, string> | undefined) ??
+    Object.fromEntries(
+      Object.entries((preload.messages ?? {}) as Record<string, MockMessage[]>)
+        .filter(([, msgs]) => msgs.length > 0)
+        .map(([id, msgs]) => [id, msgs[msgs.length - 1].id]),
+    ),
+  readElsewhere: {},
+  ingested: Object.values((preload.messages ?? {}) as Record<string, MockMessage[]>).flatMap((msgs) =>
+    msgs.map((m) => m.id),
+  ),
   securityEvents: (preload.securityEvents as MockSecurityEvent[] | undefined) ?? [],
   keyChangeNotices:
     (preload.keyChangeNotices as MockStore['keyChangeNotices'] | undefined) ?? [],
@@ -1071,9 +1088,49 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'tray_set_unread':
       return null;
 
+    // #1628: report the newest newly-seen message from someone else past the read cursor.
     case 'ingest_channel_envelopes':
-    case 'ingest_dm_envelopes':
+    case 'ingest_dm_envelopes': {
+      const target = (args.channelId ?? args.dmChannelId) as string;
+      const msgs = store.messages[target] ?? [];
+      const fresh = msgs.filter((m) => !store.ingested.includes(m.id));
+      store.ingested.push(...fresh.map((m) => m.id));
+      const news = unreadIn(target).filter((m) => fresh.includes(m));
+      return news.length > 0 ? [news[news.length - 1]] : [];
+    }
+
+    case 'get_unread_counts':
+      return Object.keys(store.messages)
+        .map((id) => ({ conversation_id: id, count: unreadIn(id).length }))
+        .filter((u) => u.count > 0);
+
+    case 'mark_conversation_read': {
+      const id = args.conversationId as string;
+      const theirs = (store.messages[id] ?? []).filter((m) => m.sender_id !== store.session?.id);
+      const newest = theirs[theirs.length - 1];
+      if (!newest || store.readCursors[id] === newest.id) {
+        return false;
+      }
+      store.readCursors[id] = newest.id;
+      return true;
+    }
+
+    case 'sync_read_cursors':
       return 0;
+
+    case 'refresh_read_cursors': {
+      const moved: string[] = [];
+      for (const [id, at] of Object.entries(store.readElsewhere)) {
+        const msgs = store.messages[id] ?? [];
+        const here = msgs.findIndex((m) => m.id === store.readCursors[id]);
+        if (msgs.findIndex((m) => m.id === at) > here) {
+          store.readCursors[id] = at;
+          moved.push(id);
+        }
+      }
+      store.readElsewhere = {};
+      return moved;
+    }
 
     case 'plugin:notification|is_permission_granted':
       return store.notificationPermission;
@@ -2007,6 +2064,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       console.warn(`[tauri-mock] Unhandled command: ${command}`, args);
       return null;
   }
+}
+
+/** Messages from someone else past this device's read cursor, oldest first (#1628). */
+function unreadIn(conversationId: string): MockMessage[] {
+  const msgs = store.messages[conversationId] ?? [];
+  const at = msgs.findIndex((m) => m.id === store.readCursors[conversationId]);
+  return msgs.slice(at + 1).filter((m) => m.sender_id !== store.session?.id);
 }
 
 let stagedAttachmentCount = 0;

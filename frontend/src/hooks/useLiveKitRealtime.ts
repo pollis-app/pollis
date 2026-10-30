@@ -18,7 +18,8 @@ import { groupQueryKeys, useMutedChannels, useUserGroupsWithChannels } from './q
 import { blocksQueryKeys } from './queries/useBlocks';
 import { notify, setNotifyPrefs, setMutedChannels, loadDeviceCallRingtone } from '../utils/notify';
 import { logIgnored } from '../utils/log';
-import { shouldAlertForWake, type WakeLatest } from '../utils/messageWake';
+import { runMessageWake, type WakeFresh } from '../utils/messageWake';
+import { refreshReadCursors, unreadQueryKeys } from './queries/useUnread';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
 import { presenceStore } from '../stores/presenceStore';
 import { keyChangeNoticeKeys, peerVerificationKeys } from './queries/useUserProfile';
@@ -112,6 +113,10 @@ type RealtimeEvent =
   | {
     // #1431: mutes changed on another device; re-read them.
     type: 'channel_mutes_changed';
+  }
+  | {
+    // #1628: another of our devices pushed read cursors; converge (DS-originated, content-free).
+    type: 'read_cursors_changed';
   }
   | {
     type: 'realtime_reconnected';
@@ -295,25 +300,30 @@ export function useLiveKitRealtime() {
 
     const channel = new Channel<RealtimeEvent>();
 
-    // Local reads don't ingest, so realtime hints must.
+    // Local reads don't ingest, so realtime hints must. Resolves to what the ingest reported as
+    // news (#1628): the newest new, unread message from someone else per conversation; null on failure.
     const ingestAndInvalidate = (
       channelId: string | null,
       conversationId: string | null,
-    ): Promise<void> => {
+    ): Promise<WakeFresh[] | null> => {
       const targetId = channelId ?? conversationId;
       if (!targetId) {
-        return Promise.resolve();
+        return Promise.resolve(null);
       }
       const command = channelId ? 'ingest_channel_envelopes' : 'ingest_dm_envelopes';
       const args = channelId
         ? { userId: currentUser.id, channelId }
         : { userId: currentUser.id, dmChannelId: conversationId };
       markIngested(targetId);
-      return invoke<void>(command, args)
+      return invoke<WakeFresh[] | null>(command, args)
+        .then((fresh) => (Array.isArray(fresh) ? fresh : null))
         .catch((err) => {
           console.warn(`[realtime] ${command} failed:`, err);
+          return null;
         })
         .finally(() => {
+          // Badges come from Rust's counts, never a local increment (#1628).
+          queryClientRef.current.invalidateQueries({ queryKey: unreadQueryKeys.all });
           if (channelId) {
             queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
           } else if (conversationId) {
@@ -475,6 +485,8 @@ export function useLiveKitRealtime() {
         presenceStore.resetRoom(event.room_id);
         // #1335: flush sends that failed while the link was down.
         void flushOutbox(queryClientRef.current);
+        // #1628: reads made elsewhere during the outage; the nudge for them was lost too.
+        void refreshReadCursors(queryClientRef.current, currentUser.id);
         // Catch up welcomes and commits missed during the outage (#371). Inbox rooms have no MLS group.
         try {
           await invoke('poll_mls_welcomes', { userId: currentUser.id });
@@ -495,6 +507,11 @@ export function useLiveKitRealtime() {
           queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
           queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(event.room_id) });
         }
+        return;
+      }
+
+      if (event.type === 'read_cursors_changed') {
+        void refreshReadCursors(queryClientRef.current, currentUser.id);
         return;
       }
 
@@ -662,44 +679,31 @@ export function useLiveKitRealtime() {
 
       const channelId = event.channel_id;
       const conversationId = event.conversation_id;
-      const incomingId = channelId ?? conversationId;
-
-      const ingested = ingestAndInvalidate(channelId, conversationId);
-
-      const isSelected =
-        (channelId && channelId === selectedChannelIdRef.current) ||
-        (conversationId && conversationId === selectedConversationIdRef.current);
-      if (isSelected || !incomingId) {
+      if (!(channelId ?? conversationId)) {
         return;
       }
 
-      // The wake-up names no sender (§5): read the newest row back; our own never alerts.
-      await ingested;
-      let latest: WakeLatest | null = null;
-      try {
-        const rows = await invoke<WakeLatest[]>('read_last_messages', {
-          conversationIds: [incomingId],
-        });
-        latest = rows?.[0] ?? null;
-      } catch (err) {
-        console.warn('[realtime] read_last_messages failed:', err);
-      }
-      if (!shouldAlertForWake({
-        latest,
+      // The wake names no sender and may be a receipt (#1628): announce only what the ingest
+      // reports as news. A channel ingest covers the whole group, so siblings may report too.
+      await runMessageWake({
+        ingest: () => ingestAndInvalidate(channelId, conversationId),
+        // The ingest's own `finally` already invalidated the counts.
+        refreshUnread: () => {},
         selfId: currentUserIdRef.current,
-        isSelected: false,
-      })) {
-        return;
-      }
-
-      const senderUsername = latest?.sender_username ?? i18n.t('nav:statusBar.someone');
-      const title = roomNameMapRef.current.get(incomingId) ?? i18n.t('chat:notify.newMessageTitle');
-      const body = i18n.t('chat:notify.newMessageBody', { name: senderUsername });
-      notify(conversationId ? 'direct_message' : 'channel_message', {
-        roomId: incomingId,
-        title,
-        body,
-        senderUsername,
+        isSelected: (id) =>
+          id === selectedChannelIdRef.current || id === selectedConversationIdRef.current,
+        announce: (m) => {
+          const senderUsername = m.sender_username ?? i18n.t('nav:statusBar.someone');
+          const title =
+            roomNameMapRef.current.get(m.conversation_id) ?? i18n.t('chat:notify.newMessageTitle');
+          const body = i18n.t('chat:notify.newMessageBody', { name: senderUsername });
+          notify(conversationId ? 'direct_message' : 'channel_message', {
+            roomId: m.conversation_id,
+            title,
+            body,
+            senderUsername,
+          });
+        },
       });
     };
 

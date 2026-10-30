@@ -12,7 +12,8 @@ type CameraRemote = { trackKey: string; width: number; height: number };
 type EnrollmentApproval = { requestId: string; newDeviceId: string };
 type IncomingCall = { callId: string; roomName: string; callerId: string; callerUsername: string };
 type OutgoingCall = { callId: string; calleeId: string };
-type StatusBarAlert = { senderUsername: string; roomId: string };
+// `readable`: the alert is about a message, so reading the conversation anywhere clears it (#1628).
+type StatusBarAlert = { senderUsername: string; roomId: string; readable?: boolean };
 
 class AppStore implements AppState {
   currentUser: User | null = null;
@@ -183,11 +184,16 @@ class AppStore implements AppState {
     this.unreadCounts = next;
   }
 
-  incrementUnread(id: string) {
-    this.unreadCounts = {
-      ...this.unreadCounts,
-      [id]: (this.unreadCounts[id] ?? 0) + 1,
-    };
+  /** After a cursor sync moved `moved` (#1628): drop a message alert whose conversation is now read. */
+  clearAlertIfRead(moved: readonly string[]) {
+    const alert = this.statusBarAlert;
+    if (!alert || !alert.readable || !moved.includes(alert.roomId)) {
+      return;
+    }
+    if ((this.unreadCounts[alert.roomId] ?? 0) > 0) {
+      return;
+    }
+    this.statusBarAlert = null;
   }
 
   unreadFor(items: { id: string }[]): number {

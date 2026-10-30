@@ -21,7 +21,6 @@ export type Category =
 type CategoryConfig = {
   sound?: 'ping' | 'join' | 'leave';
   osNotif?: boolean;
-  badge?: boolean;
   alert?: boolean;
   overlay?: boolean;
   // Gated on the device-local ringtone toggle (incoming calls).
@@ -35,8 +34,9 @@ type CategoryConfig = {
 
 // Notification behaviour per category. Cooldown is per (category, roomId), sound and OS banner only; mutes are per channel (#1431).
 const CATEGORIES: Record<Category, CategoryConfig> = {
-  direct_message:    { sound: 'ping',  osNotif: true,  badge: true, alert: true, cooldownMs: 2500 },
-  channel_message:   { sound: 'ping',  osNotif: true,  badge: true,              cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
+  // No badge here (#1628): unread counts come from Rust's read cursors, refetched after ingest.
+  direct_message:    { sound: 'ping',  osNotif: true,  alert: true, cooldownMs: 2500 },
+  channel_message:   { sound: 'ping',  osNotif: true,               cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
   voice_other_join:  { sound: 'join'                                                              },
   voice_other_leave: { sound: 'leave'                                                             },
   voice_self_join:   { sound: 'join'                                                              },
@@ -46,15 +46,13 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
   incoming_call:     {                  osNotif: true,                            honorsRingtonePref: true },
   // @all in a group. Silenced by a mute like chatter (it is addressed to the
-  // room, not to you). Badge is left to the accompanying new_message event so
-  // a connected client doesn't double-count unread.
+  // room, not to you).
   all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500, mutable: true, cooldownGroup: 'channel' },
   // @username in a group (#843) — someone spoke to YOU by name, which is a
   // personal event, so it is treated like a DM rather than like channel
   // chatter: ping, OS notification, AND the status-bar alert that names the
   // sender. It is deliberately louder than `all_mention` (which is addressed
-  // to a room, not to you) — that alert is the difference. Badge is left to
-  // the accompanying new_message event so unread isn't double-counted. NOT
+  // to a room, not to you) — that alert is the difference. NOT
   // mutable: a direct mention reaches you in a muted channel (#1431).
   user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500, cooldownGroup: 'channel' },
 };
@@ -154,14 +152,12 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
     fired = true;
   }
 
-  if (config.badge && payload.roomId) {
-    appStore.incrementUnread(payload.roomId);
-  }
-
   if (config.alert && payload.roomId && payload.senderUsername) {
     appStore.setStatusBarAlert({
       senderUsername: payload.senderUsername,
       roomId: payload.roomId,
+      // A read elsewhere clears a message alert (#1628); a request or invite waits for action.
+      readable: category === 'direct_message' || category === 'user_mention',
     });
   }
 
