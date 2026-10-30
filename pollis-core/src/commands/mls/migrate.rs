@@ -64,7 +64,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
     .await?;
 
     // 3. Hold the lineage still: the lock reconcile and self-update take.
-    let mls_guard = state.mls_group_lock(conversation_id).await;
+    let mls_guard = state.mls_group_lock(conversation_id).await?;
 
     // Re-read under the lock: the catch-up may have adopted someone else's successor.
     let local_epoch = {

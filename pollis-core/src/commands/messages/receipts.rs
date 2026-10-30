@@ -99,6 +99,10 @@ pub(crate) async fn emit_receipt(
 
     let now = super::envelope_sent_at();
     let envelope_id = ulid::Ulid::new().to_string();
+    // No in-process MLS lock here (see `try_seal_unlocked`), but the encrypt still advances this
+    // device's ratchet, so another process must not be mid-step on it (#1599). The cross-process
+    // share is reentrant within this state, so it cannot deadlock the catch-up that calls us.
+    let _cross_process = state.cross_process_lock().await?;
     let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard
