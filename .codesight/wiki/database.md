@@ -1182,6 +1182,8 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 
 **Two further bounds (#1090).** The token must be shaped like an Expo token (`devices::is_expo_push_token`), so the table cannot be padded with junk that inflates every fan-out; and a user keeps at most `PUSH_TOKENS_PER_USER` (10), oldest evicted first, so a reinstall loop cannot grow one message into an unbounded number of Expo calls.
 
+**Capabilities (#1599, migration `000043`).** `caps` INTEGER NOT NULL DEFAULT 0 CHECK (`caps >= 0`) — a bitmask; bit 0 = `rich`. Written only by the DS from the optional `caps` list on `POST /v1/push-tokens` (`PushTokenBody::caps`, `pollis_api::devices::PUSH_CAP_RICH`), reduced to the known values by `push::PushCaps::from_wire` (unknown values dropped, never refused) and **replaced on every register**, so an install that goes back to an older build goes back to today's payload. Missing = 0 = exactly the pre-#1599 payload. What `rich` changes, in `push::expo_message` (only when a handle was minted; otherwise the generic push): iOS keeps the generic title/body and adds `mutableContent: true`, so the Notification Service Extension can decrypt and rewrite it; Android gets a data-only `{ to, priority: "high", data: { h } }` — no title, body, `channelId` or `tag` — and the app posts the notification itself (tag = `h`, so #1508 dismissal still matches). `data` is `{ h }` in every variant (`push::tests::every_payload_variant_carries_only_the_handle`).
+
 ### push_handle _(migration 000030, #1122)_
 - `handle` TEXT PK _(128 bits from the OS CSPRNG, base64url)_
 - `user_id` TEXT NOT NULL
