@@ -120,6 +120,7 @@
     "plugins": [
       "./plugins/withReleaseSigning",
       "./plugins/withAbiSplits",
+      "./plugins/withRichPush",
       "expo-secure-store",
       "expo-router",
       [

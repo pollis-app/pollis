@@ -35,3 +35,11 @@ ios:
 bindings:
   cpp: cpp
   ts: src/generated
+
+# Generated once, then extended by hand, so `--and-generate` must leave them
+# alone (#1599): cpp-adapter.cpp carries the PollisNotify JNI shim the rich-push
+# handler calls, build.gradle that handler's Firebase / expo-notifications /
+# androidx dependencies.
+noOverwrite:
+  - android/cpp-adapter.cpp
+  - android/build.gradle
