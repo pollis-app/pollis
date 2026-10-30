@@ -314,17 +314,16 @@
   },
   "push": {
     "channelMessages": "Mensajes",
-    "notification": {
-      "genericTitle": "Mensaje nuevo",
-      "genericBody": "Tienes un mensaje nuevo",
-      "nameOnlyBody": "Te envió un mensaje",
-      "groupTitle": "{{sender}} · {{conversation}}",
-      "attachment": "📎 Archivo adjunto",
-      "image": "📷 Foto",
-      "video": "🎬 Vídeo",
-      "voice": "🎤 Mensaje de voz",
-      "sensitive": "🔒 Contenido sensible"
-    }
+    "genericTitle": "Mensaje nuevo",
+    "genericBody": "Tienes un mensaje nuevo",
+    "you": "Tú",
+    "bodyAttachment": "Adjunto",
+    "bodyImage": "Foto",
+    "bodyVideo": "Vídeo",
+    "bodyVoice": "Mensaje de voz",
+    "bodySensitive": "Contenido sensible",
+    "nameOnlyBody": "Te envió un mensaje",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Canales",

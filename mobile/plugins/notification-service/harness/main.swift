@@ -82,10 +82,17 @@ check("muted newest is skipped for an unmuted one", c.title.contains("Ana") && c
 
 let image = item("").replacingOccurrences(of: "\"body_key\":null", with: "\"body_key\":\"image\"")
 c = run("{\"ok\":true,\"mode\":\"full\",\"items\":[\(image)]}")
-check("attachment placeholder", c.body == "📷 Photo", c.body)
+check("attachment placeholder", c.body == "Photo", c.body)
 
 c = run("{\"ok\":true,\"mode\":\"full\",\"items\":[]}")
 check("nothing new: generic", c.title == L10n.genericTitle)
+
+c = run("{\"ok\":true,\"mode\":\"none\",\"items\":[]}")
+check("no escrow yet (none, empty): generic", c.title == "New message" && c.threadIdentifier.isEmpty)
+
+let mention = item(",\"mention\":true")
+c = run("{\"ok\":true,\"mode\":\"full\",\"items\":[\(mention)]}")
+check("a mention (muted:false, extra field) is shown", c.title == "Ana" && c.body == "hi there", c.title)
 
 c = run("{\"ok\":false,\"reason\":\"lock_busy\"}")
 check("failure: original as it arrived", c.title == "New message" && c.body == "You have a new message" && keepsHandle(c))

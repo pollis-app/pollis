@@ -330,17 +330,16 @@
   },
   "push": {
     "channelMessages": "Повідомлення",
-    "notification": {
-      "genericTitle": "Нове повідомлення",
-      "genericBody": "У вас нове повідомлення",
-      "nameOnlyBody": "Надіслав(ла) повідомлення",
-      "groupTitle": "{{sender}} · {{conversation}}",
-      "attachment": "📎 Вкладення",
-      "image": "📷 Фото",
-      "video": "🎬 Відео",
-      "voice": "🎤 Голосове повідомлення",
-      "sensitive": "🔒 Делікатний вміст"
-    }
+    "genericTitle": "Нове повідомлення",
+    "genericBody": "У вас нове повідомлення",
+    "you": "Ви",
+    "bodyAttachment": "Вкладення",
+    "bodyImage": "Фото",
+    "bodyVideo": "Відео",
+    "bodyVoice": "Голосове повідомлення",
+    "bodySensitive": "Делікатний вміст",
+    "nameOnlyBody": "Надіслав(ла) повідомлення",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Канали",

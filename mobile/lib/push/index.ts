@@ -54,6 +54,7 @@ const registrar = createPushRegistrar({
       userId,
       token,
       platform: Platform.OS,
+      // #1599: sent on every register, since the DS replaces the stored caps each time.
       caps: pushCapsFor(embeddedExtra(), Platform.OS),
     });
   },

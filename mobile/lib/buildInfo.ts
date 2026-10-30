@@ -19,8 +19,8 @@ export type BuildInfo = {
   destination: UpdateDestination;
 };
 
-/** The binary's own `extra`. Deliberately not `Constants.expoConfig`, which an OTA replaces. */
-export function embeddedExtra(): Record<string, unknown> | null {
+/** The binary's embedded expo config `extra`. Deliberately not `Constants.expoConfig`, which an OTA replaces. */
+export function embeddedExtra(): unknown {
   const native = requireOptionalNativeModule<{ manifest?: unknown }>("ExponentConstants");
   let config = native?.manifest;
   if (typeof config === "string") {
@@ -30,12 +30,12 @@ export function embeddedExtra(): Record<string, unknown> | null {
       return null;
     }
   }
-  const extra = (config as { extra?: unknown } | null | undefined)?.extra;
-  return extra && typeof extra === "object" ? (extra as Record<string, unknown>) : null;
+  return (config as { extra?: unknown } | null | undefined)?.extra ?? null;
 }
 
 function embeddedInstallChannel(): InstallChannel | null {
-  return parseInstallChannel(embeddedExtra()?.installChannel);
+  const extra = embeddedExtra() as { installChannel?: unknown } | null;
+  return parseInstallChannel(extra?.installChannel);
 }
 
 function runningUpdate(): BuildInfo["ota"] {

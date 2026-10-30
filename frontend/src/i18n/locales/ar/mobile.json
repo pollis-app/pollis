@@ -346,17 +346,16 @@
   },
   "push": {
     "channelMessages": "الرسائل",
-    "notification": {
-      "genericTitle": "رسالة جديدة",
-      "genericBody": "لديك رسالة جديدة",
-      "nameOnlyBody": "أرسل رسالة",
-      "groupTitle": "{{sender}} · {{conversation}}",
-      "attachment": "📎 مرفق",
-      "image": "📷 صورة",
-      "video": "🎬 فيديو",
-      "voice": "🎤 رسالة صوتية",
-      "sensitive": "🔒 محتوى حساس"
-    }
+    "genericTitle": "رسالة جديدة",
+    "genericBody": "لديك رسالة جديدة",
+    "you": "أنت",
+    "bodyAttachment": "مرفق",
+    "bodyImage": "صورة",
+    "bodyVideo": "فيديو",
+    "bodyVoice": "رسالة صوتية",
+    "bodySensitive": "محتوى حساس",
+    "nameOnlyBody": "أرسل رسالة",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "القنوات",

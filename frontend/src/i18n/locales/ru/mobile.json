@@ -330,17 +330,16 @@
   },
   "push": {
     "channelMessages": "Сообщения",
-    "notification": {
-      "genericTitle": "Новое сообщение",
-      "genericBody": "У вас новое сообщение",
-      "nameOnlyBody": "Отправил(а) сообщение",
-      "groupTitle": "{{sender}} · {{conversation}}",
-      "attachment": "📎 Вложение",
-      "image": "📷 Фото",
-      "video": "🎬 Видео",
-      "voice": "🎤 Голосовое сообщение",
-      "sensitive": "🔒 Деликатный контент"
-    }
+    "genericTitle": "Новое сообщение",
+    "genericBody": "У вас новое сообщение",
+    "you": "Вы",
+    "bodyAttachment": "Вложение",
+    "bodyImage": "Фото",
+    "bodyVideo": "Видео",
+    "bodyVoice": "Голосовое сообщение",
+    "bodySensitive": "Деликатный контент",
+    "nameOnlyBody": "Отправил(а) сообщение",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "Каналы",

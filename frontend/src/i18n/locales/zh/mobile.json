@@ -306,17 +306,16 @@
   },
   "push": {
     "channelMessages": "消息",
-    "notification": {
-      "genericTitle": "新消息",
-      "genericBody": "你有一条新消息",
-      "nameOnlyBody": "发来一条消息",
-      "groupTitle": "{{sender}} · {{conversation}}",
-      "attachment": "📎 附件",
-      "image": "📷 照片",
-      "video": "🎬 视频",
-      "voice": "🎤 语音消息",
-      "sensitive": "🔒 敏感内容"
-    }
+    "genericTitle": "新消息",
+    "genericBody": "你有一条新消息",
+    "you": "你",
+    "bodyAttachment": "附件",
+    "bodyImage": "照片",
+    "bodyVideo": "视频",
+    "bodyVoice": "语音消息",
+    "bodySensitive": "敏感内容",
+    "nameOnlyBody": "发来一条消息",
+    "groupTitle": "{{sender}} · {{conversation}}"
   },
   "search": {
     "channels": "频道",

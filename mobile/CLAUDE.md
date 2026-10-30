@@ -542,7 +542,7 @@ any. `userInfo` is never touched, so a tap routes by `h` exactly as before and
 after the first PIN unlock on a build that has the extension, because that
 unlock escrows the DB key for the extension (pollis-core). Until then the fetch
 fails and the push shows as it arrived. Strings come from
-`mobile:push.notification.*` in the shared catalogues; the plugin writes
+`mobile:push.*` in the shared catalogues (the same keys as the Android handler); the plugin writes
 `<lproj>/Localizable.strings` at prebuild, so the extension follows the iOS
 language, not the in-app choice.
 

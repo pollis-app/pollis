@@ -260,9 +260,9 @@ enum L10n {
   static var genericBody: String { NSLocalizedString("genericBody", comment: "") }
   static var nameOnlyBody: String { NSLocalizedString("nameOnlyBody", comment: "") }
   static var groupTitle: String { NSLocalizedString("groupTitle", comment: "") }
-  static var attachment: String { NSLocalizedString("attachment", comment: "") }
-  static var image: String { NSLocalizedString("image", comment: "") }
-  static var video: String { NSLocalizedString("video", comment: "") }
-  static var voice: String { NSLocalizedString("voice", comment: "") }
-  static var sensitive: String { NSLocalizedString("sensitive", comment: "") }
+  static var attachment: String { NSLocalizedString("bodyAttachment", comment: "") }
+  static var image: String { NSLocalizedString("bodyImage", comment: "") }
+  static var video: String { NSLocalizedString("bodyVideo", comment: "") }
+  static var voice: String { NSLocalizedString("bodyVoice", comment: "") }
+  static var sensitive: String { NSLocalizedString("bodySensitive", comment: "") }
 }

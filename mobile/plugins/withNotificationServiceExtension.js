@@ -7,7 +7,7 @@
 // `teamId`) rather than `$(AppIdentifierPrefix)`: the store archive is built unsigned, where that
 // variable is empty, and the ad-hoc codesign step reads the entitlements files unexpanded. The app also gets the Communication
 // Notifications capability (the sender-style banner). Strings come from the shared catalogues
-// (`mobile:push.notification.*`), written out as Localizable.strings at prebuild.
+// (`mobile:push.*`, shared with the Android handler), written out as Localizable.strings at prebuild.
 //
 // `POLLIS_IOS_NSE=off` builds the app without any of it (no extension, no new entitlements, and the
 // app does not advertise the `rich` push capability) — for a store build cut before the developer
@@ -41,11 +41,11 @@ const STRING_KEYS = [
   "genericBody",
   "nameOnlyBody",
   "groupTitle",
-  "attachment",
-  "image",
-  "video",
-  "voice",
-  "sensitive",
+  "bodyAttachment",
+  "bodyImage",
+  "bodyVideo",
+  "bodyVoice",
+  "bodySensitive",
 ];
 // i18next interpolation → positional format arguments, in the order NotificationService.swift passes them.
 const PLACEHOLDERS = { sender: "%1$@", conversation: "%2$@" };
@@ -105,24 +105,23 @@ function toFormat(value) {
     .replace(/%/g, "%%")
     .replace(/\{\{\s*(\w+)\s*\}\}/g, (match, name) => {
       if (!PLACEHOLDERS[name]) {
-        throw new Error(`push.notification string uses unknown placeholder {{${name}}}`);
+        throw new Error(`mobile:push string uses unknown placeholder {{${name}}}`);
       }
       return PLACEHOLDERS[name];
     });
 }
 
-/** `<lproj>` → Localizable.strings text, from `mobile:push.notification.*`; English fills any gap. */
+/** `<lproj>` → Localizable.strings text, from `mobile:push.*`; English fills any gap. */
 function localizableStrings(localesDir = LOCALES_DIR) {
   const read = (lng) =>
-    JSON.parse(fs.readFileSync(path.join(localesDir, lng, "mobile.json"), "utf8"))?.push
-      ?.notification ?? {};
+    JSON.parse(fs.readFileSync(path.join(localesDir, lng, "mobile.json"), "utf8"))?.push ?? {};
   const en = read("en");
   const out = {};
   for (const [lng, lproj] of Object.entries(LPROJ)) {
     const table = { ...en, ...read(lng) };
     const lines = STRING_KEYS.map((key) => {
       if (typeof table[key] !== "string") {
-        throw new Error(`mobile:push.notification.${key} is missing from the ${lng} catalogue`);
+        throw new Error(`mobile:push.${key} is missing from the ${lng} catalogue`);
       }
       return `"${key}" = "${escapeStrings(toFormat(table[key]))}";`;
     });

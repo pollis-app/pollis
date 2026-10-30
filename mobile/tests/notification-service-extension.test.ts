@@ -57,7 +57,7 @@ test("every locale gets every string, with positional placeholders", () => {
   const tables = plugin.localizableStrings();
   assert.deepEqual(Object.keys(tables).sort(), ["ar", "en", "es", "fr", "ru", "uk", "zh-Hans"]);
   for (const [lproj, text] of Object.entries(tables) as [string, string][]) {
-    for (const key of ["genericTitle", "genericBody", "nameOnlyBody", "groupTitle", "attachment", "image", "video", "voice", "sensitive"]) {
+    for (const key of ["genericTitle", "genericBody", "nameOnlyBody", "groupTitle", "bodyAttachment", "bodyImage", "bodyVideo", "bodyVoice", "bodySensitive"]) {
       assert.match(text, new RegExp(`^"${key}" = ".+";$`, "m"), `${lproj} ${key}`);
     }
     assert.match(text, /"groupTitle" = "[^"]*%1\$@[^"]*%2\$@[^"]*";/, `${lproj} groupTitle`);
