@@ -32,7 +32,7 @@ pub struct AppState {
     /// The only database this process opens (#987); remote reads go through the DS.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
     /// Test-harness only (#1524): a per-device data dir, so sibling devices don't share one DB. Set before sign-in.
-    #[cfg(feature = "test-harness")]
+    #[cfg(any(test, feature = "test-harness"))]
     pub local_dir: std::sync::OnceLock<std::path::PathBuf>,
     /// Pluggable secret store; tests inject an [`InMemoryKeystore`] per simulated client.
     pub keystore: Arc<dyn Keystore>,
@@ -131,7 +131,7 @@ impl AppState {
         Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
-            #[cfg(feature = "test-harness")]
+            #[cfg(any(test, feature = "test-harness"))]
             local_dir: std::sync::OnceLock::new(),
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
@@ -255,7 +255,7 @@ impl AppState {
 
     /// This state's per-user DB directory ([`AppState::local_dir`] under the harness).
     pub fn local_data_dir(&self) -> std::path::PathBuf {
-        #[cfg(feature = "test-harness")]
+        #[cfg(any(test, feature = "test-harness"))]
         if let Some(dir) = self.local_dir.get() {
             return dir.clone();
         }

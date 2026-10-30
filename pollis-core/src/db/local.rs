@@ -914,6 +914,42 @@ mod tests {
     const TEST_KEY: &[u8; 32] = b"pollis-local-db-test-key-32bytes";
     const WRONG_KEY: &[u8; 32] = b"pollis-local-db-test-key-32byteS";
 
+    /// #1599: a stale notification-key escrow must fail the extension, not cost the history.
+    #[test]
+    fn a_headless_open_refuses_a_wrong_key_and_never_wipes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        const USER: &str = "headless-open";
+        {
+            let db = LocalDb::open_for_user_in(dir.path(), USER, TEST_KEY).expect("create");
+            db.conn()
+                .execute(
+                    "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+                     VALUES ('m1', 'c1', 'u1', X'00', 'kept', '2024-01-01T00:00:00Z')",
+                    [],
+                )
+                .expect("insert");
+        }
+        let wrong = [0x5Au8; 32];
+        match LocalDb::open_existing_for_user_in(dir.path(), USER, &wrong) {
+            Err(Error::Database(rusqlite::Error::SqliteFailure(f, _))) => {
+                assert_eq!(f.code, rusqlite::ErrorCode::NotADatabase);
+            }
+            Err(e) => panic!("expected NotADatabase, got {e}"),
+            Ok(_) => panic!("a wrong key opened the database"),
+        }
+        assert!(
+            LocalDb::open_existing_for_user_in(dir.path(), "nobody-here", TEST_KEY).is_err(),
+            "a missing database is an error, never created"
+        );
+        assert!(!dir.path().join("pollis_nobody-here.db").exists());
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, TEST_KEY).expect("right key");
+        let kept: String = db
+            .conn()
+            .query_row("SELECT content FROM message WHERE id = 'm1'", [], |r| r.get(0))
+            .expect("history survives");
+        assert_eq!(kept, "kept");
+    }
+
     /// The whitepaper §7 claim, checked against the bytes.
     ///
     /// A pragma only proves the library; before #992 Windows wrote plaintext with every call succeeding.

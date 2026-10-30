@@ -912,6 +912,8 @@ pub async fn init_mls_group(
 ) -> Result<()> {
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
+    // Creating a group writes MLS state (and may delete a stale one) (#1599).
+    let _cross_process = state.cross_process_lock().await?;
 
     // Drop the guard before `publish_group_info` re-acquires it.
     {
@@ -1008,6 +1010,8 @@ pub(super) async fn forget_local_mls_group_at(
     group_id: &str,
     generation: i64,
 ) -> crate::error::Result<()> {
+    // Deleting a group is an MLS mutation another process must not interleave with (#1599).
+    let _cross_process = state.cross_process_lock().await?;
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))

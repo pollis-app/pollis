@@ -219,6 +219,73 @@ fn ios_bootstrap() -> Result<(), BridgeError> {
     prepared.map_err(|e| BridgeError::Bridge(format!("ios data dir at {}: {e}", dir.display())))
 }
 
+/// The user whose database [`quiesce_for_suspend`] closed, to reopen on resume. Its mutex also
+/// serializes suspend against resume.
+static PARKED_DB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// #1599, iOS `0xdead10cc`: once the state-lock gate for `ticket` is closed and drained, close
+/// the app's SQLCipher connection too. In WAL mode an open connection keeps `fcntl` locks on
+/// the `-shm` file, and the database lives in the App Group container, where iOS kills a
+/// suspended app holding one. The WAL is checkpointed first. Returns true when no connection
+/// is open afterwards.
+pub(crate) fn quiesce_for_suspend(ticket: u64) -> bool {
+    let Some(state) = APP_STATE.get().cloned() else {
+        return true;
+    };
+    let mut parked = PARKED_DB.lock().unwrap_or_else(|p| p.into_inner());
+    if !crate::notify::lock::suspend::is_current(ticket) {
+        return false;
+    }
+    let db = worker_runtime().block_on(async { state.local_db.lock().await.take() });
+    let Some(db) = db else {
+        return true;
+    };
+    if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+        crate::diag!("[suspend] wal checkpoint before suspension failed (non-fatal): {e}");
+    }
+    let user = worker_runtime().block_on(async {
+        state.unlock.lock().await.as_ref().map(|u| u.user_id.clone())
+    });
+    drop(db);
+    *parked = user;
+    true
+}
+
+/// Back in the foreground: open the state-lock gate and reopen the database
+/// [`quiesce_for_suspend`] closed, if the session is still unlocked for that user.
+pub(crate) fn resume_after_suspend() {
+    let mut parked = PARKED_DB.lock().unwrap_or_else(|p| p.into_inner());
+    crate::notify::lock::suspend::end();
+    let Some(user) = parked.take() else {
+        return;
+    };
+    let Some(state) = APP_STATE.get().cloned() else {
+        return;
+    };
+    worker_runtime().block_on(async {
+        let key = {
+            let unlock = state.unlock.lock().await;
+            match unlock.as_ref() {
+                Some(u) if u.user_id == user => u.db_key.clone(),
+                // Locked or signed out meanwhile: the next unlock opens it the normal way.
+                _ => return,
+            }
+        };
+        let mut slot = state.local_db.lock().await;
+        if slot.is_some() {
+            return;
+        }
+        match crate::db::local::LocalDb::open_existing_for_user_in(
+            &state.local_data_dir(),
+            &user,
+            &key,
+        ) {
+            Ok(db) => *slot = Some(db),
+            Err(e) => crate::diag!("[suspend] local database not reopened after resume: {e}"),
+        }
+    });
+}
+
 /// Whether the app's `init_pollis` has run in this process (#1599: Android may run a headless
 /// fetch inside the running app).
 pub(crate) fn is_initialized() -> bool {
