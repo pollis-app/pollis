@@ -345,6 +345,23 @@ crashed on the first silent push to a killed app).
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.
 
+## Rich notifications on iOS (#1599)
+
+The wire stays `{h}` plus the generic title and body. A binary that has the
+Notification Service Extension registers its token with `caps: ["rich"]`. It
+claims this from its *embedded* `extra.richPush.ios`, set by the config plugin,
+never from OTA'd JS (`mobile/lib/push/caps.ts`). The DS then adds
+`mutableContent`, so APNs wakes `PollisNotificationService`. The extension calls
+`pollis_notify_fetch(<App Group>/pollis, h, 20000)`, which fetches, decrypts and
+stores the pending envelopes, then rewrites the title (sender, or
+"sender · conversation"), body and `threadIdentifier` (conversation id). It
+also attaches an `INSendMessageIntent` carrying no message text, for the
+Messages-style look. Setting "Nothing", an all-muted fetch or an empty fetch
+gives the localised generic text. Any failure or `serviceExtensionTimeWillExpire`
+delivers the push untouched. `userInfo` is never modified, so taps and #1508
+dismissal still work by `data.h`. Build, signing and portal details:
+`mobile/CLAUDE.md` → "Notification Service Extension".
+
 ## Files
 
 | File | Role |
@@ -360,6 +377,8 @@ above, so reading on desktop clears the phone.
 | `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
 | `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
 | `pollis-delivery/src/profile.rs` | `set_channel_mute` / `read_channel_mutes` (#1431) |
+| `mobile/plugins/withNotificationServiceExtension.js` · `mobile/plugins/notification-service/` | iOS NSE target, entitlements, Localizable.strings, and the Swift rewrite (#1599) |
+| `mobile/modules/pollis-native/ios/PollisAppGroup.mm` | Points the core at the App Group data dir + shared keychain group before init (#1599) |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/voice/voiceBridge.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions (was `hooks/useVoiceChannel.ts`, deleted) |

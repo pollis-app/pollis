@@ -5,7 +5,11 @@
 // them as the app would, and returns previews. Any failure delivers the push as it arrived.
 
 import Intents
+import os
 import UserNotifications
+
+// Outcomes only (mode, reason, counts) — never a name, id, handle or body.
+private let log = Logger(subsystem: "com.pollis.ios.NotificationService", category: "nse")
 
 final class NotificationService: UNNotificationServiceExtension {
   // Leaves headroom under the ~30 s the system grants before serviceExtensionTimeWillExpire.
@@ -25,12 +29,20 @@ final class NotificationService: UNNotificationServiceExtension {
     lock.unlock()
 
     guard let dataDir = PollisShared.dataDirectory() else {
+      log.error("no app group container; delivering the push as it arrived")
       deliver(request.content)
       return
     }
     let handle = Self.handle(of: request.content.userInfo)
     DispatchQueue.global(qos: .userInitiated).async {
+      let started = Date()
       let result = PollisNotifyResult.fetch(dataDir: dataDir.path, handle: handle, budgetMs: Self.budgetMs)
+      let ms = Int(Date().timeIntervalSince(started) * 1000)
+      if let result, result.ok {
+        log.info("fetch ok mode=\(result.mode ?? "?", privacy: .public) items=\(result.items?.count ?? 0, privacy: .public) ms=\(ms, privacy: .public)")
+      } else {
+        log.info("fetch failed reason=\(result?.reason ?? "unparsable", privacy: .public) ms=\(ms, privacy: .public)")
+      }
       Self.rewrite(request.content, with: result) { content in
         self.deliver(content)
       }
@@ -42,6 +54,7 @@ final class NotificationService: UNNotificationServiceExtension {
     let fallback = original
     lock.unlock()
     if let fallback {
+      log.error("time expired; delivering the push as it arrived")
       deliver(fallback)
     }
   }
