@@ -385,6 +385,17 @@
         "showInlineTimestamps": "显示行内时间戳",
         "showMemberAvatars": "显示成员头像"
       },
+      "notificationContent": {
+        "description": "预览仅在此设备上解密。",
+        "full": "名称和消息",
+        "fullSub": "显示发送者和消息内容。",
+        "heading": "通知内容",
+        "name": "仅名称",
+        "nameSub": "显示发送者，不显示消息内容。",
+        "none": "不显示",
+        "noneSub": "只显示收到了一条消息。",
+        "pinNote": "选择“不显示”时，你的 PIN 码仍是这台设备上消息的唯一钥匙。"
+      },
       "notificationsOffSettings": "已关闭。请在系统设置中开启",
       "notificationsOffTap": "已关闭。点按开启",
       "notificationsOn": "已开启",

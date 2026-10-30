@@ -395,6 +395,17 @@
         "showInlineTimestamps": "Mostrar la hora junto a cada mensaje",
         "showMemberAvatars": "Mostrar los avatares de los miembros"
       },
+      "notificationContent": {
+        "description": "Las vistas previas se descifran solo en este dispositivo.",
+        "full": "Nombre y mensaje",
+        "fullSub": "Muestra quién lo envió y lo que dijo.",
+        "heading": "Contenido de las notificaciones",
+        "name": "Solo el nombre",
+        "nameSub": "Muestra quién lo envió, no lo que dijo.",
+        "none": "Nada",
+        "noneSub": "Solo muestra que llegó un mensaje.",
+        "pinNote": "Si eliges Nada, tu PIN sigue siendo la única llave de los mensajes de este dispositivo."
+      },
       "notificationsOffSettings": "Desactivadas. Actívalas en Ajustes del sistema",
       "notificationsOffTap": "Desactivadas. Toca para activar",
       "notificationsOn": "Activadas",
