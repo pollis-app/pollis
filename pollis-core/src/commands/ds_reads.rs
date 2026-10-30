@@ -276,6 +276,9 @@ pub(crate) async fn devices(
 }
 
 /// The authenticated user's own account row.
+///
+/// Device-signed once this device can sign; before that (a fresh device on the
+/// soft-reset path, #1616) the verified-OTP session authenticates it instead.
 pub(crate) async fn account_status(
     state: &Arc<AppState>,
     user_id: &str,
@@ -283,7 +286,9 @@ pub(crate) async fn account_status(
     let body = ar::AccountStatusBody {
         user_id: Some(user_id.to_string()),
     };
-    Ok(ds_post_json(state, &body).await?.account)
+    Ok(crate::commands::mls::ds_post_signed_or_session_json(state, &body)
+        .await?
+        .account)
 }
 
 /// This device's remaining unclaimed (regular) key packages in one suite, and

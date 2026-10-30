@@ -522,7 +522,12 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     }
 
     // Without this, certs signed under the old key are unverifiable until each device re-runs `ensure_device_cert`.
-    if let Err(e) = crate::commands::mls::resign_stale_device_certs(state, user_id).await {
+    // A device that cannot sign yet (#1616) rotated under its OTP session, which also
+    // wiped every other device; it has no cert of its own until `finalize`, so skip.
+    let can_sign = state.local_db.lock().await.is_some();
+    if !can_sign {
+        crate::diag!("[reset] pre-enrollment rotation: no device certs to re-sign");
+    } else if let Err(e) = crate::commands::mls::resign_stale_device_certs(state, user_id).await {
         crate::diag!(
             "[reset] resign_stale_device_certs failed (non-fatal): {e}"
         );

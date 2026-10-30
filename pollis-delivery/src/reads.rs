@@ -117,6 +117,34 @@ pub(crate) async fn authed_user(
     }
 }
 
+/// [`authed_user`], also accepting a verified OTP session (`X-Pollis-Session`)
+/// for a device that is not enrolled yet (#1616).
+///
+/// Same rule as `writes::gate_or_session`: a request carrying the signature
+/// header goes through the signature check unconditionally, so a bad signature
+/// is never rescued by a session. OTP sessions only; a device-link session is a 401.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn authed_user_or_session(
+    state: &AppState,
+    req: &RawRequest,
+    body_user_id: Option<&str>,
+) -> Result<Result<String, Response>, AppError> {
+    if !state.require_auth || req.headers.contains_key(auth::H_SIGNATURE) {
+        return authed_user(state, req, body_user_id).await;
+    }
+    match crate::session::verify_session(&req.headers, &state.sessions, crate::util::now_unix()) {
+        Ok(claims) => {
+            if let Some(claimed) = body_user_id {
+                if !claimed.is_empty() && claimed != claims.user_id {
+                    return Ok(Err(AuthRejection::Forbidden.into_response()));
+                }
+            }
+            Ok(Ok(claims.user_id))
+        }
+        Err(rej) => Ok(Err(rej.into_response())),
+    }
+}
+
 /// POST `/v1/mls/conversation-state` — every input the client's MLS replay and
 /// join-recovery paths need, batched across conversations, each conversation
 /// answered from ONE log-DB read transaction.
