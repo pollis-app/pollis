@@ -31,17 +31,11 @@ test("the hook speaks the bridge's command and argument names", () => {
   assert.match(hook, /invoke\("set_notification_content", \{ mode: value \}\)/);
 });
 
-// The arms are pollis-core's (feature/1599-core-headless-fetch); skipped, visibly, until that lands.
-const bridge = read("../../pollis-core/src/bridge.rs");
-const armsLanded = bridge.includes('"set_notification_content"');
-test(
-  "the bridge's arms take the hook's argument names",
-  { skip: armsLanded ? false : "core arms not merged yet (#1599 part A)" },
-  () => {
-    assert.match(bridge, /"get_notification_content" =>/);
-    assert.match(bridge, /"set_notification_content" => \{[\s\S]*?arg\(&args, "mode"\)/);
-  },
-);
+test("the bridge's arms take the hook's argument names", () => {
+  const bridge = read("../../pollis-core/src/bridge.rs");
+  assert.match(bridge, /"get_notification_content" =>/);
+  assert.match(bridge, /"set_notification_content" => \{[\s\S]*?arg\(&args, "mode"\)/);
+});
 
 test("the picker sits in the notifications group, one chip per choice", () => {
   const screen = read("../app/self/preferences.tsx");
