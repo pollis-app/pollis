@@ -11,6 +11,9 @@ use pollis_sqlcipher as _;
 const LOCAL_SCHEMA_VERSION: &str = "8";
 const SCHEMA: &str = include_str!("local_schema.sql");
 
+/// How long a connection waits on another connection's write lock before `SQLITE_BUSY` (#1599).
+const BUSY_TIMEOUT_MS: u64 = 5_000;
+
 /// The local schema, for unit tests that need real tables.
 ///
 /// Prefer [`apply_local_schema`].
@@ -120,6 +123,8 @@ impl LocalDb {
             conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         }
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        // A notification extension may hold a write on this file (#1599): wait, don't fail with SQLITE_BUSY.
+        conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
         if !is_fresh {
             ensure_incremental_auto_vacuum(&conn)?;
         }
@@ -136,6 +141,43 @@ impl LocalDb {
         // The VFS creates the DB and WAL at the umask; tighten them here.
         restrict_database_files(db_path);
 
+        Ok(Self { conn })
+    }
+
+    /// Open an EXISTING per-user database for a headless reader (#1599), never creating or wiping it.
+    ///
+    /// Unlike [`LocalDb::open_for_user_in`], a missing file, a wrong key or a schema mismatch is an
+    /// error, not a reason to destroy the file: the app owns the database, and a stale notification
+    /// key must never cost the user their history. Nothing that assumes "no other process is using
+    /// this file" (the orphan-attachment sweep, eviction) runs here.
+    pub fn open_existing_for_user_in(
+        data_dir: &std::path::Path,
+        user_id: &str,
+        key: &[u8],
+    ) -> Result<Self> {
+        let db_path = user_db_path(data_dir, user_id)?;
+        if !db_path.is_file() {
+            return Err(Error::Other(anyhow::anyhow!("no local database for this user")));
+        }
+        let conn = Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.execute_batch(&format!("PRAGMA key = \"x'{}'\"", hex::encode(key)))?;
+        conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
+        let version: String = conn.query_row(
+            "SELECT value FROM kv WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        if version != LOCAL_SCHEMA_VERSION {
+            return Err(Error::Other(anyhow::anyhow!(
+                "local schema {version} is not {LOCAL_SCHEMA_VERSION}; leaving it to the app"
+            )));
+        }
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        // Registers `pollis_search_text`, which the `message` triggers call; the batch is idempotent.
+        apply_local_schema(&conn)?;
         Ok(Self { conn })
     }
 
@@ -673,17 +715,60 @@ pub fn set_data_dir(dir: impl Into<std::path::PathBuf>) {
     *DATA_DIR.write().expect("data-dir lock") = Some(dir.into());
 }
 
+/// A host-chosen RELOCATION of the data dir (#1599): moves every path, but is not an "explicit" dir,
+/// so the keystore namespace (`keystore::namespace_prefix`) does not change with it.
+///
+/// The iOS host points it at the App Group container so the Notification Service Extension can
+/// read the same state; renaming the keystore namespace there would orphan every key.
+static DATA_DIR_OVERRIDE: std::sync::RwLock<Option<std::path::PathBuf>> =
+    std::sync::RwLock::new(None);
+
+/// Relocate the data dir without changing the keystore namespace. See [`DATA_DIR_OVERRIDE`].
+///
+/// Call before `init_pollis`; the iOS init then migrates the old directory into it once.
+pub fn set_data_dir_override(dir: impl Into<std::path::PathBuf>) {
+    *DATA_DIR_OVERRIDE.write().expect("data-dir lock") = Some(dir.into());
+}
+
+/// The relocation set by [`set_data_dir_override`] (or, on iOS, `POLLIS_DATA_DIR`), if any.
+pub fn data_dir_override() -> Option<std::path::PathBuf> {
+    if let Some(dir) = DATA_DIR_OVERRIDE.read().expect("data-dir lock").clone() {
+        return Some(dir);
+    }
+    // iOS never set POLLIS_DATA_DIR before #1599, so there it means a relocation: honouring it as
+    // an explicit dir would rename the keystore namespace and lose the identity.
+    #[cfg(target_os = "ios")]
+    {
+        if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
+            if !dir.is_empty() {
+                return Some(dir.into());
+            }
+        }
+    }
+    None
+}
+
 /// The explicitly chosen data dir, or `None` (shipped desktop); keyring namespacing keys off this, not [`dirs_path`].
 pub(crate) fn explicit_data_dir() -> Option<std::path::PathBuf> {
     if let Some(dir) = DATA_DIR.read().expect("data-dir lock").clone() {
         return Some(dir);
     }
-    // For a second dev instance without overriding $HOME, and the mobile sandbox.
-    std::env::var("POLLIS_DATA_DIR").ok().map(Into::into)
+    // For a second dev instance without overriding $HOME, and the Android sandbox. Not iOS: see `data_dir_override`.
+    #[cfg(not(target_os = "ios"))]
+    {
+        std::env::var("POLLIS_DATA_DIR").ok().map(Into::into)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        None
+    }
 }
 
 pub fn dirs_path() -> std::path::PathBuf {
     if let Some(dir) = explicit_data_dir() {
+        return dir;
+    }
+    if let Some(dir) = data_dir_override() {
         return dir;
     }
 
@@ -828,6 +913,42 @@ mod tests {
 
     const TEST_KEY: &[u8; 32] = b"pollis-local-db-test-key-32bytes";
     const WRONG_KEY: &[u8; 32] = b"pollis-local-db-test-key-32byteS";
+
+    /// #1599: a stale notification-key escrow must fail the extension, not cost the history.
+    #[test]
+    fn a_headless_open_refuses_a_wrong_key_and_never_wipes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        const USER: &str = "headless-open";
+        {
+            let db = LocalDb::open_for_user_in(dir.path(), USER, TEST_KEY).expect("create");
+            db.conn()
+                .execute(
+                    "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+                     VALUES ('m1', 'c1', 'u1', X'00', 'kept', '2024-01-01T00:00:00Z')",
+                    [],
+                )
+                .expect("insert");
+        }
+        let wrong = [0x5Au8; 32];
+        match LocalDb::open_existing_for_user_in(dir.path(), USER, &wrong) {
+            Err(Error::Database(rusqlite::Error::SqliteFailure(f, _))) => {
+                assert_eq!(f.code, rusqlite::ErrorCode::NotADatabase);
+            }
+            Err(e) => panic!("expected NotADatabase, got {e}"),
+            Ok(_) => panic!("a wrong key opened the database"),
+        }
+        assert!(
+            LocalDb::open_existing_for_user_in(dir.path(), "nobody-here", TEST_KEY).is_err(),
+            "a missing database is an error, never created"
+        );
+        assert!(!dir.path().join("pollis_nobody-here.db").exists());
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, TEST_KEY).expect("right key");
+        let kept: String = db
+            .conn()
+            .query_row("SELECT content FROM message WHERE id = 'm1'", [], |r| r.get(0))
+            .expect("history survives");
+        assert_eq!(kept, "kept");
+    }
 
     /// The whitepaper §7 claim, checked against the bytes.
     ///

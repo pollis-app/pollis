@@ -32,7 +32,7 @@ pub struct AppState {
     /// The only database this process opens (#987); remote reads go through the DS.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
     /// Test-harness only (#1524): a per-device data dir, so sibling devices don't share one DB. Set before sign-in.
-    #[cfg(feature = "test-harness")]
+    #[cfg(any(test, feature = "test-harness"))]
     pub local_dir: std::sync::OnceLock<std::path::PathBuf>,
     /// Pluggable secret store; tests inject an [`InMemoryKeystore`] per simulated client.
     pub keystore: Arc<dyn Keystore>,
@@ -109,6 +109,9 @@ pub struct AppState {
     ///
     /// Swapped live by `set_overlay_mode`; a `std::sync::Mutex` so the hot read holds no `.await`.
     pub overlay: std::sync::Mutex<Option<Arc<pollis_relay::OverlayHandle>>>,
+    /// The cross-process state lock (#1599), taken by every MLS section alongside its in-process
+    /// mutex. A headless fetch's state is built with [`LockPolicy::HeldByCaller`](crate::notify::lock::LockPolicy).
+    pub state_lock: Arc<crate::notify::lock::SharedStateLock>,
 }
 
 impl AppState {
@@ -128,7 +131,7 @@ impl AppState {
         Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
-            #[cfg(feature = "test-harness")]
+            #[cfg(any(test, feature = "test-harness"))]
             local_dir: std::sync::OnceLock::new(),
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
@@ -167,6 +170,9 @@ impl AppState {
             outbox_rerun: Arc::new(AtomicBool::new(false)),
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,
             overlay: std::sync::Mutex::new(None),
+            state_lock: crate::notify::lock::SharedStateLock::new(
+                crate::notify::lock::LockPolicy::PerSection,
+            ),
         }
     }
 
@@ -176,17 +182,37 @@ impl AppState {
     }
 
     /// Hold for the whole read-modify-write of local MLS state plus its `mls_commit_log` INSERT. Non-reentrant: use the `*_locked` variants.
+    ///
+    /// Also takes the cross-process [`state lock`](crate::notify::lock) (#1599), after the
+    /// in-process mutex; fails only if another process held it past
+    /// [`APP_WAIT`](crate::notify::lock::APP_WAIT), so the step is retried later instead of racing it.
     pub async fn mls_group_lock(
         &self,
         conversation_id: &str,
-    ) -> tokio::sync::OwnedMutexGuard<()> {
+    ) -> crate::error::Result<MlsGroupGuard> {
         let entry = {
             let mut map = self.mls_group_locks.lock().await;
             map.entry(conversation_id.to_string())
                 .or_insert_with(|| Arc::new(Mutex::new(())))
                 .clone()
         };
-        entry.lock_owned().await
+        let mutex = entry.lock_owned().await;
+        let cross_process = self.cross_process_lock().await?;
+        Ok(MlsGroupGuard {
+            _mutex: mutex,
+            _cross_process: cross_process,
+        })
+    }
+
+    /// A share of the cross-process state lock (#1599) for an MLS-mutating step that has no
+    /// per-conversation lock (welcome processing, KeyPackage generation).
+    pub async fn cross_process_lock(
+        &self,
+    ) -> crate::error::Result<crate::notify::lock::SharedStateGuard> {
+        Ok(self
+            .state_lock
+            .acquire(&self.local_data_dir(), crate::notify::lock::APP_WAIT)
+            .await?)
     }
 
 
@@ -229,7 +255,7 @@ impl AppState {
 
     /// This state's per-user DB directory ([`AppState::local_dir`] under the harness).
     pub fn local_data_dir(&self) -> std::path::PathBuf {
-        #[cfg(feature = "test-harness")]
+        #[cfg(any(test, feature = "test-harness"))]
         if let Some(dir) = self.local_dir.get() {
             return dir.clone();
         }
@@ -326,13 +352,20 @@ impl AppState {
 ///
 /// Borrows the guard so it can't outlive the lock.
 pub struct MlsLockHeld<'a> {
-    _guard: &'a tokio::sync::OwnedMutexGuard<()>,
+    _guard: &'a MlsGroupGuard,
 }
 
 impl<'a> MlsLockHeld<'a> {
-    pub fn from_guard(guard: &'a tokio::sync::OwnedMutexGuard<()>) -> Self {
+    pub fn from_guard(guard: &'a MlsGroupGuard) -> Self {
         Self { _guard: guard }
     }
+}
+
+/// The per-conversation MLS mutex together with this process's share of the cross-process
+/// state lock (#1599). Both release on drop.
+pub struct MlsGroupGuard {
+    _mutex: tokio::sync::OwnedMutexGuard<()>,
+    _cross_process: crate::notify::lock::SharedStateGuard,
 }
 
 /// Bring the local full-text search index up to date, off the sign-in path (#850).

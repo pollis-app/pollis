@@ -152,7 +152,7 @@ There is no time-based backoff. Against offline brute force the defence is ~250 
 
 ### 3.4 Key custody at rest
 
-After PIN setup, `db_key` and `account_id_key` exist on disk only inside AEAD ciphertext. In process they live in `Zeroizing<Vec<u8>>` (`AppState.unlock`) and are scrubbed on drop. `lock()` drops the unlock state and closes the SQLCipher handle, returning to "needs PIN" without signing out.
+After PIN setup, `db_key` and `account_id_key` exist on disk only inside AEAD ciphertext, with one mobile exception: the notification key escrow (§3.8). In process they live in `Zeroizing<Vec<u8>>` (`AppState.unlock`) and are scrubbed on drop. `lock()` drops the unlock state and closes the SQLCipher handle, returning to "needs PIN" without signing out.
 
 ### 3.5 Where the wrapped blobs physically sit (#882)
 
@@ -188,9 +188,23 @@ A file that fails to decrypt, or decrypts but fails to parse, is never rewritten
 
 ### 3.7 Comparable systems
 
-- **Signal Desktop** encrypts its SQLCipher store with a random key held in the OS keystore, with no user factor. Pollis adds the PIN: cloning the keystore without the PIN does not decrypt local data. This is closer to iOS message-cache protection.
+- **Signal Desktop** encrypts its SQLCipher store with a random key held in the OS keystore, with no user factor. Pollis adds the PIN: cloning the keystore without the PIN does not decrypt local data. This is closer to iOS message-cache protection. On mobile with rich notifications on (§3.8), Pollis has Signal's model instead.
 - **1Password / Bitwarden** use Argon2id with similar parameters, but over a high-entropy master password. Pollis has a 4-digit PIN; the 10-attempt wipe is what closes that gap.
 - **WhatsApp Desktop** keeps its database key on disk with no user factor, like Pollis before PIN. Legacy unwrapped slots are now read only to wrap them at `set_pin`.
+
+### 3.8 The notification key escrow (mobile only, #1599)
+
+Source: `pollis-core/src/notify/escrow.rs`.
+
+A rich notification ("Alice: are we shipping today?") is built on the phone. A Notification Service Extension (iOS) or an FCM data-push handler (Android) wakes up, fetches the envelope, decrypts it and stores it, all without the user present. That process has no PIN, and §3.2 puts the database key only under the PIN. So while the user's **Notification content** setting is *Name and message* (the default) or *Name only*, the app also keeps an **unwrapped copy of `db_key`** in the device keystore, slot `notify_db_key_{user_id}`. On iOS that keystore is the `keystore.pks` file sealed by the Keychain KEK (`AfterFirstUnlockThisDeviceOnly`, shared with the extension through the `com.pollis.shared` access group). On Android it is the same file sealed by the Android Keystore.
+
+**What changes.** With the escrow present, the PIN no longer stands between the local database and anyone who can run code as the app on the device after its first unlock, or who holds a copy of both the keystore file and the OS-held KEK. That is Signal's and WhatsApp's model: the OS sandbox and device encryption protect the data, and the in-app lock is a UI lock. A stolen phone that has been powered off, or never unlocked since boot, still yields nothing, because the KEK is unavailable before first unlock. The escrow never leaves the device (`ThisDeviceOnly`, excluded from backup). The account identity key (`account_id_key`) is never escrowed, so the extension cannot sign as the account, cross-sign a device, or recover anything. It can read, decrypt and acknowledge envelopes, which needs only the device key inside the database.
+
+**What does not change.** Desktop never escrows (`escrow_supported()` is false off iOS and Android; pinned by `desktop_never_escrows`). Setting **Nothing** deletes the escrow and restores the §3.4 property exactly. Notifications then show today's generic text.
+
+**Lifecycle.** The escrow is written at unlock and set-PIN when the setting allows it, and by the setting itself. It is deleted by the setting *Nothing*, every logout, account deletion, "wipe this device", and the PIN-lockout nuke (§3.3). Each trigger is tested (`src-tauri/tests/flows/rich_push.rs`, `notify::escrow` unit tests). An install upgraded to this build gets no escrow until its first unlock, so until then its notifications stay generic.
+
+**The extension cannot hurt the database.** It opens the existing file read-write but never creates, migrates or wipes it (`LocalDb::open_existing_for_user_in`). A stale escrow is reported as `decrypt` and the file is left alone. The extension also never mints a keystore KEK, and no process mints one while a sealed keystore exists. The KEK is copied into the shared access group, and the app-only item is kept so a build without the entitlement still opens the keystore. Every MLS-mutating step in either process holds an exclusive `flock` on `<data_dir>/state.lock` (§6.6), so the app and the extension cannot roll each other's group state back.
 
 ---
 
@@ -379,6 +393,8 @@ The consumer validates each claimed package (`KeyPackageIn::validate(crypto, Pro
 6. The client publishes a LiveKit `new_message` ping to wake online recipients. Non-fatal: offline recipients fetch on their next read.
 
 The `mls:` prefix is a format marker kept from the MLS rollout. Decryption (`messages/read.rs::list_messages` → `try_mls_decrypt`) strips it, hex-decodes, and calls `MlsGroup::process_message`.
+
+**Two processes, one group state (#1599).** On mobile a Notification Service Extension (iOS) or FCM handler (Android) decrypts envelopes while the app may be running. Decrypting consumes secret-tree keys and encrypting advances this device's own ratchet, both read-modify-writes of `mls_kv`. So every MLS-mutating step in either process (commit replay and its decrypt hook, every seal, welcome processing, KeyPackage generation) also holds an exclusive `flock` on `<data_dir>/state.lock` (`pollis-core/src/notify/lock.rs`). Without it, one process could write back a state the other had already advanced past: a rollback, and on the send side a reused generation. The lock is per open file description, so a killed holder releases it, and an in-process extension (Android) is excluded the same way. The extension holds it for its ingest, waits at most 40% of its budget for it, and otherwise falls back to the generic notification. On iOS the app stops taking it, drains it and closes its database before it is suspended, since iOS kills a suspended app that holds a file lock in the shared container (`0xdead10cc`). The app shares one hold among its concurrent sections. `src-tauri/tests/flows/rich_push.rs` races the two and checks that nothing is lost or rolled back, and that the extension cannot enter while the app holds a staged commit.
 
 ### 6.7 Forward secrecy and post-compromise security
 
@@ -695,7 +711,7 @@ Every other device the user enrolled is cryptographically orphaned: its account 
 | MLS HPKE init private | X-Wing (X25519 + ML-KEM-768) decapsulation key | Local `mls_kv` (SQLCipher) | Off-device |
 | Published KeyPackages | Public halves, `CS_PQ` | `mls_key_package`, suite-tagged, claimed once | Any private half |
 | MLS application secrets | RFC 9420 | Ephemeral, per epoch | Persisted past their epoch |
-| SQLCipher DB key | 32 random bytes | Keystore `db_key_wrapped_{uid}` under the PIN KEK (§3.5); `AppState.unlock` | Unwrapped on disk |
+| SQLCipher DB key | 32 random bytes | Keystore `db_key_wrapped_{uid}` under the PIN KEK (§3.5); `AppState.unlock`; on mobile with rich notifications on, also `notify_db_key_{uid}` under the OS-held keystore KEK only (§3.8) | Unwrapped on disk (desktop); off the device |
 | PIN | 4 ASCII digits | The user's head | Disk or wire |
 | PIN KEK | Argon2id → 32 B | Derived at unwrap time | Stored anywhere |
 | OTP | 6 digits | DS memory, as a salted hash; 10-min TTL; attempt-capped | Disk; the client |
@@ -726,6 +742,7 @@ Ordered by adversary cost, cheapest first. Item numbers are stable; closed items
 9. **Closed: OTP comparison.** The DS compares salted SHA-256 hashes in constant time (§4).
 10. **Account-key transparency has residual limits.** §6.9. (a) Daily publish lag: between a swap and the next publish, only live TOFU covers it. (b) Client audits alert but do not block. (c) No VRF: the user set and rotation cadence are enumerable. (d) One first-party log, signed in GitHub Actions, so CI is in the TCB; `pollis-verify` lets anyone run an independent auditor. (e) #732's rotation had no overlap window, so it was indistinguishable from equivocation to anyone holding cached heads; clients now pin a key set with expiries (#740) and an offline root (#754) for future rotations. None of these reopen the swap attack; they bound how fast and by whom it is detected.
 11. **Sealed sender is at-rest only; the live DS still sees the sender.** §1.2. Sealed sender, size padding and signalling minimization are shipped. Every send still authenticates with the sender's device signature, so the DS learns the sender in real time. Anonymous membership proofs (v1.5), per-conversation membership pseudonyms (v3) and timing batching (v4) are not built. Conversation existence, member counts and the `user_id`-keyed graph remain visible to the DS and Turso. IP hiding exists only as the opt-in relay overlay, off by default. Post-quantum confidentiality (#454) and authentication (#668) are claimed with the scope in §6.1 and §6.10: forward-only from each group's migration.
+12. **On mobile with rich notifications on, the PIN does not protect the local database (#1599).** §3.8. The database key is also escrowed unwrapped in the device keystore, so code running as the app after the phone's first unlock, or anyone holding both the keystore file and the OS-held KEK, can open the database without the PIN. This is the Signal/WhatsApp model. Setting *Nothing* removes the escrow and the exposure. Desktop never escrows.
 
 ---
 

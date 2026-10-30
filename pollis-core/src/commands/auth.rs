@@ -712,6 +712,12 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         }
     };
     if probe.as_ref().is_some_and(|p| !p.exists) {
+        // Said out loud (#1599): a session that silently vanished looked like a migration bug,
+        // when the install had been signed in against a different DS.
+        crate::diag!(
+            "[session] the DS has no account {}; removing it from this device's list",
+            profile.id
+        );
         let _ = crate::accounts::remove_account(&profile.id);
         return Ok(None);
     }
@@ -897,6 +903,13 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
 
+    // Every logout drops the notification key escrow (#1599); the next unlock re-creates it.
+    if let Some(ref uid) = user_id {
+        if let Err(e) = crate::notify::escrow::delete_escrow(state.keystore.as_ref(), uid).await {
+            crate::diag!("[auth] logout: notification key escrow not deleted: {e}");
+        }
+    }
+
     // Named explicitly: `unload_user_db` already cleared the ambient cache user.
     crate::commands::r2::clear_media_cache(match user_id.as_deref() {
         Some(uid) => crate::commands::r2::CacheScope::User(uid),
@@ -995,6 +1008,7 @@ pub async fn delete_account(
     let _ = state.keystore.delete_for_user("pin_meta", &user_id).await;
     let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, &user_id).await;
     let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, &user_id).await;
+    let _ = crate::notify::escrow::delete_escrow(state.keystore.as_ref(), &user_id).await;
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
@@ -1036,6 +1050,19 @@ pub async fn list_known_accounts(state: &Arc<AppState>) -> Result<crate::account
 /// entries (device_id, wrapped keys, pin_meta, legacy unwrapped keys),
 /// and the accounts index. Does NOT touch the remote Turso database —
 /// users can re-authenticate on this device later.
+/// Every per-user keystore slot `wipe_local_data` deletes.
+pub(crate) const WIPED_USER_SLOTS: &[&str] = &[
+    DEVICE_ID_KEY,
+    "db_key",
+    "db_key_wrapped",
+    "account_id_key",
+    "account_id_key_wrapped",
+    "pin_meta",
+    LOGIN_EMAIL_KEY,
+    // The notification key escrow (#1599).
+    crate::notify::escrow::ESCROW_SLOT,
+];
+
 pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
     state.unload_user_db().await;
     *state.device_id.lock().await = None;
@@ -1044,17 +1071,8 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
     // A corrupt index is survivable; everything goes anyway.
     let index = crate::accounts::read_accounts_index().unwrap_or_default();
 
-    let per_user_keys = [
-        DEVICE_ID_KEY,
-        "db_key",
-        "db_key_wrapped",
-        "account_id_key",
-        "account_id_key_wrapped",
-        "pin_meta",
-        LOGIN_EMAIL_KEY,
-    ];
     for account in &index.accounts {
-        for key in &per_user_keys {
+        for key in WIPED_USER_SLOTS {
             let _ = state.keystore.delete_for_user(key, &account.user_id).await;
         }
     }

@@ -178,7 +178,7 @@ pub(super) async fn deliver_queued(
         // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
         // self_update's order) and dropped with this block, before the post's
         // own catch-up can want it.
-        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;

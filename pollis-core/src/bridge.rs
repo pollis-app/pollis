@@ -49,7 +49,7 @@ static APP_STATE: OnceCell<Arc<AppState>> = OnceCell::const_new();
 /// By spawning the real work onto these big-stack workers and only
 /// `await`ing the join handle on the JS thread, the JS thread does nothing
 /// stack-hungry and the parser gets the headroom it needs.
-fn worker_runtime() -> &'static tokio::runtime::Runtime {
+pub(crate) fn worker_runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
@@ -176,6 +176,8 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 overlay_directory_key: None,
                 dev_access_key: parsed.dev_access_key.filter(|s| !s.trim().is_empty()),
             };
+            // What a notification extension needs to reach the DS (#1599).
+            crate::notify::host::save_config(&crate::db::local::dirs_path(), &config);
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))
         })
@@ -208,8 +210,157 @@ fn android_bootstrap(data_dir: Option<&str>) -> Result<(), BridgeError> {
 #[cfg(target_os = "ios")]
 fn ios_bootstrap() -> Result<(), BridgeError> {
     let dir = crate::db::local::dirs_path();
-    crate::ios_storage::prepare(&dir)
-        .map_err(|e| BridgeError::Bridge(format!("ios data dir at {}: {e}", dir.display())))
+    // #1599: with an App Group override, the first launch moves the old directory into it.
+    let prepared = if crate::db::local::data_dir_override().as_deref() == Some(dir.as_path()) {
+        crate::ios_storage::migrate_into_override(&dir)
+    } else {
+        crate::ios_storage::prepare(&dir)
+    };
+    prepared.map_err(|e| BridgeError::Bridge(format!("ios data dir at {}: {e}", dir.display())))
+}
+
+/// The user whose database [`quiesce_for_suspend`] closed, to reopen on resume. Its mutex also
+/// serializes suspend against the reopen.
+static PARKED_DB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Close the app's database within `budget`, never blocking past it: the connection is taken
+/// only when no command is using it (a `try_lock` loop, not an `.await`). Checkpoints the WAL
+/// first. Returns the user it was open for, or `Err(())` if it could not be taken in time.
+fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Option<String>, ()> {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        if let Ok(mut slot) = state.local_db.try_lock() {
+            let Some(db) = slot.take() else {
+                return Ok(None);
+            };
+            if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+                crate::diag!("[suspend] wal checkpoint before suspension failed (non-fatal): {e}");
+            }
+            drop(db);
+            let user = state
+                .unlock
+                .try_lock()
+                .ok()
+                .and_then(|u| u.as_ref().map(|u| u.user_id.clone()));
+            return Ok(user);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// #1599, iOS `0xdead10cc`: once the state-lock gate for `ticket` is closed and drained, close
+/// the app's SQLCipher connection too. In WAL mode an open connection keeps `fcntl` locks on
+/// the `-shm` file, and the database lives in the App Group container, where iOS kills a
+/// suspended app holding one. Returns true when no connection is open afterwards.
+pub(crate) fn quiesce_for_suspend(ticket: u64) -> bool {
+    let Some(state) = APP_STATE.get().cloned() else {
+        return true;
+    };
+    let mut parked = PARKED_DB.lock().unwrap_or_else(|p| p.into_inner());
+    if !crate::notify::lock::suspend::is_current(ticket) {
+        return false;
+    }
+    match close_db_bounded(&state, std::time::Duration::from_secs(3)) {
+        Ok(Some(user)) => {
+            *parked = Some(user);
+            true
+        }
+        Ok(None) => true,
+        Err(()) => {
+            crate::diag!("[suspend] the database stayed busy; not closed before suspension");
+            false
+        }
+    }
+}
+
+/// The background task is about to expire (#1599): whatever is still in flight, release the
+/// state lock and close the database NOW, within about a second, so the app is never suspended
+/// holding either. Sections still running lose the lock (they are frozen with the app) and
+/// fail their next database step; on resume a new hold retakes the file lock.
+pub(crate) fn force_release_for_suspend(ticket: u64) {
+    let Some(state) = APP_STATE.get().cloned() else {
+        return;
+    };
+    if !crate::notify::lock::suspend::is_current(ticket) {
+        return;
+    }
+    state.state_lock.force_release();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    let mut parked = loop {
+        if let Ok(g) = PARKED_DB.try_lock() {
+            break Some(g);
+        }
+        if std::time::Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    match close_db_bounded(&state, std::time::Duration::from_millis(500)) {
+        Ok(Some(user)) => {
+            if let Some(p) = parked.as_mut() {
+                **p = Some(user);
+            }
+        }
+        Ok(None) => {}
+        Err(()) => crate::diag!("[suspend] background time expired with the database in use"),
+    }
+}
+
+/// Back in the foreground: open the state-lock gate at once and reopen the database off the
+/// calling thread. Never blocks (the host calls it on the main thread). A command that arrives
+/// before the reopen finishes reopens it itself ([`reopen_parked_db`] from `invoke`).
+pub(crate) fn resume_after_suspend() {
+    crate::notify::lock::suspend::end();
+    worker_runtime().spawn_blocking(reopen_parked_db);
+}
+
+/// Reopen the database [`quiesce_for_suspend`] closed, if the session is still unlocked for
+/// that user. Cheap when nothing is parked.
+pub(crate) fn reopen_parked_db() {
+    let Some(state) = APP_STATE.get().cloned() else {
+        return;
+    };
+    let mut parked = PARKED_DB.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(user) = parked.take() else {
+        return;
+    };
+    let key = match state.unlock.try_lock() {
+        Ok(unlock) => match unlock.as_ref() {
+            Some(u) if u.user_id == user => u.db_key.clone(),
+            // Locked or signed out meanwhile: the next unlock opens it the normal way.
+            _ => return,
+        },
+        Err(_) => {
+            // Someone is changing the unlock state: try again on the next command.
+            *parked = Some(user);
+            return;
+        }
+    };
+    let Ok(mut slot) = state.local_db.try_lock() else {
+        *parked = Some(user);
+        return;
+    };
+    if slot.is_some() {
+        return;
+    }
+    match crate::db::local::LocalDb::open_existing_for_user_in(&state.local_data_dir(), &user, &key) {
+        Ok(db) => *slot = Some(db),
+        Err(e) => crate::diag!("[suspend] local database not reopened after resume: {e}"),
+    }
+}
+
+/// Whether a closed database is waiting to be reopened. Lock-free fast path for `invoke`.
+fn db_parked() -> bool {
+    PARKED_DB.try_lock().map(|p| p.is_some()).unwrap_or(true)
+}
+
+/// Whether the app's `init_pollis` has run in this process (#1599: Android may run a headless
+/// fetch inside the running app).
+pub(crate) fn is_initialized() -> bool {
+    APP_STATE.get().is_some()
 }
 
 fn state() -> Result<Arc<AppState>, BridgeError> {
@@ -261,6 +412,11 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
 }
 
 async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeError> {
+    // Back from the background before the off-thread reopen ran (#1599): reopen here, on this
+    // worker, so the command sees its database.
+    if db_parked() {
+        tokio::task::spawn_blocking(reopen_parked_db).await.ok();
+    }
     let args: Value = if args_json.trim().is_empty() {
         Value::Object(Default::default())
     } else {
@@ -280,6 +436,15 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
 
         "get_session" => ok(auth::get_session(&state()?).await?),
+        // Rich notifications (#1599): what a notification may show; also writes or drops the key escrow.
+        "get_notification_content" => ok(
+            crate::notify::escrow::get_notification_content(&state()?).await?.as_str()
+        ),
+        "set_notification_content" => {
+            let mode: String = arg(&args, "mode")?;
+            crate::notify::escrow::set_notification_content(&state()?, &mode).await?;
+            ok(())
+        }
         "request_otp" => {
             let email: String = arg(&args, "email")?;
             auth::request_otp(&state()?, email).await?;

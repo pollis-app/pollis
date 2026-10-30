@@ -306,7 +306,7 @@ pub async fn external_join_group(
     conversation_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(conversation_id).await;
+    let _guard = state.mls_group_lock(conversation_id).await?;
     external_join_group_inner(state, conversation_id, user_id).await
 }
 
@@ -912,6 +912,8 @@ pub async fn init_mls_group(
 ) -> Result<()> {
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
+    // Creating a group writes MLS state (and may delete a stale one) (#1599).
+    let _cross_process = state.cross_process_lock().await?;
 
     // Drop the guard before `publish_group_info` re-acquires it.
     {
@@ -1008,6 +1010,8 @@ pub(super) async fn forget_local_mls_group_at(
     group_id: &str,
     generation: i64,
 ) -> crate::error::Result<()> {
+    // Deleting a group is an MLS mutation another process must not interleave with (#1599).
+    let _cross_process = state.cross_process_lock().await?;
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
@@ -1064,7 +1068,7 @@ pub async fn process_pending_commits_inner(
     mls_group_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(mls_group_id).await;
+    let _guard = state.mls_group_lock(mls_group_id).await?;
     process_pending_commits_locked(state, mls_group_id, user_id).await
 }
 
@@ -1151,7 +1155,7 @@ pub async fn process_pending_commits_inner_with_hook(
     on_epoch: &mut (dyn FnMut(&rusqlite::Connection, i64, u64) + Send),
     bound: Option<ReplayBound>,
 ) -> crate::error::Result<()> {
-    let _guard = state.mls_group_lock(mls_group_id).await;
+    let _guard = state.mls_group_lock(mls_group_id).await?;
     process_pending_commits_locked_impl(state, mls_group_id, user_id, Some(on_epoch), bound).await
 }
 

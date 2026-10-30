@@ -299,7 +299,7 @@ pub async fn edit_message_as(
     let plaintext = super::framing::pad(new_content.as_bytes());
     let sealed = {
         // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
-        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -380,7 +380,7 @@ async fn send_redaction_message(
     let plaintext = super::framing::pad_redaction(target_message_id);
     let sealed = {
         // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
-        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -797,7 +797,7 @@ pub(super) async fn post_edit(
 
     let sealed = {
         // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
-        let mls_guard = state.mls_group_lock(&mls_group_id).await;
+        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
         let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
