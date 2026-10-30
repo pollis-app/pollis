@@ -20,7 +20,7 @@
 //!   CROSS_READ_SIGNAL_DIR=$(mktemp -d) POLLIS_DEV_ACCESS_KEY=… \
 //!   cargo run -p pollis-tui --example cross_read_peer -- owner <email>
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -78,7 +78,7 @@ fn signals() -> Result<PathBuf> {
 }
 
 /// The first of `names` the script has created, waiting for one.
-async fn next_signal(dir: &PathBuf, names: &[String]) -> Result<String> {
+async fn next_signal(dir: &Path, names: &[String]) -> Result<String> {
     wait_for("the script's next signal", || async {
         Ok(names.iter().find(|n| dir.join(n.as_str()).exists()).cloned())
     })
