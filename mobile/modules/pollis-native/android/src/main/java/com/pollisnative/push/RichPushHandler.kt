@@ -91,8 +91,8 @@ object RichPushHandler {
       notifier.post(handle, RichPush.Plan.Silent, data, messageId, sentTime)
       return
     }
-    // Only the outcome class, never content.
-    Log.i(TAG, "posting ${plan.outcome}")
+    // Only the outcome class and the core's reason or mode, never content.
+    Log.i(TAG, "posting ${plan.outcome} (${RichPush.outcomeDetail(json)})")
     try {
       notifier.post(handle, plan, data, messageId, sentTime)
     } catch (e: Exception) {

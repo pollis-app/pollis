@@ -6,6 +6,7 @@ import Constants from "expo-constants";
 import { invoke } from "../native";
 import i18n from "../../i18n";
 import { readPayloadRouting } from "./routing";
+import { takeLaunchTap } from "./launchTap";
 import { createPushRegistrar, createTokenEchoFilter, type EnsureOptions } from "./registration";
 import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
@@ -144,18 +145,16 @@ export async function resolveNotificationRouting(data: unknown): Promise<Routing
   return null;
 }
 
-/** The tap that cold-started the app (#1422); taken once and cleared so it never routes twice. */
+/**
+ * The tap that cold-started the app (#1422); taken once and cleared so it never routes twice. On
+ * Android a tap on a notification the rich-push handler posted reaches this store through
+ * `PushTapActivity` (#1614), whatever state the app's task was in.
+ */
 export function takeLaunchNotificationData(): unknown | null {
-  try {
-    const response = Notifications.getLastNotificationResponse();
-    if (!response) {
-      return null;
-    }
-    Notifications.clearLastNotificationResponse();
-    return response.notification.request.content.data ?? null;
-  } catch {
-    return null;
-  }
+  return takeLaunchTap({
+    getLast: () => Notifications.getLastNotificationResponse(),
+    clear: () => Notifications.clearLastNotificationResponse(),
+  });
 }
 
 export function addPushListeners(handlers: PushHandlers): () => void {

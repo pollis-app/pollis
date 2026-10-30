@@ -10,5 +10,14 @@
         <action android:name="com.google.firebase.MESSAGING_EVENT" />
       </intent-filter>
     </service>
+    <!-- #1614: the tap target of every notification the rich-push handler posts. Invisible and out
+         of Recents; it hands the tap to expo-notifications and brings the app forward. -->
+    <activity
+      android:name="com.pollisnative.push.PushTapActivity"
+      android:exported="false"
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:taskAffinity=""
+      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
   </application>
 </manifest>
