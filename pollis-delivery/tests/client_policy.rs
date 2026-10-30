@@ -202,3 +202,26 @@ async fn a_publish_reaches_enforcement() {
     mirror.refresh().await;
     assert_eq!(call(&st, otp(Some(("macos", "1.16.0")))).await.0, StatusCode::OK);
 }
+
+/// `GET /v1/config` reports the mirrored URL, so a deploy can prove the var reached the container.
+#[tokio::test]
+async fn the_effective_config_names_the_mirrored_url() {
+    let db = common::TempDb::open("policy-config.db").await;
+    let url = "https://cdn.pollis.com/dev/client-policy.json";
+    for (mirror, expected) in [
+        (PolicyMirror::new(Some(url.to_string())), serde_json::json!(url)),
+        (PolicyMirror::new(None), serde_json::Value::Null),
+    ] {
+        let st = state(db.arc(), mirror).with_metrics_token(Some("t".into()));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .header("Authorization", "Bearer t")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body) = call(&st, req).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["client_policy_url"], expected);
+    }
+}

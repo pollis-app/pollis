@@ -17,6 +17,7 @@ import {
   type GateInputs,
   type GateMode,
 } from "./dev-gate";
+import { ENV_FINGERPRINT_KEY, envFingerprint, needsRestart } from "./container-env";
 
 // WHERE the DS container physically runs (#658).
 // A DO is placed near whoever first created it, permanently; `enam` matches the Turso primary.
@@ -198,6 +199,26 @@ export class PollisDelivery extends Container<Env> {
       .join("");
   }
 
+  // Once per Durable Object instance (each deploy restarts it): a container a rollout restarted
+  // with the previous start's environment is restarted with the current one (container-env.ts).
+  private envReconciled?: Promise<void>;
+
+  private async reconcileEnv(): Promise<void> {
+    try {
+      if (!this.ctx.container?.running) {
+        return;
+      }
+      const current = await envFingerprint({ ...this.envVars, ...(await this.resolveSecretEnv()) });
+      const recorded = await this.ctx.storage.get<string>(ENV_FINGERPRINT_KEY);
+      if (needsRestart(true, recorded, current)) {
+        console.log("container env differs from the deployed config; restarting the container");
+        await this.destroy();
+      }
+    } catch (e) {
+      console.warn("container env check failed", e);
+    }
+  }
+
   // The dev gate first, so a refused request never wakes the container; then bucket the client IP.
   override async fetch(request: Request): Promise<Response> {
     const gateMode = gateModeFrom(this.env.DEV_GATE_MODE);
@@ -221,6 +242,8 @@ export class PollisDelivery extends Container<Env> {
     if (ip) {
       headers.set(CLIENT_BUCKET_HEADER, await this.clientBucket(ip));
     }
+    this.envReconciled ??= this.reconcileEnv();
+    await this.envReconciled;
     return super.fetch(new Request(request, { headers }));
   }
 
@@ -287,15 +310,18 @@ export class PollisDelivery extends Container<Env> {
     }
 
     const secretEnv = await this.resolveSecretEnv();
+    const envVars: Record<string, string> = {
+      ...this.envVars,
+      ...secretEnv,
+      ...resolvedStart?.envVars,
+    };
     // Positional form, preserving ports + cancellation.
     await super.startAndWaitForPorts(ports, resolvedCancellation, {
       ...resolvedStart,
-      envVars: {
-        ...this.envVars,
-        ...secretEnv,
-        ...resolvedStart?.envVars,
-      },
+      envVars,
     });
+    // What this start passed, so the next deploy can tell a stale container (container-env.ts).
+    await this.ctx.storage.put(ENV_FINGERPRINT_KEY, await envFingerprint(envVars));
   }
 }
 

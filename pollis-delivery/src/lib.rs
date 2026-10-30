@@ -495,6 +495,10 @@ async fn effective_config(State(state): State<AppState>, headers: HeaderMap) -> 
             "verify_otp_window_secs": state.ratelimit_config.verify_otp_window_secs,
             // Whether the dev ops log is recording (`POLLIS_DS_OPS_LOG`).
             "ops_log": state.ops_log.is_some(),
+            // #1611: the policy this DS mirrors; null means the 426 check is off. Not a secret.
+            // The deploy workflows compare it with the wrangler var, because a rolled container
+            // can keep an older environment (worker/container-env.ts).
+            "client_policy_url": state.client_policy.url(),
             // Presence only — never the token itself.
             "metrics_token_set": true,
         })),
