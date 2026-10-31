@@ -23,7 +23,7 @@ set -euo pipefail
 
 BUCKET="${TFSTATE_BUCKET:-pollis-tfstate}"
 KEY="${TFSTATE_KEY:-relay-hydra/terraform.tfstate}"
-ENDPOINT="${R2_ENDPOINT:-https://4bd9ab176c5febd5e7ac1b64b23dede5.r2.cloudflarestorage.com}"
+ENDPOINT="${R2_ENDPOINT:-https://6011b778aed6d55aea9f225f3c8aa110.r2.cloudflarestorage.com}"
 export AWS_PROFILE="${TFSTATE_PROFILE:-r2-tfstate}"
 export AWS_DEFAULT_REGION=auto
 

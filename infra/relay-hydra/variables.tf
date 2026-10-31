@@ -238,7 +238,7 @@ variable "relay_allowlist" {
     schemes/paths stripped. Verify against the CURRENT .env.production before apply.
   EOT
   type        = string
-  default     = "prod-actuallydan.aws-us-east-1.turso.io,api.pollis.com,4bd9ab176c5febd5e7ac1b64b23dede5.r2.cloudflarestorage.com,cdn.pollis.com,rtc.pollis.com"
+  default     = "prod-actuallydan.aws-us-east-1.turso.io,api.pollis.com,6011b778aed6d55aea9f225f3c8aa110.r2.cloudflarestorage.com,cdn.pollis.com,rtc.pollis.com"
 }
 
 variable "instance_type" {
