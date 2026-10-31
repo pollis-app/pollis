@@ -1220,6 +1220,15 @@ screen. `<Screen>` draws the invisible `keyboard-open` /
 `keyboard-closed` probe (`components/KeyboardProbe.tsx`) and
 `.maestro/flows/keyboard-recovery.yaml` is the device-tier proof.
 
+Screens whose only input is the PIN keypad (`PinKeypad`) never show the
+system keyboard, so they never avoid one: `<Screen avoidKeyboard={false}>`
+renders no `KeyboardAvoidingView` at all, and no stale keyboard state can pad
+them (#1642, defence in depth beside the patch). Today that is
+`app/(auth)/pin.tsx` (create, confirm and unlock) and the PIN step of
+`app/self/link-device.tsx`; its scan / code step keeps avoidance, because it
+has a text field. A new keypad-only screen opts out too, and a screen with any
+text field never does — `tests/keyboard.test.ts` pins both directions.
+
 ## Backend integration — wired vs pending
 
 Most of what older notes called "stubs" is now wired through the

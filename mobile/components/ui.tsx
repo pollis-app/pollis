@@ -119,6 +119,19 @@ export function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
   );
 }
 
+// A PIN-keypad screen never shows the system keyboard, so it gets no keyboard padding at all (#1642).
+function KeyboardFrame({ avoid, children }: { avoid: boolean; children: React.ReactNode }) {
+  if (!avoid) {
+    return <View style={{ flex: 1 }}>{children}</View>;
+  }
+  // No automaticOffset (#1432): its async window position can be stale on Android.
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 // Root of every route. On regular width content sits in a screenMaxWidth column unless `wide`.
 export function Screen({
   children,
@@ -126,6 +139,7 @@ export function Screen({
   centered,
   wide,
   aboveTabBar,
+  avoidKeyboard = true,
 }: {
   children: React.ReactNode;
   testID?: string;
@@ -134,6 +148,8 @@ export function Screen({
   wide?: boolean;
   // The tab bar already pads the bottom safe area.
   aboveTabBar?: boolean;
+  // false: no KeyboardAvoidingView at all, for screens whose only input is the PIN keypad (#1642).
+  avoidKeyboard?: boolean;
 }) {
   // Does not re-render `children`; every route subscribes itself (#1447).
   useTheme();
@@ -162,12 +178,7 @@ export function Screen({
       <ThemeProbe />
       <EmojiProbe />
       <KeyboardProbe />
-      {/* No automaticOffset (#1432): its async window position can be stale on Android. */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior="padding"
-        enabled={!nested}
-      >
+      <KeyboardFrame avoid={avoidKeyboard && !nested}>
         <KeyboardAvoidedContext.Provider value={true}>
           <ScreenBleedContext.Provider value={bleed}>
             {column ? (
@@ -186,7 +197,7 @@ export function Screen({
             )}
           </ScreenBleedContext.Provider>
         </KeyboardAvoidedContext.Provider>
-      </KeyboardAvoidingView>
+      </KeyboardFrame>
     </SafeAreaView>
   );
 }

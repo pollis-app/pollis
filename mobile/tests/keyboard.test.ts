@@ -121,3 +121,37 @@ test("<Screen> draws the keyboard-state e2e probe", () => {
   assert.match(read("components/ui.tsx"), /<KeyboardProbe \/>/);
   assert.match(read("components/KeyboardProbe.tsx"), /"keyboard-open" : "keyboard-closed"/);
 });
+
+// #1642: a screen whose only input is the PIN keypad never shows the system keyboard, so it must not avoid one.
+test("every PIN-keypad screen, and only those, opts out of keyboard avoidance", () => {
+  const blocks: { file: string; block: string }[] = [];
+  for (const file of sources().filter((f) => f.startsWith("app/"))) {
+    for (const m of read(file).matchAll(/<Screen\b[\s\S]*?<\/Screen>/g)) {
+      blocks.push({ file, block: m[0] });
+    }
+  }
+  const optedOut = blocks.filter((b) => /<Screen\b[^>]*avoidKeyboard=\{false\}/.test(b.block));
+  const keypad = blocks.filter((b) => /<PinKeypad\b|\{keypad\}/.test(b.block));
+  assert.deepEqual(
+    optedOut.map((b) => b.file).sort(),
+    keypad.map((b) => b.file).sort(),
+    "the Screens that opt out are exactly the ones drawing the PIN keypad",
+  );
+  assert.deepEqual([...new Set(optedOut.map((b) => b.file))].sort(), [
+    "app/(auth)/pin.tsx",
+    "app/self/link-device.tsx",
+  ]);
+  for (const { file, block } of optedOut) {
+    assert.doesNotMatch(block, /<Field\b|<TextInput\b/, `${file}: an opted-out screen must have no text field`);
+  }
+  // link-device: the code step keeps its keyboard avoidance; only the PIN step opts out.
+  const linkDevice = blocks.filter((b) => b.file === "app/self/link-device.tsx");
+  assert.ok(linkDevice.some((b) => /<Field\b/.test(b.block) && !/avoidKeyboard=\{false\}/.test(b.block)));
+});
+
+test("<Screen avoidKeyboard={false}> renders no KeyboardAvoidingView", () => {
+  const ui = read("components/ui.tsx");
+  assert.match(ui, /avoidKeyboard = true/, "avoidance stays the default");
+  assert.match(ui, /if \(!avoid\) \{\s*return <View style=\{\{ flex: 1 \}\}>\{children\}<\/View>;/);
+  assert.match(ui, /<KeyboardFrame avoid=\{avoidKeyboard && !nested\}>/);
+});

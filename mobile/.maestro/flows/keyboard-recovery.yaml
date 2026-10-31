@@ -111,6 +111,16 @@ appId: ${MAESTRO_APP_ID}
       id: "keyboard-closed"
     timeout: 3000
 - takeScreenshot: keyboard-recovery-04-pin-step
+# The PIN step renders no KeyboardAvoidingView at all (<Screen avoidKeyboard={false}>),
+# so its keypad sits at the bottom even straight after the keyboard-up transition:
+# a point tap at 50%,90% must land on the bottom row's "0" key (72pt keys, 20pt
+# under the last row, plus the bottom inset). Stranded, that spot is empty.
+- tapOn:
+    point: "50%,90%"
+- assertVisible: "1 of 4 digits entered"
+- tapOn:
+    id: "btn-pin-back"
+- assertVisible: "0 of 4 digits entered"
 
 # 4. Background on the PIN step too (#1642 was reported without a keyboard
 #    in sight), then back out: Direct is intact.
