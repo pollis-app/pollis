@@ -1390,6 +1390,27 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(serde_json::json!({ "token": token, "url": url }))
         }
 
+        // #1635: who published a data packet. Participants are per-room DS
+        // pseudonyms (#836), so the JS data channel resolves them here, the
+        // way desktop's realtime loop does. Unresolvable ones are left out.
+        "resolve_livekit_identities" => {
+            let room: String = arg(&args, "room")?;
+            let identities: Vec<String> = arg(&args, "identities")?;
+            let st = state()?;
+            let resolved =
+                crate::commands::mls::ds_livekit_identities(&st, &room, identities).await?;
+            ok(resolved
+                .into_iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "identity": r.identity,
+                        "userId": r.user_id,
+                        "username": if r.name.is_empty() { None } else { Some(r.name) },
+                    })
+                })
+                .collect::<Vec<_>>())
+        }
+
         "list_usable_emoji" => {
             let user_id: String = arg(&args, "userId")?;
             ok(emoji::list_usable_emoji(user_id, &state()?).await?)
@@ -1555,6 +1576,8 @@ mod tests {
             "fetch_export_attachments",
             "bundle_export",
             "dismissed_push_handles",
+            // #1635
+            "resolve_livekit_identities",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }

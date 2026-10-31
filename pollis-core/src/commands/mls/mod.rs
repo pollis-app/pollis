@@ -47,8 +47,7 @@ pub(crate) use ds_client::{
 // Desktop-only (voice roster); mobile has no Rust-side participants path.
 #[cfg(feature = "media")]
 pub(crate) use ds_client::ds_livekit_participants;
-// #836 identity resolution is media-only.
-#[cfg(feature = "media")]
+// #836 identity resolution: desktop's realtime loop, and mobile's JS data channel (#1635).
 pub(crate) use ds_client::ds_livekit_identities;
 
 pub use key_packages::{ensure_mls_key_package, validate_key_package};
