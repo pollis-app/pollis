@@ -1385,7 +1385,12 @@ Current state:
   sealed first withdraws it from everyone. Pure
   rules + tests: `pendingMessages.ts`, `tests/pending-messages.test.ts`;
   device tier: `.maestro/flows/outbox.yaml`. A core change, so phones get it
-  with the next store build. **Edits too (#1555):** `edit_message` stores the
+  with the next store build. **The composer never waits on a send (#1636):**
+  Send stays live while earlier sends are out; `useSendMessage().mutate` takes a
+  turn on `lib/sendLine.ts` at the tap and each send waits for the previous one
+  in that conversation to settle, so they reach the core one at a time, in tap
+  order (`tests/send-line.test.ts`, `.maestro/flows/rapid-send.yaml`). Never
+  gate the chat composer on `isPending` again. **Edits too (#1555):** `edit_message` stores the
   edit in the core's edit outbox before posting and the row reads back with
   `edit_state` until the DS confirms; `MessageRow` labels a failed one
   "(edit not sent)" (`editUnsent`), and the same drain delivers it.

@@ -79,7 +79,7 @@ test("retry and discard reach every copy of the message", () => {
 test("every send names its message and the shell drains the outbox on events only", () => {
   const src = (p: string) => readFileSync(new URL(`../src/${p}`, import.meta.url), "utf8");
   const main = src("components/Layout/MainContent.tsx");
-  assert.match(main, /invoke<string>\("new_message_id"\)[\s\S]*outgoingAttachments\(attachments\)[\s\S]*attachments: outgoing,[\s\S]*messageId,\n\s*\}\);/);
+  assert.match(main, /invoke<string>\("new_message_id"\)[\s\S]*outgoingAttachments\(attachments\)[\s\S]*attachments: outgoing,[\s\S]*messageId,\n\s*turn,\n\s*\}\);/);
   // The upload belongs to the outbox now (#1335): neither composer uploads itself.
   assert.doesNotMatch(main, /buildMessageContent\(/);
   assert.doesNotMatch(src("components/Layout/RightPanel/ThreadPanel.tsx"), /buildMessageContent\(/);

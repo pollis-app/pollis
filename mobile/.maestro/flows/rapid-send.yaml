@@ -1,0 +1,115 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# RAPID SEND (#1636) — sending again while a send is still in flight queues
+# the message instead of doing nothing. Every message shows at once, is
+# delivered once, and lands in the order it was sent.
+#
+# The first send in a fresh group pays for MLS group setup (often 15 s or
+# more against the dev DS), so the second and third Send taps below land while
+# the first is still out: before #1636 the Send button was disabled then and
+# those taps did nothing.
+#
+# Self-contained, like messaging.yaml: creates its own group.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Rapid Send Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Rapid Send Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# Three sends back to back, keyboard up (see messaging.yaml, #1194). No wait
+# between them: each tap must take, whatever the earlier ones are doing.
+- tapOn:
+    id: "input-composer"
+- inputText: "rs1636 one"
+- tapOn:
+    id: "btn-send"
+- inputText: "rs1636 two"
+- tapOn:
+    id: "btn-send"
+- inputText: "rs1636 three"
+- tapOn:
+    id: "btn-send"
+
+# All three are on screen straight away, in the order they were sent (the
+# list is newest at the bottom).
+- extendedWaitUntil:
+    visible: ".*rs1636 three.*"
+    timeout: 5000
+- assertVisible: ".*rs1636 one.*"
+- assertVisible: ".*rs1636 two.*"
+- assertVisible:
+    text: ".*rs1636 two.*"
+    below:
+      text: ".*rs1636 one.*"
+- assertVisible:
+    text: ".*rs1636 three.*"
+    below:
+      text: ".*rs1636 two.*"
+# The composer took every tap: nothing is left in it.
+- assertNotVisible:
+    id: "input-composer"
+    text: ".*rs1636.*"
+- takeScreenshot: rapid-send-01-queued
+
+# Delivered in the background: none of them fails or is offered Retry.
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-retry-message-.*"
+    timeout: 120000
+
+# Once delivered, re-read from the store: still three rows, once each, same order.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible: ".*rs1636 three.*"
+    timeout: 15000
+- assertVisible:
+    text: ".*rs1636 two.*"
+    below:
+      text: ".*rs1636 one.*"
+- assertVisible:
+    text: ".*rs1636 three.*"
+    below:
+      text: ".*rs1636 two.*"
+- assertNotVisible:
+    text: ".*rs1636 one.*"
+    index: 1
+- assertNotVisible:
+    text: ".*rs1636 two.*"
+    index: 1
+- assertNotVisible:
+    text: ".*rs1636 three.*"
+    index: 1
+- assertNotVisible:
+    id: "btn-retry-message-.*"
+- takeScreenshot: rapid-send-02-delivered-in-order

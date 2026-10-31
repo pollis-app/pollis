@@ -274,7 +274,7 @@ function TextChat(props: ChatViewProps = {}) {
 
   const onSend = () => {
     const text = outgoingText(draft);
-    if ((!text && pendingAttachments.length === 0) || sendMessage.isPending) {
+    if (!text && pendingAttachments.length === 0) {
       return;
     }
     setDraft("");
@@ -918,7 +918,6 @@ function TextChat(props: ChatViewProps = {}) {
             draft={draft}
             onChangeDraft={setDraft}
             onSend={onSend}
-            sendPending={sendMessage.isPending}
             editable={!!kind && !!conversationId}
             mentionCandidates={mentionCandidates}
             customEmoji={usableEmoji}

@@ -935,6 +935,24 @@ every later attempt posts that one unchanged — a re-seal does not move it — 
 after a crash-after-post, whose retry the DS answers as a replay of the first
 post, the sender's copy sits where every recipient's does.
 
+**Rapid sends queue, in order (#1636).** The composer never waits on a send:
+on both desktop and mobile the user can send again at once, and each message
+shows its stub immediately. Because `sent_at` is stamped at the first seal,
+two `send_message` calls running side by side would seal — and so be ordered
+for everyone — by whichever finished its catch-up first. So the renderers hand
+the core one send per conversation at a time: the send line
+(`frontend/src/utils/sendLine.ts`, an identical copy at `mobile/lib/sendLine.ts`;
+a test pins the copies equal) gives each send a turn, taken synchronously at the
+tap before any await, and the turn starts when the previous one in that
+conversation has settled. Delivered or failed both end a turn (the mutation's
+`onSettled`, plus a `release` on any early exit), so a failure is that message's
+own — it shows Retry / Discard — and never stalls the ones behind it. Each send
+is one mutation with one id, so a queued send is never sent twice. The cost: a
+send still waiting its turn is only in renderer memory until its turn comes, so
+a process killed in that window loses the queued ones (the in-flight one is
+already in the outbox). Mobile stubs are `pending-<ms>-<seq>`, so two made in
+one millisecond never share an id.
+
 **Attachments are the outbox's too.** The row is on screen from the moment the
 user sends, uploads included, so the upload is as durable as the send: the
 renderers pass `send_message` the caption plus `attachments` (a picked file's

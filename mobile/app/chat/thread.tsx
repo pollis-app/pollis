@@ -83,7 +83,7 @@ function ThreadScreen() {
 
   const onSend = () => {
     const text = outgoingText(draft);
-    if (!text || !threadId || sendMessage.isPending) {
+    if (!text || !threadId) {
       return;
     }
     setDraft("");
@@ -247,7 +247,6 @@ function ThreadScreen() {
         draft={draft}
         onChangeDraft={setDraft}
         onSend={onSend}
-        sendPending={sendMessage.isPending}
         editable={!!threadId && !!conversationId && !!kind}
         mentionCandidates={mentionCandidates}
       />

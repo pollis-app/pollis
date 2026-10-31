@@ -32,6 +32,7 @@ import {
 } from "./pendingMessages";
 import { parseContent } from "../../lib/messageContent";
 import { createSingleFlight } from "../../lib/singleFlight";
+import { createSendLine, type SendTurn } from "../../lib/sendLine";
 
 export type ConversationKind = "channel" | "dm";
 
@@ -320,7 +321,26 @@ function patchOutboxRows(
   }
 }
 
-/** Send a text message optimistically; durable via the core's outbox (#1335). */
+/** Sends leave one conversation one at a time, in tap order (#1636). */
+const sendLine = createSendLine();
+
+/** Tells apart stubs made in the same millisecond. */
+let stubSeq = 0;
+
+export interface SendMessageVars {
+  content: string;
+  replyToId?: string;
+  threadId?: string;
+  attachments?: PickedAttachment[];
+}
+
+/**
+ * Send a text message optimistically; durable via the core's outbox (#1335).
+ *
+ * Never blocks the composer (#1636): `mutate` may be called again while earlier sends are in
+ * flight. Each stub shows at once, and the turn is taken at the call, so the core gets the
+ * sends one at a time, in tap order.
+ */
 export function useSendMessage(
   conversationId: string | null,
   kind: ConversationKind | null,
@@ -328,15 +348,14 @@ export function useSendMessage(
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
 
-  return useMutation({
+  const mutation = useMutation({
     // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { mutate: "send" } },
-    mutationFn: async (vars: {
-      content: string;
-      replyToId?: string;
-      threadId?: string;
-      attachments?: PickedAttachment[];
-    }) => {
+    mutationFn: async (vars: SendMessageVars & { turn?: SendTurn }) => {
+      // Released in onSettled, which runs on every outcome.
+      if (vars.turn) {
+        await vars.turn.ready;
+      }
       if (!conversationId || !currentUser) {
         throw new NotQueuedError("No active conversation");
       }
@@ -377,7 +396,8 @@ export function useSendMessage(
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
-      const optimisticId = `pending-${Date.now()}`;
+      stubSeq += 1;
+      const optimisticId = `pending-${Date.now()}-${stubSeq}`;
       stubIds.set(vars, optimisticId);
       const optimistic: Message = {
         id: optimisticId,
@@ -483,7 +503,23 @@ export function useSendMessage(
         }
       }
     },
+    // Delivered or failed, the next send in this conversation may go.
+    onSettled: (_data, _e, vars) => {
+      vars.turn?.release();
+    },
   });
+
+  const mutateNow = mutation.mutate;
+  // The turn is taken here, before any await, so the line is exactly the tap order.
+  const mutate = useCallback(
+    (vars: SendMessageVars) => {
+      const turn = conversationId ? sendLine.take(conversationId) : undefined;
+      mutateNow({ ...vars, turn });
+    },
+    [conversationId, mutateNow],
+  );
+
+  return { ...mutation, mutate };
 }
 
 /** Retry one unsent message (#1335) under the same id, so it never arrives twice. */
