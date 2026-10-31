@@ -220,6 +220,12 @@ exactly as desktop does). `two-client/typing/`: the peer types and
 `text-typing-indicator` reads "<peer> is typing…", then goes when it stops; the
 device types and the peer sees `typing`, then `stopped` when the draft is
 cleared and again after a send (`scripts/peer-typing.js`).
+**DM receipts (automated, #1637):** `mobile/scripts/maestro-receipts.sh <device>`
+— one device plus the same `live_message_peer`, which also fetches the DM and
+marks the device's messages read when a flow asks (`scripts/peer-read.js`). Two
+messages read by the peer show ONE tick, on the newest (the row's label ends
+", Read by everyone"); the peer's reply carries none and does not move it; a
+third message read by the peer takes the tick from the second.
 
 **Device outside the tree (automated, #1571):** `mobile/scripts/maestro-device-outside-tree.sh <device>`
 — one device plus two dev-DS peers (`pollis-tui`'s `outside_tree_peer`, roles

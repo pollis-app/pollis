@@ -13,7 +13,7 @@ import { Icon } from "../icons";
 import { fonts, r, semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
-import { ReceiptIndicator } from "./ReceiptIndicator";
+import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
 import { AttachmentTile } from "./AttachmentTile";
 import { SwipeToReply } from "./SwipeToReply";
 import { UnsentActions } from "./UnsentActions";
@@ -182,6 +182,9 @@ export function MessageRow({
     : "";
 
   const spokenName = isNew ? `${name} (${t("message.newMember")})` : name;
+  // The row is one element on iOS, so the tick's state is spoken with it (#1637).
+  const spokenReceipt =
+    showReceipt && !pending && !failed ? receiptLabel(t, receipt, peerCount) : null;
 
   return (
     <SwipeToReply onReply={onReply} pressFeedback={press}>
@@ -191,7 +194,9 @@ export function MessageRow({
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         testID={testID}
-        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name: spokenName, text }) : spokenName}, ${spokenStatus}`}
+        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name: spokenName, text }) : spokenName}, ${spokenStatus}${
+          spokenReceipt ? `, ${spokenReceipt}` : ""
+        }`}
         accessibilityActions={a11yActions}
         onAccessibilityAction={(e) => {
           const action = e.nativeEvent.actionName;

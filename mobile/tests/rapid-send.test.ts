@@ -24,7 +24,7 @@ test("a send goes to the core at once, with nothing on the JS side making it wai
 test("a pending row says it is sending, which the rapid-send flows assert before the second tap", () => {
   const row = src("components/chat/MessageRow.tsx");
   assert.match(row, /const spokenStatus = statusLabel \?\? \(pending \? t\("status\.sending"\) : time\);/);
-  assert.match(row, /accessibilityLabel=\{`[^`]*\$\{spokenStatus\}`\}/);
+  assert.match(row, /accessibilityLabel=\{`[^`]*\$\{spokenStatus\}/);
   const burst = src(".maestro/subflows/rapid-send-burst.yaml");
   const precondition = burst.indexOf('- inputText: "${TAG} two"');
   const secondTap = burst.indexOf("- tapOn:\n    id: \"btn-send\"", precondition);
