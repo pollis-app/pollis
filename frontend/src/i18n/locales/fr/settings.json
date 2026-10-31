@@ -74,7 +74,9 @@
   "notifications": {
     "heading": "Notifications",
     "desktopLabel": "Notifications sur le bureau",
-    "soundEffectsLabel": "Effets sonores"
+    "soundEffectsLabel": "Effets sonores",
+    "callTakeoverLabel": "Appels entrants en plein écran",
+    "callTakeoverDescription": "Quand quelqu'un vous appelle en message privé, l'appel occupe l'écran avec Accepter et Refuser, puis vous ramène où vous étiez. Désactivé : l'alerte de la barre d'état, la sonnerie et la notification arrivent comme d'habitude."
   },
   "readReceipts": {
     "heading": "Accusés de lecture",

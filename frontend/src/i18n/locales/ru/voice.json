@@ -189,5 +189,13 @@
   "notify": {
     "incomingCallTitle": "Входящий звонок",
     "incomingCallBody": "@{{name}} звонит"
+  },
+  "takeover": {
+    "title": "Входящий звонок",
+    "calling": "звонит вам",
+    "accept": "Принять",
+    "decline": "Отклонить",
+    "acceptAria": "Принять звонок от @{{username}}",
+    "declineAria": "Отклонить звонок от @{{username}}"
   }
 }

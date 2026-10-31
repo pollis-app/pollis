@@ -74,7 +74,9 @@
   "notifications": {
     "heading": "通知",
     "desktopLabel": "桌面通知",
-    "soundEffectsLabel": "提示音"
+    "soundEffectsLabel": "提示音",
+    "callTakeoverLabel": "全屏来电",
+    "callTakeoverDescription": "当有人在私信中呼叫你时，来电会占据整个屏幕并提供接听和拒绝，结束后回到你原来的位置。关闭后：状态栏提醒、铃声和通知仍照常出现。"
   },
   "readReceipts": {
     "heading": "已读回执",

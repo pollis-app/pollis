@@ -10,7 +10,7 @@ import { presenceStore } from './presenceStore';
 
 type CameraRemote = { trackKey: string; width: number; height: number };
 type EnrollmentApproval = { requestId: string; newDeviceId: string };
-type IncomingCall = { callId: string; roomName: string; callerId: string; callerUsername: string };
+export type IncomingCall = { callId: string; roomName: string; callerId: string; callerUsername: string };
 type OutgoingCall = { callId: string; calleeId: string };
 // `readable`: the alert is about a message, so reading the conversation anywhere clears it (#1628).
 type StatusBarAlert = { senderUsername: string; roomId: string; readable?: boolean };

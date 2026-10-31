@@ -191,5 +191,13 @@
   "notify": {
     "incomingCallTitle": "Incoming call",
     "incomingCallBody": "@{{name}} is calling"
+  },
+  "takeover": {
+    "title": "Incoming call",
+    "calling": "is calling you",
+    "accept": "Accept",
+    "decline": "Decline",
+    "acceptAria": "Accept call from @{{username}}",
+    "declineAria": "Decline call from @{{username}}"
   }
 }

@@ -74,7 +74,9 @@
   "notifications": {
     "heading": "Notificaciones",
     "desktopLabel": "Notificaciones de escritorio",
-    "soundEffectsLabel": "Efectos de sonido"
+    "soundEffectsLabel": "Efectos de sonido",
+    "callTakeoverLabel": "Llamadas entrantes a pantalla completa",
+    "callTakeoverDescription": "Cuando alguien te llama en un mensaje directo, la llamada ocupa la pantalla con Aceptar y Rechazar y luego te devuelve donde estabas. Desactivado: el aviso de la barra de estado, el tono y la notificación siguen llegando como siempre."
   },
   "readReceipts": {
     "heading": "Confirmaciones de lectura",

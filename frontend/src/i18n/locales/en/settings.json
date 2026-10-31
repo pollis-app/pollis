@@ -76,7 +76,9 @@
   "notifications": {
     "heading": "Notifications",
     "desktopLabel": "Desktop notifications",
-    "soundEffectsLabel": "Sound effects"
+    "soundEffectsLabel": "Sound effects",
+    "callTakeoverLabel": "Full-screen incoming calls",
+    "callTakeoverDescription": "When someone calls you in a DM, the call takes over the screen with Accept and Decline, then returns you where you were. Off: the status-bar alert, ringtone and notification still arrive as usual."
   },
   "readReceipts": {
     "heading": "Read receipts",

@@ -27,6 +27,8 @@ import { panelWidthStore } from "../../stores/panelWidthStore";
 import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
+import { useIncomingCallTakeover } from "../../hooks/useIncomingCallTakeover";
+import { acceptIncomingCall, declineIncomingCall } from "../../voice/incomingCall";
 import { flushOutbox } from "../../hooks/queries/useMessages";
 import { useBadge } from "../../hooks/useBadge";
 import { useAutoLock } from "../../hooks/useAutoLock";
@@ -82,7 +84,6 @@ export const AppShell: React.FC = observer(() => {
     setVoiceError,
     // Don't destructure `isLocalSpeaking`: observer() would re-render the shell on every speech onset (#874).
     incomingCall,
-    setIncomingCall,
     viewingScreenShareTrackKey,
     setViewingScreenShareTrackKey,
     shareStopped,
@@ -257,11 +258,13 @@ export const AppShell: React.FC = observer(() => {
   }, [membershipSignature, currentUser?.id]);
 
   useLiveKitRealtime();
+  useIncomingCallTakeover(incomingCall);
 
   // Warm the lazy call chunks when idle (#874): answering a call navigates programmatically, so no spinner there.
   useEffect(() => {
     const warm = () => {
       void import("../../pages/Call").catch(logIgnored);
+      void import("../../pages/IncomingCallPage").catch(logIgnored);
       void import("../../pages/VoiceChannel").catch(logIgnored);
     };
     if (typeof requestIdleCallback === "function") {
@@ -645,24 +648,7 @@ export const AppShell: React.FC = observer(() => {
               data-testid="status-bar-incoming-call-accept"
               className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
               style={{ color: "inherit", background: "none", padding: 0 }}
-              onClick={() => {
-                // Route first so the old voice page unmounts before the room swaps.
-                const callId = incomingCall.callId;
-                router.navigate({ to: "/call/$callId", params: { callId } });
-                voiceSession.setIntent({
-                  channelId: incomingCall.roomName,
-                  groupId: null,
-                  counterpartyUserId: incomingCall.callerId,
-                });
-                setIncomingCall(null);
-                // Stop ringing on other devices; `call_canceled` is idempotent.
-                if (currentUser) {
-                  invoke("dismiss_call_on_my_devices", {
-                    userId: currentUser.id,
-                    callId,
-                  }).catch((e) => console.warn("dismiss_call_on_my_devices failed", e));
-                }
-              }}
+              onClick={() => acceptIncomingCall(router, incomingCall)}
               aria-label={t("statusBar.answerCall", { username: incomingCall.callerUsername })}
             >
               <Phone className="w-4 h-4" />: <bdi>@{incomingCall.callerUsername}</bdi>
@@ -671,18 +657,7 @@ export const AppShell: React.FC = observer(() => {
               data-testid="status-bar-incoming-call-decline"
               className="cursor-pointer border-0"
               style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
-              onClick={() => {
-                const callerId = incomingCall.callerId;
-                const callId = incomingCall.callId;
-                setIncomingCall(null);
-                invoke("cancel_call", { otherUserId: callerId, callId }).catch((e) => console.warn("cancel_call failed", e));
-                if (currentUser) {
-                  invoke("dismiss_call_on_my_devices", {
-                    userId: currentUser.id,
-                    callId,
-                  }).catch((e) => console.warn("dismiss_call_on_my_devices failed", e));
-                }
-              }}
+              onClick={() => declineIncomingCall(incomingCall)}
               aria-label={t("statusBar.declineCall")}
             >
               <X className="w-4 h-4" />

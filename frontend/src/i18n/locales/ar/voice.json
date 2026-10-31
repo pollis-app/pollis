@@ -191,5 +191,13 @@
   "notify": {
     "incomingCallTitle": "مكالمة واردة",
     "incomingCallBody": "‎@{{name}} يتصل بك"
+  },
+  "takeover": {
+    "title": "مكالمة واردة",
+    "calling": "يتصل بك",
+    "accept": "قبول",
+    "decline": "رفض",
+    "acceptAria": "قبول المكالمة من @{{username}}",
+    "declineAria": "رفض المكالمة من @{{username}}"
   }
 }

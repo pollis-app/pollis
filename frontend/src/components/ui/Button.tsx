@@ -20,6 +20,9 @@ interface ButtonProps {
   size?: "xs" | "sm" | "md";
   type?: "button" | "submit" | "reset";
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+  /** Hover / keyboard-focus intent, e.g. to pre-warm what the click will need (#1639). */
+  onPointerEnter?: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onFocus?: (e: React.FocusEvent<HTMLButtonElement>) => void;
   autoFocus?: boolean;
   "aria-label"?: string;
   /** Toggle-button selected state; otherwise only colour distinguishes it. */
@@ -42,6 +45,8 @@ export const Button: React.FC<ButtonProps> = ({
   size = "md",
   type = "button",
   onKeyDown,
+  onPointerEnter,
+  onFocus,
   autoFocus,
   "aria-label": ariaLabel,
   "aria-pressed": ariaPressed,
@@ -74,6 +79,8 @@ export const Button: React.FC<ButtonProps> = ({
       {...press}
       disabled={disabled || isLoading}
       onKeyDown={onKeyDown}
+      onPointerEnter={onPointerEnter}
+      onFocus={onFocus}
       autoFocus={autoFocus}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
