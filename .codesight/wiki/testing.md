@@ -601,9 +601,15 @@ delivered once each, in order; a failed message does not block the next) and
 that the composer never waits. `e2e/rapid-send.spec.ts` holds the first
 `send_message` in flight and checks a burst is shown at once, reaches the core
 at once in order, is delivered once each, and fails per message. On mobile
-`.maestro/flows/rapid-send.yaml` sends three back to back in a fresh group
-(whose first send is slow), then kills the app mid-burst and checks every
-message arrives once, in order, after the relaunch.
+the proof is `mobile/scripts/maestro-rapid-send.sh` (Android emulator booted
+through `mobile/scripts/slow-proxy.py`, which slows the network on demand):
+setup, a burst on a slowed network, delivery, a second burst killed and
+relaunched while slowed, delivery. The shared burst subflow asserts message 1
+is still "sending" (the row's spoken label) before Send is tapped for message
+2, so the run fails instead of passing when the race was not reproduced. It
+failed at that second send on the pre-#1636 build and passed on the fix.
+`.maestro/flows/rapid-send.yaml` is the iOS path (a fresh group's slow first
+send, same guard); its timing on iOS is not proven.
 
 ### Killing an edit part-way (#1555)
 

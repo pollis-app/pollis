@@ -1390,9 +1390,16 @@ Current state:
   `send_message` at once. The core stores it before any network work and
   delivers one conversation's sends one at a time, in stored order (see
   `.codesight/wiki/mls.md` → "Rapid sends"), so the JS neither waits nor
-  orders (`tests/rapid-send.test.ts`, `.maestro/flows/rapid-send.yaml`, which
-  also kills the app mid-burst). Never gate the chat composer on `isPending`
-  again. **Edits too (#1555):** `edit_message` stores the
+  orders. A pending row's spoken label ends "…, sending" (never drawn). The
+  device proof is `scripts/maestro-rapid-send.sh` (Android): the emulator is
+  booted through `scripts/slow-proxy.py` (`-http-proxy`; the console's
+  `network delay` does not shape traffic on current emulators), the bursts run
+  on a slowed network, and the burst subflow fails unless message 1 is still
+  sending when Send is tapped for message 2. It failed exactly there on the
+  pre-#1636 build and passed all five parts after. `flows/rapid-send.yaml` is
+  the iOS path, timed by a fresh group's slow first send, with the same guard.
+  `tests/rapid-send.test.ts` pins the hook and the guard. Never gate the chat
+  composer on `isPending` again. **Edits too (#1555):** `edit_message` stores the
   edit in the core's edit outbox before posting and the row reads back with
   `edit_state` until the DS confirms; `MessageRow` labels a failed one
   "(edit not sent)" (`editUnsent`), and the same drain delivers it.
