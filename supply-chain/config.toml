@@ -2793,12 +2793,12 @@ criteria = "safe-to-deploy"
 version = "0.29.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.typeid]]
-version = "1.0.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.typed-path]]
 version = "0.12.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.typeid]]
+version = "1.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.typenum]]
