@@ -1,0 +1,29 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Rapid send (#1636): create the group ${GROUP} (#General on) and open General.
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "${GROUP}"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP}, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"

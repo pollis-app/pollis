@@ -1,0 +1,15 @@
+appId: ${MAESTRO_APP_ID}
+---
+# RAPID SEND on Android (#1636), part 2 of 5, on the slowed network: a burst of
+# four while the first is still out. Fails if message 1 already went before
+# Send is tapped for message 2 (see the subflow).
+- assertVisible:
+    id: "screen-chat"
+- runFlow:
+    file: ../../subflows/rapid-send-burst.yaml
+    env:
+      TAG: "rs1636"
+# Still slowed: nothing in the burst has landed yet, and none has failed.
+- assertVisible: ".*: rs1636 four, sending"
+- assertNotVisible:
+    id: "btn-retry-message-.*"

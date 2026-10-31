@@ -1,0 +1,19 @@
+appId: ${MAESTRO_APP_ID}
+---
+# RAPID SEND on Android (#1636), part 3 of 5, network back to full speed: the
+# burst lands once each, in order, with no Retry; re-read from the store too.
+- runFlow:
+    file: ../../subflows/rapid-send-delivered.yaml
+    env:
+      TAG: "rs1636"
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- runFlow:
+    file: ../../subflows/rapid-send-delivered.yaml
+    env:
+      TAG: "rs1636"

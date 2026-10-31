@@ -21,6 +21,17 @@ test("a send goes to the core at once, with nothing on the JS side making it wai
   assert.doesNotMatch(send, /scope:|\.ready\b|sendLine|isPending/);
 });
 
+test("a pending row says it is sending, which the rapid-send flows assert before the second tap", () => {
+  const row = src("components/chat/MessageRow.tsx");
+  assert.match(row, /const spokenStatus = statusLabel \?\? \(pending \? t\("status\.sending"\) : time\);/);
+  assert.match(row, /accessibilityLabel=\{`[^`]*\$\{spokenStatus\}`\}/);
+  const burst = src(".maestro/subflows/rapid-send-burst.yaml");
+  const precondition = burst.indexOf('- inputText: "${TAG} two"');
+  const secondTap = burst.indexOf("- tapOn:\n    id: \"btn-send\"", precondition);
+  assert.ok(precondition > 0 && secondTap > precondition);
+  assert.match(burst.slice(precondition, secondTap), /assertVisible: "\.\*: \$\{TAG\} one, sending"/);
+});
+
 test("two stubs made in one millisecond never share an id", () => {
   // Settling one would otherwise replace both.
   assert.match(src("hooks/queries/useMessages.ts"), /`pending-\$\{Date\.now\(\)\}-\$\{stubSeq\}`/);

@@ -1,0 +1,37 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Rapid send (#1636): every message of the ${TAG} burst lands once, in the
+# order sent, with nothing left sending and no Retry offered.
+- extendedWaitUntil:
+    visible: ".*: ${TAG} four, .*"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible: ".*: ${TAG} .*, sending"
+    timeout: 180000
+- assertNotVisible:
+    id: "btn-retry-message-.*"
+- assertVisible:
+    text: ".*: ${TAG} two, .*"
+    below:
+      text: ".*: ${TAG} one, .*"
+- assertVisible:
+    text: ".*: ${TAG} three, .*"
+    below:
+      text: ".*: ${TAG} two, .*"
+- assertVisible:
+    text: ".*: ${TAG} four, .*"
+    below:
+      text: ".*: ${TAG} three, .*"
+- assertNotVisible:
+    text: ".*: ${TAG} one, .*"
+    index: 1
+- assertNotVisible:
+    text: ".*: ${TAG} two, .*"
+    index: 1
+- assertNotVisible:
+    text: ".*: ${TAG} three, .*"
+    index: 1
+- assertNotVisible:
+    text: ".*: ${TAG} four, .*"
+    index: 1
+- takeScreenshot: rapid-send-${TAG}-delivered

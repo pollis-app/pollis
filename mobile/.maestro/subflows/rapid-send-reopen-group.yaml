@@ -1,0 +1,23 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Rapid send (#1636): after a relaunch, unlock and open ${GROUP}'s General again.
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "${GROUP}.*"
+    index: 0
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"

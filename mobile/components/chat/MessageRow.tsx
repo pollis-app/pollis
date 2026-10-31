@@ -155,6 +155,8 @@ export function MessageRow({
 
   const showHeader = !continued;
   const statusLabel = failed ? t("status.failed") : null;
+  // Spoken (and seen by e2e), never drawn: a pending row looks sent, as on desktop (#1636).
+  const spokenStatus = statusLabel ?? (pending ? t("status.sending") : time);
 
   // The row is one accessible element: nested buttons are offered as custom actions.
   const openableAttachments = onOpenAttachment
@@ -189,9 +191,7 @@ export function MessageRow({
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         testID={testID}
-        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name: spokenName, text }) : spokenName}, ${
-          statusLabel ?? time
-        }`}
+        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name: spokenName, text }) : spokenName}, ${spokenStatus}`}
         accessibilityActions={a11yActions}
         onAccessibilityAction={(e) => {
           const action = e.nativeEvent.actionName;
