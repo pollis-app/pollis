@@ -52,7 +52,7 @@ terraform {
     profile = "r2-tfstate"
 
     endpoints = {
-      s3 = "https://4bd9ab176c5febd5e7ac1b64b23dede5.r2.cloudflarestorage.com"
+      s3 = "https://6011b778aed6d55aea9f225f3c8aa110.r2.cloudflarestorage.com"
     }
 
     use_lockfile = true

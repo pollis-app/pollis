@@ -30,7 +30,7 @@ rotation_interval_hours = 24
 directory_domain = "relays.pollis.com"
 
 # Verify against the CURRENT .env.production before apply (schemes/paths stripped).
-relay_allowlist = "prod-actuallydan.aws-us-east-1.turso.io,api.pollis.com,4bd9ab176c5febd5e7ac1b64b23dede5.r2.cloudflarestorage.com,cdn.pollis.com,rtc.pollis.com"
+relay_allowlist = "prod-actuallydan.aws-us-east-1.turso.io,api.pollis.com,6011b778aed6d55aea9f225f3c8aa110.r2.cloudflarestorage.com,cdn.pollis.com,rtc.pollis.com"
 
 # $20/mo hard cap alert. Add emails to get notified.
 monthly_budget_usd  = 20
