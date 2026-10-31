@@ -186,5 +186,13 @@
   "notify": {
     "incomingCallTitle": "来电",
     "incomingCallBody": "@{{name}} 正在呼叫你"
+  },
+  "takeover": {
+    "title": "来电",
+    "calling": "正在呼叫你",
+    "accept": "接听",
+    "decline": "拒绝",
+    "acceptAria": "接听 @{{username}} 的来电",
+    "declineAria": "拒绝 @{{username}} 的来电"
   }
 }

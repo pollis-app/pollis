@@ -187,5 +187,13 @@
   "notify": {
     "incomingCallTitle": "Appel entrant",
     "incomingCallBody": "@{{name}} vous appelle"
+  },
+  "takeover": {
+    "title": "Appel entrant",
+    "calling": "vous appelle",
+    "accept": "Accepter",
+    "decline": "Refuser",
+    "acceptAria": "Accepter l'appel de @{{username}}",
+    "declineAria": "Refuser l'appel de @{{username}}"
   }
 }

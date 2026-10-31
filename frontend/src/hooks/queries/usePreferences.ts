@@ -22,6 +22,10 @@ import {
   type VoiceInputMode,
 } from "../../types/voice-state";
 import { voiceSession } from "../../voice";
+import {
+  INCOMING_CALL_TAKEOVER_DEFAULT,
+  INCOMING_CALL_TAKEOVER_PREF,
+} from "../../utils/incomingCallTakeover";
 
 /**
  * Mirrors `voice_apm::NsLevel` in src-tauri.
@@ -50,6 +54,8 @@ export interface PreferencesData {
   font_size?: string;
   allow_desktop_notifications?: boolean;
   allow_sound_effects?: boolean;
+  /** #1639: a ringing DM call takes over the screen (`/incoming-call/$callId`). Default true; synced. */
+  incoming_call_takeover?: boolean;
   /** DM receipts (#857), default true. Reciprocal: off emits and records none. Enforced in Rust; synced. */
   send_read_receipts?: boolean;
   /** Pre-AGC mic boost in dB. 0..=20; 0 = off. */
@@ -259,6 +265,11 @@ export function usePreferences() {
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
         allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
+        incoming_call_takeover: getPreference<boolean>(
+          json,
+          INCOMING_CALL_TAKEOVER_PREF,
+          INCOMING_CALL_TAKEOVER_DEFAULT,
+        ),
         send_read_receipts: getPreference<boolean>(json, "send_read_receipts", true),
         mic_boost_db: getPreference<number>(json, "mic_boost_db", APM_DEFAULTS.mic_boost_db),
         auto_gain_control: getPreference<boolean>(json, "auto_gain_control", APM_DEFAULTS.auto_gain_control),

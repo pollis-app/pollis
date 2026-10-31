@@ -305,6 +305,13 @@ const callRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Call"), "CallPage"),
 });
 
+// #1639: full-page incoming-call takeover; parameterized, so not a nav/search page.
+const incomingCallRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/incoming-call/$callId",
+  component: lazyRouteComponent(() => import("./pages/IncomingCallPage"), "IncomingCallPage"),
+});
+
 const savedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/saved",
@@ -373,6 +380,7 @@ const routeTree = rootRoute.addChildren([
   diagnosticsRoute,
   updateRoute,
   callRoute,
+  incomingCallRoute,
   savedRoute,
   vaultRoute,
   arcadeRoute,

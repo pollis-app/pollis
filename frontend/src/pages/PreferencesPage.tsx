@@ -51,6 +51,7 @@ import { Button } from "../components/ui/Button";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
+import { INCOMING_CALL_TAKEOVER_DEFAULT } from "../utils/incomingCallTakeover";
 import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
@@ -89,6 +90,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
+  const [incomingCallTakeover, setIncomingCallTakeover] = useState<boolean>(INCOMING_CALL_TAKEOVER_DEFAULT);
   const [sendReadReceipts, setSendReadReceipts] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
@@ -127,6 +129,9 @@ export const PreferencesPage: React.FC = observer(() => {
       }
       if (query.data.allow_sound_effects !== undefined) {
         setAllowSoundEffects(query.data.allow_sound_effects);
+      }
+      if (query.data.incoming_call_takeover !== undefined) {
+        setIncomingCallTakeover(query.data.incoming_call_takeover);
       }
       if (query.data.send_read_receipts !== undefined) {
         setSendReadReceipts(query.data.send_read_receipts);
@@ -176,6 +181,7 @@ export const PreferencesPage: React.FC = observer(() => {
     bgH?: number; bgS?: number; bgL?: number;
     skin?: Skin;
     notifications?: boolean; soundEffects?: boolean;
+    incomingCallTakeover?: boolean;
     sendReadReceipts?: boolean;
     sidebarOpenByDefault?: boolean;
     rightPanelOpenByDefault?: boolean;
@@ -191,6 +197,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const bl = opts.bgL ?? bgLightness;
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
+    const takeover = opts.incomingCallTakeover ?? incomingCallTakeover;
     const receipts = opts.sendReadReceipts ?? sendReadReceipts;
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
     const rightPanel = opts.rightPanelOpenByDefault ?? rightPanelOpenByDefault;
@@ -211,6 +218,7 @@ export const PreferencesPage: React.FC = observer(() => {
       skin: skinVal,
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
+      incoming_call_takeover: takeover,
       send_read_receipts: receipts,
       sidebar_open_by_default: sidebar,
       right_panel_open_by_default: rightPanel,
@@ -221,7 +229,7 @@ export const PreferencesPage: React.FC = observer(() => {
       relay_serving_wifi_only: relay.wifi_only,
       relay_serving_power_only: relay.power_only,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sendReadReceipts, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, incomingCallTakeover, sendReadReceipts, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
 
   // Apply `val` live, never throwing: errors show inline and the control snaps to the real mode.
   const applyOverlayMode = useCallback(async (val: OverlayMode, persist: boolean) => {
@@ -364,6 +372,11 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleAllowSoundEffects = (val: boolean) => {
     setAllowSoundEffects(val);
     save({ soundEffects: val });
+  };
+
+  const handleIncomingCallTakeover = (val: boolean) => {
+    setIncomingCallTakeover(val);
+    save({ incomingCallTakeover: val });
   };
 
   const handleSendReadReceipts = (val: boolean) => {
@@ -769,6 +782,17 @@ export const PreferencesPage: React.FC = observer(() => {
                 checked={allowSoundEffects}
                 onChange={handleAllowSoundEffects}
               />
+              <div className="flex flex-col gap-1.5">
+                <Switch
+                  id="pref-incoming-call-takeover"
+                  label={t("notifications.callTakeoverLabel")}
+                  checked={incomingCallTakeover}
+                  onChange={handleIncomingCallTakeover}
+                />
+                <p className="text-xs font-mono text-muted">
+                  {t("notifications.callTakeoverDescription")}
+                </p>
+              </div>
             </section>
 
             {/* Read receipts (#857) — DMs only. */}
