@@ -1,4 +1,4 @@
-/* The Android adaptive icon's glyph fills the 66dp safe zone and nothing else (#1406). */
+/* The Android adaptive icon's glyph fills the 66dp safe zone, with margin, and nothing else (#1406, #1638). */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -39,14 +39,15 @@ test("app.json: adaptive foreground + monochrome on the brand amber", () => {
   assert.equal(mono.w, fg.w);
 });
 
-test("foreground: every painted pixel is inside the 66dp safe zone", () => {
+// #1638: a glyph touching the 33dp safe radius crowds circle masks, so keep a margin inside it.
+test("foreground: every painted pixel is inside the 66dp safe zone, with margin", () => {
   const { reachDp } = geometry(fg);
-  assert.ok(reachDp <= 33.2, `farthest pixel ${reachDp.toFixed(1)}dp from centre (safe radius 33dp)`);
+  assert.ok(reachDp <= 31.7, `farthest pixel ${reachDp.toFixed(1)}dp from centre (safe radius 33dp, less 1.3dp margin)`);
 });
 
-test("foreground: the glyph fills the safe zone (not the old 58dp lock)", () => {
+test("foreground: the glyph stays larger than the old 58dp lock (#1406)", () => {
   const { heightDp } = geometry(fg);
-  assert.ok(heightDp >= 60, `glyph ${heightDp.toFixed(1)}dp tall of 108dp`);
+  assert.ok(heightDp >= 59, `glyph ${heightDp.toFixed(1)}dp tall of 108dp`);
 });
 
 // The lock body's interior, in assets/pollis-logo.svg units, inset clear of the anti-aliased edges and corners.
