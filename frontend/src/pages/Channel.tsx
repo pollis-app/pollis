@@ -10,6 +10,7 @@ import { observer } from "mobx-react-lite";
 import { useMarkConversationRead } from "../hooks/queries/useUnread";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
 import { PressButton } from "../components/ui/PressButton";
+import { ConversationHeader } from "../components/Layout/ConversationHeader";
 
 export const ChannelPage: React.FC = observer(() => {
   const { t } = useTranslation("channels");
@@ -50,19 +51,14 @@ export const ChannelPage: React.FC = observer(() => {
 
   return (
     <div className="flex flex-col h-full">
-      <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
-      >
-        <span className="flex-1">{title}</span>
-        <div className="me-2">
-          <ExportArchiveButton
-            key={channelId}
-            conversationId={channelId}
-            fileStem={`pollis-${channel?.name ?? channelId}`}
-            variant="icon"
-            testId="channel-export-trigger"
-          />
-        </div>
+      <ConversationHeader title={title}>
+        <ExportArchiveButton
+          key={channelId}
+          conversationId={channelId}
+          fileStem={`pollis-${channel?.name ?? channelId}`}
+          variant="icon"
+          testId="channel-export-trigger"
+        />
         {/* Per-channel mute (#1431): silences this channel's pushes and
             notifications on every device of the account, except a direct
             @mention. Optimistic, and disabled while the write is in flight. */}
@@ -74,7 +70,7 @@ export const ChannelPage: React.FC = observer(() => {
           aria-pressed={isMuted}
           aria-label={muteLabel}
           title={`${muteLabel}. ${t("channel.muteDescription")}`}
-          className="icon-btn-sm flex-shrink-0 padding-0 me-2"
+          className="icon-btn-sm flex-shrink-0"
         >
           {isMuted ? <BellOff size={14} aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
         </button>
@@ -83,17 +79,17 @@ export const ChannelPage: React.FC = observer(() => {
           onClick={togglePins}
           aria-label={t("channel.pinsLabel")}
           title={t("channel.pinsLabel")}
-          className="icon-btn-sm flex-shrink-0 padding-0 me-2"
+          className="icon-btn-sm flex-shrink-0"
         >
           <Pin size={14} aria-hidden="true" />
         </PressButton>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (
-          <div className="flex items-center gap-2">
+          <>
             <PressButton
               data-testid="rename-channel-trigger"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
               aria-label={t("channel.renameLabel")}
-              className="icon-btn-sm flex-shrink-0 padding-0"
+              className="icon-btn-sm flex-shrink-0"
             >
               <Pencil size={14} aria-hidden="true" />
             </PressButton>
@@ -101,13 +97,13 @@ export const ChannelPage: React.FC = observer(() => {
               data-testid="delete-channel-trigger"
               onClick={() => setPendingDeleteChannelId(channelId)}
               aria-label={t("channel.deleteLabel")}
-              className="icon-btn-sm flex-shrink-0 padding-0"
+              className="icon-btn-sm flex-shrink-0"
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>
-          </div>
+          </>
         )}
-      </div>
+      </ConversationHeader>
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         <MainContent />
       </div>
