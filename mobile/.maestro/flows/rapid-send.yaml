@@ -2,9 +2,9 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - parity
 ---
-# RAPID SEND (#1636) — sending again while a send is still in flight queues
-# the message instead of doing nothing. Every message shows at once, is
-# delivered once, and lands in the order it was sent.
+# RAPID SEND (#1636) — sending again while a send is still in flight is never
+# refused. Every message shows at once, is stored by the core at once, is
+# delivered once, and lands in the order it was sent — also across a kill.
 #
 # The first send in a fresh group pays for MLS group setup (often 15 s or
 # more against the dev DS), so the second and third Send taps below land while
@@ -113,3 +113,66 @@ tags:
 - assertNotVisible:
     id: "btn-retry-message-.*"
 - takeScreenshot: rapid-send-02-delivered-in-order
+
+# ── Killed mid-burst ────────────────────────────────────────────────────────
+# Three more back to back, then the app is killed at once, while at most the
+# first can have gone out. The core stored every one before any network work,
+# so after the relaunch the drain delivers all three: each once, in order.
+- tapOn:
+    id: "input-composer"
+- inputText: "rk1636 one"
+- tapOn:
+    id: "btn-send"
+- inputText: "rk1636 two"
+- tapOn:
+    id: "btn-send"
+- inputText: "rk1636 three"
+- tapOn:
+    id: "btn-send"
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "E2E Rapid Send Group.*"
+    index: 0
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- extendedWaitUntil:
+    visible: ".*rk1636 three.*"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-retry-message-.*"
+    timeout: 120000
+- assertVisible:
+    text: ".*rk1636 two.*"
+    below:
+      text: ".*rk1636 one.*"
+- assertVisible:
+    text: ".*rk1636 three.*"
+    below:
+      text: ".*rk1636 two.*"
+- assertNotVisible:
+    text: ".*rk1636 one.*"
+    index: 1
+- assertNotVisible:
+    text: ".*rk1636 two.*"
+    index: 1
+- assertNotVisible:
+    text: ".*rk1636 three.*"
+    index: 1
+- takeScreenshot: rapid-send-03-delivered-after-kill

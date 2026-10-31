@@ -6,7 +6,6 @@ import {
   useMessages,
   useSendMessage,
   useThreadMessages,
-  takeSendTurn,
 } from "../../../hooks/queries/useMessages";
 import { ChatInput, type Attachment } from "../../ui/ChatInput";
 import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../../utils/attachmentEnvelope";
@@ -37,13 +36,11 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
       if ((!contentText && attachments.length === 0) || !currentUser) {
         return;
       }
-      // Same outbox hand-off and send line as the channel composer (#1335, #1636).
-      const turn = takeSendTurn(channelId || conversationId || "");
+      // Same outbox hand-off as the channel composer (#1335).
       let outgoing: OutgoingAttachment[];
       try {
         outgoing = await outgoingAttachments(attachments);
       } catch (error) {
-        turn.release();
         await releaseStaged(attachments);
         console.error("Failed to send thread reply:", error);
         return;
@@ -55,7 +52,6 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           content: contentText,
           attachments: outgoing,
           threadId,
-          turn,
         },
         { onError: () => void releaseStaged(attachments) },
       );

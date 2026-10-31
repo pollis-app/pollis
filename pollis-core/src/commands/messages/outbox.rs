@@ -5,6 +5,10 @@
 //! [`flush_outbox`] (event-driven, never polled) and [`retry_message`] redeliver unsent rows and queued edits.
 //!
 //! **Idempotency.** A retry reuses the envelope id (the DS answers a replay); [`deliver`] holds the per-message lock.
+//!
+//! **Order (#1636).** One conversation delivers one message at a time, in stored `(sent_at, id)`
+//! order: [`deliver`] holds the conversation's line lock and sends every earlier `pending` row
+//! first. A `failed` or `rejected` row never holds up the ones behind it.
 
 use std::sync::Arc;
 
@@ -618,9 +622,248 @@ impl OutboxLock {
     }
 }
 
-/// Run one delivery attempt for the queued message `id`.
-/// Re-reads the row under the lock; a failed attempt marks it `failed`.
+/// Sends of each conversation still writing their outbox row (#1636).
+///
+/// A send registers here before its first await and leaves once its row is written (or it
+/// died trying), so a delivery never runs past an earlier send whose row is not there yet:
+/// an attachment send stores its bytes before its row, and a text sent just after must not
+/// overtake it.
+#[derive(Default)]
+pub struct Enqueuing {
+    inner: std::sync::Mutex<std::collections::HashMap<String, Vec<EnqueueEntry>>>,
+}
+
+struct EnqueueEntry {
+    sent_at: String,
+    id: String,
+    gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// One send's place in [`Enqueuing`]; dropping it (the row is written, or the future was
+/// dropped) lets deliveries behind it go.
+pub(super) struct EnqueueTicket {
+    state: Arc<AppState>,
+    conversation_id: String,
+    id: String,
+    _open: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl EnqueueTicket {
+    /// Synchronous on purpose: taken before the send's first await.
+    pub(super) fn begin(state: &Arc<AppState>, queued: &Queued) -> Self {
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        let open = gate
+            .clone()
+            .try_lock_owned()
+            .expect("a gate nobody has seen is free");
+        state
+            .outbox_enqueuing
+            .inner
+            .lock()
+            .expect("outbox_enqueuing poisoned")
+            .entry(queued.conversation_id.clone())
+            .or_default()
+            .push(EnqueueEntry {
+                sent_at: queued.sent_at.clone(),
+                id: queued.id.clone(),
+                gate,
+            });
+        Self {
+            state: state.clone(),
+            conversation_id: queued.conversation_id.clone(),
+            id: queued.id.clone(),
+            _open: open,
+        }
+    }
+}
+
+impl Drop for EnqueueTicket {
+    fn drop(&mut self) {
+        let mut map = self
+            .state
+            .outbox_enqueuing
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(entries) = map.get_mut(&self.conversation_id) {
+            entries.retain(|e| e.id != self.id);
+            if entries.is_empty() {
+                map.remove(&self.conversation_id);
+            }
+        }
+    }
+}
+
+/// Gates of this conversation's sends still writing a row that comes before `(sent_at, id)`.
+fn earlier_enqueues(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    sent_at: &str,
+    id: &str,
+) -> Vec<Arc<tokio::sync::Mutex<()>>> {
+    let map = state
+        .outbox_enqueuing
+        .inner
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    map.get(conversation_id)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|e| e.id != id && (e.sent_at.as_str(), e.id.as_str()) < (sent_at, id))
+                .map(|e| e.gate.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The outbox-lock key that serializes one conversation's deliveries (#1636). Message ids are
+/// ULIDs, so this can never name a message's own lock.
+fn line_key(conversation_id: &str) -> String {
+    format!("line:{conversation_id}")
+}
+
+/// Where a stored row sits in its conversation's line: `(conversation_id, sent_at)`.
+fn line_position_on(conn: &rusqlite::Connection, id: &str) -> Result<Option<(String, String)>> {
+    Ok(conn
+        .query_row(
+            "SELECT conversation_id, sent_at FROM message WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// This conversation's `pending` messages stored before `id`, oldest first (#1636).
+///
+/// Only `pending`: a `failed` or `rejected` message does not hold up the ones behind it. It
+/// is retried by Retry and (`failed` only) the drain, and then lands when it goes.
+pub(super) fn pending_ahead_on(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    id: &str,
+) -> Result<Vec<String>> {
+    let Some((_, sent_at)) = line_position_on(conn, id)? else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT id FROM message
+         WHERE conversation_id = ?1 AND send_state = 'pending' AND id != ?3
+           AND (sent_at < ?2 OR (sent_at = ?2 AND id < ?3))
+         ORDER BY sent_at, id",
+    )?;
+    let ids = stmt
+        .query_map(rusqlite::params![conversation_id, sent_at, id], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+/// The stamp a never-sealed row seals with (#1636), and the rows behind it kept behind it.
+///
+/// The time it actually goes out, but never earlier than its own stored stamp, so a
+/// conversation's sends keep their stored order. Every later unsent, never-sealed row of the
+/// conversation whose stamp would then sort before it is moved just after it, in order, so
+/// the line (and what the sender sees) never reshuffles. A sealed row's stamp is the DS's
+/// and never moves.
+pub(super) fn restamp_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+    conversation_id: &str,
+    stored: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<String> {
+    let parse = |s: &str| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|d| d.to_utc())
+    };
+    let stamp = match parse(stored) {
+        Some(at) if at > now => at,
+        _ => now,
+    };
+    let behind: Vec<(String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, sent_at FROM message
+             WHERE conversation_id = ?1 AND send_state IS NOT NULL AND length(ciphertext) = 0
+               AND id != ?3 AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
+             ORDER BY sent_at, id",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![conversation_id, stored, id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows
+    };
+    let mut prev = stamp;
+    for (later, at) in behind {
+        let keep = parse(&at).filter(|t| *t > prev);
+        let next = keep.unwrap_or(prev + chrono::Duration::microseconds(1));
+        if keep.is_none() {
+            conn.execute(
+                "UPDATE message SET sent_at = ?1 WHERE id = ?2",
+                rusqlite::params![super::stamp_envelope_sent_at(next), later],
+            )?;
+        }
+        prev = next;
+    }
+    Ok(super::stamp_envelope_sent_at(stamp))
+}
+
+/// Deliver the queued message `id`, in its conversation's order (#1636).
+///
+/// One conversation delivers one message at a time, oldest first: under the conversation's
+/// line lock, any earlier send still writing its row is waited for, then every earlier
+/// `pending` message is delivered before this one. A failed earlier one is recorded and
+/// skipped, never a reason to stop. Every path (send, Retry, the drain) comes through here,
+/// so the order holds whichever trigger runs and across restarts.
 pub(super) async fn deliver(
+    state: &Arc<AppState>,
+    id: &str,
+    sender_username: Option<String>,
+) -> Result<Message> {
+    let position = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        line_position_on(db.conn(), id)?
+    };
+    let Some((conversation_id, sent_at)) = position else {
+        return deliver_one(state, id, sender_username).await;
+    };
+    let line = OutboxLock::acquire(state, &line_key(&conversation_id)).await;
+    let result = deliver_in_line(state, &conversation_id, &sent_at, id, sender_username).await;
+    line.release().await;
+    result
+}
+
+async fn deliver_in_line(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    sent_at: &str,
+    id: &str,
+    sender_username: Option<String>,
+) -> Result<Message> {
+    for gate in earlier_enqueues(state, conversation_id, sent_at, id) {
+        drop(gate.lock().await);
+    }
+    let ahead = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        pending_ahead_on(db.conn(), conversation_id, id)?
+    };
+    for earlier in ahead {
+        if let Err(e) = deliver_one(state, &earlier, None).await {
+            crate::diag!("[outbox] delivery of {earlier}, ahead of {id}, failed: {e}");
+        }
+    }
+    deliver_one(state, id, sender_username).await
+}
+
+/// One delivery attempt for `id`, under its own lock.
+/// Re-reads the row under the lock; a failed attempt marks it `failed`.
+async fn deliver_one(
     state: &Arc<AppState>,
     id: &str,
     sender_username: Option<String>,
@@ -959,6 +1202,103 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    fn at(s: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(s).unwrap().to_utc()
+    }
+
+    fn queued_at(id: &str, conversation: &str, sent_at: &str) -> Queued {
+        Queued {
+            conversation_id: conversation.to_string(),
+            thread_id: None,
+            sent_at: sent_at.to_string(),
+            ..queued(id, id)
+        }
+    }
+
+    fn sent_at_of(conn: &rusqlite::Connection, id: &str) -> String {
+        conn.query_row("SELECT sent_at FROM message WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn line(conn: &rusqlite::Connection, conversation: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT id FROM message WHERE conversation_id = ?1 ORDER BY sent_at, id")
+            .unwrap();
+        stmt.query_map([conversation], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .unwrap()
+    }
+
+    /// A message waits only behind earlier PENDING messages of its own conversation (#1636);
+    /// failed, rejected, delivered and other conversations' messages hold nobody up.
+    #[test]
+    fn only_earlier_pending_messages_of_the_conversation_are_ahead() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let rows = [
+            ("01A", "c1", "2026-10-31T10:00:00.000001+00:00", Some(PENDING)),
+            ("01B", "c1", "2026-10-31T10:00:00.000002+00:00", Some(FAILED)),
+            ("01C", "c1", "2026-10-31T10:00:00.000003+00:00", Some(REJECTED)),
+            ("01D", "c1", "2026-10-31T10:00:00.000004+00:00", None),
+            ("01E", "c2", "2026-10-31T10:00:00.000005+00:00", Some(PENDING)),
+            ("01F", "c1", "2026-10-31T10:00:00.000006+00:00", Some(PENDING)),
+            ("01G", "c1", "2026-10-31T10:00:00.000007+00:00", Some(PENDING)),
+            ("01H", "c1", "2026-10-31T10:00:00.000008+00:00", Some(PENDING)),
+        ];
+        for (id, conv, sent_at, state) in rows {
+            enqueue_on(conn, &queued_at(id, conv, sent_at), &[]).unwrap();
+            match state {
+                Some(s) => mark_state_on(conn, id, s).unwrap(),
+                None => {
+                    settle_on(conn, id).unwrap();
+                }
+            }
+        }
+        assert_eq!(pending_ahead_on(conn, "c1", "01A").unwrap(), Vec::<String>::new());
+        assert_eq!(pending_ahead_on(conn, "c1", "01G").unwrap(), vec!["01A", "01F"]);
+        assert_eq!(pending_ahead_on(conn, "c1", "01H").unwrap(), vec!["01A", "01F", "01G"]);
+        assert_eq!(pending_ahead_on(conn, "c2", "01E").unwrap(), Vec::<String>::new());
+        // Equal stamps fall back to the id, the same tie-break as the drain.
+        enqueue_on(conn, &queued_at("01I", "c3", "2026-10-31T10:00:00+00:00"), &[]).unwrap();
+        enqueue_on(conn, &queued_at("01J", "c3", "2026-10-31T10:00:00+00:00"), &[]).unwrap();
+        assert_eq!(pending_ahead_on(conn, "c3", "01J").unwrap(), vec!["01I"]);
+        assert!(pending_ahead_on(conn, "c3", "01I").unwrap().is_empty());
+    }
+
+    /// A seal stamps the time it goes out, never earlier than the row's own stamp, and the
+    /// unsent rows behind it stay behind it, in their order (#1636).
+    #[test]
+    fn a_restamp_keeps_the_conversation_in_stored_order() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let t = |n: u32| format!("2026-10-31T10:00:0{n}+00:00");
+        for (i, id) in ["01A", "01B", "01C", "01D"].iter().enumerate() {
+            enqueue_on(conn, &queued_at(id, "c1", &t(i as u32 + 1)), &[]).unwrap();
+        }
+        // 01D was sealed once: its stamp is the DS's and must not move.
+        conn.execute("UPDATE message SET ciphertext = X'01' WHERE id = '01D'", []).unwrap();
+        let before_d = sent_at_of(conn, "01D");
+        enqueue_on(conn, &queued_at("01Z", "c2", &t(1)), &[]).unwrap();
+
+        // 01A goes out late, at :07: B and C were stored after it, so they move behind it.
+        let stamp = restamp_on(conn, "01A", "c1", &t(1), at("2026-10-31T10:00:07+00:00")).unwrap();
+        conn.execute("UPDATE message SET sent_at = ?1 WHERE id = '01A'", [&stamp]).unwrap();
+        assert_eq!(at(&stamp), at("2026-10-31T10:00:07+00:00"));
+        assert!(at(&sent_at_of(conn, "01B")) > at(&stamp));
+        assert!(at(&sent_at_of(conn, "01C")) > at(&sent_at_of(conn, "01B")));
+        assert_eq!(sent_at_of(conn, "01D"), before_d, "a sealed stamp never moves");
+        assert_eq!(sent_at_of(conn, "01Z"), t(1), "another conversation is untouched");
+        let order = line(conn, "c1");
+        let pos = |id: &str| order.iter().position(|x| x == id).unwrap();
+        assert!(pos("01A") < pos("01B") && pos("01B") < pos("01C"), "{order:?}");
+
+        // A clock behind the stored stamp never moves a message earlier.
+        let stored_b = sent_at_of(conn, "01B");
+        let stamp_b = restamp_on(conn, "01B", "c1", &stored_b, at("2026-10-31T09:00:00+00:00")).unwrap();
+        assert_eq!(at(&stamp_b), at(&stored_b));
     }
 
     /// The message is stored as unsent before anything else happens.

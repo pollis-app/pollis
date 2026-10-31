@@ -14,7 +14,6 @@ import {
   withoutOutboxRows,
   type SendState,
 } from "../../utils/pendingMessages";
-import { createSendLine, type SendTurn } from "../../utils/sendLine";
 
 // Last background ingest per conversation, to debounce channel switching (realtime writes it too).
 const lastIngestAt = new Map<string, number>();
@@ -315,19 +314,6 @@ export function useConversationMessages(conversationId: string | null) {
   return useMessages(null, conversationId);
 }
 
-/** Sends leave one conversation one at a time, in tap order (#1636). */
-const sendLine = createSendLine();
-
-/**
- * Take the next send turn for a conversation (#1636). Call it synchronously as the user sends,
- * before any await, and hand the turn to `useSendMessage`; a send that never reaches the
- * mutation must release it itself.
- */
-export function takeSendTurn(conversationId: string): SendTurn {
-  return sendLine.take(conversationId);
-}
-
-/** Never blocks the composer: each send waits its `turn`, so they leave in tap order (#1636). */
 export function useSendMessage() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -341,10 +327,7 @@ export function useSendMessage() {
       threadId,
       messageId,
       attachments,
-      turn,
     }: {
-      // From takeSendTurn; released in onSettled, which runs on every outcome.
-      turn?: SendTurn;
       channelId: string;
       conversationId: string;
       content: string;
@@ -357,9 +340,6 @@ export function useSendMessage() {
       // Attachments for the outbox to upload (#1335); `content` is the caption.
       attachments?: OutgoingAttachment[];
     }) => {
-      if (turn) {
-        await turn.ready;
-      }
       if (!currentUser) {
         throw new Error("No current user");
       }
@@ -434,10 +414,6 @@ export function useSendMessage() {
           queryKey: messageQueryKeys.thread(variables.threadId),
         });
       }
-    },
-    // Delivered or failed, the next send in this conversation may go.
-    onSettled: (_data, _err, variables) => {
-      variables.turn?.release();
     },
   });
 }

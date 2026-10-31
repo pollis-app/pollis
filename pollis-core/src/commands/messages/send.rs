@@ -67,9 +67,12 @@ pub async fn send_message_with_id(
         thread_id,
         sent_at: super::envelope_sent_at(),
     };
-    if let super::outbox::Enqueued::AlreadySent(message) =
-        super::outbox::enqueue(state, &queued, attachments).await?
-    {
+    // Before the first await (#1636): the stamp above is this send's place in its
+    // conversation, and no delivery may pass it until its row is written.
+    let ticket = super::outbox::EnqueueTicket::begin(state, &queued);
+    let enqueued = super::outbox::enqueue(state, &queued, attachments).await;
+    drop(ticket);
+    if let super::outbox::Enqueued::AlreadySent(message) = enqueued? {
         return Ok(message);
     }
     // Test-harness only: die right after the outbox row is written (#1335).
@@ -192,12 +195,17 @@ pub(super) async fn deliver_queued(
         )?;
 
         // `sent_at` refreshes per attempt until the first seal, then stays fixed (the DS may hold it).
+        // Never earlier than the stored stamp, and later rows stay behind it (#1636).
         let never_sealed: bool = db.conn().query_row(
             "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
             rusqlite::params![id],
             |row| row.get(0),
         )?;
-        let sent_at = if never_sealed { super::envelope_sent_at() } else { sent_at };
+        let sent_at = if never_sealed {
+            super::outbox::restamp_on(db.conn(), &id, &conversation_id, &sent_at, chrono::Utc::now())?
+        } else {
+            sent_at
+        };
         db.conn().execute(
             "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
             rusqlite::params![sealed.bytes, sent_at, id],

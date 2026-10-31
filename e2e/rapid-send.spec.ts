@@ -1,5 +1,5 @@
-// Rapid sends (#1636): sending while a send is still out queues the message — shown at once,
-// handed to the core one at a time in the order sent, delivered once each, failures per message.
+// Rapid sends (#1636): sending while a send is still out is never refused — every message shows
+// at once, reaches the core at once in the order sent, is delivered once, and fails on its own.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -115,8 +115,12 @@ test("a burst sent while the first send is still out is queued, in order, and de
   }
   await expect.poll(() => shownOrder(page)).toEqual(BURST);
   await expect(page.getByTestId("message-input")).not.toContainText("rs1636");
-  // One at a time: the later two wait their turn behind the one in flight.
-  await expect.poll(() => sendCalls(page)).toBe(1);
+  // Each was handed to the core at once, not held behind the one in flight: the core stores
+  // every send immediately and orders delivery itself (pollis-core outbox).
+  await expect.poll(() => sendCalls(page)).toBe(BURST.length);
+  await expect.poll(() => stored(page)).toEqual(
+    BURST.map((content) => ({ content, send_state: null })),
+  );
   await page.screenshot({ path: test.info().outputPath("rapid-send-queued.png") });
 
   await page.evaluate(() => (window as any).__tauriRelease("send_message"));

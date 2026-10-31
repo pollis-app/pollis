@@ -593,12 +593,17 @@ renderer halves are `frontend/tests/pending-messages.test.ts` and
 `mobile/tests/pending-messages.test.ts`; the UI is `e2e/outbox.spec.ts` (desktop)
 and `mobile/.maestro/flows/outbox.yaml` (mobile: a real `stopApp` mid-send, and
 on Android an airplane-mode send that fails and is retried). Rapid sends
-(#1636): `frontend/tests/send-line.test.ts` and `mobile/tests/send-line.test.ts`
-pin the send line, `e2e/rapid-send.spec.ts` holds the first `send_message` in
-flight and checks a burst is shown at once, handed over one at a time in order,
-delivered once each, and that a failure is per message; on mobile
+(#1636): the core invariant is in `flows/outbox.rs` (a concurrent burst is
+delivered once each in stored order; a burst killed mid-delivery is all stored
+before any post, never has two messages out at once, and after a restart is
+delivered once each, in order; a failed message does not block the next) and
+`commands::messages::outbox::tests`. `mobile/tests/rapid-send.test.ts` pins
+that the composer never waits. `e2e/rapid-send.spec.ts` holds the first
+`send_message` in flight and checks a burst is shown at once, reaches the core
+at once in order, is delivered once each, and fails per message. On mobile
 `.maestro/flows/rapid-send.yaml` sends three back to back in a fresh group
-(whose first send is slow) and checks order and single delivery.
+(whose first send is slow), then kills the app mid-burst and checks every
+message arrives once, in order, after the relaunch.
 
 ### Killing an edit part-way (#1555)
 

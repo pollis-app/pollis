@@ -564,3 +564,231 @@ async fn a_long_queued_message_lands_with_the_time_it_went_out() {
     assert_eq!(theirs[0]["sent_at"], landed_at.as_str(), "sender and recipient agree");
     drop((alice, bob));
 }
+
+/// The DS's delivery order (`seq`, #1087) of a conversation's envelopes among `ids`.
+async fn posted_order(channel_id: &str, ids: &[String]) -> Vec<String> {
+    let conn = writable_remote().await.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT id FROM message_envelope WHERE conversation_id = ?1 ORDER BY seq",
+            libsql::params![channel_id.to_string()],
+        )
+        .await
+        .expect("envelope order");
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        let id: String = row.get(0).expect("id");
+        if ids.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
+type LineRow = (String, String, Option<String>);
+
+/// This client's own rows among `ids`, as `(id, sent_at, send_state)`, in display order.
+async fn own_line(client: &TestClient, channel_id: &str, ids: &[String]) -> Vec<LineRow> {
+    let page = client
+        .invoke_json("read_channel_messages", json!({ "channelId": channel_id, "limit": 200 }))
+        .await;
+    let mut rows: Vec<LineRow> = page["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .filter(|m| ids.iter().any(|id| m["id"] == id.as_str()))
+        .map(|m| {
+            (
+                m["id"].as_str().expect("id").to_string(),
+                m["sent_at"].as_str().expect("sent_at").to_string(),
+                m.get("send_state").and_then(|s| s.as_str()).map(str::to_string),
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| (a.1.as_str(), a.0.as_str()).cmp(&(b.1.as_str(), b.0.as_str())));
+    rows
+}
+
+/// A recipient's copies of `ids`, in display order.
+async fn their_line(client: &TestClient, channel_id: &str, ids: &[String]) -> Vec<String> {
+    let mut rows: Vec<(String, String)> = client
+        .fetch_channel_messages(channel_id)
+        .await
+        .into_iter()
+        .filter(|m| ids.iter().any(|id| m["id"] == id.as_str()))
+        .map(|m| {
+            (
+                m["sent_at"].as_str().expect("sent_at").to_string(),
+                m["id"].as_str().expect("id").to_string(),
+            )
+        })
+        .collect();
+    rows.sort();
+    rows.into_iter().map(|(_, id)| id).collect()
+}
+
+type SendTask = tokio::task::JoinHandle<
+    pollis_core::error::Result<pollis_core::commands::messages::Message>,
+>;
+
+/// Start `n` sends to `channel_id` at once, as a burst of taps does (#1636).
+async fn burst(client: &TestClient, channel_id: &str, n: usize) -> (Vec<String>, Vec<SendTask>) {
+    let mut ids = Vec::new();
+    for _ in 0..n {
+        let id: String = client.invoke_json("new_message_id", json!({})).await
+            .as_str().expect("id").to_string();
+        ids.push(id);
+    }
+    let tasks = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let state = client.state.clone();
+            let channel_id = channel_id.to_string();
+            let sender = client.user_id().to_string();
+            let id = id.clone();
+            tokio::spawn(async move {
+                pollis_core::commands::messages::send_message_with_id(
+                    Some(id),
+                    channel_id,
+                    sender,
+                    format!("burst {i}"),
+                    Vec::new(),
+                    None,
+                    None,
+                    None,
+                    &state,
+                )
+                .await
+            })
+        })
+        .collect();
+    (ids, tasks)
+}
+
+/// Rapid sends (#1636): concurrent sends are all delivered once each, one at a time, in the
+/// order the outbox stored them, and every reader shows that order.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_burst_of_concurrent_sends_is_delivered_once_each_in_stored_order() {
+    let (alice, bob, channel_id) = pair().await;
+    let (ids, tasks) = burst(&alice, &channel_id, 6).await;
+    for task in tasks {
+        task.await.expect("join").expect("each send is delivered");
+    }
+
+    let line = own_line(&alice, &channel_id, &ids).await;
+    assert_eq!(line.len(), ids.len(), "every send is stored once");
+    assert!(line.iter().all(|(_, _, s)| s.is_none()), "all delivered: {line:?}");
+    let stored: Vec<String> = line.iter().map(|(id, _, _)| id.clone()).collect();
+    assert_eq!(posted_order(&channel_id, &ids).await, stored, "posted in the order shown");
+    for id in &ids {
+        assert_eq!(envelopes_with_id(id).await, 1, "{id} posted exactly once");
+    }
+    assert_eq!(their_line(&bob, &channel_id, &ids).await, stored, "the recipient agrees");
+    drop((alice, bob));
+}
+
+/// Rapid sends (#1636): a burst is stored before any of it reaches the network, only one
+/// message is ever out at a time, and a kill mid-burst (every send future dropped, one of
+/// them sealed and parked before its post) loses nothing and doubles nothing: after the
+/// restart the drain delivers every message exactly once, in the stored order.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_burst_killed_mid_delivery_is_delivered_once_each_in_order_after_restart() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    let (alice, bob, channel_id) = pair().await;
+    let mut parked = rendezvous::arm(Point::EnvelopeBeforePost);
+    let (ids, tasks) = burst(&alice, &channel_id, 5).await;
+
+    let release = tokio::time::timeout(std::time::Duration::from_secs(60), parked.recv())
+        .await
+        .expect("no send reached its post")
+        .expect("rendezvous closed");
+
+    // Every row of the burst is in the outbox while the first is still out.
+    let mut line = Vec::new();
+    for _ in 0..200 {
+        line = own_line(&alice, &channel_id, &ids).await;
+        if line.len() == ids.len() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(line.len(), ids.len(), "the whole burst is stored: {line:?}");
+    assert!(
+        line.iter().all(|(_, _, s)| s.as_deref() == Some("pending")),
+        "stored as pending: {line:?}"
+    );
+    for id in &ids {
+        assert_eq!(envelopes_with_id(id).await, 0, "nothing posted yet");
+    }
+    // One at a time: nobody else reaches a post while the first is parked.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(parked.try_recv().is_err(), "a second send reached its post concurrently");
+    let stored: Vec<String> = line.iter().map(|(id, _, _)| id.clone()).collect();
+
+    // The kill: every in-flight send future is dropped.
+    for task in &tasks {
+        task.abort();
+    }
+    for task in tasks {
+        let _ = task.await;
+    }
+    rendezvous::disarm(Point::EnvelopeBeforePost);
+    drop(release);
+
+    restart(&alice).await;
+    alice.invoke_json("flush_outbox", json!({})).await;
+
+    let line = own_line(&alice, &channel_id, &ids).await;
+    assert!(line.iter().all(|(_, _, s)| s.is_none()), "all delivered: {line:?}");
+    let shown: Vec<String> = line.iter().map(|(id, _, _)| id.clone()).collect();
+    assert_eq!(shown, stored, "the sender's order is the stored order");
+    for id in &ids {
+        assert_eq!(envelopes_with_id(id).await, 1, "{id} posted exactly once");
+    }
+    assert_eq!(posted_order(&channel_id, &ids).await, stored, "posted in stored order");
+    assert_eq!(their_line(&bob, &channel_id, &ids).await, stored, "the recipient agrees");
+    drop((alice, bob));
+}
+
+/// Rapid sends (#1636): a failed message never holds up the ones behind it. A later send
+/// goes straight out and does not retry it; Retry then sends it, and it lands at the time it
+/// went, after the message that overtook it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_failed_message_does_not_hold_up_the_next_and_lands_when_retried() {
+    let (alice, bob, channel_id) = pair().await;
+    let outdated = alice.state.update_required.clone();
+
+    outdated.store(true, std::sync::atomic::Ordering::SeqCst);
+    let first: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    send_with_id(&alice, &channel_id, &first, "first, failed", None)
+        .await
+        .expect_err("an outdated client cannot send");
+    outdated.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    let before = test_hooks::delivery_attempts();
+    let second: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    send_with_id(&alice, &channel_id, &second, "second, behind it", None)
+        .await
+        .expect("the failed one ahead does not block this one");
+    assert_eq!(test_hooks::delivery_attempts(), before + 1, "the failed one was not retried");
+    assert_eq!(own_row(&alice, &channel_id, &first).await.expect("kept")["send_state"], "failed");
+    assert_eq!(copies(&bob, &channel_id, "second, behind it").await, 1);
+
+    alice
+        .invoke_try("retry_message", json!({ "messageId": first }))
+        .await
+        .expect("retry delivers it");
+    let ids = vec![first.clone(), second.clone()];
+    let line = own_line(&alice, &channel_id, &ids).await;
+    let shown: Vec<String> = line.iter().map(|(id, _, _)| id.clone()).collect();
+    assert_eq!(shown, vec![second.clone(), first.clone()], "it lands when it went: {line:?}");
+    assert_eq!(their_line(&bob, &channel_id, &ids).await, shown, "the recipient agrees");
+    assert_eq!(copies(&bob, &channel_id, "first, failed").await, 1);
+    drop((alice, bob));
+}

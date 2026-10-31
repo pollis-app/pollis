@@ -32,7 +32,7 @@ pub(crate) fn envelope_sent_at() -> String {
 }
 
 /// [`envelope_sent_at`] with the clock lifted out, so tests can pick the instant.
-fn stamp_envelope_sent_at(at: chrono::DateTime<chrono::Utc>) -> String {
+pub(super) fn stamp_envelope_sent_at(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339()
 }
 
@@ -120,6 +120,7 @@ pub use outbox::{
 };
 pub(crate) use outbox::{spawn_outbox_flush, sweep_orphan_attachments_on};
 pub use outbox::OutgoingAttachment;
+pub use outbox::Enqueuing;
 
 pub use read::{
     get_channel_messages, get_dm_messages, list_messages, list_thread_summaries,

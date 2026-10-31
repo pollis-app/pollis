@@ -14,7 +14,7 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
 import { EditMessageBar } from "../ui/EditMessageBar";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
-import { transformChannelMessage, type RawChannelMessage, useThreadSummaries, takeSendTurn } from "../../hooks/queries/useMessages";
+import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
 import { useRightPanel } from "./RightPanel/useRightPanel";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
@@ -669,10 +669,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       return { ...prev, messages: [...prev.messages, optimisticMessage] };
     });
     setReplyToMessageId(null);
-    // Taken now, before any await, so rapid sends leave in the order they were made (#1636).
-    const turn = takeSendTurn(selectedChannelId || selectedConversationId!);
 
-    const patchStub =(patch: Partial<Message>) => {
+    const patchStub = (patch: Partial<Message>) => {
       queryClient.setQueryData<MessagesQueryData>(queryKey, (old) => {
         if (!old) {
           return { messages: [], nextCursor: null };
@@ -694,7 +692,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       patchStub({ outbox_id: messageId });
       outgoing = await outgoingAttachments(attachments);
     } catch (error) {
-      turn.release();
       await releaseStaged(attachments);
       patchStub({ status: 'failed', retryable: false });
       console.error("Failed to send message:", error);
@@ -710,7 +707,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         replyToMessageId: replyToMessageId ?? undefined,
         optimisticId,
         messageId,
-        turn,
       });
     } catch (error) {
       await releaseStaged(attachments);

@@ -935,23 +935,45 @@ every later attempt posts that one unchanged — a re-seal does not move it — 
 after a crash-after-post, whose retry the DS answers as a replay of the first
 post, the sender's copy sits where every recipient's does.
 
-**Rapid sends queue, in order (#1636).** The composer never waits on a send:
-on both desktop and mobile the user can send again at once, and each message
-shows its stub immediately. Because `sent_at` is stamped at the first seal,
-two `send_message` calls running side by side would seal — and so be ordered
-for everyone — by whichever finished its catch-up first. So the renderers hand
-the core one send per conversation at a time: the send line
-(`frontend/src/utils/sendLine.ts`, an identical copy at `mobile/lib/sendLine.ts`;
-a test pins the copies equal) gives each send a turn, taken synchronously at the
-tap before any await, and the turn starts when the previous one in that
-conversation has settled. Delivered or failed both end a turn (the mutation's
-`onSettled`, plus a `release` on any early exit), so a failure is that message's
-own — it shows Retry / Discard — and never stalls the ones behind it. Each send
-is one mutation with one id, so a queued send is never sent twice. The cost: a
-send still waiting its turn is only in renderer memory until its turn comes, so
-a process killed in that window loses the queued ones (the in-flight one is
-already in the outbox). Mobile stubs are `pending-<ms>-<seq>`, so two made in
-one millisecond never share an id.
+**Rapid sends: stored at once, delivered in order (#1636).** The composer
+never waits on a send: on desktop and mobile every tap calls `send_message`
+immediately and shows its stub (mobile stubs are `pending-<ms>-<seq>`, so two
+made in one millisecond never share an id). The core makes the order:
+
+- **Stored at call time.** `send_message` stamps `sent_at` and registers the
+  send in `AppState::outbox_enqueuing` before its first await, then writes the
+  `pending` row (attachment bytes first, then the row) before any catch-up or
+  network work. A kill after that point loses nothing. A conversation's line
+  order is `(sent_at, id)` over its unsent rows: the order the core received
+  the calls.
+- **Delivered one at a time, in stored order.** Every delivery (a send, Retry,
+  the drain) goes through `outbox::deliver`, which holds the conversation's
+  line lock (`outbox_locks["line:<conversation>"]`). Under it, it waits for any
+  earlier send still writing its row (so a text sent right after an attachment
+  never overtakes it), delivers every earlier `pending` row of the conversation
+  oldest first, then its own. A send that finds its own row already delivered
+  by an earlier caller returns it. The order therefore holds whichever trigger
+  runs, and across restarts: the drain walks `(sent_at, id)` and takes the same
+  lock.
+- **`sent_at` follows seal order.** A never-sealed row still re-stamps at its
+  first seal (it lands at the time it went out), but never earlier than its
+  stored stamp, and every later never-sealed unsent row of the conversation
+  whose stamp would then sort before it is moved just after it, in order
+  (`outbox::restamp_on`). Seals run in line order, so stamps, seals and DS
+  `seq` agree.
+- **Failed and rejected rows do not block.** Only `pending` rows are delivered
+  ahead of a send. A `failed` or `rejected` one is skipped, so it never holds up
+  the messages behind it, and a new send never retries it. Retry (and, for
+  `failed`, the drain) sends it later. If it was never sealed it re-stamps then
+  and lands after the messages that overtook it. If it was sealed, its stamp
+  stays (the DS may hold it).
+
+Ties on `sent_at` (calls arriving at the core within the clock's resolution)
+fall back to the id. Pinned by `outbox::tests` (the line and the re-stamp) and
+the flows `a_burst_of_concurrent_sends_is_delivered_once_each_in_stored_order`,
+`a_burst_killed_mid_delivery_is_delivered_once_each_in_order_after_restart`
+and `a_failed_message_does_not_hold_up_the_next_and_lands_when_retried`. No
+wire or schema change.
 
 **Attachments are the outbox's too.** The row is on screen from the moment the
 user sends, uploads included, so the upload is as durable as the send: the
