@@ -207,8 +207,15 @@ pub async fn save_preferences(
     outcome_response::<SavePreferencesBody>(apply_save_preferences(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// UPSERT the user's `user_preferences` row. Authz: the actor may only write
-/// their own preferences (`user_id` bound to the authenticated user).
+/// Merge a save into the user's `user_preferences` row (#1650). Authz: the actor may only
+/// write their own preferences (`user_id` bound to the authenticated user).
+///
+/// The blob is shared by desktop and mobile, and each knows only some of its keys, so a save
+/// is a top-level merge, never a replacement: a key the save does not name keeps its stored
+/// value, a key it names takes the new value whole (nested objects included), and a key it
+/// sets to `null` is deleted. Merging here, in one statement, means no writer can drop a key
+/// it does not know, old builds included. The stored blob is always a JSON object: a save
+/// that is not one is refused.
 pub async fn apply_save_preferences(
     conn: &Connection,
     authed: Option<&str>,
@@ -218,15 +225,36 @@ pub async fn apply_save_preferences(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
+    let Some(clear) = clear_named_keys(&body.preferences) else {
+        return Ok(WriteOutcome::Invalid("preferences must be a JSON object"));
+    };
+    // `json_patch` is RFC 7396, which merges nested objects. Nulling every named key first
+    // makes the second patch replace each one whole instead.
     conn.execute(
         "INSERT INTO user_preferences (user_id, preferences, updated_at) \
-             VALUES (?1, ?2, datetime('now')) \
+             VALUES (?1, json_patch('{}', ?3), datetime('now')) \
          ON CONFLICT(user_id) DO UPDATE SET \
-             preferences = ?2, updated_at = datetime('now')",
-        libsql::params![user, body.preferences.clone()],
+             preferences = json_patch(json_patch( \
+                 CASE WHEN json_valid(user_preferences.preferences) \
+                       AND json_type(user_preferences.preferences) = 'object' \
+                      THEN user_preferences.preferences ELSE '{}' END, \
+                 ?2), ?3), \
+             updated_at = datetime('now')",
+        libsql::params![user, clear, body.preferences.clone()],
     )
     .await?;
     Ok(WriteOutcome::Ok)
+}
+
+/// The merge patch that removes every top-level key a save names; `None` when the save is
+/// not a JSON object.
+fn clear_named_keys(raw: &str) -> Option<String> {
+    let serde_json::Value::Object(map) = serde_json::from_str::<serde_json::Value>(raw).ok()? else {
+        return None;
+    };
+    let clear: serde_json::Map<String, serde_json::Value> =
+        map.into_iter().map(|(k, _)| (k, serde_json::Value::Null)).collect();
+    Some(serde_json::Value::Object(clear).to_string())
 }
 
 /// Ceiling on one account's stored cursor blob.
