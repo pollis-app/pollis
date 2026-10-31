@@ -797,7 +797,7 @@ mod tests {
         let zip_path = bundle_archive(&path).unwrap();
         assert_eq!(zip_path, dir.path().join("archive.zip"));
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
-        let names: Vec<String> = (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().to_string()).collect();
+        let names: Vec<String> = (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().unwrap().to_string()).collect();
         assert_eq!(names, ["archive.json", "files/deadbeef-cat.png"]);
         let mut json = String::new();
         std::io::Read::read_to_string(&mut zip.by_name("archive.json").unwrap(), &mut json).unwrap();
