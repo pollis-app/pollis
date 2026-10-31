@@ -42,12 +42,13 @@ test("app.json: adaptive foreground + monochrome on the brand amber", () => {
 // #1638: a glyph touching the 33dp safe radius crowds circle masks, so keep a margin inside it.
 test("foreground: every painted pixel is inside the 66dp safe zone, with margin", () => {
   const { reachDp } = geometry(fg);
-  assert.ok(reachDp <= 31.7, `farthest pixel ${reachDp.toFixed(1)}dp from centre (safe radius 33dp, less 1.3dp margin)`);
+  assert.ok(reachDp <= 30.2, `farthest pixel ${reachDp.toFixed(1)}dp from centre (safe radius 33dp, less ~3dp margin)`);
 });
 
-test("foreground: the glyph stays larger than the old 58dp lock (#1406)", () => {
+// #1406: the glyph is rendered to its margin, not shrunk inside the old 870px tile.
+test("foreground: the glyph fills the safe zone up to its margin", () => {
   const { heightDp } = geometry(fg);
-  assert.ok(heightDp >= 59, `glyph ${heightDp.toFixed(1)}dp tall of 108dp`);
+  assert.ok(heightDp >= 56, `glyph ${heightDp.toFixed(1)}dp tall of 108dp`);
 });
 
 // The lock body's interior, in assets/pollis-logo.svg units, inset clear of the anti-aliased edges and corners.

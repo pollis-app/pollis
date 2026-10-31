@@ -39,13 +39,13 @@ from PIL import Image
 
 # Output canvas, px (= 108dp).
 SIZE = 1024
-# Farthest glyph pixel from the layer's centre, in dp: 1.5dp inside the 33dp
+# Farthest glyph pixel from the layer's centre, in dp: 3dp inside the 33dp
 # radius of the 66dp safe zone, so no mask shape clips it and circle masks
-# (Pixel, themed icons) leave visible air round it (#1638: at exactly 33dp the
-# shackle and body corners crowded the mask). The lock is tall, so this is set
-# by the body's lower corners, and the glyph comes out ~59dp tall, still above
-# the pre-#1413 58dp lock.
-MAX_RADIUS_DP = 31.5
+# (Pixel, themed icons) leave the same air round it as neighbouring icons
+# (#1638: at exactly 33dp the shackle and body corners crowded the mask). A
+# comfortable margin was chosen over a bigger glyph. The lock is tall, so this
+# is set by the body's lower corners, and the glyph comes out ~57dp tall.
+MAX_RADIUS_DP = 30
 # Notification small icon: 24dp at xxxhdpi, and the optical margin kept clear
 # on each side of the glyph's tall side (Material's keyline is 2dp; 1dp reads
 # visibly larger in the status bar, which is the point).
