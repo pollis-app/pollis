@@ -64,6 +64,12 @@ async function openGeneral(page: Page) {
   await expect(page.getByTestId("message-input")).toBeVisible();
 }
 
+/** Back to #general from any other screen, through the sidebar (the home menu exists only on Home). */
+async function sidebarToGeneral(page: Page) {
+  await page.getByTestId("sidebar").getByRole("button", { name: "general", exact: true }).click();
+  await expect(page.getByTestId("message-input")).toBeVisible();
+}
+
 /** Push a realtime event once the inbox channel is open (the mock drops events before it is). */
 async function emit(page: Page, event: Record<string, unknown>) {
   await expect
@@ -192,7 +198,7 @@ for (const skin of SKINS) {
       await ring(page);
       await expect(page.getByTestId("incoming-call-takeover")).toBeVisible();
 
-      await openGeneral(page);
+      await sidebarToGeneral(page);
       await expect(page.getByTestId("incoming-call-takeover")).toHaveCount(0);
       await expect(page.getByTestId("status-bar-incoming-call")).toBeVisible();
       await page.waitForTimeout(500);
@@ -229,7 +235,7 @@ for (const skin of SKINS) {
         )
         .toBe(false);
 
-      await openGeneral(page);
+      await sidebarToGeneral(page);
       await ring(page);
       const alert = page.getByTestId("status-bar-incoming-call");
       await expect(alert).toBeVisible();
