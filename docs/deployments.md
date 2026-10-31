@@ -20,6 +20,8 @@ Environments with required reviewers, fork-PR and dispatch restrictions — are
 `docs/ci-trust.md`. A workflow can pin its actions and drop its permissions; it cannot
 stop someone moving the tag that fires it.
 
+**Cloudflare account.** Every Cloudflare resource (the `pollis.com` zone, DS Workers and Containers, Secrets Store, R2, Pages, archon) lives in the **dan@pollis.com** account `6011b778aed6d55aea9f225f3c8aa110`. Everything moved there from the personal account on 2026-10-31. The registration of `pollis.com` itself is still at Vercel until #1656. The account id is part of the client trust config: desktop and mobile builds bake in `R2_S3_ENDPOINT` (`https://<account>.r2.cloudflarestorage.com/...`), and `PresignedUrl::parse` rejects presigned URLs on any other origin. So moving R2 to another account breaks media on every shipped build until a new desktop release and mobile build go out.
+
 ---
 
 ## Directory → output map

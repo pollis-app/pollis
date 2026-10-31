@@ -115,25 +115,25 @@
   // account's single Secrets Store under a DS_DEV_ prefix. Binding name == the
   // OS env var the DS reads.
   "secrets_store_secrets": [
-    { "binding": "TURSO_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_URL" },
-    { "binding": "TURSO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_TOKEN" },
-    { "binding": "LOG_DB_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LOG_DB_URL" },
-    { "binding": "LOG_DB_ADMIN_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LOG_DB_ADMIN_TOKEN" },
-    { "binding": "RESEND_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_RESEND_API_KEY" },
-    { "binding": "APP_REVIEW_LOGIN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_APP_REVIEW_LOGIN" },
-    { "binding": "LIVEKIT_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LIVEKIT_API_KEY" },
-    { "binding": "LIVEKIT_API_SECRET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LIVEKIT_API_SECRET" },
-    { "binding": "LIVEKIT_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LIVEKIT_URL" },
-    { "binding": "R2_S3_ENDPOINT", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_S3_ENDPOINT" },
-    { "binding": "R2_ACCESS_KEY_ID", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_ACCESS_KEY_ID" },
-    { "binding": "R2_SECRET_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_SECRET_KEY" },
-    { "binding": "R2_BUCKET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_BUCKET" },
-    { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_POLLIS_DS_METRICS_TOKEN" },
-    { "binding": "EXPO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_EXPO_TOKEN" },
-    { "binding": "DEV_OTP", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_DEV_OTP" },
+    { "binding": "TURSO_URL", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_TURSO_URL" },
+    { "binding": "TURSO_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_TURSO_TOKEN" },
+    { "binding": "LOG_DB_URL", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_LOG_DB_URL" },
+    { "binding": "LOG_DB_ADMIN_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_LOG_DB_ADMIN_TOKEN" },
+    { "binding": "RESEND_API_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_RESEND_API_KEY" },
+    { "binding": "APP_REVIEW_LOGIN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_APP_REVIEW_LOGIN" },
+    { "binding": "LIVEKIT_API_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_LIVEKIT_API_KEY" },
+    { "binding": "LIVEKIT_API_SECRET", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_LIVEKIT_API_SECRET" },
+    { "binding": "LIVEKIT_URL", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_LIVEKIT_URL" },
+    { "binding": "R2_S3_ENDPOINT", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_R2_S3_ENDPOINT" },
+    { "binding": "R2_ACCESS_KEY_ID", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_R2_ACCESS_KEY_ID" },
+    { "binding": "R2_SECRET_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_R2_SECRET_KEY" },
+    { "binding": "R2_BUCKET", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_R2_BUCKET" },
+    { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_POLLIS_DS_METRICS_TOKEN" },
+    { "binding": "EXPO_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_EXPO_TOKEN" },
+    { "binding": "DEV_OTP", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_DEV_OTP" },
     // Read by the Worker for the dev gate, never forwarded to the container
     // (not in SECRET_KEYS). May hold "old,new" during a rotation.
-    { "binding": "POLLIS_DEV_ACCESS_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_POLLIS_DEV_ACCESS_KEY" }
+    { "binding": "POLLIS_DEV_ACCESS_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_POLLIS_DEV_ACCESS_KEY" }
   ],
   // Custom-domain cutover (route, not NS — zone already on CF). Attached only
   // once the container is smoke-tested; rollback = flip this DNS back to the VPS.
