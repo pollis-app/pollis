@@ -792,3 +792,238 @@ async fn a_failed_message_does_not_hold_up_the_next_and_lands_when_retried() {
     assert_eq!(copies(&bob, &channel_id, "first, failed").await, 1);
     drop((alice, bob));
 }
+
+/// Rapid sends (#1636): a later send's pass over the earlier rows never changes what they show.
+/// A transient failure there leaves the earlier row `pending`; only its own call, Retry or the
+/// drain marks it `failed`. The drain then delivers both in stored order.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_later_send_never_marks_an_earlier_row_failed() {
+    let (alice, bob, channel_id) = pair().await;
+    let outdated = alice.state.update_required.clone();
+
+    // An earlier row whose own call is gone (a kill after the insert).
+    let first: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    send_with_id(&alice, &channel_id, &first, "earlier, still pending", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+
+    outdated.store(true, std::sync::atomic::Ordering::SeqCst);
+    let before = test_hooks::delivery_attempts();
+    let second: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    send_with_id(&alice, &channel_id, &second, "later, fails itself", None)
+        .await
+        .expect_err("an outdated client cannot send");
+    assert_eq!(test_hooks::delivery_attempts(), before + 2, "the earlier row was tried first");
+    assert_eq!(
+        own_row(&alice, &channel_id, &first).await.expect("kept")["send_state"],
+        "pending",
+        "another send's pass left the earlier row as it was"
+    );
+    assert_eq!(
+        own_row(&alice, &channel_id, &second).await.expect("kept")["send_state"],
+        "failed",
+        "its own call marks it"
+    );
+
+    outdated.store(false, std::sync::atomic::Ordering::SeqCst);
+    alice.invoke_json("flush_outbox", json!({})).await;
+    let ids = vec![first.clone(), second.clone()];
+    let line = own_line(&alice, &channel_id, &ids).await;
+    assert!(line.iter().all(|(_, _, s)| s.is_none()), "all delivered: {line:?}");
+    let shown: Vec<String> = line.iter().map(|(id, _, _)| id.clone()).collect();
+    assert_eq!(shown, ids, "stored order");
+    assert_eq!(posted_order(&channel_id, &ids).await, ids);
+    assert_eq!(their_line(&bob, &channel_id, &ids).await, ids);
+    drop((alice, bob));
+}
+
+/// One attachment send, as a task, with `size` bytes from the staging buffer.
+fn spawn_attachment_send(
+    client: &TestClient,
+    channel_id: &str,
+    id: &str,
+    size: usize,
+) -> SendTask {
+    let staged = pollis_core::commands::staging::stage_attachment(vec![0x5a; size])
+        .expect("stage")
+        .id;
+    let attachment: pollis_core::commands::messages::OutgoingAttachment = serde_json::from_value(
+        json!({ "stagedId": staged, "filename": "big.bin", "contentType": "application/octet-stream" }),
+    )
+    .expect("attachment");
+    let state = client.state.clone();
+    let channel_id = channel_id.to_string();
+    let sender = client.user_id().to_string();
+    let id = id.to_string();
+    tokio::spawn(async move {
+        pollis_core::commands::messages::send_message_with_id(
+            Some(id),
+            channel_id,
+            sender,
+            "the big one".to_string(),
+            vec![attachment],
+            None,
+            None,
+            None,
+            &state,
+        )
+        .await
+    })
+}
+
+/// Rapid sends (#1636): a text sent while an earlier attachment send is still writing its row
+/// waits for that row, so it never overtakes it. The attachment's row write is held open, so
+/// only the enqueue gate can keep the order.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_text_sent_right_after_an_attachment_never_overtakes_it() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    let (alice, bob, channel_id) = pair().await;
+    let _stub = StubbedUploads::on();
+
+    let mut before_row = rendezvous::arm(Point::OutboxBeforeRow);
+    let big: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    let attachment = spawn_attachment_send(&alice, &channel_id, &big, 4 * 1024 * 1024);
+    let release = tokio::time::timeout(std::time::Duration::from_secs(30), before_row.recv())
+        .await
+        .expect("the attachment send never reached its row")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::OutboxBeforeRow);
+    assert!(own_row(&alice, &channel_id, &big).await.is_none(), "its row is not written yet");
+
+    let text: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    let text_send = {
+        let state = alice.state.clone();
+        let channel_id = channel_id.clone();
+        let sender = alice.user_id().to_string();
+        let text = text.clone();
+        tokio::spawn(async move {
+            pollis_core::commands::messages::send_message_with_id(
+                Some(text),
+                channel_id,
+                sender,
+                "right after it".to_string(),
+                Vec::new(),
+                None,
+                None,
+                None,
+                &state,
+            )
+            .await
+        })
+    };
+
+    // The text is stored, and waits: the earlier send has not written its row.
+    let mut stored = None;
+    for _ in 0..200 {
+        stored = own_row(&alice, &channel_id, &text).await;
+        if stored.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(stored.expect("the text is stored at once")["send_state"], "pending");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!text_send.is_finished(), "the text waits for the attachment's row");
+    assert_eq!(envelopes_with_id(&text).await, 0, "and has not been posted");
+
+    let _ = release.send(());
+    attachment.await.expect("join").expect("the attachment is delivered");
+    text_send.await.expect("join").expect("the text is delivered");
+
+    let ids = vec![big.clone(), text.clone()];
+    assert_eq!(posted_order(&channel_id, &ids).await, ids, "posted in the order sent");
+    let shown: Vec<String> = own_line(&alice, &channel_id, &ids)
+        .await
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect();
+    assert_eq!(shown, ids);
+    assert_eq!(their_line(&bob, &channel_id, &ids).await, ids, "the recipient agrees");
+    assert_eq!(alice.state.outbox_enqueuing.in_progress(), 0);
+    drop((alice, bob));
+}
+
+/// Rapid sends (#1636): a send that fails, or is dropped, before it writes its row releases its
+/// place, so the sends after it are never held up by it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_send_that_never_writes_its_row_does_not_hold_up_the_next() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    let (alice, bob, channel_id) = pair().await;
+    let _stub = StubbedUploads::on();
+    let text_send = |content: &'static str| {
+        let state = alice.state.clone();
+        let channel_id = channel_id.clone();
+        let sender = alice.user_id().to_string();
+        async move {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                pollis_core::commands::messages::send_message_with_id(
+                    None,
+                    channel_id,
+                    sender,
+                    content.to_string(),
+                    Vec::new(),
+                    None,
+                    None,
+                    None,
+                    &state,
+                ),
+            )
+            .await
+            .expect("held up by a send that never wrote its row")
+            .expect("delivered")
+        }
+    };
+
+    // Errors before its row: a staged attachment that does not exist.
+    let missing: pollis_core::commands::messages::OutgoingAttachment = serde_json::from_value(
+        json!({ "stagedId": "no-such-staged-id", "filename": "x.bin", "contentType": "application/octet-stream" }),
+    )
+    .expect("attachment");
+    let err = pollis_core::commands::messages::send_message_with_id(
+        None,
+        channel_id.clone(),
+        alice.user_id().to_string(),
+        "never stored".to_string(),
+        vec![missing],
+        None,
+        None,
+        None,
+        &alice.state,
+    )
+    .await;
+    assert!(err.is_err(), "a missing attachment fails the send");
+    assert_eq!(alice.state.outbox_enqueuing.in_progress(), 0, "its place is released");
+    text_send("after an error").await;
+
+    // Dropped before its row: the future is aborted while its bytes are stored and its row is not.
+    let mut before_row = rendezvous::arm(Point::OutboxBeforeRow);
+    let dropped: String = alice.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string();
+    let task = spawn_attachment_send(&alice, &channel_id, &dropped, 64 * 1024);
+    let release = tokio::time::timeout(std::time::Duration::from_secs(30), before_row.recv())
+        .await
+        .expect("never reached its row")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::OutboxBeforeRow);
+    assert_eq!(alice.state.outbox_enqueuing.in_progress(), 1);
+    task.abort();
+    let _ = task.await;
+    drop(release);
+    assert_eq!(alice.state.outbox_enqueuing.in_progress(), 0, "dropping it released its place");
+    text_send("after a drop").await;
+
+    assert!(own_row(&alice, &channel_id, &dropped).await.is_none(), "never accepted, never stored");
+    for text in ["after an error", "after a drop"] {
+        assert_eq!(copies(&bob, &channel_id, text).await, 1, "{text}");
+    }
+    drop((alice, bob));
+}

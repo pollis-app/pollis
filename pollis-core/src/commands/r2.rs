@@ -683,6 +683,16 @@ pub async fn upload_media_staged(
     result
 }
 
+/// Fail with the file-key wait before an outbox upload reads any bytes (#1636).
+pub(crate) async fn check_outbox_upload_key(
+    conversation_id: &str,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    upload_ring_key(state, &UploadScope::Conversation(conversation_id.to_string()))
+        .await
+        .map(|_| ())
+}
+
 /// Upload bytes the durable outbox kept for an unsent message (#1335).
 pub(crate) async fn upload_outbox_bytes(
     data: Vec<u8>,

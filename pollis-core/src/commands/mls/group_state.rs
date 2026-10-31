@@ -47,12 +47,14 @@ pub mod rendezvous {
         EnvelopeBeforePost,
         /// An external join lost its CAS; the retry has not started (#1220).
         ExternalJoinAfterLostRace,
+        /// An attachment send's bytes are stored and its outbox row is not yet written (#1636).
+        OutboxBeforeRow,
     }
 
-    const POINTS: usize = 5;
+    const POINTS: usize = 6;
 
     static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
-        Mutex::new([None, None, None, None, None]);
+        Mutex::new([None, None, None, None, None, None]);
 
     /// Arm `point`: clients reaching it park and send a [`Release`] on the returned receiver.
     pub fn arm(point: Point) -> mpsc::UnboundedReceiver<Release> {

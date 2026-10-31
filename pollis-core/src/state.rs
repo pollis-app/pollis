@@ -104,6 +104,8 @@ pub struct AppState {
     pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Sends still writing their outbox row, per conversation (#1636), so an earlier one is never overtaken.
     pub outbox_enqueuing: Arc<crate::commands::messages::Enqueuing>,
+    /// Unsent messages whose last attempt stopped on the file key (#1636); later sends pass them.
+    pub outbox_awaiting_key: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Held during a KeyPackage top-up (#1412); `try_lock` so a drain never publishes a second batch.
     pub key_package_refill: Arc<Mutex<()>>,
     /// Last pre-seal missing-device check per conversation (#1571), so a burst of sends checks once.
@@ -177,6 +179,7 @@ impl AppState {
             inbound_news: Arc::default(),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_enqueuing: Arc::default(),
+            outbox_awaiting_key: Arc::default(),
             key_package_refill: Arc::new(Mutex::new(())),
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),

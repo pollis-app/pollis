@@ -520,6 +520,12 @@ pub(super) async fn enqueue(
             return Err(e);
         }
     }
+    // Test-harness only: hold an attachment send between its bytes and its row (#1636).
+    #[cfg(feature = "test-harness")]
+    if !attachments.is_empty() {
+        crate::commands::mls::rendezvous::park(crate::commands::mls::rendezvous::Point::OutboxBeforeRow)
+            .await;
+    }
     let outcome = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
@@ -694,6 +700,19 @@ impl Drop for EnqueueTicket {
     }
 }
 
+impl Enqueuing {
+    /// Sends still writing their row, across conversations. For tests.
+    #[cfg(feature = "test-harness")]
+    pub fn in_progress(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .map(Vec::len)
+            .sum()
+    }
+}
+
 /// Gates of this conversation's sends still writing a row that comes before `(sent_at, id)`.
 fn earlier_enqueues(
     state: &Arc<AppState>,
@@ -734,6 +753,19 @@ fn line_position_on(conn: &rusqlite::Connection, id: &str) -> Result<Option<(Str
         .optional()?)
 }
 
+/// Earlier `pending` rows of a conversation; reads only the unsent rows, through
+/// `idx_message_unsent_line` (`tests::the_line_queries_read_only_unsent_rows`).
+const AHEAD_SQL: &str = "SELECT id FROM message
+     WHERE conversation_id = ?1 AND send_state = 'pending' AND id != ?3
+       AND (sent_at < ?2 OR (sent_at = ?2 AND id < ?3))
+     ORDER BY sent_at, id";
+
+/// Later never-sealed unsent rows of a conversation, through the same index.
+const BEHIND_SQL: &str = "SELECT id, sent_at FROM message
+     WHERE conversation_id = ?1 AND send_state IS NOT NULL AND length(ciphertext) = 0
+       AND id != ?3 AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
+     ORDER BY sent_at, id";
+
 /// This conversation's `pending` messages stored before `id`, oldest first (#1636).
 ///
 /// Only `pending`: a `failed` or `rejected` message does not hold up the ones behind it. It
@@ -746,12 +778,7 @@ pub(super) fn pending_ahead_on(
     let Some((_, sent_at)) = line_position_on(conn, id)? else {
         return Ok(Vec::new());
     };
-    let mut stmt = conn.prepare(
-        "SELECT id FROM message
-         WHERE conversation_id = ?1 AND send_state = 'pending' AND id != ?3
-           AND (sent_at < ?2 OR (sent_at = ?2 AND id < ?3))
-         ORDER BY sent_at, id",
-    )?;
+    let mut stmt = conn.prepare(AHEAD_SQL)?;
     let ids = stmt
         .query_map(rusqlite::params![conversation_id, sent_at, id], |row| {
             row.get::<_, String>(0)
@@ -784,12 +811,7 @@ pub(super) fn restamp_on(
         _ => now,
     };
     let behind: Vec<(String, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, sent_at FROM message
-             WHERE conversation_id = ?1 AND send_state IS NOT NULL AND length(ciphertext) = 0
-               AND id != ?3 AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
-             ORDER BY sent_at, id",
-        )?;
+        let mut stmt = conn.prepare(BEHIND_SQL)?;
         let rows = stmt
             .query_map(rusqlite::params![conversation_id, stored, id], |row| {
                 Ok((row.get(0)?, row.get(1)?))
@@ -830,7 +852,7 @@ pub(super) async fn deliver(
         line_position_on(db.conn(), id)?
     };
     let Some((conversation_id, sent_at)) = position else {
-        return deliver_one(state, id, sender_username).await;
+        return deliver_one(state, id, sender_username, Attempt::Own).await;
     };
     let line = OutboxLock::acquire(state, &line_key(&conversation_id)).await;
     let result = deliver_in_line(state, &conversation_id, &sent_at, id, sender_username).await;
@@ -853,23 +875,63 @@ async fn deliver_in_line(
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
         pending_ahead_on(db.conn(), conversation_id, id)?
     };
+    // A row waiting for its file key cannot go yet, so it holds nobody up; the drain or its
+    // own retry sends it when the key arrives.
+    let ahead: Vec<String> = ahead
+        .into_iter()
+        .filter(|earlier| !awaiting_key(state, earlier))
+        .collect();
     for earlier in ahead {
-        if let Err(e) = deliver_one(state, &earlier, None).await {
+        if let Err(e) = deliver_one(state, &earlier, None, Attempt::Ahead).await {
             crate::diag!("[outbox] delivery of {earlier}, ahead of {id}, failed: {e}");
         }
     }
-    deliver_one(state, id, sender_username).await
+    deliver_one(state, id, sender_username, Attempt::Own).await
+}
+
+/// Whose attempt this is (#1636), which decides what a transient failure records.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Attempt {
+    /// The row's own send, Retry, or the drain: a transient failure marks it `failed`.
+    Own,
+    /// A pass for a LATER send of the conversation: a transient failure leaves the row
+    /// `pending` (only a refusal no retry fixes is recorded), so another send never changes
+    /// what this row shows.
+    Ahead,
+}
+
+/// Whether `id` last stopped on its conversation's file key (#1636); in memory only, so after a
+/// restart such a row gets one more ahead attempt, which the key check ends before any bytes.
+fn awaiting_key(state: &Arc<AppState>, id: &str) -> bool {
+    state
+        .outbox_awaiting_key
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .contains(id)
+}
+
+fn set_awaiting_key(state: &Arc<AppState>, id: &str, waiting: bool) {
+    let mut set = state
+        .outbox_awaiting_key
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if waiting {
+        set.insert(id.to_string());
+    } else {
+        set.remove(id);
+    }
 }
 
 /// One delivery attempt for `id`, under its own lock.
-/// Re-reads the row under the lock; a failed attempt marks it `failed`.
+/// Re-reads the row under the lock; what a failure records depends on [`Attempt`].
 async fn deliver_one(
     state: &Arc<AppState>,
     id: &str,
     sender_username: Option<String>,
+    attempt: Attempt,
 ) -> Result<Message> {
     let lock = OutboxLock::acquire(state, id).await;
-    let result = deliver_locked(state, id, sender_username).await;
+    let result = deliver_locked(state, id, sender_username, attempt).await;
     lock.release().await;
     result
 }
@@ -878,6 +940,7 @@ async fn deliver_locked(
     state: &Arc<AppState>,
     id: &str,
     sender_username: Option<String>,
+    attempt: Attempt,
 ) -> Result<Message> {
     let (queued, sender_username) = {
         let guard = state.local_db.lock().await;
@@ -926,23 +989,35 @@ async fn deliver_locked(
         Err(e) if crate::commands::file_keys::is_file_key_unavailable(&e) => {
             // Only the file key is missing: stays queued, not failed; the next drain sends it.
             mark_state(state, id, PENDING).await;
+            set_awaiting_key(state, id, true);
             return Err(e);
         }
         Err(e) => {
-            mark_failed(state, id, is_permanent(&e)).await;
+            set_awaiting_key(state, id, false);
+            record_failure(state, id, &e, attempt).await;
             return Err(e);
         }
     };
+    set_awaiting_key(state, id, false);
 
     match super::send::deliver_queued(&queued, sender_username, state).await {
         Ok(message) => Ok(message),
         Err(e) => {
             if !super::send::test_hooks::is_simulated_crash(&e) {
-                mark_failed(state, id, is_permanent(&e)).await;
+                record_failure(state, id, &e, attempt).await;
             }
             Err(e)
         }
     }
+}
+
+/// Record a failed attempt; an [`Attempt::Ahead`] pass records only a permanent refusal.
+async fn record_failure(state: &Arc<AppState>, id: &str, e: &Error, attempt: Attempt) {
+    let permanent = is_permanent(e);
+    if attempt == Attempt::Ahead && !permanent {
+        return;
+    }
+    mark_failed(state, id, permanent).await;
 }
 
 async fn mark_failed(state: &Arc<AppState>, id: &str, permanent: bool) {
@@ -968,6 +1043,9 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
     if metas.is_empty() {
         return Ok(queued);
     }
+    // The key before any bytes (#1636): a row still waiting for it must not read its
+    // attachments out of the database on every attempt.
+    crate::commands::r2::check_outbox_upload_key(&queued.conversation_id, state).await?;
     let mut uploaded = Vec::with_capacity(metas.len());
     for (n, meta) in metas.iter().enumerate() {
         let data = {
@@ -1266,6 +1344,32 @@ mod tests {
         enqueue_on(conn, &queued_at("01J", "c3", "2026-10-31T10:00:00+00:00"), &[]).unwrap();
         assert_eq!(pending_ahead_on(conn, "c3", "01J").unwrap(), vec!["01I"]);
         assert!(pending_ahead_on(conn, "c3", "01I").unwrap().is_empty());
+    }
+
+    /// The line's queries read the partial index of unsent rows, never the whole
+    /// conversation (#1636).
+    #[test]
+    fn the_line_queries_read_only_unsent_rows() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        for sql in [AHEAD_SQL, BEHIND_SQL] {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = stmt
+                .query_map(rusqlite::params!["c1", "2026-10-31T10:00:00+00:00", "01A"], |r| {
+                    r.get::<_, String>(3)
+                })
+                .unwrap()
+                .collect::<std::result::Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter().any(|step| step.contains("idx_message_unsent_line")),
+                "{sql}\n{plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+                "the index gives the order: {plan:?}"
+            );
+        }
     }
 
     /// A seal stamps the time it goes out, never earlier than the row's own stamp, and the
