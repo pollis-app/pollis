@@ -389,13 +389,20 @@ mod tests {
         tempfile::tempdir().unwrap()
     }
 
+    /// Whether the lock can be taken once its holders drop. Retries briefly: a sibling test
+    /// that spawns a process forks this one, and until that child execs it shares every open
+    /// descriptor, so a just-dropped `flock` can stay held for a moment.
+    fn released(data_dir: &Path) -> bool {
+        StateLock::acquire_blocking_in(data_dir, Duration::from_secs(5)).is_ok()
+    }
+
     #[test]
     fn a_second_descriptor_is_refused_while_the_first_holds_it() {
         let d = dir();
         let first = StateLock::try_acquire_in(d.path()).unwrap().expect("free");
         assert!(StateLock::try_acquire_in(d.path()).unwrap().is_none());
         drop(first);
-        assert!(StateLock::try_acquire_in(d.path()).unwrap().is_some());
+        assert!(released(d.path()));
     }
 
     #[test]
@@ -443,7 +450,7 @@ mod tests {
         drop(a);
         assert!(StateLock::try_acquire_in(d.path()).unwrap().is_none(), "b still holds");
         drop(b);
-        assert!(StateLock::try_acquire_in(d.path()).unwrap().is_some(), "released with the last share");
+        assert!(released(d.path()), "released with the last share");
     }
 
     #[tokio::test]
@@ -480,7 +487,7 @@ mod tests {
             .unwrap();
         releaser.await.unwrap();
         assert!(drained, "the in-flight hold ended");
-        assert!(StateLock::try_acquire_in(d.path()).unwrap().is_some(), "nothing holds the file");
+        assert!(released(d.path()), "nothing holds the file");
 
         // While suspended a new hold waits, without timing out, until the app is back.
         let s2 = shared.clone();
@@ -521,8 +528,7 @@ mod tests {
         let shared = SharedStateLock::new(LockPolicy::PerSection);
         let in_flight = shared.acquire(d.path(), Duration::from_millis(50)).await.unwrap();
         shared.force_release();
-        let other = StateLock::try_acquire_in(d.path())
-            .unwrap()
+        let other = StateLock::acquire_blocking_in(d.path(), Duration::from_secs(5))
             .expect("the file lock is gone although a section still runs");
         // A new section does not join the released hold; it waits for the file lock.
         let s2 = shared.clone();
@@ -535,7 +541,7 @@ mod tests {
         drop(other);
         next.await.unwrap().expect("retook the file lock");
         drop(in_flight);
-        assert!(StateLock::try_acquire_in(d.path()).unwrap().is_some(), "all released");
+        assert!(released(d.path()), "all released");
     }
 
     #[tokio::test]
