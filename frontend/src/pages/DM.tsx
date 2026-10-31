@@ -18,6 +18,9 @@ import { useReadReceipts } from "../hooks/useReadReceipts";
 import { useSendReadReceipts } from "../hooks/queries/usePreferences";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 import { PressButton } from "../components/ui/PressButton";
+import { PillButton } from "../components/ui/PillButton";
+import { ConversationHeader } from "../components/Layout/ConversationHeader";
+import { activeCallIdOf, voiceCounterpartyUserId } from "../types/voice-state";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -30,7 +33,9 @@ export const DMPage: React.FC = observer(() => {
   const { mutate: markConversationRead } = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const currentUser = appStore.currentUser;
   const setOutgoingCall = appStore.setOutgoingCall;
-  const outgoingCall = appStore.outgoingCall;
+  // Joining or in a 1:1 call, ringing or answered, either side (#1640).
+  const activeCallId = activeCallIdOf(appStore.voiceState);
+  const callPeerId = voiceCounterpartyUserId(appStore.voiceState);
 
   const sendReadReceipts = useSendReadReceipts();
 
@@ -141,33 +146,28 @@ export const DMPage: React.FC = observer(() => {
     }
   };
 
+  const returnToCallLabel = callPeerId != null && callPeerId === otherUserId
+    ? t("conversation.returnToCall", { name: username })
+    : t("voice:bar.returnToCall");
+
+  const title = canShowProfile && username ? (
+    <PressButton
+      data-testid="dm-header-username"
+      onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
+      className="font-mono transition-colors text-inherit hover:text-accent border-0 bg-transparent p-0 cursor-pointer text-xs"
+      aria-label={t("conversation.viewProfile", { name: username })}
+    >
+      <bdi>@{username}</bdi>
+    </PressButton>
+  ) : conv || pendingRequest ? (
+    `@${username}`
+  ) : (
+    t("conversation.fallbackTitle")
+  );
+
   return (
     <div className="flex flex-col h-full">
-      <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
-      >
-        <span style={{ flex: 1 }}>
-          {canShowProfile && username ? (
-            <PressButton
-              data-testid="dm-header-username"
-              onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
-              className="font-mono transition-colors text-inherit hover:text-accent border-0"
-              style={{
-                background: "none",
-                padding: 0,
-                cursor: "pointer",
-                fontSize: "inherit",
-              }}
-              aria-label={t("conversation.viewProfile", { name: username })}
-            >
-              <bdi>@{username}</bdi>
-            </PressButton>
-          ) : conv || pendingRequest ? (
-            `@${username}`
-          ) : (
-            t("conversation.fallbackTitle")
-          )}
-        </span>
+      <ConversationHeader title={title}>
         {isOneOnOne && otherUserId && (
           // Verified only while `verified = 1`; a key change clears it, the timeline says why (#1605).
           <PressButton
@@ -175,7 +175,7 @@ export const DMPage: React.FC = observer(() => {
             onClick={() => setSafety(otherUserId)}
             aria-label={peerVerified ? t("list.verified") : t("safety.verify")}
             title={peerVerified ? t("list.verified") : t("safety.verify")}
-            className={`icon-btn-sm flex-shrink-0 padding-0 me-2 ${peerVerified ? "text-accent" : ""}`}
+            className={`icon-btn-sm flex-shrink-0 ${peerVerified ? "text-accent" : ""}`}
           >
             {peerVerified ? (
               <ShieldCheck size={14} aria-hidden="true" />
@@ -189,58 +189,41 @@ export const DMPage: React.FC = observer(() => {
           onClick={togglePins}
           aria-label={t("conversation.pinsLabel")}
           title={t("conversation.pinsLabel")}
-          className="icon-btn-sm flex-shrink-0 padding-0 me-2"
+          className="icon-btn-sm flex-shrink-0"
         >
           <Pin size={14} aria-hidden="true" />
         </PressButton>
-        {canCall && (() => {
-          // A live call to this user turns the button into "rejoin".
-          const inCallWithThisUser =
-            outgoingCall != null && outgoingCall.calleeId === otherUserId;
-          return (
-            <button
-              data-testid="dm-header-call"
-              onClick={() => {
-                if (inCallWithThisUser) {
-                  navigate({
-                    to: "/call/$callId",
-                    params: { callId: outgoingCall.callId },
-                  });
-                } else {
-                  void startCall();
-                }
-              }}
-              onMouseEnter={() =>
-                !inCallWithThisUser &&
-                otherUserId &&
-                warmVoiceChannel(`call-prewarm-${otherUserId}`)
+        {activeCallId ? (
+          // In a 1:1 call: the call slot becomes the voice bar's "return to call" (#1640).
+          <PillButton
+            data-testid="dm-header-return-to-call"
+            accent="var(--c-accent)"
+            onClick={() => navigate({ to: "/call/$callId", params: { callId: activeCallId } })}
+            title={returnToCallLabel}
+            aria-label={returnToCallLabel}
+          >
+            <PhoneCall size={12} aria-hidden="true" />
+            {t("voice:bar.returnToCall")}
+          </PillButton>
+        ) : canCall ? (
+          <button
+            data-testid="dm-header-call"
+            onClick={() => {
+              void startCall();
+            }}
+            onMouseEnter={() => {
+              if (otherUserId) {
+                warmVoiceChannel(`call-prewarm-${otherUserId}`);
               }
-              aria-label={
-                inCallWithThisUser
-                  ? t("conversation.returnToCall", { name: username })
-                  : t("conversation.call", { name: username })
-              }
-              title={
-                inCallWithThisUser
-                  ? t("conversation.returnToCall", { name: username })
-                  : t("conversation.call", { name: username })
-              }
-              className="icon-btn-sm flex-shrink-0"
-              style={{
-                position: "absolute",
-                insetInlineEnd: "0.75rem",
-                color: inCallWithThisUser ? "var(--c-accent)" : undefined,
-              }}
-            >
-              {inCallWithThisUser ? (
-                <PhoneCall size={14} aria-hidden="true" />
-              ) : (
-                <Phone size={14} aria-hidden="true" />
-              )}
-            </button>
-          );
-        })()}
-      </div>
+            }}
+            aria-label={t("conversation.call", { name: username })}
+            title={t("conversation.call", { name: username })}
+            className="icon-btn-sm flex-shrink-0"
+          >
+            <Phone size={14} aria-hidden="true" />
+          </button>
+        ) : null}
+      </ConversationHeader>
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         <MainContent pendingDmRequest={pendingDmRequest} />
       </div>

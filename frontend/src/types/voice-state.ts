@@ -138,6 +138,17 @@ export function voiceChannelId(s: VoiceState): string | null {
   }
 }
 
+/** The 1:1 call (`call-<id>` room) this session is joining or in, as the `/call/$callId` id; null otherwise. */
+export function activeCallIdOf(s: VoiceState): string | null {
+  if (s.kind !== 'joining' && s.kind !== 'joined') {
+    return null;
+  }
+  if (!s.channelId.startsWith('call-')) {
+    return null;
+  }
+  return s.channelId.slice('call-'.length);
+}
+
 export function voiceCounterpartyUserId(s: VoiceState): string | null {
   switch (s.kind) {
     case 'idle':

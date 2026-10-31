@@ -11,7 +11,7 @@ import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { toggleCamera } from "../../camera/cameraActions";
-import { shareOf, cameraOf, gateOf, micIndicatorOf } from "../../types/voice-state";
+import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf } from "../../types/voice-state";
 import { useShortcutLabel } from "../../keyboard";
 import {
   micControlTitleKey,
@@ -33,6 +33,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
     voiceActiveSpeakerIds,
   } = appStore;
   const gate = gateOf(voiceState);
+  // Same "return to call" target as the DM header (#1640).
+  const activeCallId = activeCallIdOf(voiceState);
   // Four states: PTT-idle and deafened close the mic too.
   const micIndicator = micIndicatorOf(gate);
   const pttCombo = useShortcutLabel("voice.pushToTalk");
@@ -78,15 +80,14 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         data-testid="voice-bar-channel-name"
         accent="var(--c-accent)"
         onClick={() => {
-          if (channelId.startsWith("call-")) {
-            const callId = channelId.slice("call-".length);
-            navigate({ to: "/call/$callId", params: { callId } });
+          if (activeCallId) {
+            navigate({ to: "/call/$callId", params: { callId: activeCallId } });
           } else if (groupId) {
             navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId } });
           }
         }}
         title={
-          channelId.startsWith("call-")
+          activeCallId
             ? t("bar.returnToCall")
             : t("bar.goToChannel", { name: channelName })
         }

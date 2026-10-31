@@ -673,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**175 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**176 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -726,10 +726,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (10)
+### `components/Layout` (11)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`. The bar under the TitleBar: a back/forward chevron pair, then the clickable trail, then search + settings. The chevrons walk **router history**, one entry per click, the way a browser (and Slack, and Discord) does — there is no hierarchical "up one level" navigation any more; the trail's own segments are what jump up the tree. **Both are always rendered**, root included: a control that vanishes at the root shifts everything beside it sideways on the way home. When a direction has nowhere to go it is greyed out and truly `disabled` (a `ui/Button` `variant="ghost"`), so assistive tech is told what the grey says. Enablement comes from `stores/historyNavStore`, which subscribes to `router.history` (event-driven, never polled) and keeps a cursor plus a ceiling — `canGoBack` is `index > 0`, `canGoForward` is `index < maxIndex`, and a PUSH resets the ceiling to the new entry because it discards whatever was ahead. That arithmetic is pure in `utils/historyNav.ts` and pinned by `frontend/tests/history-nav.test.ts`; it exists because no browser API answers "can I go forward?" — `history.length` counts a session, not a direction, and never shrinks on a truncating push. The `nav.back` shortcut (Escape, handled in `AppShell`) routes through the same `historyNavStore.goBack()`, so the key and the chevron cannot land in different places.
+- **ConversationHeader** — props: title, children — `frontend/src/components/Layout/ConversationHeader.tsx`. The `h-bar` top bar of the channel and DM pages (#1640): title on the start side, every action in one `flex items-center gap-2` row on the end side. Spacing and vertical centring live here only — actions carry no `me-*` margins and nothing is absolutely positioned (the DM call button used to be, and sat on top of the pin). In the DM header the call slot becomes a "Return to call" `PillButton` (same target as the voice bar's channel pill, via `activeCallIdOf` in `types/voice-state.ts`) while any 1:1 call is joining or joined. Pinned by `frontend/tests/conversation-header.test.ts` and `e2e/dm-header-actions.spec.ts`.
 - **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
