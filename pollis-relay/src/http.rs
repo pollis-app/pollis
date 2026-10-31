@@ -132,6 +132,9 @@ mod seam_tests {
         // the DS's own `OnceLock` client (the server has no overlay to route
         // through, so it cannot share `pollis-relay`'s)
         "pollis-delivery/src/util.rs",
+        // the client-policy fetch (#1612): one request per launch through a
+        // per-call proxy plan, so a pooled client would save no handshake
+        "pollis-core/src/client_policy.rs",
     ];
 
     fn workspace_root() -> PathBuf {
