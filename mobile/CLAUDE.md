@@ -1210,10 +1210,19 @@ the pending did-event, and a keyboard dismissed while the app is in the
 background can leave JS at its old progress after `keyboardDidHide` already
 fired (the `keyboard-closed` probe read closed over a padded screen). The
 same patch records what JS was last told and whether the keyboard is shown,
-drops interactive moves unless the keyboard is shown and the app is active,
-and on `didBecomeActive` (after UIKit has restored or dropped the keyboard)
-replays a hide (`onKeyboardMove` + `onKeyboardMoveEnd` at 0) when no keyboard
-is on screen but JS still holds a non-zero progress. One global fix on both
+and drops interactive moves unless the keyboard is shown and the app is
+active. On Home, iOS hides the keyboard while the app is inactive (a 0 ms
+`keyboardWillHide`/`DidHide`), and on a loaded machine those view events can
+be lost even though `keyboardDidHide` reached JS, so "JS was last told 0"
+proves nothing there. So `didBecomeActive` and `UIWindow.didBecomeKey` always
+replay the hide (`onKeyboardMove` + `onKeyboardMoveEnd` at 0) when no keyboard
+is on screen, and a finished hide or an interactive move re-checks for a
+non-zero progress left behind. Each re-check is a bounded round after its
+signal (0, 0.1, 0.25, 0.5, 1 and 2 s; never a timer): it ends once the
+keyboard is really up or the hide is replayed, and waits while an animation
+runs, so no single fixed delay can lose the race. The observer traces every
+event and decision at debug level: `log stream --level debug --predicate
+'subsystem == "com.pollis.keyboard"'`. One global fix on both
 platforms, so every `<Screen>`, `SheetOverlay` and
 `KeyboardController.isVisible()` recover together. Never work around it per
 screen. `<Screen>` draws the invisible `keyboard-open` /

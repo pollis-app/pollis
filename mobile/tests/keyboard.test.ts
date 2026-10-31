@@ -108,8 +108,20 @@ test("keyboard-controller is patched to replay a hide Android applied without an
     /UIApplication\.didBecomeActiveNotification/,
     "iOS re-checks when the app returns to the foreground",
   );
+  assert.match(
+    read(`${ios}KeyboardMovementObserver+Lifecycle.swift`),
+    /UIWindow\.didBecomeKeyNotification/,
+    "iOS re-checks when its window becomes key again",
+  );
   const listeners = read(`${ios}KeyboardMovementObserver+Listeners.swift`);
-  assert.match(listeners, /func reconcileHiddenKeyboard\(\)/, "iOS replays a hide JS never saw");
+  assert.match(listeners, /func reconcileHiddenKeyboard\(_ reason: String\) -> Bool/, "iOS replays a hide JS never saw");
+  // A foreground return resends the hide even when JS was last told 0: events dispatched while
+  // backgrounded can be lost (#1641 coordinator run), so "JS holds 0" proves nothing there.
+  assert.match(listeners, /scheduleReconcile\("active", force: true\)/);
+  assert.match(listeners, /scheduleReconcile\("didHide", force: false\)/);
+  // Bounded re-check after a signal, never a timer or a single fixed delay.
+  assert.match(listeners, /for delay in \[0\.0, 0\.1, 0\.25, 0\.5, 1\.0, 2\.0\]/);
+  assert.doesNotMatch(listeners, /Timer\.scheduledTimer|repeats: true/);
   assert.match(
     read(`${ios}KeyboardMovementObserver+Interactive.swift`),
     /!isKeyboardShown \|\| UIApplication\.shared\.applicationState != \.active/,
