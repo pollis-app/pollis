@@ -121,3 +121,124 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..0aff80be94d41edeec618851937200b7
    }
  
    private fun isKeyboardVisible(): Boolean {
+diff --git a/ios/observers/movement/observer/KeyboardMovementObserver+Interactive.swift b/ios/observers/movement/observer/KeyboardMovementObserver+Interactive.swift
+index 7f2cb909ab2243901bb760db2438b7cc84a805d5..6cee056f24a1ea9310f95b5f683d27dab4bed511 100644
+--- a/ios/observers/movement/observer/KeyboardMovementObserver+Interactive.swift
++++ b/ios/observers/movement/observer/KeyboardMovementObserver+Interactive.swift
+@@ -25,6 +25,11 @@ extension KeyboardMovementObserver {
+     if UIResponder.isKeyboardPreloading {
+       return
+     }
++    // Pollis (#1641): a keyboard JS was told is hidden, or an app that is not in the
++    // foreground (snapshots, scene transitions), moves no KeyboardAvoidingView.
++    if !isKeyboardShown || UIApplication.shared.applicationState != .active {
++      return
++    }
+     // if we are currently animating keyboard -> we need to ignore values from KVO
+     if !displayLink.isPaused {
+       return
+diff --git a/ios/observers/movement/observer/KeyboardMovementObserver+Lifecycle.swift b/ios/observers/movement/observer/KeyboardMovementObserver+Lifecycle.swift
+index cdbd63359be9c04fbb0cb30b3cbd1e399bb72d9a..47cc78dfa5676c9d04bc9c89c9383326eb225b38 100644
+--- a/ios/observers/movement/observer/KeyboardMovementObserver+Lifecycle.swift
++++ b/ios/observers/movement/observer/KeyboardMovementObserver+Lifecycle.swift
+@@ -25,6 +25,12 @@ public extension KeyboardMovementObserver {
+       name: UIResponder.keyboardWillShowNotification,
+       object: nil
+     )
++    NotificationCenter.default.addObserver(
++      self,
++      selector: #selector(appDidBecomeActive),
++      name: UIApplication.didBecomeActiveNotification,
++      object: nil
++    )
+   }
+ 
+   @objc func unmount() {
+diff --git a/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift b/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift
+index 464eec73bb1450faec92a62e4e60a92fc15307e2..65770f8c3e5945a9eb4f9be070be097ced671652 100644
+--- a/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift
++++ b/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift
+@@ -38,6 +38,7 @@ extension KeyboardMovementObserver {
+     let (duration, _) = notification.keyboardMetaData()
+     tag = UIResponder.current.reactViewTag
+     self.notification = notification
++    isKeyboardShown = false
+     // when keyboard disappears immediately replace the keyboard frame with .zero
+     // since this will be the final frame of the keyboard after animation
+     self.notification?.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] =
+@@ -74,6 +75,7 @@ extension KeyboardMovementObserver {
+       removeKeyboardWatcher()
+       setupKVObserver()
+       animation = nil
++      isKeyboardShown = true
+ 
+       NotificationCenter.default.post(
+         name: .keyboardDidAppear, object: notification, userInfo: nil
+@@ -92,6 +94,39 @@ extension KeyboardMovementObserver {
+ 
+     removeKeyboardWatcher()
+     animation = nil
++    isKeyboardShown = false
++  }
++
++  // Pollis (#1641): back in the foreground, give UIKit a moment to restore (or not) the
++  // keyboard, then make sure JS is not still padded for one that is gone.
++  @objc func appDidBecomeActive(_: Notification) {
++    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
++      self?.reconcileHiddenKeyboard()
++    }
++  }
++
++  // Pollis (#1641): replays a hide when no keyboard is on screen but JS still holds a
++  // non-zero progress. A no-op whenever an animation runs or the keyboard is really up.
++  @objc func reconcileHiddenKeyboard() {
++    guard isMounted, displayLink.isPaused, lastProgressSentToJS > 0 else { return }
++
++    let visibleHeight = keyboardTrackingView.view.frameTransitionInWindow.0
++    if visibleHeight >= 1 {
++      return
++    }
++
++    let wasShown = isKeyboardShown
++    keyboardDidTask?.cancel()
++    removeKVObserver()
++    prevKeyboardPosition = 0
++    isKeyboardShown = false
++    animation = nil
++
++    onEvent("onKeyboardMove", 0, 0, 0, tag)
++    onEvent("onKeyboardMoveEnd", 0, 0, 0, tag)
++    if wasShown {
++      onNotify("KeyboardController::keyboardDidHide", buildEventParams(0, 0, tag))
++    }
+   }
+ 
+   @objc func scheduleDidEvent(height: CGFloat, duration: CGFloat) {
+diff --git a/ios/observers/movement/observer/KeyboardMovementObserver.swift b/ios/observers/movement/observer/KeyboardMovementObserver.swift
+index ae97d611a7f727ebbb0e17eabbb3294e1cc76a2f..65827647ab8f8bb34529ee1e9ca923072a5e1727 100644
+--- a/ios/observers/movement/observer/KeyboardMovementObserver.swift
++++ b/ios/observers/movement/observer/KeyboardMovementObserver.swift
+@@ -34,6 +34,11 @@ public class KeyboardMovementObserver: NSObject {
+ 
+   var duration = 0
+   var tag: NSNumber = -1
++  // Pollis (#1641): what JS was last told. A keyboard that went away without an animated
++  // hide (backgrounded, focus torn down mid-transition) or a stray KVO move left every
++  // KeyboardAvoidingView padded while `keyboardDidHide` had already fired.
++  var isKeyboardShown = false
++  var lastProgressSentToJS: Double = 0
+   // manual did events
+   var notification: Notification?
+   var keyboardDidTask: DispatchWorkItem?
+@@ -51,6 +56,11 @@ public class KeyboardMovementObserver: NSObject {
+ 
+     super.init()
+ 
++    onEvent = { [weak self] event, height, progress, duration, target in
++      self?.lastProgressSentToJS = progress.doubleValue
++      handler(event, height, progress, duration, target)
++    }
++
+     displayLink = CADisplayLink(target: self, selector: #selector(updateKeyboardFrame))
+     displayLink.preferredFramesPerSecond = 120 // will fallback to 60 fps for devices without Pro Motion display
+     displayLink.add(to: .main, forMode: .common)

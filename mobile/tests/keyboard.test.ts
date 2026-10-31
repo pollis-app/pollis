@@ -82,7 +82,8 @@ test("react-native-keyboard-controller is pinned to the Expo SDK's version", () 
 
 // #1641/#1642: Android hides the keyboard without an animation when the window is backgrounded or loses
 // focus, so keyboard-controller 1.21.9 never sent the hide and every <Screen> stayed padded at the
-// keyboard's height. The pnpm patch replays such a hide; it must stay registered and applied.
+// keyboard's height. iOS strands the same way after a background/resume or a stray KVO move.
+// The pnpm patch replays such a hide on both platforms; it must stay registered and applied.
 test("keyboard-controller is patched to replay a hide Android applied without an animation", () => {
   const pkg = JSON.parse(read("package.json"));
   const version = pkg.dependencies["react-native-keyboard-controller"];
@@ -100,6 +101,20 @@ test("keyboard-controller is patched to replay a hide Android applied without an
   assert.match(callback, /private fun reconcileMissedHide\(/, "the installed copy must carry the patch");
   assert.match(callback, /addOnWindowFocusChangeListener\(windowFocusListener\)/, "regaining window focus re-checks");
   assert.match(callback, /postDelayed\(missedHideCheck, MISSED_HIDE_GRACE_MS\)/, "an insets change re-checks");
+
+  const ios = "node_modules/react-native-keyboard-controller/ios/observers/movement/observer/";
+  assert.match(
+    read(`${ios}KeyboardMovementObserver+Lifecycle.swift`),
+    /UIApplication\.didBecomeActiveNotification/,
+    "iOS re-checks when the app returns to the foreground",
+  );
+  const listeners = read(`${ios}KeyboardMovementObserver+Listeners.swift`);
+  assert.match(listeners, /func reconcileHiddenKeyboard\(\)/, "iOS replays a hide JS never saw");
+  assert.match(
+    read(`${ios}KeyboardMovementObserver+Interactive.swift`),
+    /!isKeyboardShown \|\| UIApplication\.shared\.applicationState != \.active/,
+    "iOS drops KVO moves of a hidden keyboard or a backgrounded app",
+  );
 });
 
 test("<Screen> draws the keyboard-state e2e probe", () => {

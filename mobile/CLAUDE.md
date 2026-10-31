@@ -16,7 +16,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `mobile/pnpm-lock.yaml` is independent of the root lock.
 - **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
-- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there are two: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7. And `react-native-keyboard-controller@1.21.9`, Android only, which replays a keyboard hide Android applied without an animation (#1641, see "Keyboard" below; `tests/keyboard.test.ts`). It is native, so it reaches phones only with a store build, and a keyboard-controller bump must carry it forward or drop it once upstream does the same. Make or change a patch with `pnpm patch <pkg>@<ver> --ignore-workspace`, then `pnpm patch-commit <dir> --ignore-workspace` and `pnpm install --ignore-workspace` (which writes the lockfile's `patchedDependencies` hash).
+- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there are two: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7. And `react-native-keyboard-controller@1.21.9`, which replays a keyboard hide the library never reported to JS — on Android one applied without an animation, on iOS one after the app returns to the foreground or a stray KVO "interactive" move (#1641, see "Keyboard" below; `tests/keyboard.test.ts`). It is native, so it reaches phones only with a store build, and a keyboard-controller bump must carry it forward or drop it once upstream does the same. Make or change a patch with `pnpm patch <pkg>@<ver> --ignore-workspace`, then `pnpm patch-commit <dir> --ignore-workspace` and `pnpm install --ignore-workspace` (which writes the lockfile's `patchedDependencies` hash).
 - Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
 
 ## Stack
@@ -1203,9 +1203,20 @@ records what the last `End` told JS and, when the insets change or the window
 regains focus and the keyboard is gone but JS still has it open (and no
 animation is running), replays the hide with the library's own
 `syncKeyboardPosition(0, false)`, the same call it uses when a Modal closes.
-One global fix, so every `<Screen>`, `SheetOverlay` and
-`KeyboardController.isVisible()` recover together; iOS is untouched. Never work
-around it per screen. `<Screen>` draws the invisible `keyboard-open` /
+iOS strands the same way by a different road: its `KeyboardMovementObserver`
+also turns KVO moves of the keyboard-tracking view into "interactive" events,
+which set every `KeyboardAvoidingView`'s progress with no end event and cancel
+the pending did-event, and a keyboard dismissed while the app is in the
+background can leave JS at its old progress after `keyboardDidHide` already
+fired (the `keyboard-closed` probe read closed over a padded screen). The
+same patch records what JS was last told and whether the keyboard is shown,
+drops interactive moves unless the keyboard is shown and the app is active,
+and on `didBecomeActive` (after UIKit has restored or dropped the keyboard)
+replays a hide (`onKeyboardMove` + `onKeyboardMoveEnd` at 0) when no keyboard
+is on screen but JS still holds a non-zero progress. One global fix on both
+platforms, so every `<Screen>`, `SheetOverlay` and
+`KeyboardController.isVisible()` recover together. Never work around it per
+screen. `<Screen>` draws the invisible `keyboard-open` /
 `keyboard-closed` probe (`components/KeyboardProbe.tsx`) and
 `.maestro/flows/keyboard-recovery.yaml` is the device-tier proof.
 
