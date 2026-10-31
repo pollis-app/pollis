@@ -10,10 +10,12 @@
 //! The response comes back once the DS has the message, so the flow's wait that follows is
 //! the time from the DS having it to the phone showing it.
 //!
-//!   GET http://127.0.0.1:<port>/read   → 200 `<count of the phone's messages marked read>`
+//!   GET http://127.0.0.1:<port>/read?expect=<n>   → 200 `<count of the phone's messages marked read>`
 //!
-//! fetches the DM (storing the phone's messages emits their delivered receipts) and marks every
-//! message from the other side read, as a person with it on screen would. `GET /quit` ends the peer.
+//! fetches the DM (storing the phone's messages emits their delivered receipts) until it holds at
+//! least `n` messages from the other side — the phone shows a send before the DS has it, so a flow
+//! must not race its own send — then marks them all read, as a person with them on screen would.
+//! `GET /quit` ends the peer.
 //!
 //! Not a shipping binary: examples build against pollis-tui's dev-dependencies.
 //!
@@ -34,6 +36,8 @@ use tokio::net::TcpListener;
 const DEFAULT_OTP: &str = "000000";
 /// How long to wait for the phone's DM request.
 const WAIT: Duration = Duration::from_secs(300);
+/// How long `/read` waits for the phone's messages to reach the DS.
+const READ_WAIT: Duration = Duration::from_secs(30);
 /// The peer exits on its own after this long without a request.
 const IDLE: Duration = Duration::from_secs(1800);
 
@@ -68,15 +72,26 @@ fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Fetch the DM, then send a read receipt for every message the other side wrote.
-async fn read_theirs(state: &Arc<AppState>, me: &str, dm_id: &str) -> Result<usize> {
-    let page = pollis_tui::data::dm_messages(state, me, dm_id, None).await?;
-    let theirs: Vec<String> = page
-        .messages
-        .iter()
-        .filter(|m| m.sender_id != me)
-        .map(|m| m.id.clone())
-        .collect();
+/// Fetch the DM until it holds `expect` messages from the other side, then send a read receipt
+/// for every one of them.
+async fn read_theirs(state: &Arc<AppState>, me: &str, dm_id: &str, expect: usize) -> Result<usize> {
+    let started = Instant::now();
+    let theirs: Vec<String> = loop {
+        let page = pollis_tui::data::dm_messages(state, me, dm_id, None).await?;
+        let theirs: Vec<String> = page
+            .messages
+            .iter()
+            .filter(|m| m.sender_id != me)
+            .map(|m| m.id.clone())
+            .collect();
+        if theirs.len() >= expect {
+            break theirs;
+        }
+        if started.elapsed() > READ_WAIT {
+            bail!("saw {} of {expect} messages within {READ_WAIT:?}", theirs.len());
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    };
     let n = theirs.len();
     messages::mark_messages_read(dm_id.to_string(), me.to_string(), theirs, state).await?;
     Ok(n)
@@ -125,8 +140,13 @@ async fn main() -> Result<()> {
         let target = request.split_whitespace().nth(1).unwrap_or("/").to_string();
         let (status, body, quit) = if target == "/quit" {
             ("200 OK", "bye".to_string(), true)
-        } else if target == "/read" {
-            match read_theirs(&state, &me.id, &dm_id).await {
+        } else if let Some(query) = target.strip_prefix("/read") {
+            let expect = query
+                .strip_prefix("?expect=")
+                .and_then(|v| v.split('&').next())
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0);
+            match read_theirs(&state, &me.id, &dm_id, expect).await {
                 Ok(n) => {
                     println!("READ count={n}");
                     ("200 OK", n.to_string(), false)

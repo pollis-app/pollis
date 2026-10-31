@@ -18,11 +18,13 @@ tags:
     visible: ".*: receipt two, .*"
     timeout: 15000
 
-# The peer fetches (delivered) and reads both.
+# The peer fetches (delivered) and reads both, once both are on the DS. "receipt two"
+# is a continuation row (no header) under "receipt one"; its tick and label are its own.
 - runScript:
     file: ../../scripts/peer-read.js
     env:
       PEER_PORT: ${PEER_PORT}
+      EXPECT: "2"
 - extendedWaitUntil:
     visible: ".*: receipt two, .*, Read by everyone"
     timeout: 20000
@@ -55,6 +57,7 @@ tags:
     file: ../../scripts/peer-read.js
     env:
       PEER_PORT: ${PEER_PORT}
+      EXPECT: "3"
 - extendedWaitUntil:
     visible: ".*: receipt three, .*, Read by everyone"
     timeout: 20000

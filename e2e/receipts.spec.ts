@@ -286,6 +286,16 @@ test.describe("DM receipts — refined skin", () => {
     await expect(page.getByTestId(`receipt-${MSG_EARLIER_READ}`)).toHaveCount(0);
     await expect(page.locator("[data-receipt-state]")).toHaveCount(1);
 
+    // The two are a minute apart, so they group: the newest is a continuation row with no
+    // header, and the tick is drawn inside that row, not beside the group header above it.
+    const newest = page.getByTestId(`message-${MSG_DELIVERED}`);
+    await expect(newest.getByTestId("message-author")).toHaveCount(0);
+    await expect(
+      page.getByTestId(`message-${MSG_EARLIER_READ}`).getByTestId("message-author"),
+    ).toHaveCount(1);
+    await expect(newest.getByTestId(`receipt-${MSG_DELIVERED}`)).toBeVisible();
+    await expect(page.getByTestId(`message-${MSG_EARLIER_READ}`).locator("[data-receipt-state]")).toHaveCount(0);
+
     await page.screenshot({
       path: `artifacts/receipt-latest-only-${skin}.png`,
       fullPage: true,
