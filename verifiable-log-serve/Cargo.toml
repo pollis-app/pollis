@@ -48,7 +48,7 @@ name = "verifiable-log-serve"
 # is untouched (a new subtree is additive); older binaries keep failing on the
 # retired tree as they do today, so auditors should upgrade. Cut
 # `pollis-verify-v0.10.0`.
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 rust-version.workspace = true
 description = "Serve layer for the verifiable log (Key Transparency #330): turns a signed monitor bundle into an immutable static artifact tree, a dev HTTP server, and a fetch-over-HTTP remote verifier. Slice 3."
