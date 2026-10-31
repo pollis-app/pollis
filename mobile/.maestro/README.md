@@ -213,6 +213,14 @@ then waits with a tight timeout: a message into the open DM is on screen within
 the DM opens, with no loading line; and after 35 s in the background one is in
 the DM within 3 s of opening it on resume.
 
+**Typing indicator (automated, #1635):** `mobile/scripts/maestro-typing.sh <device>`
+— one device plus `pollis-tui`'s `typing_peer` example (built with
+`--features typing-peer`, i.e. pollis-core's real LiveKit path, so it types
+exactly as desktop does). `two-client/typing/`: the peer types and
+`text-typing-indicator` reads "<peer> is typing…", then goes when it stops; the
+device types and the peer sees `typing`, then `stopped` when the draft is
+cleared and again after a send (`scripts/peer-typing.js`).
+
 **Device outside the tree (automated, #1571):** `mobile/scripts/maestro-device-outside-tree.sh <device>`
 — one device plus two dev-DS peers (`pollis-tui`'s `outside_tree_peer`, roles
 `owner` and `creator`). The owner signs up as the account's first device; the
