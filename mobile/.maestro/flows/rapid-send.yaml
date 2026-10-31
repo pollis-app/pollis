@@ -1,0 +1,71 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# RAPID SEND (#1636): sending again while a send is still in flight is never
+# refused. Every message shows at once, is delivered once and lands in the
+# order it was sent, also across a kill.
+#
+# The race is held open by the first send in a FRESH group, which pays for
+# MLS group setup (often 15 s or more against the dev DS). Each part uses its
+# own new group for that reason. The burst subflow asserts message 1 is still
+# sending before Send is tapped for message 2, so this flow FAILS rather than
+# passes when the race was not reproduced.
+#
+# This is the iOS path (a simulator's network cannot be slowed from inside).
+# On Android, scripts/maestro-rapid-send.sh holds the first send in flight on
+# a slowed network instead, which reproduces the race regardless of timing.
+
+- runFlow: ../subflows/sign-in.yaml
+
+# ── Part 1: a burst while the first send is out ─────────────────────────────
+- runFlow:
+    file: ../subflows/rapid-send-open-group.yaml
+    env:
+      GROUP: "E2E Rapid Send Group"
+- runFlow:
+    file: ../subflows/rapid-send-burst.yaml
+    env:
+      TAG: "rs1636"
+- runFlow:
+    file: ../subflows/rapid-send-delivered.yaml
+    env:
+      TAG: "rs1636"
+
+# Re-read from the store: still once each, in order.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- runFlow:
+    file: ../subflows/rapid-send-delivered.yaml
+    env:
+      TAG: "rs1636"
+
+# ── Part 2: killed mid-burst ────────────────────────────────────────────────
+# A second fresh group, so its first send is slow too. The app is killed right
+# after the burst, while it is still going out. The core stored every message
+# before any network work, so after the relaunch each lands once, in order.
+- tapOn:
+    id: "btn-back"
+- runFlow:
+    file: ../subflows/rapid-send-open-group.yaml
+    env:
+      GROUP: "E2E Rapid Kill Group"
+- runFlow:
+    file: ../subflows/rapid-send-burst.yaml
+    env:
+      TAG: "rk1636"
+- stopApp
+- launchApp
+- runFlow:
+    file: ../subflows/rapid-send-reopen-group.yaml
+    env:
+      GROUP: "E2E Rapid Kill Group"
+- runFlow:
+    file: ../subflows/rapid-send-delivered.yaml
+    env:
+      TAG: "rk1636"

@@ -1,0 +1,8 @@
+appId: ${MAESTRO_APP_ID}
+---
+# RAPID SEND on Android (#1636), part 5 of 5, network back to full speed: the
+# burst that was killed mid-delivery lands once each, in order, with no Retry.
+- runFlow:
+    file: ../../subflows/rapid-send-delivered.yaml
+    env:
+      TAG: "rk1636"

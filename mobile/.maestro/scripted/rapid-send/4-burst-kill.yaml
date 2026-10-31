@@ -1,0 +1,35 @@
+appId: ${MAESTRO_APP_ID}
+---
+# RAPID SEND on Android (#1636), part 4 of 5, on the slowed network again: a
+# second burst, then the app is killed while it is still going out. After the
+# relaunch and unlock, still slowed, every message is there and still sending:
+# the core stored each one before any network work.
+- assertVisible:
+    id: "screen-chat"
+- runFlow:
+    file: ../../subflows/rapid-send-burst.yaml
+    env:
+      TAG: "rk1636"
+- stopApp
+- launchApp
+- runFlow:
+    file: ../../subflows/rapid-send-reopen-group.yaml
+    env:
+      GROUP: "E2E Rapid Send Group"
+- extendedWaitUntil:
+    visible: ".*: rk1636 four, .*"
+    timeout: 30000
+- assertVisible:
+    text: ".*: rk1636 two, .*"
+    below:
+      text: ".*: rk1636 one, .*"
+- assertVisible:
+    text: ".*: rk1636 three, .*"
+    below:
+      text: ".*: rk1636 two, .*"
+- assertVisible:
+    text: ".*: rk1636 four, .*"
+    below:
+      text: ".*: rk1636 three, .*"
+- assertVisible: ".*: rk1636 four, sending"
+- takeScreenshot: rapid-send-rk1636-after-relaunch

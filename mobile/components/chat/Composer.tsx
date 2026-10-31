@@ -32,7 +32,7 @@ export function Composer({
   draft,
   onChangeDraft,
   onSend,
-  sendPending,
+  sendPending = false,
   editable,
   mentionCandidates,
   customEmoji,
@@ -47,7 +47,8 @@ export function Composer({
   draft: string;
   onChangeDraft: (text: string) => void;
   onSend: () => void;
-  sendPending: boolean;
+  /** Holds the send button while a send is out. Chat never sets it: sends queue (#1636). */
+  sendPending?: boolean;
   editable: boolean;
   mentionCandidates?: MentionCandidate[];
   customEmoji?: CustomEmoji[];

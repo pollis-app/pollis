@@ -935,6 +935,64 @@ every later attempt posts that one unchanged — a re-seal does not move it — 
 after a crash-after-post, whose retry the DS answers as a replay of the first
 post, the sender's copy sits where every recipient's does.
 
+**Rapid sends: stored at once, delivered in order (#1636).** The composer
+never waits on a send: on desktop and mobile every tap calls `send_message`
+immediately and shows its stub (mobile stubs are `pending-<ms>-<seq>`, so two
+made in one millisecond never share an id). The core makes the order:
+
+- **Stored at call time.** `send_message` stamps `sent_at` and registers the
+  send in `AppState::outbox_enqueuing` before its first await, then writes the
+  `pending` row (attachment bytes first, then the row) before any catch-up or
+  network work. A kill after that point loses nothing. A conversation's line
+  order is `(sent_at, id)` over its unsent rows: the order the core received
+  the calls.
+- **Delivered one at a time, in stored order.** Every delivery (a send, Retry,
+  the drain) goes through `outbox::deliver`, which holds the conversation's
+  line lock (`outbox_locks["line:<conversation>"]`). Under it, it waits for any
+  earlier send still writing its row (so a text sent right after an attachment
+  never overtakes it), delivers every earlier `pending` row of the conversation
+  oldest first, then its own. A send that finds its own row already delivered
+  by an earlier caller returns it. The order therefore holds whichever trigger
+  runs, and across restarts: the drain walks `(sent_at, id)` and takes the same
+  lock.
+- **`sent_at` follows seal order.** A never-sealed row still re-stamps at its
+  first seal (it lands at the time it went out), but never earlier than its
+  stored stamp, and every later never-sealed unsent row of the conversation
+  whose stamp would then sort before it is moved just after it, in order
+  (`outbox::restamp_on`). Seals run in line order, so stamps, seals and DS
+  `seq` agree.
+- **Failed and rejected rows do not block.** Only `pending` rows are delivered
+  ahead of a send. A `failed` or `rejected` one is skipped, so it never holds up
+  the messages behind it, and a new send never retries it. Retry (and, for
+  `failed`, the drain) sends it later. If it was never sealed it re-stamps then
+  and lands after the messages that overtook it. If it was sealed, its stamp
+  stays (the DS may hold it).
+- **Nor does a row waiting for its file key.** A `pending` attachment row
+  whose last attempt stopped on `FileKeyUnavailable` is noted in
+  `AppState::outbox_awaiting_key` (memory only) and passed over by later sends'
+  ahead passes. The drain and its own Retry still try it. Every attempt checks
+  the key (`r2::check_outbox_upload_key`) before reading any attachment bytes
+  out of the database, so a wait costs a key lookup, not a 100 MiB read.
+- **An ahead pass never changes an earlier row's state on a transient error.**
+  It leaves the row `pending` and moves on. Only a refusal no retry fixes is
+  recorded (`rejected`). `failed` is written only by the row's own call, Retry
+  or the drain (`outbox::Attempt`).
+- Both line queries (`AHEAD_SQL`, `BEHIND_SQL`) read the partial index
+  `idx_message_unsent_line (conversation_id, sent_at, id) WHERE send_state IS
+  NOT NULL`, never the whole conversation. A unit test pins the query plan.
+
+Ties on `sent_at` (calls arriving at the core within the clock's resolution)
+fall back to the id. Pinned by `outbox::tests` (the line and the re-stamp) and
+the flows `a_burst_of_concurrent_sends_is_delivered_once_each_in_stored_order`,
+`a_burst_killed_mid_delivery_is_delivered_once_each_in_order_after_restart`
+`a_failed_message_does_not_hold_up_the_next_and_lands_when_retried`,
+`a_later_send_never_marks_an_earlier_row_failed`,
+`a_text_sent_right_after_an_attachment_never_overtakes_it` (the enqueue gate,
+with the attachment's row write held at the `OutboxBeforeRow` rendezvous),
+`a_send_that_never_writes_its_row_does_not_hold_up_the_next`, and
+`file_keys::a_photo_waiting_for_the_file_key_does_not_hold_up_the_next_send`.
+No wire or remote-schema change; one additive local index.
+
 **Attachments are the outbox's too.** The row is on screen from the moment the
 user sends, uploads included, so the upload is as durable as the send: the
 renderers pass `send_message` the caption plus `attachments` (a picked file's

@@ -1,0 +1,62 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Rapid send (#1636): four sends back to back while the first is still out.
+#
+# This subflow REFUSES to pass without reproducing the race: before Send is
+# tapped for message 2, message 1 must still be on screen as sending. If the
+# first send already finished, the steps after it prove nothing, so the
+# assertion fails the run instead. The caller makes the first send slow: a
+# fresh group's MLS setup, or a slowed network on Android
+# (scripts/maestro-rapid-send.sh).
+#
+# Rows are matched by their spoken label, "<name>: <text>, <status or time>",
+# in which a pending row says "sending" (MessageRow). The ": " keeps the
+# composer's own text, which has none, from ever matching a row.
+- tapOn:
+    id: "input-composer"
+- inputText: "${TAG} one"
+- tapOn:
+    id: "btn-send"
+- assertVisible: ".*: ${TAG} one, sending"
+- assertNotVisible:
+    id: "input-composer"
+    text: ".*${TAG}.*"
+
+- inputText: "${TAG} two"
+# The precondition: message 1 is still in flight as Send is tapped again.
+- assertVisible: ".*: ${TAG} one, sending"
+- tapOn:
+    id: "btn-send"
+# Before #1636 this tap did nothing (Send was disabled while message 1 was
+# out): message 2 never appeared and its text stayed in the composer.
+- assertVisible: ".*: ${TAG} two, sending"
+- assertNotVisible:
+    id: "input-composer"
+    text: ".*${TAG}.*"
+
+- inputText: "${TAG} three"
+- tapOn:
+    id: "btn-send"
+- assertVisible: ".*: ${TAG} three, .*"
+- inputText: "${TAG} four"
+- tapOn:
+    id: "btn-send"
+- assertVisible: ".*: ${TAG} four, .*"
+- assertNotVisible:
+    id: "input-composer"
+    text: ".*${TAG}.*"
+
+# All four on screen at once, in the order sent (newest at the bottom).
+- assertVisible:
+    text: ".*: ${TAG} two, .*"
+    below:
+      text: ".*: ${TAG} one, .*"
+- assertVisible:
+    text: ".*: ${TAG} three, .*"
+    below:
+      text: ".*: ${TAG} two, .*"
+- assertVisible:
+    text: ".*: ${TAG} four, .*"
+    below:
+      text: ".*: ${TAG} three, .*"
+- takeScreenshot: rapid-send-${TAG}-queued

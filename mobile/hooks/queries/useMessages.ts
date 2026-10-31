@@ -320,7 +320,16 @@ function patchOutboxRows(
   }
 }
 
-/** Send a text message optimistically; durable via the core's outbox (#1335). */
+/** Tells apart stubs made in the same millisecond. */
+let stubSeq = 0;
+
+/**
+ * Send a text message optimistically; durable via the core's outbox (#1335).
+ *
+ * Never blocks the composer (#1636): `mutate` may be called again while earlier sends are in
+ * flight. The core stores each one at once and delivers a conversation's sends one at a time,
+ * in the order it stored them, so nothing here waits or orders.
+ */
 export function useSendMessage(
   conversationId: string | null,
   kind: ConversationKind | null,
@@ -377,7 +386,8 @@ export function useSendMessage(
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
-      const optimisticId = `pending-${Date.now()}`;
+      stubSeq += 1;
+      const optimisticId = `pending-${Date.now()}-${stubSeq}`;
       stubIds.set(vars, optimisticId);
       const optimistic: Message = {
         id: optimisticId,

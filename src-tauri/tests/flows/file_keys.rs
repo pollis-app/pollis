@@ -296,3 +296,55 @@ async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arri
         .contains(&"waits for the key".to_string()));
     drop((alice, bob));
 }
+
+/// Rapid sends (#1636): a photo waiting for the file key holds nobody up. A text sent after it
+/// goes straight out without another attempt at the photo, and the photo goes once the key
+/// arrives.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_photo_waiting_for_the_file_key_does_not_hold_up_the_next_send() {
+    use pollis_core::commands::messages::test_hooks;
+    wipe().await;
+    let _stub = StubbedUploads::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let dm_id = dm_pair(&mut alice, &mut bob).await;
+    forget_the_ring(&dm_id, &[&alice, &bob]).await;
+
+    let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
+    sent.expect("alice's photo mints the ring");
+    assert!(bob.self_update(&dm_id).await, "bob moves the epoch on");
+    wipe_local_ring(&bob, &dm_id).await;
+
+    let (photo, _) = send_photo(&bob, &dm_id, "waits for the key").await;
+    assert_eq!(own_send_state(&bob, &dm_id, &photo).await.as_deref(), Some("pending"));
+
+    let before = test_hooks::delivery_attempts();
+    bob.invoke_try(
+        "send_message",
+        serde_json::json!({
+            "conversationId": dm_id,
+            "senderId": bob.user_id(),
+            "content": "sent after the photo",
+            "replyToId": null,
+            "senderUsername": null,
+        }),
+    )
+    .await
+    .expect("the text is not held up by the photo");
+    assert_eq!(test_hooks::delivery_attempts(), before + 1, "the waiting photo was passed over");
+    assert_eq!(own_send_state(&bob, &dm_id, &photo).await.as_deref(), Some("pending"));
+    assert!(alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .any(|m| m["content"] == "sent after the photo"));
+
+    alice.process_commits_for(&dm_id).await;
+    bob.invoke_json("flush_outbox", serde_json::json!({})).await;
+    assert_eq!(own_send_state(&bob, &dm_id, &photo).await, None, "delivered once the key is there");
+    assert!(received_captions(&alice, &dm_id)
+        .await
+        .contains(&"waits for the key".to_string()));
+    drop((alice, bob));
+}

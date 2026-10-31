@@ -143,6 +143,8 @@ CREATE TABLE IF NOT EXISTS outbox_edit (
 
 -- The outbox drain's scan (#1335): only unsent rows, which are few.
 CREATE INDEX IF NOT EXISTS idx_message_send_state ON message(sent_at) WHERE send_state IS NOT NULL;
+-- A conversation's unsent line, in order (#1636): the outbox's ahead pass and re-stamp.
+CREATE INDEX IF NOT EXISTS idx_message_unsent_line ON message(conversation_id, sent_at, id) WHERE send_state IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS dm_conversation (
     id TEXT PRIMARY KEY,

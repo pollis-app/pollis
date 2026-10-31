@@ -1,0 +1,21 @@
+appId: ${MAESTRO_APP_ID}
+---
+# RAPID SEND on Android (#1636), part 1 of 5, at full network speed: sign in,
+# make a group and settle its MLS setup with one delivered message, so that
+# from here on only the slowed network (set by maestro-rapid-send.sh) holds a
+# send in flight.
+- runFlow: ../../subflows/sign-in.yaml
+- runFlow:
+    file: ../../subflows/rapid-send-open-group.yaml
+    env:
+      GROUP: "E2E Rapid Send Group"
+- tapOn:
+    id: "input-composer"
+- inputText: "rs1636 warm-up"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    notVisible: ".*: rs1636 warm-up, sending"
+    timeout: 120000
+- assertNotVisible:
+    id: "btn-retry-message-.*"

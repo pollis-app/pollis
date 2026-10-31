@@ -1,0 +1,32 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Rapid send (#1636): after a relaunch, unlock and open ${GROUP}'s General again.
+# A cold start always locks; on a slow emulator the PIN screen can take a while
+# to draw, so wait for it before the conditional below looks for it.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 30000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: enter-pin.yaml
+# Unlock makes DS round trips, which take minutes on the Android run's slowed
+# network (scripts/maestro-rapid-send.sh).
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 240000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "${GROUP}.*"
+    index: 0
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
