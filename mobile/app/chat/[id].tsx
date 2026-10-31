@@ -59,6 +59,8 @@ import {
 } from "../../hooks/queries";
 import { retryTarget } from "../../hooks/queries/pendingMessages";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
+import { useTypingPublisher } from "../../hooks/useTypingPublisher";
+import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
@@ -204,6 +206,14 @@ function TextChat(props: ChatViewProps = {}) {
     props.groupId ??
     (kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined);
   useConversationRealtime(conversationId, kind, groupId);
+  const typing = useTypingPublisher(conversationId, kind, groupId);
+  const onChangeDraft = useCallback(
+    (text: string) => {
+      setDraft(text);
+      typing.notify(text);
+    },
+    [typing],
+  );
 
   // Contextual notification permission: asked on first conversation open, never at login.
   useEffect(() => {
@@ -278,6 +288,7 @@ function TextChat(props: ChatViewProps = {}) {
       return;
     }
     setDraft("");
+    typing.stop();
     setPendingAttachments([]);
     setReplyTarget(null);
     sendMessage.mutate({
@@ -913,10 +924,14 @@ function TextChat(props: ChatViewProps = {}) {
               onDismiss={() => setReplyTarget(null)}
             />
           ) : null}
+          <TypingIndicator
+            channelId={kind === "channel" ? conversationId : null}
+            conversationId={kind === "dm" ? conversationId : null}
+          />
           <Composer
             focusRequest={composerFocus}
             draft={draft}
-            onChangeDraft={setDraft}
+            onChangeDraft={onChangeDraft}
             onSend={onSend}
             editable={!!kind && !!conversationId}
             mentionCandidates={mentionCandidates}

@@ -1,4 +1,6 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useTypingState } from "../hooks/useTypingState";
 
 interface TypingIndicatorProps {
@@ -6,17 +8,17 @@ interface TypingIndicatorProps {
   conversationId: string | null;
 }
 
-function describe(usernames: string[]): string | null {
+function describe(usernames: string[], t: TFunction): string | null {
   if (usernames.length === 0) {
     return null;
   }
   if (usernames.length === 1) {
-    return `${usernames[0]} is typing…`;
+    return t("chat:typing.one", { name: usernames[0] });
   }
   if (usernames.length === 2) {
-    return `${usernames[0]} and ${usernames[1]} are typing…`;
+    return t("chat:typing.two", { first: usernames[0], second: usernames[1] });
   }
-  return `${usernames.length} people are typing…`;
+  return t("chat:typing.several", { count: usernames.length });
 }
 
 /** "X is typing…" above the input, in a fixed-height row. */
@@ -25,7 +27,8 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   conversationId,
 }) => {
   const usernames = useTypingState({ channelId, conversationId });
-  const text = describe(usernames);
+  const { t } = useTranslation();
+  const text = describe(usernames, t);
 
   return (
     <div

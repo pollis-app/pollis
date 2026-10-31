@@ -4,6 +4,11 @@
 import type { Room } from "livekit-client";
 import { invoke } from "../native";
 import { decodeRealtimeEvent, isTrustedOrigin, type RealtimeEvent } from "./events";
+import { createParticipantResolver } from "./participants";
+
+const resolveSender = createParticipantResolver((room, identities) =>
+  invoke("resolve_livekit_identities", { room, identities }),
+);
 
 // registerGlobals() runs lazily on first connect: at module load it can crash boot without the webrtc module.
 let globalsRegistered = false;
@@ -80,9 +85,33 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
 
   try {
     const room = new Room();
-    room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: unknown) => {
+    room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: { identity?: string }) => {
       const event = decodeRealtimeEvent(payload);
       if (!event || !isTrustedOrigin(event, participant != null)) {
+        return;
+      }
+      if (event.type === "typing") {
+        // The typist is the publishing participant (#836); body claims are never read.
+        const identity = participant?.identity;
+        if (!identity) {
+          return;
+        }
+        void resolveSender(roomName, identity).then((sender) => {
+          if (!sender) {
+            return;
+          }
+          const stamped: RealtimeEvent = {
+            type: "typing",
+            channel_id: event.channel_id ?? null,
+            conversation_id: event.conversation_id ?? null,
+            is_typing: event.is_typing === true,
+            user_id: sender.userId,
+            username: sender.username,
+          };
+          for (const listener of entry.listeners) {
+            listener(stamped);
+          }
+        });
         return;
       }
       for (const listener of entry.listeners) {
@@ -106,6 +135,22 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
     console.warn("[realtime] connect failed:", e);
     dropEntry(roomName, entry);
   }
+}
+
+/** Publish on a room this device already holds open; a no-op while it is connecting or down. */
+export function publishRealtime(
+  roomName: string,
+  payload: Record<string, unknown>,
+  reliable: boolean,
+): void {
+  const room = entries.get(roomName)?.room;
+  if (!room) {
+    return;
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  room.localParticipant.publishData(bytes, { reliable }).catch((e: unknown) => {
+    console.warn("[realtime] publish failed:", e);
+  });
 }
 
 /** False once its connect failed, so a holder can re-subscribe. */

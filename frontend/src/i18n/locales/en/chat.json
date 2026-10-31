@@ -149,5 +149,11 @@
     "notice": "Your safety number with {{name}} changed.",
     "verify": "Verify it",
     "defaultName": "this contact"
+  },
+  "typing": {
+    "one": "{{name}} is typing…",
+    "two": "{{first}} and {{second}} are typing…",
+    "several_one": "{{count}} person is typing…",
+    "several_other": "{{count}} people are typing…"
   }
 }
