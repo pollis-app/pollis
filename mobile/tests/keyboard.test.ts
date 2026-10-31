@@ -79,3 +79,91 @@ test("react-native-keyboard-controller is pinned to the Expo SDK's version", () 
     bundled["react-native-keyboard-controller"],
   );
 });
+
+// #1641/#1642: Android hides the keyboard without an animation when the window is backgrounded or loses
+// focus, so keyboard-controller 1.21.9 never sent the hide and every <Screen> stayed padded at the
+// keyboard's height. iOS strands the same way after a background/resume or a stray KVO move.
+// The pnpm patch replays such a hide on both platforms; it must stay registered and applied.
+test("keyboard-controller is patched to replay a hide Android applied without an animation", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const version = pkg.dependencies["react-native-keyboard-controller"];
+  const key = `react-native-keyboard-controller@${version}`;
+  const patchPath = pkg.pnpm.patchedDependencies[key];
+  assert.equal(
+    patchPath,
+    `patches/${key}.patch`,
+    "a keyboard-controller bump must carry the #1641 patch forward (or drop it once upstream replays a missed hide)",
+  );
+  assert.match(read(patchPath), /reconcileMissedHide/);
+  const callback = read(
+    "node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt",
+  );
+  assert.match(callback, /private fun reconcileMissedHide\(/, "the installed copy must carry the patch");
+  assert.match(callback, /addOnWindowFocusChangeListener\(windowFocusListener\)/, "regaining window focus re-checks");
+  assert.match(callback, /postDelayed\(missedHideCheck, MISSED_HIDE_GRACE_MS\)/, "an insets change re-checks");
+
+  const ios = "node_modules/react-native-keyboard-controller/ios/observers/movement/observer/";
+  assert.match(
+    read(`${ios}KeyboardMovementObserver+Lifecycle.swift`),
+    /UIApplication\.didBecomeActiveNotification/,
+    "iOS re-checks when the app returns to the foreground",
+  );
+  assert.match(
+    read(`${ios}KeyboardMovementObserver+Lifecycle.swift`),
+    /UIWindow\.didBecomeKeyNotification/,
+    "iOS re-checks when its window becomes key again",
+  );
+  const listeners = read(`${ios}KeyboardMovementObserver+Listeners.swift`);
+  assert.match(listeners, /func reconcileHiddenKeyboard\(_ reason: String\) -> Bool/, "iOS replays a hide JS never saw");
+  // A foreground return resends the hide even when JS was last told 0: events dispatched while
+  // backgrounded can be lost (#1641 coordinator run), so "JS holds 0" proves nothing there.
+  assert.match(listeners, /scheduleReconcile\("active", force: true\)/);
+  assert.match(listeners, /scheduleReconcile\("didHide", force: false\)/);
+  // Bounded re-check after a signal, never a timer or a single fixed delay.
+  assert.match(listeners, /for delay in \[0\.0, 0\.1, 0\.25, 0\.5, 1\.0, 2\.0\]/);
+  assert.doesNotMatch(listeners, /Timer\.scheduledTimer|repeats: true/);
+  assert.match(
+    read(`${ios}KeyboardMovementObserver+Interactive.swift`),
+    /!isKeyboardShown \|\| UIApplication\.shared\.applicationState != \.active/,
+    "iOS drops KVO moves of a hidden keyboard or a backgrounded app",
+  );
+});
+
+test("<Screen> draws the keyboard-state e2e probe", () => {
+  assert.match(read("components/ui.tsx"), /<KeyboardProbe \/>/);
+  assert.match(read("components/KeyboardProbe.tsx"), /"keyboard-open" : "keyboard-closed"/);
+});
+
+// #1642: a screen whose only input is the PIN keypad never shows the system keyboard, so it must not avoid one.
+test("every PIN-keypad screen, and only those, opts out of keyboard avoidance", () => {
+  const blocks: { file: string; block: string }[] = [];
+  for (const file of sources().filter((f) => f.startsWith("app/"))) {
+    for (const m of read(file).matchAll(/<Screen\b[\s\S]*?<\/Screen>/g)) {
+      blocks.push({ file, block: m[0] });
+    }
+  }
+  const optedOut = blocks.filter((b) => /<Screen\b[^>]*avoidKeyboard=\{false\}/.test(b.block));
+  const keypad = blocks.filter((b) => /<PinKeypad\b|\{keypad\}/.test(b.block));
+  assert.deepEqual(
+    optedOut.map((b) => b.file).sort(),
+    keypad.map((b) => b.file).sort(),
+    "the Screens that opt out are exactly the ones drawing the PIN keypad",
+  );
+  assert.deepEqual([...new Set(optedOut.map((b) => b.file))].sort(), [
+    "app/(auth)/pin.tsx",
+    "app/self/link-device.tsx",
+  ]);
+  for (const { file, block } of optedOut) {
+    assert.doesNotMatch(block, /<Field\b|<TextInput\b/, `${file}: an opted-out screen must have no text field`);
+  }
+  // link-device: the code step keeps its keyboard avoidance; only the PIN step opts out.
+  const linkDevice = blocks.filter((b) => b.file === "app/self/link-device.tsx");
+  assert.ok(linkDevice.some((b) => /<Field\b/.test(b.block) && !/avoidKeyboard=\{false\}/.test(b.block)));
+});
+
+test("<Screen avoidKeyboard={false}> renders no KeyboardAvoidingView", () => {
+  const ui = read("components/ui.tsx");
+  assert.match(ui, /avoidKeyboard = true/, "avoidance stays the default");
+  assert.match(ui, /if \(!avoid\) \{\s*return <View style=\{\{ flex: 1 \}\}>\{children\}<\/View>;/);
+  assert.match(ui, /<KeyboardFrame avoid=\{avoidKeyboard && !nested\}>/);
+});

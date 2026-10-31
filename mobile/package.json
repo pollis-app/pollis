@@ -70,7 +70,8 @@
   "private": true,
   "pnpm": {
     "patchedDependencies": {
-      "decode-uri-component@0.2.2": "patches/decode-uri-component@0.2.2.patch"
+      "decode-uri-component@0.2.2": "patches/decode-uri-component@0.2.2.patch",
+      "react-native-keyboard-controller@1.21.9": "patches/react-native-keyboard-controller@1.21.9.patch"
     }
   }
 }

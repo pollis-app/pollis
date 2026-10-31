@@ -16,7 +16,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `mobile/pnpm-lock.yaml` is independent of the root lock.
 - **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
-- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there is one: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7.
+- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there are two: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7. And `react-native-keyboard-controller@1.21.9`, which replays a keyboard hide the library never reported to JS — on Android one applied without an animation, on iOS one after the app returns to the foreground or a stray KVO "interactive" move (#1641, see "Keyboard" below; `tests/keyboard.test.ts`). It is native, so it reaches phones only with a store build, and a keyboard-controller bump must carry it forward or drop it once upstream does the same. Make or change a patch with `pnpm patch <pkg>@<ver> --ignore-workspace`, then `pnpm patch-commit <dir> --ignore-workspace` and `pnpm install --ignore-workspace` (which writes the lockfile's `patchedDependencies` hash).
 - Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
 
 ## Stack
@@ -1189,6 +1189,54 @@ frame alone is exact, since a `<Screen>` starts at the window's top; only
 `keyboardDidShow` heights come out short. A screen that mounts with the
 keyboard already up (email → OTP) seeds from the current keyboard state.
 `tests/keyboard.test.ts` pins this.
+
+Stranded layout (#1641, #1642): every `KeyboardAvoidingView` pads from
+keyboard-controller's events, and on Android those come only from the
+window-insets *animation* callback. Android hides the keyboard with no
+animation when the window is backgrounded or loses focus (Home, the lock
+screen, a permission dialog, a share sheet), so 1.21.9 never sent the hide:
+JS kept the keyboard open, and every `<Screen>` stayed padded at its height,
+including screens mounted later, which seed from that stale state. The
+composer sat mid-screen with empty space below; the scan-to-sign-in PIN step
+was squeezed into the top half. The pnpm patch on `KeyboardAnimationCallback`
+records what the last `End` told JS and, when the insets change or the window
+regains focus and the keyboard is gone but JS still has it open (and no
+animation is running), replays the hide with the library's own
+`syncKeyboardPosition(0, false)`, the same call it uses when a Modal closes.
+iOS strands the same way by a different road: its `KeyboardMovementObserver`
+also turns KVO moves of the keyboard-tracking view into "interactive" events,
+which set every `KeyboardAvoidingView`'s progress with no end event and cancel
+the pending did-event, and a keyboard dismissed while the app is in the
+background can leave JS at its old progress after `keyboardDidHide` already
+fired (the `keyboard-closed` probe read closed over a padded screen). The
+same patch records what JS was last told and whether the keyboard is shown,
+and drops interactive moves unless the keyboard is shown and the app is
+active. On Home, iOS hides the keyboard while the app is inactive (a 0 ms
+`keyboardWillHide`/`DidHide`), and on a loaded machine those view events can
+be lost even though `keyboardDidHide` reached JS, so "JS was last told 0"
+proves nothing there. So `didBecomeActive` and `UIWindow.didBecomeKey` always
+replay the hide (`onKeyboardMove` + `onKeyboardMoveEnd` at 0) when no keyboard
+is on screen, and a finished hide or an interactive move re-checks for a
+non-zero progress left behind. Each re-check is a bounded round after its
+signal (0, 0.1, 0.25, 0.5, 1 and 2 s; never a timer): it ends once the
+keyboard is really up or the hide is replayed, and waits while an animation
+runs, so no single fixed delay can lose the race. The observer traces every
+event and decision at debug level: `log stream --level debug --predicate
+'subsystem == "com.pollis.keyboard"'`. One global fix on both
+platforms, so every `<Screen>`, `SheetOverlay` and
+`KeyboardController.isVisible()` recover together. Never work around it per
+screen. `<Screen>` draws the invisible `keyboard-open` /
+`keyboard-closed` probe (`components/KeyboardProbe.tsx`) and
+`.maestro/flows/keyboard-recovery.yaml` is the device-tier proof.
+
+Screens whose only input is the PIN keypad (`PinKeypad`) never show the
+system keyboard, so they never avoid one: `<Screen avoidKeyboard={false}>`
+renders no `KeyboardAvoidingView` at all, and no stale keyboard state can pad
+them (#1642, defence in depth beside the patch). Today that is
+`app/(auth)/pin.tsx` (create, confirm and unlock) and the PIN step of
+`app/self/link-device.tsx`; its scan / code step keeps avoidance, because it
+has a text field. A new keypad-only screen opts out too, and a screen with any
+text field never does — `tests/keyboard.test.ts` pins both directions.
 
 ## Backend integration — wired vs pending
 

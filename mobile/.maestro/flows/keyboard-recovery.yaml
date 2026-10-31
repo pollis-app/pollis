@@ -1,0 +1,138 @@
+appId: ${MAESTRO_APP_ID}
+---
+# KEYBOARD RECOVERY (#1641, #1642) — the layout must come back whenever the
+# keyboard goes away, however it goes. Android hides it WITHOUT an animation
+# when the window is backgrounded or loses focus; keyboard-controller 1.21.9
+# never told JS, so every <Screen> stayed padded at the keyboard's height:
+# the composer / bottom buttons stranded mid-screen (#1641) and the scan-to-
+# sign-in PIN step squeezed into the top half (#1642). The fix is the pnpm
+# patch on keyboard-controller (patches/), so this proves the NATIVE binary.
+#
+# Two checks after every hide:
+#  - `keyboard-closed`: the invisible probe <Screen> draws
+#    (components/KeyboardProbe.tsx) — what every KeyboardAvoidingView pads
+#    from. Stranded = `keyboard-open` with no keyboard on screen.
+#  - a point tap at 50%,92%, where the bottom-anchored "Enter code" toggle
+#    (btn-scan-toggle-manual, the only BottomAction button while the field is
+#    empty / in scan mode) sits when nothing pads the screen. Stranded, that
+#    spot is empty background and the tap does nothing, so the next assert
+#    fails. If a device's bottom inset moves the button, tune the percentage
+#    from screenshot keyboard-recovery-01-baseline.
+# Self-contained; the camera is never granted (clearState), so scan mode
+# shows the allow-camera button and no preview.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+
+# Baseline: the toggle is at the bottom, and the point tap reaches it.
+- tapOn:
+    id: "tab-link-device"
+- assertVisible:
+    id: "screen-link-device"
+- assertVisible:
+    id: "keyboard-closed"
+- takeScreenshot: keyboard-recovery-01-baseline
+- tapOn:
+    point: "50%,92%"
+- assertVisible:
+    id: "input-scan-code"
+
+# 1. Navigate away with the keyboard up, then come back.
+- tapOn:
+    id: "input-scan-code"
+- inputText: "pollis"
+- assertVisible:
+    id: "keyboard-open"
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-direct"
+- tapOn:
+    id: "tab-link-device"
+- assertVisible:
+    id: "screen-link-device"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 3000
+- takeScreenshot: keyboard-recovery-02-after-navigation
+- tapOn:
+    point: "50%,92%"
+- assertVisible:
+    id: "input-scan-code"
+
+# 2. Background the app with the keyboard up (Android hides it with no
+#    animation while the window is not visible), then resume. If the OS
+#    restores the keyboard on resume, leaving manual mode tears the focused
+#    field down and hides it; either way the layout must recover.
+- tapOn:
+    id: "input-scan-code"
+- inputText: "pollis"
+- assertVisible:
+    id: "keyboard-open"
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "screen-link-device"
+- tapOn:
+    id: "btn-scan-toggle-manual"
+- assertNotVisible:
+    id: "input-scan-code"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 3000
+- takeScreenshot: keyboard-recovery-03-after-background
+- tapOn:
+    point: "50%,92%"
+- assertVisible:
+    id: "input-scan-code"
+
+# 3. #1642's path: the typed code moves to the PIN step, which unmounts the
+#    focused field with the keyboard still up. The PIN step must lay out at
+#    full height: heading clear of the keypad, keypad not squeezed.
+- tapOn:
+    id: "input-scan-code"
+# The field still holds "pollis" from step 2.
+- eraseText: 20
+- inputText: "pollis-link:v2:e2e-keyboard"
+- assertVisible:
+    id: "keyboard-open"
+- tapOn:
+    id: "btn-scan-code-continue"
+- assertVisible:
+    id: "scan-device-confirm"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 3000
+- takeScreenshot: keyboard-recovery-04-pin-step
+# The PIN step renders no KeyboardAvoidingView at all (<Screen avoidKeyboard={false}>),
+# so its keypad sits at the bottom even straight after the keyboard-up transition:
+# a point tap at 50%,90% must land on the bottom row's "0" key (72pt keys, 20pt
+# under the last row, plus the bottom inset). Stranded, that spot is empty.
+- tapOn:
+    point: "50%,90%"
+- assertVisible: "1 of 4 digits entered"
+- tapOn:
+    id: "btn-pin-back"
+- assertVisible: "0 of 4 digits entered"
+
+# 4. Background on the PIN step too (#1642 was reported without a keyboard
+#    in sight), then back out: Direct is intact.
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "scan-device-confirm"
+- assertVisible:
+    id: "keyboard-closed"
+- takeScreenshot: keyboard-recovery-05-pin-after-background
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "screen-direct"

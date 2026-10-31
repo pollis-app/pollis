@@ -163,8 +163,9 @@ export default function ScanToSignIn() {
         void submitPin(step.payload, next);
       }
     };
+    // The PIN step's only input is the keypad: no keyboard padding, even one left over from the code field (#1642).
     return (
-      <Screen testID="screen-link-device">
+      <Screen testID="screen-link-device" avoidKeyboard={false}>
         {crumb}
         {/* iPad: the PIN block centred vertically. */}
         <View style={regular ? { flex: 1, justifyContent: "center", gap: 32 } : { flex: 1 }}>

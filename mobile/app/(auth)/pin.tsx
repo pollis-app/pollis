@@ -218,8 +218,9 @@ function AuthPIN() {
     />
   );
 
+  // The keypad is the only input: no keyboard padding can ever apply (#1642).
   return (
-    <Screen testID="screen-auth-pin" centered>
+    <Screen testID="screen-auth-pin" centered avoidKeyboard={false}>
       {regular ? (
         // iPad: heading, dots and keypad as one centred block.
         <View style={{ flex: 1, justifyContent: "center", gap: 32 }}>
