@@ -11,11 +11,11 @@ ignoredBuiltDependencies:
 # Security floors for transitive deps (vulnerability scan, 2026-10). Every
 # override stays inside the major the parent already asked for, so no parent
 # gets an API it did not request. Advisories whose only fix is a new major
-# (fast-xml-parser 4, sharp 0.34, deepmerge-ts 5, basic-ftp 5, esbuild 0.27,
-# postcss-selector-parser 6) are dev/test tooling only and are left for their
-# parent's next release; see docs/security/dependency-scan-2026-10.md.
+# (fast-xml-parser 4, sharp 0.34, deepmerge-ts 5, basic-ftp 5, extract-zip)
+# are dev/test tooling only and are left for their parent's next release; see
+# docs/security/dependency-scan-2026-10.md.
 overrides:
-  undici@>=7.0.0 <7.29.1: ^7.29.1
+  undici@>=7.0.0 <7.30.1: ^7.30.1
   ws@>=8.0.0 <8.21.0: ^8.21.0
   tar-fs@>=3.0.0 <3.1.1: ^3.1.1
   brace-expansion@<1.1.21: ^1.1.21
@@ -26,5 +26,7 @@ overrides:
   browserslist@<4.28.7: ^4.28.7
   baseline-browser-mapping@>=2.0.0 <2.11.0: ^2.11.0
   source-map-js@>=1.0.0 <1.2.2: ^1.2.2
-  postcss-selector-parser@>=6.1.0 <6.1.3: ^6.1.3
+  postcss-selector-parser@>=6.0.0 <6.1.5: ^6.1.5
   '@babel/core@>=7.0.0 <7.29.6': ^7.29.6
+  seroval@>=1.0.0 <1.6.11: ~1.6.12
+  seroval-plugins@>=1.0.0 <1.6.11: ~1.6.12
