@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Two-client 1:1 call (#570, M3a): over a DM, both sides must see each other's tile (needs LiveKit + audio).
+// B answers from the full-page incoming-call takeover (#1639).
 
 const fs = require("fs");
 const path = require("path");
@@ -230,8 +231,13 @@ async function main() {
 
     console.log("[two-client-call] B: waiting for the incoming-call alert…");
     await h.waitTestId(B.browser, "status-bar-incoming-call-accept", INCOMING_CALL_TIMEOUT_MS);
+    // #1639: the takeover (on by default) replaces B's screen; the status-bar alert stays too.
+    await h.waitTestId(B.browser, "incoming-call-takeover", 15000);
     await shot(B.browser, "two-client-call-B-incoming.png");
-    await h.clickTestId(B.browser, "status-bar-incoming-call-accept");
+    // Hover first: that pre-warms the room (token + DNS/TLS) before the click joins it.
+    await (await B.browser.$('[data-testid="incoming-call-accept"]')).moveTo();
+    await h.sleep(500);
+    await h.clickTestId(B.browser, "incoming-call-accept");
     await h.waitTestId(B.browser, "call-hang-up", 30000);
 
     console.log("[two-client-call] waiting for both sides to see each other…");

@@ -203,6 +203,43 @@ The frontend type narrows it:
 
 When adding a new use of `MembershipChanged`, decide whether the receiver wants a notification. If yes, define a new `kind` value, set it on the publisher, and add the corresponding `notify(...)` call in the membership handler. If no, omit `kind` and the receiver will silently invalidate queries.
 
+## Incoming-call takeover (#1639)
+
+A ringing 1:1 call (`call_invite` → `appStore.incomingCall`) also replaces the
+screen with a full-page caller ID: the route `/incoming-call/$callId`
+(`frontend/src/pages/IncomingCallPage.tsx`), never an overlay. It is pushed onto
+the memory history by `useIncomingCallTakeover` (mounted in `AppShell`), so app
+state (stores, query cache, composer drafts, a terminal session) is untouched and
+returning is one `history.back()` to exactly where the user was. Accept /
+Decline are the same functions the status-bar alert calls
+(`frontend/src/voice/incomingCall.ts`); Accept *replaces* the takeover entry with
+`/call/$callId`, so Back from the call skips it.
+
+- **Warm-up:** hovering (pointer-enter) or focusing Accept calls
+  `warmVoiceChannel(call.roomName)` → `prepare_voice_connection`, the same #176
+  warm-up group voice rows and the DM call button use: the DS token is pre-minted
+  and DNS/TLS primed, and `join_voice_channel` consumes it for the same room.
+- **Exit:** when the call stops ringing (declined here or in the status bar, the
+  caller's `call_canceled`, or answered on another device via
+  `dismiss_call_on_my_devices`) the takeover steps back; a stale entry reached
+  by Back does the same. A different call ringing replaces it in place.
+- **Never forced twice:** a call whose takeover was shown once does not re-take
+  the screen if the user navigates away from it; the status-bar alert stays.
+  No takeover while already in that call's room or on its `/call` page.
+- **Setting:** `incoming_call_takeover` in the synced preferences blob, default
+  on; Preferences → Notifications → "Full-screen incoming calls". The hook waits
+  for the preference to load so "off" never flashes a takeover. Off changes
+  nothing else: the status-bar alert, ringtone (`honorsRingtonePref`) and OS
+  notification behave exactly as before. Mobile does not render calls (voice is
+  desktop-only by product decision); its preference writes merge, so the key
+  survives them.
+
+Pure decisions (`shouldTakeOver`, `takeoverExit`) live in
+`frontend/src/utils/incomingCallTakeover.ts`, pinned by
+`frontend/tests/incoming-call-takeover.test.ts`; the UI by
+`e2e/incoming-call-takeover.spec.ts`, and the real two-client path by
+`e2e/two-client-call.js` (B answers from the takeover).
+
 ## Adding a new alert
 
 1. **Add a row to `CATEGORIES`** in `frontend/src/utils/notify.ts`:
@@ -584,6 +621,7 @@ dismissal still work by `data.h`. Build, signing and portal details:
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/voice/voiceBridge.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions (was `hooks/useVoiceChannel.ts`, deleted) |
+| `frontend/src/hooks/useIncomingCallTakeover.ts` · `frontend/src/pages/IncomingCallPage.tsx` · `frontend/src/voice/incomingCall.ts` | Incoming-call takeover route, its trigger, and the shared accept / decline (#1639) |
 | `frontend/src/hooks/useBadge.ts` | Reads `unreadCounts` from the MobX store, applies dock/taskbar badge |
 | `pollis-core/src/realtime.rs` | `RealtimeEvent` enum (Rust → JS wire format) |
 | `pollis-core/src/commands/livekit/` | `dispatch_data()` parses payloads, sends typed events to JS |
@@ -592,6 +630,7 @@ dismissal still work by `data.h`. Build, signing and portal details:
 
 ## Related issues
 
+- #1639 — full-page incoming-call takeover for DM calls, with a Notifications toggle.
 - #843 — per-user `@username` mentions that notify the mentioned user.
 - #1431 — channel messages push by default; per-channel, per-account mute.
 - #1508 — a read on any client clears that conversation's push notifications from every phone.

@@ -30,6 +30,7 @@ Both `.spec.js` and `.spec.ts` are picked up by the one config.
 | `emoji.spec.ts` | Custom emoji in BOTH skins: the picker mounts the real standard set (≥100 cells, not the old hardcoded eight), search narrows it, a pick splices in AT THE CARET rather than appending, and a `<:name:hash>` token renders as an image while a malformed one stays literal |
 | `invite-links.spec.ts` | Shareable invite links in BOTH skins: a created link is shown once with its bounds, copy puts exactly it on the clipboard, no list view can hand the token back, and revoking retires the row and takes its card away; the section carries no `>`/`[…]` terminal decoration and the link wraps rather than scrolling |
 | `update-page.spec.ts` | Software Update, managed-install branch: the package-manager command renders in the shared `CodeSnippet` and its copy button puts exactly that command on the clipboard |
+| `incoming-call-takeover.spec.ts` | Incoming-call takeover (#1639) in BOTH skins: a ringing DM call replaces the screen, hovering Accept pre-warms the room, declining or the caller cancelling returns the user with their draft intact, and the Notifications toggle turns the takeover off while the status-bar alert stays |
 | `voice-controls.spec.ts` | Push-to-talk + deafen in BOTH skins: the four `data-mic-state` values are drawn distinctly (push-to-talk-idle must not look muted), deafened is tellable from both, and the settings input-mode toggle reaches the preference and the gate |
 | `bookmarks.spec.ts` | Saved messages + `pollis://m/` permalinks in BOTH skins: the saved list, an evicted body admitting it honestly, channel/DM permalink jump-and-highlight, and an unresolvable permalink leaking nothing |
 | `receipts.spec.ts` | DM delivery/read receipts in BOTH skins: a delivered tick, a read tick, the two being visually distinct (different glyph AND different colour), a group channel showing none at all, and a multi-participant DM rendering "2/3" rather than a boolean |
@@ -67,7 +68,7 @@ entry point (see below):
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
 | `voice-ptt-deafen.js` | push-to-talk + self-deafen (#849): deafen implies mute and undeafen restores the *prior* mute state; PTT-idle renders distinctly from muted | yes | yes (writable) + LiveKit + audio |
 | `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |
-| `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
+| `two-client-call.js` | two instances place + accept a real 1:1 call (B answers from the #1639 takeover); each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 | `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | two instances in a call; A shares its screen (X11/Xvfb capture), B sees A's remote screenshare tile | yes | yes (writable) + LiveKit + audio |
 

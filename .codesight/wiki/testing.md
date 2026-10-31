@@ -1137,7 +1137,7 @@ build):
 | `two-client-dm-reply.js` | the reverse direction: B replies, A sees it | yes |
 | `two-client-channel.js` | group + channel convergence: create, invite, accept, post, receive | yes |
 | `two-client-delete.js` | delete convergence — the peer sees the tombstone | yes |
-| `two-client-call.js` | 1:1 call place + accept, both sides see each other | yes (+ LiveKit) |
+| `two-client-call.js` | 1:1 call place + accept (B answers from the #1639 takeover, hovering Accept first), both sides see each other | yes (+ LiveKit) |
 | `two-client-camera.js` | camera on → the peer renders the remote tile | yes (+ LiveKit) |
 | `two-client-screenshare.js` | screenshare → the peer renders the remote tile | yes (+ LiveKit) |
 | `two-client-voice-channel.js` | voice channel join/leave, participant counts converge | yes (+ LiveKit) |
@@ -1222,6 +1222,7 @@ traces upload per shard as the `playwright-artifacts-N` workflow artifacts.
 | `linkify.spec.ts` | URL detection in message bodies in BOTH skins — every body keeps the link it *starts* with, the media unfurl agrees with the linkifier about which URLs exist, and a bare `www.` link gets a protocol. Guards the pattern shared by `LinkifiedText` and `MediaLinkUnfurl` (#874) |
 | `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
 | `message-nav.spec.ts` | The DOM half of arrow-key log navigation in BOTH skins: the composer hands ArrowUp off at the right caret positions, logical focus projects onto real element focus (rows, then action-bar buttons), and the exits (down past newest, Escape, Tab) land back in the composer. The pure state machine is `frontend/tests/message-nav.test.ts` |
+| `incoming-call-takeover.spec.ts` | Incoming-call takeover (#1639) in BOTH skins: a ringing DM call replaces the screen (status-bar alert kept), hovering Accept fires `prepare_voice_connection` for the call room and accepting joins it, Decline / the caller's `call_canceled` / the status-bar decline return the user with their composer draft intact, leaving the takeover never drags them back, and the Notifications toggle (synced `incoming_call_takeover`) turns it off with every other indicator unchanged |
 | `search.spec.ts` | On-device message search (#850), the user-visible flow in BOTH skins: type a query, ranked results with real names, structured snippet highlights, pagination, click through to the message |
 | `right-panel-persistence.spec.ts` | The right-hand panel's open/closed state is per user, per device, and survives navigation and a skin flip (#904), in BOTH skins |
 | `vault-search-style.spec.ts` | Vault + search + chrome style regressions in BOTH skins, every one asserted on a computed style or rendered node rather than a class string |
