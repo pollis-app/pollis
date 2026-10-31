@@ -7,8 +7,8 @@
 An adaptive layer is 108dp square; the launcher shows the central 72dp through
 its mask (circle, squircle, ...) and only the central 66dp circle is safe on
 every mask. The logo is rendered straight from the vector, tile and all, and
-scaled about the artwork's own centre until the glyph's farthest pixel sits on
-the safe-zone circle (MAX_RADIUS_DP), so no mask clips it. The amber then
+scaled about the artwork's own centre until the glyph's farthest pixel sits just
+inside the safe-zone circle (MAX_RADIUS_DP), so no mask clips it. The amber then
 becomes transparency (it is the layer's `backgroundColor` in mobile/app.json):
 the artwork uses exactly two colours, so each pixel is `t * INK + (1 - t) *
 AMBER` and `t` is its alpha. Over amber the layer reproduces the logo exactly,
@@ -39,10 +39,13 @@ from PIL import Image
 
 # Output canvas, px (= 108dp).
 SIZE = 1024
-# Farthest glyph pixel from the layer's centre, in dp: the radius of the 66dp
-# safe zone, so no mask shape can clip it. The lock is tall, so this is set by
-# the body's lower corners, and the glyph comes out ~62dp tall.
-MAX_RADIUS_DP = 33
+# Farthest glyph pixel from the layer's centre, in dp: 3dp inside the 33dp
+# radius of the 66dp safe zone, so no mask shape clips it and circle masks
+# (Pixel, themed icons) leave the same air round it as neighbouring icons
+# (#1638: at exactly 33dp the shackle and body corners crowded the mask). A
+# comfortable margin was chosen over a bigger glyph. The lock is tall, so this
+# is set by the body's lower corners, and the glyph comes out ~57dp tall.
+MAX_RADIUS_DP = 30
 # Notification small icon: 24dp at xxxhdpi, and the optical margin kept clear
 # on each side of the glyph's tall side (Material's keyline is 2dp; 1dp reads
 # visibly larger in the status bar, which is the point).
