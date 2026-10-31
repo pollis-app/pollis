@@ -74,11 +74,37 @@ The desktop renderer's runtime dependencies have no advisories.
   decoder is super-linear: a 2.4 KB malformed link froze the JS thread for
   about 3 s on a laptop. The upstream fix (0.5.0) is ESM-only, and query-string 7
   `require`s it. `patches/decode-uri-component@0.2.2.patch` therefore backports
-  0.5.0's linear decoder into the CJS file. A differential test against 0.5.0
+  0.5.0's linear decoder into the CJS file (since 2026-10-31 0.5.1's, see below). A differential test against 0.5.0
   over 50k random inputs showed identical output. `tests/deep-link-decode.test.ts`
   fails if the patch stops applying.
 - **Left, build-time only:** `uuid` 7 (Expo config plugins at prebuild),
   `node-forge` (expo CLI, no fix), and `braces` (Metro file map, no fix).
+
+## Update 2026-10-31: Dependabot sweep
+
+36 open alerts. What changed:
+
+| Alert(s) | Fix |
+|---|---|
+| `zip` < 9.0.5 in `pollis-core` (3 advisories, all reader-side) | `zip` 4 → 9.0.5. pollis-core only writes zips (the mobile export bundle), so none was reachable, but the manifest alerts close. |
+| `decode-uri-component` ≤ 0.5.0 (GHSA-qr28-fpjm-wq7f) | 0.5.0's fix kept a replace-map loop that ran one full-string regex per distinct percent run, which is quadratic. The patch now backports 0.5.1. It matches 0.5.1 on 200k random inputs, and the advisory's PoC drops from 45 s to under 0.1 s. `tests/deep-link-decode.test.ts` pins it. |
+| `seroval` < 1.6.11 (5 advisories, the desktop router) | override floor `~1.6.12` (and `seroval-plugins`), inside router-core's `^1.6.7` |
+| `undici` < 7.30.1, `postcss-selector-parser` < 6.1.5 | raised the existing override floors |
+| `esbuild` 0.27.3 | root `wrangler` ^4.76 → ^4.107.1, the version `pollis-delivery` already uses (esbuild 0.28) |
+
+Still open, each with its reason:
+
+| Package | Why it stays |
+|---|---|
+| `zip` 4.6.1 (Cargo.lock) | `tauri-plugin-updater` pins it on Windows. Only 2.14.1 moves to zip 9, and that needs tauri ^2.12 (we are on 2.11). The archive is minisign-verified before extraction. |
+| `zip` 0.6.6 (Cargo.lock) | build-only, via `webrtc-sys-build` (see above). No upstream fix. |
+| `rand` 0.7.3 | build-time `phf_generator`, via tauri-utils → kuchikiki. 0.7 has no fix, and the bug needs a custom logger. |
+| `lru` 0.12 | `ratatui` 0.28, in the TUI only. The fix is lru 0.16 (a ratatui upgrade). |
+| `glib` 0.18 | GTK3 via Tauri on Linux. The fix is 0.20 (gtk4-rs), which Tauri does not use. |
+| `libsql-sqlite3-parser` 0.13 | no fix released. The DS and pollis-schema only parse our own migrations and queries. |
+| `sharp` 0.34.5 | wrangler → miniflare 4, local `wrangler dev` only. 0.35.5 arrives only with miniflare 5 (beta). |
+| `basic-ftp`, `extract-zip` ×2, `deepmerge-ts`, `fast-xml-parser` | e2e → webdriverio 8 (the tauri-driver WebDriver scenarios). The fix is webdriverio 10, a two-major bump of test tooling. |
+| mobile `zod` 3, `node-forge`, `deepmerge`, `uuid` 7 | build-time Expo CLI / config plugins, pinned by SDK 57. None is in the app bundle. |
 
 ## Server images (`trivy image --severity HIGH,CRITICAL`)
 
