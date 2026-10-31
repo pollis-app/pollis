@@ -28,9 +28,6 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "receipt one"
-# The keyboard can sit over the send button and take the tap (Gboard's mic).
-- hideKeyboard:
-    optional: true
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:

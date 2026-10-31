@@ -12,8 +12,6 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "receipt two"
-- hideKeyboard:
-    optional: true
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
@@ -48,8 +46,6 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "receipt three"
-- hideKeyboard:
-    optional: true
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
