@@ -2976,7 +2976,7 @@ version = "0.3.49"
 criteria = "safe-to-deploy"
 
 [[exemptions.webrtc-sys-build]]
-version = "0.3.19"
+version = "0.3.20"
 criteria = "safe-to-deploy"
 
 [[exemptions.webview2-com]]
@@ -3388,15 +3388,15 @@ version = "0.11.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.zip]]
-version = "0.6.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.zip]]
 version = "4.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.zip]]
 version = "9.0.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.zlib-rs]]
+version = "0.6.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.zmij]]
