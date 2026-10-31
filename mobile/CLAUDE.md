@@ -16,7 +16,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `mobile/pnpm-lock.yaml` is independent of the root lock.
 - **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
-- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there is one: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7.
+- `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there are two: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`). Drop it once expo-router stops pulling query-string 7. And `react-native-keyboard-controller@1.21.9`, Android only, which replays a keyboard hide Android applied without an animation (#1641, see "Keyboard" below; `tests/keyboard.test.ts`). It is native, so it reaches phones only with a store build, and a keyboard-controller bump must carry it forward or drop it once upstream does the same. Make or change a patch with `pnpm patch <pkg>@<ver> --ignore-workspace`, then `pnpm patch-commit <dir> --ignore-workspace` and `pnpm install --ignore-workspace` (which writes the lockfile's `patchedDependencies` hash).
 - Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
 
 ## Stack
@@ -1189,6 +1189,25 @@ frame alone is exact, since a `<Screen>` starts at the window's top; only
 `keyboardDidShow` heights come out short. A screen that mounts with the
 keyboard already up (email → OTP) seeds from the current keyboard state.
 `tests/keyboard.test.ts` pins this.
+
+Stranded layout (#1641, #1642): every `KeyboardAvoidingView` pads from
+keyboard-controller's events, and on Android those come only from the
+window-insets *animation* callback. Android hides the keyboard with no
+animation when the window is backgrounded or loses focus (Home, the lock
+screen, a permission dialog, a share sheet), so 1.21.9 never sent the hide:
+JS kept the keyboard open, and every `<Screen>` stayed padded at its height,
+including screens mounted later, which seed from that stale state. The
+composer sat mid-screen with empty space below; the scan-to-sign-in PIN step
+was squeezed into the top half. The pnpm patch on `KeyboardAnimationCallback`
+records what the last `End` told JS and, when the insets change or the window
+regains focus and the keyboard is gone but JS still has it open (and no
+animation is running), replays the hide with the library's own
+`syncKeyboardPosition(0, false)`, the same call it uses when a Modal closes.
+One global fix, so every `<Screen>`, `SheetOverlay` and
+`KeyboardController.isVisible()` recover together; iOS is untouched. Never work
+around it per screen. `<Screen>` draws the invisible `keyboard-open` /
+`keyboard-closed` probe (`components/KeyboardProbe.tsx`) and
+`.maestro/flows/keyboard-recovery.yaml` is the device-tier proof.
 
 ## Backend integration — wired vs pending
 

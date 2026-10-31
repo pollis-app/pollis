@@ -79,3 +79,30 @@ test("react-native-keyboard-controller is pinned to the Expo SDK's version", () 
     bundled["react-native-keyboard-controller"],
   );
 });
+
+// #1641/#1642: Android hides the keyboard without an animation when the window is backgrounded or loses
+// focus, so keyboard-controller 1.21.9 never sent the hide and every <Screen> stayed padded at the
+// keyboard's height. The pnpm patch replays such a hide; it must stay registered and applied.
+test("keyboard-controller is patched to replay a hide Android applied without an animation", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const version = pkg.dependencies["react-native-keyboard-controller"];
+  const key = `react-native-keyboard-controller@${version}`;
+  const patchPath = pkg.pnpm.patchedDependencies[key];
+  assert.equal(
+    patchPath,
+    `patches/${key}.patch`,
+    "a keyboard-controller bump must carry the #1641 patch forward (or drop it once upstream replays a missed hide)",
+  );
+  assert.match(read(patchPath), /reconcileMissedHide/);
+  const callback = read(
+    "node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt",
+  );
+  assert.match(callback, /private fun reconcileMissedHide\(/, "the installed copy must carry the patch");
+  assert.match(callback, /addOnWindowFocusChangeListener\(windowFocusListener\)/, "regaining window focus re-checks");
+  assert.match(callback, /postDelayed\(missedHideCheck, MISSED_HIDE_GRACE_MS\)/, "an insets change re-checks");
+});
+
+test("<Screen> draws the keyboard-state e2e probe", () => {
+  assert.match(read("components/ui.tsx"), /<KeyboardProbe \/>/);
+  assert.match(read("components/KeyboardProbe.tsx"), /"keyboard-open" : "keyboard-closed"/);
+});

@@ -23,6 +23,7 @@ import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } fr
 import { useTheme } from "./theme";
 import { ThemeProbe } from "./ThemeProbe";
 import { EmojiProbe } from "./emoji/EmojiProbe";
+import { KeyboardProbe } from "./KeyboardProbe";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { PaneEntryContext } from "./pane/paneContext";
 import { activeLocale } from "../i18n";
@@ -160,6 +161,7 @@ export function Screen({
     >
       <ThemeProbe />
       <EmojiProbe />
+      <KeyboardProbe />
       {/* No automaticOffset (#1432): its async window position can be stale on Android. */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}

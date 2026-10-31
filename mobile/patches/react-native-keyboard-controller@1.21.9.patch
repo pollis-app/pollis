@@ -1,0 +1,123 @@
+diff --git a/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt b/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
+index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..0aff80be94d41edeec618851937200b76b377565 100644
+--- a/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
++++ b/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
+@@ -2,6 +2,7 @@ package com.reactnativekeyboardcontroller.listeners
+ 
+ import android.view.View
+ import android.view.ViewTreeObserver.OnGlobalFocusChangeListener
++import android.view.ViewTreeObserver.OnWindowFocusChangeListener
+ import android.widget.EditText
+ import androidx.core.graphics.Insets
+ import androidx.core.view.OnApplyWindowInsetsListener
+@@ -31,6 +32,9 @@ import kotlin.math.abs
+ private val TAG = KeyboardAnimationCallback::class.qualifiedName
+ private val isResizeHandledInCallbackMethods = Keyboard.IS_ANIMATION_EMULATED
+ 
++// Pollis (#1641): how long a hide seen only in the insets waits for its own animation before it is replayed.
++private const val MISSED_HIDE_GRACE_MS = 120L
++
+ private data class PendingKeyboardStartEvent(
+   val keyboardHeight: Double,
+   val progress: Double,
+@@ -76,6 +80,19 @@ class KeyboardAnimationCallback(
+     get() = duration == -1
+   override var isSuspended: Boolean = false
+ 
++  // Pollis (#1641): what the last `End` told JS. A hide Android applies without an animation (window
++  // backgrounded or unfocused, focused input torn down mid-transition) dispatches no onStart/onEnd, so
++  // JS kept the keyboard "open" and every KeyboardAvoidingView stayed padded at the old height.
++  private var isKeyboardShownInJs = false
++  private val missedHideCheck = Runnable { reconcileMissedHide(ignoreTransition = false) }
++  private val windowFocusListener =
++    OnWindowFocusChangeListener { hasFocus ->
++      if (hasFocus) {
++        // a transition that began before the window lost focus has finished by now
++        view.post { reconcileMissedHide(ignoreTransition = true) }
++      }
++    }
++
+   // listeners
+   private val focusListener =
+     OnGlobalFocusChangeListener { oldFocus, newFocus ->
+@@ -113,6 +130,7 @@ class KeyboardAnimationCallback(
+               viewTagFocused,
+             ),
+           )
++          isKeyboardShownInJs = true
+           context.emitEvent("KeyboardController::keyboardWillShow", getEventParams(this.persistentKeyboardHeight))
+           context.emitEvent("KeyboardController::keyboardDidShow", getEventParams(this.persistentKeyboardHeight))
+         }
+@@ -128,6 +146,7 @@ class KeyboardAnimationCallback(
+ 
+     layoutObserver = FocusedInputObserver(view = view, eventPropagationView = eventPropagationView, context = context)
+     view.viewTreeObserver.addOnGlobalFocusChangeListener(focusListener)
++    view.viewTreeObserver.addOnWindowFocusChangeListener(windowFocusListener)
+   }
+ 
+   /**
+@@ -172,6 +191,13 @@ class KeyboardAnimationCallback(
+       this.onKeyboardResized(keyboardHeight)
+     }
+ 
++    // Pollis (#1641): the keyboard is gone but JS still has it open. Wait briefly: an animated hide
++    // gets its own onStart/onEnd, and the check then finds nothing to replay.
++    if (isKeyboardShownInJs && !isKeyboardVisible()) {
++      view.removeCallbacks(missedHideCheck)
++      view.postDelayed(missedHideCheck, MISSED_HIDE_GRACE_MS)
++    }
++
+     return insets
+   }
+ 
+@@ -323,6 +349,7 @@ class KeyboardAnimationCallback(
+ 
+         flushPendingStartEvent()
+ 
++        isKeyboardShownInJs = isKeyboardVisible
+         context.emitEvent(
+           "KeyboardController::" + if (!isKeyboardVisible) "keyboardDidHide" else "keyboardDidShow",
+           getEventParams(keyboardHeight),
+@@ -366,6 +393,7 @@ class KeyboardAnimationCallback(
+     isTransitioning = false
+     duration = 0
+     pendingStartEvent = null
++    isKeyboardShownInJs = isKeyboardVisible
+ 
+     context.emitEvent(
+       "KeyboardController::" + if (!isKeyboardVisible) "keyboardDidHide" else "keyboardDidShow",
+@@ -390,7 +418,9 @@ class KeyboardAnimationCallback(
+ 
+   fun destroy() {
+     pendingStartEvent = null
++    view.removeCallbacks(missedHideCheck)
+     view.viewTreeObserver.removeOnGlobalFocusChangeListener(focusListener)
++    view.viewTreeObserver.removeOnWindowFocusChangeListener(windowFocusListener)
+     layoutObserver?.destroy()
+   }
+ 
+@@ -423,6 +453,24 @@ class KeyboardAnimationCallback(
+     context.keepShadowNodesInSync(eventPropagationView.id)
+ 
+     this.persistentKeyboardHeight = keyboardHeight
++    isKeyboardShownInJs = true
++  }
++
++  /*
++   * Pollis (#1641): replays a hide that never produced onStart/onEnd, so JS (KeyboardAvoidingView,
++   * provider values, `KeyboardController.isVisible()`) cannot stay stranded at the old keyboard height.
++   */
++  private fun reconcileMissedHide(ignoreTransition: Boolean) {
++    if (isSuspended || !isKeyboardShownInJs || isKeyboardVisible()) {
++      return
++    }
++    if (!ignoreTransition && (isTransitioning || InteractiveKeyboardProvider.isInteractive)) {
++      return
++    }
++
++    Logger.i(TAG, "reconcileMissedHide: keyboard hidden without an animation, syncing JS")
++    syncKeyboardPosition(0.0, false)
++    context.keepShadowNodesInSync(eventPropagationView.id)
+   }
+ 
+   private fun isKeyboardVisible(): Boolean {
