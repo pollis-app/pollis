@@ -1353,7 +1353,16 @@ Current state:
   `useConversationRealtime` for the open chat, `useInboxRealtime` for the
   groups/DM lists). It ingests + invalidates on `new_message` / `dm_created` /
   `membership_changed`. Graceful no-op until `get_livekit_token` exists on the
-  bridge. A missed wake-up is caught up, not waited out: returning to the
+  bridge. **Typing (#1635)** rides the open chat's room both ways, with desktop's
+  wire body and cadence (`lib/typing.ts`: start on the first keystroke, re-sent
+  every 3 s, one stop on idle / clear / send / leaving; receivers age out after
+  6 s). The body names no one (#836): `lib/realtime/client.ts` takes the typist
+  from the publishing participant, resolved through the bridge's
+  `resolve_livekit_identities` (cached per room, `lib/realtime/participants.ts`),
+  and drops a packet it cannot attribute. A binary without that arm (pre-1.0.26)
+  simply shows no indicator. Shown over the composer by
+  `components/chat/TypingIndicator.tsx` (`stores/typingStore.ts`); Maestro
+  `scripts/maestro-typing.sh`. A missed wake-up is caught up, not waited out: returning to the
   foreground re-ingests every listed conversation (so does landing in the app —
   cold start, sign-in, unlock — once both lists load, #1422), and a LiveKit `Reconnected`
   re-ingests that room (`lib/messageWake.ts`) — a message sent from the user's

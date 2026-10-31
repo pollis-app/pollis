@@ -8,6 +8,9 @@ import { useIngestConversation, type ConversationKind } from "./queries/useMessa
 import { groupQueryKeys } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
 import { dmQueryKeys } from "./queries/useDMChannels";
+import { appStore } from "../stores/appStore";
+import { typingStore } from "../stores/typingStore";
+import { typingRoomKey } from "../lib/typing";
 
 export function useConversationRealtime(
   conversationId: string | null,
@@ -54,6 +57,22 @@ export function useConversationRealtime(
         });
         void qcRef.current.invalidateQueries({ queryKey: groupQueryKeys.all });
         void qcRef.current.invalidateQueries({ queryKey: dmQueryKeys.all });
+        return;
+      }
+      if (event.type === "typing") {
+        // The user's own other devices are not "someone typing".
+        if (event.user_id === appStore.currentUser?.id) {
+          return;
+        }
+        const roomKey = typingRoomKey(event.channel_id, event.conversation_id);
+        if (!roomKey) {
+          return;
+        }
+        if (event.is_typing) {
+          typingStore.setTyping(roomKey, event.user_id, event.username ?? event.user_id);
+        } else {
+          typingStore.clearTyping(roomKey, event.user_id);
+        }
         return;
       }
       if (event.type === "realtime_reconnected") {

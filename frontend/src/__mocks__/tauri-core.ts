@@ -1947,6 +1947,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'prepare_voice_connection':
     case 'publish_voice_presence':
+    case 'publish_typing':
     case 'set_voice_audio_processing':
     case 'subscribe_voice_test_events':
     case 'start_mic_test':

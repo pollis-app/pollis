@@ -1,0 +1,73 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# TYPING (#1635), part 2 of 2. The DM is open and the peer — a desktop-shaped
+# typist on pollis-core's own LiveKit path — is in its room.
+#
+# Receive: the peer types → "<peer> is typing…" over the composer; it stops →
+# the line goes.
+# Send: this device types → the peer sees `typing`; clearing the draft → the
+# peer sees `stopped`; typing again and sending → `typing`, then `stopped`.
+
+# --- Receive ------------------------------------------------------------------
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "on"
+- extendedWaitUntil:
+    visible:
+      id: "text-typing-indicator"
+      text: "${MAESTRO_PEER_HANDLE} is typing…"
+    timeout: 10000
+- takeScreenshot: typing-01-peer-typing
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "off"
+- extendedWaitUntil:
+    notVisible:
+      id: "text-typing-indicator"
+    timeout: 5000
+
+# --- Send ---------------------------------------------------------------------
+- tapOn:
+    id: "input-composer"
+- inputText: "typing to you"
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "seen"
+      EXPECT: "typing"
+- eraseText: 20
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "seen"
+      EXPECT: "stopped"
+
+- inputText: "sent while typing"
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "seen"
+      EXPECT: "typing"
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: sent while typing, .*"
+    timeout: 15000
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "seen"
+      EXPECT: "stopped"
+- takeScreenshot: typing-02-after-send

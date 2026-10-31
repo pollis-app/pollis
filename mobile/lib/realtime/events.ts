@@ -77,6 +77,16 @@ export type RealtimeEvent =
       type: "read_cursors_changed";
     }
   | {
+      // #1635, unreliable and re-sent while typing. The wire body is identity-free (#836): the
+      // client stamps `user_id`/`username` from the PUBLISHING participant, never from the body.
+      type: "typing";
+      channel_id: string | null;
+      conversation_id: string | null;
+      is_typing: boolean;
+      user_id: string;
+      username: string | null;
+    }
+  | {
       // LOCAL, never on the wire: the room reconnected and wake-ups were lost.
       type: "realtime_reconnected";
       room: string;
@@ -96,6 +106,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "enrollment_requested",
   "channel_mutes_changed",
   "read_cursors_changed",
+  "typing",
 ]);
 
 /** Decode a data-channel payload; `null` for anything malformed or unknown. */
@@ -130,8 +141,11 @@ export function decodeRealtimeEvent(
   return parsed as RealtimeEvent;
 }
 
-/** `enrollment_requested` with a participant is a spoof (DS sends arrive with none). */
+/** `enrollment_requested` with a participant is a spoof (DS sends arrive with none); `typing` without one is unattributable. */
 export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean): boolean {
+  if (event.type === "typing") {
+    return fromParticipant;
+  }
   if (
     event.type === "enrollment_requested" ||
     event.type === "channel_mutes_changed" ||

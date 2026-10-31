@@ -333,7 +333,6 @@ pub async fn ds_livekit_participants(
 }
 
 /// One participant identity resolved back to a Pollis user (#836).
-#[cfg(feature = "media")]
 pub use pollis_api::broker::ResolvedIdentity;
 
 /// Ask the DS to resolve opaque LiveKit participant identities back to users
@@ -342,7 +341,6 @@ pub use pollis_api::broker::ResolvedIdentity;
 /// Only the DS holds the per-room identity key, so clients ask here.
 ///
 /// `room` is the **logical** room; unresolvable identities are simply absent.
-#[cfg(feature = "media")]
 pub async fn ds_livekit_identities(
     state: &Arc<AppState>,
     room: &str,

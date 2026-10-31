@@ -16,6 +16,15 @@ path = "src/main.rs"
 name = "pollis_tui"
 path = "src/lib.rs"
 
+[features]
+# #1635: the mobile Maestro typing peer needs pollis-core's real LiveKit path.
+# Dev-only; the shipped `pollis` binary never enables it.
+typing-peer = ["pollis-core/media"]
+
+[[example]]
+name = "typing_peer"
+required-features = ["typing-peer"]
+
 [dependencies]
 # Media OFF (the TUI is headless — no LiveKit/libwebrtc/cpal); auth/pin/mls/
 # messages all compile media-off. See docs/pollis-tui-spec.md §9.
