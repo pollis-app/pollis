@@ -95,7 +95,8 @@ const shownOrder = (page: Page) =>
     .locator("[data-testid^='message-']", { hasText: /rs1636/ })
     .evaluateAll((rows) =>
       rows
-        .map((r) => (r.textContent ?? "").match(/rs1636 \w+/)?.[0])
+        // Only the burst's own words: a row's textContent runs straight into its timestamp.
+        .map((r) => (r.textContent ?? "").match(/rs1636 (one|two|three)(?![a-z])/)?.[0])
         .filter((t, i, all): t is string => !!t && all.indexOf(t) === i),
     );
 
