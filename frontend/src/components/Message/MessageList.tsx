@@ -44,6 +44,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { KeyChangeNoticeRow } from "./KeyChangeNoticeRow";
 import { useKeyChangeNotices, type KeyChangeNotice } from "../../hooks/queries/useUserProfile";
 import { placeKeyChangeNotices } from "../../utils/keyChangeTimeline";
+import { receiptTargetId } from "../../utils/receiptTarget";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
@@ -220,6 +221,15 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }),
     [skin, isLightBg, currentUser?.id, mentionNames, selfName],
   );
+
+  // One tick per DM (#1637), on the newest own message with a receipt. A window
+  // anchored on older history (`hasNewer`) does not hold that message, so none.
+  const receiptMessageId = useMemo(() => {
+    if (!isDm || hasNewer) {
+      return null;
+    }
+    return receiptTargetId([...sortedMessages].reverse(), currentUser?.id, receipts);
+  }, [isDm, hasNewer, sortedMessages, currentUser?.id, receipts]);
 
   // Reply targets in one pass, not a per-row find() (#874).
   const replyTargets = useMemo(() => {
@@ -766,7 +776,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         copyLinkState={
           copyLinkState?.messageId === message.id ? copyLinkState.state : "idle"
         }
-        receipt={receipts?.get(message.id)}
+        receipt={message.id === receiptMessageId ? receipts?.get(message.id) : undefined}
         peerCount={peerCount}
         isDm={isDm}
       />

@@ -1,4 +1,5 @@
 /** DM receipts (#857), per message and reader, from the local table; refreshed by realtime, never polled. */
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import type { MessageReceipts } from "../../types";
@@ -21,10 +22,14 @@ export function useConversationReceipts(conversationId: string | null) {
     staleTime: 1000 * 5,
   });
 
-  const byMessageId = new Map<string, MessageReceipts>();
-  for (const entry of query.data ?? []) {
-    byMessageId.set(entry.message_id, entry);
-  }
+  // Stable per fetch, so the list's one-tick pick (#1637) recomputes only on new data.
+  const byMessageId = useMemo(() => {
+    const map = new Map<string, MessageReceipts>();
+    for (const entry of query.data ?? []) {
+      map.set(entry.message_id, entry);
+    }
+    return map;
+  }, [query.data]);
 
   return { receipts: byMessageId, isLoading: query.isLoading };
 }

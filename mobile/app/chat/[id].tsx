@@ -62,6 +62,7 @@ import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
+import { receiptTargetId } from "../../lib/receiptTarget";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import * as Clipboard from "expo-clipboard";
@@ -159,6 +160,18 @@ function TextChat(props: ChatViewProps = {}) {
     isDm && sendReadReceipts,
   );
   const peerCount = 1;
+  // One tick per DM (#1637): the newest own top-level message with a receipt.
+  const receiptMessageId = useMemo(
+    () =>
+      isDm
+        ? receiptTargetId(
+            messages.filter((m) => !m.thread_id || m.thread_id === m.id),
+            currentUser?.id,
+            receiptsByMessage,
+          )
+        : null,
+    [isDm, messages, currentUser?.id, receiptsByMessage],
+  );
 
   // Safety numbers (#1605): durable change notices + this DM's verified state.
   const { data: dmChannel } = useDMChannel(isDm ? conversationId : null);
@@ -671,7 +684,7 @@ function TextChat(props: ChatViewProps = {}) {
           editUnsent={m.edit_unsent}
           reactions={reactionsByMessage?.get(m.id)}
           currentUserId={currentUser?.id}
-          receipt={receiptsByMessage?.get(m.id)}
+          receipt={m.id === receiptMessageId ? receiptsByMessage?.get(m.id) : undefined}
           peerCount={peerCount}
           showReceipt={mine && isDm}
           continued={item.continued}
@@ -715,6 +728,7 @@ function TextChat(props: ChatViewProps = {}) {
       reactionsByMessage,
       toggleReaction,
       receiptsByMessage,
+      receiptMessageId,
       peerCount,
       isDm,
       threadSummaries,

@@ -1,4 +1,5 @@
 // DM receipts (#857): delivered and read must render differently (geometry + colour); refined skin only.
+// #1637: one tick per DM, on the viewer's newest own message that has a receipt, never one per message.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -7,10 +8,19 @@ const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";
 const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 
-// 1:1 DM — alice + bob. One peer, so the tick carries no count.
+// 1:1 DM — alice + bob. One peer, so the tick carries no count. The older
+// message was read, the newer only delivered: the tick is on the newer one.
 const DM_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0DMX";
 const MSG_DELIVERED = "01HQ7Z3K9M2P5R8T1V4W6Y0DEL";
+const MSG_EARLIER_READ = "01HQ7Z3K9M2P5R8T1V4W6Y0ERD";
+
+// 1:1 DM — alice + erin. Two of alice's messages read, erin replying in
+// between and after: the tick is on alice's newest, not on erin's.
+const DM_READ_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0DMR";
+const MSG_OLD_READ = "01HQ7Z3K9M2P5R8T1V4W6Y0OLD";
+const MSG_PEER_MID = "01HQ7Z3K9M2P5R8T1V4W6Y0PMD";
 const MSG_READ = "01HQ7Z3K9M2P5R8T1V4W6Y0RED";
+const MSG_PEER_LAST = "01HQ7Z3K9M2P5R8T1V4W6Y0PLS";
 
 // Group DM — alice + bob + carol + dave. Three peers, so state is a fraction.
 const GROUP_DM_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GDM";
@@ -41,6 +51,16 @@ function ownMessage(conversationId: string, id: string, content: string, sentAt:
   };
 }
 
+function peerMessage(
+  conversationId: string,
+  id: string,
+  senderId: string,
+  content: string,
+  sentAt: string,
+) {
+  return { id, conversation_id: conversationId, sender_id: senderId, content, sent_at: sentAt };
+}
+
 function preloadState(skin: Skin) {
   return {
     session: USER,
@@ -65,6 +85,12 @@ function preloadState(skin: Skin) {
         members: [dmMember(USER.id, "alice"), dmMember("u-bob", "bob")],
       },
       {
+        id: DM_READ_ID,
+        created_by: USER.id,
+        created_at: new Date().toISOString(),
+        members: [dmMember(USER.id, "alice"), dmMember("u-erin", "erin")],
+      },
+      {
         id: GROUP_DM_ID,
         created_by: USER.id,
         created_at: new Date().toISOString(),
@@ -81,21 +107,31 @@ function preloadState(skin: Skin) {
         ownMessage(CHANNEL_ID, CHANNEL_MSG, "a channel message of mine", "2026-08-01T10:00:00.000Z"),
       ],
       [DM_ID]: [
-        ownMessage(DM_ID, MSG_DELIVERED, "this one only arrived", "2026-08-01T11:00:00.000Z"),
-        ownMessage(DM_ID, MSG_READ, "this one was actually read", "2026-08-01T11:01:00.000Z"),
+        ownMessage(DM_ID, MSG_EARLIER_READ, "this one was read a while ago", "2026-08-01T11:00:00.000Z"),
+        ownMessage(DM_ID, MSG_DELIVERED, "this one only arrived", "2026-08-01T11:01:00.000Z"),
+      ],
+      [DM_READ_ID]: [
+        ownMessage(DM_READ_ID, MSG_OLD_READ, "an older message erin read", "2026-08-01T11:10:00.000Z"),
+        peerMessage(DM_READ_ID, MSG_PEER_MID, "u-erin", "erin answers", "2026-08-01T11:11:00.000Z"),
+        ownMessage(DM_READ_ID, MSG_READ, "this one was actually read", "2026-08-01T11:12:00.000Z"),
+        peerMessage(DM_READ_ID, MSG_PEER_LAST, "u-erin", "erin answers again", "2026-08-01T11:13:00.000Z"),
       ],
       [GROUP_DM_ID]: [
-        ownMessage(GROUP_DM_ID, MSG_PARTIAL, "two of you have read this", "2026-08-01T12:00:00.000Z"),
-        ownMessage(GROUP_DM_ID, MSG_EVERYONE, "all three of you have read this", "2026-08-01T12:01:00.000Z"),
+        ownMessage(GROUP_DM_ID, MSG_EVERYONE, "all three of you have read this", "2026-08-01T12:00:00.000Z"),
+        ownMessage(GROUP_DM_ID, MSG_PARTIAL, "two of you have read this", "2026-08-01T12:01:00.000Z"),
       ],
     },
     receipts: {
       [DM_ID]: [
-        // Delivered to bob, unread — the weaker of the two states.
-        { message_id: MSG_DELIVERED, delivered_by: ["u-bob"], read_by: [] },
         // Read by bob. `read_by` is a subset of `delivered_by`, as the local
         // schema's trigger guarantees.
-        { message_id: MSG_READ, delivered_by: ["u-bob"], read_by: ["u-bob"] },
+        { message_id: MSG_EARLIER_READ, delivered_by: ["u-bob"], read_by: ["u-bob"] },
+        // Delivered to bob, unread — the weaker of the two states.
+        { message_id: MSG_DELIVERED, delivered_by: ["u-bob"], read_by: [] },
+      ],
+      [DM_READ_ID]: [
+        { message_id: MSG_OLD_READ, delivered_by: ["u-erin"], read_by: ["u-erin"] },
+        { message_id: MSG_READ, delivered_by: ["u-erin"], read_by: ["u-erin"] },
       ],
       [GROUP_DM_ID]: [
         {
@@ -198,7 +234,7 @@ test.describe("DM receipts — refined skin", () => {
 
   test("a read message shows a double tick in the accent colour", async ({ page }) => {
     await boot(page, skin);
-    await gotoViaPermalink(page, DM_ID, MSG_READ);
+    await gotoViaPermalink(page, DM_READ_ID, MSG_READ);
 
     const indicator = page.getByTestId(`receipt-${MSG_READ}`);
     await expect(indicator).toBeVisible();
@@ -218,8 +254,12 @@ test.describe("DM receipts — refined skin", () => {
   }) => {
     await boot(page, skin);
     await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
-
+    await expect(page.getByTestId(`receipt-${MSG_DELIVERED}`)).toBeVisible();
     const delivered = await indicatorShape(page, MSG_DELIVERED);
+
+    // One tick per DM (#1637), so the read state is shown by the other DM.
+    await gotoViaPermalink(page, DM_READ_ID, MSG_READ);
+    await expect(page.getByTestId(`receipt-${MSG_READ}`)).toBeVisible();
     const read = await indicatorShape(page, MSG_READ);
     expect(delivered).not.toBeNull();
     expect(read).not.toBeNull();
@@ -234,6 +274,36 @@ test.describe("DM receipts — refined skin", () => {
       path: `artifacts/receipt-delivered-vs-read-${skin}.png`,
       fullPage: true,
     });
+  });
+
+  test("only the newest own message carries the tick (#1637)", async ({ page }) => {
+    await boot(page, skin);
+    await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
+    await expect(page.getByTestId(`receipt-${MSG_DELIVERED}`)).toBeVisible();
+
+    // The earlier message was read, and still draws nothing: one tick per DM.
+    await expect(page.getByTestId(`message-${MSG_EARLIER_READ}`)).toBeVisible();
+    await expect(page.getByTestId(`receipt-${MSG_EARLIER_READ}`)).toHaveCount(0);
+    await expect(page.locator("[data-receipt-state]")).toHaveCount(1);
+
+    await page.screenshot({
+      path: `artifacts/receipt-latest-only-${skin}.png`,
+      fullPage: true,
+    });
+  });
+
+  test("the peer replying after does not move the tick off my newest message", async ({
+    page,
+  }) => {
+    await boot(page, skin);
+    await gotoViaPermalink(page, DM_READ_ID, MSG_READ);
+    await expect(page.getByTestId(`receipt-${MSG_READ}`)).toBeVisible();
+    await expect(page.getByTestId(`message-${MSG_PEER_LAST}`)).toBeVisible();
+
+    await expect(page.getByTestId(`receipt-${MSG_OLD_READ}`)).toHaveCount(0);
+    await expect(page.getByTestId(`receipt-${MSG_PEER_MID}`)).toHaveCount(0);
+    await expect(page.getByTestId(`receipt-${MSG_PEER_LAST}`)).toHaveCount(0);
+    await expect(page.locator("[data-receipt-state]")).toHaveCount(1);
   });
 
   test("a group channel message shows no indicator at all", async ({ page }) => {
@@ -261,18 +331,21 @@ test.describe("DM receipts — refined skin", () => {
     await boot(page, skin);
     await gotoViaPermalink(page, GROUP_DM_ID, MSG_PARTIAL);
 
+    await expect(page.getByTestId(`receipt-${MSG_PARTIAL}`)).toBeVisible();
     const partial = await indicatorShape(page, MSG_PARTIAL);
     expect(partial?.state).toBe("read-some");
     expect(partial?.text).toBe("2/3");
     expect(partial?.label).toBe("Read by 2 of 3");
 
-    // All-read in the same conversation differs, so the fraction comes from the reader set.
-    const everyone = await indicatorShape(page, MSG_EVERYONE);
-    expect(everyone?.state).toBe("read-all");
-    expect(everyone?.text).toBe("3/3");
-    expect(everyone?.label).toBe("Read by everyone");
+    // The older, all-read message keeps no tick of its own (#1637): the newest speaks for the DM.
+    await expect(page.getByTestId(`message-${MSG_EVERYONE}`)).toBeVisible();
+    await expect(page.getByTestId(`receipt-${MSG_EVERYONE}`)).toHaveCount(0);
 
-    // Partial is not dressed up as complete.
+    // Partial is not dressed up as complete: an all-read tick elsewhere is coloured differently.
+    await gotoViaPermalink(page, DM_READ_ID, MSG_READ);
+    await expect(page.getByTestId(`receipt-${MSG_READ}`)).toBeVisible();
+    const everyone = await indicatorShape(page, MSG_READ);
+    expect(everyone?.state).toBe("read-all");
     expect(partial?.color).not.toBe(everyone?.color);
 
     await page.screenshot({
@@ -289,7 +362,11 @@ test.describe("DM receipts — terminal skin", () => {
     // Every seeded receipt state is present (delivered, read, partial, all
     // read), so an indicator would render here if the skin gate were missing.
     await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);
-    await expect(page.getByTestId(`message-${MSG_READ}`)).toBeVisible();
+    await expect(page.getByTestId(`message-${MSG_EARLIER_READ}`)).toBeVisible();
+    await expect(page.locator("[data-receipt-state]")).toHaveCount(0);
+
+    await gotoViaPermalink(page, DM_READ_ID, MSG_READ);
+    await expect(page.getByTestId(`message-${MSG_PEER_LAST}`)).toBeVisible();
     await expect(page.locator("[data-receipt-state]")).toHaveCount(0);
 
     await gotoViaPermalink(page, GROUP_DM_ID, MSG_PARTIAL);

@@ -1,0 +1,67 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DM RECEIPTS (#1637), part 2 of 2. The peer has accepted the DM.
+#
+# A DM shows ONE receipt tick, iMessage-style: on this device's newest own message
+# that has one, never on every message and never on the peer's. The row's spoken
+# label carries the tick's state (", Read by everyone" / ", Delivered to 1 of 1"),
+# which is what these assertions read.
+
+- tapOn:
+    id: "input-composer"
+- inputText: "receipt two"
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: receipt two, .*"
+    timeout: 15000
+
+# The peer fetches (delivered) and reads both.
+- runScript:
+    file: ../../scripts/peer-read.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+- extendedWaitUntil:
+    visible: ".*: receipt two, .*, Read by everyone"
+    timeout: 20000
+# The older one was read too, and carries nothing.
+- assertNotVisible: ".*: receipt one, .*, (Read|Delivered).*"
+- takeScreenshot: receipts-01-latest-only
+
+# The peer answers: its message never carries a tick, and mine keeps it.
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "got both"
+- extendedWaitUntil:
+    visible: ".*: got both, .*"
+    timeout: 20000
+- assertVisible: ".*: receipt two, .*, Read by everyone"
+- assertNotVisible: ".*: got both, .*, (Read|Delivered).*"
+
+# A newer message takes the tick once the peer has it; the older one gives it up.
+- tapOn:
+    id: "input-composer"
+- inputText: "receipt three"
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: receipt three, .*"
+    timeout: 15000
+- runScript:
+    file: ../../scripts/peer-read.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+- extendedWaitUntil:
+    visible: ".*: receipt three, .*, Read by everyone"
+    timeout: 20000
+- assertNotVisible: ".*: receipt two, .*, (Read|Delivered).*"
+- assertNotVisible: ".*: receipt one, .*, (Read|Delivered).*"
+- takeScreenshot: receipts-02-tick-moved

@@ -1,4 +1,4 @@
-//! Dev-DS peer for the mobile Maestro `live-message` flow (#1610).
+//! Dev-DS peer for the mobile Maestro `live-message` (#1610) and `receipts` (#1637) flows.
 //!
 //! Signs up a fresh account on the DS named by `POLLIS_DELIVERY_URL` (the dev DS — it fixes the
 //! OTP), prints `PEER_HANDLE=<handle>` and `PEER_PORT=<port>`, accepts the first DM request (the
@@ -8,7 +8,12 @@
 //!   GET http://127.0.0.1:<port>/send?text=<url-encoded text>   → 200 `<epoch ms when stored>`
 //!
 //! The response comes back once the DS has the message, so the flow's wait that follows is
-//! the time from the DS having it to the phone showing it. `GET /quit` ends the peer.
+//! the time from the DS having it to the phone showing it.
+//!
+//!   GET http://127.0.0.1:<port>/read   → 200 `<count of the phone's messages marked read>`
+//!
+//! fetches the DM (storing the phone's messages emits their delivered receipts) and marks every
+//! message from the other side read, as a person with it on screen would. `GET /quit` ends the peer.
 //!
 //! Not a shipping binary: examples build against pollis-tui's dev-dependencies.
 //!
@@ -63,6 +68,20 @@ fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Fetch the DM, then send a read receipt for every message the other side wrote.
+async fn read_theirs(state: &Arc<AppState>, me: &str, dm_id: &str) -> Result<usize> {
+    let page = pollis_tui::data::dm_messages(state, me, dm_id, None).await?;
+    let theirs: Vec<String> = page
+        .messages
+        .iter()
+        .filter(|m| m.sender_id != me)
+        .map(|m| m.id.clone())
+        .collect();
+    let n = theirs.len();
+    messages::mark_messages_read(dm_id.to_string(), me.to_string(), theirs, state).await?;
+    Ok(n)
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     let email = std::env::args().nth(1).context("usage: live_message_peer <email>")?;
@@ -106,6 +125,14 @@ async fn main() -> Result<()> {
         let target = request.split_whitespace().nth(1).unwrap_or("/").to_string();
         let (status, body, quit) = if target == "/quit" {
             ("200 OK", "bye".to_string(), true)
+        } else if target == "/read" {
+            match read_theirs(&state, &me.id, &dm_id).await {
+                Ok(n) => {
+                    println!("READ count={n}");
+                    ("200 OK", n.to_string(), false)
+                }
+                Err(e) => ("500 Internal Server Error", format!("read failed: {e}"), false),
+            }
         } else if let Some(query) = target.strip_prefix("/send?text=") {
             let text = url_decode(query.split('&').next().unwrap_or(""));
             match messages::send_message(
