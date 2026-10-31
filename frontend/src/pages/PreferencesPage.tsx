@@ -208,11 +208,10 @@ export const PreferencesPage: React.FC = observer(() => {
     const skinVal = opts.skin ?? skin;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
-    // `font_size` is device-local; strip the legacy field so saves don't overwrite it.
-    const { font_size: _legacyFontSize, ...rest } = query.data ?? {};
-    void _legacyFontSize;
+    // `font_size` is device-local; delete the legacy synced field so saves don't overwrite it.
     savePrefs({
-      ...rest,
+      ...query.data,
+      font_size: undefined,
       accent_color: accentHex,
       background_color: bgHex,
       skin: skinVal,

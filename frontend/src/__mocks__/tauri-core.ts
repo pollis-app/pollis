@@ -1422,7 +1422,14 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'save_preferences': {
       const { preferencesJson } = args as { preferencesJson?: string };
       try {
-        store.preferences = { ...store.preferences, ...JSON.parse(preferencesJson ?? '{}') };
+        // Mirrors the DS (#1650): a top-level merge where `null` deletes a key.
+        const merged: Record<string, unknown> = { ...store.preferences, ...JSON.parse(preferencesJson ?? '{}') };
+        for (const [k, v] of Object.entries(merged)) {
+          if (v === null) {
+            delete merged[k];
+          }
+        }
+        store.preferences = merged;
       } catch {
       }
       return null;

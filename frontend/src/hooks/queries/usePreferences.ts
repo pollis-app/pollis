@@ -26,6 +26,13 @@ import {
   INCOMING_CALL_TAKEOVER_DEFAULT,
   INCOMING_CALL_TAKEOVER_PREF,
 } from "../../utils/incomingCallTakeover";
+import {
+  mergePreferencesSave,
+  parsePreferencesBlob,
+  preferencesSaveJson,
+  type MergedSave,
+  type PreferencesBlob,
+} from "../../utils/preferencesBlob";
 
 /**
  * Mirrors `voice_apm::NsLevel` in src-tauri.
@@ -198,8 +205,12 @@ const SAVE_THROTTLE_MS = 500;
 
 interface PendingSave {
   userId: string;
-  prefs: PreferencesData;
+  merged: MergedSave;
 }
+
+// The raw stored blob per user, keys desktop does not parse included (#1650): every save
+// merges into it, so mobile's keys survive a desktop save.
+const rawBlobs = new Map<string, PreferencesBlob>();
 
 let pendingSave: PendingSave | null = null;
 let saveThrottleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -219,7 +230,7 @@ async function flushPendingSave(): Promise<void> {
   try {
     await invoke("save_preferences", {
       userId: job.userId,
-      preferencesJson: JSON.stringify(job.prefs),
+      preferencesJson: preferencesSaveJson(job.merged),
     });
   } catch (e) {
     console.warn("[prefs] save_preferences failed", e);
@@ -232,7 +243,11 @@ function scheduleSave(
   queryClient: QueryClient,
 ): void {
   queryClient.setQueryData(prefsKey(userId), prefs);
-  pendingSave = { userId, prefs };
+  // Deletes from a save still waiting on the throttle ride along with this one.
+  const carried = pendingSave?.userId === userId ? pendingSave.merged.deleted : undefined;
+  const merged = mergePreferencesSave(rawBlobs.get(userId) ?? {}, { ...prefs }, carried);
+  rawBlobs.set(userId, merged.blob);
+  pendingSave = { userId, merged };
 
   const elapsed = performance.now() - lastSaveInvokeAt;
   if (elapsed >= SAVE_THROTTLE_MS) {
@@ -258,6 +273,7 @@ export function usePreferences() {
         return {};
       }
       const json = await invoke<string>("get_preferences", { userId: currentUser.id });
+      rawBlobs.set(currentUser.id, parsePreferencesBlob(json));
       return {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
         background_color: getPreference<string | undefined>(json, "background_color", undefined),

@@ -190,7 +190,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `update_user_profile(user_id, username?, email?, phone?)` → `User`
 - `search_user_by_username(query)` → `User | null` — a username OR an email, resolved by the DS's `directory::user_by_identifier` (`POST /v1/directory/users`): an identifier containing `@` matches `email` only, anything else matches `username` only, exact. Never `username OR email` — that predicate's first row was won by an account whose username was the target's email address (see `database.md` → users).
 - `get_preferences(user_id)` → JSON string
-- `save_preferences(user_id, preferences_json)`
+- `save_preferences(user_id, preferences_json)` — a top-level merge on the DS, not a replacement (#1650): keys the JSON leaves out are kept, a key set to `null` is deleted. See `database.md` → user_preferences.
 - ~~`upload_avatar(user_id, file_data, file_name, content_type)`~~ / ~~`get_avatar_url(user_id)`~~ — **neither exists** anywhere in `pollis-core` or `src-tauri` as of 2026-08-03 (#714). Struck out rather than replaced with a guess: `avatar_url` is a field on the user profile returned by `get_user_profile`; whatever writes it is not one of these two commands. Trace it from `frontend/src/hooks/queries/useUserProfile.ts` before documenting a replacement.
 
 ## groups (`commands/groups/`)

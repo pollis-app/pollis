@@ -641,8 +641,20 @@ anonymous-membership (not shipped — tracked in #489).
 
 ### user_preferences
 - `user_id` TEXT PK FK users
-- `preferences` TEXT NOT NULL DEFAULT '{}'
+- `preferences` TEXT NOT NULL DEFAULT '{}' _(always a JSON object)_
 - `updated_at` TEXT NOT NULL DEFAULT now
+
+One blob shared by desktop and mobile, and neither knows all its keys (mobile
+writes `accent_hex` and `mobile_behavior`, which desktop never parses). So
+`POST /v1/profile/preferences` **merges** rather than replaces (#1650,
+`profile::apply_save_preferences`): in one statement, each top-level key the
+save names takes the new value whole (nested objects replaced, not deep-merged),
+a key set to `null` is deleted, and every other key keeps its stored value. A
+save that is not a JSON object is refused (400). Clients still send the whole
+blob they hold, with unknown keys carried through (desktop
+`utils/preferencesBlob.ts`, mobile `hooks/queries/usePreferences.ts`), so a
+save is also correct against a DS from before the merge.
+`pollis-delivery/tests/preferences_merge.rs` pins it.
 
 ### read_cursor_sync _(migration 000018, #844)_
 - `user_id` TEXT PK
