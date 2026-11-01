@@ -83,8 +83,11 @@ test("react-native-keyboard-controller is pinned to the Expo SDK's version", () 
 // #1641/#1642: Android hides the keyboard without an animation when the window is backgrounded or loses
 // focus, so keyboard-controller 1.21.9 never sent the hide and every <Screen> stayed padded at the
 // keyboard's height. iOS strands the same way after a background/resume or a stray KVO move.
-// The pnpm patch replays such a hide on both platforms; it must stay registered and applied.
-test("keyboard-controller is patched to replay a hide Android applied without an animation", () => {
+// #1662 is the mirror image: the keyboard Android restores on resume came with no animation, so JS kept
+// it closed and the composer sat under it. The pnpm patch holds one invariant on both platforms: once no
+// animation runs, JS holds the real keyboard height, synced in whichever direction (show, hide, resize).
+// It must stay registered and applied.
+test("keyboard-controller is patched to keep JS in step with the real keyboard, both ways", () => {
   const pkg = JSON.parse(read("package.json"));
   const version = pkg.dependencies["react-native-keyboard-controller"];
   const key = `react-native-keyboard-controller@${version}`;
@@ -94,13 +97,17 @@ test("keyboard-controller is patched to replay a hide Android applied without an
     `patches/${key}.patch`,
     "a keyboard-controller bump must carry the #1641 patch forward (or drop it once upstream replays a missed hide)",
   );
-  assert.match(read(patchPath), /reconcileMissedHide/);
+  assert.match(read(patchPath), /private fun reconcile\(ignoreTransition: Boolean\)/);
   const callback = read(
     "node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt",
   );
-  assert.match(callback, /private fun reconcileMissedHide\(/, "the installed copy must carry the patch");
+  assert.match(callback, /private fun reconcile\(ignoreTransition: Boolean\)/, "the installed copy must carry the patch");
   assert.match(callback, /addOnWindowFocusChangeListener\(windowFocusListener\)/, "regaining window focus re-checks");
-  assert.match(callback, /postDelayed\(missedHideCheck, MISSED_HIDE_GRACE_MS\)/, "an insets change re-checks");
+  assert.match(callback, /postDelayed\(missedMoveCheck, MISSED_MOVE_GRACE_MS\)/, "an insets change re-checks");
+  // Two-way: the check compares heights, never "JS has it open" alone, and syncs to whatever is on screen.
+  assert.match(callback, /abs\(realKeyboardHeight\(\) - heightInJs\) >= 1\.0/);
+  assert.match(callback, /syncKeyboardPosition\(height, visible\)/);
+  assert.doesNotMatch(callback, /syncKeyboardPosition\(0\.0, false\)/, "no hide-only replay");
 
   const ios = "node_modules/react-native-keyboard-controller/ios/observers/movement/observer/";
   assert.match(
@@ -115,6 +122,8 @@ test("keyboard-controller is patched to replay a hide Android applied without an
   );
   const listeners = read(`${ios}KeyboardMovementObserver+Listeners.swift`);
   assert.match(listeners, /func reconcileHiddenKeyboard\(_ reason: String\) -> Bool/, "iOS replays a hide JS never saw");
+  assert.match(listeners, /replay show/, "iOS replays a show JS never saw (#1662)");
+  assert.match(listeners, /onEvent\("onKeyboardMoveEnd", visibleHeight as NSNumber, 1, 0, tag\)/);
   // A foreground return resends the hide even when JS was last told 0: events dispatched while
   // backgrounded can be lost (#1641 coordinator run), so "JS holds 0" proves nothing there.
   assert.match(listeners, /scheduleReconcile\("active", force: true\)/);
