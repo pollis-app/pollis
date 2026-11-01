@@ -65,10 +65,14 @@
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
     "@types/react": "~19.2.14",
+    "decode-uri-component-upstream": "npm:decode-uri-component@0.5.1",
     "typescript": "~6.0.3"
   },
   "private": true,
   "pnpm": {
+    "overrides": {
+      "node-forge": "^1.4.2"
+    },
     "patchedDependencies": {
       "decode-uri-component@0.2.2": "patches/decode-uri-component@0.2.2.patch",
       "react-native-keyboard-controller@1.21.9": "patches/react-native-keyboard-controller@1.21.9.patch"

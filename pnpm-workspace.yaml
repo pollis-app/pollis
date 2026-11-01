@@ -11,8 +11,9 @@ ignoredBuiltDependencies:
 # Security floors for transitive deps (vulnerability scan, 2026-10). Every
 # override stays inside the major the parent already asked for, so no parent
 # gets an API it did not request. Advisories whose only fix is a new major
-# (fast-xml-parser 4, sharp 0.34, deepmerge-ts 5, basic-ftp 5, extract-zip)
-# are dev/test tooling only and are left for their parent's next release; see
+# (fast-xml-parser 4, deepmerge-ts 5, basic-ftp 5, extract-zip, glob 10,
+# minimatch, all via e2e → webdriverio 8) are test tooling only and are left
+# for their parent's next release; see
 # docs/security/dependency-scan-2026-10.md.
 overrides:
   undici@>=7.0.0 <7.30.1: ^7.30.1

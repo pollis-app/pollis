@@ -77,8 +77,8 @@ The desktop renderer's runtime dependencies have no advisories.
   0.5.0's linear decoder into the CJS file (since 2026-10-31 0.5.1's, see below). A differential test against 0.5.0
   over 50k random inputs showed identical output. `tests/deep-link-decode.test.ts`
   fails if the patch stops applying.
-- **Left, build-time only:** `uuid` 7 (Expo config plugins at prebuild),
-  `node-forge` (expo CLI, no fix), and `braces` (Metro file map, no fix).
+- **Left, build-time only:** `braces` (Metro file map, no fix). `uuid` 7 and
+  `node-forge` were fixed on 2026-10-31 (below).
 
 ## Update 2026-10-31: Dependabot sweep
 
@@ -91,20 +91,23 @@ The desktop renderer's runtime dependencies have no advisories.
 | `seroval` < 1.6.11 (5 advisories, the desktop router) | override floor `~1.6.12` (and `seroval-plugins`), inside router-core's `^1.6.7` |
 | `undici` < 7.30.1, `postcss-selector-parser` < 6.1.5 | raised the existing override floors |
 | `esbuild` 0.27.3 | root `wrangler` ^4.76 → ^4.107.1, the version `pollis-delivery` already uses (esbuild 0.28) |
+| `sharp` < 0.35.5 (3 advisories) | `wrangler` ^4.107.1 → ^4.151.3 (root + `pollis-delivery`): miniflare 5, sharp 0.35.5. Local `wrangler dev` only. The DS bundle, `deploy --containers-rollout`, `containers push/list/instances` are unchanged. |
+| `zip` 0.6.6 (Cargo.lock) | `webrtc-sys-build` 0.3.19 → 0.3.20, whose only change is zip 9. Not 0.3.21: that also swaps the prebuilt libwebrtc and belongs with a LiveKit bump. |
+| mobile `node-forge` ≤ 1.4.0 | override floor `^1.4.2`. The advisory lists no fix, but 1.4.2's `rsa.js` requires a canonical DER DigestInfo, which is the fix. Build-time (`@expo/cli`, `@expo/code-signing-certificates`). |
+| mobile `uuid` 7 | removed. `pnpm dedupe` moved expo-splash-screen off a stale `@expo/config-plugins` (xcode 3 → uuid 7) onto the 57.0.11 the app already uses. |
+| `clipboard-win` 5.4.1 (yanked) | 5.4.3. Windows clipboard, via `tauri-plugin-clipboard-manager` → arboard. |
 
 Still open, each with its reason:
 
 | Package | Why it stays |
 |---|---|
-| `zip` 4.6.1 (Cargo.lock) | `tauri-plugin-updater` pins it on Windows. Only 2.14.1 moves to zip 9, and that needs tauri ^2.12 (we are on 2.11). The archive is minisign-verified before extraction. |
-| `zip` 0.6.6 (Cargo.lock) | build-only, via `webrtc-sys-build` (see above). No upstream fix. |
+| `zip` 4.6.1 (Cargo.lock) | `tauri-plugin-updater` pins it on Windows. Only 2.14.1 moves to zip 9, and that needs tauri ^2.12 (we are on 2.11). The archive is minisign-verified before extraction. The bump changes the auto-updater on every platform. CI cannot build Windows or macOS without cutting a release, so it waits for a release we can test end to end: an old build updating to the new one on all three platforms. |
 | `rand` 0.7.3 | build-time `phf_generator`, via tauri-utils → kuchikiki. 0.7 has no fix, and the bug needs a custom logger. |
 | `lru` 0.12 | `ratatui` 0.28, in the TUI only. The fix is lru 0.16 (a ratatui upgrade). |
 | `glib` 0.18 | GTK3 via Tauri on Linux. The fix is 0.20 (gtk4-rs), which Tauri does not use. |
 | `libsql-sqlite3-parser` 0.13 | no fix released. The DS and pollis-schema only parse our own migrations and queries. |
-| `sharp` 0.34.5 | wrangler → miniflare 4, local `wrangler dev` only. 0.35.5 arrives only with miniflare 5 (beta). |
 | `basic-ftp`, `extract-zip` ×2, `deepmerge-ts`, `fast-xml-parser` | e2e → webdriverio 8 (the tauri-driver WebDriver scenarios). The fix is webdriverio 10, a two-major bump of test tooling. |
-| mobile `zod` 3, `node-forge`, `deepmerge`, `uuid` 7 | build-time Expo CLI / config plugins, pinned by SDK 57. None is in the app bundle. |
+| mobile `zod` 3, `deepmerge` | build-time Expo CLI / config loading, pinned by SDK 57. Neither is in the app bundle (checked against the `expo export` source map). zod's fix is 4.x, outside `@expo/cli`'s `^3.25.76`; deepmerge has no fixed release. |
 
 ## Server images (`trivy image --severity HIGH,CRITICAL`)
 
