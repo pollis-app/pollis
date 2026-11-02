@@ -1439,11 +1439,14 @@ Current state:
   send the OS killed mid-flight is still there after relaunch and is delivered
   by the drain: core spawns it after `unlock`, and `useInboxRealtime` calls
   `flush_outbox` on sign-in, on resume and on a LiveKit `Reconnected` — never
-  on a timer. A failed send is a stored `failed` row: `MessageRow` shows
-  Retry / Discard (`components/chat/UnsentActions.tsx`, `btn-retry-message-<id>`
-  / `btn-discard-message-<id>`; `useRetryMessage` / `useDiscardUnsent`); a
-  `rejected` row (no retry can fix it, so the drain stops trying) looks the
-  same. Attachments are not uploaded by the hook any more: `send_message` gets
+  on a timer. A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and
+  `components/chat/UnsentActions.tsx` says why in one line (`unsentReason`:
+  `failed` — "It'll send automatically when Pollis reconnects."; `rejected`,
+  which no retry can fix so the drain stops trying, or a send the core never
+  stored — "This message couldn't be delivered.") above Retry / Discard
+  (`btn-retry-message-<id>` / `btn-discard-message-<id>`; `useRetryMessage` /
+  `useDiscardUnsent`). The chat and thread screens never print the send's raw
+  error (#1668); it is in the diagnostics log. Attachments are not uploaded by the hook any more: `send_message` gets
   the caption plus `attachments` (`lib/attachments.ts` →
   `outgoingAttachments`, picker paths), the core copies the files into its
   encrypted local DB with the row, and the outbox uploads them — so a kill

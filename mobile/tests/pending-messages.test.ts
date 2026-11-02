@@ -8,6 +8,7 @@ import {
   retryTarget,
   settleSend,
   unsentFlags,
+  unsentReason,
   withoutOutboxRows,
   type StubLike,
 } from "../hooks/queries/pendingMessages.ts";
@@ -88,7 +89,11 @@ test("a settling send replaces a stored pending row instead of duplicating it", 
 test("a stored row's send_state maps to the stub flags", () => {
   assert.deepEqual(unsentFlags("01A", "pending"), { pending: true, outboxId: "01A" });
   assert.deepEqual(unsentFlags("01A", "failed"), { failed: true, outboxId: "01A" });
-  assert.deepEqual(unsentFlags("01A", "rejected"), { failed: true, outboxId: "01A" });
+  assert.deepEqual(unsentFlags("01A", "rejected"), {
+    failed: true,
+    rejected: true,
+    outboxId: "01A",
+  });
   assert.equal(retryTarget({ id: "01A", ...unsentFlags("01A", "rejected") }), "01A");
   assert.deepEqual(unsentFlags("01A", undefined), {});
   assert.deepEqual(unsentFlags("01A", null), {});
@@ -143,4 +148,20 @@ test("an attachment the outbox has not uploaded yet is drawn pending, never fetc
 test("picked attachments go to the core as paths, un-uploaded", () => {
   const s = readFileSync(new URL("../lib/attachments.ts", import.meta.url), "utf8");
   assert.match(s, /export function outgoingAttachments[\s\S]*path: att\.uri,[\s\S]*filename: att\.name,[\s\S]*contentType: att\.mimeType/);
+});
+
+test("an unsent row says whether the outbox will resend it", () => {
+  assert.equal(unsentReason({ id: "01A", ...unsentFlags("01A", "failed") }), "willResend");
+  assert.equal(unsentReason({ id: "01A", ...unsentFlags("01A", "rejected") }), "notDelivered");
+  // Never stored by the core: nothing will resend it.
+  assert.equal(unsentReason({ id: "pending-1", failed: true, retryable: false }), "notDelivered");
+  assert.equal(unsentReason({ id: "01A", ...unsentFlags("01A", "pending") }), null);
+  assert.equal(unsentReason({ id: "01A" }), null);
+});
+
+test("a send error is never drawn raw under the conversation", () => {
+  for (const screen of ["../app/chat/[id].tsx", "../app/chat/thread.tsx"]) {
+    const s = readFileSync(new URL(screen, import.meta.url), "utf8");
+    assert.doesNotMatch(s, /sendMessage\.error/, screen);
+  }
 });

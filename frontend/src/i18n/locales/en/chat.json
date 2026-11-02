@@ -29,7 +29,10 @@
     "retry": "Retry",
     "discard": "Discard",
     "retryLabel": "Retry sending this message",
-    "discardLabel": "Discard this unsent message"
+    "discardLabel": "Discard this unsent message",
+    "notSent": "Not sent",
+    "willResend": "It'll send automatically when Pollis reconnects.",
+    "notDelivered": "This message couldn't be delivered."
   },
   "actions": {
     "reply": "Reply",

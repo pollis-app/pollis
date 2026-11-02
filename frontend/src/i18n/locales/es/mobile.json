@@ -87,7 +87,6 @@
     "replyQuoteLabel": "Respuesta a {{name}}: {{text}}",
     "replyingTo": "Respondiendo a <name>{{name}}</name>",
     "replyingToLabel": "Respondiendo a {{name}}",
-    "sendFailed": "No se pudo enviar el mensaje.",
     "viewProfile": "Ver perfil"
   },
   "common": {
@@ -500,9 +499,7 @@
     "withUnread_one": "{{label}}, {{count}} sin leer",
     "withUnread_other": "{{label}}, {{count}} sin leer"
   },
-  "thread": {
-    "sendFailed": "No se pudo enviar la respuesta."
-  },
+  "thread": {},
   "timeAgo": {
     "now": "ahora"
   },

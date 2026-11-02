@@ -17,6 +17,15 @@
     "failed": "发送失败",
     "cancelled": "已取消"
   },
+  "outbox": {
+    "retry": "重试",
+    "discard": "舍弃",
+    "retryLabel": "重新发送此消息",
+    "discardLabel": "舍弃这条未发送的消息",
+    "notSent": "未发送",
+    "willResend": "Pollis 重新连接后会自动发送。",
+    "notDelivered": "此消息无法送达。"
+  },
   "actions": {
     "reply": "回复",
     "replyInThread": "在话题中回复",

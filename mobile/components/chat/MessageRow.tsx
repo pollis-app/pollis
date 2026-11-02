@@ -25,6 +25,7 @@ import {
   restingSurface,
 } from "../../lib/pressFeedback";
 import { haptic } from "../../lib/haptics";
+import type { UnsentReason } from "../../hooks/queries/pendingMessages";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 import type { MessageAttachment } from "../../types";
@@ -44,6 +45,7 @@ export function MessageRow({
   text,
   pending,
   failed,
+  unsentReason,
   onRetry,
   onDiscard,
   edited,
@@ -79,6 +81,8 @@ export function MessageRow({
   text?: string;
   pending?: boolean;
   failed?: boolean;
+  /** Whether the outbox will resend a failed row; defaults to it will. */
+  unsentReason?: UnsentReason | null;
   // A failed send's way out (#1335).
   onRetry?: () => void;
   onDiscard?: () => void;
@@ -154,7 +158,7 @@ export function MessageRow({
     : undefined;
 
   const showHeader = !continued;
-  const statusLabel = failed ? t("status.failed") : null;
+  const statusLabel = failed ? t("outbox.notSent") : null;
   // Spoken (and seen by e2e), never drawn: a pending row looks sent, as on desktop (#1636).
   const spokenStatus = statusLabel ?? (pending ? t("status.sending") : time);
 
@@ -358,9 +362,10 @@ export function MessageRow({
                 />
               </View>
             ) : null}
-            {failed && (onRetry || onDiscard) ? (
+            {failed ? (
               <UnsentActions
                 messageId={messageId ?? ""}
+                reason={unsentReason ?? "willResend"}
                 onRetry={onRetry}
                 onDiscard={onDiscard}
               />

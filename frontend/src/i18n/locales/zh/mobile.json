@@ -85,7 +85,6 @@
     "replyQuoteLabel": "回复 {{name}}：{{text}}",
     "replyingTo": "回复 <name>{{name}}</name>",
     "replyingToLabel": "回复 {{name}}",
-    "sendFailed": "无法发送消息。",
     "viewProfile": "查看个人资料"
   },
   "common": {
@@ -484,9 +483,7 @@
     "withRequests_other": "{{label}}，{{count}} 条消息请求",
     "withUnread_other": "{{label}}，{{count}} 条未读"
   },
-  "thread": {
-    "sendFailed": "无法发送回复。"
-  },
+  "thread": {},
   "timeAgo": {
     "now": "刚刚"
   },

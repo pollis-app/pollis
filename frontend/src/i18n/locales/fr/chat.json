@@ -17,6 +17,15 @@
     "failed": "échec",
     "cancelled": "annulé"
   },
+  "outbox": {
+    "retry": "Réessayer",
+    "discard": "Supprimer",
+    "retryLabel": "Réessayer d'envoyer ce message",
+    "discardLabel": "Supprimer ce message non envoyé",
+    "notSent": "Non envoyé",
+    "willResend": "Il partira automatiquement quand Pollis se reconnectera.",
+    "notDelivered": "Ce message n'a pas pu être distribué."
+  },
   "actions": {
     "reply": "Répondre",
     "replyInThread": "Répondre dans le fil",

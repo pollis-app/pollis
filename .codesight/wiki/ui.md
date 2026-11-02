@@ -777,7 +777,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`. Mobile's counterpart is `mobile/components/chat/ReplyBar.tsx` (#1270), where a reply starts from a swipe toward the start edge or a double tap on the row (`SwipeToReply.tsx`) as well as the message sheet's Reply.
 - **ThreadReplyCount** — props: count, onOpen — `frontend/src/components/Message/ThreadReplyCount.tsx`
 - **UndecryptableMessage** — props: message, skin — `frontend/src/components/Message/UndecryptableMessage.tsx`
-- **UnsentMessageActions** — props: message — `frontend/src/components/Message/UnsentMessageActions.tsx`. Retry / Discard beside an own message the durable outbox has not delivered (#1335), rendered by both skins' `MessageItem` and by the thread panel's `ThreadMessageRow`; Retry is absent when the send failed before the core stored it (an upload). Mobile's counterpart is `mobile/components/chat/UnsentActions.tsx`.
+- **UnsentMessageActions** — props: message — `frontend/src/components/Message/UnsentMessageActions.tsx`. "[Not sent]", one line on why (`unsentReason`: the outbox will resend a `failed` row; a `rejected` or never-stored one "couldn't be delivered", #1668), then Retry / Discard beside an own message the durable outbox has not delivered (#1335), rendered by both skins' `MessageItem` and by the thread panel's `ThreadMessageRow`; Retry is absent when the send failed before the core stored it (an upload). Mobile's counterpart is `mobile/components/chat/UnsentActions.tsx`.
 
 ### `components/Preferences` (2)
 

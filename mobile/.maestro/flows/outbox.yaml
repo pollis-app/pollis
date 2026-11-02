@@ -112,6 +112,11 @@ tags:
           timeout: 60000
       - assertVisible:
           id: "btn-discard-message-.*"
+      # Said on the row in plain words, never as a raw error under the list.
+      - assertVisible:
+          id: "text-unsent-reason-.*"
+          text: "It'll send automatically when Pollis reconnects."
+      - assertNotVisible: ".*error sending request.*"
       - assertVisible: ".*ob1335 offline.*"
       - takeScreenshot: outbox-02-failed-offline
       - setAirplaneMode: disabled

@@ -247,12 +247,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
-            {/* Only a failed send is labelled. */}
-            {message.status === "failed" && (
-              <span className="ms-1 text-xs font-machine text-muted">
-                [{t(`status.${message.status}`)}]
-              </span>
-            )}
+            {/* Only a failed send is labelled, with why and its way out. */}
             {message.status === "failed" && isOwn && (
               <UnsentMessageActions message={message} />
             )}
@@ -384,12 +379,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
               </span>
             )}
-            {/* Only a failed send is labelled. */}
-            {message.status === "failed" && (
-              <span className="ms-1 text-xs text-muted">
-                [{t(`status.${message.status}`)}]
-              </span>
-            )}
+            {/* Only a failed send is labelled, with why and its way out. */}
             {message.status === "failed" && isOwn && (
               <UnsentMessageActions message={message} />
             )}

@@ -87,7 +87,6 @@
     "replyQuoteLabel": "Reply to {{name}}: {{text}}",
     "replyingTo": "Replying to <name>{{name}}</name>",
     "replyingToLabel": "Replying to {{name}}",
-    "sendFailed": "Couldn't send message.",
     "viewProfile": "View profile"
   },
   "common": {
@@ -511,9 +510,7 @@
     "withUnread_one": "{{label}}, {{count}} unread",
     "withUnread_other": "{{label}}, {{count}} unread"
   },
-  "thread": {
-    "sendFailed": "Couldn't send reply."
-  },
+  "thread": {},
   "timeAgo": {
     "now": "now"
   },

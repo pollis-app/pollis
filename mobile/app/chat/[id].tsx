@@ -57,7 +57,7 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
-import { retryTarget } from "../../hooks/queries/pendingMessages";
+import { retryTarget, unsentReason } from "../../hooks/queries/pendingMessages";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
@@ -678,6 +678,7 @@ function TextChat(props: ChatViewProps = {}) {
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
+          unsentReason={unsentReason(m)}
           onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
           onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
@@ -897,22 +898,7 @@ function TextChat(props: ChatViewProps = {}) {
           ) : null
         }
       />
-      {sendMessage.isError ? (
-        <Text
-          accessibilityRole="alert"
-          style={[
-            ty.meta,
-            {
-              color: semantic.danger,
-              paddingHorizontal: 16,
-              paddingTop: 8,
-              paddingBottom: 4,
-            },
-          ]}
-        >
-          {(sendMessage.error as Error).message || t("chat.sendFailed")}
-        </Text>
-      ) : null}
+      {/* A failed send is told on its own row (UnsentActions), never as a raw error here. */}
 
       {editTarget ? (
         <EditBar

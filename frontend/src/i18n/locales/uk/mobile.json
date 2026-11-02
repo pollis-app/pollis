@@ -91,7 +91,6 @@
     "replyQuoteLabel": "Відповідь {{name}}: {{text}}",
     "replyingTo": "Відповідь <name>{{name}}</name>",
     "replyingToLabel": "Відповідь {{name}}",
-    "sendFailed": "Не вдалося надіслати повідомлення.",
     "viewProfile": "Переглянути профіль"
   },
   "common": {
@@ -532,9 +531,7 @@
     "withUnread_one": "{{label}}, {{count}} непрочитане",
     "withUnread_other": "{{label}}, {{count}} непрочитаних"
   },
-  "thread": {
-    "sendFailed": "Не вдалося надіслати відповідь."
-  },
+  "thread": {},
   "timeAgo": {
     "now": "зараз"
   },
