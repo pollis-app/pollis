@@ -20,7 +20,7 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
-import { retryTarget } from "../../hooks/queries/pendingMessages";
+import { retryTarget, unsentReason } from "../../hooks/queries/pendingMessages";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { appStore } from "../../stores/appStore";
@@ -125,6 +125,7 @@ function ThreadScreen() {
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
+          unsentReason={unsentReason(m)}
           onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
           onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
@@ -227,22 +228,7 @@ function ThreadScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: 4, paddingBottom: 12 }}
       />
-      {sendMessage.isError ? (
-        <Text
-          accessibilityRole="alert"
-          style={[
-            ty.meta,
-            {
-              color: semantic.danger,
-              paddingHorizontal: 16,
-              paddingTop: 8,
-              paddingBottom: 4,
-            },
-          ]}
-        >
-          {(sendMessage.error as Error).message || t("mobile:thread.sendFailed")}
-        </Text>
-      ) : null}
+      {/* A failed send is told on its own row (UnsentActions), never as a raw error here. */}
       <Composer
         draft={draft}
         onChangeDraft={setDraft}

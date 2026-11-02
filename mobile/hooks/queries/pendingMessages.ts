@@ -4,6 +4,8 @@ export interface StubLike {
   id: string;
   pending?: boolean;
   failed?: boolean;
+  /** The DS refused it for good: the outbox will not try again. */
+  rejected?: boolean;
   /** The core's id for this send (#1335), named by Retry and Discard. */
   outboxId?: string;
   retryable?: boolean;
@@ -55,15 +57,29 @@ export type SendState = "pending" | "failed" | "rejected";
 export function unsentFlags(
   id: string,
   sendState: SendState | null | undefined,
-): Pick<StubLike, "pending" | "failed" | "outboxId"> {
+): Pick<StubLike, "pending" | "failed" | "rejected" | "outboxId"> {
   if (sendState === "pending") {
     return { pending: true, outboxId: id };
   }
-  // `rejected` is shown exactly like `failed`.
-  if (sendState === "failed" || sendState === "rejected") {
+  if (sendState === "failed") {
     return { failed: true, outboxId: id };
   }
+  if (sendState === "rejected") {
+    return { failed: true, rejected: true, outboxId: id };
+  }
   return {};
+}
+
+/** Why an unsent row is unsent: the outbox resends a `failed` row on reconnect; nothing resends the rest. */
+export type UnsentReason = "willResend" | "notDelivered";
+
+export function unsentReason(m: StubLike): UnsentReason | null {
+  if (m.failed !== true) {
+    return null;
+  }
+  return m.rejected === true || m.retryable === false
+    ? "notDelivered"
+    : "willResend";
 }
 
 /** The id for `retry_message`, or null when the core never stored the send. */

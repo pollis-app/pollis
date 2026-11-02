@@ -17,7 +17,6 @@ interface ThreadMessageRowProps {
 export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
   ({ message, isRoot = false }) => {
     const { t } = useTranslation("nav");
-    const { t: tChat } = useTranslation("chat");
     const skin = useSkin();
     const isTerminal = skin !== "refined";
     const author = message.sender_username ?? message.sender_id;
@@ -39,14 +38,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
           >
             {message.content_decrypted}
             {/* An unsent reply (#1335). */}
-            {message.status === "failed" && (
-              <>
-                <span className="ms-1 text-xs text-muted">
-                  [{tChat("status.failed")}]
-                </span>
-                <UnsentMessageActions message={message} />
-              </>
-            )}
+            {message.status === "failed" && <UnsentMessageActions message={message} />}
           </p>
         ) : (
           <p

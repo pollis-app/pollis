@@ -90,6 +90,8 @@ export interface Message {
   outbox_id?: string;
   // False when the send failed before the core stored it: discard only.
   retryable?: boolean;
+  // The DS refused it for good; the outbox will not resend it.
+  rejected?: boolean;
 }
 
 export interface ReplyPreview {

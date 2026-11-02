@@ -8,6 +8,7 @@ import {
   isLocalStub,
   mapOutboxRows,
   outboxFields,
+  unsentReason,
   retryTarget,
   settleSend,
   withoutOutboxRows,
@@ -21,7 +22,12 @@ test("a stored row's send_state maps to the row's status", () => {
   assert.deepEqual(outboxFields("01A", "failed"), { status: "failed", outbox_id: "01A", delivered: false });
   assert.deepEqual(outboxFields("01A", undefined), { status: "sent", delivered: true });
   // A refusal no retry fixes is shown like any failure, Retry included.
-  assert.deepEqual(outboxFields("01A", "rejected"), { status: "failed", outbox_id: "01A", delivered: false });
+  assert.deepEqual(outboxFields("01A", "rejected"), {
+    status: "failed",
+    outbox_id: "01A",
+    rejected: true,
+    delivered: false,
+  });
   assert.equal(retryTarget(row("01A", outboxFields("01A", "rejected"))), "01A");
 });
 
@@ -87,4 +93,13 @@ test("every send names its message and the shell drains the outbox on events onl
   assert.match(hooks, /messageId: id,/);
   assert.match(src("components/Layout/AppShell.tsx"), /flushOutbox\(queryClient\)[\s\S]*addEventListener\("online"/);
   assert.match(src("hooks/useLiveKitRealtime.ts"), /realtime_reconnected[\s\S]*flushOutbox\(/);
+});
+
+test("an unsent row says whether the outbox will resend it (#1668)", () => {
+  assert.equal(unsentReason({ id: "01A", ...outboxFields("01A", "failed") }), "willResend");
+  assert.equal(unsentReason({ id: "01A", ...outboxFields("01A", "rejected") }), "notDelivered");
+  // Never stored by the core: nothing will resend it.
+  assert.equal(unsentReason({ id: "pending-1", status: "failed", retryable: false }), "notDelivered");
+  assert.equal(unsentReason({ id: "01A", ...outboxFields("01A", "pending") }), null);
+  assert.equal(unsentReason({ id: "01A", ...outboxFields("01A", null) }), null);
 });

@@ -98,6 +98,8 @@ export interface Message {
   undecryptableCount?: number;
   pending?: boolean;
   failed?: boolean;
+  /** The DS refused it for good: the outbox will not try again. */
+  rejected?: boolean;
   /** The core's id for this outgoing message (#1335). */
   outboxId?: string;
   /** False when the send failed before the core stored it: only discard. */

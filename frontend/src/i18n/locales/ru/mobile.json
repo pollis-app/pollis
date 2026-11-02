@@ -91,7 +91,6 @@
     "replyQuoteLabel": "Ответ {{name}}: {{text}}",
     "replyingTo": "Ответ <name>{{name}}</name>",
     "replyingToLabel": "Ответ {{name}}",
-    "sendFailed": "Не удалось отправить сообщение.",
     "viewProfile": "Открыть профиль"
   },
   "common": {
@@ -532,9 +531,7 @@
     "withUnread_one": "{{label}}, {{count}} непрочитанное",
     "withUnread_other": "{{label}}, {{count}} непрочитанных"
   },
-  "thread": {
-    "sendFailed": "Не удалось отправить ответ."
-  },
+  "thread": {},
   "timeAgo": {
     "now": "сейчас"
   },

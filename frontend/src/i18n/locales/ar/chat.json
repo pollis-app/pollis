@@ -17,6 +17,15 @@
     "failed": "فشلت",
     "cancelled": "أُلغيت"
   },
+  "outbox": {
+    "retry": "إعادة المحاولة",
+    "discard": "تجاهل",
+    "retryLabel": "إعادة محاولة إرسال هذه الرسالة",
+    "discardLabel": "تجاهل هذه الرسالة غير المُرسلة",
+    "notSent": "لم تُرسل",
+    "willResend": "ستُرسل تلقائيًا عندما يعيد Pollis الاتصال.",
+    "notDelivered": "تعذّر تسليم هذه الرسالة."
+  },
   "actions": {
     "reply": "رد",
     "replyInThread": "الرد في سلسلة",

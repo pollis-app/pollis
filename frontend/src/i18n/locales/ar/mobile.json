@@ -95,7 +95,6 @@
     "replyQuoteLabel": "رد على {{name}}: {{text}}",
     "replyingTo": "الرد على <name>{{name}}</name>",
     "replyingToLabel": "الرد على {{name}}",
-    "sendFailed": "تعذّر إرسال الرسالة.",
     "viewProfile": "عرض الملف الشخصي"
   },
   "common": {
@@ -564,9 +563,7 @@
     "withUnread_two": "{{label}}، رسالتان غير مقروءتين",
     "withUnread_zero": "{{label}}، {{count}} غير مقروءة"
   },
-  "thread": {
-    "sendFailed": "تعذّر إرسال الرد."
-  },
+  "thread": {},
   "timeAgo": {
     "now": "الآن"
   },

@@ -87,7 +87,6 @@
     "replyQuoteLabel": "Réponse à {{name}} : {{text}}",
     "replyingTo": "Réponse à <name>{{name}}</name>",
     "replyingToLabel": "Réponse à {{name}}",
-    "sendFailed": "Impossible d'envoyer le message.",
     "viewProfile": "Voir le profil"
   },
   "common": {
@@ -500,9 +499,7 @@
     "withUnread_one": "{{label}}, {{count}} non lu",
     "withUnread_other": "{{label}}, {{count}} non lus"
   },
-  "thread": {
-    "sendFailed": "Impossible d'envoyer la réponse."
-  },
+  "thread": {},
   "timeAgo": {
     "now": "maintenant"
   },

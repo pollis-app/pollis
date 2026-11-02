@@ -93,7 +93,7 @@ test("a message a killed process left unsent is delivered by the launch drain", 
   await expect(row).toContainText("typed just before the app was killed");
   await expect.poll(() => sendState(page, MSG_UNSENT)).toBeNull();
   // Delivered: no failure label, nothing to retry.
-  await expect(row).not.toContainText("[failed]");
+  await expect(row).not.toContainText("[Not sent]");
   await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toHaveCount(0);
 });
 
@@ -103,7 +103,11 @@ for (const skin of SKINS) {
     await openChannel(page);
     const row = page.getByTestId(`message-${MSG_UNSENT}`);
     // The launch drain tried and failed: labelled, with its way out.
-    await expect(row).toContainText("[failed]");
+    await expect(row).toContainText("[Not sent]");
+    // Said in plain words (#1668): the outbox will resend it.
+    await expect(page.getByTestId(`message-unsent-reason-${MSG_UNSENT}`)).toHaveText(
+      "It'll send automatically when Pollis reconnects.",
+    );
     await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toBeVisible();
     await expect(page.getByTestId(`message-discard-${MSG_UNSENT}`)).toBeVisible();
     await page.screenshot({ path: test.info().outputPath(`outbox-failed-${skin}.png`) });
@@ -111,7 +115,7 @@ for (const skin of SKINS) {
     // Back online: Retry delivers it — the same message, once.
     await page.evaluate(() => (window as any).__tauriFailSends(false));
     await page.getByTestId(`message-retry-${MSG_UNSENT}`).click();
-    await expect(row).not.toContainText("[failed]");
+    await expect(row).not.toContainText("[Not sent]");
     await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toHaveCount(0);
     expect(await sendState(page, MSG_UNSENT)).toBeNull();
     const copies = await page.evaluate(
@@ -137,7 +141,7 @@ test("a send that fails now is kept as failed, and Retry sends it", async ({ pag
   const retry = page.locator("[data-testid^='message-retry-']");
   await expect(retry).toHaveCount(1);
   const failedRow = page.locator("[data-testid^='message-']", { hasText: "sent while offline" }).first();
-  await expect(failedRow).toContainText("[failed]");
+  await expect(failedRow).toContainText("[Not sent]");
 
   await page.evaluate(() => (window as any).__tauriFailSends(false));
   await retry.click();
@@ -168,7 +172,7 @@ test("an attachment message whose upload never finished is shown, pending, with 
   const row = page.getByTestId(`message-${MSG_UNSENT}`);
   await expect(row).toContainText("the screenshot");
   await expect(row.getByTestId("attachment-uploading-0")).toBeVisible();
-  await expect(row).toContainText("[failed]");
+  await expect(row).toContainText("[Not sent]");
   await expect(page.getByTestId(`message-retry-${MSG_UNSENT}`)).toBeVisible();
   expect(errors).toEqual([]);
 });

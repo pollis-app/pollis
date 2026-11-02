@@ -6,6 +6,8 @@ export interface OutgoingLike {
   status?: "pending" | "sending" | "sent" | "failed" | "cancelled";
   outbox_id?: string;
   retryable?: boolean;
+  /** The DS refused it for good: the outbox will not try again. */
+  rejected?: boolean;
 }
 
 /** The core's `send_state` on our own not-yet-delivered message. */
@@ -20,15 +22,27 @@ export function isLocalStub(m: OutgoingLike): boolean {
 export function outboxFields(
   id: string,
   sendState: SendState | null | undefined,
-): Pick<OutgoingLike, "status" | "outbox_id"> & { delivered: boolean } {
+): Pick<OutgoingLike, "status" | "outbox_id" | "rejected"> & { delivered: boolean } {
   if (sendState === "pending") {
     return { status: "sending", outbox_id: id, delivered: false };
   }
-  // `rejected` shows as `failed`.
-  if (sendState === "failed" || sendState === "rejected") {
+  if (sendState === "failed") {
     return { status: "failed", outbox_id: id, delivered: false };
   }
+  if (sendState === "rejected") {
+    return { status: "failed", outbox_id: id, rejected: true, delivered: false };
+  }
   return { status: "sent", delivered: true };
+}
+
+/** Why an unsent row is unsent: the outbox resends a `failed` row on reconnect; nothing resends the rest. */
+export type UnsentReason = "willResend" | "notDelivered";
+
+export function unsentReason(m: OutgoingLike): UnsentReason | null {
+  if (m.status !== "failed") {
+    return null;
+  }
+  return m.rejected === true || m.retryable === false ? "notDelivered" : "willResend";
 }
 
 /** Refetched rows plus carried stubs; a stored stub is dropped, an unstored failed one is discard-only. */
