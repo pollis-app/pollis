@@ -18,7 +18,7 @@
     "i18n:check": "node scripts/i18n-check.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/cli": "^2.12.4",
     "@types/node": "^22.10.5",
     "wrangler": "^4.151.3"
   },
