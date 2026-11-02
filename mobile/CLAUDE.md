@@ -1198,11 +1198,19 @@ screen, a permission dialog, a share sheet), so 1.21.9 never sent the hide:
 JS kept the keyboard open, and every `<Screen>` stayed padded at its height,
 including screens mounted later, which seed from that stale state. The
 composer sat mid-screen with empty space below; the scan-to-sign-in PIN step
-was squeezed into the top half. The pnpm patch on `KeyboardAnimationCallback`
-records what the last `End` told JS and, when the insets change or the window
-regains focus and the keyboard is gone but JS still has it open (and no
-animation is running), replays the hide with the library's own
-`syncKeyboardPosition(0, false)`, the same call it uses when a Modal closes.
+was squeezed into the top half. #1662 is the mirror image: the keyboard
+Android restores on resume for a focused composer also comes with no
+animation, so JS kept it closed and the keyboard covered the composer. So the
+pnpm patch on `KeyboardAnimationCallback` holds one invariant instead of
+patching cases: once no animation runs, JS holds the real IME height. It
+records the height every event last told JS (`heightInJs`, 0 = hidden); after
+any insets change (120 ms grace for the move's own animation) and in a
+bounded round after the window regains focus (120, 350 and 700 ms, the last
+ignoring a transition whose end was lost), it compares that with the real IME
+height and, if they differ, syncs JS with the library's own
+`syncKeyboardPosition(height, visible)` (the call it uses when a Modal
+closes), whichever direction that is: show, hide or resize. Each sync logs one
+`PollisKeyboard` line to logcat.
 iOS strands the same way by a different road: its `KeyboardMovementObserver`
 also turns KVO moves of the keyboard-tracking view into "interactive" events,
 which set every `KeyboardAvoidingView`'s progress with no end event and cancel
@@ -1217,9 +1225,11 @@ be lost even though `keyboardDidHide` reached JS, so "JS was last told 0"
 proves nothing there. So `didBecomeActive` and `UIWindow.didBecomeKey` always
 replay the hide (`onKeyboardMove` + `onKeyboardMoveEnd` at 0) when no keyboard
 is on screen, and a finished hide or an interactive move re-checks for a
-non-zero progress left behind. Each re-check is a bounded round after its
-signal (0, 0.1, 0.25, 0.5, 1 and 2 s; never a timer): it ends once the
-keyboard is really up or the hide is replayed, and waits while an animation
+non-zero progress left behind. The same round replays a missed *show*
+(#1662): a keyboard on screen with JS still at progress 0 gets a move + end at
+its height and `keyboardDidShow`. Each re-check is a bounded round after its
+signal (0, 0.1, 0.25, 0.5, 1 and 2 s; never a timer): it ends once JS
+agrees with the screen or a show / hide is replayed, and waits while an animation
 runs, so no single fixed delay can lose the race. The observer traces every
 event and decision at debug level: `log stream --level debug --predicate
 'subsystem == "com.pollis.keyboard"'`. One global fix on both

@@ -1,7 +1,8 @@
 appId: ${MAESTRO_APP_ID}
 ---
-# KEYBOARD RECOVERY (#1641, #1642) — the layout must come back whenever the
-# keyboard goes away, however it goes. Android hides it WITHOUT an animation
+# KEYBOARD RECOVERY (#1641, #1642, #1662) — the layout must follow the
+# keyboard however it moves: back when it goes away, padded when it comes
+# back. Android hides it WITHOUT an animation
 # when the window is backgrounded or loses focus; keyboard-controller 1.21.9
 # never told JS, so every <Screen> stayed padded at the keyboard's height:
 # the composer / bottom buttons stranded mid-screen (#1641) and the scan-to-
@@ -20,6 +21,13 @@ appId: ${MAESTRO_APP_ID}
 #    from screenshot keyboard-recovery-01-baseline.
 # Self-contained; the camera is never granted (clearState), so scan mode
 # shows the allow-camera button and no preview.
+#
+# Step 5 is #1662, the mirror image: Android restores the keyboard on resume
+# for a focused composer, again with no animation, so JS kept it closed and
+# the keyboard covered the composer. Proof: a tap on btn-send by id. Covered,
+# that point is the keyboard and the message never lands. If the OS does not
+# restore the keyboard, the composer sits at the bottom and the tap passes
+# for that reason too; logcat tag `PollisKeyboard` shows which ran.
 
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
@@ -136,3 +144,75 @@ appId: ${MAESTRO_APP_ID}
     id: "btn-back"
 - assertVisible:
     id: "screen-direct"
+
+# 5. #1662: a focused chat composer across a background/resume, with the
+#    keyboard up and with it dismissed by Back (focus kept). Whatever keyboard
+#    the OS restores, the composer must be padded above it: Send is tapped by
+#    id and the message row must land (its label is "<text>, <time>…"; the
+#    unsent text in the composer has no comma, so it cannot satisfy the wait).
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Keyboard Resume"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Keyboard Resume, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# 5a. Keyboard up, Home, back.
+- tapOn:
+    id: "input-composer"
+- inputText: "resume one"
+- assertVisible:
+    id: "keyboard-open"
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "screen-chat"
+# The restored keyboard (if any) and the re-check rounds settle within a second.
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: keyboard-recovery-06-chat-after-background
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*esume one,.*"
+    timeout: 30000
+
+# 5b. Keyboard dismissed with Back (the composer keeps focus), Home, back.
+- tapOn:
+    id: "input-composer"
+- inputText: "resume two"
+- hideKeyboard
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "screen-chat"
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: keyboard-recovery-07-chat-after-back-background
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*esume two,.*"
+    timeout: 30000
