@@ -6,14 +6,15 @@ const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const WRONG_CODE = "111111";
 const POST_VERIFY_FAILURE_CODE = "500500";
 
-async function boot(page: Page, signedIn: boolean) {
-  const state = signedIn
+async function boot(page: Page, signedIn: boolean, extra: Record<string, unknown> = {}) {
+  const base = signedIn
     ? {
         session: USER,
         profile: { id: USER.id, username: USER.username, email: USER.email },
         preferences: JSON.stringify({ skin: "terminal" }),
       }
     : { session: null, preferences: JSON.stringify({ skin: "terminal" }) };
+  const state = { ...base, ...extra };
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
@@ -97,4 +98,51 @@ test("the Diagnostics page shows exactly what it copies", async ({ page }) => {
   await page.getByTestId("copy-diagnostics-button").click();
   await expect(page.getByTestId("copy-diagnostics-button")).toHaveAttribute("data-copy-state", "copied");
   expect(await clipboard(page)).toBe(await preview.innerText());
+});
+
+async function openDiagnostics(page: Page) {
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await page.getByTestId("breadcrumb-settings-button").first().click();
+  await page.getByTestId("menu-item-diagnostics").click();
+  await expect(page.getByTestId("diagnostics-page")).toBeVisible();
+}
+
+test("a long log shows and copies its NEWEST lines, and says what it left out", async ({ page }) => {
+  await boot(page, true, { longDiagnostics: 5000 });
+  await openDiagnostics(page);
+
+  const preview = page.getByTestId("diagnostics-preview");
+  await expect(preview).toContainText("line 5000");
+  await expect(preview).not.toContainText("line 1\n");
+  await expect(page.getByTestId("diagnostics-trimmed")).toContainText("Save as file has the whole log");
+  await page.getByTestId("copy-diagnostics-button").click();
+  await expect(page.getByTestId("copy-diagnostics-button")).toHaveAttribute("data-copy-state", "copied");
+  const copied = await clipboard(page);
+  expect(copied.startsWith("Pollis diagnostics")).toBe(true);
+  expect(copied).toContain("line 5000");
+  await page.screenshot({ path: "e2e/artifacts/playwright/diagnostics-trimmed.png" });
+});
+
+test("Save as file writes the whole log where the save panel points", async ({ page }) => {
+  await boot(page, true, { exportSavePath: "/Users/alice/Downloads/pollis-diagnostics.txt" });
+  await openDiagnostics(page);
+
+  await page.getByTestId("save-diagnostics-button").click();
+  await expect(page.getByTestId("save-diagnostics-button")).toHaveText("Saved");
+  const saved = await page.evaluate(
+    () => (window as unknown as { __tauriMock: { savedDiagnosticsPath: string | null } }).__tauriMock.savedDiagnosticsPath,
+  );
+  expect(saved).toBe("/Users/alice/Downloads/pollis-diagnostics.txt");
+});
+
+test("cancelling the save panel saves nothing", async ({ page }) => {
+  await boot(page, true, { exportSavePath: null });
+  await openDiagnostics(page);
+
+  await page.getByTestId("save-diagnostics-button").click();
+  await expect(page.getByTestId("save-diagnostics-button")).toHaveText("Save as file");
+  const saved = await page.evaluate(
+    () => (window as unknown as { __tauriMock: { savedDiagnosticsPath: string | null } }).__tauriMock.savedDiagnosticsPath,
+  );
+  expect(saved).toBeNull();
 });

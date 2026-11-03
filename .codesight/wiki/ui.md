@@ -673,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**177 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**178 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -704,9 +704,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
 
-### `components/Diagnostics` (1)
+### `components/Diagnostics` (2)
 
 - **CopyDiagnosticsButton** — props: size, variant, className — `frontend/src/components/Diagnostics/CopyDiagnosticsButton.tsx`
+- **SaveDiagnosticsButton** — `frontend/src/components/Diagnostics/SaveDiagnosticsButton.tsx`
 
 ### `components/Emoji` (9)
 

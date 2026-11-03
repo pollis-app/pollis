@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { writeClipboardText } from "../../bridge";
 import * as api from "../../services/api";
 import { Button } from "../ui/Button";
+import { recentReport } from "../../utils/diagnosticsReport";
 
 type CopyState = "idle" | "copied" | "failed";
 
@@ -12,7 +13,7 @@ interface CopyDiagnosticsButtonProps {
   className?: string;
 }
 
-/// Copies the on-device diagnostics log (#1305); nothing is sent.
+/// Copies the newest part of the on-device diagnostics log (#1305); nothing is sent.
 export const CopyDiagnosticsButton: React.FC<CopyDiagnosticsButtonProps> = ({
   size = "sm",
   variant = "secondary",
@@ -26,7 +27,7 @@ export const CopyDiagnosticsButton: React.FC<CopyDiagnosticsButtonProps> = ({
     setBusy(true);
     try {
       const report = await api.getDiagnostics();
-      const ok = await writeClipboardText(report);
+      const ok = await writeClipboardText(recentReport(report).text);
       setState(ok ? "copied" : "failed");
     } catch {
       setState("failed");

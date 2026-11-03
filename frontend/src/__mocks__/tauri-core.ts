@@ -217,6 +217,8 @@ interface MockStore {
   paginate: boolean;
   // Export (#856): what the save dialog returns; null = cancelled.
   exportSavePath: string | null;
+  /** Diagnostics (#1305): where `save_diagnostics` last wrote; null until it does. */
+  savedDiagnosticsPath: string | null;
   /** Outbox (#1335): while true every send fails as offline; see `window.__tauriFailSends`. */
   failSends: boolean;
   /** Per-channel mute (#1431). */
@@ -355,6 +357,7 @@ const store: MockStore = {
     preload.exportSavePath === undefined
       ? '/Users/alice/Downloads/pollis-archive.json'
       : preload.exportSavePath,
+  savedDiagnosticsPath: null,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
   readCursors:
@@ -1999,7 +2002,19 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'get_diagnostics':
+      // `longDiagnostics`: a log longer than the preview carries, newest line last.
+      if (typeof preload.longDiagnostics === 'number') {
+        const lines = Array.from({ length: preload.longDiagnostics }, (_, i) => `2026-01-01T00:00:00.000Z [mock] line ${i + 1}`);
+        return `Pollis diagnostics\napp: mock\ncore: mock\nos: browser\ngenerated: 2026-01-01T00:00:00Z\n----\n${lines.join('\n')}\n`;
+      }
       return 'Pollis diagnostics\napp: mock\ncore: mock\nos: browser\ngenerated: 2026-01-01T00:00:00Z\n----\n2026-01-01T00:00:00.000Z [auth] verify_otp: email=***@example.com\n';
+
+    // The whole report "written" where the save panel pointed (#1305).
+    case 'save_diagnostics': {
+      const { path } = args as { path: string };
+      store.savedDiagnosticsPath = path;
+      return null;
+    }
 
     case 'write_clipboard_text': {
       // `failClipboard`: the command returns false and writes nothing (#889).
