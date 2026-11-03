@@ -164,7 +164,7 @@ on `pollis-core`.
 
 ## diagnostics (`commands/diagnostics.rs`, #1305)
 - `get_diagnostics(appVersion?)` → `string` — the on-device log (`pollis-core/src/diag.rs`, `<data dir>/logs/pollis.log` + the rotated `.1`) under a short header (app/core version, OS, time). Local only; the desktop shim passes the bundle version, mobile passes `appVersion` from `expo-constants`. Empty log when no host called `diag::init` (tests, CLI, TUI).
-- `save_diagnostics(path)` → `()` — desktop only: writes the same report to `path`, which must come from the save panel (`pathscope`). Mobile writes the file in JS (`mobile/lib/diagnostics.ts`) and hands it to the share sheet.
+- `save_diagnostics(path)` → `()` — desktop only, implemented in the `src-tauri` shim (a pollis-core change would move the mobile OTA fingerprint): writes the same report to `path`, which must come from the save panel (`pathscope`). Mobile writes the file in JS (`mobile/lib/diagnostics.ts`) and hands it to the share sheet.
 
 ## pin (`commands/pin.rs`)
 PIN is cryptographically load-bearing — see `pin-design.md`.
