@@ -177,7 +177,10 @@
     "avatarUpdated": "头像已更新。",
     "avatarUploadFailed": "头像上传失败",
     "uploadAvatarButton": "上传头像",
-    "uploading": "上传中…"
+    "uploading": "上传中…",
+    "removeAvatarButton": "移除头像",
+    "avatarRemoved": "头像已移除。",
+    "avatarRemoveFailed": "无法移除你的头像。"
   },
   "security": {
     "title": "安全",

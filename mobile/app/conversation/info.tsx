@@ -10,9 +10,9 @@ import {
   Body,
   SectionTitle,
   ListRow,
-  Avatar,
   Group,
 } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { ExportArchive } from "../../components/ExportArchive";
 import { SafetyNumberRows } from "../../components/direct/SafetyNumberRows";
 import { fonts, semantic, space, type as ty } from "../../theme/tokens";
@@ -64,6 +64,7 @@ function ConversationInfo() {
       return sortMembersByRole(groupMembers).map((m) => ({
         userId: m.user_id,
         handle: m.username ?? m.user_id.slice(0, 8),
+        avatarKey: m.avatar_url ?? null,
         role: m.role,
       }));
     }
@@ -75,6 +76,7 @@ function ConversationInfo() {
       .map((m) => ({
         userId: m.user_id,
         handle: m.username ?? m.user_id.slice(0, 8),
+        avatarKey: m.avatar_url ?? null,
         role: null as string | null,
       }));
   }, [kind, groupMembers, dmChannel.data]);
@@ -147,7 +149,9 @@ function ConversationInfo() {
                   testID={`row-member-${m.userId}`}
                   minHeight={56}
                   glyph={
-                    <Avatar
+                    <UserAvatar
+                      userId={m.userId}
+                      avatarKey={m.avatarKey}
                       label={m.handle}
                       size="sm"
                       variant={isMe ? "self" : "default"}

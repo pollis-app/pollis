@@ -4,11 +4,11 @@ import {
   Screen,
   Header,
   Body,
-  Avatar,
   Chip,
   Group,
   Txt,
 } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { semantic, fonts, space, layout } from "../../theme/tokens";
 import {
   useDMRequests,
@@ -65,7 +65,12 @@ export default function DMRequests() {
                       minWidth: 160,
                     }}
                   >
-                    <Avatar label={handle} size={layout.touchMin} />
+                    <UserAvatar
+                      userId={d.user2_id}
+                      avatarKey={d.user2_avatar_url}
+                      label={handle}
+                      size={layout.touchMin}
+                    />
                     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                       <Text
                         numberOfLines={1}

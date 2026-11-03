@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, ListRow, Group, Avatar, Chip, SectionTitle } from "../../components/ui";
+import { Screen, Header, Body, ListRow, Group, Chip, SectionTitle } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { space } from "../../theme/tokens";
 import {
@@ -105,7 +106,15 @@ function Members() {
                   <ListRow
                     testID={`row-member-${m.user_id}`}
                     minHeight={64}
-                    glyph={<Avatar label={m.username || m.user_id} variant={isMe ? "self" : "default"} />}
+                    glyph={
+                      <UserAvatar
+                        testID={`avatar-member-${m.user_id}`}
+                        userId={m.user_id}
+                        avatarKey={m.avatar_url ?? null}
+                        label={m.username || m.user_id}
+                        variant={isMe ? "self" : "default"}
+                      />
+                    }
                     name={name}
                     sub={role}
                     chevron={!isMe}
@@ -188,7 +197,7 @@ function Members() {
                     <ListRow
                       testID={`row-invited-${inv.invitee_id}`}
                       minHeight={64}
-                      glyph={<Avatar label={inv.invitee_username || inv.invitee_id} />}
+                      glyph={<UserAvatar userId={inv.invitee_id} label={inv.invitee_username || inv.invitee_id} />}
                       name={handle}
                       sub={
                         inv.inviter_username

@@ -1,6 +1,6 @@
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Avatar } from "../ui";
+import { UserAvatar } from "../UserAvatar";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";
 import type { SearchMessageResult } from "../../hooks/queries/useSearch";
@@ -56,7 +56,7 @@ export function SearchResultRow({
         backgroundColor: pressed ? semantic.high : "transparent",
       })}
     >
-      <Avatar label={sender} size="md" variant={isSelf ? "self" : "default"} />
+      <UserAvatar userId={result.sender_id} label={sender} size="md" variant={isSelf ? "self" : "default"} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View
           style={{

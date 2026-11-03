@@ -455,7 +455,23 @@
       "handle": "用户名",
       "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
       "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
-      "save": "保存更改"
+      "save": "保存更改",
+      "photo": {
+        "heading": "头像",
+        "hint": "与你聊天的每个人都能看到这张照片。",
+        "add": "添加照片",
+        "change": "更换照片",
+        "library": "从相册选择",
+        "camera": "拍照",
+        "remove": "移除照片",
+        "saving": "正在保存照片…",
+        "removing": "正在移除照片…",
+        "saved": "照片已更新。",
+        "removed": "照片已移除。",
+        "failed": "无法保存你的照片，请重试。",
+        "removeFailed": "无法移除你的照片，请重试。",
+        "cameraDenied": "Pollis 无法使用相机。请在“设置”中允许后再拍照。"
+      }
     },
     "scanDevice": {
       "heading": "扫码登录设备",

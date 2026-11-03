@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Avatar, Badge } from "../ui";
+import { Badge } from "../ui";
+import { UserAvatar } from "../UserAvatar";
 import {
   semantic,
   type as ty,
@@ -13,7 +14,7 @@ import {
 /** One conversation in the Direct list; unread is said three ways, never colour alone. One control. */
 export function ConversationRow({
   name,
-  avatarLabels,
+  avatars,
   preview,
   own,
   time,
@@ -26,7 +27,7 @@ export function ConversationRow({
 }: {
   name: string;
   // Two or more draws the overlapped group avatar.
-  avatarLabels: string[];
+  avatars: ConversationAvatarPerson[];
   preview?: string | null;
   own?: boolean;
   time?: string | null;
@@ -77,7 +78,7 @@ export function ConversationRow({
             : "transparent",
       })}
     >
-      <ConversationAvatar labels={avatarLabels} />
+      <ConversationAvatar people={avatars} testID={testID ? `${testID}-avatar` : undefined} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View
           style={{
@@ -142,9 +143,29 @@ export function ConversationRow({
   );
 }
 
-function ConversationAvatar({ labels }: { labels: string[] }) {
-  if (labels.length < 2) {
-    return <Avatar label={labels[0]} size={layout.touchMin} />;
+export interface ConversationAvatarPerson {
+  label: string;
+  userId?: string;
+  avatarKey?: string | null;
+}
+
+function ConversationAvatar({
+  people,
+  testID,
+}: {
+  people: ConversationAvatarPerson[];
+  testID?: string;
+}) {
+  if (people.length < 2) {
+    return (
+      <UserAvatar
+        testID={testID}
+        userId={people[0]?.userId}
+        avatarKey={people[0]?.avatarKey}
+        label={people[0]?.label}
+        size={layout.touchMin}
+      />
+    );
   }
   return (
     <View
@@ -152,13 +173,17 @@ function ConversationAvatar({ labels }: { labels: string[] }) {
       importantForAccessibility="no-hide-descendants"
       style={{ width: layout.touchMin, height: layout.touchMin }}
     >
-      <Avatar
-        label={labels[0]}
+      <UserAvatar
+        userId={people[0].userId}
+        avatarKey={people[0].avatarKey}
+        label={people[0].label}
         size={30}
         style={{ position: "absolute", top: 0, start: 0 }}
       />
-      <Avatar
-        label={labels[1]}
+      <UserAvatar
+        userId={people[1].userId}
+        avatarKey={people[1].avatarKey}
+        label={people[1].label}
         size={30}
         style={{
           position: "absolute",

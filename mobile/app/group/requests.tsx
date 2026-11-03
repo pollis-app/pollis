@@ -1,7 +1,8 @@
 import { View } from "react-native";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, ListRow, Group, Avatar, Chip, SectionTitle } from "../../components/ui";
+import { Screen, Header, Body, ListRow, Group, Chip, SectionTitle } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { space } from "../../theme/tokens";
 import {
@@ -43,7 +44,7 @@ export default function JoinRequests() {
                   <ListRow
                     testID={`row-request-${r.id}`}
                     minHeight={64}
-                    glyph={<Avatar label={r.requester_username ?? r.requester_id} />}
+                    glyph={<UserAvatar userId={r.requester_id} label={r.requester_username ?? r.requester_id} />}
                     name={handle}
                     sub={t("mobile:group.requests.requested", {
                       date: new Date(r.created_at).toLocaleDateString(activeLocale()),

@@ -19,7 +19,7 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Pollis needs your camera to scan sign-in QR codes from your other devices.",
+        "NSCameraUsageDescription": "Pollis needs your camera to scan sign-in QR codes from your other devices and to take your profile photo.",
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
         ],
@@ -152,7 +152,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Pollis needs your camera to scan sign-in QR codes from your other devices.",
+          "cameraPermission": "Pollis needs your camera to scan sign-in QR codes from your other devices and to take your profile photo.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
@@ -174,15 +174,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",
-          "cameraPermission": "Pollis needs your camera to scan sign-in QR codes from your other devices.",
+          "photosPermission": "Pollis needs access to your photo library so you can attach images to messages, choose your profile photo and upload custom group emoji.",
+          "cameraPermission": "Pollis needs your camera to scan sign-in QR codes from your other devices and to take your profile photo.",
           "microphonePermission": false
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "Pollis needs access to your photo library so you can attach images to messages and upload custom group emoji.",
+          "photosPermission": "Pollis needs access to your photo library so you can attach images to messages, choose your profile photo and upload custom group emoji.",
           "savePhotosPermission": "Pollis saves the photos and videos you choose to your photo library.",
           "isAccessMediaLocationEnabled": false,
           "granularPermissions": []

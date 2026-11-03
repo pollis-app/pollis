@@ -1398,6 +1398,20 @@ Current state:
   (android + ios cross-compile jobs).
 - **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
   `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
+- **Profile photos:** `components/UserAvatar.tsx` draws a user's photo everywhere a
+  person is named (Direct rows, message and thread rows, mentions, members,
+  requests, new DM, blocked, profile, info pages, search, Self), falling back to the
+  letter `Avatar`. Core writes 128/256/512 px square renditions to
+  `cacheDirectory/pollis-avatars/<uid>_<sha256>_<px>.<jpg|png>` (`get_avatar_path`);
+  `lib/avatarStore.ts` (pure, `tests/avatars.test.ts`) maps users to them from ONE
+  directory listing at launch, so a revisit draws the photo on its first frame with
+  no letter flash, keeps an old photo up until a changed one is on disk, drops a
+  removed one at once, and looks up every user whose key no list carried in one
+  `get_user_profiles` call. Rows pass the key their list already has (`avatarKey`;
+  `undefined` = unknown). Set / change / remove: Self → Account details
+  (`components/self/ProfilePhotoEditor.tsx`; library or front camera, system square
+  crop, `upload_avatar` re-encodes and strips EXIF). `endSession()` wipes the
+  directory. Maestro: `.maestro/flows/profile-photo.yaml`.
   Every path that ends a session (sign-out, account deletion, revoked-device
   sign-out) goes through `endSession()` (`lib/session/`): it resets the store,
   pops every signed-in screen and lands on sign-in, then clears the React Query

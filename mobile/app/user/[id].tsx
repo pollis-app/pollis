@@ -6,7 +6,6 @@ import {
   Screen,
   Header,
   Body,
-  Avatar,
   Card,
   Button,
   BottomAction,
@@ -14,6 +13,7 @@ import {
   ListRow,
   Txt,
 } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { Icon } from "../../components/icons";
 import { semantic, fonts, space } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
@@ -107,7 +107,10 @@ function UserProfile() {
           surface="panel"
           style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}
         >
-          <Avatar
+          <UserAvatar
+            testID="avatar-user"
+            userId={peerId}
+            avatarKey={profile.data ? profile.data.avatar_url ?? null : undefined}
             label={handle}
             size="lg"
             variant={isSelf ? "self" : "default"}

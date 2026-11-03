@@ -8,12 +8,12 @@ import {
   Header,
   Body,
   SectionTitle,
-  Avatar,
   Field,
   Button,
   BottomAction,
 } from "../../components/ui";
 import { SettingsField, ErrorText, ReadOnlyField } from "../../components/self/SettingsField";
+import { ProfilePhotoEditor } from "../../components/self/ProfilePhotoEditor";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
@@ -68,14 +68,16 @@ function UserSettings() {
     <Screen testID="screen-self-user-settings">
       <Header title={t("mobile:self.hub.accountDetails")} backTo={t("mobile:self.title")} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.xxxl }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>
-          <Avatar label={shownName} size="lg" variant="self" />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text accessibilityRole="header" numberOfLines={1} ellipsizeMode="tail" style={ty.title}>
-              {shownName || "—"}
-            </Text>
-            {isLoading ? <Text style={ty.meta}>{t("common:states.loading")}</Text> : null}
-          </View>
+        <View style={{ alignItems: "center", gap: space.md }}>
+          <ProfilePhotoEditor
+            userId={currentUser?.id}
+            avatarKey={profile ? profile.avatar_url ?? null : undefined}
+            label={shownName}
+          />
+          <Text accessibilityRole="header" numberOfLines={1} ellipsizeMode="tail" style={ty.title}>
+            {shownName || "—"}
+          </Text>
+          {isLoading ? <Text style={ty.meta}>{t("common:states.loading")}</Text> : null}
         </View>
 
         <View style={{ gap: space.xxl }}>

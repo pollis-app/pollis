@@ -10,6 +10,8 @@ export interface SessionTeardownDeps {
   clearMediaCache: () => Promise<void>;
   clearExportArchives: () => Promise<void>;
   clearEmojiCache: () => Promise<void>;
+  // Profile pictures of the people this account talks to.
+  clearAvatarCache: () => Promise<void>;
 }
 
 // Every wipe runs even if one fails: a disk hiccup must not strand an ended session.
@@ -31,6 +33,7 @@ export async function tearDownSession(deps: SessionTeardownDeps): Promise<void> 
     deps.clearMediaCache,
     deps.clearExportArchives,
     deps.clearEmojiCache,
+    deps.clearAvatarCache,
   ]);
 }
 
