@@ -228,9 +228,10 @@ full detail: `docs/metadata-retention-policy.md` §3.
   Self → Diagnostics) and the "Copy diagnostics" button under sign-in errors.
   The log reaches ~1 MB, more than a screen or a clipboard holds, so the preview
   and Copy carry only the newest ~48 KB (`recentReport`, `frontend/src/utils/` and
-  its copy in `mobile/lib/diagnosticsReport.ts`) and say how many old lines they
-  left out; **Save as file** writes the whole report as a `.txt` (desktop: the
-  save panel + `save_diagnostics`; mobile: the share sheet from the cache dir).
+  its copy in `mobile/lib/diagnosticsReport.ts`) and say they show only the most
+  recent entries; **Download** (side by side with **Copy**) writes the whole report
+  as a `.txt` (desktop: the save panel + `save_diagnostics`; mobile: the share
+  sheet from the cache dir).
   **DS:** `error_log.rs`, a route layer recording every matched 4xx/5xx (not
   the limiter's 429s) to `ds_error_log` with the response's `error` and the
   request's own `warn!`/`error!` lines (captured by `error_log::CaptureLayer`,

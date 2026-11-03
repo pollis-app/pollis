@@ -11,9 +11,12 @@ type CopyState = "idle" | "copied" | "failed";
 export function CopyDiagnosticsButton({
   variant = "secondary",
   full,
+  short,
 }: {
   variant?: "primary" | "secondary" | "subtle";
   full?: boolean;
+  // "Copy" beside "Download" on the Diagnostics screen; "Copy diagnostics" where it stands alone.
+  short?: boolean;
 }) {
   const { t } = useTranslation("settings");
   const [state, setState] = useState<CopyState>("idle");
@@ -31,7 +34,7 @@ export function CopyDiagnosticsButton({
       ? t("diagnostics.copied")
       : state === "failed"
         ? t("diagnostics.copyFailed")
-        : t("diagnostics.copy");
+        : t(short ? "diagnostics.copyShort" : "diagnostics.copy");
 
   return (
     <Button

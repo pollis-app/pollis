@@ -114,21 +114,21 @@ test("a long log shows and copies its NEWEST lines, and says what it left out", 
   const preview = page.getByTestId("diagnostics-preview");
   await expect(preview).toContainText("line 5000");
   await expect(preview).not.toContainText("line 1\n");
-  await expect(page.getByTestId("diagnostics-trimmed")).toContainText("Save as file has the whole log");
+  await expect(page.getByTestId("diagnostics-trimmed")).toHaveText("Showing the most recent entries. Download saves the full log.");
   await page.getByTestId("copy-diagnostics-button").click();
   await expect(page.getByTestId("copy-diagnostics-button")).toHaveAttribute("data-copy-state", "copied");
   const copied = await clipboard(page);
   expect(copied.startsWith("Pollis diagnostics")).toBe(true);
   expect(copied).toContain("line 5000");
-  await page.screenshot({ path: "e2e/artifacts/playwright/diagnostics-trimmed.png" });
+  await page.screenshot({ path: "artifacts/playwright/diagnostics-trimmed.png" });
 });
 
-test("Save as file writes the whole log where the save panel points", async ({ page }) => {
+test("Download writes the whole log where the save panel points", async ({ page }) => {
   await boot(page, true, { exportSavePath: "/Users/alice/Downloads/pollis-diagnostics.txt" });
   await openDiagnostics(page);
 
   await page.getByTestId("save-diagnostics-button").click();
-  await expect(page.getByTestId("save-diagnostics-button")).toHaveText("Saved");
+  await expect(page.getByTestId("save-diagnostics-button")).toHaveText("Downloaded");
   const saved = await page.evaluate(
     () => (window as unknown as { __tauriMock: { savedDiagnosticsPath: string | null } }).__tauriMock.savedDiagnosticsPath,
   );
@@ -140,7 +140,7 @@ test("cancelling the save panel saves nothing", async ({ page }) => {
   await openDiagnostics(page);
 
   await page.getByTestId("save-diagnostics-button").click();
-  await expect(page.getByTestId("save-diagnostics-button")).toHaveText("Save as file");
+  await expect(page.getByTestId("save-diagnostics-button")).toHaveText("Download");
   const saved = await page.evaluate(
     () => (window as unknown as { __tauriMock: { savedDiagnosticsPath: string | null } }).__tauriMock.savedDiagnosticsPath,
   );

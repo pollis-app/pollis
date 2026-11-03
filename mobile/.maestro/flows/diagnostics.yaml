@@ -39,7 +39,7 @@ tags:
 - takeScreenshot: diagnostics-01-auth-error
 - tapOn:
     id: "btn-copy-diagnostics"
-- assertVisible: "Copied to clipboard"
+- assertVisible: "Copied"
 
 # --- 2. Signed in: the Diagnostics screen shows the core's log ---
 - runFlow: ../subflows/sign-in.yaml
@@ -63,9 +63,9 @@ tags:
 - takeScreenshot: diagnostics-02-screen
 - tapOn:
     id: "btn-copy-diagnostics"
-- assertVisible: "Copied to clipboard"
+- assertVisible: "Copied"
 
-# --- 3. Save as file: the whole log goes to the system share sheet as a .txt ---
+# --- 3. Download: the whole log goes to the system share sheet as a .txt ---
 - assertVisible:
     id: "btn-save-diagnostics"
 - tapOn:
@@ -92,4 +92,4 @@ tags:
           optional: true
 - assertVisible:
     id: "screen-self-diagnostics"
-- assertNotVisible: "Could not save — try again"
+- assertNotVisible: "Couldn.t download"
