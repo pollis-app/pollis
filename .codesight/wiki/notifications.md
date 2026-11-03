@@ -427,7 +427,11 @@ so the app, not the system, posts the notification.
   time). Not WorkManager: an expedited job adds a dependency and quota, and
   before Android 12 needs a foreground service, which the app blocks. If the
   fetch overruns, the generic text is posted at the deadline and a late result
-  replaces it in place (same tag, `setOnlyAlertOnce`).
+  replaces it in place (same tag, `setOnlyAlertOnce`). A fetch that fails on the
+  network is retried (250 ms, doubling to 1.5 s) until the deadline: Android lets
+  a backgrounded app's sockets through only a moment after the push wakes it, and
+  until then every lookup fails with "No address associated with hostname"
+  (`notify::fetch::retry_on_network`).
 - **Post.** `RichPushNotifier`: `MessagingStyle` on channel `default`, **tag =
   `h`, id 0** (what FCM used), so all three #1508 paths keep finding it through
   the foreign identifier. One notification per conversation: a new one folds the

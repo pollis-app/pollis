@@ -148,6 +148,7 @@ pub async fn run_in_app(app: &Arc<AppState>, handle: Option<&str>, budget: Durat
                 finish(app, &user_id, mode, floor, None, deadline, Some(reason)).await
             }
             Err(_) => {
+                crate::diag!("[notify] in-app ingest ran out of time");
                 finish(app, &user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await
             }
         })
@@ -291,7 +292,10 @@ async fn run_locked(
             crate::diag!("[notify] ingest failed: {reason:?}");
             finish(state, user_id, mode, floor, None, deadline, Some(reason)).await
         }
-        Err(_) => finish(state, user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await,
+        Err(_) => {
+            crate::diag!("[notify] ingest ran out of time");
+            finish(state, user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await
+        }
     }
 }
 
@@ -302,7 +306,48 @@ struct Target {
     is_dm: bool,
 }
 
+/// First pause before retrying a fetch that failed on the network, doubled up to [`RETRY_MAX`].
+const RETRY_FIRST: Duration = Duration::from_millis(250);
+const RETRY_MAX: Duration = Duration::from_millis(1500);
+
+/// [`ingest_once`], retried while it fails on the network. Android lets a backgrounded app's
+/// sockets through only some time after a high-priority push wakes it; until then every lookup
+/// fails with "No address associated with hostname" and pooled connections are aborted, so a
+/// single attempt posted the generic text for a message the app then showed fine. The ingest is
+/// idempotent, and the caller's deadline bounds the retries.
 async fn ingest_for_handle(
+    state: &Arc<AppState>,
+    user_id: &str,
+    handle: Option<&str>,
+) -> Result<Option<Target>, Reason> {
+    retry_on_network(|| ingest_once(state, user_id, handle)).await
+}
+
+async fn retry_on_network<T, F, Fut>(mut attempt: F) -> Result<T, Reason>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, Reason>>,
+{
+    let mut pause = RETRY_FIRST;
+    let mut retries = 0u32;
+    loop {
+        match attempt().await {
+            Err(Reason::Network) => {
+                retries += 1;
+                tokio::time::sleep(pause).await;
+                pause = (pause * 2).min(RETRY_MAX);
+            }
+            result => {
+                if retries > 0 {
+                    crate::diag!("[notify] network came back after {retries} retr(ies)");
+                }
+                return result;
+            }
+        }
+    }
+}
+
+async fn ingest_once(
     state: &Arc<AppState>,
     user_id: &str,
     handle: Option<&str>,
@@ -646,6 +691,49 @@ async fn conversation_meta(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_network_failure_is_retried_until_it_clears() {
+        let mut calls = 0;
+        let started = Instant::now();
+        let r = retry_on_network(|| {
+            calls += 1;
+            let n = calls;
+            async move {
+                if n < 3 {
+                    Err(Reason::Network)
+                } else {
+                    Ok(n)
+                }
+            }
+        })
+        .await;
+        assert_eq!(r, Ok(3));
+        // 250 ms, then 500 ms.
+        assert!(started.elapsed() >= Duration::from_millis(750));
+    }
+
+    #[tokio::test]
+    async fn any_other_failure_is_not_retried() {
+        let mut calls = 0;
+        let r: Result<(), Reason> = retry_on_network(|| {
+            calls += 1;
+            async { Err(Reason::Internal) }
+        })
+        .await;
+        assert_eq!(r, Err(Reason::Internal));
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn the_caller_deadline_bounds_the_retries() {
+        let r = tokio::time::timeout(
+            Duration::from_secs(1),
+            retry_on_network(|| async { Err::<(), _>(Reason::Network) }),
+        )
+        .await;
+        assert!(r.is_err());
+    }
 
     #[test]
     fn outcomes_serialize_to_the_contract() {
