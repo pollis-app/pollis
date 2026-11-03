@@ -469,8 +469,12 @@ so the app, not the system, posts the notification.
   conversation posts nothing (and drops a generic one already posted at the
   deadline), instead of a heads-up #1508 would clear seconds later. Any other
   conversation, or the app in the background, posts as usual.
-- **Avatars.** Mobile shows letter avatars only, so the notification draws the
-  same one natively (`LetterAvatar`: the initial on `semantic.high` in
+- **Avatars.** The app draws profile photos now (`mobile/lib/avatarCache.ts`), but a
+  rich push does not carry the sender's user id, only `sender_name`, so the
+  notification cannot find the picture on disk and still draws the letter avatar
+  natively (follow-up: add the sender id to the fetch result and read
+  `cacheDir/pollis-avatars/<uid>_*_128.*`; the iOS extension would need the files
+  in the app-group container) (`LetterAvatar`: the initial on `semantic.high` in
   `semantic.dim`, from `theme/derive.ts`'s recipe; a circle per sender as the
   `Person` icon and the DM's large icon, a rounded square for a group's). JS
   saves the live accent/background (`setThemeColors`) to SharedPreferences
