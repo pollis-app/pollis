@@ -1214,9 +1214,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'screenshare_ws_url':
       return null;
 
-    // The "use the byte path" sentinel (#874).
-    case 'get_public_file_url':
-      return '';
+    // The "use the byte path" sentinel (#874); a spec may serve a key via `publicFileUrls`.
+    case 'get_public_file_url': {
+      const { key } = args as { key: string };
+      return (preload.publicFileUrls as Record<string, string> | undefined)?.[key] ?? '';
+    }
 
     // Explicit no-ops so they don't log as unhandled.
     case 'tray_set_enabled':
