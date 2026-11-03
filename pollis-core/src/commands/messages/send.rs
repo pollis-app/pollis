@@ -67,6 +67,10 @@ pub async fn send_message_with_id(
         thread_id,
         sent_at: super::envelope_sent_at(),
     };
+    // Also before the first await: iOS gives the app background time to finish this send
+    // before it is suspended (`notify::lock::suspend::enter`), so the user may leave the app
+    // the moment they tap Send.
+    let _sending = crate::notify::lock::suspend::send_started(Some(&queued.id));
     // Before the first await (#1636): the stamp above is this send's place in its
     // conversation, and no delivery may pass it until its row is written.
     let ticket = super::outbox::EnqueueTicket::begin(state, &queued);

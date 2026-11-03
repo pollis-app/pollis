@@ -715,6 +715,8 @@ pub async fn edit_message(
     new_content: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // Finished before the app is suspended, if iOS gives it the time (`notify::lock::suspend`).
+    let _sending = crate::notify::lock::suspend::send_started(None);
     {
         let guard = state.local_db.lock().await;
         let db = guard

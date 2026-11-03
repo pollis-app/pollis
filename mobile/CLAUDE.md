@@ -1439,7 +1439,10 @@ Current state:
   send the OS killed mid-flight is still there after relaunch and is delivered
   by the drain: core spawns it after `unlock`, and `useInboxRealtime` calls
   `flush_outbox` on sign-in, on resume and on a LiveKit `Reconnected` — never
-  on a timer. A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and
+  on a timer. On iOS a send made just before leaving the app finishes in the
+  app's background time before the database closes, or is marked `failed` if
+  the time runs out (#1678; `.codesight/wiki/notifications.md` → "Cross-process
+  lock"). A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and
   `components/chat/UnsentActions.tsx` says why in one line (`unsentReason`:
   `failed` — "It'll send automatically when Pollis reconnects."; `rejected`,
   which no retry can fix so the drain stops trying, or a send the core never

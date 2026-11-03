@@ -61,7 +61,8 @@ void pollis_set_keychain_access_group(const char *group);
 
 // App only (iOS 0xdead10cc). In applicationDidEnterBackground take a ticket SYNCHRONOUSLY,
 // then, inside a background-task assertion and off the main thread (it blocks up to
-// timeout_ms), call pollis_app_will_suspend(ticket, ...): no new state.lock hold starts, the
+// timeout_ms), call pollis_app_will_suspend(ticket, ...): the sends in flight finish first (most
+// of timeout_ms), then no new state.lock hold starts, the
 // open ones are drained, and the database connection is checkpointed and closed. Returns true
 // when nothing is held. A ticket older than the last pollis_app_did_resume does nothing.
 uint64_t pollis_app_suspend_ticket(void);

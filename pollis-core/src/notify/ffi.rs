@@ -105,17 +105,14 @@ pub extern "C" fn pollis_app_suspend_ticket() -> u64 {
 }
 
 /// Off the main thread, inside a `beginBackgroundTask` assertion (it blocks up to
-/// `timeout_ms`): stop new holds of `state.lock`, wait for the open ones, then checkpoint and
-/// close the app's database connection, so the suspended app holds no lock in the App Group
-/// container (`0xdead10cc`). Does nothing if [`pollis_app_did_resume`] ran since `ticket`.
-/// Returns true when nothing is held.
+/// `timeout_ms`): let the sends in flight finish, then stop new holds of `state.lock`, wait for
+/// the open ones, and checkpoint and close the app's database connection, so the suspended app
+/// holds no lock in the App Group container (`0xdead10cc`). Does nothing if
+/// [`pollis_app_did_resume`] ran since `ticket`. Returns true when nothing is held.
 #[no_mangle]
 pub extern "C" fn pollis_app_will_suspend(ticket: u64, timeout_ms: u32) -> bool {
     std::panic::catch_unwind(|| {
-        let drained =
-            super::lock::suspend::begin(ticket, Duration::from_millis(u64::from(timeout_ms)));
-        let closed = crate::bridge::quiesce_for_suspend(ticket);
-        drained && closed
+        crate::bridge::prepare_for_suspend(ticket, Duration::from_millis(u64::from(timeout_ms)))
     })
     .unwrap_or(false)
 }

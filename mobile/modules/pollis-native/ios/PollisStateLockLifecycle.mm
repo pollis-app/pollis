@@ -3,7 +3,8 @@
 // iOS terminates a suspended app (0xdead10cc) that still holds a file lock in an App Group
 // container. Once the Notification Service Extension shares the core's data dir, that is
 // where `state.lock` and the SQLCipher database (whose WAL keeps fcntl locks on -shm) live.
-// On entering the background this asks for background time and lets the core stop new
+// On entering the background this asks for background time and lets the core finish the
+// sends in flight (a message sent just before leaving the app still goes out), then stop new
 // `state.lock` holds, drain the open ones, checkpoint and close the database
 // (pollis_app_will_suspend). If the background time runs out first, the expiration handler
 // force-releases both (pollis_app_suspend_expired) before ending the task. On returning,
@@ -22,6 +23,20 @@ extern "C" void pollis_app_did_resume(void);
 
 // Below the ~30 s iOS grants a background task, leaving room to end it cleanly.
 static const uint32_t kDrainTimeoutMs = 25000;
+// Kept back from the time iOS reports, to end the task before it expires.
+static const double kDrainMarginSec = 5.0;
+static const uint32_t kMinDrainTimeoutMs = 1000;
+
+// iOS may grant less than ~30 s (the app was backgrounded moments ago, or the system is busy).
+static uint32_t drainTimeoutMs(UIApplication *app)
+{
+  NSTimeInterval remaining = app.backgroundTimeRemaining;
+  if (remaining >= (kDrainTimeoutMs / 1000.0) + kDrainMarginSec) {
+    return kDrainTimeoutMs;
+  }
+  double ms = (remaining - kDrainMarginSec) * 1000.0;
+  return ms > kMinDrainTimeoutMs ? (uint32_t)ms : kMinDrainTimeoutMs;
+}
 
 @interface PollisStateLockLifecycle : NSObject
 @end
@@ -60,8 +75,9 @@ static const uint32_t kDrainTimeoutMs = 25000;
                           [app endBackgroundTask:task];
                           task = UIBackgroundTaskInvalid;
                         }];
+  uint32_t timeoutMs = drainTimeoutMs(app);
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-    pollis_app_will_suspend(ticket, kDrainTimeoutMs);
+    pollis_app_will_suspend(ticket, timeoutMs);
     dispatch_async(dispatch_get_main_queue(), ^{
       if (task != UIBackgroundTaskInvalid) {
         [app endBackgroundTask:task];
