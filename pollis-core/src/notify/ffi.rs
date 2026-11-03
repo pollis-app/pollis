@@ -24,9 +24,37 @@ pub unsafe extern "C" fn pollis_notify_fetch(
 ) -> *mut c_char {
     let data_dir = opt_str(data_dir);
     let handle = opt_str(handle);
+    let started = std::time::Instant::now();
     let json = std::panic::catch_unwind(move || fetch_json(data_dir, handle, budget_ms))
         .unwrap_or_else(|_| INTERNAL.to_string());
+    crate::diag!("[notify] push fetch: {} in {}ms", summary(&json), started.elapsed().as_millis());
     to_c(json)
+}
+
+/// A line the host adds to the diagnostics log under `[notify]`, e.g. what the OS was doing
+/// to the app's network when a fetch failed. Never message content.
+///
+/// # Safety
+/// `line` must be NULL (ignored) or a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn pollis_notify_note(line: *const c_char) {
+    if let Some(line) = opt_str(line).filter(|l| !l.is_empty()) {
+        let _ = std::panic::catch_unwind(|| crate::diag!("[notify] {line}"));
+    }
+}
+
+/// The outcome of a fetch without its content: `ok mode=full items=2` or `failed network`.
+fn summary(json: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    if v["ok"].as_bool() == Some(true) {
+        format!(
+            "ok mode={} items={}",
+            v["mode"].as_str().unwrap_or("?"),
+            v["items"].as_array().map_or(0, Vec::len)
+        )
+    } else {
+        format!("failed {}", v["reason"].as_str().unwrap_or("internal"))
+    }
 }
 
 /// Free a string returned by this library. NULL is a no-op.
@@ -133,6 +161,7 @@ fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) 
     }
 
     super::host::adopt_data_dir(&data_dir);
+    crate::diag::ensure_init(&crate::diag::log_dir(&data_dir));
     // An extension never mints a keystore key; see `keystore::forbid_key_creation`. Only when
     // the app is not running in this process (Android may call this in-process).
     if !crate::bridge::is_initialized() {
@@ -185,5 +214,13 @@ mod tests {
             pollis_string_free(out);
             pollis_string_free(std::ptr::null_mut());
         }
+    }
+
+    #[test]
+    fn a_summary_names_the_outcome_never_the_content() {
+        let ok = r#"{"ok":true,"mode":"full","items":[{"body":"secret","sender_name":"x"}]}"#;
+        assert_eq!(summary(ok), "ok mode=full items=1");
+        assert_eq!(summary(r#"{"ok":false,"reason":"network"}"#), "failed network");
+        assert_eq!(summary("not json"), "failed internal");
     }
 }

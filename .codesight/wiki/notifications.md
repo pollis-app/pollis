@@ -428,10 +428,16 @@ so the app, not the system, posts the notification.
   before Android 12 needs a foreground service, which the app blocks. If the
   fetch overruns, the generic text is posted at the deadline and a late result
   replaces it in place (same tag, `setOnlyAlertOnce`). A fetch that fails on the
-  network is retried (250 ms, doubling to 1.5 s) until the deadline: Android lets
-  a backgrounded app's sockets through only a moment after the push wakes it, and
-  until then every lookup fails with "No address associated with hostname"
-  (`notify::fetch::retry_on_network`).
+  network is retried (250 ms, doubling to 1.5 s) until the deadline
+  (`notify::fetch::retry_on_network`): a backgrounded app's lookups fail with "No
+  address associated with hostname" while Android blocks its network, and the
+  push's exemption may arrive a moment late (#1672). Every fetch logs
+  `[notify] push fetch: ok mode=… items=… in …ms` or `failed <reason>`, and a
+  network failure or overrun adds `[notify] android …` (`PushNetworkState`): the
+  kind of network and whether it is metered, Android's blocked state, Data Saver,
+  the battery "Restricted" setting, the standby bucket, Doze and the process
+  importance, written through `pollis_notify_note`. A fetch in a process the app
+  never started in opens the same log (`diag::ensure_init`).
 - **Post.** `RichPushNotifier`: `MessagingStyle` on channel `default`, **tag =
   `h`, id 0** (what FCM used), so all three #1508 paths keep finding it through
   the foreign identifier. One notification per conversation: a new one folds the

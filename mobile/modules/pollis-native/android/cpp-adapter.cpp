@@ -51,6 +51,7 @@ Java_com_pollisnative_PollisNativeModule_nativeCleanupRustCrate(JNIEnv *env, jcl
 // Declared here rather than included; pollis-core/include/pollis_notify.h is the reference.
 extern "C" char *pollis_notify_fetch(const char *data_dir, const char *handle, uint32_t budget_ms);
 extern "C" void pollis_string_free(char *s);
+extern "C" void pollis_notify_note(const char *line);
 
 // Returns UTF-8 bytes, not a jstring: NewStringUTF takes modified UTF-8 and
 // mangles 4-byte sequences (an emoji in a preview).
@@ -86,4 +87,17 @@ Java_com_pollisnative_PollisNotify_nativeFetch(
     }
     pollis_string_free(json);
     return out;
+}
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_pollisnative_PollisNotify_nativeNote(JNIEnv *env, jclass type, jstring line) {
+    (void) type;
+    if (line == nullptr) {
+        return;
+    }
+    const char *l = env->GetStringUTFChars(line, nullptr);
+    if (l != nullptr) {
+        pollis_notify_note(l);
+        env->ReleaseStringUTFChars(line, l);
+    }
 }

@@ -42,6 +42,14 @@ pub fn init(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// [`init`] unless a log is already open in this process: a push fetch in a process the app
+/// never started in (an iOS extension, an FCM cold start) records to the same log.
+pub fn ensure_init(dir: &Path) {
+    if lock().is_none() {
+        let _ = init(dir);
+    }
+}
+
 /// Where [`init`] puts the log for a data directory.
 pub fn log_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("logs")

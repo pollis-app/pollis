@@ -98,6 +98,7 @@ test("ubrn regeneration keeps the hand-extended native files", () => {
   assert.match(cfg, /noOverwrite:\n\s+- android\/cpp-adapter\.cpp\n\s+- android\/build\.gradle/);
   const adapter = readFileSync(join(MOBILE, "modules/pollis-native/android/cpp-adapter.cpp"), "utf8");
   assert.match(adapter, /Java_com_pollisnative_PollisNotify_nativeFetch/);
+  assert.match(adapter, /Java_com_pollisnative_PollisNotify_nativeNote/);
   assert.match(adapter, /pollis_notify_fetch\(/);
 });
 
