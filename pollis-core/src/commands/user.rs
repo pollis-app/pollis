@@ -26,6 +26,21 @@ pub async fn get_user_profile(
     )
 }
 
+/// Many profiles in ONE DS round trip; unknown ids are left out (mobile avatars).
+pub async fn get_user_profiles(
+    user_ids: Vec<String>,
+    state: &Arc<AppState>,
+) -> Result<Vec<UserProfile>> {
+    let mut ids = user_ids;
+    ids.sort();
+    ids.dedup();
+    Ok(crate::commands::ds_reads::users(state, ids, None)
+        .await?
+        .into_iter()
+        .map(profile_from_wire)
+        .collect())
+}
+
 /// Wire → domain for one user profile.
 /// No `phone` (#987): unrendered and the most re-identifying field.
 fn profile_from_wire(u: pollis_api::directory::UserWire) -> UserProfile {
