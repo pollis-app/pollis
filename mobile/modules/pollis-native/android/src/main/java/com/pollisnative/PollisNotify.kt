@@ -30,6 +30,20 @@ object PollisNotify {
   @JvmStatic
   private external fun nativeFetch(dataDir: String, handle: String?, budgetMs: Int): ByteArray?
 
+  @JvmStatic
+  private external fun nativeNote(line: String)
+
+  /** Add a line to the core's diagnostics log under `[notify]`; never content. Never throws. */
+  fun note(line: String) {
+    if (!ensureLoaded()) {
+      return
+    }
+    try {
+      nativeNote(line)
+    } catch (t: Throwable) {
+    }
+  }
+
   /** The core's JSON reply, or a failure reply; blocks for at most about `budgetMs`. */
   fun fetch(dataDir: String, handle: String?, budgetMs: Int): String {
     if (!ensureLoaded()) {

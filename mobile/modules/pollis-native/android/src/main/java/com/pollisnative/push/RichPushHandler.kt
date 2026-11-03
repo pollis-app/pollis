@@ -41,6 +41,7 @@ object RichPushHandler {
     messageId: String?,
     sentTime: Long,
     fetch: (dataDir: String, handle: String, budgetMs: Int) -> String = { dir, h, budget -> PollisNotify.fetch(dir, h, budget) },
+    note: (line: String) -> Unit = { PollisNotify.note(it) },
   ) {
     val app = context.applicationContext
     val notifier = RichPushNotifier(app)
@@ -63,6 +64,10 @@ object RichPushHandler {
       null
     } catch (e: Exception) {
       """{"ok":false,"reason":"internal"}"""
+    }
+    if (json == null || RichPush.outcomeDetail(json).let { it == "reason=network" || it == "reason=timeout" }) {
+      // Why the network failed is Android's to say (#1672): record its restrictions as they are now.
+      note("android " + PushNetworkState.describe(app))
     }
     if (json != null) {
       post(notifier, handle, json, data, messageId, sentTime)

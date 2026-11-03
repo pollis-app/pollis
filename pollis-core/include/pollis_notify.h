@@ -41,6 +41,10 @@ extern "C" {
 // since installing this build: show the generic text.
 char *pollis_notify_fetch(const char *data_dir, const char *handle, uint32_t budget_ms);
 
+// Add `line` to the diagnostics log under "[notify]" (e.g. the OS's network restrictions when a
+// fetch failed). Never message content. NULL or "" is ignored.
+void pollis_notify_note(const char *line);
+
 // Free a string returned above. NULL is a no-op.
 void pollis_string_free(char *s);
 
