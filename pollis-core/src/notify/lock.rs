@@ -277,9 +277,16 @@ impl SharedStateLock {
 ///
 /// A hold in flight may be doing network I/O (each DS request is bounded by the shared
 /// client's 10 s connect and 30 s read-stall timeouts), so `begin` waits with a deadline.
+///
+/// Sends come first: a send takes and lets go of the hold several times (catch-up, seal,
+/// re-seal) with network steps between, so a gate closed between two of its sections would
+/// leave it frozen until the next foreground. The host therefore calls [`enter`], which lets
+/// every send in flight ([`send_started`]) finish while holds may still start, and only then
+/// closes the gate.
 pub mod suspend {
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
+    use std::sync::{Condvar, Mutex};
     use std::time::{Duration, Instant};
 
     struct Gate {
@@ -300,7 +307,9 @@ pub mod suspend {
         GATE.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    pub(super) fn is_suspending() -> bool {
+    /// Whether the gate is closed: no new hold starts, and the database is (or is about to be)
+    /// closed for the suspension.
+    pub fn is_suspending() -> bool {
         gate().closed
     }
 
@@ -323,16 +332,22 @@ pub mod suspend {
         g.closed && g.resumes == ticket
     }
 
+    /// Close the gate for `ticket` without waiting. `false` when the app came back since.
+    pub fn close(ticket: u64) -> bool {
+        let mut g = gate();
+        if g.resumes != ticket {
+            return false;
+        }
+        g.closed = true;
+        true
+    }
+
     /// Close the gate for `ticket`, then block up to `timeout` for the open holds to end.
     /// `true` when the gate is closed for this ticket and no hold is open.
     pub fn begin(ticket: u64, timeout: Duration) -> bool {
-        {
-            let mut g = gate();
-            if g.resumes != ticket {
-                // The app came back before this ran.
-                return false;
-            }
-            g.closed = true;
+        if !close(ticket) {
+            // The app came back before this ran.
+            return false;
         }
         let deadline = Instant::now() + timeout;
         loop {
@@ -352,9 +367,160 @@ pub mod suspend {
 
     /// Back in the foreground: holds may start again, and any `begin` not yet run is void.
     pub fn end() {
-        let mut g = gate();
-        g.resumes = g.resumes.wrapping_add(1);
-        g.closed = false;
+        {
+            let mut g = gate();
+            g.resumes = g.resumes.wrapping_add(1);
+            g.closed = false;
+        }
+        // Wake an `enter` still letting sends finish: it stops at once.
+        let _sends = sends();
+        SENDS_CHANGED.notify_all();
+    }
+
+    /// Outgoing work the user asked for and is not done yet: sends, Retry, edits, discards, the
+    /// outbox drain. `ids` counts the messages among them by id, for [`enter`] to report.
+    struct Sends {
+        count: usize,
+        ids: Option<HashMap<String, usize>>,
+    }
+
+    static SENDS: Mutex<Sends> = Mutex::new(Sends {
+        count: 0,
+        ids: None,
+    });
+    static SENDS_CHANGED: Condvar = Condvar::new();
+
+    fn sends() -> std::sync::MutexGuard<'static, Sends> {
+        SENDS.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// How long [`enter`] waits for a send the app's JS queued just before it left to reach
+    /// the core, when none is in flight yet. A send is `new_message_id` then `send_message`,
+    /// two bridge calls of a few milliseconds each.
+    pub const SEND_GRACE: Duration = Duration::from_millis(300);
+
+    /// One send in flight; it counts until dropped.
+    #[must_use = "the send counts only while the guard lives"]
+    pub struct SendGuard {
+        id: Option<String>,
+    }
+
+    /// Register outgoing work for [`enter`] to wait for. `id` is the message, when there is
+    /// one, so a send still out when the background time runs short can be marked unsent.
+    pub fn send_started(id: Option<&str>) -> SendGuard {
+        let mut s = sends();
+        s.count += 1;
+        if let Some(id) = id {
+            *s.ids.get_or_insert_with(HashMap::new).entry(id.to_string()).or_default() += 1;
+        }
+        SendGuard {
+            id: id.map(str::to_string),
+        }
+    }
+
+    impl Drop for SendGuard {
+        fn drop(&mut self) {
+            let mut s = sends();
+            s.count = s.count.saturating_sub(1);
+            if let (Some(id), Some(ids)) = (self.id.take(), s.ids.as_mut()) {
+                if let Some(n) = ids.get_mut(&id) {
+                    *n -= 1;
+                    if *n == 0 {
+                        ids.remove(&id);
+                    }
+                }
+            }
+            drop(s);
+            SENDS_CHANGED.notify_all();
+        }
+    }
+
+    /// Sends in flight. Diagnostics and tests.
+    pub fn sends_in_flight() -> usize {
+        sends().count
+    }
+
+    fn ids_of(s: &Sends) -> Vec<String> {
+        let mut ids: Vec<String> = s
+            .ids
+            .as_ref()
+            .map(|ids| ids.keys().cloned().collect())
+            .unwrap_or_default();
+        ids.sort();
+        ids
+    }
+
+    /// The messages whose send is still out, by id: what the database marks unsent as it
+    /// closes for a suspension.
+    pub fn unfinished_sends() -> Vec<String> {
+        ids_of(&sends())
+    }
+
+    /// Let the sends in flight finish, for at most `timeout`, while holds may still start.
+    /// `Ok` when none is left (having waited at least [`SEND_GRACE`] for one about to arrive),
+    /// `Err(ids)` with the messages still out at the deadline. `Ok` at once if the app came
+    /// back since `ticket`. Waits on a condition variable, woken by every send that ends and
+    /// by [`end`].
+    fn let_sends_finish(ticket: u64, timeout: Duration) -> Result<(), Vec<String>> {
+        let started = Instant::now();
+        let grace = SEND_GRACE.min(timeout);
+        let mut s = sends();
+        loop {
+            if gate().resumes != ticket {
+                return Ok(());
+            }
+            let elapsed = started.elapsed();
+            if s.count == 0 && elapsed >= grace {
+                return Ok(());
+            }
+            if elapsed >= timeout {
+                return Err(ids_of(&s));
+            }
+            let wait = if s.count == 0 {
+                grace - elapsed
+            } else {
+                timeout - elapsed
+            };
+            s = SENDS_CHANGED
+                .wait_timeout(s, wait)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+    }
+
+    /// What [`enter`] managed.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    pub struct Entered {
+        /// The gate is closed for this ticket and no hold is open.
+        pub drained: bool,
+        /// Messages whose send was still out when the time for sends ran out.
+        pub unfinished: Vec<String>,
+    }
+
+    /// The share of [`enter`]'s budget that sends may use; the rest drains the holds.
+    const SENDS_SHARE: (u32, u32) = (3, 4);
+
+    /// The app is going to the background with `timeout` to spare: let the sends in flight
+    /// finish (most of the budget, holds still allowed), then close the gate and drain the
+    /// holds (the rest). Does nothing if the app came back since `ticket`.
+    pub fn enter(ticket: u64, timeout: Duration) -> Entered {
+        let started = Instant::now();
+        let for_sends = timeout * SENDS_SHARE.0 / SENDS_SHARE.1;
+        let unfinished = match let_sends_finish(ticket, for_sends) {
+            Ok(()) => Vec::new(),
+            Err(ids) => {
+                crate::diag!(
+                    "[state-lock] {} send(s) still out as the app goes to the background",
+                    ids.len()
+                );
+                ids
+            }
+        };
+        let left = timeout.saturating_sub(started.elapsed());
+        Entered {
+            drained: begin(ticket, left),
+            unfinished,
+        }
     }
 
     /// Open app-side holds. Diagnostics and tests.
@@ -467,10 +633,12 @@ mod tests {
         waiter.await.unwrap().expect("acquired once the extension let go");
     }
 
-    /// One test for the whole suspend gate: it is process-global, so its cases must not run in
-    /// parallel with each other.
+    /// The suspend gate is process-global: the tests that close it run one at a time.
+    static GATE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test(flavor = "multi_thread")]
     async fn going_to_the_background_drains_holds_and_survives_a_quick_return() {
+        let _serial = GATE_TESTS.lock().await;
         let d = dir();
         let shared = SharedStateLock::new(LockPolicy::PerSection);
 
@@ -520,6 +688,117 @@ mod tests {
         assert!(suspend::is_current(new), "the newer suspension stands");
         suspend::end();
         assert!(!suspend::is_suspending());
+    }
+
+    /// A send as the core runs it: a catch-up section, a network step holding nothing, then the
+    /// seal section. Returns once all of it is done.
+    fn spawn_send(
+        shared: &Arc<SharedStateLock>,
+        data_dir: &Path,
+        id: &str,
+        network: Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        let (shared, path) = (shared.clone(), data_dir.to_path_buf());
+        // Registered before the task runs, as `send_message_with_id` does before its first await.
+        let guard = suspend::send_started(Some(id));
+        tokio::spawn(async move {
+            let _guard = guard;
+            drop(shared.acquire(&path, Duration::from_secs(1)).await.unwrap());
+            tokio::time::sleep(network).await;
+            drop(shared.acquire(&path, Duration::from_secs(1)).await.unwrap());
+        })
+    }
+
+    /// The tester's report: send, then leave the app at once. Before the fix the host closed
+    /// the gate while the send was between its sections (no hold open, so the drain returned
+    /// at once) and the seal waited for the next foreground.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_send_between_its_sections_finishes_before_the_gate_closes() {
+        let _serial = GATE_TESTS.lock().await;
+        let d = dir();
+        let shared = SharedStateLock::new(LockPolicy::PerSection);
+        let send = spawn_send(&shared, d.path(), "m1", Duration::from_millis(200));
+        // Into its network step, where it holds nothing.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let t = suspend::ticket();
+        let entered = tokio::task::spawn_blocking(move || suspend::enter(t, Duration::from_secs(5)))
+            .await
+            .unwrap();
+        assert!(send.is_finished(), "the send completed before the gate closed");
+        assert_eq!(
+            entered,
+            suspend::Entered {
+                drained: true,
+                unfinished: Vec::new()
+            }
+        );
+        assert!(suspend::is_suspending());
+        assert_eq!(suspend::sends_in_flight(), 0);
+        suspend::end();
+        send.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_send_that_outlasts_the_budget_is_reported_and_the_gate_still_closes() {
+        let _serial = GATE_TESTS.lock().await;
+        let d = dir();
+        let shared = SharedStateLock::new(LockPolicy::PerSection);
+        let send = spawn_send(&shared, d.path(), "slow", Duration::from_millis(800));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let t = suspend::ticket();
+        let started = Instant::now();
+        let entered =
+            tokio::task::spawn_blocking(move || suspend::enter(t, Duration::from_millis(400)))
+                .await
+                .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(700), "bounded by the budget");
+        assert_eq!(entered.unfinished, vec!["slow".to_string()]);
+        assert!(entered.drained, "no hold was open, so the gate closed drained");
+        assert!(suspend::is_suspending(), "0xdead10cc: the gate closes regardless");
+        // The send's seal now waits for the foreground, as it must while suspended.
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert!(!send.is_finished());
+        suspend::end();
+        send.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_send_arriving_just_after_the_background_is_waited_for() {
+        let _serial = GATE_TESTS.lock().await;
+        let d = dir();
+        let shared = SharedStateLock::new(LockPolicy::PerSection);
+        let t = suspend::ticket();
+        let entering =
+            tokio::task::spawn_blocking(move || suspend::enter(t, Duration::from_secs(5)));
+        // The JS thread's `send_message` reaches the core a moment after the host's ticket.
+        tokio::time::sleep(suspend::SEND_GRACE / 3).await;
+        let send = spawn_send(&shared, d.path(), "late", Duration::from_millis(300));
+        let entered = entering.await.unwrap();
+        assert!(send.is_finished(), "waited for although none was in flight at first");
+        assert!(entered.unfinished.is_empty());
+        suspend::end();
+        send.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn returning_while_sends_finish_never_closes_the_gate() {
+        let _serial = GATE_TESTS.lock().await;
+        let d = dir();
+        let shared = SharedStateLock::new(LockPolicy::PerSection);
+        let send = spawn_send(&shared, d.path(), "m2", Duration::from_millis(500));
+        let t = suspend::ticket();
+        let started = Instant::now();
+        let entering =
+            tokio::task::spawn_blocking(move || suspend::enter(t, Duration::from_secs(10)));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        suspend::end();
+        let entered = entering.await.unwrap();
+        assert!(started.elapsed() < Duration::from_millis(450), "woken by the return");
+        assert!(!entered.drained);
+        assert!(!suspend::is_suspending(), "a stale suspension never closes the gate");
+        send.await.unwrap();
     }
 
     #[tokio::test]

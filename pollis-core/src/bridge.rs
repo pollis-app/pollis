@@ -236,8 +236,9 @@ fn ios_bootstrap() -> Result<(), BridgeError> {
 static PARKED_DB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// Close the app's database within `budget`, never blocking past it: the connection is taken
-/// only when no command is using it (a `try_lock` loop, not an `.await`). Checkpoints the WAL
-/// first. Returns the user it was open for, or `Err(())` if it could not be taken in time.
+/// only when no command is using it (a `try_lock` loop, not an `.await`). Marks the sends still
+/// out unsent and checkpoints the WAL first. Returns the user it was open for, or `Err(())` if
+/// it could not be taken in time.
 fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Option<String>, ()> {
     let deadline = std::time::Instant::now() + budget;
     loop {
@@ -245,6 +246,15 @@ fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Opt
             let Some(db) = slot.take() else {
                 return Ok(None);
             };
+            // A send iOS did not leave time for waits, frozen, for the foreground; until a
+            // drain delivers it the row says "Not sent" rather than looking sent.
+            let unfinished = crate::notify::lock::suspend::unfinished_sends();
+            if !unfinished.is_empty() {
+                match crate::commands::messages::mark_suspended_sends_on(db.conn(), &unfinished) {
+                    Ok(n) => crate::diag!("[suspend] {n} send(s) left unsent for the foreground"),
+                    Err(e) => crate::diag!("[suspend] could not mark unfinished sends: {e}"),
+                }
+            }
             if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
                 crate::diag!("[suspend] wal checkpoint before suspension failed (non-fatal): {e}");
             }
@@ -261,6 +271,16 @@ fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Opt
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+}
+
+/// The app is entering the background (`pollis_app_will_suspend`), with `timeout` of iOS
+/// background time to use: let the sends in flight finish, close the state-lock gate and drain
+/// the holds ([`crate::notify::lock::suspend::enter`]), then close the database
+/// ([`quiesce_for_suspend`]). True when nothing is held afterwards.
+pub(crate) fn prepare_for_suspend(ticket: u64, timeout: std::time::Duration) -> bool {
+    let entered = crate::notify::lock::suspend::enter(ticket, timeout);
+    let closed = quiesce_for_suspend(ticket);
+    entered.drained && closed
 }
 
 /// #1599, iOS `0xdead10cc`: once the state-lock gate for `ticket` is closed and drained, close
@@ -296,7 +316,9 @@ pub(crate) fn force_release_for_suspend(ticket: u64) {
     let Some(state) = APP_STATE.get().cloned() else {
         return;
     };
-    if !crate::notify::lock::suspend::is_current(ticket) {
+    // Sends may still be finishing with the gate open: close it now, so nothing retakes the
+    // lock or reopens the database before the suspension.
+    if !crate::notify::lock::suspend::close(ticket) {
         return;
     }
     state.state_lock.force_release();
@@ -336,6 +358,12 @@ pub(crate) fn reopen_parked_db() {
         return;
     };
     let mut parked = PARKED_DB.lock().unwrap_or_else(|p| p.into_inner());
+    // Still in the background (a command the JS ran after the database closed, or a resume
+    // overtaken by the next background): reopening now would leave the app suspended with
+    // the connection open. The resume reopens it.
+    if crate::notify::lock::suspend::is_suspending() {
+        return;
+    }
     let Some(user) = parked.take() else {
         return;
     };
@@ -431,7 +459,7 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
 async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeError> {
     // Back from the background before the off-thread reopen ran (#1599): reopen here, on this
     // worker, so the command sees its database.
-    if db_parked() {
+    if db_parked() && !crate::notify::lock::suspend::is_suspending() {
         tokio::task::spawn_blocking(reopen_parked_db).await.ok();
     }
     let args: Value = if args_json.trim().is_empty() {

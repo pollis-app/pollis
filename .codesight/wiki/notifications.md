@@ -538,13 +538,28 @@ Android FCM handler both call one plain C function in `pollis-core`
   deadline of 40% of its budget, and only for the ingest (it lets go before
   the name and mute lookups). On iOS the host takes
   `pollis_app_suspend_ticket` on entering the background, then calls
-  `pollis_app_will_suspend(ticket, ms)` (no new holds, drain the open ones,
-  checkpoint and close the SQLCipher connection, whose WAL holds `-shm` locks)
-  and `pollis_app_did_resume` (reopen), from
-  `mobile/modules/pollis-native/ios/PollisStateLockLifecycle.mm`, so the app
-  never sits suspended holding a lock in the App Group (`0xdead10cc`). A
-  ticket older than the last resume does nothing. The extension closes its
-  connection before returning.
+  `pollis_app_will_suspend(ticket, ms)` and `pollis_app_did_resume` (reopen),
+  from `mobile/modules/pollis-native/ios/PollisStateLockLifecycle.mm`, so the
+  app never sits suspended holding a lock in the App Group (`0xdead10cc`).
+  `will_suspend` (`suspend::enter` + `bridge::quiesce_for_suspend`) runs in
+  two phases. First, for ¾ of `ms`, the sends in flight finish with holds
+  still allowed. Every send, Retry, edit, discard and outbox drain registers
+  with `suspend::send_started` before its first await, and a 300 ms grace
+  covers a send that reaches the core just after the notification. Then no
+  new holds start, the open ones drain, and the SQLCipher connection (whose
+  WAL holds `-shm` locks) is checkpointed and closed. A send still out at that
+  point is marked `failed`, so its row reads "Not sent", and it waits frozen
+  for the foreground. The resume, relaunch or reconnect drain delivers it.
+  #1678: a send drops and retakes the hold between its network steps, so
+  before that change a gate closed in such a gap left the message unsent,
+  and looking sent, until the app was reopened. `ms` comes from
+  `backgroundTimeRemaining` (at most 25 s). The expiration handler closes the
+  gate itself, so it works in either phase. No command reopens the database
+  while the gate is closed. A ticket older than the last resume does nothing.
+  Android never closes the gate. The extension closes its connection before
+  returning. Tests: `notify::lock::tests` (`a_send_between_its_sections_…`,
+  `…_outlasts_the_budget_…`, `…_arriving_just_after_…`, `returning_while_…`)
+  and `outbox::tests::a_send_frozen_by_the_suspension_…`.
 - **iOS data dir + keychain.** `pollis_set_data_dir_override` (App Group
   container) relocates the data dir without changing the keystore namespace,
   and `init_pollis` moves the old `Application Support/pollis` there once

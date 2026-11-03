@@ -574,6 +574,20 @@ pub(super) fn mark_state_on(conn: &rusqlite::Connection, id: &str, send_state: &
     Ok(())
 }
 
+/// The app is being suspended with these sends still out: mark the ones still `pending`
+/// `failed`, so the row reads "Not sent" until a drain (resume, relaunch, reconnect) delivers
+/// it. A delivered or already-failed row is left alone. Returns how many were marked.
+pub(crate) fn mark_suspended_sends_on(conn: &rusqlite::Connection, ids: &[String]) -> Result<usize> {
+    let mut marked = 0;
+    for id in ids {
+        marked += conn.execute(
+            "UPDATE message SET send_state = ?1 WHERE id = ?2 AND send_state = ?3",
+            rusqlite::params![FAILED, id, PENDING],
+        )?;
+    }
+    Ok(marked)
+}
+
 /// Unsent message ids the drain should try, oldest first; `rejected` ones excluded.
 pub(super) fn unsent_ids_on(conn: &rusqlite::Connection) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
@@ -846,6 +860,7 @@ pub(super) async fn deliver(
     id: &str,
     sender_username: Option<String>,
 ) -> Result<Message> {
+    let _sending = crate::notify::lock::suspend::send_started(Some(id));
     let position = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
@@ -1086,6 +1101,8 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
 /// Deliver one unsent message again — the renderer's Retry (#1335). Naming a
 /// delivered message whose edit is still queued delivers that edit (#1555).
 pub async fn retry_message(message_id: String, state: &Arc<AppState>) -> Result<Message> {
+    // Finished before the app is suspended, if iOS gives it the time (`notify::lock::suspend`).
+    let _sending = crate::notify::lock::suspend::send_started(Some(&message_id));
     if !is_unsent(state, &message_id).await?
         && super::edit_outbox::has_pending_edit(state, &message_id).await?
     {
@@ -1106,6 +1123,7 @@ pub async fn retry_message(message_id: String, state: &Arc<AppState>) -> Result<
 /// Returns `false` when there was nothing to discard: the id is unknown, or the
 /// message was delivered (a delivered message is deleted with `delete_message`).
 pub async fn discard_unsent_message(message_id: String, state: &Arc<AppState>) -> Result<bool> {
+    let _sending = crate::notify::lock::suspend::send_started(None);
     let lock = OutboxLock::acquire(state, &message_id).await;
     let result = discard_locked(state, &message_id).await;
     lock.release().await;
@@ -1183,6 +1201,9 @@ pub struct OutboxReport {
 /// Single-flight: a call during a drain sets `outbox_rerun` instead of overlapping. Nothing retries in a loop.
 pub async fn flush_outbox(state: &Arc<AppState>) -> Result<OutboxReport> {
     use std::sync::atomic::Ordering;
+    // The whole drain, so the gaps between its messages do not count as idle; each message
+    // also counts by id while `deliver` has it.
+    let _sending = crate::notify::lock::suspend::send_started(None);
     let mut last = match state.outbox_drain.try_lock() {
         Ok(guard) => guard,
         Err(_) => {
@@ -1456,6 +1477,25 @@ mod tests {
 
     /// Failing only ever applies to an unsent row; a delivered one stays
     /// delivered.
+    #[test]
+    fn a_send_frozen_by_the_suspension_reads_unsent_and_stays_queued() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let (out, sent, refused) = (new_message_id(), new_message_id(), new_message_id());
+        for id in [&out, &sent, &refused] {
+            enqueue_on(conn, &queued(id, "x"), &[]).unwrap();
+        }
+        conn.execute("UPDATE message SET send_state = NULL WHERE id = ?1", [&sent]).unwrap();
+        mark_state_on(conn, &refused, REJECTED).unwrap();
+        let ids = vec![out.clone(), sent.clone(), refused.clone(), "unknown".to_string()];
+        assert_eq!(mark_suspended_sends_on(conn, &ids).unwrap(), 1);
+        assert_eq!(send_state(conn, &out).as_deref(), Some(FAILED), "shows Not sent");
+        assert_eq!(send_state(conn, &sent), None, "a delivered row is never demoted");
+        assert_eq!(send_state(conn, &refused).as_deref(), Some(REJECTED));
+        // Still queued: the resume or next launch's drain delivers it.
+        assert_eq!(unsent_ids_on(conn).unwrap(), vec![out]);
+    }
+
     #[test]
     fn mark_failed_never_demotes_a_delivered_message() {
         let db = LocalDb::open_in_memory().unwrap();

@@ -118,7 +118,7 @@ pub(crate) use send::direct_mentions;
 pub use outbox::{
     discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,
 };
-pub(crate) use outbox::{spawn_outbox_flush, sweep_orphan_attachments_on};
+pub(crate) use outbox::{mark_suspended_sends_on, spawn_outbox_flush, sweep_orphan_attachments_on};
 pub use outbox::OutgoingAttachment;
 pub use outbox::Enqueuing;
 
