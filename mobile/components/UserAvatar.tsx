@@ -5,6 +5,7 @@ import { Avatar } from "./ui";
 import { semantic, r } from "../theme/tokens";
 import { avatarStore } from "../lib/avatarCache";
 import { renditionFor } from "../lib/avatarKey";
+import { reportAvatarPhoto } from "../lib/avatarRenderState";
 
 type Size = "sm" | "md" | "lg" | number;
 
@@ -76,6 +77,15 @@ export function UserAvatar({
   const px = renditionFor(dim * PixelRatio.get());
   const uri = useAvatarUri(userId, avatarKey, px);
   const radius = shape === "rounded" ? r.lg : dim / 2;
+  const drawsPhoto = !!uri && !!userId;
+
+  // For Maestro: a row is one accessible element on iOS, so `<Screen>`'s AvatarProbe re-draws this tag.
+  useEffect(() => {
+    if (!drawsPhoto || !testID) {
+      return;
+    }
+    return reportAvatarPhoto(testID);
+  }, [drawsPhoto, testID]);
 
   if (!uri || !userId) {
     return (

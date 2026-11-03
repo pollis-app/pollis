@@ -330,3 +330,16 @@ test("every surface that names a person draws their picture", () => {
   assert.match(src("app/chat/thread.tsx"), /senderId=\{m\.sender_id\}/);
   assert.match(src("app/chat/[id].tsx"), /senderAvatarKey=\{avatarKeyById\.get\(m\.sender_id\)\}/);
 });
+
+test("a tagged photo reaches the screen probe until it unmounts", async () => {
+  const { reportAvatarPhoto, avatarPhotosShowing } = await import("../lib/avatarRenderState.ts");
+  const a = reportAvatarPhoto("row-message-1-avatar");
+  const b = reportAvatarPhoto("row-message-1-avatar");
+  assert.deepEqual(avatarPhotosShowing(), ["row-message-1-avatar"]);
+  a();
+  a();
+  assert.deepEqual(avatarPhotosShowing(), ["row-message-1-avatar"], "a double withdrawal counts once");
+  b();
+  assert.deepEqual(avatarPhotosShowing(), []);
+  assert.match(src("components/ui.tsx"), /<AvatarProbe \/>/);
+});
