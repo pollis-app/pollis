@@ -43,6 +43,11 @@ export async function getDiagnostics(): Promise<string> {
   return invoke<string>('get_diagnostics');
 }
 
+/** Writes the whole diagnostics report to `path`, which must come from the save panel (#1305). */
+export async function saveDiagnostics(path: string): Promise<void> {
+  await invoke('save_diagnostics', { path });
+}
+
 export async function verifyOTP(email: string, code: string): Promise<AuthResult> {
   const profile = await invoke<RawUserProfile>('verify_otp', { email, code });
   return rawProfileToAuthResult(profile, false);

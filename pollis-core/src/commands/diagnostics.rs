@@ -15,3 +15,11 @@ pub fn get_diagnostics(app_version: Option<String>) -> String {
         if log.is_empty() { "(no log recorded on this device)\n".to_string() } else { log },
     )
 }
+
+/// Writes the same report to `path`, a file the user picked in the save panel, so the whole log
+/// can leave the device as a file instead of one huge clipboard string. Local-only.
+pub fn save_diagnostics(path: String, app_version: Option<String>) -> crate::error::Result<()> {
+    std::fs::write(&path, get_diagnostics(app_version))
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("could not write the diagnostics file: {e}")))?;
+    Ok(())
+}

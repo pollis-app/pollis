@@ -64,3 +64,32 @@ tags:
 - tapOn:
     id: "btn-copy-diagnostics"
 - assertVisible: "Copied to clipboard"
+
+# --- 3. Save as file: the whole log goes to the system share sheet as a .txt ---
+- assertVisible:
+    id: "btn-save-diagnostics"
+- tapOn:
+    id: "btn-save-diagnostics"
+# The share sheet is the system's; it opening means a file was handed over. Its
+# look differs per OS version, so close it rather than asserting its copy.
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: diagnostics-03-share-sheet
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: "Close"
+          optional: true
+      - swipe:
+          direction: DOWN
+          optional: true
+- assertVisible:
+    id: "screen-self-diagnostics"
+- assertNotVisible: "Could not save — try again"

@@ -2,15 +2,17 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { CopyDiagnosticsButton } from "../components/Diagnostics/CopyDiagnosticsButton";
+import { SaveDiagnosticsButton } from "../components/Diagnostics/SaveDiagnosticsButton";
+import { recentReport, type RecentReport } from "../utils/diagnosticsReport";
 import * as api from "../services/api";
 import { errorMessage } from "../utils/errorMessage";
 
 /// The on-device diagnostics log (#1305): what it holds, what it never holds,
-/// and the exact text "Copy diagnostics" would put on the clipboard — shown in
-/// full, so nobody has to take the description on trust.
+/// and the exact text "Copy diagnostics" would put on the clipboard (the newest
+/// part), so nobody has to take the description on trust. "Save as file" writes it all.
 export const DiagnosticsPage: React.FC = () => {
   const { t } = useTranslation("settings");
-  const [report, setReport] = useState<string | null>(null);
+  const [report, setReport] = useState<RecentReport | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -19,7 +21,7 @@ export const DiagnosticsPage: React.FC = () => {
       .getDiagnostics()
       .then((text) => {
         if (!cancelled) {
-          setReport(text);
+          setReport(recentReport(text));
         }
       })
       .catch((err) => {
@@ -38,19 +40,25 @@ export const DiagnosticsPage: React.FC = () => {
         <div className="w-full max-w-2xl flex flex-col gap-4 font-mono text-xs">
           <p className="text-fg">{t("diagnostics.intro")}</p>
           <p className="text-dim">{t("diagnostics.privacy")}</p>
-          <div>
+          <div className="flex flex-wrap gap-2">
             <CopyDiagnosticsButton size="md" variant="primary" />
+            <SaveDiagnosticsButton />
           </div>
           {loadError && (
             <p data-testid="diagnostics-error" className="text-danger">
               {loadError}
             </p>
           )}
+          {report && report.omitted > 0 && (
+            <p data-testid="diagnostics-trimmed" className="text-dim">
+              {t("diagnostics.trimmed", { count: report.omitted })}
+            </p>
+          )}
           <pre
             data-testid="diagnostics-preview"
             className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-control border border-line bg-surface p-3 text-dim"
           >
-            {report ?? t("common:states.loading")}
+            {report?.text ?? t("common:states.loading")}
           </pre>
         </div>
       </div>
