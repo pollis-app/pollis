@@ -2,12 +2,13 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { dialogSave } from "../../bridge";
 import * as api from "../../services/api";
+import { Download } from "lucide-react";
 import { Button } from "../ui/Button";
 import { diagnosticsFileName } from "../../utils/diagnosticsReport";
 
 type SaveState = "idle" | "saved" | "failed";
 
-/// Saves the whole on-device diagnostics log (#1305) as a .txt where the user picks; nothing is sent.
+/// "Download": saves the whole on-device diagnostics log (#1305) as a .txt where the user picks; nothing is sent.
 export const SaveDiagnosticsButton: React.FC = () => {
   const { t } = useTranslation("settings");
   const [state, setState] = useState<SaveState>("idle");
@@ -48,6 +49,7 @@ export const SaveDiagnosticsButton: React.FC = () => {
       isLoading={busy}
       onClick={save}
     >
+      <Download size={14} aria-hidden="true" />
       {label}
     </Button>
   );

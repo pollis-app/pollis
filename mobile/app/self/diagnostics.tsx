@@ -41,12 +41,18 @@ export default function Diagnostics() {
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.lg }}>
         <Text style={ty.body}>{t("diagnostics.intro")}</Text>
         <Text style={[ty.secondary, { color: semantic.dim }]}>{t("diagnostics.privacy")}</Text>
-        <CopyDiagnosticsButton variant="primary" full />
-        <SaveDiagnosticsButton />
+        <View style={{ flexDirection: "row", gap: space.md }}>
+          <View style={{ flex: 1 }}>
+            <CopyDiagnosticsButton variant="primary" full short />
+          </View>
+          <View style={{ flex: 1 }}>
+            <SaveDiagnosticsButton />
+          </View>
+        </View>
         {loadError ? <ErrorText>{loadError}</ErrorText> : null}
         {report && report.omitted > 0 ? (
           <Text testID="text-diagnostics-trimmed" style={[ty.secondary, { color: semantic.dim }]}>
-            {t("diagnostics.trimmed", { count: report.omitted })}
+            {t("diagnostics.trimmed")}
           </Text>
         ) : null}
         <View

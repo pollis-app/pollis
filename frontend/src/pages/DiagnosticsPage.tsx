@@ -40,8 +40,8 @@ export const DiagnosticsPage: React.FC = () => {
         <div className="w-full max-w-2xl flex flex-col gap-4 font-mono text-xs">
           <p className="text-fg">{t("diagnostics.intro")}</p>
           <p className="text-dim">{t("diagnostics.privacy")}</p>
-          <div className="flex flex-wrap gap-2">
-            <CopyDiagnosticsButton size="md" variant="primary" />
+          <div className="flex gap-2">
+            <CopyDiagnosticsButton size="md" variant="primary" short />
             <SaveDiagnosticsButton />
           </div>
           {loadError && (
@@ -51,7 +51,7 @@ export const DiagnosticsPage: React.FC = () => {
           )}
           {report && report.omitted > 0 && (
             <p data-testid="diagnostics-trimmed" className="text-dim">
-              {t("diagnostics.trimmed", { count: report.omitted })}
+              {t("diagnostics.trimmed")}
             </p>
           )}
           <pre

@@ -5,15 +5,15 @@ import { Icon } from "../icons";
 import { semantic } from "../../theme/tokens";
 import { saveDiagnostics } from "../../lib/diagnostics";
 
-/** Offers the whole diagnostics log (#1305) as a .txt through the share sheet; sends nothing itself. */
+/** "Download": the whole diagnostics log (#1305) as a .txt through the share sheet; sends nothing itself. */
 export function SaveDiagnosticsButton() {
   const { t } = useTranslation("settings");
-  const [failed, setFailed] = useState(false);
+  const [state, setState] = useState<"idle" | "saved" | "failed">("idle");
   const [busy, setBusy] = useState(false);
 
   const onPress = async () => {
     setBusy(true);
-    setFailed(!(await saveDiagnostics(t("diagnostics.save"))));
+    setState((await saveDiagnostics(t("diagnostics.save"))) ? "saved" : "failed");
     setBusy(false);
   };
 
@@ -26,7 +26,7 @@ export function SaveDiagnosticsButton() {
       onPress={() => void onPress()}
       icon={<Icon.download size={16} color={semantic.text} />}
     >
-      {failed ? t("diagnostics.saveFailed") : t("diagnostics.save")}
+      {state === "saved" ? t("diagnostics.saved") : state === "failed" ? t("diagnostics.saveFailed") : t("diagnostics.save")}
     </Button>
   );
 }

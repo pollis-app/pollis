@@ -706,7 +706,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 ### `components/Diagnostics` (2)
 
-- **CopyDiagnosticsButton** — props: size, variant, className — `frontend/src/components/Diagnostics/CopyDiagnosticsButton.tsx`
+- **CopyDiagnosticsButton** — props: size, variant, className, short — `frontend/src/components/Diagnostics/CopyDiagnosticsButton.tsx`
 - **SaveDiagnosticsButton** — `frontend/src/components/Diagnostics/SaveDiagnosticsButton.tsx`
 
 ### `components/Emoji` (9)
