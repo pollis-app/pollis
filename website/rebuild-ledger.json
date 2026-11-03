@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-03T15:48:49Z",
+  "generated_at": "2026-11-03T16:16:49Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
@@ -18,7 +18,7 @@
     },
     {
       "tag": "v1.18.1",
-      "conclusion": "failure",
+      "conclusion": "success",
       "created_at": "2026-10-31T21:28:53Z",
       "event": "workflow_run",
       "run_id": "41243777213",
