@@ -693,8 +693,10 @@ export function Avatar({
   variant = "default",
   shape = "circle",
   style,
+  testID,
 }: {
   label?: string;
+  testID?: string;
   // sm 30 · md 40 · lg 64, or an explicit size in points.
   size?: "sm" | "md" | "lg" | number;
   variant?: "default" | "self" | "amber" | "solid";
@@ -711,6 +713,7 @@ export function Avatar({
     : null;
   return (
     <View
+      testID={testID}
       accessible={false}
       importantForAccessibility="no-hide-descendants"
       style={[

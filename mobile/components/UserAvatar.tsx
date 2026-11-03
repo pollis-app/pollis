@@ -79,9 +79,14 @@ export function UserAvatar({
 
   if (!uri || !userId) {
     return (
-      <View testID={testID ? `${testID}-letter` : undefined} style={style}>
-        <Avatar label={label} size={dim} variant={variant} shape={shape} />
-      </View>
+      <Avatar
+        testID={testID ? `${testID}-letter` : undefined}
+        label={label}
+        size={dim}
+        variant={variant}
+        shape={shape}
+        style={style}
+      />
     );
   }
   return (
