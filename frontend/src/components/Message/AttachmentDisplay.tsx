@@ -7,7 +7,7 @@ import { Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
-import { getMediaUrl, mediaArgs } from "../../services/r2-upload";
+import { getMediaUrl, mediaArgs, peekMediaUrl } from "../../services/r2-upload";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
@@ -91,8 +91,11 @@ export const AttachmentDisplay = observer(({
     ? { width: "100%", height: "100%" }
     : thumbBox;
 
+  // An already-resolved URL draws on the first render (a remount: Vault tab switch, scroll back).
   const [downloadUrl, setDownloadUrl] = useState<string | null>(
-    attachment.localPreviewUrl ?? null
+    () =>
+      attachment.localPreviewUrl ??
+      ((isImage || isAudio) && attachment.object_key ? peekMediaUrl(attachment) : null)
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
