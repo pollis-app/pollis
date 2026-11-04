@@ -1,0 +1,102 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# WHO REACTED (#1684), part 2 of 2. The peer has sent "react to this one" and
+# reacted to it with 👍 and 🎉. This device:
+#   - adds its own 👍 with a SHORT tap on the pill (the toggle must still work),
+#   - LONG-presses the 👍 pill: the who-reacted sheet opens on the 👍 tab, and
+#     the message's own action sheet does not,
+#   - finds both accounts under 👍 (itself marked "(you)") and only the peer
+#     under 🎉, then the All tab.
+# The script then waits for the peer to see this device's 👍.
+# No relaunch: the session from part 1 is still on screen.
+
+# Leave and re-open the conversation so its ingest runs whether or not a
+# realtime wake arrived. (On iPad the chat is the Direct tab's right pane: no back.)
+- runFlow:
+    when:
+      visible:
+        id: "btn-back"
+    commands:
+      - tapOn:
+          id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: ".*: react to this one, .*"
+    timeout: 60000
+# Reactions are read per loaded message after the timeline lands.
+- extendedWaitUntil:
+    visible:
+      id: "pill-reaction-.*-👍"
+    timeout: 30000
+
+# ── A short tap still toggles: this device adds its own 👍 ─────────────
+- tapOn:
+    id: "pill-reaction-.*-👍"
+- extendedWaitUntil:
+    visible: "👍 2 reactions, you reacted"
+    timeout: 15000
+- takeScreenshot: reaction-breakdown-00-pills
+
+# ── Long press: the who-reacted sheet, on the 👍 tab ────────────────────
+- longPressOn:
+    id: "pill-reaction-.*-👍"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-reaction-breakdown"
+    timeout: 8000
+# The pill took the touch: the message's action sheet must not open too.
+- assertNotVisible:
+    id: "btn-react-0"
+- assertVisible:
+    id: "tab-reaction-👍"
+    selected: true
+- assertVisible: "All, 3 reactions"
+- assertVisible: "👍, 2 reactions"
+- assertVisible: "🎉, 1 reaction"
+- extendedWaitUntil:
+    visible: "${MAESTRO_PEER_HANDLE}, reacted with 👍"
+    timeout: 15000
+- assertVisible: ".* \\(you\\), reacted with 👍"
+- takeScreenshot: reaction-breakdown-01-thumbs
+
+# ── 🎉: only the peer ──────────────────────────────────────────────────
+- tapOn:
+    id: "tab-reaction-🎉"
+- assertVisible:
+    id: "tab-reaction-🎉"
+    selected: true
+- assertVisible: "${MAESTRO_PEER_HANDLE}, reacted with 🎉"
+- assertNotVisible: ".* \\(you\\), reacted with .*"
+- takeScreenshot: reaction-breakdown-02-tada
+
+# ── All: each person once, with the emojis they used ────────────────────
+- tapOn:
+    id: "tab-reaction-all"
+- assertVisible: "${MAESTRO_PEER_HANDLE}, reacted with (👍 🎉|🎉 👍)"
+- assertVisible: ".* \\(you\\), reacted with 👍"
+- takeScreenshot: reaction-breakdown-03-all
+
+# ── Drag the tab strip up: the sheet expands and stays open ─────────────
+- swipe:
+    from:
+      id: "tab-reaction-all"
+    direction: UP
+    duration: 600
+- assertVisible:
+    id: "sheet-reaction-breakdown"
+- takeScreenshot: reaction-breakdown-04-expanded
+
+# ── Close ───────────────────────────────────────────────────────────────
+- tapOn:
+    id: "btn-reaction-breakdown-close"
+- assertNotVisible:
+    id: "sheet-reaction-breakdown"

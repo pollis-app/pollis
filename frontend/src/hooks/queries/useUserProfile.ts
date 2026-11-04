@@ -49,6 +49,43 @@ export function useOtherUserProfile(userId: string | null | undefined) {
   });
 }
 
+export interface PublicProfileRow {
+  id: string;
+  username?: string | null;
+  preferred_name?: string | null;
+  avatar_url?: string | null;
+}
+
+/**
+ * Many users' public profiles in ONE `get_user_profiles` round trip (no per-user
+ * `get_user_profile` fan-out); unknown ids are simply absent. Each row also seeds
+ * `otherProfile`, so avatars drawn later need no read of their own.
+ */
+export function useUserProfiles(userIds: readonly string[], enabled = true) {
+  const queryClient = useQueryClient();
+  const sorted = useMemo(() => [...new Set(userIds)].sort(), [userIds]);
+  return useQuery({
+    queryKey: ["user", "public-profiles", sorted.join("|")] as const,
+    queryFn: async (): Promise<Map<string, PublicProfileRow>> => {
+      const rows = await invoke<PublicProfileRow[]>("get_user_profiles", { userIds: sorted });
+      const map = new Map<string, PublicProfileRow>();
+      for (const row of rows ?? []) {
+        map.set(row.id, row);
+        queryClient.setQueryData(userQueryKeys.otherProfile(row.id), {
+          id: row.id,
+          username: row.username ?? "",
+          preferred_name: row.preferred_name ?? undefined,
+          avatar_url: row.avatar_url ?? undefined,
+        });
+      }
+      return map;
+    },
+    enabled: enabled && sorted.length > 0,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 5,
+  });
+}
+
 export interface SafetyNumberInfo {
   safety_number: string;
   status: "unverified" | "verified" | "changed";

@@ -144,3 +144,32 @@ export function useRemoveAvatar() {
     },
   });
 }
+
+export interface ProfileRow {
+  id: string;
+  username?: string | null;
+  preferred_name?: string | null;
+  avatar_url?: string | null;
+}
+
+/**
+ * Many users' profiles in ONE `get_user_profiles` round trip (the batch the avatar
+ * store uses); unknown ids are simply absent. Off while `ids` is empty.
+ */
+export function useUserProfiles(ids: readonly string[]) {
+  const sorted = [...new Set(ids)].sort();
+  return useQuery({
+    queryKey: ["user", "profiles", sorted.join("|")] as const,
+    queryFn: async (): Promise<Map<string, ProfileRow>> => {
+      const rows = await invoke<ProfileRow[]>("get_user_profiles", { userIds: sorted });
+      const map = new Map<string, ProfileRow>();
+      for (const row of rows ?? []) {
+        map.set(row.id, row);
+      }
+      return map;
+    },
+    enabled: sorted.length > 0,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 5,
+  });
+}

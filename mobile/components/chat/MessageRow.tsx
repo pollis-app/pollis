@@ -56,6 +56,7 @@ export function MessageRow({
   reactions,
   currentUserId,
   onToggleReaction,
+  onShowReactions,
   receipt,
   peerCount = 0,
   showReceipt = false,
@@ -97,6 +98,8 @@ export function MessageRow({
   reactions?: Reaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string, reacted: boolean) => void;
+  // Who reacted with `emoji` (long press on a pill, or the row's a11y action).
+  onShowReactions?: (emoji: string) => void;
   receipt?: MessageReceipts;
   peerCount?: number;
   showReceipt?: boolean;
@@ -184,6 +187,9 @@ export function MessageRow({
     ...(failed && onDiscard ? [{ name: "discardSend", label: t("outbox.discardLabel") }] : []),
     ...(onPressReplyQuote ? [{ name: "openReply", label: t("replyBar.scrollToMessage") }] : []),
     ...(onPressAvatar ? [{ name: "viewProfile", label: t("mobile:chat.viewProfile") }] : []),
+    ...(onShowReactions && reactions && reactions.length > 0
+      ? [{ name: "viewReactions", label: t("reactions.viewWho") }]
+      : []),
     ...openableAttachments.map((a, i) => ({
       name: `openAttachment${i}`,
       label: t("attachment.openLabel", { filename: a.filename }),
@@ -220,6 +226,11 @@ export function MessageRow({
           }
           if (action === "viewProfile") {
             onPressAvatar?.();
+          } else if (action === "viewReactions") {
+            const first = reactions?.[0];
+            if (first) {
+              onShowReactions?.(first.emoji);
+            }
           } else if (action.startsWith("openAttachment")) {
             const target = openableAttachments[Number(action.slice("openAttachment".length))];
             if (target) {
@@ -416,6 +427,7 @@ export function MessageRow({
                 reactions={reactions}
                 currentUserId={currentUserId}
                 onToggle={onToggleReaction}
+                onShowWho={onShowReactions}
               />
             ) : null}
             {threadCount > 0 && onOpenThread ? (

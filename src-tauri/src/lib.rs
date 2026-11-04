@@ -427,6 +427,7 @@ pub fn run() {
             commands::relay_serving::get_relay_serving_status,
             commands::relay_serving::set_relay_serving,
             commands::user::get_user_profile,
+            commands::user::get_user_profiles,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,
             commands::user::get_preferences,

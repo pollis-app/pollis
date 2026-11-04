@@ -71,7 +71,19 @@
   },
   "reactions": {
     "add": "添加表情回应",
-    "pillLabel_other": "{{emoji}} {{count}} 个回应"
+    "all": "全部",
+    "allTabLabel_other": "全部，{{count}} 个回应",
+    "contextHint": "右键点击查看谁回应了",
+    "hoverMore_other": "{{names}} 和另外 {{count}} 人回应了 {{emoji}}",
+    "hoverNames": "{{names}} 回应了 {{emoji}}",
+    "pillLabel_other": "{{emoji}} {{count}} 个回应",
+    "rowLabel": "{{name}}，回应了 {{emojis}}",
+    "selfName": "{{name}}（你）",
+    "sheetTitle": "回应",
+    "tabLabel_other": "{{emoji}}，{{count}} 个回应",
+    "unknownUser": "未知用户",
+    "viewWho": "查看回应",
+    "you": "你"
   },
   "preview": {
     "noMessages": "还没有消息",

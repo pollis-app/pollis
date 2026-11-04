@@ -117,6 +117,7 @@
       "get_unlock_state",
       "get_unread_counts",
       "get_user_profile",
+      "get_user_profiles",
       "get_vault_messages",
       "ingest_channel_envelopes",
       "ingest_dm_envelopes",

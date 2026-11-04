@@ -1272,7 +1272,11 @@ Current state:
 - **Chat parity set (2026-08, stacked PRs; bridge arms land in PR #967):**
   load-older paging (`useMessages` is an infinite query over `next_cursor`;
   inverted FlatList, `onEndReached`); reaction pills + full emoji picker
-  (`get_reactions` batched per conversation in one queryFn; generated
+  (`get_reactions` batched per conversation in one queryFn; a long press on a
+  pill opens `components/chat/ReactionBreakdownSheet.tsx`, who reacted with
+  what, #1684 — tabs and rows from `lib/reactionBreakdown.ts`, names from the
+  roster then one `get_user_profiles`, Maestro
+  `scripts/maestro-reaction-breakdown.sh`; generated
   `components/emoji/emojiData.ts` — regenerate with
   `scripts/generate-emoji-data.py`, which writes frontend + mobile together);
   custom group emoji (`list_usable_emoji` / `list_group_emoji` /

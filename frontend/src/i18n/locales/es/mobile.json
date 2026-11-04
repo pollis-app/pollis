@@ -544,5 +544,8 @@
     "title": "Usuario",
     "unblockUser": "Desbloquear usuario",
     "verified": "◆ Verificado"
+  },
+  "reactions": {
+    "pillHint": "Mantén pulsado para ver quién reaccionó"
   }
 }

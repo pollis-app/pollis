@@ -4,9 +4,11 @@ import { fonts, semantic, type as ty, r } from "../../theme/tokens";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import { splitEmojiSegments } from "../emoji/emojiTokens";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
+import { haptic } from "../../lib/haptics";
+import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 
 /** A reaction's emoji is a Unicode emoji or a `<:name:hash>` custom token. */
-function ReactionFace({ emoji }: { emoji: string }) {
+export function ReactionFace({ emoji, size = 18 }: { emoji: string; size?: number }) {
   const segments = splitEmojiSegments(emoji);
   const first = segments[0];
   if (segments.length === 1 && first.kind === "emoji") {
@@ -14,11 +16,11 @@ function ReactionFace({ emoji }: { emoji: string }) {
       <CustomEmojiImage
         shortcode={first.shortcode}
         contentHash={first.contentHash}
-        size={18}
+        size={size}
       />
     );
   }
-  return <Text style={{ fontSize: 16 }}>{emoji}</Text>;
+  return <Text style={{ fontSize: size - 2 }}>{emoji}</Text>;
 }
 
 export function ReactionPills({
@@ -26,11 +28,14 @@ export function ReactionPills({
   reactions,
   currentUserId,
   onToggle,
+  onShowWho,
 }: {
   messageId: string;
   reactions: Reaction[];
   currentUserId?: string;
   onToggle: (emoji: string, reacted: boolean) => void;
+  // Long press: who reacted (the breakdown sheet). The pill is the responder, so the row's own long press never fires.
+  onShowWho?: (emoji: string) => void;
 }) {
   const { t } = useTranslation("chat");
   if (reactions.length === 0) {
@@ -66,7 +71,26 @@ export function ReactionPills({
                     count: reaction.count,
                   })
             }
+            accessibilityHint={onShowWho ? t("mobile:reactions.pillHint") : undefined}
+            accessibilityActions={
+              onShowWho ? [{ name: "longpress", label: t("reactions.viewWho") }] : undefined
+            }
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === "longpress") {
+                onShowWho?.(reaction.emoji);
+              }
+            }}
             onPress={() => onToggle(reaction.emoji, reacted)}
+            onLongPress={
+              onShowWho
+                ? () => {
+                    // Every long press confirms itself by touch (#1286).
+                    haptic("longPress");
+                    onShowWho(reaction.emoji);
+                  }
+                : undefined
+            }
+            delayLongPress={LONG_PRESS_MS}
             hitSlop={6}
             style={({ pressed }) => ({
               flexDirection: "row",
