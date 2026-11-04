@@ -188,7 +188,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 
 ## user (`commands/user.rs`)
 - `get_user_profile(user_id)` → `User`
-- `get_user_profiles(user_ids)` → `UserProfile[]` — **mobile bridge only.** Many profiles in ONE `POST /v1/directory/users` (unknown ids left out). Mobile's avatar store batches every user a render pass does not know the picture of into one call (`mobile/lib/avatarStore.ts`).
+- `get_user_profiles(user_ids)` → `UserProfile[]` — mobile bridge and, since #1684, a Tauri command too. Many profiles in ONE `POST /v1/directory/users` (unknown ids left out). Mobile's avatar store batches every user a render pass does not know the picture of into one call (`mobile/lib/avatarStore.ts`); both apps' who-reacted views (`useUserProfiles`) name every reactor of a message with one call.
 - `update_user_profile(user_id, username?, preferred_name?, phone?, avatar_url?)` — the DS update is a COALESCE, so `None` leaves a field as it is. **An empty `avatar_url` clears the picture**: every client reads `""` as none (desktop's `useAvatarBlobUrl` is disabled for it, mobile's `avatarHash` returns null).
 - `search_user_by_username(query)` → `User | null` — a username OR an email, resolved by the DS's `directory::user_by_identifier` (`POST /v1/directory/users`): an identifier containing `@` matches `email` only, anything else matches `username` only, exact. Never `username OR email` — that predicate's first row was won by an account whose username was the target's email address (see `database.md` → users).
 - `get_preferences(user_id)` → JSON string
@@ -772,7 +772,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 - **`update`** — `get_update_check_plan`, `is_update_required`, `mark_update_required`
-- **`user`** — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
+- **`user`** — `get_preferences`, `get_user_profile`, `get_user_profiles`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 - **`vault`** — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `search_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
 - **`voice`** — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
 - **`voice_test`** — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
@@ -813,7 +813,7 @@ than hand-edit.
 
 **`relay_serving`** (2) — `get_relay_serving_status`, `set_relay_serving`
 
-**`user`** (5) — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
+**`user`** (6) — `get_preferences`, `get_user_profile`, `get_user_profiles`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 
 **`groups`** (31) — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_group_invites`, `list_muted_channels`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_channel_muted`, `set_member_role`, `update_channel`, `update_group`
 
