@@ -83,8 +83,23 @@
   },
   "reactions": {
     "add": "Add reaction",
+    "all": "All",
+    "allTabLabel_one": "All, {{count}} reaction",
+    "allTabLabel_other": "All, {{count}} reactions",
+    "contextHint": "Right-click to see who reacted",
+    "hoverMore_one": "{{names}} and {{count}} more reacted with {{emoji}}",
+    "hoverMore_other": "{{names}} and {{count}} more reacted with {{emoji}}",
+    "hoverNames": "{{names}} reacted with {{emoji}}",
     "pillLabel_one": "{{emoji}} {{count}} reaction",
-    "pillLabel_other": "{{emoji}} {{count}} reactions"
+    "pillLabel_other": "{{emoji}} {{count}} reactions",
+    "rowLabel": "{{name}}, reacted with {{emojis}}",
+    "selfName": "{{name}} (you)",
+    "sheetTitle": "Reactions",
+    "tabLabel_one": "{{emoji}}, {{count}} reaction",
+    "tabLabel_other": "{{emoji}}, {{count}} reactions",
+    "unknownUser": "Unknown user",
+    "viewWho": "View reactions",
+    "you": "You"
   },
   "preview": {
     "noMessages": "No messages yet",

@@ -1253,6 +1253,36 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
     }
 
+    case 'get_user_profiles': {
+      // Everyone the mock knows by id: self, group rosters, DM members, then `__POLLIS_PRELOAD__.userProfiles`.
+      const { userIds } = args as { userIds: string[] };
+      const known = new Map<string, { id: string; username?: string; preferred_name?: string; avatar_url?: string }>();
+      for (const members of Object.values(store.groupMembers)) {
+        for (const m of members) {
+          known.set(m.user_id, { id: m.user_id, username: m.username, avatar_url: m.avatar_url });
+        }
+      }
+      for (const dm of store.dmChannels) {
+        for (const m of dm.members) {
+          if (!known.has(m.user_id)) {
+            known.set(m.user_id, { id: m.user_id, username: m.username });
+          }
+        }
+      }
+      for (const p of (preload.userProfiles ?? []) as Array<{ id: string; username?: string; preferred_name?: string; avatar_url?: string }>) {
+        known.set(p.id, p);
+      }
+      if (store.session) {
+        known.set(store.session.id, {
+          id: store.session.id,
+          username: store.profile?.username ?? store.session.username,
+          preferred_name: store.profile?.preferred_name,
+          avatar_url: store.profile?.avatar_url,
+        });
+      }
+      return [...new Set(userIds)].flatMap((id) => (known.has(id) ? [known.get(id)!] : []));
+    }
+
     case 'get_user_profile': {
       if (!store.session) {
         return null;

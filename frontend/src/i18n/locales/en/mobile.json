@@ -564,5 +564,8 @@
     "saveFailedOffline": "Couldn't reach Pollis to save this. Your draft is back in the composer — check your connection and try again.",
     "saveFailedTooLarge": "A file is too large for your vault. Your draft is back in the composer — remove it and send again.",
     "retry": "Try again"
+  },
+  "reactions": {
+    "pillHint": "Long-press to see who reacted"
   }
 }

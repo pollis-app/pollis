@@ -528,5 +528,8 @@
     "title": "用户",
     "unblockUser": "取消屏蔽用户",
     "verified": "◆ 已验证"
+  },
+  "reactions": {
+    "pillHint": "长按查看谁回应了"
   }
 }

@@ -14,6 +14,11 @@ pub async fn get_user_profile(user_id: String, state: State<'_, Arc<AppState>>) 
 }
 
 #[tauri::command]
+pub async fn get_user_profiles(user_ids: Vec<String>, state: State<'_, Arc<AppState>>) -> Result<Vec<UserProfile>> {
+    pollis_core::commands::user::get_user_profiles(user_ids, &state).await
+}
+
+#[tauri::command]
 pub async fn update_user_profile(user_id: String, username: Option<String>, preferred_name: Option<String>, phone: Option<String>, avatar_url: Option<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::user::update_user_profile(user_id, username, preferred_name, phone, avatar_url, &state).await
 }
