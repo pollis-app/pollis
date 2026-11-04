@@ -90,6 +90,80 @@ for the release.
 `components/ui.tsx` primitives, fixed chrome only — never a row inside a
 `ScrollView` / `FlatList`, and on Android never inside a `SheetOverlay`.
 
+### Message links (#874, #1682)
+
+Message text is attacker-controlled, so a link is a security surface. One pure
+module decides what is a link and what it opens: `frontend/src/utils/links.ts`,
+copied byte for byte to `mobile/lib/links.ts` (mobile imports no frontend
+TypeScript; `mobile/tests/links.test.ts` fails if the copies differ, and both
+`frontend/tests/links.test.ts` and the mobile test run the same cases).
+`findUrls(text)` returns only tokens `parseLink` accepts; `parseLink(raw)` is
+re-run at the moment of opening and returns `{ href, host, needsConfirm }` or
+`null`. It uses no `URL` global (React Native's is a regex stub), so it parses
+the authority itself.
+
+What becomes a link, and why:
+
+- **Only `http(s)://…` and `www.…`** (the latter gets `https://`). Bare
+  `example.com` and email addresses are not links (desktop's rule since #874).
+  Nothing else ever opens: no `javascript:`, `data:`, `file:`, `intent:`,
+  `content:`, `tel:`, `sms:`, custom schemes or the app's own `pollis://` —
+  those never match the pattern, and the opener re-checks the scheme of the
+  `href` it is about to hand over.
+- **The label is the destination.** There is no markdown on either client, so
+  no `[label](url)`. A token with credentials in the authority
+  (`https://good.example@evil.example`) or a backslash in it (browsers read `\`
+  as `/`) is refused outright, because its text names one host and opens
+  another.
+- **Bidi and invisible characters** (U+202A–202E, U+2066–2069, U+200B–200F,
+  U+061C, U+2060–2064, U+FEFF, C0/C1 controls) anywhere in the token make the
+  whole token plain text, so an override cannot make `…/\u202egnp.exe` read as
+  `…/exe.png`. The link text is also pinned LTR: `dir="ltr"` on desktop's
+  anchor, an LRI…PDI isolate plus `writingDirection: "ltr"` on mobile.
+- **IDN / punycode hosts ask first.** The host is converted to ASCII (NFKC,
+  lowercase, RFC 3492 Punycode; the test checks it against Node's WHATWG
+  `domainToASCII`), and the ASCII form is what opens. Labels may hold only
+  letters, marks, digits and `-` (so `∕`, `⁄` and fullwidth `／` cannot fake a
+  path). A non-ASCII or `xn--` host sets `needsConfirm`: on mobile a tap opens
+  the link sheet with the real host and a line saying why; on desktop the
+  anchor's tooltip (`title`) and status-bar `href` are the ASCII destination.
+  ASCII hosts open on a plain tap — a confirmation for every link was ruled out.
+- **Punctuation.** Trailing `.,;:!?` and an unbalanced closing `)` / `]` are not
+  part of the link; balanced ones are (`…/wiki/Foo_(bar)`). Quotes, `<>` and
+  backticks end a token.
+- **Length.** Tokens over `MAX_URL_LENGTH` (2048) are plain text and never reach
+  the trimmer (linear in the token anyway). Long links wrap: desktop's
+  `.message-link` has `overflow-wrap: anywhere`; React Native breaks a word too
+  long for its line.
+- **No network until the tap.** Rendering a link fetches nothing: no previews,
+  unfurls, favicons or prefetch, which would tell the sender's chosen host the
+  reader's IP and that the message was read. Desktop's image/video unfurl
+  (`MediaLinkUnfurl`) stays click-to-load and now takes its `href` from
+  `parseLink` too. Mobile has no unfurl.
+- **The system browser, never a WebView.** Desktop: `shellOpen` (the
+  `shell:allow-open` http(s) scope). Mobile: `Linking.openURL` in
+  `mobile/lib/openLink.ts` — no in-app browser, so no shared cookies or JS bridge.
+  No `canOpenURL` (it needs Android 11+ package-visibility `<queries>`; the
+  prebuild already declares an https `VIEW` query, and `openURL` itself starts the
+  intent without one). iOS needs no `LSApplicationQueriesSchemes` for http(s).
+  The app registers no https app links, so a message link can never route back
+  into Pollis.
+
+Mobile pieces: `components/chat/MessageLink.tsx` (accent text, underlined, no
+border; tap → `tapLink`, long press → `longPressLink`), rendered by
+`MessageBodyInline` through `renderEmojiSegments`' `renderText` hook, so mentions
+and custom emoji split first exactly as on desktop. Message rows (main timeline
+and threads) and Vault rows linkify; the quoted preview in a message / Vault
+sheet does not (`linkify={false}`). The sheet is `components/chat/LinkSheet.tsx`
+(`LinkSheetHost`, mounted once in `app/_layout.tsx` and never drawn while locked
+or signed out) over `stores/linkSheetStore.ts`: the ASCII host and full `href`,
+then Open in browser and Copy link (copies the `href`; verified copy feedback as
+in the message sheet). A row is one accessible element, so its first five links
+are offered as `openLink<n>` accessibility actions labelled with the real host,
+through the same `tapLink`. A link span takes its own touch, so a long press on
+it opens the link sheet, not the message sheet; swipe to reply is unaffected.
+Maestro: `.maestro/flows/message-links.yaml`.
+
 ### Design tokens: utilities, not `var()` (#874)
 
 Tokens are CSS custom properties in `frontend/src/index.css` and are surfaced as
@@ -816,7 +890,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick, activateOn — `frontend/src/components/ui/InlineAudioPlayer.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
-- **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
+- **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874). `href`, `title` and the click all go through `parseLink`; the rules are under "Message links" above (#1682). Mobile's counterpart is `mobile/components/chat/MessageLink.tsx`.
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
 - **MentionSuggestList** — props: candidates, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/MentionSuggestList.tsx`
 - **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`

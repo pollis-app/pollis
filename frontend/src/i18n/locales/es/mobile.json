@@ -286,6 +286,14 @@
   "language": {
     "restartRequired": "Reinicia Pollis para cambiar la dirección de la interfaz."
   },
+  "link": {
+    "copy": "Copiar enlace",
+    "destinationLabel": "Enlace a {{host}}: {{url}}",
+    "idnNotice": "Esta dirección usa letras de otro alfabeto, que pueden parecerse a un sitio que conoces. Esta es su dirección real:",
+    "open": "Abrir en el navegador",
+    "openLabel": "Abrir enlace {{host}}",
+    "title": "Enlace"
+  },
   "media": {
     "audioPosition": "{{current}} de {{total}}",
     "audioProgress": "Posición de reproducción",

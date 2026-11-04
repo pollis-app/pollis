@@ -49,7 +49,7 @@ export function VaultEntrySheet({
           </Text>
           {quote ? (
             <Text numberOfLines={3} style={[ty.body, { color: semantic.text }]}>
-              <MessageBodyInline text={quote} emojiSize={16} />
+              <MessageBodyInline text={quote} emojiSize={16} linkify={false} />
             </Text>
           ) : null}
         </View>

@@ -286,6 +286,14 @@
   "language": {
     "restartRequired": "Redémarrez Pollis pour changer le sens de la mise en page."
   },
+  "link": {
+    "copy": "Copier le lien",
+    "destinationLabel": "Lien vers {{host}} : {{url}}",
+    "idnNotice": "Cette adresse utilise des lettres d’un autre alphabet, qui peuvent imiter un site que vous connaissez. Voici sa véritable adresse :",
+    "open": "Ouvrir dans le navigateur",
+    "openLabel": "Ouvrir le lien {{host}}",
+    "title": "Lien"
+  },
   "media": {
     "audioPosition": "{{current}} sur {{total}}",
     "audioProgress": "Position de lecture",

@@ -1,9 +1,11 @@
+import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { MessageBodyInline } from "../chat/MessageBody";
 import { AttachmentTile } from "../chat/AttachmentTile";
 import { haptic } from "../../lib/haptics";
+import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import type { MessageAttachment } from "../../types";
@@ -48,6 +50,10 @@ export function VaultEntryRow({
     ? `${text}, ${status}`
     : `${attachments.map((a) => a.filename).join(", ")}, ${status}`;
 
+  const linkActions = useMemo(
+    () => linkA11yActions(text, (host) => t("mobile:link.openLabel", { host })),
+    [text, t],
+  );
   const a11yActions = [
     { name: "activate" },
     { name: "longpress" },
@@ -58,6 +64,7 @@ export function VaultEntryRow({
       name: `openAttachment${i}`,
       label: t("chat:attachment.openLabel", { filename: a.filename }),
     })),
+    ...linkActions.map(({ name, label }) => ({ name, label })),
   ];
 
   return (
@@ -70,6 +77,9 @@ export function VaultEntryRow({
       accessibilityActions={a11yActions}
       onAccessibilityAction={(e) => {
         const action = e.nativeEvent.actionName;
+        if (runLinkA11yAction(action, linkActions)) {
+          return;
+        }
         if (action === "togglePin") {
           onTogglePin();
         } else if (action === "edit") {

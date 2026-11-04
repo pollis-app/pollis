@@ -138,7 +138,7 @@ export function MessageActionsSheet({
                 color: semantic.text,
               }}
             >
-              <MessageBodyInline text={target.content} emojiSize={16} />
+              <MessageBodyInline text={target.content} emojiSize={16} linkify={false} />
             </Text>
           ) : null}
         </View>

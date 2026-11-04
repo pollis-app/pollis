@@ -12,11 +12,16 @@ export function renderEmojiSegments(
   text: string,
   keyPrefix: string,
   emojiSize: number,
+  renderText?: (text: string, key: string) => React.ReactNode,
 ): React.ReactNode[] {
   const segments = splitEmojiSegments(text);
   return segments.map((seg, i) =>
     seg.kind === "text" ? (
-      <Text key={`${keyPrefix}-${i}`}>{seg.text}</Text>
+      renderText ? (
+        renderText(seg.text, `${keyPrefix}-${i}`)
+      ) : (
+        <Text key={`${keyPrefix}-${i}`}>{seg.text}</Text>
+      )
     ) : (
       <CustomEmojiImage
         key={`${keyPrefix}-${i}`}

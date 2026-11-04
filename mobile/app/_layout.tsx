@@ -25,6 +25,7 @@ import { useInboxRealtime } from "../hooks/useInboxRealtime";
 import { useEnrollmentApprovals } from "../hooks/useEnrollmentApprovals";
 import { useUnreadSync } from "../hooks/queries/useUnread";
 import { AutoLockProvider } from "../lib/autolock";
+import { LinkSheetHost } from "../components/chat/LinkSheet";
 import i18n, { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 import { endSession, sweepStalePlaintext } from "../lib/session";
@@ -338,6 +339,8 @@ export default function RootLayout() {
                 options={settingsPage}
               />
             </RootStack>
+            {/* A message link's Copy / Open sheet and the IDN confirm. */}
+            <LinkSheetHost />
             {resetBoot ? <BootReset /> : null}
             </AutoLockProvider>
             </>

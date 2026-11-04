@@ -25,6 +25,7 @@ import {
   restingSurface,
 } from "../../lib/pressFeedback";
 import { haptic } from "../../lib/haptics";
+import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import type { UnsentReason } from "../../hooks/queries/pendingMessages";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
@@ -172,6 +173,10 @@ export function MessageRow({
     ? (attachments ?? []).filter((a) => !!a.object_key || !!a.localPreviewUri)
     : [];
   const isReply = replyTo !== undefined;
+  const linkActions = useMemo(
+    () => linkA11yActions(text, (host) => t("mobile:link.openLabel", { host })),
+    [text, t],
+  );
   const a11yActions = [
     ...(onLongPress ? [{ name: "activate" }, { name: "longpress" }] : []),
     ...(onReply ? [{ name: "reply", label: t("actions.reply") }] : []),
@@ -183,6 +188,7 @@ export function MessageRow({
       name: `openAttachment${i}`,
       label: t("attachment.openLabel", { filename: a.filename }),
     })),
+    ...linkActions.map(({ name, label }) => ({ name, label })),
   ];
 
   const quoteText = replyTo ? replyTo.snippet || t("message.encrypted") : t("message.redacted");
@@ -209,6 +215,9 @@ export function MessageRow({
         accessibilityActions={a11yActions}
         onAccessibilityAction={(e) => {
           const action = e.nativeEvent.actionName;
+          if (runLinkA11yAction(action, linkActions)) {
+            return;
+          }
           if (action === "viewProfile") {
             onPressAvatar?.();
           } else if (action.startsWith("openAttachment")) {

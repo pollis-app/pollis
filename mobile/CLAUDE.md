@@ -1352,6 +1352,14 @@ Current state:
   tints it. Saved and `pollis://m/…` links now jump the same way. Maestro:
   `flows/pins.yaml` and, across members, `scripts/maestro-pins.sh` (dev-DS
   peer `pollis-tui/examples/pins_peer.rs`).
+- **Message links (#1682, desktop's LinkifiedText):** URLs in message and Vault
+  rows are `components/chat/MessageLink.tsx` spans; a tap opens the system browser
+  (`lib/openLink.ts`, `Linking.openURL`, never a WebView), a long press or an
+  IDN / punycode host opens `LinkSheet` (real ASCII host, Open in browser, Copy
+  link). `lib/links.ts` is a byte-for-byte copy of desktop's
+  `frontend/src/utils/links.ts` — edit both; `tests/links.test.ts` fails on drift.
+  The security rules (http(s) only, no credentials, no bidi/invisible chars, no
+  prefetch) are in `.codesight/wiki/ui.md` → "Message links". JS only.
 - **Vault (#1316, desktop parity for #107):** `app/vault.tsx`, reached from a row
   at the top of the Direct tab (desktop puts it first in the DM list) and from the
   page quick-jumps of the search at the top of Self. Same core commands as desktop
