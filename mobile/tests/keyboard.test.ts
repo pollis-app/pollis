@@ -86,6 +86,12 @@ test("react-native-keyboard-controller is pinned to the Expo SDK's version", () 
 // #1662 is the mirror image: the keyboard Android restores on resume came with no animation, so JS kept
 // it closed and the composer sat under it. The pnpm patch holds one invariant on both platforms: once no
 // animation runs, JS holds the real keyboard height, synced in whichever direction (show, hide, resize).
+// #1687: the replay itself must be a whole transition. KeyboardAvoidingView learns the height it pads to
+// only from a Start event, so a Move + End replay set progress 1 against the height of the last animated
+// show (0 if it never saw one): JS said "open" and the composer stayed under the keyboard. A Modal's
+// callback feeds the same JS, so what JS was told is kept per KeyboardControllerView, and handing the
+// keyboard back from a Modal, like regaining focus, runs a re-check round. A transition whose end was
+// lost stops blocking the check once it outlives its own duration.
 // It must stay registered and applied.
 test("keyboard-controller is patched to keep JS in step with the real keyboard, both ways", () => {
   const pkg = JSON.parse(read("package.json"));
@@ -97,17 +103,30 @@ test("keyboard-controller is patched to keep JS in step with the real keyboard, 
     `patches/${key}.patch`,
     "a keyboard-controller bump must carry the #1641 patch forward (or drop it once upstream replays a missed hide)",
   );
-  assert.match(read(patchPath), /private fun reconcile\(ignoreTransition: Boolean\)/);
+  assert.match(read(patchPath), /private fun reconcile\(reason: String\)/);
   const callback = read(
     "node_modules/react-native-keyboard-controller/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt",
   );
-  assert.match(callback, /private fun reconcile\(ignoreTransition: Boolean\)/, "the installed copy must carry the patch");
+  assert.match(callback, /private fun reconcile\(reason: String\)/, "the installed copy must carry the patch");
   assert.match(callback, /addOnWindowFocusChangeListener\(windowFocusListener\)/, "regaining window focus re-checks");
   assert.match(callback, /postDelayed\(missedMoveCheck, MISSED_MOVE_GRACE_MS\)/, "an insets change re-checks");
   // Two-way: the check compares heights, never "JS has it open" alone, and syncs to whatever is on screen.
   assert.match(callback, /abs\(realKeyboardHeight\(\) - heightInJs\) >= 1\.0/);
   assert.match(callback, /syncKeyboardPosition\(height, visible\)/);
   assert.doesNotMatch(callback, /syncKeyboardPosition\(0\.0, false\)/, "no hide-only replay");
+  // #1687: the replay is Start + Move + End, so a KeyboardAvoidingView pads to the replayed height.
+  assert.match(
+    callback,
+    /listOf\(KeyboardTransitionEvent\.Start, KeyboardTransitionEvent\.Move, KeyboardTransitionEvent\.End\)/,
+  );
+  assert.match(callback, /private val heightsInJs = HashMap<Int, Double>\(\)/, "one record of JS per controller view");
+  assert.match(
+    callback,
+    /override fun suspend\(suspended: Boolean\) \{[\s\S]*?scheduleRound\(\)/,
+    "a Modal's hand-back re-checks",
+  );
+  assert.match(callback, /LOST_END_GRACE_MS/, "a lost onEnd stops blocking the check");
+  assert.doesNotMatch(callback, /ignoreTransition/, "no special-cased last check");
 
   const ios = "node_modules/react-native-keyboard-controller/ios/observers/movement/observer/";
   assert.match(
@@ -124,6 +143,9 @@ test("keyboard-controller is patched to keep JS in step with the real keyboard, 
   assert.match(listeners, /func reconcileHiddenKeyboard\(_ reason: String\) -> Bool/, "iOS replays a hide JS never saw");
   assert.match(listeners, /replay show/, "iOS replays a show JS never saw (#1662)");
   assert.match(listeners, /onEvent\("onKeyboardMoveEnd", visibleHeight as NSNumber, 1, 0, tag\)/);
+  // #1687: the iOS replays carry a Start too.
+  assert.match(listeners, /onEvent\("onKeyboardMoveStart", visibleHeight as NSNumber, 1, 0, tag\)/);
+  assert.match(listeners, /onEvent\("onKeyboardMoveStart", 0, 0, 0, tag\)/);
   // A foreground return resends the hide even when JS was last told 0: events dispatched while
   // backgrounded can be lost (#1641 coordinator run), so "JS holds 0" proves nothing there.
   assert.match(listeners, /scheduleReconcile\("active", force: true\)/);
