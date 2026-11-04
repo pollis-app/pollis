@@ -68,26 +68,12 @@ tags:
 - tapOn:
     id: "btn-link-copy"
 - assertVisible: "Copied"
-# Open hands it to the system browser: Pollis leaves the foreground.
 - tapOn:
-    id: "btn-link-open"
+    id: "btn-link-close"
 - extendedWaitUntil:
     notVisible:
-      id: "screen-chat"
-    timeout: 10000
-- takeScreenshot: message-links-03-browser
-- launchApp:
-    stopApp: false
-- runFlow:
-    when:
-      visible:
-        id: "screen-auth-pin"
-    commands:
-      - runFlow: ../subflows/enter-pin.yaml
-- extendedWaitUntil:
-    visible:
-      id: "screen-chat"
-    timeout: 15000
+      id: "sheet-link"
+    timeout: 5000
 
 # A punycode host: a tap asks first and shows the ASCII host.
 - tapOn:
@@ -109,7 +95,7 @@ tags:
 - assertVisible:
     id: "text-link-host"
     text: "xn--bcher-kva.example"
-- takeScreenshot: message-links-04-idn-confirm
+- takeScreenshot: message-links-03-idn-confirm
 - tapOn:
     id: "btn-link-close"
 - extendedWaitUntil:
@@ -119,20 +105,35 @@ tags:
 - assertVisible:
     id: "screen-chat"
 
-# Not a link: a javascript: URL stays plain text, so a long press opens the
-# message sheet as for any text.
+# Not a link: a javascript: URL stays plain text, so a tap on it opens no link
+# sheet. Android's keyboard capitalises the first letter, hence "avascript".
 - tapOn:
     id: "input-composer"
 - inputText: "javascript:alert(document.cookie)-pollis-e2e-plain-text-that-must-never-become-a-tappable-link-in-the-body"
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
-    visible: ".*javascript:alert.*"
+    visible: ".*avascript:alert.*"
     timeout: 10000
 - hideKeyboard
-- tapOn: ".*javascript:alert.*"
+- tapOn: ".*avascript:alert.*"
 - assertNotVisible:
     id: "sheet-link"
 - assertNotVisible:
     id: "sheet-link-confirm"
 - runFlow: ../subflows/assert-no-loss.yaml
+
+# Last, so nothing has to come back from the browser: Open hands the link to
+# the system browser and Pollis leaves the foreground.
+- longPressOn: ".*example.com/pollis-e2e/links.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link"
+    timeout: 5000
+- tapOn:
+    id: "btn-link-open"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-chat"
+    timeout: 10000
+- takeScreenshot: message-links-04-browser
