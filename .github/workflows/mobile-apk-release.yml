@@ -54,6 +54,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The mobile-v1.0.29 build ran the runner out of disk mid-gradle ("No
+      # space left on device"); the Rust cross-compile, three ABIs and the
+      # Gradle caches no longer fit a stock runner's free space with room to
+      # spare. Not scripts/ci-free-disk.sh: that removes /usr/local/lib/android,
+      # the SDK this job builds with. Everything removed here is unused by it.
+      - name: Free disk space (keeps the Android SDK)
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune --all --force > /dev/null || true
+          df -h /
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
