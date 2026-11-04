@@ -232,7 +232,9 @@ appId: ${MAESTRO_APP_ID}
 #    with the Back key (Android) or a relaunch (iOS has no Back key).
 - tapOn:
     id: "input-composer"
-- inputText: "https://example.com/pollis-e2e/keyboard/a-long-link-that-wraps-over-several-lines-so-a-text-selector-lands-on-it"
+# One long link that wraps over several lines even on an iPad, so the row's
+# centre, where a text selector taps, lies inside the link (message-links.yaml).
+- inputText: "https://example.com/pollis-e2e/keyboard/a-long-link-that-wraps-over-several-lines-so-a-text-selector-lands-on-it-even-on-a-wide-ipad-pane-where-a-line-holds-far-more-characters-than-on-a-phone-and-a-short-link-would-sit-off-centre?with=query&and=more&padding=to-make-it-wrap-again"
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
