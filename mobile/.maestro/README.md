@@ -283,6 +283,15 @@ the peer, which approves with `approve_device_enrollment`, and the phone must
 land in the app. `maestro-device-link.sh`'s step 3 likewise waits for the
 approval screen to open by itself.
 
+**Who reacted (automated, #1684):** `mobile/scripts/maestro-reaction-breakdown.sh <device>`
+— a dev-DS peer (`pollis-tui/examples/reactions_peer.rs`) and a fresh account
+on the device open a DM; the peer posts a message and reacts 👍 and 🎉, the
+device adds its own 👍 with a short tap on the pill (the toggle still works),
+then long-presses the pill: the sheet opens on the 👍 tab (and the message
+sheet does not), lists both accounts there — the device's own row marked
+"(you)" — only the peer under 🎉, and both on All. The peer exits once it sees
+the device's 👍. `SHOTS_DIR=<dir>` keeps the screenshots.
+
 **Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
 — the lost-message shape with `pollis-tui`'s `pins_peer` example: the device
 opens a DM with a fresh peer (`two-client/pins/1-open-dm.yaml`), the peer sends

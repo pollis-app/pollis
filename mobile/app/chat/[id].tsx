@@ -29,6 +29,8 @@ import { replySnippet, replyTargets } from "../../lib/replyPreview";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
+import { ReactionBreakdownSheet } from "../../components/chat/ReactionBreakdownSheet";
+import type { ReactorProfile } from "../../lib/reactionBreakdown";
 import { afterSheetClose } from "../../components/chat/SheetOverlay";
 import {
   useMessages,
@@ -121,6 +123,9 @@ function TextChat(props: ChatViewProps = {}) {
   >([]);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [pickerTarget, setPickerTarget] = useState<Message | null>(null);
+  // Who reacted (long press on a pill): the message and the emoji whose tab opens.
+  const [whoTarget, setWhoTarget] = useState<{ messageId: string; emoji: string } | null>(null);
+  const closeWho = useCallback(() => setWhoTarget(null), []);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
   // The message the composer is replying to (#1270).
@@ -586,6 +591,31 @@ function TextChat(props: ChatViewProps = {}) {
     40,
   );
 
+  // Reactors' names before the sheet's one batched profile read lands: loaded senders
+  // (covers people who have left), then the roster, then self.
+  const reactorRoster = useMemo(() => {
+    const map = new Map<string, ReactorProfile>();
+    for (const m of messages) {
+      if (m.sender_username && !map.has(m.sender_id)) {
+        map.set(m.sender_id, { username: m.sender_username });
+      }
+    }
+    for (const m of [...(dmChannel?.members ?? []), ...(groupMembers ?? [])]) {
+      map.set(m.user_id, {
+        username: m.username || map.get(m.user_id)?.username,
+        avatar_url: m.avatar_url ?? null,
+      });
+    }
+    if (currentUser) {
+      map.set(currentUser.id, {
+        ...map.get(currentUser.id),
+        username: currentUser.username || map.get(currentUser.id)?.username,
+        preferred_name: currentUser.preferred_name,
+      });
+    }
+    return map;
+  }, [messages, dmChannel, groupMembers, currentUser]);
+
   // Header title: never the raw conversation ULID.
   const peerName = useMemo(() => {
     if (kind !== "dm") {
@@ -728,6 +758,7 @@ function TextChat(props: ChatViewProps = {}) {
               mode: reacted ? "remove" : "add",
             })
           }
+          onShowReactions={(emoji) => setWhoTarget({ messageId: m.id, emoji })}
           onPressAvatar={
             mine
               ? undefined
@@ -1052,6 +1083,20 @@ function TextChat(props: ChatViewProps = {}) {
             );
           }}
           onClose={() => setActionTarget(null)}
+        />
+      ) : null}
+
+      {whoTarget ? (
+        <ReactionBreakdownSheet
+          messageId={whoTarget.messageId}
+          reactions={reactionsByMessage?.get(whoTarget.messageId) ?? []}
+          initialEmoji={whoTarget.emoji}
+          selfId={currentUser?.id}
+          roster={reactorRoster}
+          onOpenProfile={(userId) =>
+            router.push({ pathname: "/user/[id]", params: { id: userId } })
+          }
+          onClose={closeWho}
         />
       ) : null}
 
