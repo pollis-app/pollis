@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { View, ActivityIndicator, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { restoreSession } from "../hooks/queries/useAuth";
 import { invoke } from "../lib/native";
-import { semantic } from "../theme/tokens";
 import { useThemeRerender } from "../components/theme";
+import { LaunchScreen } from "../components/LaunchScreen";
 
 interface UnlockStateSnapshot {
   pin_set: boolean;
@@ -55,27 +54,6 @@ export default function Index() {
     };
   }, [router]);
 
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: semantic.bg,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      {/* The native splash's glyph at the same size (app.json `imageWidth`), so the handoff is seamless. */}
-      <Image
-        source={require("../assets/splash-glyph.png")}
-        style={{ width: 120, height: 120 }}
-        accessibilityIgnoresInvertColors
-      />
-      {!routed ? (
-        <ActivityIndicator
-          color={semantic.accent}
-          style={{ position: "absolute", top: "50%", marginTop: 96 }}
-        />
-      ) : null}
-    </View>
-  );
+  // The native splash's glyph at the same size, so the handoff is seamless.
+  return <LaunchScreen busy={!routed} />;
 }

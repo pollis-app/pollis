@@ -31,10 +31,16 @@ test("submit buttons spin while their call is in flight", () => {
   }
 });
 
-test("the PIN screens show a busy line under the dots once the PIN is in", () => {
-  for (const rel of ["app/(auth)/pin.tsx", "app/self/link-device.tsx"]) {
-    assert.match(read(rel), /<PinBusy\b/, `${rel} must render <PinBusy> while it works`);
-  }
+test("once the PIN is in, a loader replaces the keypad", () => {
+  // Sign-in / unlock: the launch loader (the boot screen's glyph + spinner) takes the whole screen.
+  const pinSrc = read("app/(auth)/pin.tsx");
+  assert.match(pinSrc, /<LaunchScreen\b/);
+  assert.match(pinSrc, /testID=\{view === "submitting" \? "pin-busy"/);
+  assert.match(read("app/index.tsx"), /<LaunchScreen\b/, "the boot screen and the PIN loader are one component");
+  assert.doesNotMatch(pinSrc, /<PinBusy\b/);
+  // Scan to sign in: the busy line stands where the keypad was; the keypad is not drawn meanwhile.
+  const link = read("app/self/link-device.tsx");
+  assert.match(link, /\{busy \? \(\s*<View[^>]*>\s*<PinBusy label=\{t\("security\.verifying"\)\} \/>\s*<\/View>\s*\) : \(\s*<PinKeypad/);
   // Busy on the fourth tap itself, before the slow call starts.
   const pin = read("app/(auth)/pin.tsx");
   const begin = pin.indexOf("submit.begin()");
