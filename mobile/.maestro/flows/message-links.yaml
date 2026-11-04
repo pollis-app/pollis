@@ -1,0 +1,139 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# MESSAGE LINKS — a URL in a message is a link: a long press on it opens the
+# link sheet (not the message sheet), whose Open hands the URL to the system
+# browser; a tap on a punycode / IDN host asks first, showing the real host.
+# Self-contained: posts into a fresh self-owned group's #General.
+#
+# A link is a nested <Text> span, which Maestro cannot address by id, so each
+# message is ONE long link that wraps over several lines: the row's centre,
+# where a text selector taps, then lies inside the link.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Links Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Links Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# An ASCII link: opens directly on a tap, Copy / Open on a long press.
+- tapOn:
+    id: "input-composer"
+- inputText: "https://example.com/pollis-e2e/links/check-that-a-long-address-wraps-across-several-lines-of-the-message-body?with=query&and=more"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*example.com/pollis-e2e/links.*"
+    timeout: 10000
+- hideKeyboard
+- takeScreenshot: message-links-01-sent
+
+- longPressOn: ".*example.com/pollis-e2e/links.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link"
+    timeout: 5000
+# It was the link that took the press, not the row.
+- assertNotVisible:
+    id: "btn-edit"
+- assertVisible:
+    id: "text-link-host"
+    text: "example.com"
+- assertVisible:
+    id: "btn-link-copy"
+- takeScreenshot: message-links-02-link-sheet
+- tapOn:
+    id: "btn-link-copy"
+- assertVisible: "Copied"
+- tapOn:
+    id: "btn-link-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "sheet-link"
+    timeout: 5000
+
+# A punycode host: a tap asks first and shows the ASCII host.
+- tapOn:
+    id: "input-composer"
+- inputText: "https://xn--bcher-kva.example/pollis-e2e/links/a-lookalike-host-must-be-confirmed-before-it-opens-in-the-browser"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*xn--bcher-kva.example.*"
+    timeout: 10000
+- hideKeyboard
+- tapOn: ".*xn--bcher-kva.example.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link-confirm"
+    timeout: 5000
+- assertVisible:
+    id: "text-link-idn"
+- assertVisible:
+    id: "text-link-host"
+    text: "xn--bcher-kva.example"
+- takeScreenshot: message-links-03-idn-confirm
+- tapOn:
+    id: "btn-link-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "sheet-link-confirm"
+    timeout: 5000
+- assertVisible:
+    id: "screen-chat"
+
+# Not a link: a javascript: URL stays plain text, so a tap on it opens no link
+# sheet. Android's keyboard capitalises the first letter, hence "avascript".
+- tapOn:
+    id: "input-composer"
+- inputText: "javascript:alert(document.cookie)-pollis-e2e-plain-text-that-must-never-become-a-tappable-link-in-the-body"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*avascript:alert.*"
+    timeout: 10000
+- hideKeyboard
+- tapOn: ".*avascript:alert.*"
+- assertNotVisible:
+    id: "sheet-link"
+- assertNotVisible:
+    id: "sheet-link-confirm"
+- runFlow: ../subflows/assert-no-loss.yaml
+
+# Last, so nothing has to come back from the browser: Open hands the link to
+# the system browser and Pollis leaves the foreground.
+- longPressOn: ".*example.com/pollis-e2e/links.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link"
+    timeout: 5000
+- tapOn:
+    id: "btn-link-open"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-chat"
+    timeout: 10000
+- takeScreenshot: message-links-04-browser

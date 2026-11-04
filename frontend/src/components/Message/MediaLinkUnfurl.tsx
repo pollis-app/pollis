@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { shellOpen } from "../../bridge";
-import { ensureProtocol, findUrls } from "../../utils/links";
+import { findUrls, parseLink } from "../../utils/links";
 
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"];
 const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
@@ -10,13 +10,15 @@ type MediaKind = "image" | "video";
 
 interface MediaLink {
   url: string;
+  /** The vetted destination (`parseLink`), never the raw text. */
+  href: string;
   kind: MediaKind;
 }
 
-function classify(url: string): MediaKind | null {
+function classify(href: string): MediaKind | null {
   let pathname: string;
   try {
-    pathname = new URL(ensureProtocol(url)).pathname.toLowerCase();
+    pathname = new URL(href).pathname.toLowerCase();
   } catch {
     return null;
   }
@@ -42,9 +44,13 @@ function extractMediaLinks(text: string): MediaLink[] {
       continue;
     }
     seen.add(url);
-    const kind = classify(url);
+    const target = parseLink(url);
+    if (!target) {
+      continue;
+    }
+    const kind = classify(target.href);
     if (kind) {
-      out.push({ url, kind });
+      out.push({ url, href: target.href, kind });
     }
   }
   return out;
@@ -61,8 +67,8 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   // Remote media loads only on a per-URL click, every host: an automatic fetch leaks the reader's IP to a sender-chosen host.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
-  const handleClick = useCallback((url: string) => {
-    shellOpen(ensureProtocol(url));
+  const handleClick = useCallback((href: string) => {
+    shellOpen(href);
   }, []);
 
   const visible = links.filter((l) => !hidden.has(l.url));
@@ -82,7 +88,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   return (
     <div data-testid="media-link-unfurl" className="mt-2 flex flex-wrap gap-1">
       {visible.map((link) => {
-        const href = ensureProtocol(link.url);
+        const href = link.href;
         const show = revealed.has(link.url);
         if (!show) {
           return (
@@ -114,7 +120,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
             <button
               key={link.url}
               type="button"
-              onClick={() => handleClick(link.url)}
+              onClick={() => handleClick(link.href)}
               className="p-0 bg-transparent border-0 cursor-pointer flex-shrink-0"
               title={href}
               aria-label={t("unfurl.openLabel", { url: href })}

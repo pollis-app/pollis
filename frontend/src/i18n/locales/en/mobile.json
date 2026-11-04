@@ -290,6 +290,14 @@
   "language": {
     "restartRequired": "Restart Pollis to switch the layout direction."
   },
+  "link": {
+    "copy": "Copy link",
+    "destinationLabel": "Link to {{host}}: {{url}}",
+    "idnNotice": "This address uses letters from another alphabet, which can look like a site you know. This is its real address:",
+    "open": "Open in browser",
+    "openLabel": "Open link {{host}}",
+    "title": "Link"
+  },
   "media": {
     "audioPosition": "{{current}} of {{total}}",
     "audioProgress": "Playback position",

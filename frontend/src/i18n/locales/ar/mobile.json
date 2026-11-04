@@ -318,6 +318,14 @@
   "language": {
     "restartRequired": "أعد تشغيل Pollis لتبديل اتجاه الواجهة."
   },
+  "link": {
+    "copy": "نسخ الرابط",
+    "destinationLabel": "رابط إلى {{host}}: {{url}}",
+    "idnNotice": "يستخدم هذا العنوان حروفًا من أبجدية أخرى قد تشبه موقعًا تعرفه. هذا هو عنوانه الحقيقي:",
+    "open": "فتح في المتصفح",
+    "openLabel": "فتح الرابط {{host}}",
+    "title": "رابط"
+  },
   "media": {
     "audioPosition": "{{current}} من {{total}}",
     "audioProgress": "موضع التشغيل",

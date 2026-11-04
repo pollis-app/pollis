@@ -278,6 +278,14 @@
   "language": {
     "restartRequired": "重启 Pollis 以切换布局方向。"
   },
+  "link": {
+    "copy": "复制链接",
+    "destinationLabel": "指向 {{host}} 的链接：{{url}}",
+    "idnNotice": "此地址包含其他字母表中的字母，可能伪装成你熟悉的网站。它的真实地址是：",
+    "open": "在浏览器中打开",
+    "openLabel": "打开链接 {{host}}",
+    "title": "链接"
+  },
   "media": {
     "audioPosition": "{{current}} / {{total}}",
     "audioProgress": "播放位置",

@@ -10,6 +10,15 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const SKINS = ["terminal", "refined"] as const;
 type Skin = (typeof SKINS)[number];
 
+/** Message text is attacker-controlled: only what opens what it shows is a link (#1682). */
+const HOSTILE = [
+  "javascript:alert(1) and data:text/html,x",
+  "https://good.example@evil.example/login",
+  "https://example.com/\u202egnp.exe",
+  "https://xn--bcher-kva.example/a",
+  "https://en.wikipedia.org/wiki/Foo_(bar).",
+];
+
 /** Each body starts with a URL (what a stale lastIndex skips) and mixes image and plain URLs. */
 const BODIES = [
   "https://example.com/one.png and https://example.com/first",
@@ -18,7 +27,7 @@ const BODIES = [
   "https://example.com/four.png finally https://example.com/fourth",
 ];
 
-function preloadState(skin: Skin) {
+function preloadState(skin: Skin, bodies: readonly string[] = BODIES) {
   return {
     session: USER,
     profile: { id: USER.id, username: USER.username },
@@ -47,7 +56,7 @@ function preloadState(skin: Skin) {
       ],
     },
     messages: {
-      [CHANNEL_ID]: BODIES.map((content, i) => ({
+      [CHANNEL_ID]: bodies.map((content, i) => ({
         id: `01HQ7Z3K9M2P5R8T1V4W6Y0MS${i}`,
         conversation_id: CHANNEL_ID,
         sender_id: USER.id,
@@ -58,7 +67,7 @@ function preloadState(skin: Skin) {
   };
 }
 
-async function boot(page: Page, skin: Skin) {
+async function boot(page: Page, skin: Skin, bodies: readonly string[] = BODIES) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
@@ -74,7 +83,7 @@ async function boot(page: Page, skin: Skin) {
       runCallback: () => {},
       invoke: () => Promise.resolve(null),
     };
-  }, preloadState(skin));
+  }, preloadState(skin, bodies));
   await page.goto("/");
   await expect(page.getByTestId("sidebar")).toBeVisible();
   await page
@@ -142,3 +151,19 @@ for (const skin of SKINS) {
     });
   });
 }
+
+test.describe("hostile links (#1682)", () => {
+  test("only safe tokens link, IDN hosts point at their ASCII host", async ({ page }) => {
+    await boot(page, "refined", HOSTILE);
+    const links = page.getByTestId("message-list").locator("a.message-link");
+    // The punycode host and the Wikipedia URL; nothing from the first three bodies.
+    await expect(links).toHaveCount(2);
+    await expect(links.filter({ hasText: "xn--bcher-kva.example" })).toHaveAttribute(
+      "title",
+      "https://xn--bcher-kva.example/a",
+    );
+    await expect(
+      links.filter({ hasText: "https://en.wikipedia.org/wiki/Foo_(bar)" }),
+    ).toHaveAttribute("href", "https://en.wikipedia.org/wiki/Foo_(bar)");
+  });
+});

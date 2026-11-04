@@ -1,17 +1,21 @@
 import React, { useCallback, useMemo } from "react";
 import { shellOpen } from "../../bridge";
-import { ensureProtocol, findUrls } from "../../utils/links";
+import { findUrls, parseLink } from "../../utils/links";
 
 interface LinkifiedTextProps {
   text: string;
 }
 
-/** Linkifies URLs (opened in the system browser); memoised on `text`. */
+/** Linkifies URLs (opened in the system browser); memoised on `text`. `utils/links.ts` decides what may open. */
 export const LinkifiedText: React.FC<LinkifiedTextProps> = React.memo(({ text }) => {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>, url: string) => {
       e.preventDefault();
-      shellOpen(ensureProtocol(url));
+      // Re-vetted at the moment of opening, never trusted from the render.
+      const target = parseLink(url);
+      if (target) {
+        void shellOpen(target.href);
+      }
     },
     [],
   );
@@ -25,18 +29,22 @@ export const LinkifiedText: React.FC<LinkifiedTextProps> = React.memo(({ text })
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   for (const { start, url } of matches) {
+    const target = parseLink(url);
+    if (target === null) {
+      continue;
+    }
     if (start > lastIndex) {
       parts.push(text.slice(lastIndex, start));
     }
     parts.push(
-      // URLs are pinned `ltr` and isolated.
+      // URLs are pinned `ltr` and isolated; the tooltip is the ASCII (punycode) destination, so an IDN lookalike shows its real host.
       <a
         key={start}
         dir="ltr"
-        href={ensureProtocol(url)}
+        href={target.href}
         onClick={(e) => handleClick(e, url)}
         className="message-link"
-        title={ensureProtocol(url)}
+        title={target.href}
       >
         {url}
       </a>,
