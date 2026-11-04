@@ -82,10 +82,12 @@ test("a Vault caption edit keeps the flag", () => {
 });
 
 test("the message tile, the viewer and the Vault grid all read the reveal", () => {
+  // The grid draws the message tile itself, so it shares the cover and the reveal.
+  const grid = readFileSync(new URL("../components/vault/VaultMediaGrid.tsx", import.meta.url), "utf8");
+  assert.match(grid, /<AttachmentTile\s[^>]*box=\{box\}/);
   for (const file of [
     "components/chat/AttachmentTile.tsx",
     "components/media/MediaViewerPage.tsx",
-    "components/vault/VaultMediaGrid.tsx",
   ]) {
     const src = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     assert.match(src, /useSensitiveReveal\(attachment\)/, file);

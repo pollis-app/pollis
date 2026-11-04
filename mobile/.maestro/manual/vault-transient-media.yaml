@@ -8,8 +8,9 @@ tags:
 # Mobile has no loopback media server, so viewing a Vault image decrypts it to a
 # PLAINTEXT file, `<cacheDirectory>/pollis-media/<file id>` (`get_media_path`,
 # pollis-core/src/bridge.rs), plus a named copy under `pollis-media/named/` for
-# the full-screen viewer. `mobile/lib/media/cache.ts` must unlink both when the
-# last view releases them. This flow stores an image in the Vault, opens it in
+# the full-screen viewer. `mobile/lib/media/cache.ts` unlinks the named copy on
+# its last release and keeps the base file for a remount only until the app is
+# locked or goes to the background, when it must be unlinked too. This flow stores an image in the Vault, opens it in
 # the viewer, closes it, leaves the Vault and backgrounds the app; then check by
 # hand that `pollis-media/` holds nothing — commands in
 # .codesight/wiki/testing.md → "Vault media soak" → "Mobile".
@@ -74,7 +75,8 @@ tags:
     id: "btn-media-close"
 
 # Viewing ends: leave the Vault and background the app. Every view has
-# released its reference, so `pollis-media/` must now be empty.
+# released its reference and backgrounding trims what was kept for a remount,
+# so `pollis-media/` must now be empty.
 - tapOn:
     id: "btn-back"
 - assertVisible:

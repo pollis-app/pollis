@@ -89,7 +89,7 @@ tags:
 - takeScreenshot: auth-05-inbox
 
 # UNLOCK — cold relaunch lands on the PIN pad; the fourth digit must switch it
-# to its busy state at once (spinner + "Unlocking…", keys disabled) while
+# to its busy state at once (the launch loader in place of the pad) while
 # Argon2id derives the key and the encrypted database opens, never a frozen
 # pad. The last tap skips Maestro's settle wait: the busy state lasts only as
 # long as the unlock, so the check has to look straight away.
@@ -112,6 +112,22 @@ tags:
 # the fourth tap would pass without the pad doing anything.
 - assertNotVisible:
     id: "screen-auth-initializing|screen-groups|tab-groups"
+# A wrong PIN goes through the same loader and puts the pad back, with its error.
+- tapOn:
+    id: "btn-pin-9"
+- tapOn:
+    id: "btn-pin-9"
+- tapOn:
+    id: "btn-pin-9"
+- tapOn:
+    id: "btn-pin-9"
+- extendedWaitUntil:
+    visible:
+      id: "pin-error"
+    timeout: 20000
+- assertVisible:
+    id: "btn-pin-1"
+- takeScreenshot: auth-06a-pin-wrong
 - tapOn:
     id: "btn-pin-1"
 - tapOn:
@@ -125,12 +141,16 @@ tags:
     visible:
       id: "pin-busy|screen-auth-initializing|screen-groups|tab-groups"
     timeout: 1000
+# While it works, the launch loader REPLACES the pad: no key is left on screen
+# (a disabled keypad with a spinner squeezed in is what this guards against).
 - runFlow:
     when:
       visible:
         id: "pin-busy"
     commands:
       - takeScreenshot: auth-06-pin-unlocking
+      - assertNotVisible:
+          id: "btn-pin-1|btn-pin-5|btn-pin-0|btn-pin-back"
 - extendedWaitUntil:
     visible:
       id: "tab-groups"

@@ -1,8 +1,11 @@
-// Resolves an attachment to a local `file://` URI and releases it on unmount (#346), so the decrypted file is unlinked. `null` no-ops.
+// Resolves an attachment to a local `file://` URI and releases it on unmount (#346). `null` no-ops.
+// A file still on disk (held elsewhere, or just released) is answered on the first render, so a
+// remount (a Vault tab switch, a row scrolled back) draws the picture with no placeholder.
 
 import { useEffect, useState } from "react";
 import {
   mediaCacheGeneration,
+  peekMediaUri,
   resolveMediaUri,
   releaseMediaUri,
 } from "../lib/media/cache";
@@ -20,10 +23,9 @@ export function useMediaUri(
     "object_key" | "content_hash" | "content_type" | "sha256" | "key_scope"
   > | null,
 ): MediaUriState {
-  const [state, setState] = useState<MediaUriState>({
-    uri: null,
-    loading: !!attachment,
-    error: null,
+  const [state, setState] = useState<MediaUriState>(() => {
+    const cached = attachment?.object_key ? peekMediaUri(attachment.content_hash) : null;
+    return { uri: cached, loading: !!attachment && !cached, error: null };
   });
 
   // Re-resolve only when the bytes change: content_hash is the identity.
@@ -37,14 +39,23 @@ export function useMediaUri(
     }
 
     let active = true;
-  // A release after a sign-out clear must not touch the next session's counts.
+    // A release after a sign-out clear must not touch the next session's counts.
     const resolvedIn = mediaCacheGeneration();
-    setState({ uri: null, loading: true, error: null });
+    const cached = peekMediaUri(contentHash);
+    setState((prev) =>
+      cached
+        ? prev.uri === cached && !prev.loading
+          ? prev
+          : { uri: cached, loading: false, error: null }
+        : { uri: null, loading: true, error: null },
+    );
 
     resolveMediaUri(attachment)
       .then((uri) => {
         if (active) {
-          setState({ uri, loading: false, error: null });
+          setState((prev) =>
+            prev.uri === uri && !prev.loading ? prev : { uri, loading: false, error: null },
+          );
         }
       })
       .catch((err: unknown) => {

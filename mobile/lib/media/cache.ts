@@ -1,8 +1,14 @@
-// Mobile media transport (#346): Rust decrypts to a sandbox file; refcounted, unlinked on last release.
+// Mobile media transport (#346): Rust decrypts to a sandbox file; ref-counted, and unlinked once
+// released unless it is among the few most recently released (kept until lock or leaving the app).
 
+import { AppState } from "react-native";
+import { reaction } from "mobx";
 import * as FileSystem from "expo-file-system/legacy";
 import { invoke } from "../native";
+import { Image } from "expo-image";
 import { exportFilename } from "./viewer";
+import { createMediaStore } from "./store";
+import { appStore } from "../../stores/appStore";
 import type { AttachmentKeyScope, MessageAttachment } from "../../types";
 
 // A dedicated subfolder of OS-evictable cache storage.
@@ -19,20 +25,17 @@ interface GetMediaPathArgs {
   destDir: string;
 }
 
-const inFlight = new Map<string, Promise<string>>();
-
-// Live consumers per content hash; the file is unlinked at zero.
-const refCounts = new Map<string, number>();
-
-const resolvedUris = new Map<string, string>();
+// Ref-counted decrypted files, plus a few just-released ones kept so a remount draws at once (./store.ts).
+export const MEDIA_RETAIN_MAX = 32;
+const store = createMediaStore({
+  unlink: (uri) => FileSystem.deleteAsync(uri, { idempotent: true }),
+  retainMax: MEDIA_RETAIN_MAX,
+});
 
 let dirEnsured: Promise<void> | null = null;
 
-// Bumped by every `clearMediaCache()`: a resolve or release from an ended session must not touch the next one.
-let generation = 0;
-
 export function mediaCacheGeneration(): number {
-  return generation;
+  return store.generation();
 }
 
 function ensureDir(): Promise<void> {
@@ -50,6 +53,11 @@ function ensureDir(): Promise<void> {
   return pending;
 }
 
+/** The decrypted file already on disk for `contentHash`, synchronously, so a remount skips the placeholder. */
+export function peekMediaUri(contentHash: string | null | undefined): string | null {
+  return contentHash ? store.peek(contentHash) : null;
+}
+
 // Every successful resolve must be paired with a `releaseMediaUri()`.
 export async function resolveMediaUri(
   attachment: Pick<
@@ -64,14 +72,7 @@ export async function resolveMediaUri(
     throw new Error("resolveMediaUri: attachment is not available to fetch");
   }
 
-  const existing = inFlight.get(content_hash);
-  if (existing) {
-    refCounts.set(content_hash, (refCounts.get(content_hash) ?? 0) + 1);
-    return existing;
-  }
-
-  const startedIn = generation;
-  const promise = (async () => {
+  return store.acquire(content_hash, async () => {
     await ensureDir();
     const uri = await invoke<string>("get_media_path", {
       r2Key: object_key,
@@ -84,26 +85,8 @@ export async function resolveMediaUri(
     if (!uri) {
       throw new Error(`get_media_path returned empty path for ${content_hash}`);
     }
-    if (startedIn !== generation) {
-      // Cleared (sign-out) mid-decrypt: never hand plaintext from the ended session to anyone.
-      await FileSystem.deleteAsync(uri, { idempotent: true });
-      throw new Error(`media cache cleared while resolving ${content_hash}`);
-    }
-    resolvedUris.set(content_hash, uri);
     return uri;
-  })();
-
-  inFlight.set(content_hash, promise);
-  refCounts.set(content_hash, (refCounts.get(content_hash) ?? 0) + 1);
-
-  promise.catch(() => {
-    // Let the next caller retry; only drop our own entry.
-    if (inFlight.get(content_hash) === promise) {
-      inFlight.delete(content_hash);
-    }
   });
-
-  return promise;
 }
 
 // Pass the `mediaCacheGeneration()` captured at resolve: a pre-clear release is a no-op.
@@ -111,23 +94,36 @@ export async function releaseMediaUri(
   contentHash: string,
   resolvedIn?: number,
 ): Promise<void> {
-  if (resolvedIn !== undefined && resolvedIn !== generation) {
-    return;
-  }
-  const next = (refCounts.get(contentHash) ?? 0) - 1;
-  if (next > 0) {
-    refCounts.set(contentHash, next);
-    return;
-  }
+  await store.release(contentHash, resolvedIn);
+}
 
-  refCounts.delete(contentHash);
-  inFlight.delete(contentHash);
-  const uri = resolvedUris.get(contentHash);
-  resolvedUris.delete(contentHash);
-  if (!uri) {
+/** Lock and leaving the app: unlink every decrypted file nothing is drawing, and drop decoded copies. */
+export async function trimMediaCache(): Promise<void> {
+  Image.clearMemoryCache().catch(() => undefined);
+  await store.trim();
+}
+
+let retentionHooked = false;
+
+/** Kept files live only while the app is in the foreground and unlocked. Once per process. */
+export function startMediaRetention(): void {
+  if (retentionHooked) {
     return;
   }
-  await FileSystem.deleteAsync(uri, { idempotent: true });
+  retentionHooked = true;
+  AppState.addEventListener("change", (state) => {
+    if (state === "background") {
+      void trimMediaCache();
+    }
+  });
+  reaction(
+    () => appStore.isLocked,
+    (locked) => {
+      if (locked) {
+        void trimMediaCache();
+      }
+    },
+  );
 }
 
 // Named copies (#1248): AVPlayer, the photo library and the share sheet type a file by its extension.
@@ -158,7 +154,7 @@ export async function resolveNamedMediaUri(
     return existing;
   }
 
-  const startedIn = generation;
+  const startedIn = store.generation();
   const promise = (async () => {
     namedBaseRefs.set(content_hash, (namedBaseRefs.get(content_hash) ?? 0) + 1);
     const source = await resolveMediaUri(attachment);
@@ -169,7 +165,7 @@ export async function resolveNamedMediaUri(
     const target = `${dir}${exportFilename(filename, content_type, content_hash)}`;
     await FileSystem.deleteAsync(target, { idempotent: true });
     await FileSystem.copyAsync({ from: source, to: target });
-    if (startedIn !== generation) {
+    if (startedIn !== store.generation()) {
       await FileSystem.deleteAsync(dir, { idempotent: true });
       throw new Error(`media cache cleared while copying ${content_hash}`);
     }
@@ -194,7 +190,7 @@ export async function releaseNamedMediaUri(
   if (!object_key || !content_hash) {
     return;
   }
-  if (resolvedIn !== undefined && resolvedIn !== generation) {
+  if (resolvedIn !== undefined && resolvedIn !== store.generation()) {
     return;
   }
   const next = (namedRefCounts.get(content_hash) ?? 0) - 1;
@@ -208,16 +204,14 @@ export async function releaseNamedMediaUri(
   namedBaseRefs.delete(content_hash);
   await FileSystem.deleteAsync(`${NAMED_DIR}${content_hash}/`, { idempotent: true });
   for (let i = 0; i < baseRefs; i++) {
-    await releaseMediaUri(content_hash, generation);
+    await releaseMediaUri(content_hash, store.generation());
   }
 }
 
 // Sign-out teardown; called from `endSession()` (lib/session).
 export async function clearMediaCache(): Promise<void> {
-  generation += 1;
-  inFlight.clear();
-  refCounts.clear();
-  resolvedUris.clear();
+  store.clear();
+  Image.clearMemoryCache().catch(() => undefined);
   namedInFlight.clear();
   namedRefCounts.clear();
   namedBaseRefs.clear();

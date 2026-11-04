@@ -90,7 +90,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 
 | Flow | What it proves | Peer? |
 | --- | --- | --- |
-| `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch and PIN unlock whose fourth digit must, within a second, show `pin-busy` or have already left the pad (a fast unlock; never a frozen pad) | no |
+| `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |
@@ -107,6 +107,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `client-policy` | #1611 a build below the published minimum: the dev override link blocks a running app (`screen-client-blocked`, Android back stays put), a cold launch with the override still set is blocked before any sign-in screen, Check again re-checks with a busy state, and clearing the override (the unpublished dev file 404s, i.e. no minimums) unblocks back to sign-in and stays so across a cold launch. Overrides are never cached; the offline cached-block case is in the core and CLI tests. Needs no account | no |
 | `app-update` | #1443 Self → App shows the native version + build number and the Update row with its destination (a Maestro build is the `dev` channel, so it names pollis.com) | no |
 | `media-viewer` | #1248 send an image through the SYSTEM photo picker (seeded by `addMedia` from `fixtures/`, cell picked by its accessibility label), cold-restart, and require the image to render from R2 (`media-image-rendered`, never `media-unavailable`); then the full-screen viewer: double-tap zoom, Save to photos with feedback, Share reachable, Close. Every step is mandatory | no |
+| `vault-media-instant` | Vault Chat ↔ Media: an image entry, then three switches each way, each of which must already show `media-image-rendered` (never `media-image-loading`) on the first look. The switch is faster than Maestro can see on a simulator, so the frame-by-frame proof is a screen recording (the PR's before/after); the flow guards a regression to a slow re-decrypt | no |
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |

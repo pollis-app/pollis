@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, FileIcon, Play, X } from "lucide-react";
-import { getMediaUrl } from "../../services/r2-upload";
+import { getMediaUrl, peekMediaUrl } from "../../services/r2-upload";
 import { AttachmentDisplay } from "../Message/AttachmentDisplay";
-import { useSkin } from "../../hooks/queries/usePreferences";
 import type { MessageAttachment } from "../../types";
 import { PressButton } from "../ui/PressButton";
 import { observer } from "mobx-react-lite";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { SensitiveCover } from "./SensitiveCover";
+import { BlurhashCanvas } from "./BlurhashCanvas";
 import { SensitiveHideButton } from "./SensitiveHideButton";
 
 interface MediaGalleryViewProps {
@@ -23,7 +23,6 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
   emptyLabel,
 }) => {
   const { t } = useTranslation("vault");
-  const isTerminal = useSkin() !== "refined";
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const media = useMemo(
@@ -92,7 +91,6 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
             <GalleryTile
               key={attachment.id}
               attachment={attachment}
-              isTerminal={isTerminal}
               onOpen={() => setViewerIndex(index)}
             />
           ))}
@@ -128,19 +126,20 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
 
 interface GalleryTileProps {
   attachment: MessageAttachment;
-  isTerminal: boolean;
   onOpen: () => void;
 }
 
 const GalleryTile = observer(({
   attachment,
-  isTerminal,
   onOpen,
 }: GalleryTileProps) => {
   const { t } = useTranslation("chat");
   // Sensitive media (#1568): covered until revealed; reveal shared with the log.
   const sensitivity = useSensitiveReveal(attachment);
-  const [url, setUrl] = useState<string | null>(null);
+  // Already resolved (the chat view drew it): no placeholder on a tab switch.
+  const [url, setUrl] = useState<string | null>(() =>
+    attachment.object_key ? peekMediaUrl(attachment) : null,
+  );
   const [failed, setFailed] = useState(false);
   const isVideo = attachment.content_type.startsWith("video/");
   const isPending = !attachment.object_key;
@@ -166,9 +165,8 @@ const GalleryTile = observer(({
     };
   }, [isPending, url, failed, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
-  const shape = `relative aspect-square overflow-hidden border border-line bg-surface-raised ${
-    isTerminal ? "" : "rounded"
-  }`;
+  // The chat card's shape (AttachmentDisplay: 0.5rem, no frame), in both skins.
+  const shape = "relative aspect-square overflow-hidden rounded-lg bg-surface-raised";
   if (sensitivity.hidden) {
     // One click only reveals; a video does not open.
     return (
@@ -213,6 +211,8 @@ const GalleryTile = observer(({
           className="h-full w-full object-cover"
           onError={() => setFailed(true)}
         />
+      ) : attachment.blurhash ? (
+        <BlurhashCanvas hash={attachment.blurhash} />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-muted">
           <FileIcon size={20} aria-hidden />
@@ -256,7 +256,10 @@ const GalleryViewer = observer(({
   const { t } = useTranslation("vault");
   const { t: tChat } = useTranslation("chat");
   const sensitivity = useSensitiveReveal(attachment);
-  const [url, setUrl] = useState<string | null>(null);
+  // Already resolved (the chat view drew it): no placeholder on a tab switch.
+  const [url, setUrl] = useState<string | null>(() =>
+    attachment.object_key ? peekMediaUrl(attachment) : null,
+  );
   const isVideo = attachment.content_type.startsWith("video/");
 
   useEffect(() => {

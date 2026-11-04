@@ -974,10 +974,13 @@ metadata.
 Mobile's transient plaintext lives in JS, not core: `get_media_path` decrypts a
 viewed Vault file to `<cacheDirectory>/pollis-media/<file id>` (plus a named
 copy under `pollis-media/named/` for the viewer) and `mobile/lib/media/cache.ts`
-unlinks both on the last release. The core soak cannot reach that, so it is a
-manual check: run `mobile/.maestro/manual/vault-transient-media.yaml` (outside
-`flows/`, so never part of `maestro-run.sh all`) against a Release build, then
-list the directory — it must be empty:
+unlinks the named copy on its last release; the base file is kept among the 32
+most recently released until the app is locked or goes to the background
+(`media-server.md` → "Mobile: no loopback server"). The core soak cannot reach
+that, so it is a manual check: run `mobile/.maestro/manual/vault-transient-media.yaml` (outside
+`flows/`, so never part of `maestro-run.sh all`) against a Release build, send
+the app to the background (or lock it), then list the directory — it must be
+empty:
 
 ```bash
 # iOS simulator

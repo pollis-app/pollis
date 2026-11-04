@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Button } from "../../components/ui";
 import { useIsRegular } from "../../hooks/useLayoutClass";
-import { PinBusy, PinCells, PinKeypad } from "../../components/auth/PinPad";
+import { PinCells, PinKeypad } from "../../components/auth/PinPad";
+import { LaunchScreen } from "../../components/LaunchScreen";
 import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
-import { semantic } from "../../theme/tokens";
 import {
   useSetPin,
   useUnlock,
@@ -18,8 +18,7 @@ import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useThemeRerender } from "../../components/theme";
-
-type Stage = "checking" | "create-first" | "create-confirm" | "unlock";
+import { pinScreenView, pinSubmitIsSlow, type PinStage as Stage } from "../../lib/pinStage";
 
 function AuthPIN() {
   useThemeRerender();
@@ -152,8 +151,10 @@ function AuthPIN() {
     const next = pin + n;
     setPin(next);
     if (next.length === 4) {
-      // Go busy on this very tap, so the spinner renders before the slow call starts.
-      if (stage !== "create-first") {
+      // Go busy on this very tap, so the loader replaces the keypad before the slow call starts.
+      // A mismatched confirm makes no call, so it stays on the pad with its error.
+      const mismatch = stage === "create-confirm" && next !== firstPin;
+      if (pinSubmitIsSlow(stage) && !mismatch) {
         if (!submit.begin()) {
           return;
         }
@@ -165,6 +166,26 @@ function AuthPIN() {
 
   const regular = useIsRegular();
   const working = submit.busy;
+
+  // A PIN is in and the slow call runs: the launch loader replaces the whole pad (no frozen keypad).
+  const view = pinScreenView(stage, working, !!error);
+  if (view !== "keypad") {
+    return (
+      <View testID="screen-auth-pin" collapsable={false} style={{ flex: 1 }}>
+        <LaunchScreen
+          testID={view === "submitting" ? "pin-busy" : "pin-checking"}
+          label={
+            view === "checking"
+              ? t("settings:security.permissionChecking")
+              : stage === "unlock"
+                ? t("pinEntry.unlocking")
+                : t("pinCreate.saving")
+          }
+        />
+      </View>
+    );
+  }
+
   const busy =
     stage === "checking" ||
     working ||
@@ -173,28 +194,13 @@ function AuthPIN() {
 
   const pinContent = (
     <>
-      {stage === "checking" ? (
-        <ActivityIndicator
-          color={semantic.accent}
-          accessibilityLabel={t("settings:security.permissionChecking")}
-        />
-      ) : (
+      {stage === "checking" ? null : (
         <Heading step={stepLabel} title={headline} subtitle={subtitle} />
       )}
 
       <View style={{ gap: 16 }}>
         <PinCells length={pin.length} />
-        {working ? (
-          <PinBusy
-            label={
-              stage === "unlock"
-                ? t("pinEntry.unlocking")
-                : t("pinCreate.saving")
-            }
-          />
-        ) : error ? (
-          <AuthError center message={error} />
-        ) : null}
+        {error ? <AuthError center testID="pin-error" message={error} /> : null}
       </View>
 
       {/* Always offer a way out, or an error strands the user on the keypad. */}

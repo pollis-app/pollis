@@ -1,4 +1,4 @@
-// One attachment in a message row; every kind opens the viewer (#1248). A sensitive one (#1568) is covered until a tap reveals it.
+// One attachment in a message row or a Vault grid cell; every kind opens the viewer (#1248). A sensitive one (#1568) is covered until a tap reveals it.
 
 import { useMemo, type ReactNode } from "react";
 import { observer } from "mobx-react-lite";
@@ -33,12 +33,17 @@ export const AttachmentTile = observer(function AttachmentTile({
   attachment,
   onOpen,
   onLongPress,
+  box: boxOverride,
+  testID: testIDOverride,
 }: {
   attachment: MessageAttachment;
   // Absent with no conversation context.
   onOpen?: (attachment: MessageAttachment) => void;
   // The row's long press, so pressing an attachment still reaches it.
   onLongPress?: () => void;
+  // A fixed frame for a picture or video (the Vault's grid); else sized from the attachment.
+  box?: { width: number; height: number };
+  testID?: string;
 }) {
   useThemeRerender();
   const { t } = useTranslation("chat");
@@ -46,7 +51,8 @@ export const AttachmentTile = observer(function AttachmentTile({
   const sensitivity = useSensitiveReveal(attachment);
   const openable =
     !!onOpen && (!!attachment.object_key || !!attachment.localPreviewUri);
-  const testID = `btn-attachment-${attachment.id}`;
+  const testID = testIDOverride ?? `btn-attachment-${attachment.id}`;
+  const visualBox = boxOverride ?? imageSize(attachment);
   const placeholder = useMemo(
     () => (attachment.blurhash ? { blurhash: attachment.blurhash } : undefined),
     [attachment.blurhash],
@@ -64,7 +70,7 @@ export const AttachmentTile = observer(function AttachmentTile({
 
   const visual = kind === "image" || kind === "video";
   if (visual && tileTap(attachment, sensitivity.revealed) === "reveal") {
-    const box = imageSize(attachment);
+    const box = visualBox;
     return (
       <Pressable
         testID={testID}
@@ -104,7 +110,7 @@ export const AttachmentTile = observer(function AttachmentTile({
           attachment={attachment}
           contentFit="cover"
           style={{
-            ...imageSize(attachment),
+            ...visualBox,
             borderRadius: r.md,
             borderWidth: 1,
             borderColor: semantic.hair,
@@ -115,7 +121,7 @@ export const AttachmentTile = observer(function AttachmentTile({
   }
 
   if (kind === "video") {
-    const box = imageSize(attachment);
+    const box = visualBox;
     return withHide(
       <Pressable
         {...press}

@@ -225,8 +225,22 @@ A sandboxed React Native app cannot serve or fetch `http://127.0.0.1`
 file-path route instead: the uniffi bridge's `get_media_path(r2Key, contentHash, sha256, keyScope, destDir)`
 decrypts the R2 object to `<cacheDirectory>/pollis-media/<content_hash>` (the file
 id) and returns a
-`file://` path; `mobile/lib/media/cache.ts` ref-counts it and unlinks the
-plaintext on the last release (`useMediaUri`).
+`file://` path; `mobile/lib/media/cache.ts` ref-counts it (`useMediaUri`).
+The last release does not unlink at once: the file joins the
+`MEDIA_RETAIN_MAX` (32) most recently released, so a tile that remounts — a
+Vault Chat ↔ Media switch, a message row scrolled back into view — reads its
+path synchronously (`peekMediaUri`) and `MediaImage` draws it on the first
+frame with no blurhash and no fade. Before this every remount decrypted again
+and played the placeholder (the hook started at `uri: null`, the file was
+already unlinked, and `cachePolicy="none"` kept no decoded copy). The
+bookkeeping is pure (`mobile/lib/media/store.ts`, `tests/media-store.test.ts`):
+the oldest kept file beyond the bound is unlinked, a file in use never is, a
+consumer that leaves mid-decrypt leaves the file kept rather than leaked, and
+`trimMediaCache()` unlinks every kept file on lock and whenever the app goes to
+the background (`startMediaRetention`, root layout). `MediaImage` uses
+expo-image's **memory** cache only (never its disk cache); trims and sign-out
+clear it with `Image.clearMemoryCache()`. Sign-out (`clearMediaCache`) still
+wipes the directory and forgets everything.
 
 The full-screen media viewer (`mobile/app/media.tsx`, #1248) adds a second,
 NAMED copy of those same decrypted bytes under `pollis-media/named/<hash>/`
@@ -240,9 +254,18 @@ same way; Save to photos (expo-media-library, add-only) and Share
 The viewer's pager is virtualised for rolls of hundreds (#1492): only the page
 on screen and one each side are mounted. An image page holds a `useMediaUri`
 reference while mounted, so neighbours decrypt ahead of a swipe and a page that
-scrolls further away drops its reference (the last one unlinks the file); a
-video page takes its named copy only while on screen. The Vault's grid is a
-virtualised list too, so a large vault never decrypts every tile at once.
+scrolls further away drops its reference (the file is then kept, bounded, as
+above); a video page takes its named copy only while on screen. The Vault's grid
+is a virtualised list too, so a large vault never decrypts every tile at once,
+and its cells are the chat's own `AttachmentTile` at a fixed square `box`, so a
+picture has the same corners, frame, blurhash and sensitive cover in both views.
+
+Desktop has the same rule: `getMediaUrl` already de-duplicated per object, and
+`peekMediaUrl` (`frontend/src/services/r2-upload.ts`) answers an already
+resolved URL synchronously, so `AttachmentDisplay` and the Vault's
+`MediaGalleryView` tile start from it and a remount draws the image on its first
+render. The gallery tile has the chat card's shape (0.5rem, no frame, blurhash
+placeholder) in both skins; Playwright `e2e/vault-media-tiles.spec.ts`.
 
 ---
 _Back to [index.md](./index.md)_

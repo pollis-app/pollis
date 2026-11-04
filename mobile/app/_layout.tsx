@@ -30,6 +30,7 @@ import i18n, { adoptUserLanguage, hydrateLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 import { endSession, sweepStalePlaintext } from "../lib/session";
 import { startAvatarCache } from "../lib/avatarCache";
+import { startMediaRetention } from "../lib/media/cache";
 import { onDeviceRevoked, setSessionNotice } from "../lib/deviceRevoked";
 import { getBuildInfo } from "../lib/buildInfo";
 import {
@@ -151,9 +152,10 @@ export default function RootLayout() {
     sweepStalePlaintext().finally(() => setSweepReady(true));
   }, []);
 
-  // One directory listing maps every user to the picture last drawn for them.
+  // One directory listing maps every user to the picture last drawn for them; kept media trims on lock / background.
   useEffect(() => {
     startAvatarCache();
+    startMediaRetention();
   }, []);
 
   // Holding the splash for the stored language avoids an English first frame.

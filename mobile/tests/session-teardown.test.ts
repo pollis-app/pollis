@@ -171,8 +171,8 @@ test("nothing but endSession resets the store on sign-out", () => {
 
 test("the media viewer's named copies respect a sign-out clear", () => {
   const cache = read("lib/media/cache.ts");
-  assert.match(cache, /copyAsync[\s\S]*?if \(startedIn !== generation\)[\s\S]*?deleteAsync\(dir/);
-  assert.match(cache, /releaseNamedMediaUri\([\s\S]*?resolvedIn\?: number[\s\S]*?resolvedIn !== generation/);
+  assert.match(cache, /copyAsync[\s\S]*?if \(startedIn !== store\.generation\(\)\)[\s\S]*?deleteAsync\(dir/);
+  assert.match(cache, /releaseNamedMediaUri\([\s\S]*?resolvedIn\?: number[\s\S]*?resolvedIn !== store\.generation\(\)/);
   // Every release passes the generation it resolved in.
   for (const rel of ["app/media.tsx", "hooks/useNamedMediaUri.ts"]) {
     const src = read(rel);

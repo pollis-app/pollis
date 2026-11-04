@@ -97,6 +97,13 @@ export async function downloadAndDecryptMedia(attachment: MessageAttachment): Pr
 
 // De-dup per object id; resolved URLs stay valid for the document.
 const inFlight = new Map<string, Promise<string>>();
+// The same URLs once resolved, read synchronously so a remount (Vault Chat ↔ Media) draws at once.
+const resolvedUrls = new Map<string, string>();
+
+/** The URL already resolved for this attachment, or null; never starts a fetch. */
+export function peekMediaUrl(attachment: Pick<MessageAttachment, "content_hash">): string | null {
+  return resolvedUrls.get(attachment.content_hash) ?? null;
+}
 
 /// Attachment → loopback media-server URL; over the 100 MiB cap, a Blob URL via `downloadAndDecryptMedia`.
 export async function getMediaUrl(attachment: MessageAttachment): Promise<string> {
@@ -116,8 +123,15 @@ export async function getMediaUrl(attachment: MessageAttachment): Promise<string
     return url;
   })();
   inFlight.set(contentHash, promise);
-  promise.catch(() => {
-    inFlight.delete(contentHash);
-  });
+  promise.then(
+    (url) => {
+      if (inFlight.get(contentHash) === promise) {
+        resolvedUrls.set(contentHash, url);
+      }
+    },
+    () => {
+      inFlight.delete(contentHash);
+    },
+  );
   return promise;
 }

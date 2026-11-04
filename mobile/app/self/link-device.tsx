@@ -175,18 +175,25 @@ export default function ScanToSignIn() {
               title={t("mobile:self.scanDevice.confirmTitle")}
               subtitle={t("mobile:self.scanDevice.confirmBody")}
             />
-            <View style={{ gap: 14 }}>
-              <PinCells length={pin.length} />
-              {busy ? (
-                <PinBusy label={t("security.verifying")} />
-              ) : pinError ? (
-                <View style={{ alignSelf: "center" }}>
-                  <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
-                </View>
-              ) : null}
-            </View>
+            {busy ? null : (
+              <View style={{ gap: 14 }}>
+                <PinCells length={pin.length} />
+                {pinError ? (
+                  <View style={{ alignSelf: "center" }}>
+                    <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
+                  </View>
+                ) : null}
+              </View>
+            )}
           </View>
-          <PinKeypad onDigit={pushDigit} onBackspace={() => setPin(pin.slice(0, -1))} disabled={busy} />
+          {/* Once the PIN is in, the loading line takes the keypad's place until it lands or fails. */}
+          {busy ? (
+            <View style={{ flex: regular ? 0 : 1, justifyContent: "center" }}>
+              <PinBusy label={t("security.verifying")} />
+            </View>
+          ) : (
+            <PinKeypad onDigit={pushDigit} onBackspace={() => setPin(pin.slice(0, -1))} />
+          )}
         </View>
       </Screen>
     );

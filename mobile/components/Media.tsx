@@ -1,6 +1,6 @@
 // Media renderers for message attachments (#346): every attachment renders through this seam.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { View, Text } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
@@ -24,14 +24,17 @@ export function MediaImage({
   const { uri, error } = useMediaUri(isPending ? null : attachment);
 
   const displayUri = isPending ? attachment.localPreviewUri ?? null : uri;
+  // The file was already on disk at mount (a remount): draw it at once, no blurhash, no fade.
+  const instantUri = useRef(displayUri).current;
+  const instant = !!displayUri && displayUri === instantUri;
 
   const placeholder = useMemo(
-    () => (attachment.blurhash ? { blurhash: attachment.blurhash } : undefined),
-    [attachment.blurhash],
+    () => (attachment.blurhash && !instant ? { blurhash: attachment.blurhash } : undefined),
+    [attachment.blurhash, instant],
   );
 
   // Lets Maestro tell a rendered image from a blurhash that never resolved.
-  const [renderedUri, setRenderedUri] = useState<string | null>(null);
+  const [renderedUri, setRenderedUri] = useState<string | null>(instantUri);
   const rendered = !!displayUri && renderedUri === displayUri;
 
   if (error) {
@@ -60,9 +63,9 @@ export function MediaImage({
       placeholder={placeholder}
       placeholderContentFit={contentFit}
       contentFit={contentFit}
-      // Plaintext is unlinked on unmount: expo-image must keep no copy.
-      cachePolicy="none"
-      transition={150}
+      // Decoded copies in memory only (cleared on lock, background, sign-out); never expo-image's disk cache.
+      cachePolicy="memory"
+      transition={instant ? 0 : 150}
       // Inline styles so the theme getters follow a live accent change.
       style={[{ borderRadius: r.md, backgroundColor: semantic.raised }, style]}
       accessibilityLabel={attachment.filename}

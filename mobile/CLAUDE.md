@@ -1428,6 +1428,10 @@ Current state:
   (android + ios cross-compile jobs).
 - **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
   `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
+  A released file is kept among the 32 most recently released (`lib/media/store.ts`)
+  so a remount (Vault Chat ↔ Media, a row scrolled back) draws on its first frame;
+  kept files are unlinked on lock and on going to the background, and `MediaImage`
+  caches decoded images in memory only. Rules: `.codesight/wiki/media-server.md`.
 - **Profile photos:** `components/UserAvatar.tsx` draws a user's photo everywhere a
   person is named (Direct rows, message and thread rows, mentions, members,
   requests, new DM, blocked, profile, info pages, search, Self), falling back to the

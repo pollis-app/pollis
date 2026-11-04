@@ -7,6 +7,10 @@ export {
   releaseNamedMediaUri,
   clearMediaCache,
   mediaCacheGeneration,
+  peekMediaUri,
+  trimMediaCache,
+  startMediaRetention,
+  MEDIA_RETAIN_MAX,
   MEDIA_DIR,
 } from "./cache";
 export { registerMediaMock } from "./mock";

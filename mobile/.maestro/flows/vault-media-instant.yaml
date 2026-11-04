@@ -1,0 +1,70 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# VAULT CHAT ↔ MEDIA — a picture already on screen in one view is drawn on the
+# first frame of the other, every switch: the decrypted file is kept for a
+# remount and its path read synchronously (lib/media/store.ts), so the tile
+# never shows its blurhash while the file is decrypted again. The grid tile is
+# the chat's own AttachmentTile (same corners, same placeholder).
+#
+# The check is "the first look already sees the rendered image": the chip
+# taps skip Maestro's settle wait and the wait for `media-image-rendered` is
+# 500 ms, well under a fresh decrypt + draw. Every step is mandatory.
+# Self-contained: a fresh disposable account, no peer.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- extendedWaitUntil:
+    visible:
+      id: "vault-empty"
+    timeout: 15000
+
+- addMedia:
+    - "../fixtures/vault-swipe-03.png"
+- runFlow: ../subflows/pick-newest-photo.yaml
+- runFlow: ../subflows/send-vault-picks.yaml
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 60000
+- takeScreenshot: vault-instant-01-chat
+
+- tapOn:
+    id: "chip-vault-view-media"
+    waitToSettleTimeoutMs: 0
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 500
+- assertVisible:
+    id: "tile-vault-media-.*"
+- takeScreenshot: vault-instant-02-media
+
+- repeat:
+    times: 3
+    commands:
+      - tapOn:
+          id: "chip-vault-view-chat"
+          waitToSettleTimeoutMs: 0
+      - extendedWaitUntil:
+          visible:
+            id: "media-image-rendered"
+          timeout: 500
+      - assertNotVisible:
+          id: "media-image-loading"
+      - tapOn:
+          id: "chip-vault-view-media"
+          waitToSettleTimeoutMs: 0
+      - extendedWaitUntil:
+          visible:
+            id: "media-image-rendered"
+          timeout: 500
+      - assertNotVisible:
+          id: "media-image-loading"
+- takeScreenshot: vault-instant-03-media-after-switches
