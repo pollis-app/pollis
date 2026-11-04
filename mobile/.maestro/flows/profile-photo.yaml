@@ -1,0 +1,172 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# PROFILE PHOTO — set your own photo from the library (system picker + square
+# crop), see it on Account details, on the Self card and on your message rows,
+# then prove it is drawn from disk after a cold restart, and remove it.
+#
+# `UserAvatar` carries `<testID>-photo` once a picture is on disk for that
+# user and `<testID>-letter` while it shows the letter avatar. After the cold
+# restart the Self card is asserted with a SHORT wait: the picture must come
+# from the on-disk rendition on the first frames, not from a fresh download.
+# The fixture is a synthetic 900x600 drawing, so the crop is exercised too.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "avatar-self-letter"
+- tapOn:
+    id: "row-self-user-settings"
+- assertVisible:
+    id: "screen-self-user-settings"
+- assertVisible:
+    id: "avatar-self-settings-letter"
+- takeScreenshot: profile-photo-01-none
+
+# Seed the library, then pick it through the sheet.
+- addMedia:
+    - "../fixtures/profile-photo.png"
+- tapOn:
+    id: "btn-avatar-change"
+- assertVisible:
+    id: "sheet-avatar"
+- takeScreenshot: profile-photo-02-sheet
+- tapOn:
+    id: "btn-avatar-library"
+- waitForAnimationToEnd:
+    timeout: 5000
+# With editing on, iOS 27 runs the picker AND its square crop out of process:
+# neither its cells nor its "Use" button are in the accessibility hierarchy, so
+# on iOS this is the one place a point tap is the only way in. Pass the two
+# points per device: PICK_POINT is the grid's first cell (the photo `addMedia`
+# just seeded, newest first), USE_POINT the crop's "Use".
+#   iPad Pro 13-inch (M5): -e PICK_POINT=39%,35% -e USE_POINT=61%,35%
+# Android's picker labels its cells as everywhere else, and its cropper's
+# confirm is found by text or id.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      # The out-of-process sheets take input only once they have settled, and
+      # are invisible to waitForAnimationToEnd: wait on an id that never
+      # appears (optional, so its timeout is just the settle time).
+      - extendedWaitUntil:
+          visible:
+            id: "settle-picker"
+          timeout: 4000
+          optional: true
+      - tapOn:
+          point: ${PICK_POINT}
+      - extendedWaitUntil:
+          visible:
+            id: "settle-crop"
+          timeout: 4000
+          optional: true
+      - tapOn:
+          point: ${USE_POINT}
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          text: "Photo(,| taken on) .*"
+          index: 0
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - tapOn:
+          text: "(?i)(crop|done|save)"
+          optional: true
+      - tapOn:
+          id: "(?i).*crop.*"
+          optional: true
+- extendedWaitUntil:
+    visible:
+      id: "text-avatar-saved"
+    timeout: 60000
+- assertVisible:
+    id: "avatar-self-settings-photo"
+- takeScreenshot: profile-photo-03-set
+
+# The Self card shows it too.
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "avatar-self-photo"
+- takeScreenshot: profile-photo-04-self-card
+
+# And so do your message rows.
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Photo Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Photo Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "hello with a photo"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible:
+      id: "row-message-.*-avatar-photo"
+    timeout: 30000
+- takeScreenshot: profile-photo-05-message-row
+- extendedWaitUntil:
+    notVisible:
+      id: "row-message-pending-.*"
+    timeout: 120000
+
+# Cold restart: the picture is on disk, so it draws without waiting on the network.
+- stopApp
+- launchApp
+- runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-self"
+    timeout: 20000
+- tapOn:
+    id: "tab-self"
+- extendedWaitUntil:
+    visible:
+      id: "avatar-self-photo"
+    timeout: 3000
+- takeScreenshot: profile-photo-06-after-restart
+
+# Remove it.
+- tapOn:
+    id: "row-self-user-settings"
+- tapOn:
+    id: "btn-avatar-change"
+- tapOn:
+    id: "btn-avatar-remove"
+- extendedWaitUntil:
+    visible:
+      id: "text-avatar-removed"
+    timeout: 30000
+- assertVisible:
+    id: "avatar-self-settings-letter"
+- takeScreenshot: profile-photo-07-removed
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "avatar-self-letter"

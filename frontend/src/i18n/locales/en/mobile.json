@@ -479,7 +479,23 @@
       "handle": "Handle",
       "handleHint": "Other members can find and DM you with @handle.",
       "handleInvalid": "Handles are 3–32 characters: lowercase letters, digits, '_', '.' or '-'.",
-      "save": "Save changes"
+      "save": "Save changes",
+      "photo": {
+        "heading": "Profile photo",
+        "hint": "Everyone you talk to sees this photo.",
+        "add": "Add photo",
+        "change": "Change photo",
+        "library": "Choose from library",
+        "camera": "Take photo",
+        "remove": "Remove photo",
+        "saving": "Saving photo…",
+        "removing": "Removing photo…",
+        "saved": "Photo updated.",
+        "removed": "Photo removed.",
+        "failed": "Couldn't save your photo. Try again.",
+        "removeFailed": "Couldn't remove your photo. Try again.",
+        "cameraDenied": "Pollis can't use the camera. Allow it in Settings to take a photo."
+      }
     },
     "scanDevice": {
       "heading": "Scan to sign in a device",

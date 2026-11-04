@@ -185,7 +185,10 @@
     "avatarUpdated": "Avatar updated.",
     "avatarUploadFailed": "Failed to upload avatar",
     "uploadAvatarButton": "Upload Avatar",
-    "uploading": "Uploading…"
+    "uploading": "Uploading…",
+    "removeAvatarButton": "Remove avatar",
+    "avatarRemoved": "Avatar removed.",
+    "avatarRemoveFailed": "Couldn't remove your avatar."
   },
   "security": {
     "title": "Security",

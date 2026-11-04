@@ -180,7 +180,10 @@
     "avatarUpdated": "Avatar mis à jour.",
     "avatarUploadFailed": "Échec de l'envoi de l'avatar",
     "uploadAvatarButton": "Envoyer l'avatar",
-    "uploading": "Envoi…"
+    "uploading": "Envoi…",
+    "removeAvatarButton": "Retirer l'avatar",
+    "avatarRemoved": "Avatar retiré.",
+    "avatarRemoveFailed": "Impossible de retirer votre avatar."
   },
   "security": {
     "title": "Sécurité",

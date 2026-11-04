@@ -17,7 +17,8 @@ import { RequestsRow } from "../../components/direct/RequestsRow";
 import { VaultRow } from "../../components/direct/VaultRow";
 import { conversationTime } from "../../components/direct/conversationTime";
 import { Icon } from "../../components/icons";
-import { semantic, space } from "../../theme/tokens";
+import { semantic, space, layout } from "../../theme/tokens";
+import { usePrefetchAvatars } from "../../components/UserAvatar";
 import {
   useDMChannels,
   useDMRequests,
@@ -66,6 +67,12 @@ function Direct() {
   // One batched preview fetch for every row (#874/#936).
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
+
+  // Warm every row's picture before it scrolls into view.
+  usePrefetchAvatars(
+    dms.flatMap((d) => (d.user2_id ? [{ userId: d.user2_id, key: d.user2_avatar_url }] : [])),
+    layout.touchMin,
+  );
 
   const shown = useMemo(() => {
     if (!needle) {
@@ -209,7 +216,7 @@ function Direct() {
               testID={`row-dm-${d.id}`}
               unreadTestID={`unread-${d.id}`}
               name={handle}
-              avatarLabels={[handle]}
+              avatars={[{ label: handle, userId: d.user2_id, avatarKey: d.user2_avatar_url }]}
               preview={preview}
               own={
                 !!last && !!currentUserId && last.sender_id === currentUserId

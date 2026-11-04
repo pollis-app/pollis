@@ -468,7 +468,23 @@
       "handle": "Nom d'utilisateur",
       "handleHint": "Les autres membres peuvent vous trouver et vous écrire avec @handle.",
       "handleInvalid": "Le nom d'utilisateur doit compter de 3 à 32 caractères : minuscules, chiffres, '_', '.' ou '-'.",
-      "save": "Enregistrer les modifications"
+      "save": "Enregistrer les modifications",
+      "photo": {
+        "heading": "Photo de profil",
+        "hint": "Toutes les personnes avec qui vous parlez voient cette photo.",
+        "add": "Ajouter une photo",
+        "change": "Changer de photo",
+        "library": "Choisir dans la photothèque",
+        "camera": "Prendre une photo",
+        "remove": "Retirer la photo",
+        "saving": "Enregistrement de la photo…",
+        "removing": "Retrait de la photo…",
+        "saved": "Photo mise à jour.",
+        "removed": "Photo retirée.",
+        "failed": "Impossible d'enregistrer votre photo. Réessayez.",
+        "removeFailed": "Impossible de retirer votre photo. Réessayez.",
+        "cameraDenied": "Pollis ne peut pas utiliser l'appareil photo. Autorisez-le dans Réglages pour prendre une photo."
+      }
     },
     "scanDevice": {
       "heading": "Scanner pour connecter un appareil",

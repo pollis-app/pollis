@@ -8,11 +8,11 @@ import {
   Body,
   Field,
   ListRow,
-  Avatar,
   Button,
   Group,
   Txt,
 } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { Icon } from "../../components/icons";
 import { semantic, space, layout } from "../../theme/tokens";
 import { useUserSearch, useCreateDM } from "../../hooks/queries";
@@ -107,7 +107,9 @@ export default function NewDM() {
               accessibilityLabel={t("dm.startWith", { name: found.username })}
               minHeight={64}
               glyph={
-                <Avatar
+                <UserAvatar
+                  userId={found.id}
+                  avatarKey={found.avatar_url ?? null}
                   label={found.username || found.email || undefined}
                   size={layout.touchMin}
                 />

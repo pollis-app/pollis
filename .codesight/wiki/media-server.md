@@ -37,6 +37,13 @@ resolves a hash by scanning for `<hash>.<ext>.enc`, so a new producer needs no
 server change at all; what it needs is a content-addressed name, which is why
 avatars had to stop living at a mutable `avatars/{user_id}` key first.
 
+Mobile has no loopback server: `commands::avatar::get_avatar_path` writes small
+square renditions of the hash-checked avatar to the app's cache directory
+instead (see `commands.md` → "Profile pictures"). Like custom emoji there, they
+are public objects and stay cached across launches; `endSession()` wipes them.
+Desktop's copy stays encrypted at rest; mobile's relies on the OS sandbox and
+file protection, the same as its emoji cache.
+
 ## Saving an attachment out of the app
 
 The loopback route is for RENDERING. "Save attachment as…" does not use it:

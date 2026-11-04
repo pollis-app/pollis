@@ -117,6 +117,7 @@ function ThreadScreen() {
           testID={`row-thread-${m.id}`}
           messageId={m.id}
           av={name.slice(0, 2)}
+          senderId={m.sender_id}
           amber={mine}
           name={name}
           time={timeLabel(m.created_at)}
@@ -158,6 +159,7 @@ function ThreadScreen() {
           testID={`row-thread-root-${root.id}`}
           messageId={root.id}
           av={(rootName ?? "??").slice(0, 2)}
+          senderId={root.sender_id}
           amber={currentUser?.id === root.sender_id}
           name={rootName ?? t("chat:list.unknownAuthor")}
           time={timeLabel(root.created_at)}

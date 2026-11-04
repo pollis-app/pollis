@@ -13,6 +13,7 @@ import {
   Txt,
 } from "../ui";
 import { SearchResultRow } from "./SearchResultRow";
+import { UserAvatar } from "../UserAvatar";
 import { CorpusFooter } from "./CorpusFooter";
 import type { SearchSort } from "../../hooks/queries/useSearch";
 import { Icon } from "../icons";
@@ -347,7 +348,9 @@ export function GlobalSearchResults({
             <ListRow
               testID={`row-user-${user.data.id}`}
               glyph={
-                <Avatar
+                <UserAvatar
+                  userId={user.data.id}
+                  avatarKey={user.data.avatar_url ?? null}
                   label={user.data.username || undefined}
                   size={layout.touchMin - 8}
                 />

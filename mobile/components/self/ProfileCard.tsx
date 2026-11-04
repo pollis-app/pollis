@@ -1,6 +1,7 @@
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Avatar, IconButton } from "../ui";
+import { IconButton } from "../ui";
+import { UserAvatar } from "../UserAvatar";
 import { Icon } from "../icons";
 import { semantic, type as ty, r, space } from "../../theme/tokens";
 
@@ -8,10 +9,15 @@ import { semantic, type as ty, r, space } from "../../theme/tokens";
 export function ProfileCard({
   displayName,
   handle,
+  userId,
+  avatarKey,
   onEdit,
 }: {
   displayName: string;
   handle: string;
+  userId?: string;
+  // undefined while the profile is loading.
+  avatarKey?: string | null;
   onEdit: () => void;
 }) {
   const { t } = useTranslation("mobile");
@@ -26,7 +32,14 @@ export function ProfileCard({
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>
-        <Avatar label={displayName} size="lg" variant="self" />
+        <UserAvatar
+          testID="avatar-self"
+          userId={userId}
+          avatarKey={avatarKey}
+          label={displayName}
+          size="lg"
+          variant="self"
+        />
         <View
           accessible
           accessibilityLabel={`${displayName}, ${sub}`}

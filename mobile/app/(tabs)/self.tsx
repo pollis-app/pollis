@@ -170,6 +170,8 @@ function Self() {
           <ProfileCard
             displayName={display}
             handle={handle}
+            userId={appStore.currentUser?.id}
+            avatarKey={profile ? profile.avatar_url ?? null : undefined}
             onEdit={() => router.push("/self/user-settings")}
           />
 

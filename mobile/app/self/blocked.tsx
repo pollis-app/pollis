@@ -1,6 +1,7 @@
 import { Text } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, Group, Avatar, Chip, ActionRow } from "../../components/ui";
+import { Screen, Header, Body, Group, Chip, ActionRow } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { ErrorText } from "../../components/self/SettingsField";
 import { type as ty, space } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";
@@ -36,7 +37,7 @@ export default function Blocked() {
                 <ActionRow
                   key={b.user_id}
                   testID={`row-blocked-${b.user_id}`}
-                  glyph={<Avatar label={handle} />}
+                  glyph={<UserAvatar userId={b.user_id} label={handle} />}
                   name={`@${handle}`}
                   sub={sub}
                   action={

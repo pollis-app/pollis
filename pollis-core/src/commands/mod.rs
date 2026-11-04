@@ -2,6 +2,8 @@ pub mod account_identity;
 pub mod auth;
 pub mod pin;
 pub mod autolock;
+// Profile pictures as local renditions, for mobile (no loopback server).
+pub mod avatar;
 pub mod blocks;
 // The minimum-version check (#1611).
 pub mod client_policy;

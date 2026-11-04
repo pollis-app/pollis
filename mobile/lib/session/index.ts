@@ -6,6 +6,7 @@ import { queryClient } from "../queryClient";
 import { clearMediaCache } from "../media/cache";
 import { clearExportArchives } from "../exportDir";
 import { clearEmojiCache } from "../emojiCache";
+import { clearAvatarCache } from "../avatarCache";
 import { oncePerProcess, sweepPlaintext, tearDownSession } from "./teardown";
 
 export function endSession(): Promise<void> {
@@ -25,6 +26,7 @@ export function endSession(): Promise<void> {
     clearMediaCache,
     clearExportArchives,
     clearEmojiCache,
+    clearAvatarCache,
   });
 }
 

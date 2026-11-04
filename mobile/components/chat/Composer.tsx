@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, Platform, ScrollView, type TextInput } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { Avatar, Field, PressInPressable } from "../ui";
+import { Field, PressInPressable } from "../ui";
+import { UserAvatar } from "../UserAvatar";
 import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
 import {
   applyMention,
@@ -170,7 +171,12 @@ export function Composer({
                 onPress={() => acceptMention(candidate)}
                 style={({ pressed }) => suggestionRow(pressed, i)}
               >
-                <Avatar label={candidate.username} size="sm" />
+                <UserAvatar
+                  userId={candidate.userId}
+                  avatarKey={candidate.avatarUrl}
+                  label={candidate.username}
+                  size="sm"
+                />
                 <Text style={[ty.body, { color: semantic.text }]}>
                   @{candidate.username}
                 </Text>

@@ -8,11 +8,11 @@ import {
   Body,
   SectionTitle,
   ListRow,
-  Avatar,
   Button,
   Group,
   Txt,
 } from "../../components/ui";
+import { UserAvatar } from "../../components/UserAvatar";
 import { ExportArchive } from "../../components/ExportArchive";
 import { SafetyNumberRows } from "../../components/direct/SafetyNumberRows";
 import { Icon } from "../../components/icons";
@@ -84,7 +84,9 @@ function DMInfo() {
                     testID={`row-member-${m.user_id}`}
                     minHeight={52}
                     glyph={
-                      <Avatar
+                      <UserAvatar
+                        userId={m.user_id}
+                        avatarKey={m.avatar_url ?? null}
                         label={handle}
                         size={layout.touchMin - 8}
                         variant={isMe ? "self" : "default"}

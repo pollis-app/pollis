@@ -28,6 +28,7 @@ export const SettingsPage: React.FC = observer(() => {
   const [preview, setPreview] = useState<string | null>(null);
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [avatarRemoved, setAvatarRemoved] = useState(false);
   const [username, setUsername] = useState("");
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [preferredName, setPreferredName] = useState("");
@@ -131,6 +132,19 @@ export const SettingsPage: React.FC = observer(() => {
       setUploadError(errorMessage(error, t("user.avatarUploadFailed")));
     }
   }, [selectedFile, currentUser, preview, updateAvatarMutation, t]);
+
+  // An empty key reads as "no avatar" on every client (the DS update is a COALESCE).
+  const handleAvatarRemove = useCallback(async () => {
+    setUploadError(null);
+    setSaveSuccess(false);
+    try {
+      await updateAvatarMutation.mutateAsync("");
+      setCurrentAvatarUrl(null);
+      setAvatarRemoved(true);
+    } catch (error) {
+      setUploadError(errorMessage(error, t("user.avatarRemoveFailed")));
+    }
+  }, [updateAvatarMutation, t]);
 
   useEffect(() => {
     if (saveSuccess) {
@@ -516,6 +530,24 @@ export const SettingsPage: React.FC = observer(() => {
                 <p data-testid="avatar-upload-success" className="text-xs font-mono text-accent-dim">
                   {t("user.avatarUpdated")}
                 </p>
+              )}
+
+              {avatarRemoved && !currentAvatarUrl && !selectedFile && (
+                <p data-testid="avatar-remove-success" className="text-xs font-mono text-accent-dim">
+                  {t("user.avatarRemoved")}
+                </p>
+              )}
+
+              {currentAvatarUrl && !selectedFile && (
+                <Button
+                  data-testid="remove-avatar-button"
+                  variant="secondary"
+                  onClick={handleAvatarRemove}
+                  disabled={updateAvatarMutation.isPending}
+                  isLoading={updateAvatarMutation.isPending}
+                >
+                  {t("user.removeAvatarButton")}
+                </Button>
               )}
 
               {selectedFile && (

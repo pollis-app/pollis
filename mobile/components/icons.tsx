@@ -73,6 +73,7 @@ import {
   Stethoscope,
   Vault,
   Images,
+  Camera,
   MessageSquare,
   type LucideIcon,
 } from "lucide-react-native";
@@ -184,6 +185,7 @@ export const Icon = {
   diagnostics: wrap(Stethoscope, 14),
   vault: wrap(Vault),
   images: wrap(Images),
+  camera: wrap(Camera),
   messageSquare: wrap(MessageSquare),
 
   /* ── Media (#1248) ── */

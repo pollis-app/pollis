@@ -192,7 +192,10 @@
     "avatarUpdated": "تم تحديث الصورة الرمزية.",
     "avatarUploadFailed": "تعذّر رفع الصورة الرمزية",
     "uploadAvatarButton": "رفع صورة رمزية",
-    "uploading": "جارٍ الرفع…"
+    "uploading": "جارٍ الرفع…",
+    "removeAvatarButton": "إزالة الصورة الرمزية",
+    "avatarRemoved": "تمت إزالة الصورة الرمزية.",
+    "avatarRemoveFailed": "تعذّرت إزالة صورتك الرمزية."
   },
   "security": {
     "title": "الأمان",

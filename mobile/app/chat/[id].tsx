@@ -18,6 +18,7 @@ import { collapseUndecryptable } from "../../lib/collapseUndecryptable";
 import { placeKeyChangeNotices } from "../../lib/keyChangeTimeline";
 import { useQueryClient } from "@tanstack/react-query";
 import { MessageRow } from "../../components/chat/MessageRow";
+import { usePrefetchAvatars } from "../../components/UserAvatar";
 import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
@@ -566,6 +567,25 @@ function TextChat(props: ChatViewProps = {}) {
     [groupMembers, group?.owner_id],
   );
 
+  // Senders' pictures: the roster already carries every member's key.
+  const avatarKeyById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const m of dmChannel?.members ?? []) {
+      map.set(m.user_id, m.avatar_url ?? null);
+    }
+    for (const m of groupMembers ?? []) {
+      map.set(m.user_id, m.avatar_url ?? null);
+    }
+    return map;
+  }, [dmChannel, groupMembers]);
+  usePrefetchAvatars(
+    useMemo(
+      () => [...avatarKeyById].map(([userId, key]) => ({ userId, key })),
+      [avatarKeyById],
+    ),
+    40,
+  );
+
   // Header title: never the raw conversation ULID.
   const peerName = useMemo(() => {
     if (kind !== "dm") {
@@ -670,6 +690,8 @@ function TextChat(props: ChatViewProps = {}) {
           testID={`row-message-${m.id}`}
           messageId={m.id}
           av={name.slice(0, 2)}
+          senderId={m.sender_id}
+          senderAvatarKey={avatarKeyById.get(m.sender_id)}
           amber={mine}
           name={name}
           time={timeLabel(m.created_at)}
@@ -745,6 +767,7 @@ function TextChat(props: ChatViewProps = {}) {
       discardUnsent,
       newMemberJoinMs,
       peerLabel,
+      avatarKeyById,
       t,
     ],
   );

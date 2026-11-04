@@ -23,6 +23,7 @@ import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } fr
 import { useTheme } from "./theme";
 import { ThemeProbe } from "./ThemeProbe";
 import { EmojiProbe } from "./emoji/EmojiProbe";
+import { AvatarProbe } from "./AvatarProbe";
 import { KeyboardProbe } from "./KeyboardProbe";
 import { useLayoutClass } from "../hooks/useLayoutClass";
 import { PaneEntryContext } from "./pane/paneContext";
@@ -177,6 +178,7 @@ export function Screen({
     >
       <ThemeProbe />
       <EmojiProbe />
+      <AvatarProbe />
       <KeyboardProbe />
       <KeyboardFrame avoid={avoidKeyboard && !nested}>
         <KeyboardAvoidedContext.Provider value={true}>
@@ -693,8 +695,10 @@ export function Avatar({
   variant = "default",
   shape = "circle",
   style,
+  testID,
 }: {
   label?: string;
+  testID?: string;
   // sm 30 · md 40 · lg 64, or an explicit size in points.
   size?: "sm" | "md" | "lg" | number;
   variant?: "default" | "self" | "amber" | "solid";
@@ -711,6 +715,7 @@ export function Avatar({
     : null;
   return (
     <View
+      testID={testID}
       accessible={false}
       importantForAccessibility="no-hide-descendants"
       style={[

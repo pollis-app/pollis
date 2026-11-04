@@ -186,7 +186,10 @@
     "avatarUpdated": "Аватар обновлён.",
     "avatarUploadFailed": "Не удалось загрузить аватар",
     "uploadAvatarButton": "Загрузить аватар",
-    "uploading": "Загрузка…"
+    "uploading": "Загрузка…",
+    "removeAvatarButton": "Удалить аватар",
+    "avatarRemoved": "Аватар удалён.",
+    "avatarRemoveFailed": "Не удалось удалить аватар."
   },
   "security": {
     "title": "Безопасность",

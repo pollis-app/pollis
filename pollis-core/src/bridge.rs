@@ -712,6 +712,32 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(user::get_user_profile(user_id, &state()?).await?)
         }
+        "get_user_profiles" => {
+            let user_ids: Vec<String> = arg(&args, "userIds")?;
+            ok(user::get_user_profiles(user_ids, &state()?).await?)
+        }
+        // No loopback server on mobile: a hash-checked square rendition on disk.
+        "get_avatar_path" => {
+            let user_id: String = arg(&args, "userId")?;
+            let key: String = arg(&args, "key")?;
+            let px: u32 = arg(&args, "px")?;
+            let dest_dir: String = arg(&args, "destDir")?;
+            ok(crate::commands::avatar::get_avatar_path(user_id, key, px, dest_dir, &state()?)
+                .await?)
+        }
+        "upload_avatar" => {
+            let user_id: String = arg(&args, "userId")?;
+            let path: String = arg(&args, "path")?;
+            let px: u32 = arg(&args, "px")?;
+            let dest_dir: Option<String> = arg_opt(&args, "destDir")?;
+            ok(crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state()?)
+                .await?)
+        }
+        "remove_avatar" => {
+            let user_id: String = arg(&args, "userId")?;
+            crate::commands::avatar::remove_avatar(user_id, &state()?).await?;
+            ok(())
+        }
         "update_user_profile" => {
             let user_id: String = arg(&args, "userId")?;
             let username: Option<String> = arg_opt(&args, "username")?;
@@ -1606,6 +1632,10 @@ mod tests {
             "dismissed_push_handles",
             // #1635
             "resolve_livekit_identities",
+            "get_user_profiles",
+            "get_avatar_path",
+            "upload_avatar",
+            "remove_avatar",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }

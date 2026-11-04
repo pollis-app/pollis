@@ -8,7 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
-import { Avatar } from "../ui";
+import { UserAvatar } from "../UserAvatar";
 import { Icon } from "../icons";
 import { fonts, r, semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
@@ -39,6 +39,8 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 /** One timeline message, Discord-style; the whole row is ONE accessible element. */
 export function MessageRow({
   av,
+  senderId,
+  senderAvatarKey,
   amber,
   name,
   time,
@@ -75,6 +77,9 @@ export function MessageRow({
   messageId,
 }: {
   av: string;
+  // The sender's picture; `senderAvatarKey` undefined = the roster does not say.
+  senderId?: string;
+  senderAvatarKey?: string | null;
   amber?: boolean;
   name: string;
   time: string;
@@ -269,7 +274,14 @@ export function MessageRow({
               disabled={!onPressAvatar}
               hitSlop={4}
             >
-              <Avatar label={av} size={AVATAR} variant={amber ? "self" : "default"} />
+              <UserAvatar
+                userId={senderId}
+                avatarKey={senderAvatarKey}
+                label={av}
+                size={AVATAR}
+                variant={amber ? "self" : "default"}
+                testID={testID ? `${testID}-avatar` : undefined}
+              />
             </Pressable>
           ) : (
             <View style={{ width: AVATAR }} />
