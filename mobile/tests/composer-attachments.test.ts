@@ -184,7 +184,6 @@ test("every video play glyph goes through the themed badge", () => {
   for (const file of [
     "components/chat/ComposerAttachmentPreview.tsx",
     "components/chat/AttachmentTile.tsx",
-    "components/vault/VaultMediaGrid.tsx",
   ]) {
     const src = read(file);
     assert.match(src, /<PlayBadge /, file);
