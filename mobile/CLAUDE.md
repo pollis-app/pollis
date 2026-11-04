@@ -1203,14 +1203,32 @@ Android restores on resume for a focused composer also comes with no
 animation, so JS kept it closed and the keyboard covered the composer. So the
 pnpm patch on `KeyboardAnimationCallback` holds one invariant instead of
 patching cases: once no animation runs, JS holds the real IME height. It
-records the height every event last told JS (`heightInJs`, 0 = hidden); after
-any insets change (120 ms grace for the move's own animation) and in a
-bounded round after the window regains focus (120, 350 and 700 ms, the last
-ignoring a transition whose end was lost), it compares that with the real IME
-height and, if they differ, syncs JS with the library's own
-`syncKeyboardPosition(height, visible)` (the call it uses when a Modal
-closes), whichever direction that is: show, hide or resize. Each sync logs one
-`PollisKeyboard` line to logcat.
+records the height every event last told JS (`heightInJs`, 0 = hidden), one
+record per `KeyboardControllerView` (`heightsInJs`): a Modal's own callback
+feeds the same JS, and a per-callback copy went stale whenever the other one
+spoke. After any insets change (120 ms grace for the move's own animation), in
+a bounded round after the window regains focus (120, 350 and 700 ms) and in
+the same round when a Modal hands the keyboard back (`suspend(false)`; while a
+Modal owns it the main callback skips every event and every check), it
+compares that with the real IME height and, if they differ, syncs JS with the
+library's own `syncKeyboardPosition(height, visible)` (the call it uses when a
+Modal closes), whichever direction that is: show, hide or resize. A transition
+blocks the check only while it is younger than its own duration plus 250 ms,
+so a lost `onEnd` cannot block it for good. Each sync logs one
+`PollisKeyboard` line (`reconcile (<reason>): JS had …`) to logcat.
+#1687: the replay must be a whole transition. `KeyboardAvoidingView` learns
+the height it pads to (`heightWhenOpened`) only from a **Start** event, so the
+#1662 replay, Move + End only, set progress 1 against the height of the last
+*animated* show: 0 when it had seen none, and JS read "open" with the
+composer still under the keyboard. That is what a return from another app hit
+when the phone restored the keyboard without an animation.
+`syncKeyboardPosition` now sends will-event, Start, Move, End and did-event,
+and the iOS replays send `onKeyboardMoveStart` too. The emulator always
+animates the restore, so to see the replay path there, drop the insets
+animation callbacks in a local build (the investigation used a
+`debug.pollis.dropanim` system property, never shipped): before the fix the
+composer stays under the keyboard after `reconcile … syncing JS`, after it the
+composer sits above.
 iOS strands the same way by a different road: its `KeyboardMovementObserver`
 also turns KVO moves of the keyboard-tracking view into "interactive" events,
 which set every `KeyboardAvoidingView`'s progress with no end event and cancel

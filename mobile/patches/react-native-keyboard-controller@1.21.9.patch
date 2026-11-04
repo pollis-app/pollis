@@ -1,10 +1,11 @@
 diff --git a/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt b/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
-index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a371dda4d 100644
+index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..6c96de1d0fa9e5834d2a237a624a14cceb80200c 100644
 --- a/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
 +++ b/android/src/main/java/com/reactnativekeyboardcontroller/listeners/KeyboardAnimationCallback.kt
-@@ -1,7 +1,9 @@
+@@ -1,7 +1,10 @@
  package com.reactnativekeyboardcontroller.listeners
  
++import android.os.SystemClock
 +import android.util.Log
  import android.view.View
  import android.view.ViewTreeObserver.OnGlobalFocusChangeListener
@@ -12,47 +13,64 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a
  import android.widget.EditText
  import androidx.core.graphics.Insets
  import androidx.core.view.OnApplyWindowInsetsListener
-@@ -31,6 +33,13 @@ import kotlin.math.abs
+@@ -31,6 +34,20 @@ import kotlin.math.abs
  private val TAG = KeyboardAnimationCallback::class.qualifiedName
  private val isResizeHandledInCallbackMethods = Keyboard.IS_ANIMATION_EMULATED
  
 +// Pollis (#1641, #1662): how long an insets change waits for its own animation before JS is synced to it.
 +private const val MISSED_MOVE_GRACE_MS = 120L
 +
-+// Pollis (#1662): re-checks after the window regains focus; the last one ignores a transition whose end was lost.
++// Pollis (#1662, #1687): re-checks after the window regains focus or a Modal hands the keyboard back.
 +private val FOCUS_RECHECK_MS = longArrayOf(120L, 350L, 700L)
++
++// Pollis (#1687): a transition still "running" this long after its own duration lost its end.
++private const val LOST_END_GRACE_MS = 250L
 +private const val POLLIS_TAG = "PollisKeyboard"
++
++// Pollis (#1687): what JS was last told, per KeyboardControllerView. A Modal's own callback feeds the
++// same JS as the main one, so a per-callback copy went stale whenever the other one spoke.
++private val heightsInJs = HashMap<Int, Double>()
 +
  private data class PendingKeyboardStartEvent(
    val keyboardHeight: Double,
    val progress: Double,
-@@ -76,6 +85,25 @@ class KeyboardAnimationCallback(
+@@ -76,6 +93,35 @@ class KeyboardAnimationCallback(
      get() = duration == -1
    override var isSuspended: Boolean = false
  
++  // Pollis (#1687): while a Modal owns the keyboard this callback skips every event and every check, so
++  // whatever the keyboard did meanwhile (a show restored on resume, above all) is checked on hand-back.
++  override fun suspend(suspended: Boolean) {
++    isSuspended = suspended
++    if (!suspended) {
++      scheduleRound()
++    }
++  }
++
 +  // Pollis (#1641, #1662): the keyboard height the last event told JS (0 = hidden). Android applies
 +  // some keyboard moves with no animation, so no onStart/onEnd: a hide when the window is backgrounded
 +  // or unfocused (#1641), the keyboard it restores on resume (#1662). JS then kept the old state and
 +  // every KeyboardAvoidingView stayed padded, or unpadded under the keyboard. The invariant: once no
 +  // animation runs, JS holds the real IME height; `reconcile` restores it in whichever direction.
-+  private var heightInJs = 0.0
-+  private val missedMoveCheck = Runnable { reconcile(ignoreTransition = false) }
-+  private val focusRechecks =
-+    FOCUS_RECHECK_MS.indices.map { i -> Runnable { reconcile(ignoreTransition = i == FOCUS_RECHECK_MS.lastIndex) } }
++  private var heightInJs: Double
++    get() = heightsInJs[eventPropagationView.id] ?: 0.0
++    set(value) {
++      heightsInJs[eventPropagationView.id] = value
++    }
++  private var transitionStartedAt = 0L
++  private val missedMoveCheck = Runnable { reconcile("insets") }
++  private val roundChecks = FOCUS_RECHECK_MS.map { Runnable { reconcile("round") } }
 +  private val windowFocusListener =
 +    OnWindowFocusChangeListener { hasFocus ->
 +      if (hasFocus) {
-+        focusRechecks.forEachIndexed { i, check ->
-+          view.removeCallbacks(check)
-+          view.postDelayed(check, FOCUS_RECHECK_MS[i])
-+        }
++        scheduleRound()
 +      }
 +    }
 +
    // listeners
    private val focusListener =
      OnGlobalFocusChangeListener { oldFocus, newFocus ->
-@@ -113,6 +141,7 @@ class KeyboardAnimationCallback(
+@@ -113,6 +159,7 @@ class KeyboardAnimationCallback(
                viewTagFocused,
              ),
            )
@@ -60,7 +78,7 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a
            context.emitEvent("KeyboardController::keyboardWillShow", getEventParams(this.persistentKeyboardHeight))
            context.emitEvent("KeyboardController::keyboardDidShow", getEventParams(this.persistentKeyboardHeight))
          }
-@@ -128,6 +157,7 @@ class KeyboardAnimationCallback(
+@@ -128,6 +175,7 @@ class KeyboardAnimationCallback(
  
      layoutObserver = FocusedInputObserver(view = view, eventPropagationView = eventPropagationView, context = context)
      view.viewTreeObserver.addOnGlobalFocusChangeListener(focusListener)
@@ -68,7 +86,7 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a
    }
  
    /**
-@@ -172,6 +202,13 @@ class KeyboardAnimationCallback(
+@@ -172,6 +220,13 @@ class KeyboardAnimationCallback(
        this.onKeyboardResized(keyboardHeight)
      }
  
@@ -82,7 +100,15 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a
      return insets
    }
  
-@@ -323,6 +360,7 @@ class KeyboardAnimationCallback(
+@@ -185,6 +240,7 @@ class KeyboardAnimationCallback(
+     }
+ 
+     isTransitioning = true
++    transitionStartedAt = SystemClock.uptimeMillis()
+     pendingStartEvent = null
+     isKeyboardVisible = isKeyboardVisible()
+     duration = animation.durationMillis.toInt()
+@@ -323,6 +379,7 @@ class KeyboardAnimationCallback(
  
          flushPendingStartEvent()
  
@@ -90,41 +116,67 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a
          context.emitEvent(
            "KeyboardController::" + if (!isKeyboardVisible) "keyboardDidHide" else "keyboardDidShow",
            getEventParams(keyboardHeight),
-@@ -366,6 +404,7 @@ class KeyboardAnimationCallback(
+@@ -366,13 +423,21 @@ class KeyboardAnimationCallback(
      isTransitioning = false
      duration = 0
      pendingStartEvent = null
 +    heightInJs = if (isKeyboardVisible) keyboardHeight else 0.0
  
++    // Pollis (#1687): a whole transition, Start included. KeyboardAvoidingView takes the height it pads
++    // to only from a Start, so Move + End alone set progress 1 against whatever height it last saw:
++    // 0 if it never saw a show, which left the composer under a keyboard JS knew was open.
++    context.emitEvent(
++      "KeyboardController::" + if (!isKeyboardVisible) "keyboardWillHide" else "keyboardWillShow",
++      getEventParams(keyboardHeight),
++    )
      context.emitEvent(
        "KeyboardController::" + if (!isKeyboardVisible) "keyboardDidHide" else "keyboardDidShow",
-@@ -390,7 +429,10 @@ class KeyboardAnimationCallback(
+       getEventParams(keyboardHeight),
+     )
+     // dispatch `onMove` to update RN animated value and `onEnd` to indicate that transition finished
+-    listOf(KeyboardTransitionEvent.Move, KeyboardTransitionEvent.End).forEach { eventName ->
++    listOf(KeyboardTransitionEvent.Start, KeyboardTransitionEvent.Move, KeyboardTransitionEvent.End).forEach { eventName ->
+       context.dispatchEvent(
+         eventPropagationView.id,
+         KeyboardTransitionEvent(
+@@ -390,7 +455,10 @@ class KeyboardAnimationCallback(
  
    fun destroy() {
      pendingStartEvent = null
 +    view.removeCallbacks(missedMoveCheck)
-+    focusRechecks.forEach { view.removeCallbacks(it) }
++    roundChecks.forEach { view.removeCallbacks(it) }
      view.viewTreeObserver.removeOnGlobalFocusChangeListener(focusListener)
 +    view.viewTreeObserver.removeOnWindowFocusChangeListener(windowFocusListener)
      layoutObserver?.destroy()
    }
  
-@@ -423,8 +465,37 @@ class KeyboardAnimationCallback(
+@@ -423,8 +491,51 @@ class KeyboardAnimationCallback(
      context.keepShadowNodesInSync(eventPropagationView.id)
  
      this.persistentKeyboardHeight = keyboardHeight
 +    heightInJs = keyboardHeight
 +  }
 +
++  // Pollis (#1662, #1687): a bounded round of checks, after focus returns or a Modal hands back.
++  private fun scheduleRound() {
++    roundChecks.forEachIndexed { i, check ->
++      view.removeCallbacks(check)
++      view.postDelayed(check, FOCUS_RECHECK_MS[i])
++    }
+   }
+ 
 +  /*
-+   * Pollis (#1641, #1662): syncs JS (KeyboardAvoidingView, provider values, `KeyboardController.isVisible()`)
-+   * to the real keyboard after a show, hide or resize that never produced onStart/onEnd.
++   * Pollis (#1641, #1662, #1687): syncs JS (KeyboardAvoidingView, provider values, `KeyboardController.isVisible()`)
++   * to the real keyboard after a show, hide or resize that never produced onStart/onEnd, or whose onEnd was lost.
 +   */
-+  private fun reconcile(ignoreTransition: Boolean) {
++  private fun reconcile(reason: String) {
 +    if (isSuspended) {
 +      return
 +    }
-+    if (!ignoreTransition && (isTransitioning || InteractiveKeyboardProvider.isInteractive)) {
++    if (InteractiveKeyboardProvider.isInteractive) {
++      return
++    }
++    if (isTransitioning && SystemClock.uptimeMillis() - transitionStartedAt < duration.coerceAtLeast(0) + LOST_END_GRACE_MS) {
 +      return
 +    }
 +    val visible = isKeyboardVisible()
@@ -133,14 +185,17 @@ index ef37c24dbd82b8cf70bf09fe349a6f15f0408296..55449fe95a2c46364f8625ea23cd4b5a
 +      return
 +    }
 +
-+    Log.i(POLLIS_TAG, "reconcile: JS had $heightInJs, keyboard is $height (visible=$visible), syncing JS")
++    Log.i(
++      POLLIS_TAG,
++      "reconcile ($reason): JS had $heightInJs, keyboard is $height (visible=$visible, lostEnd=$isTransitioning), syncing JS",
++    )
 +    if (visible) {
 +      this.persistentKeyboardHeight = height
 +    }
 +    syncKeyboardPosition(height, visible)
 +    context.keepShadowNodesInSync(eventPropagationView.id)
-   }
- 
++  }
++
 +  // Pollis (#1662): the height JS should hold right now, 0 when the keyboard is hidden.
 +  private fun realKeyboardHeight(): Double = if (isKeyboardVisible()) getCurrentKeyboardHeight() else 0.0
 +
@@ -206,7 +261,7 @@ index cdbd63359be9c04fbb0cb30b3cbd1e399bb72d9a..420953c1ba3a8d4899424d7a220e81f1
  
    @objc func unmount() {
 diff --git a/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift b/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift
-index 464eec73bb1450faec92a62e4e60a92fc15307e2..ccc20905bddeb124b394f4a0e34154d3445c7b42 100644
+index 464eec73bb1450faec92a62e4e60a92fc15307e2..9682afd8a81563ae43fa77a6aee5d61c9cef9366 100644
 --- a/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift
 +++ b/ios/observers/movement/observer/KeyboardMovementObserver+Listeners.swift
 @@ -5,8 +5,12 @@
@@ -259,7 +314,7 @@ index 464eec73bb1450faec92a62e4e60a92fc15307e2..ccc20905bddeb124b394f4a0e34154d3
      guard !UIResponder.isKeyboardPreloading else { return }
      let (duration, _) = notification.keyboardMetaData()
      tag = UIResponder.current.reactViewTag
-@@ -92,6 +101,95 @@ extension KeyboardMovementObserver {
+@@ -92,6 +101,101 @@ extension KeyboardMovementObserver {
  
      removeKeyboardWatcher()
      animation = nil
@@ -324,6 +379,10 @@ index 464eec73bb1450faec92a62e4e60a92fc15307e2..ccc20905bddeb124b394f4a0e34154d3
 +      animation = nil
 +      setupKVObserver()
 +
++      // Pollis (#1687): a whole transition, Start included: KeyboardAvoidingView takes the height it pads
++      // to only from a Start, so Move + End alone padded by whatever height it last saw (0 if none).
++      onEvent("onKeyboardMoveStart", visibleHeight as NSNumber, 1, 0, tag)
++      onNotify("KeyboardController::keyboardWillShow", buildEventParams(visibleHeight, 0, tag))
 +      onEvent("onKeyboardMove", visibleHeight as NSNumber, 1, 0, tag)
 +      onEvent("onKeyboardMoveEnd", visibleHeight as NSNumber, 1, 0, tag)
 +      onNotify("KeyboardController::keyboardDidShow", buildEventParams(visibleHeight, 0, tag))
@@ -346,9 +405,11 @@ index 464eec73bb1450faec92a62e4e60a92fc15307e2..ccc20905bddeb124b394f4a0e34154d3
 +    isKeyboardShown = false
 +    animation = nil
 +
++    onEvent("onKeyboardMoveStart", 0, 0, 0, tag)
 +    onEvent("onKeyboardMove", 0, 0, 0, tag)
 +    onEvent("onKeyboardMoveEnd", 0, 0, 0, tag)
 +    if wasShown {
++      onNotify("KeyboardController::keyboardWillHide", buildEventParams(0, 0, tag))
 +      onNotify("KeyboardController::keyboardDidHide", buildEventParams(0, 0, tag))
 +    }
 +    return true
