@@ -23,6 +23,7 @@ import {
 import { useMutedChannels, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
+import { warmVoiceChannel } from "../../utils/voiceWarmup";
 import { usePeerVerificationMap } from "../../hooks/queries/useUserProfile";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
@@ -227,6 +228,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                               params: { groupId: group.id, channelId: ch.id },
                             })
                         }
+                        onIntent={isVoice ? () => warmVoiceChannel(ch.id) : undefined}
                         leading={isVoice ? <Volume2 {...iconProps} /> : <Hash {...iconProps} />}
                         label={ch.name}
                         badge={badge}
@@ -436,9 +438,11 @@ interface RowProps {
   dimmed?: boolean;
   /** `"press"`: pointer-down (#1529). */
   activateOn?: ActivateOn;
+  /** Hover or keyboard focus: the user is about to act on this row (voice warmup, #176). */
+  onIntent?: () => void;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn }) => {
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn, onIntent }) => {
   const press = usePressActivation(onClick, activateOn);
   const chevronPress = usePressActivation(
     chevron
@@ -453,6 +457,8 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
     <div
       data-active={isActive ? "true" : "false"}
       data-muted={dimmed ? "true" : undefined}
+      onMouseEnter={onIntent}
+      onFocus={onIntent}
       className={`sidebar-row flex w-full items-stretch border-s-2 transition-colors ${
         isActive
           ? "bg-hover border-accent text-accent"
