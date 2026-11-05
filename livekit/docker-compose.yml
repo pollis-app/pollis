@@ -40,11 +40,13 @@ services:
       # and forwarded over the compose network to livekit:5349 as plaintext —
       # so the TURN listener must not be reachable from the internet at all.
       #
-      # TURN relay media ports. Widened 30000-30100 (101 ports) -> 30000-30999:
-      # one UDP port per TURN allocation and two allocations per participant
-      # (publisher + subscriber peer connection) capped relayed concurrency at
-      # roughly FIFTY participants, independent of CPU. This range must stay in
-      # lockstep with relay_range_* in livekit.yml and the host firewall.
+      # TURN relay media ports: one UDP port per TURN allocation, one
+      # allocation per relayed peer connection (LiveKit 1.13 SDKs negotiate a
+      # single peer connection per participant). The old 101-port range capped
+      # relayed peer connections at ~100 independent of CPU; 1000 ≈ 1000, and a
+      # fully relayed user holds ~12 of them (DEPLOY.md → "Capacity"). This
+      # range must stay in lockstep with relay_range_* in livekit.yml and the
+      # host firewall.
       #
       # REQUIRES `"userland-proxy": false` in /etc/docker/daemon.json — see
       # DEPLOY.md. With the userland proxy on, Docker forks TWO docker-proxy

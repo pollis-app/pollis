@@ -106,18 +106,19 @@ http://127.0.0.1:8787/`.
 | Service | Image (pinned) | Managed by |
 |---------|----------------|------------|
 | `livekit` | `livekit/livekit-server:v1.13.9` | this compose |
-| `nginx` (shared ingress) | `nginx:1.30-alpine` | this compose |
-| `delivery` / `delivery-dev` | `ghcr.io/actuallydan/pollis-delivery:{prod,dev}` | **#407** (Watchtower) — standalone |
-| `watchtower` | `containrrr/watchtower` | **#407** — standalone |
+| `nginx` (ingress) | `nginx:1.30-alpine` | this compose |
 
-All five containers share the `livekit_default` docker network. nginx reaches
-the delivery/watchtower containers by network alias.
+These are the only containers on the VPS: the Delivery Service moved to
+Cloudflare Containers (#515) and its `delivery` / `delivery-dev` / `watchtower`
+containers were torn down (#555). Both share the `livekit_default` docker
+network; nginx reaches `livekit` by service name through Docker's DNS.
 
 ```
 livekit/
-  docker-compose.yml   # livekit + nginx only (delivery/watchtower owned by #407)
+  docker-compose.yml   # livekit + nginx: ports, healthchecks, restart policy
   livekit.yml          # non-secret; deploy appends the keys: block from secrets
   nginx.conf           # LiveKit ingress: SNI demux on 443 (web + TURNS)
+  probe/               # Cloudflare cron Worker watching rtc/turn from outside
   DEPLOY.md
 ```
 
@@ -359,9 +360,9 @@ echo "net.core.rmem_max=5000000"     >> /etc/sysctl.conf
 echo "net.core.rmem_default=5000000" >> /etc/sysctl.conf
 ```
 
-### 4. Delivery Service
-Stand up `delivery` / `delivery-dev` / `watchtower` (#407) so nginx's upstreams
-resolve, then hit the **Deploy LiveKit + nginx** button.
+### 4. Deploy
+Hit the **Deploy LiveKit + nginx** button, then deploy the external probe
+("External probe" above) and point its alert webhook somewhere a human reads.
 
 ## LiveKit API keys
 
@@ -426,11 +427,13 @@ listener configured, published and open.
 
 ```bash
 cd /root/livekit
-docker compose ps                 # status (livekit + nginx)
+docker compose ps                 # status + health column (livekit + nginx)
 # (no `docker compose logs` — container logging is off; see "No client IPs in logs")
 docker compose exec nginx nginx -t            # validate ingress config
 docker compose exec nginx nginx -s reload     # graceful reload after a cert renew
 docker stats                      # live CPU/memory per container
+docker inspect -f '{{.State.Health.Status}}' livekit-livekit-1 livekit-nginx-1
+curl -s http://127.0.0.1:6789/metrics | grep -E '^livekit_(room|participant)_total'
 ```
 
 ## Useful commands (TURN)
@@ -447,24 +450,125 @@ curl -sS https://rtc.pollis.com
 docker compose exec -T livekit sh -c 'ss -lun' | awk '$5 ~ /:3[0-9]{4}$/' | wc -l
 ```
 
-## Performance notes
+## Capacity
 
-- **Relay ports: 30000–30999 (1000 ports).** One UDP port per TURN *allocation*,
-  and a LiveKit client opens **two** peer connections (publisher + subscriber),
-  so budget ~2 ports per concurrent relayed participant. 1000 ports ≈ 250
-  concurrent participants with slack for allocations still draining —
-  comfortably past what 2 vCPU can serve, and past the 150-subscriber level that
-  load-tested clean. The old 101-port range capped this at ~50 participants
-  regardless of how idle the CPU was.
-- Changing the range means editing **three** places in lockstep —
-  `relay_range_*` in `livekit.yml`, the `ports:` publish in
-  `docker-compose.yml`, and the host firewall. Ports LiveKit allocates but the
-  firewall drops produce silent relay failures.
-- Do not widen much further without re-measuring: every published port is
-  iptables state, and with the userland proxy accidentally re-enabled it is also
-  two processes per port (see §1b).
-- Metrics are on a separate loopback-only port, not on `/metrics` of the public
-  vhost — see "Metrics".
+The box is a Hostinger KVM 2 (2 vCPU, 8 GB, **8 TB/month transfer**) in
+Boston. What bounds it, in order:
+
+1. **Peer connections, not CPU.** Every signed-in client holds a LiveKit
+   realtime room per conversation plus its inbox — about **12 peer connections
+   (and 12 WSS sessions) per user** before anyone speaks
+   (`pollis-core/src/commands/livekit/realtime.rs`,
+   `frontend/src/hooks/useLiveKitRealtime.ts`). The 2026-08-11 load test ran
+   150 subscribers at 13 % CPU with zero failures; failures above that were
+   nginx's connection ceiling (#817, since raised), not the SFU. Budget
+   **~150 concurrent users** on this box, set by peer-connection count; the
+   lever that moves it is fewer realtime rooms per user (one data room per
+   user, or a DS WebSocket), which is a client/DS change, not a server one.
+2. **Transfer cap.** 8 TB/month is **~25 Mbit/s averaged over the month** —
+   about **13 continuous 720p streams** at the client's ~1.9 Mbit/s 720p
+   bitrate, or ~800 continuous Opus voice streams. Audio-only usage will never
+   hit it; sustained video/screenshare will, long before CPU does. Watch
+   `rate(livekit_node_packet_total[5m])` ("Metrics") and the host's monthly
+   transfer in the Hostinger panel. `limit.bytes_per_sec` (60 MB/s) only
+   stops a burst from saturating the NIC; it is not a monthly budget.
+3. **Relay ports: 30000–30999 (1000 ports).** One UDP port per TURN
+   *allocation*, one allocation per relayed peer connection, and LiveKit 1.13
+   SDKs negotiate a **single** peer connection per participant — so 1000 ports
+   ≈ 1000 relayed peer connections, with slack for allocations still
+   draining. A user whose network forces *every* connection through the
+   relay costs ~12 of them (item 1), so the range covers ~80 fully relayed
+   users; relay is the minority path (UDP-blocking networks), so this is not
+   the first ceiling. The old 101-port range capped relayed peer connections
+   at ~100 regardless of how idle the CPU was.
+4. **Latency, not capacity.** One node in Boston means ~120 ms connect for
+   US-East, ~0.6 s for Europe and ~1.6 s for APAC (seven round trips: TCP,
+   TLS, WSS+join, SDP, ICE, DTLS ×2), and 180–250 ms one-way media for APAC.
+   Only more nodes fix that — "Tier 2" below.
+
+Changing the relay range means editing **three** places in lockstep —
+`relay_range_*` in `livekit.yml`, the `ports:` publish in
+`docker-compose.yml`, and the host firewall. Ports LiveKit allocates but the
+firewall drops produce silent relay failures. The same lockstep applies to
+the ICE/UDP mux range (`rtc.udp_port`) and the TURN/UDP port (`turn.udp_port`).
+
+## Tier 2 — regional nodes (runbook)
+
+When APAC/EU latency matters more than the ~$10–15/month per extra node. Two
+or three LiveKit nodes, one per region, sharing one Redis; a room lives on
+the node its first participant joined and other nodes relay signalling to it
+(one cross-region media leg per remote participant — LiveKit OSS routes by
+*room*, not per-participant mesh). Clients need **no change**: the DS already
+returns the SFU `url` with every token (`LivekitTokenResponse { token, url }`,
+honoured by desktop `resolve_livekit_url` and mobile).
+
+**Prerequisite:** reduce the per-user realtime-room fan-out first (Capacity
+item 1); every extra node multiplies nothing if each user still opens twelve
+peer connections to whichever node they land on.
+
+1. **Redis.** One instance reachable from every node over a private link or
+   TLS (`redis.address`, `redis.password`, `redis.tls` in `livekit.yml`;
+   every key is in the v1.13.9 config sample). A managed Redis in the first
+   region, or `redis:7-alpine` in the first node's compose with its port
+   firewalled to the other nodes' IPs. Redis holds room → node routing and
+   the node list; no media, no identities beyond LiveKit's room pseudonyms.
+2. **Per-node `livekit.yml`.** Identical except:
+   ```yaml
+   region: us-east            # or eu-west, ap-southeast — free-form, must match node_selector.regions
+   rtc:
+     node_ip: <that node's public IP>
+   turn:
+     domain: turn-<region>.pollis.com
+   node_selector:
+     kind: regionaware
+     sort_by: sysload
+     sysload_limit: 0.7
+     regions:
+       - { name: us-east,      lat: 42.36,  lon: -71.06 }
+       - { name: eu-west,      lat: 50.11,  lon: 8.68 }
+       - { name: ap-southeast, lat: 1.35,   lon: 103.82 }
+   ```
+   Same `keys:` block on every node (the deploy renders it from the same
+   secrets). `regionaware` picks the node nearest the *first joiner*; the
+   node a client signals to is chosen by the DS (step 4), so the two agree.
+3. **Per-node ingress.** Each node runs this compose unchanged with its own
+   nginx, its own DNS-only A records (`rtc-<region>.pollis.com`,
+   `turn-<region>.pollis.com` → that node) and its own Let's Encrypt lineage
+   with both names as SANs (§2 above, per node). `turn.domain` is per node
+   because LiveKit hands clients `turns:<turn.domain>:443`, and the relay
+   must be the node they are on. The deploy workflow grows a `node` input
+   (host, user, `REMOTE_DIR`) or a matrix over `vars.VPS_HOST_<REGION>`; the
+   per-node preflights (DNS, SAN, firewall) stay as they are.
+4. **DS: pick the URL by request country.** The Cloudflare Worker in front of
+   the DS sees `request.cf.country` for free. `pollis-delivery/worker/index.ts`
+   maps it to a region name (`us-east` default; a short EU country list →
+   `eu-west`; AU/NZ/SG/JP/KR/IN… → `ap-southeast`) and forwards **only the
+   region** as `X-Pollis-Region`, the way it already forwards the hashed
+   client bucket — the country itself is never forwarded, stored or logged
+   (`docs/metadata-retention-policy.md` §3; extend
+   `tests/no_client_ip_exposure.rs` to assert the header carries a region
+   name from a fixed set). The DS `broker.rs` reads
+   `LIVEKIT_URL_<REGION>` (falling back to `LIVEKIT_URL`) when minting
+   `/v1/livekit/token` and returns that `url`. Additive: a DS without the
+   header or the vars behaves exactly as today, and every shipped client
+   already follows `url`.
+5. **Probe.** One `livekit/probe/` deployment per region (`wrangler deploy
+   --name pollis-livekit-probe-<region>` with `RTC_URL`/`TURN_HOST` vars
+   overridden), or one Worker iterating a list — either way one row per node
+   on `status.pollis.com`.
+6. **Verify.** From each region: `curl https://rtc-<region>.pollis.com` → `OK`;
+   a token minted via that region's DS answers with the matching `url`; two
+   clients in different regions join one room and `livekit_participant_total`
+   rises on exactly one node while the other shows the relayed signalling.
+
+Tier 3 (not planned): LiveKit Cloud (multi-home mesh, E2EE-compatible, but a
+third party then sees client IPs and pseudonymous room metadata) or an
+autoscaled OSS fleet on the relay-hydra Terraform pattern.
+Do not widen the relay range much further without re-measuring: every
+published port is iptables state, and with the userland proxy accidentally
+re-enabled it is also two processes per port (see §1b). Metrics are on a
+separate loopback-only port, not on `/metrics` of the public vhost — see
+"Metrics".
 
 ## Metrics
 
