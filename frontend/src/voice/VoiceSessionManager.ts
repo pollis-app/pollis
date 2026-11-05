@@ -558,8 +558,6 @@ class VoiceSessionManager {
         outputDevice: output,
         audioProcessing,
         counterpartyUserId: target.counterpartyUserId ?? null,
-        // The channel's group, so Rust needn't ask the DS which MLS group backs it.
-        groupId: target.groupId,
       });
     } catch (e) {
       const raw = errorMessage(e);
