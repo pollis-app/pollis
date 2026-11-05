@@ -8,6 +8,7 @@ import React, {
 import { useTranslation } from "react-i18next";
 
 import { horizontalArrowStep } from "../../utils/direction";
+import { probeRender } from "../../utils/renderProbe";
 
 // Arrow-key-navigable 2D grid; cells keep an aspect ratio and scroll past `minCellWidth`. Left/right resolve against the computed direction (RTL).
 
@@ -54,7 +55,7 @@ function computeLayout(
   return { cols, cellW, cellH: cellW / aspect };
 }
 
-export function NavigableGrid<T>({
+function NavigableGridImpl<T>({
   items,
   getKey,
   renderCell,
@@ -67,6 +68,7 @@ export function NavigableGrid<T>({
   emptyLabel,
   testId,
 }: NavigableGridProps<T>) {
+  probeRender("NavigableGrid");
   const { t } = useTranslation("common");
   const resolvedEmptyLabel = emptyLabel ?? t("grid.empty");
   // State-backed ref callback: the root is conditionally rendered, so a one-shot effect could bind ResizeObserver to the wrong element.
@@ -202,3 +204,6 @@ export function NavigableGrid<T>({
     </div>
   );
 }
+
+/** Memoised: a parent re-render with the same `items`/`renderCell` must not re-render every cell. */
+export const NavigableGrid = React.memo(NavigableGridImpl) as typeof NavigableGridImpl;

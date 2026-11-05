@@ -914,6 +914,11 @@ export const voiceSession = new VoiceSessionManager();
 
 /** The manager error last pushed to the store; a dismissed error must not resurface on the next notification. */
 let mirroredError: string | null = null;
+// What the store last received. The store deep-observes what it is handed, so `store.voiceState.gate`
+// is a proxy that never `===` the manager's object: comparing against the store would re-write (and
+// re-render every `voiceState` observer) on each speaking flip.
+let mirroredGate: VoiceGateState | null = null;
+let mirroredParticipants: VoiceParticipant[] | null = null;
 
 /** Mirror the manager's state onto the store; the manager is the source of truth. */
 voiceSession.subscribe(() => {
@@ -947,7 +952,8 @@ voiceSession.subscribe(() => {
         store.voiceJoined();
       }
       const after = appStore.voiceState;
-      if (after.kind === 'joined' && after.gate !== s.gate) {
+      if (after.kind === 'joined' && mirroredGate !== s.gate) {
+        mirroredGate = s.gate;
         store.voiceSetGate(s.gate);
       }
       if (after.kind === 'joined' && after.micMuted !== s.isMuted) {
@@ -969,7 +975,8 @@ voiceSession.subscribe(() => {
     }
   }
 
-  if (store.voiceParticipants !== s.participants) {
+  if (mirroredParticipants !== s.participants) {
+    mirroredParticipants = s.participants;
     store.setVoiceParticipants(s.participants);
   }
   // Unpin a fullscreen view whose screenshare ended; the local preview pin is separate.

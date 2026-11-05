@@ -1,6 +1,6 @@
 // Voice channel content: picking (source picker), preview (roster + Join), spotlight (focused video + filmstrip), or grid. Reads appStore directly.
 
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal } from "lucide-react";
@@ -29,7 +29,36 @@ import { NavigableGrid } from "../../ui/NavigableGrid";
 import { ScreenSharePicker } from "../ScreenSharePicker";
 import { CameraPicker } from "../CameraPicker";
 import { StageTile, type StageTileModel } from "./StageTile";
+import { probeRender } from "../../../utils/renderProbe";
 import "./voice-stage.css";
+
+/** True when two models would draw identically, so the previous reference can be reused (`React.memo`). */
+function sameTileModel(a: StageTileModel, b: StageTileModel): boolean {
+  if (
+    a.tileKey !== b.tileKey ||
+    a.identity !== b.identity ||
+    a.name !== b.name ||
+    a.avatarKey !== b.avatarKey ||
+    a.isMuted !== b.isMuted ||
+    a.isLocal !== b.isLocal ||
+    a.isSpeaking !== b.isSpeaking ||
+    a.connectionQuality !== b.connectionQuality ||
+    a.isConnecting !== b.isConnecting ||
+    a.isReconnecting !== b.isReconnecting ||
+    a.stale !== b.stale ||
+    a.media.kind !== b.media.kind
+  ) {
+    return false;
+  }
+  if (a.media.kind === "audio" || b.media.kind === "audio") {
+    return true;
+  }
+  return (
+    a.media.trackKey === b.media.trackKey &&
+    a.media.width === b.media.width &&
+    a.media.height === b.media.height
+  );
+}
 
 interface VoiceStageProps {
   channelName: string;
@@ -58,6 +87,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     footer,
     callMode = false,
   }) => {
+    probeRender("VoiceStage");
     const { t } = useTranslation("voice");
     const {
       voiceParticipants,
@@ -92,6 +122,13 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const micAvailable = voiceState.kind === "joined" ? voiceState.micAvailable : true;
 
     const [focusId, setFocusId] = useState<string | null>(null);
+    // Previous render's models by tile key: an unchanged tile keeps its reference, so one
+    // participant's speaking flip re-renders exactly that tile (#874 for the stage). The list is
+    // kept too, so a render that changes nothing hands the grid the same array.
+    const modelCache = useRef<{ byKey: Map<string, StageTileModel>; list: StageTileModel[] }>({
+      byKey: new Map(),
+      list: [],
+    });
 
     // Drop any fullscreen stream on leave (the viewer lives in AppShell).
     React.useEffect(() => {
@@ -177,7 +214,23 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       return tiles;
     };
 
-    const people = mergedParticipants.flatMap(tilesFor);
+    const people = (() => {
+      const cache = modelCache.current;
+      const byKey = new Map<string, StageTileModel>();
+      let unchanged = true;
+      const stable = mergedParticipants.flatMap(tilesFor).map((model, i) => {
+        const prev = cache.byKey.get(model.tileKey);
+        const keep = prev && sameTileModel(prev, model) ? prev : model;
+        if (keep !== cache.list[i]) {
+          unchanged = false;
+        }
+        byKey.set(model.tileKey, keep);
+        return keep;
+      });
+      const list = unchanged && stable.length === cache.list.length ? cache.list : stable;
+      modelCache.current = { byKey, list };
+      return list;
+    })();
     // Camera and screenshare are treated alike (#394).
     const streamers = people.filter(
       (p) => p.media.kind === "screenshare" || p.media.kind === "camera",
@@ -212,7 +265,22 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       media: { kind: "audio" },
     }));
 
-    const onView = (trackKey: string) => setViewingScreenShareTrackKey(trackKey);
+    const onView = useCallback(
+      (trackKey: string) => setViewingScreenShareTrackKey(trackKey),
+      [setViewingScreenShareTrackKey],
+    );
+    const renderPreviewCell = useCallback(
+      (p: StageTileModel, { focused: f }: { focused: boolean }) => (
+        <StageTile participant={p} mode="preview" focused={f} onView={onView} />
+      ),
+      [onView],
+    );
+    const renderGridCell = useCallback(
+      (p: StageTileModel, { focused: f }: { focused: boolean }) => (
+        <StageTile participant={p} mode="grid" focused={f} onView={onView} />
+      ),
+      [onView],
+    );
 
     // Shared by the tray and the connecting footer, so a call can always end.
     const leaveButton = (
@@ -282,9 +350,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     autoFocus={false}
                     minCellWidth={180}
                     maxCellWidth={240}
-                    renderCell={(p, { focused: f }) => (
-                      <StageTile participant={p} mode="preview" focused={f} onView={onView} />
-                    )}
+                    renderCell={renderPreviewCell}
                   />
                   <div className="vs-preview-cta">
                     <Button data-testid="voice-join-cta" variant="primary" onClick={onJoin}>
@@ -298,7 +364,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             <div className="vs-spotlight" data-testid="voice-channel-view">
               <div className="vs-spot-main">
                 {focused ? (
-                  <StageTile participant={focused} mode="big" onFocus={setFocusId} onView={onView} />
+                  // Keyed, so switching the spotlight remounts the WebGL canvas for the new track.
+                  <StageTile key={focused.tileKey} participant={focused} mode="big" onFocus={setFocusId} onView={onView} />
                 ) : (
                   <div className="vs-tile vs-empty">{t("stage.noActiveStream")}</div>
                 )}
@@ -328,9 +395,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 autoFocus={false}
                 minCellWidth={180}
                 maxCellWidth={240}
-                renderCell={(p, { focused: f }) => (
-                  <StageTile participant={p} mode="grid" focused={f} onView={onView} />
-                )}
+                renderCell={renderGridCell}
               />
             </>
           )}

@@ -372,6 +372,8 @@ test("a gate command returning nothing is reported, not swallowed as a TypeError
   ).toEqual([]);
 
   // An unknown gate must leave the last good state alone rather than write a
-  // half-built one.
-  expect(await readStrip(page, "terminal")).toEqual(before);
+  // half-built one: the optimistic paint rolls back to the re-read truth.
+  await restPointer(page);
+  // Polled: the pill's colour transition is still settling after the pointer leaves.
+  await expect.poll(() => readStrip(page, "terminal")).toEqual(before);
 });

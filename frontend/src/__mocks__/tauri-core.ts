@@ -658,11 +658,8 @@ function emojiDataUrl(shortcode: string, contentHash: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-/** Snapshot as `TransmitGate::snapshot`; `nullGateCommands` makes a command resolve null (#888). */
-function gateSnapshot(command?: string): Record<string, unknown> | null {
-  if (command && (preload.nullGateCommands ?? []).includes(command)) {
-    return null;
-  }
+/** Snapshot as `TransmitGate::snapshot`; `nullGateCommands` is handled before dispatch (#888). */
+function gateSnapshot(_command?: string): Record<string, unknown> | null {
   const gate = store.voiceGate;
   const transmitting = gate.self_muted
     ? false
@@ -877,6 +874,11 @@ function searchMessagesMock(
 }
 
 function handleCommand(command: string, args: Record<string, unknown>): unknown {
+  // #888: a gate command that yields no snapshot also applied nothing, so the renderer's optimistic
+  // paint must roll back to the unchanged truth on its re-read.
+  if ((preload.nullGateCommands ?? []).includes(command)) {
+    return null;
+  }
   switch (command) {
     case 'get_session':
       return store.session;

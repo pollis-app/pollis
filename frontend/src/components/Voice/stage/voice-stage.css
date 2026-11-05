@@ -170,22 +170,26 @@
 }
 
 /* live audio meter — BAND_COUNT bars driven by per-source levels via the
-   --eqN custom properties (set on the element by LiveWaveform). Falls back
-   to a fixed "glyph" shape until levels arrive. Minimal, informational
-   motion only: a short height transition smooths the ~20Hz updates. */
+   --eqN custom properties (0..1, set on the element by LiveWaveform). Falls
+   back to a fixed "glyph" shape until levels arrive. The bars are full height
+   and scale on the compositor (transform, not height) so ~20Hz updates never
+   relayout the tile. */
 .vs-eq {
    display: flex;
    align-items: flex-end;
    gap: 3px;
-   height: 16px;
-   margin-top: 11px;
+   height: 1rem;
+   margin-top: 0.6875rem;
 }
 
 .vs-eq i {
    width: 3px;
+   height: 100%;
    border-radius: 1px;
    background: var(--vs-ink-faint);
-   transition: height 80ms linear;
+   transform-origin: bottom;
+   will-change: transform;
+   transition: transform 80ms linear;
 }
 
 .vs-tile.speaking .vs-eq i {
@@ -193,15 +197,15 @@
 }
 
 .vs-eq i:nth-child(1) {
-   height: var(--eq0, 45%);
+   transform: scaleY(var(--eq0, 0.45));
 }
 
 .vs-eq i:nth-child(2) {
-   height: var(--eq1, 100%);
+   transform: scaleY(var(--eq1, 1));
 }
 
 .vs-eq i:nth-child(3) {
-   height: var(--eq2, 60%);
+   transform: scaleY(var(--eq2, 0.6));
 }
 
 /* Corner overlays. These are CHROME laid over the video, not part of the

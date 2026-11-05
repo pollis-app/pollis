@@ -7,6 +7,7 @@ import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { VoiceInputModeSelect } from "../components/Voice/VoiceInputModeSelect";
 import { ShareResolutionSelect } from "../components/Voice/ShareResolutionSelect";
+import { MicLevelMeter } from "../components/Voice/MicLevelMeter";
 import {
   VOICE_INPUT_MODE_DEFAULT,
   type VoiceInputMode,
@@ -483,27 +484,11 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
             <span className="text-muted">{t("settings.microphone")}</span>
 
-            {/* Level meter. Reserves its height even when idle so the
-                layout doesn't jump on start/stop. */}
-            <div
-              data-testid="voice-test-meter"
-              aria-label={t("settings.micLevelLabel")}
-              className="bg-surface border border-line"
-              style={{
-                height: 12,
-                borderRadius: 4,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                className="bg-accent"
-                style={{
-                  width: `${Math.max(test.peak, test.rms) * 100}%`,
-                  height: "100%",
-                  transition: "width 60ms linear",
-                }}
-              />
-            </div>
+            <MicLevelMeter
+              subscribe={test.subscribeLevel}
+              label={t("settings.micLevelLabel")}
+              testId="voice-test-meter"
+            />
 
             <div className="flex flex-col gap-2 mt-4">
               <div className="flex">

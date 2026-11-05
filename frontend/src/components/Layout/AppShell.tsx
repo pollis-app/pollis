@@ -80,7 +80,7 @@ export const AppShell: React.FC = observer(() => {
     setGroups,
     setChannels,
     voiceState,
-    voiceParticipants,
+    voiceCounterpartyName,
     statusBarAlert,
     setStatusBarAlert,
     voiceError,
@@ -522,11 +522,8 @@ export const AppShell: React.FC = observer(() => {
           ? voiceState.counterpartyUserId
           : null;
       if (peerId) {
-        const peer = voiceParticipants.find(
-          (p) => userIdFromVoiceIdentity(p.identity) === peerId,
-        );
-        if (peer?.name) {
-          return peer.name;
+        if (voiceCounterpartyName) {
+          return voiceCounterpartyName;
         }
         if (incomingCall && incomingCall.callerId === peerId) {
           return incomingCall.callerUsername;
@@ -541,7 +538,7 @@ export const AppShell: React.FC = observer(() => {
       }
     }
     return t("shell.voiceChannelFallback");
-  }, [activeVoiceChannelId, groupsWithChannels, voiceState, voiceParticipants, incomingCall, t]);
+  }, [activeVoiceChannelId, groupsWithChannels, voiceState, voiceCounterpartyName, incomingCall, t]);
 
   return (
     <div

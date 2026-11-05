@@ -12,6 +12,7 @@ import { SignalBars } from "../SignalBars";
 import { RemoteVideoTile } from "../RemoteVideoTile";
 import { useScreenShareStats } from "../../../screenshare/useScreenShareStats";
 import { audioLevels, BAND_COUNT } from "../../../voice/audioLevels";
+import { probeRender } from "../../../utils/renderProbe";
 
 // Live meter: per-band levels written as CSS variables via a ref, no React state.
 const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
@@ -21,10 +22,11 @@ const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
     if (!el) {
       return;
     }
+    // A 0..1 scale factor: the bars animate `transform`, so a level change never relayouts.
     const apply = (bands: number[]) => {
       for (let i = 0; i < BAND_COUNT; i++) {
-        const pct = Math.max(8, Math.round((bands[i] ?? 0) * 100));
-        el.style.setProperty(`--eq${i}`, `${pct}%`);
+        const scale = Math.max(0.08, Math.round((bands[i] ?? 0) * 100) / 100);
+        el.style.setProperty(`--eq${i}`, String(scale));
       }
     };
     const seed = audioLevels.get(identity);
@@ -79,13 +81,16 @@ interface Props {
   onView?: (trackKey: string) => void;
 }
 
-export const StageTile: React.FC<Props> = ({
+const StageTileImpl: React.FC<Props> = ({
   participant: p,
   mode,
   focused = false,
   onFocus,
   onView,
 }) => {
+  probeRender("StageTile");
+  // Per-tile count, so a spec can prove a change touched exactly one tile.
+  probeRender(`StageTile:${p.tileKey}`);
   const { t } = useTranslation("voice");
   const big = mode === "big";
   const preview = mode === "preview";
@@ -236,3 +241,6 @@ export const StageTile: React.FC<Props> = ({
     </div>
   );
 };
+
+/** Memoised: `VoiceStage` hands every tile a reference-stable model, so a speaking event re-renders one tile. */
+export const StageTile = React.memo(StageTileImpl);

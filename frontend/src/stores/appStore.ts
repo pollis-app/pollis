@@ -1,7 +1,8 @@
 import { makeAutoObservable } from 'mobx';
 import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant, ClientPolicyStatus } from '../types';
 import type { ShareAudioState, VoiceState, VoiceGateState } from '../types/voice-state';
-import { VOICE_GATE_INITIAL } from '../types/voice-state';
+import { VOICE_GATE_INITIAL, voiceCounterpartyUserId } from '../types/voice-state';
+import { userIdFromVoiceIdentity } from '../voice/identity';
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
 import { isSpeaking } from '../voice/participantAudio';
@@ -516,6 +517,16 @@ class AppStore implements AppState {
     return this.voiceParticipants
       .filter((p) => isSpeaking(p.audio))
       .map((p) => p.identity);
+  }
+
+  /** The 1:1 call peer's display name once they are in the room; a computed, so observers only wake when the name changes, not on every speaking flip (#874). */
+  get voiceCounterpartyName(): string | null {
+    const peerId = voiceCounterpartyUserId(this.voiceState);
+    if (!peerId) {
+      return null;
+    }
+    const peer = this.voiceParticipants.find((p) => userIdFromVoiceIdentity(p.identity) === peerId);
+    return peer?.name ?? null;
   }
 
   get isLocalSpeaking(): boolean {
