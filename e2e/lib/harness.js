@@ -108,8 +108,19 @@ async function waitViteReady() {
 }
 
 async function present(browser, testId) {
-  const els = await browser.$$(`[data-testid="${testId}"]`);
-  return els.length > 0;
+  // WebKitWebDriver throws "Stale element" when the node unmounts between the query and the
+  // handle creation — the very moment a waited-for element disappears. Re-query instead.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const els = await browser.$$(`[data-testid="${testId}"]`);
+      return els.length > 0;
+    } catch (err) {
+      if (attempt >= 4 || !/stale element/i.test(String(err && err.message))) {
+        throw err;
+      }
+      await sleep(100);
+    }
+  }
 }
 
 async function waitTestId(browser, testId, timeoutMs = 30000, label = testId) {
