@@ -348,6 +348,14 @@ impl Default for FrameFanout {
     }
 }
 
+/// The track key a packed frame carries in its header (`[u32 LE len][UTF-8 key]…`, see
+/// `screenshare::codec::pack_frame_bytes`). Lives here, not in the `media`-gated codec, because
+/// the fanout is compiled into every client (the TUI builds pollis-core without `media`).
+pub(crate) fn frame_track_key(frame: &[u8]) -> Option<&str> {
+    let len = u32::from_le_bytes(frame.get(0..4)?.try_into().ok()?) as usize;
+    std::str::from_utf8(frame.get(4..4 + len)?).ok()
+}
+
 impl FrameFanout {
     pub fn new() -> Self {
         Self {
@@ -358,7 +366,7 @@ impl FrameFanout {
     /// Offer a packed frame (the track key is its header) to every subscriber; a frame
     /// still waiting for the same track is replaced.
     pub fn send(&self, frame: Arc<Vec<u8>>) {
-        let Some(track_key) = crate::commands::screenshare::codec::frame_track_key(&frame) else {
+        let Some(track_key) = frame_track_key(&frame) else {
             return;
         };
         let subscribers = self.subscribers.lock().unwrap().clone();
