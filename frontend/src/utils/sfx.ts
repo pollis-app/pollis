@@ -13,7 +13,7 @@ export const SFX = {
   join: 'join',
   /** Another user left a voice channel. */
   leave: 'leave',
-  /** Self mute / unmute / deafen / undeafen cues (Discord's clicks). `play_sfx` ignores a name it has no asset for. */
+  /** Self mute / unmute / deafen / undeafen cues (Discord's two-tone clicks). */
   mute: 'mute',
   unmute: 'unmute',
   deafen: 'deafen',

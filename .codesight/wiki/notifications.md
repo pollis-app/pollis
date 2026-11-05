@@ -67,7 +67,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
 
 | Field | What it does | Pref gate | Notes |
 |---|---|---|---|
-| `sound` | Plays a sfx (`'ping'`/`'join'`/`'leave'`) via the `play_sfx` Rust command | `allow_sound_effects` | Cooldownable |
+| `sound` | Plays a sfx (`'ping'`/`'join'`/`'leave'`, and the self-gate cues `'mute'`/`'unmute'`/`'deafen'`/`'undeafen'`) via the `play_sfx` Rust command | `allow_sound_effects` | Cooldownable |
 | `osNotif` | Fires an OS notification banner via the bridge's `sendNotification` (→ `tauri-plugin-notification`) | `allow_desktop_notifications` + OS permission | Cooldownable |
 | `alert` | Sets the blinking status-bar alert (`appStore.setStatusBarAlert`) | none | Cleared on navigation; a message alert (`direct_message`, `user_mention`) also clears when a cursor sync shows its conversation read on another device (#1628) |
 | `overlay` | Sets `pendingEnrollmentApproval` so the UI takes over | none | Used only by enrollment |

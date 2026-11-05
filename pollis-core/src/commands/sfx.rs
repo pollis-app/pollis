@@ -10,6 +10,10 @@ static PING: &[u8] = include_bytes!("../../../assets/sfx/ping_fx.wav");
 static JOIN: &[u8] = include_bytes!("../../../assets/sfx/join_fx.wav");
 static LEAVE: &[u8] = include_bytes!("../../../assets/sfx/leave-fx.wav");
 static CALL: &[u8] = include_bytes!("../../../assets/sfx/call.wav");
+static MUTE: &[u8] = include_bytes!("../../../assets/sfx/mute_fx.wav");
+static UNMUTE: &[u8] = include_bytes!("../../../assets/sfx/unmute_fx.wav");
+static DEAFEN: &[u8] = include_bytes!("../../../assets/sfx/deafen_fx.wav");
+static UNDEAFEN: &[u8] = include_bytes!("../../../assets/sfx/undeafen_fx.wav");
 
 // One process-wide output on a parked thread (`OutputStream` is `!Send`):
 // cold opens can take seconds after idle. `None` = no audio, silent no-op.
@@ -57,6 +61,10 @@ pub fn play_sfx(sound: &str) {
         "ping" => PING,
         "join" => JOIN,
         "leave" => LEAVE,
+        "mute" => MUTE,
+        "unmute" => UNMUTE,
+        "deafen" => DEAFEN,
+        "undeafen" => UNDEAFEN,
         _ => return,
     };
 
