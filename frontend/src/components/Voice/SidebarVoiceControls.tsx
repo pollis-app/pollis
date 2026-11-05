@@ -5,6 +5,7 @@ import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { appStore } from "../../stores/appStore";
 import { voiceSession } from "../../voice";
 import { gateOf, micIndicatorOf, type MicIndicator } from "../../types/voice-state";
+import { SignalBars } from "./SignalBars";
 import { useShortcutLabel } from "../../keyboard";
 import {
   micControlTitleKey,
@@ -24,7 +25,8 @@ const MIC_TONE: Record<MicIndicator, string> = {
 /** Mic + deafen for refined's sidebar strip; labels and state shared with `VoiceBar`. */
 export const SidebarVoiceControls: React.FC = observer(() => {
   const { t } = useTranslation("voice");
-  const { voiceState } = appStore;
+  const { voiceState, voiceParticipants } = appStore;
+  const localQuality = voiceParticipants.find((p) => p.isLocal)?.connectionQuality;
   const gate = gateOf(voiceState);
   // Four states: PTT-idle and deafened close the mic too.
   const micIndicator = micIndicatorOf(gate);
@@ -34,6 +36,7 @@ export const SidebarVoiceControls: React.FC = observer(() => {
 
   return (
     <>
+      <SignalBars quality={localQuality} testId="sidebar-voice-quality" />
       {micAvailable ? (
         <button
           type="button"

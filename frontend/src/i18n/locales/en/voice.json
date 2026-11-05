@@ -28,7 +28,8 @@
     "goToChannel": "Go to {{name}} voice channel",
     "participants_one": "{{count}} participant",
     "participants_other": "{{count}} participants",
-    "settings": "Voice settings"
+    "settings": "Voice settings",
+    "reconnecting": "Reconnecting…"
   },
   "stage": {
     "emptyRoster": "No one in this channel",
@@ -39,6 +40,8 @@
     "hangUp": "Hang up",
     "noActiveStream": "no active stream",
     "connecting": "Connecting…",
+    "reconnecting": "Reconnecting…",
+    "reconnectingAttempt": "Reconnecting… (attempt {{attempt}})",
     "ringing": "Ringing…",
     "calling": "Calling…",
     "settingsLink": "Voice Settings"
@@ -46,7 +49,10 @@
   "tile": {
     "connectingTitle": "Connecting…",
     "connectingLabel": "Connecting",
+    "reconnectingTitle": "Reconnecting…",
+    "reconnectingLabel": "Reconnecting",
     "quality": "Connection: {{quality}}",
+    "qualityUnknown": "not measured yet",
     "qualityExcellent": "excellent",
     "qualityGood": "good",
     "qualityPoor": "poor",

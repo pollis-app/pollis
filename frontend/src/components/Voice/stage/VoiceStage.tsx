@@ -82,6 +82,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const cameraLocalDims = cameraActive ? camera.dimensions : null;
 
     const isJoining = voiceState.kind === "joining";
+    const reconnecting = voiceState.kind === "joined" ? voiceState.reconnecting : null;
     const micMuted = voiceState.kind === "joined" ? voiceState.micMuted : false;
     const gate = gateOf(voiceState);
     // Four states (`micIndicatorOf`): PTT-idle and deafened close the mic too.
@@ -157,6 +158,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !isMuted(p.audio),
         connectionQuality: p.connectionQuality,
         isConnecting: p.isLocal && isJoining,
+        isReconnecting: p.isLocal && reconnecting !== null,
+        // Remote media is paused until the room is back; dim rather than drop.
+        stale: !p.isLocal && reconnecting !== null,
       };
 
       const tiles: StageTileModel[] = [];
@@ -249,6 +253,14 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         </div>
 
         <div className="vs-body">
+          {reconnecting && (
+            <div className="vs-notice" role="status" data-testid="voice-stage-reconnecting">
+              <LoadingSpinner size="sm" />
+              {reconnecting.attempt > 1
+                ? t("stage.reconnectingAttempt", { attempt: reconnecting.attempt })
+                : t("stage.reconnecting")}
+            </div>
+          )}
           {sharePicking ? (
             <ScreenSharePicker />
           ) : cameraPicking ? (

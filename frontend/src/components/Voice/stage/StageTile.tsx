@@ -8,6 +8,7 @@ import type { VoiceConnectionQuality } from "../../../types";
 import { Avatar } from "../../ui/Avatar";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { RemoteUserVolumeSlider } from "../RemoteUserVolumeSlider";
+import { SignalBars } from "../SignalBars";
 import { RemoteVideoTile } from "../RemoteVideoTile";
 import { useScreenShareStats } from "../../../screenshare/useScreenShareStats";
 import { audioLevels, BAND_COUNT } from "../../../voice/audioLevels";
@@ -62,6 +63,10 @@ export interface StageTileModel {
   isSpeaking: boolean;
   connectionQuality?: VoiceConnectionQuality;
   isConnecting?: boolean;
+  /** Local tile while LiveKit re-establishes the room. */
+  isReconnecting?: boolean;
+  /** Remote tile whose media is paused by our reconnect; drawn dimmed. */
+  stale?: boolean;
   media: TileMedia;
 }
 
@@ -74,18 +79,6 @@ interface Props {
   onView?: (trackKey: string) => void;
 }
 
-function signalClass(q: VoiceConnectionQuality | undefined): string {
-  switch (q) {
-    case "poor":
-    case "lost":
-      return "poor";
-    case "good":
-      return "fair";
-    default:
-      return "good";
-  }
-}
-
 export const StageTile: React.FC<Props> = ({
   participant: p,
   mode,
@@ -94,14 +87,6 @@ export const StageTile: React.FC<Props> = ({
   onView,
 }) => {
   const { t } = useTranslation("voice");
-  // Literal keys so `scripts/i18n-check.mjs` resolves them; the enum is a wire value.
-  const qualityLabels: Record<VoiceConnectionQuality, string> = {
-    excellent: t("tile.qualityExcellent"),
-    good: t("tile.qualityGood"),
-    poor: t("tile.qualityPoor"),
-    lost: t("tile.qualityLost"),
-  };
-  const qualityLabel = qualityLabels[p.connectionQuality ?? "excellent"];
   const big = mode === "big";
   const preview = mode === "preview";
   const media = p.media;
@@ -134,6 +119,7 @@ export const StageTile: React.FC<Props> = ({
     p.isSpeaking && "speaking",
     focusable && "clickable",
     focused && "focused",
+    p.stale && "stale",
   ]
     .filter(Boolean)
     .join(" ");
@@ -177,25 +163,22 @@ export const StageTile: React.FC<Props> = ({
       </div>
 
       <div className="vs-tr">
-        {p.isConnecting ? (
+        {p.isConnecting || p.isReconnecting ? (
           <span
-            data-testid={`voice-tile-connecting-${p.tileKey}`}
-            className="flex items-center leading-none"
-            title={t("tile.connectingTitle")}
-            aria-label={t("tile.connectingLabel")}
+            data-testid={`voice-tile-${p.isReconnecting ? "reconnecting" : "connecting"}-${p.tileKey}`}
+            className="vs-tag flex items-center gap-1.5 leading-none"
+            title={p.isReconnecting ? t("tile.reconnectingTitle") : t("tile.connectingTitle")}
+            aria-label={p.isReconnecting ? t("tile.reconnectingLabel") : t("tile.connectingLabel")}
           >
             <LoadingSpinner size="sm" />
+            {p.isReconnecting ? t("stage.reconnecting") : null}
           </span>
         ) : (
-          <span
-            className="vs-tag vs-pad6"
-            data-testid={`voice-tile-quality-${p.tileKey}`}
-            title={t("tile.quality", { quality: qualityLabel })}
-          >
-            <span className={"vs-sig " + signalClass(p.connectionQuality)}>
-              <i /><i /><i /><i />
-            </span>
-          </span>
+          <SignalBars
+            quality={p.connectionQuality}
+            testId={`voice-tile-quality-${p.tileKey}`}
+            className="vs-pad6"
+          />
         )}
       </div>
 

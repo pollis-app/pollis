@@ -28,6 +28,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
   const handle = profile?.username ? `@${profile.username}` : null;
 
   const inVoice = voiceState.kind === "joined";
+  const reconnecting = inVoice ? voiceState.reconnecting : null;
   const voiceChannelId = inVoice ? voiceState.channelId : null;
   const share = shareOf(voiceState);
   const shareActive = share.kind === "active";
@@ -116,12 +117,19 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             title={returnToVoiceLabel}
             className="group flex min-w-0 flex-1 cursor-pointer flex-col text-start leading-tight"
           >
-            <span
-              className="text-2xs font-semibold"
-              style={{ color: "var(--c-voice-connected, var(--c-accent))" }}
-            >
-              {t("profile.voiceConnected")}
-            </span>
+            {reconnecting ? (
+              <span
+                className="text-2xs font-semibold text-warning"
+                data-testid="sidebar-voice-reconnecting"
+                role="status"
+              >
+                {tVoice("bar.reconnecting")}
+              </span>
+            ) : (
+              <span className="text-2xs font-semibold text-connected">
+                {t("profile.voiceConnected")}
+              </span>
+            )}
             <span className="truncate text-2xs text-muted transition-colors group-hover:text-fg group-hover:underline">
               {voiceChannelName}
             </span>

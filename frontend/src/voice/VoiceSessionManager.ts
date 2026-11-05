@@ -306,26 +306,33 @@ class VoiceSessionManager {
       this.adoptGate(predicted);
     }
     this.gateInFlight.add(command);
+    // Rust stays authoritative: whenever a reply can't be adopted, re-read the gate so the
+    // optimistic state is rolled back to the last real one rather than left standing.
+    const resync = async (): Promise<void> => {
+      if (command === 'get_voice_gate_state') {
+        return;
+      }
+      await invoke<VoiceGateState | null>('get_voice_gate_state')
+        .then((gate) => {
+          if (gate) {
+            this.adoptGate(gate);
+          }
+        })
+        .catch(logIgnored);
+    };
     const run = async (): Promise<void> => {
       try {
-        // A null gate must not become a silent no-op (#888): bail loudly and keep the last state.
+        // A null gate must not become a silent no-op (#888): say so, then fall back to the truth.
         const gate = await invoke<VoiceGateState | null>(command, args);
         if (!gate) {
           console.error(`[voice] ${command} returned no gate state; leaving the previous gate in place`);
+          await resync();
           return;
         }
         this.adoptGate(gate);
       } catch (e) {
         console.warn(`[voice] ${command} failed:`, e);
-        if (command !== 'get_voice_gate_state') {
-          await invoke<VoiceGateState | null>('get_voice_gate_state')
-            .then((gate) => {
-              if (gate) {
-                this.adoptGate(gate);
-              }
-            })
-            .catch(logIgnored);
-        }
+        await resync();
       } finally {
         this.gateInFlight.delete(command);
       }

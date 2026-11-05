@@ -119,6 +119,25 @@
    border-color: var(--c-accent);
 }
 
+/* Remote media is frozen while we reconnect: dim it, don't drop it. */
+.vs-tile.stale {
+   opacity: 0.5;
+}
+
+/* In-flow status row above the stage (never an overlay). */
+.vs-notice {
+   flex: 0 0 auto;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   gap: 0.5rem;
+   padding: 0.375rem 0.75rem;
+   font-size: 0.75rem;
+   letter-spacing: .04em;
+   color: var(--c-warning);
+   border-bottom: 1px solid var(--vs-line);
+}
+
 /* solid border = speaking. no glow */
 .vs-empty {
    display: grid;
@@ -326,6 +345,11 @@
 
 .vs-sig i:nth-child(4) {
    height: 110%;
+}
+
+/* No quality event yet: visibly "unmeasured", never a confident full signal. */
+.vs-sig.unknown i {
+   opacity: 0.45;
 }
 
 .vs-sig.good i {

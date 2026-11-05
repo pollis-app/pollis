@@ -90,6 +90,7 @@ export const AppShell: React.FC = observer(() => {
     viewingScreenShareTrackKey,
     setViewingScreenShareTrackKey,
     shareStopped,
+    cameraStopped,
     availableUpdateVersion,
   } = appStore;
   const activeVoiceChannelId =
@@ -97,6 +98,10 @@ export const AppShell: React.FC = observer(() => {
   const screenShareError =
     voiceState.kind === 'joined' && voiceState.share.kind === 'failed'
       ? voiceState.share.error
+      : null;
+  const cameraError =
+    voiceState.kind === 'joined' && voiceState.camera.kind === 'failed'
+      ? voiceState.camera.error
       : null;
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -719,6 +724,29 @@ export const AppShell: React.FC = observer(() => {
               style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => shareStopped()}
               aria-label={t("statusBar.dismissScreenShareError")}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : cameraError ? (
+          <div
+            data-testid="status-bar-camera-error"
+            className="flex items-center gap-2 min-w-0 flex-1"
+            style={{ color: barInk }}
+          >
+            <span
+              className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
+              title={cameraError}
+            >
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{cameraError}</span>
+            </span>
+            <button
+              data-testid="status-bar-camera-error-dismiss"
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
+              onClick={() => cameraStopped()}
+              aria-label={t("statusBar.dismissCameraError")}
             >
               <X className="w-4 h-4" />
             </button>

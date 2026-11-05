@@ -13,6 +13,7 @@ import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { toggleCamera } from "../../camera/cameraActions";
 import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf, isMediaBusy } from "../../types/voice-state";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
+import { SignalBars } from "./SignalBars";
 import { useShortcutLabel } from "../../keyboard";
 import {
   micControlTitleKey,
@@ -61,8 +62,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const toggleDeafen = () => voiceSession.toggleDeafen();
   const leave = () => voiceSession.leave();
 
+  const reconnecting = voiceState.kind === "joined" ? voiceState.reconnecting : null;
   // Exclude every identity of the local user (other devices, reconnect overlap), not just `isLocal`.
-  const localIdentity = voiceParticipants.find((p) => p.isLocal)?.identity ?? null;
+  const local = voiceParticipants.find((p) => p.isLocal) ?? null;
+  const localIdentity = local?.identity ?? null;
   const localUserId = localIdentity ? userIdFromVoiceIdentity(localIdentity) : null;
   const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter(
     (id) => userIdFromVoiceIdentity(id) !== localUserId,
@@ -251,6 +254,19 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       </PillButton>
 
       <span className="text-line">|</span>
+
+      {reconnecting ? (
+        <span
+          data-testid="voice-bar-reconnecting"
+          role="status"
+          className="flex items-center gap-1 text-warning"
+        >
+          <LoadingSpinner size="sm" />
+          {t("bar.reconnecting")}
+        </span>
+      ) : (
+        <SignalBars quality={local?.connectionQuality} testId="voice-bar-quality" />
+      )}
 
       <span data-testid="voice-bar-participant-count" className="text-dim">
         {t("bar.participants", { count: participantCount })}
