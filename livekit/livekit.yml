@@ -10,9 +10,30 @@ logging:
 
 rtc:
   tcp_port: 7881
-  udp_port: 7882
-  use_external_ip: true
+  # A UDP mux range, not a single port: LiveKit recommends at least as many
+  # mux ports as vCPUs (the KVM 2 has two). Published 1:1 in docker-compose.yml
+  # and opened in the host firewall — the three must stay in lockstep.
+  udp_port: 7882-7883
+  # The node IP is pinned rather than STUN-discovered: `use_external_ip: true`
+  # asked Google's STUN servers for it at every boot (a seconds-long start and
+  # an outbound dependency on a third party), and the VPS address is static.
+  # node_ip is also what the TURN/UDP URL is built from
+  # (`turn:<node_ip>:3478?transport=udp`). Changing the box means changing this.
+  use_external_ip: false
+  node_ip: 31.97.140.76
   use_ice_lite: true
+  # When UDP fails, a client whose signalling RTT is under 100 ms tries ICE/TCP
+  # (7881) first; a farther client goes straight to TURN/TLS, which is the
+  # fallback that actually works through the restrictive networks they are on.
+  allow_tcp_fallback: true
+  tcp_fallback_rtt_threshold: 100
+
+# Node-level ceilings. bytes_per_sec is the node's egress budget for admitting
+# new rooms: 60 MB/s ≈ 480 Mbit/s, chosen so that a burst cannot pin the shared
+# 1 Gbit NIC; the binding monthly bound is the plan's 8 TB transfer cap, which
+# is ~25 Mbit/s averaged over a month (see DEPLOY.md → "Capacity").
+limit:
+  bytes_per_sec: 60_000_000
 
 # Metrics. LiveKit serves Prometheus metrics on a SEPARATE listener at
 # :6789/metrics (never on the signalling port 7880), so nothing reaches the

@@ -166,16 +166,18 @@ jobs:
             #    firewall — a control-panel firewall can't be checked from here.
             #    Same for TURN/UDP (3478): LiveKit advertises it as the
             #    STUN+TURN server, and a dropped port there means every client
-            #    silently loses STUN and the UDP relay.
+            #    silently loses STUN and the UDP relay. And the ICE/UDP mux
+            #    range (7882-7883): LiveKit spreads connections across both
+            #    ports, so a firewall that passes only 7882 drops half of them.
             if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
-              for rule in '30000:30999/udp' '3478/udp'; do
+              for rule in '30000:30999/udp' '3478/udp' '7882:7883/udp'; do
                 if ! ufw status | grep -q "${rule}"; then
                   echo "::error::ufw does not allow ${rule}. Run 'ufw allow ${rule}' (see livekit/DEPLOY.md)."
                   fail=1
                 fi
               done
             else
-              echo "::warning::ufw inactive or absent — verify 30000-30999/udp and 3478/udp are open in the host control-panel firewall."
+              echo "::warning::ufw inactive or absent — verify 30000-30999/udp, 3478/udp and 7882-7883/udp are open in the host control-panel firewall."
             fi
 
             exit "${fail}"

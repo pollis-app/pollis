@@ -28,7 +28,7 @@ services:
     image: livekit/livekit-server:v1.13.9@sha256:d0c04791bf63ca8dcea123571827d56ba9504bd57c8d5de60ee03b5408cc3154
     ports:
       - "7881:7881"             # ICE TCP candidates
-      - "7882:7882/udp"         # ICE UDP (single-port mux)
+      - "7882-7883:7882-7883/udp"   # ICE UDP mux range (rtc.udp_port; ≥ vCPU count)
       # TURN over UDP (turn.udp_port in livekit.yml). Also the STUN server
       # clients are handed — without it LiveKit hands out Google's public STUN.
       - "3478:3478/udp"

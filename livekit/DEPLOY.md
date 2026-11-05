@@ -174,8 +174,8 @@ could write one is off:
 | LiveKit process | `logging: { level: warn, pion_level: error }` in `livekit.yml` |
 | Container stdout/stderr (both) | `logging: driver: none` in `docker-compose.yml` |
 
-LiveKit still learns client addresses for ICE from the media ports (7881/7882,
-the TURN relay range), which docker publishes by iptables DNAT — that is how
+LiveKit still learns client addresses for ICE from the media ports (7881,
+7882-7883, 3478, the TURN relay range), which docker publishes by iptables DNAT — that is how
 WebRTC works and nothing records it. `docker compose logs` now prints nothing;
 diagnose with `nginx -t` / `nginx -T`, `docker compose ps` and the deploy
 workflow's checks.
@@ -223,13 +223,14 @@ the host tunables in place. On a brand-new box:
 curl -fsSL https://get.docker.com | sh
 ufw allow 80/tcp && ufw allow 443/tcp
 ufw allow 7881/tcp          # ICE TCP
-ufw allow 7882/udp          # ICE UDP
+ufw allow 7882:7883/udp     # ICE UDP mux range (rtc.udp_port — one port per vCPU)
 ufw allow 3478/udp          # TURN over UDP (doubles as the STUN server clients are handed)
 ufw allow 30000:30999/udp   # TURN relay media ports
 ufw reload
 ```
-Upgrading an existing box for TURN/UDP is the one `ufw allow 3478/udp` line;
-the deploy workflow refuses to run until it is there.
+Upgrading an existing box: `ufw allow 3478/udp && ufw allow 7882:7883/udp`
+(the old single `7882/udp` rule can stay). The deploy workflow refuses to run
+until both are there.
 Note: if the host (e.g. Hostinger) has a control-panel firewall, open the same
 ports there too — it overrides UFW.
 
