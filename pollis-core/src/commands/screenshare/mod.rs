@@ -20,6 +20,7 @@ pub(crate) mod helper_subprocess;
 mod remote_video;
 pub(crate) mod self_echo;
 mod state;
+pub(crate) mod wants;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod start_unix;
 #[cfg(target_os = "windows")]
@@ -41,6 +42,7 @@ pub use remote_video::{
 };
 pub use state::ScreenShareState;
 pub use stop::stop_screen_share;
+pub use wants::{set_video_wants, VideoWants};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use state::HelperSession;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

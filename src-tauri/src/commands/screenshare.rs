@@ -71,3 +71,12 @@ pub async fn start_screen_share(
 pub async fn stop_screen_share(state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::screenshare::stop_screen_share(&state).await
 }
+
+#[tauri::command]
+pub async fn set_video_wants(
+    state: State<'_, Arc<AppState>>,
+    track_key: String,
+    wants: Option<pollis_core::commands::screenshare::VideoWants>,
+) -> Result<()> {
+    pollis_core::commands::screenshare::set_video_wants(&state, track_key, wants).await
+}

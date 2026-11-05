@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 
 import { screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
+import { videoWants } from "../../screenshare/videoWants";
 import { LOCAL_CAMERA_PREVIEW_KEY } from "../../camera/cameraSession";
 
 interface Props {
@@ -17,6 +18,9 @@ interface Props {
 }
 
 const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
+const PREVIEW_WANT_FPS = 15;
+// A ceiling, not a target: the publisher's own cap is lower; "as fast as it arrives".
+const FULL_WANT_FPS = 60;
 
 const VERT_SRC = `
 attribute vec2 a_pos;
@@ -161,6 +165,55 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
   const pendingRef = useRef<DecodedFrame | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastPaintAtRef = useRef<number>(0);
+
+  // Report what this tile needs — its container's size in device pixels while it is on screen,
+  // nothing while hidden — so Rust can pick the SFU layer, pause the track and pack to size.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const box = canvas?.parentElement;
+    if (!canvas || !box) {
+      return;
+    }
+    const id = videoWants.register(trackKey);
+    let boxW = box.clientWidth;
+    let boxH = box.clientHeight;
+    let intersecting = true;
+    const report = () => {
+      const shown = intersecting && document.visibilityState !== "hidden" && boxW > 0 && boxH > 0;
+      if (!shown) {
+        videoWants.report(trackKey, id, null);
+        return;
+      }
+      const dpr = window.devicePixelRatio || 1;
+      videoWants.report(trackKey, id, {
+        width: Math.ceil(boxW * dpr),
+        height: Math.ceil(boxH * dpr),
+        fps: preview ? PREVIEW_WANT_FPS : FULL_WANT_FPS,
+      });
+    };
+    const resize = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) {
+        boxW = rect.width;
+        boxH = rect.height;
+      }
+      report();
+    });
+    resize.observe(box);
+    const intersection = new IntersectionObserver((entries) => {
+      intersecting = entries.some((e) => e.isIntersecting);
+      report();
+    });
+    intersection.observe(canvas);
+    document.addEventListener("visibilitychange", report);
+    report();
+    return () => {
+      document.removeEventListener("visibilitychange", report);
+      intersection.disconnect();
+      resize.disconnect();
+      videoWants.unregister(trackKey, id);
+    };
+  }, [trackKey, preview]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

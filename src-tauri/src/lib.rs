@@ -596,6 +596,7 @@ pub fn run() {
             commands::screenshare::cancel_screen_share_picker,
             commands::screenshare::start_screen_share,
             commands::screenshare::stop_screen_share,
+            commands::screenshare::set_video_wants,
             commands::camera::subscribe_camera_events,
             commands::camera::list_video_devices,
             commands::camera::start_camera,

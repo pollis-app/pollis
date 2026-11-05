@@ -51,6 +51,11 @@ pub struct ScreenShareState {
 
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+    /// Remote publications by track key, for carrying a tile's wants to the SFU.
+    pub remote_publications:
+        std::collections::HashMap<String, livekit::publication::RemoteTrackPublication>,
+    /// Per-track demand from the renderer's tiles (`wants.rs`), local preview keys included.
+    pub video_wants: std::collections::HashMap<String, super::wants::WantsTx>,
 
     /// Bumped by every start and every effective stop; a start re-checks it after each await
     /// so a stop that lands mid-handshake cannot be followed by a publish with no capture.
@@ -87,6 +92,8 @@ impl ScreenShareState {
             #[cfg(target_os = "windows")]
             windows_picker: None,
             remote_drain_tasks: std::collections::HashMap::new(),
+            remote_publications: std::collections::HashMap::new(),
+            video_wants: std::collections::HashMap::new(),
             session_generation: 0,
         }
     }

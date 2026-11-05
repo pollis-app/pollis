@@ -166,6 +166,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::mls::catch_up_all_mls_groups,
             crate::commands::overlay::get_overlay_mode,
             crate::commands::overlay::set_overlay_mode,
+            crate::commands::screenshare::set_video_wants,
         ])
         .manage(state)
         // Empty: the harness drives no picker, so path-taking shims must refuse every path.
