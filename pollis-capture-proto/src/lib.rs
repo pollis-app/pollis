@@ -16,6 +16,13 @@
 //!     Pixel format is BGRx (4 bpp), top-down. The parent does the
 //!     I420 conversion + LiveKit publish.
 //!
+//!   type 0x09  FrameI420
+//!     payload := [ u32 width ][ u32 height ][ i64 timestamp_us ]
+//!                [ Y plane (width*height) ][ U plane ][ V plane ]
+//!     Tight 4:2:0 planes (U and V are (width/2)*(height/2), dimensions
+//!     even). What a source that already has YUV (a webcam's YUYV or MJPG)
+//!     sends, so the parent neither converts nor reads 4 bytes per pixel.
+//!
 //!   type 0x03  Sources (helper → parent)
 //!     payload := utf-8 JSON `SourceList`
 //!     Sent once after enumeration (macOS only); the parent replies with Select.
@@ -80,6 +87,8 @@ pub const MSG_SELECT_CAMERA: u8 = 0x06;
 pub const MSG_AUDIO_FORMAT: u8 = 0x07;
 /// A block of interleaved s16 shared audio, helper -> parent.
 pub const MSG_AUDIO_FRAME: u8 = 0x08;
+/// A single tight-plane I420 frame.
+pub const MSG_FRAME_I420: u8 = 0x09;
 /// An error from the helper, carrying a human-readable utf-8 string.
 /// Fatal unless prefixed `audio:` — see the wire-protocol table above.
 pub const MSG_ERROR: u8 = 0xFF;
@@ -101,6 +110,14 @@ pub enum CaptureMsg {
         stride: u32,
         timestamp_us: i64,
         bgrx: Vec<u8>,
+    },
+    /// Tight I420 planes back to back: `Y` (`width*height`), then `U`, then `V`
+    /// (each `(width/2)*(height/2)`). See [`i420_plane_lengths`].
+    FrameI420 {
+        width: u32,
+        height: u32,
+        timestamp_us: i64,
+        planes: Vec<u8>,
     },
     Sources(SourceList),
     Select(Selection),
@@ -166,7 +183,9 @@ pub struct SourceList {
 
 /// What the user picked in the in-app picker. Parent → helper.
 ///
-/// `with_audio` rides here because the macOS helper spawns before the picker; defaulted for old frontends.
+/// `with_audio` and the limits ride here because the macOS helper spawns before the picker
+/// (there is no later message to carry them); every field past `id` is defaulted so an
+/// older sender still decodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Selection {
@@ -174,12 +193,47 @@ pub enum Selection {
         id: u32,
         #[serde(default)]
         with_audio: bool,
+        #[serde(default, flatten)]
+        limits: CaptureLimits,
     },
     Window {
         id: u32,
         #[serde(default)]
         with_audio: bool,
+        #[serde(default, flatten)]
+        limits: CaptureLimits,
     },
+}
+
+/// What the publish will carry, so the capture never produces more than that.
+/// `0` means unbounded for both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureLimits {
+    /// Frames per second the capture should not exceed.
+    #[serde(default)]
+    pub max_fps: u32,
+    /// Tallest frame to produce; a taller source is captured scaled down, aspect kept.
+    #[serde(default)]
+    pub max_height: u32,
+}
+
+impl CaptureLimits {
+    /// The even `(w, h)` a `(w, h)` source should be captured at under `max_height`, or
+    /// `None` when it already fits.
+    pub fn fit(&self, width: u32, height: u32) -> Option<(u32, u32)> {
+        if self.max_height == 0 || height <= self.max_height || height == 0 {
+            return None;
+        }
+        let w =
+            ((width as u64 * self.max_height as u64 + height as u64 / 2) / height as u64) as u32;
+        Some((w.max(2) & !1, self.max_height.max(2) & !1))
+    }
+
+    /// The capture tick for `max_fps`, or `None` for "as fast as the source".
+    pub fn frame_interval(&self) -> Option<std::time::Duration> {
+        (self.max_fps > 0)
+            .then(|| std::time::Duration::from_nanos(1_000_000_000 / self.max_fps as u64))
+    }
 }
 
 impl Selection {
@@ -187,6 +241,12 @@ impl Selection {
     pub fn with_audio(&self) -> bool {
         match self {
             Self::Display { with_audio, .. } | Self::Window { with_audio, .. } => *with_audio,
+        }
+    }
+
+    pub fn limits(&self) -> CaptureLimits {
+        match self {
+            Self::Display { limits, .. } | Self::Window { limits, .. } => *limits,
         }
     }
 }
@@ -211,6 +271,31 @@ pub struct CameraList {
 pub struct CameraSelection {
     /// The chosen `CameraSource::id`, echoed back verbatim.
     pub id: String,
+}
+
+/// `(y_len, chroma_len)` of a tight I420 frame; the planes buffer is `y_len + 2 * chroma_len`.
+pub fn i420_plane_lengths(width: u32, height: u32) -> (usize, usize) {
+    let y = width as usize * height as usize;
+    let c = (width as usize / 2) * (height as usize / 2);
+    (y, c)
+}
+
+/// Serialize a FrameI420 header (everything up to and excluding the planes), like
+/// [`encode_frame_header`].
+pub fn encode_frame_i420_header(
+    width: u32,
+    height: u32,
+    timestamp_us: i64,
+    planes_len: usize,
+) -> Vec<u8> {
+    let payload_len = (4 + 4 + 8 + planes_len) as u32;
+    let mut header = Vec::with_capacity(1 + 4 + 4 + 4 + 8);
+    header.push(MSG_FRAME_I420);
+    header.extend_from_slice(&payload_len.to_le_bytes());
+    header.extend_from_slice(&width.to_le_bytes());
+    header.extend_from_slice(&height.to_le_bytes());
+    header.extend_from_slice(&timestamp_us.to_le_bytes());
+    header
 }
 
 /// Wall-clock µs since the epoch for `timestamp_us`; a pre-epoch clock yields 0.
@@ -327,9 +412,7 @@ where
     W: AsyncWriteExt + Unpin,
 {
     match msg {
-        CaptureMsg::Format { width, height } => {
-            w.write_all(&encode_format(*width, *height)).await
-        }
+        CaptureMsg::Format { width, height } => w.write_all(&encode_format(*width, *height)).await,
         CaptureMsg::Frame {
             width,
             height,
@@ -337,10 +420,19 @@ where
             timestamp_us,
             bgrx,
         } => {
-            let header =
-                encode_frame_header(*width, *height, *stride, *timestamp_us, bgrx.len());
+            let header = encode_frame_header(*width, *height, *stride, *timestamp_us, bgrx.len());
             w.write_all(&header).await?;
             w.write_all(bgrx).await
+        }
+        CaptureMsg::FrameI420 {
+            width,
+            height,
+            timestamp_us,
+            planes,
+        } => {
+            let header = encode_frame_i420_header(*width, *height, *timestamp_us, planes.len());
+            w.write_all(&header).await?;
+            w.write_all(planes).await
         }
         CaptureMsg::Sources(list) => w.write_all(&encode_sources(list)).await,
         CaptureMsg::Select(sel) => w.write_all(&encode_select(sel)).await,
@@ -349,15 +441,23 @@ where
         CaptureMsg::AudioFormat {
             sample_rate,
             channels,
-        } => w.write_all(&encode_audio_format(*sample_rate, *channels)).await,
+        } => {
+            w.write_all(&encode_audio_format(*sample_rate, *channels))
+                .await
+        }
         CaptureMsg::AudioFrame {
             sample_rate,
             channels,
             timestamp_us,
             pcm,
         } => {
-            w.write_all(&encode_audio_frame(*sample_rate, *channels, *timestamp_us, pcm))
-                .await
+            w.write_all(&encode_audio_frame(
+                *sample_rate,
+                *channels,
+                *timestamp_us,
+                pcm,
+            ))
+            .await
         }
         CaptureMsg::Error { message } => w.write_all(&encode_error(message)).await,
     }
@@ -409,6 +509,19 @@ pub async fn read_msg<R>(r: &mut R) -> std::io::Result<Option<CaptureMsg>>
 where
     R: AsyncReadExt + Unpin,
 {
+    read_msg_pooled(r, &mut None).await
+}
+
+/// [`read_msg`] whose frame payload lands in `spare` when one is offered (its capacity
+/// is reused, so a steady stream allocates nothing per frame); the caller gives the
+/// `Vec` back once it has consumed the frame.
+pub async fn read_msg_pooled<R>(
+    r: &mut R,
+    spare: &mut Option<Vec<u8>>,
+) -> std::io::Result<Option<CaptureMsg>>
+where
+    R: AsyncReadExt + Unpin,
+{
     let mut header = [0u8; 5];
     match r.read_exact(&mut header).await {
         Ok(_) => {}
@@ -438,7 +551,8 @@ where
             let stride = u32::from_le_bytes(head[8..12].try_into().unwrap());
             let timestamp_us = i64::from_le_bytes(head[12..20].try_into().unwrap());
             let body_len = payload_len - head.len();
-            let mut bgrx = vec![0u8; body_len];
+            let mut bgrx = spare.take().unwrap_or_default();
+            bgrx.resize(body_len, 0);
             r.read_exact(&mut bgrx).await?;
             Ok(Some(CaptureMsg::Frame {
                 width,
@@ -446,6 +560,34 @@ where
                 stride,
                 timestamp_us,
                 bgrx,
+            }))
+        }
+        MSG_FRAME_I420 => {
+            const HEAD: usize = 4 + 4 + 8;
+            if payload_len < HEAD {
+                return Err(invalid_data("i420 frame payload too short"));
+            }
+            let mut head = [0u8; HEAD];
+            r.read_exact(&mut head).await?;
+            let width = u32::from_le_bytes(head[0..4].try_into().unwrap());
+            let height = u32::from_le_bytes(head[4..8].try_into().unwrap());
+            let timestamp_us = i64::from_le_bytes(head[8..16].try_into().unwrap());
+            let (y, c) = i420_plane_lengths(width, height);
+            let body_len = payload_len - HEAD;
+            if body_len != y + 2 * c {
+                return Err(invalid_data(format!(
+                    "i420 frame {width}x{height} carries {body_len} plane bytes, expected {}",
+                    y + 2 * c
+                )));
+            }
+            let mut planes = spare.take().unwrap_or_default();
+            planes.resize(body_len, 0);
+            r.read_exact(&mut planes).await?;
+            Ok(Some(CaptureMsg::FrameI420 {
+                width,
+                height,
+                timestamp_us,
+                planes,
             }))
         }
         MSG_SOURCES => Ok(Some(CaptureMsg::Sources(
@@ -562,6 +704,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn i420_frame_roundtrip_and_reuses_the_offered_buffer() {
+        let (y, c) = i420_plane_lengths(8, 6);
+        assert_eq!((y, c), (48, 12));
+        let mut planes = vec![0u8; y + 2 * c];
+        planes[0] = 0x11;
+        planes[y] = 0x22;
+        planes[y + c] = 0x33;
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        write_msg(
+            &mut a,
+            &CaptureMsg::FrameI420 {
+                width: 8,
+                height: 6,
+                timestamp_us: 7,
+                planes: planes.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        drop(a);
+        let spare_buf = Vec::with_capacity(4096);
+        let spare_ptr = spare_buf.as_ptr();
+        let mut spare = Some(spare_buf);
+        match read_msg_pooled(&mut b, &mut spare).await.unwrap().unwrap() {
+            CaptureMsg::FrameI420 {
+                width,
+                height,
+                timestamp_us,
+                planes: got,
+            } => {
+                assert_eq!((width, height, timestamp_us), (8, 6, 7));
+                assert_eq!(got, planes);
+                assert_eq!(
+                    got.as_ptr(),
+                    spare_ptr,
+                    "the offered buffer must be the one filled"
+                );
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+        assert!(spare.is_none(), "the buffer was taken");
+    }
+
+    // A plane count that disagrees with the dimensions is a desync, not a frame.
+    #[tokio::test]
+    async fn i420_frame_with_wrong_plane_length_is_rejected() {
+        let mut bytes = encode_frame_i420_header(8, 6, 0, 10);
+        bytes.extend_from_slice(&[0u8; 10]);
+        let (mut a, mut b) = tokio::io::duplex(4096);
+        tokio::io::AsyncWriteExt::write_all(&mut a, &bytes)
+            .await
+            .unwrap();
+        drop(a);
+        let err = read_msg(&mut b).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
     async fn error_roundtrip() {
         let m = roundtrip(CaptureMsg::Error {
             message: "portal: no backend".into(),
@@ -619,35 +819,76 @@ mod tests {
         match roundtrip(CaptureMsg::Select(Selection::Display {
             id: 7,
             with_audio: false,
+            limits: CaptureLimits::default(),
         }))
         .await
         {
-            CaptureMsg::Select(Selection::Display { id, with_audio }) => {
+            CaptureMsg::Select(Selection::Display {
+                id,
+                with_audio,
+                limits,
+            }) => {
                 assert_eq!(id, 7);
                 assert!(!with_audio);
+                assert_eq!(limits, CaptureLimits::default());
             }
             _ => panic!("wrong variant"),
         }
         match roundtrip(CaptureMsg::Select(Selection::Window {
             id: 13,
             with_audio: true,
+            limits: CaptureLimits {
+                max_fps: 30,
+                max_height: 1080,
+            },
         }))
         .await
         {
-            CaptureMsg::Select(Selection::Window { id, with_audio }) => {
+            CaptureMsg::Select(Selection::Window {
+                id,
+                with_audio,
+                limits,
+            }) => {
                 assert_eq!(id, 13);
                 assert!(with_audio);
+                assert_eq!(
+                    limits,
+                    CaptureLimits {
+                        max_fps: 30,
+                        max_height: 1080
+                    }
+                );
             }
             _ => panic!("wrong variant"),
         }
     }
 
-    // A Select from a pre-audio frontend has no `with_audio`; it must decode as video-only.
+    // A Select from a pre-audio frontend has no `with_audio`; it must decode as video-only,
+    // and one without limits as unbounded.
     #[test]
     fn select_without_with_audio_defaults_to_video_only() {
         let sel: Selection = serde_json::from_str(r#"{"kind":"display","id":3}"#).unwrap();
         assert!(!sel.with_audio());
+        assert_eq!(sel.limits(), CaptureLimits::default());
         assert!(matches!(sel, Selection::Display { id: 3, .. }));
+    }
+
+    #[test]
+    fn capture_limits_fit_and_tick() {
+        let none = CaptureLimits::default();
+        assert_eq!(none.fit(3840, 2160), None);
+        assert_eq!(none.frame_interval(), None);
+        let l = CaptureLimits {
+            max_fps: 30,
+            max_height: 1080,
+        };
+        assert_eq!(l.fit(1920, 1080), None);
+        assert_eq!(l.fit(3840, 2160), Some((1920, 1080)));
+        assert_eq!(l.fit(2560, 1600), Some((1728, 1080)));
+        assert_eq!(
+            l.frame_interval(),
+            Some(std::time::Duration::from_nanos(33_333_333))
+        );
     }
 
     #[tokio::test]
@@ -775,6 +1016,7 @@ mod tests {
         assert_eq!(MSG_SELECT_CAMERA, 0x06);
         assert_eq!(MSG_AUDIO_FORMAT, 0x07);
         assert_eq!(MSG_AUDIO_FRAME, 0x08);
+        assert_eq!(MSG_FRAME_I420, 0x09);
         assert_eq!(MSG_ERROR, 0xFF);
     }
 }

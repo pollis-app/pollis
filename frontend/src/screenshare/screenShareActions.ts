@@ -26,21 +26,31 @@ export function toggleScreenShare(share: ShareState): void {
     return;
   }
 
-  // Any other non-idle state (wedged 'starting', 'failed'): force-stop to recover.
-  if (share.kind !== "idle") {
-    screenShareSession
-      .stop()
-      .catch((e) => console.warn("[screenshare] force-stop:", e));
+  // The source list (or the portal dialog) is still being awaited: a second click is the same intent.
+  if (share.kind === "enumerating") {
     return;
   }
 
+  // Any other non-idle state (wedged 'starting', 'failed'): force-stop to recover. A stop with
+  // nothing live sends no `local_stopped`, so the store is reset here.
+  if (share.kind !== "idle") {
+    screenShareSession
+      .stop()
+      .catch((e) => console.warn("[screenshare] force-stop:", e))
+      .finally(() => appStore.shareStopped());
+    return;
+  }
+
+  // Busy on the same frame as the click, before anything is awaited.
+  appStore.shareStartEnumerating();
   (async () => {
     try {
       const list = await screenShareSession.enumerate();
       if (list.displays.length + list.windows.length === 0) {
-        // Linux: the stored preference is the only audio choice. Not `starting` yet: a cancelled portal emits no event.
+        // Linux: the stored preference is the only audio choice. A cancelled portal resolves with no event.
         const withAudio = await screenShareSession.resolveWithAudio();
         await screenShareSession.start(undefined, withAudio);
+        appStore.shareEnumerationSettled();
         return;
       }
       appStore.shareStartPicking(list);

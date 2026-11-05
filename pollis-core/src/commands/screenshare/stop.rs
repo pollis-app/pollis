@@ -8,6 +8,16 @@ use crate::{error::Result, state::AppState};
 use super::ScreenShareEvent;
 
 pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
+    stop_session(state, None).await
+}
+
+/// Stop only if `token` is still the live session (see `ScreenShareState::begin_session`):
+/// a reader that died after the user already restarted must not kill the new share.
+pub(super) async fn stop_screen_share_if(state: &Arc<AppState>, token: u64) -> Result<()> {
+    stop_session(state, Some(token)).await
+}
+
+async fn stop_session(state: &Arc<AppState>, token: Option<u64>) -> Result<()> {
     let room;
     let track;
     let source_to_drop;
@@ -26,6 +36,11 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let windows_active;
     {
         let mut ss = state.screenshare.lock().await;
+        if let Some(token) = token {
+            if !ss.is_session(token) {
+                return Ok(());
+            }
+        }
         track = ss.local_track.take();
         // Hold the source until the track is unpublished (in-flight handler calls).
         source_to_drop = ss.local_source.take();
@@ -46,24 +61,25 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
             windows_active = ss.windows_active.take();
         }
         ev_opt = ss.events.clone();
+
+        // Nothing live: skip LocalStopped, which would clobber a starting share's UI.
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let had_session = track.is_some()
+            || source_to_drop.is_some()
+            || helper.is_some()
+            || reader.is_some()
+            || picker.is_some();
+        #[cfg(target_os = "windows")]
+        let had_session = track.is_some() || source_to_drop.is_some() || windows_thread.is_some();
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        let had_session = track.is_some() || source_to_drop.is_some();
+        if !had_session {
+            return Ok(());
+        }
+        ss.end_session();
+
         let voice = state.voice.lock().await;
         room = voice.room.clone();
-    }
-
-    // Nothing live: skip LocalStopped, which would clobber a starting share's UI.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let had_session = track.is_some()
-        || source_to_drop.is_some()
-        || helper.is_some()
-        || reader.is_some()
-        || picker.is_some();
-    #[cfg(target_os = "windows")]
-    let had_session =
-        track.is_some() || source_to_drop.is_some() || windows_thread.is_some();
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    let had_session = track.is_some() || source_to_drop.is_some();
-    if !had_session {
-        return Ok(());
     }
 
     // Disarm the self-echo tap; every stop path converges here.
@@ -95,20 +111,26 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         // 2. Detach, don't join: the fence keeps it off the source; a join could hang.
         drop(windows_thread);
     }
-    // 3. Unpublish before dropping the source (unpublish can free its backing).
+    // 3. Unpublish before dropping the sources (unpublish can free their backing).
     if let Some(room) = room {
-        if let Some(track) = track {
-            let sid = track.sid();
-            if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-                crate::diag!("[screenshare] unpublish error: {e}");
+        let participant = room.local_participant();
+        let video = async {
+            if let Some(track) = track {
+                let sid = track.sid();
+                if let Err(e) = participant.unpublish_track(&sid).await {
+                    crate::diag!("[screenshare] unpublish error: {e}");
+                }
             }
-        }
-        if let Some(track) = audio_track {
-            let sid = track.sid();
-            if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-                crate::diag!("[screenshare/audio] unpublish error: {e}");
+        };
+        let audio = async {
+            if let Some(track) = audio_track {
+                let sid = track.sid();
+                if let Err(e) = participant.unpublish_track(&sid).await {
+                    crate::diag!("[screenshare/audio] unpublish error: {e}");
+                }
             }
-        }
+        };
+        tokio::join!(video, audio);
     }
     // 4. Now the sources can be dropped safely.
     drop(source_to_drop);

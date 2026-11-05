@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use libwebrtc::{
-    prelude::{RtcVideoSource, VideoBuffer, VideoFrame, VideoRotation},
+    prelude::RtcVideoSource,
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
@@ -13,13 +13,34 @@ use livekit::{
 };
 
 use crate::commands::screenshare::{
-    codec::{convert_to_i420, pack_frame_bytes},
+    codec::ShareLimits,
     helper_subprocess::locate_capture_helper,
+    pump::{FrameIn, LocalVideoPump, PumpHandle},
+    wants::{wants_channel, PreviewMirror},
     HelperSession,
 };
 use crate::{error::Result, state::AppState};
 
-use super::{fail_capture, CameraEvent, CAMERA_PREVIEW_MIN_INTERVAL, LOCAL_CAMERA_PREVIEW_KEY};
+use super::{fail_capture, CameraEvent, LOCAL_CAMERA_PREVIEW_KEY};
+
+/// The camera publishes at 30 fps and its own size; the pump's pacer matches the encoder.
+const CAMERA_LIMITS: ShareLimits = ShareLimits {
+    max_fps: 30,
+    max_height: None,
+};
+
+/// A pump for the local camera: the publish source (or none for the settings preview) plus
+/// the self-preview mirror, sized and paced by what the preview tile reports.
+async fn camera_pump(state: &Arc<AppState>, source: Option<NativeVideoSource>) -> LocalVideoPump {
+    let mut ss = state.screenshare.lock().await;
+    LocalVideoPump::new(
+        source,
+        CAMERA_LIMITS,
+        PreviewMirror::new(wants_channel(&mut ss, LOCAL_CAMERA_PREVIEW_KEY)),
+        LOCAL_CAMERA_PREVIEW_KEY,
+        Arc::clone(&state.screenshare_frame_tx),
+    )
+}
 
 /// Helper `Cameras`/`Format` timeout; long enough for the macOS TCC prompt.
 const HELPER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -151,9 +172,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
 }
 
 /// Enumerate cameras via the helper and park it for `start_camera`.
-pub async fn list_video_devices(
-    state: &Arc<AppState>,
-) -> Result<pollis_capture_proto::CameraList> {
+pub async fn list_video_devices(state: &Arc<AppState>) -> Result<pollis_capture_proto::CameraList> {
     use pollis_capture_proto::{read_msg, CaptureMsg};
 
     // Discard any previous enumeration session that was never started.
@@ -174,11 +193,7 @@ pub async fn list_video_devices(
         Ok(Ok(Some(CaptureMsg::Cameras(list)))) => list,
         Ok(Ok(Some(CaptureMsg::Error { message }))) => {
             let _ = session.child.kill().await;
-            return Err(fail_capture(
-                state,
-                format!("Could not list cameras: {message}"),
-            )
-            .await);
+            return Err(fail_capture(state, format!("Could not list cameras: {message}")).await);
         }
         Ok(Ok(Some(_other))) => {
             let _ = session.child.kill().await;
@@ -190,11 +205,9 @@ pub async fn list_video_devices(
         }
         Ok(Ok(None)) => {
             let _ = session.child.kill().await;
-            return Err(fail_capture(
-                state,
-                "Camera helper exited before listing devices.".into(),
-            )
-            .await);
+            return Err(
+                fail_capture(state, "Camera helper exited before listing devices.".into()).await,
+            );
         }
         Ok(Err(e)) => {
             let _ = session.child.kill().await;
@@ -219,7 +232,9 @@ pub async fn list_video_devices(
 }
 
 pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()> {
-    use pollis_capture_proto::{encode_select_camera, read_msg, CameraSelection, CaptureMsg};
+    use pollis_capture_proto::{
+        encode_select_camera, read_msg, read_msg_pooled, CameraSelection, CaptureMsg,
+    };
     use tokio::io::AsyncWriteExt;
 
     let room = {
@@ -290,19 +305,22 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     }
     let _ = session.writer.flush().await;
 
-    // Park the session so a concurrent `stop_camera` can kill it.
+    // Park the session so a concurrent `stop_camera` can kill it. The token is re-checked
+    // after every await below (see `CameraState::begin_session`).
     let mut reader = session.reader;
-    {
+    let token = {
         let mut cam = state.camera.lock().await;
         cam.local_helper = Some(session.child);
         cam.local_writer = Some(session.writer);
-    }
+        cam.begin_session()
+    };
 
     // Read the negotiated Format (or a leading self-describing Frame).
     let read = tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut reader)).await;
     let (width, height) = match read {
         Ok(Ok(Some(CaptureMsg::Format { width, height }))) => (width & !1, height & !1),
-        Ok(Ok(Some(CaptureMsg::Frame { width, height, .. }))) => (width & !1, height & !1),
+        Ok(Ok(Some(CaptureMsg::Frame { width, height, .. })))
+        | Ok(Ok(Some(CaptureMsg::FrameI420 { width, height, .. }))) => (width & !1, height & !1),
         Ok(Ok(Some(CaptureMsg::Error { message }))) => {
             stop_camera(state).await.ok();
             let lower = message.to_lowercase();
@@ -324,6 +342,10 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
             .await);
         }
         Ok(Ok(None)) => {
+            // A stop during the handshake kills the helper; that EOF is not a failure.
+            if session_ended(state, token).await {
+                return Ok(());
+            }
             stop_camera(state).await.ok();
             return Err(fail_capture(
                 state,
@@ -332,6 +354,9 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
             .await);
         }
         Ok(Err(e)) => {
+            if session_ended(state, token).await {
+                return Ok(());
+            }
             stop_camera(state).await.ok();
             return Err(fail_capture(state, format!("Camera read error: {e}")).await);
         }
@@ -344,6 +369,9 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
             .await);
         }
     };
+    if session_ended(state, token).await {
+        return Ok(());
+    }
 
     if width == 0 || height == 0 {
         stop_camera(state).await.ok();
@@ -388,13 +416,21 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         .await);
     }
 
-    // Reader task feeds the source and mirrors throttled self-preview frames.
-    let source_for_task = source.clone();
-    let preview_tx = state.screenshare_frame_tx.clone();
+    if session_ended(state, token).await {
+        // Stopped while publishing: roll the publish back; the stop already announced itself.
+        let sid = track.sid();
+        let _ = room.local_participant().unpublish_track(&sid).await;
+        return Ok(());
+    }
+
+    // Reader task feeds the converter; the self-preview follows the preview tile's wants.
+    let pump = camera_pump(state, Some(source.clone())).await;
+    let state_for_exit = Arc::clone(state);
     let reader_task = tokio::spawn(async move {
-        let mut last_preview: Option<std::time::Instant> = None;
+        let frames = PumpHandle::spawn(pump);
         loop {
-            match read_msg(&mut reader).await {
+            let mut spare = frames.take_spare();
+            match read_msg_pooled(&mut reader, &mut spare).await {
                 Ok(Some(CaptureMsg::Frame {
                     width,
                     height,
@@ -402,21 +438,26 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                     timestamp_us,
                     bgrx,
                 })) => {
-                    let show_preview = last_preview
-                        .map(|t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL)
-                        .unwrap_or(true);
-                    if show_preview {
-                        last_preview = Some(std::time::Instant::now());
-                    }
-                    push_frame(
-                        Some(&source_for_task),
+                    frames.offer(FrameIn::Bgrx {
                         width,
                         height,
                         stride,
                         timestamp_us,
-                        &bgrx,
-                        show_preview.then_some(&preview_tx),
-                    );
+                        bytes: bgrx,
+                    });
+                }
+                Ok(Some(CaptureMsg::FrameI420 {
+                    width,
+                    height,
+                    timestamp_us,
+                    planes,
+                })) => {
+                    frames.offer(FrameIn::I420 {
+                        width,
+                        height,
+                        timestamp_us,
+                        planes,
+                    });
                 }
                 // Mid-stream renegotiation: harmless to ignore.
                 Ok(Some(CaptureMsg::Format { .. })) => {}
@@ -430,11 +471,29 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                 | Ok(Some(CaptureMsg::AudioFrame { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
                     crate::diag!("[camera] helper error mid-stream: {message}");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        format!("Camera capture failed: {message}"),
+                    );
                     break;
                 }
-                Ok(None) => break,
+                Ok(None) => {
+                    crate::diag!("[camera] helper closed socket mid-stream");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Camera stopped: the capture device went away.".into(),
+                    );
+                    break;
+                }
                 Err(e) => {
                     crate::diag!("[camera] reader error: {e}");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Lost the camera-capture connection. Please try again.".into(),
+                    );
                     break;
                 }
             }
@@ -443,6 +502,13 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
 
     {
         let mut cam = state.camera.lock().await;
+        if !cam.is_session(token) {
+            drop(cam);
+            reader_task.abort();
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Ok(());
+        }
         cam.local_source = Some(source);
         cam.local_track = Some(track);
         cam.local_reader_task = Some(reader_task);
@@ -453,8 +519,42 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     Ok(())
 }
 
+/// True once a stop has invalidated `token` (see `CameraState::begin_session`).
+async fn session_ended(state: &Arc<AppState>, token: u64) -> bool {
+    !state.camera.lock().await.is_session(token)
+}
+
+/// The reader task's exit: stop this session, then tell the renderer why. Spawned, not
+/// awaited — the stop aborts the reader task itself (see screenshare's `on_reader_exit`).
+pub(crate) fn on_reader_exit(state: Arc<AppState>, token: u64, message: String) {
+    tokio::spawn(async move {
+        let live = state.camera.lock().await.is_session(token);
+        if !live {
+            return;
+        }
+        let _ = stop_camera_if(&state, token).await;
+        let ev = {
+            let cam = state.camera.lock().await;
+            cam.events.clone()
+        };
+        if let Some(ev) = ev {
+            let _ = ev.send(CameraEvent::LocalError { message });
+        }
+    });
+}
+
 /// Tear down the camera capture; safe when nothing is live.
 pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
+    stop_session(state, None).await
+}
+
+/// Stop only if `token` is still the live session (a reader that died after the user
+/// already restarted must not kill the new capture).
+pub(super) async fn stop_camera_if(state: &Arc<AppState>, token: u64) -> Result<()> {
+    stop_session(state, Some(token)).await
+}
+
+async fn stop_session(state: &Arc<AppState>, token: Option<u64>) -> Result<()> {
     let track;
     let source_to_drop;
     let mut helper;
@@ -464,6 +564,11 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     let room;
     {
         let mut cam = state.camera.lock().await;
+        if let Some(token) = token {
+            if !cam.is_session(token) {
+                return Ok(());
+            }
+        }
         track = cam.local_track.take();
         source_to_drop = cam.local_source.take();
         helper = cam.local_helper.take();
@@ -472,17 +577,18 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
         // Closing the writer sends the helper EOF.
         cam.local_writer = None;
         ev_opt = cam.events.clone();
+
+        let had_session = track.is_some()
+            || source_to_drop.is_some()
+            || helper.is_some()
+            || reader.is_some()
+            || picker.is_some();
+        if !had_session {
+            return Ok(());
+        }
+        cam.end_session();
         let voice = state.voice.lock().await;
         room = voice.room.clone();
-    }
-
-    let had_session = track.is_some()
-        || source_to_drop.is_some()
-        || helper.is_some()
-        || reader.is_some()
-        || picker.is_some();
-    if !had_session {
-        return Ok(());
     }
 
     // Abort the reader, then kill the helper (it owns the AVCaptureSession).
@@ -514,7 +620,9 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
 /// Preview-only capture for settings (#434): no room, no publish.
 /// Uses `preview_*` slots, so an in-call camera keeps running.
 pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> Result<()> {
-    use pollis_capture_proto::{encode_select_camera, read_msg, CameraSelection, CaptureMsg};
+    use pollis_capture_proto::{
+        encode_select_camera, read_msg, read_msg_pooled, CameraSelection, CaptureMsg,
+    };
     use tokio::io::AsyncWriteExt;
 
     // Restart from a clean slate: tear down any lingering preview capture.
@@ -550,7 +658,9 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
 
     if let Err(e) = session
         .writer
-        .write_all(&encode_select_camera(&CameraSelection { id: device_id.clone() }))
+        .write_all(&encode_select_camera(&CameraSelection {
+            id: device_id.clone(),
+        }))
         .await
     {
         crate::diag!("[camera] preview send SelectCamera: {e}");
@@ -573,7 +683,9 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
     // Read the negotiated Format (or a leading Frame); only start matters.
     let read = tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut reader)).await;
     match read {
-        Ok(Ok(Some(CaptureMsg::Format { .. }))) | Ok(Ok(Some(CaptureMsg::Frame { .. }))) => {}
+        Ok(Ok(Some(CaptureMsg::Format { .. })))
+        | Ok(Ok(Some(CaptureMsg::Frame { .. })))
+        | Ok(Ok(Some(CaptureMsg::FrameI420 { .. }))) => {}
         Ok(Ok(Some(CaptureMsg::Error { message }))) => {
             stop_camera_preview(state).await.ok();
             let lower = message.to_lowercase();
@@ -597,11 +709,12 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
     }
 
     // Reader task: preview only, no LiveKit publish.
-    let preview_tx = state.screenshare_frame_tx.clone();
+    let pump = camera_pump(state, None).await;
     let reader_task = tokio::spawn(async move {
-        let mut last_preview: Option<std::time::Instant> = None;
+        let frames = PumpHandle::spawn(pump);
         loop {
-            match read_msg(&mut reader).await {
+            let mut spare = frames.take_spare();
+            match read_msg_pooled(&mut reader, &mut spare).await {
                 Ok(Some(CaptureMsg::Frame {
                     width,
                     height,
@@ -609,13 +722,26 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
                     timestamp_us,
                     bgrx,
                 })) => {
-                    let show = last_preview
-                        .map(|t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL)
-                        .unwrap_or(true);
-                    if show {
-                        last_preview = Some(std::time::Instant::now());
-                        push_frame(None, width, height, stride, timestamp_us, &bgrx, Some(&preview_tx));
-                    }
+                    frames.offer(FrameIn::Bgrx {
+                        width,
+                        height,
+                        stride,
+                        timestamp_us,
+                        bytes: bgrx,
+                    });
+                }
+                Ok(Some(CaptureMsg::FrameI420 {
+                    width,
+                    height,
+                    timestamp_us,
+                    planes,
+                })) => {
+                    frames.offer(FrameIn::I420 {
+                        width,
+                        height,
+                        timestamp_us,
+                        planes,
+                    });
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
@@ -663,51 +789,6 @@ pub async fn stop_camera_preview(state: &Arc<AppState>) -> Result<()> {
 
 /// Camera-tuned `(max_framerate, max_bitrate)`: 30 fps, ≈0.07 bits/pixel/frame.
 fn resolve_camera_encoding(width: u32, height: u32) -> (f64, u64) {
-    let max_bitrate =
-        ((width as u64) * (height as u64) * 30 * 7 / 100).clamp(500_000, 5_000_000);
+    let max_bitrate = ((width as u64) * (height as u64) * 30 * 7 / 100).clamp(500_000, 5_000_000);
     (30.0, max_bitrate)
-}
-
-fn push_frame(
-    // `None` on the preview-only path.
-    source: Option<&NativeVideoSource>,
-    width: u32,
-    height: u32,
-    stride: u32,
-    timestamp_us: i64,
-    bgrx: &[u8],
-    // `Some` on throttled frames that also feed the local preview.
-    preview: Option<&tokio::sync::broadcast::Sender<Arc<Vec<u8>>>>,
-) {
-    // libwebrtc + VP8 + libyuv I420 all require even dimensions.
-    let w = (width & !1) as i32;
-    let h = (height & !1) as i32;
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    // BGRA (== little-endian ARGB) → I420 at native resolution.
-    let buffer = convert_to_i420(w, h, stride, bgrx);
-    let (out_w, out_h) = (buffer.width(), buffer.height());
-    let frame = VideoFrame {
-        rotation: VideoRotation::VideoRotation0,
-        timestamp_us,
-        // No packet-trailer features are negotiated, so there is no metadata to attach.
-        frame_metadata: None,
-        buffer,
-    };
-    if let Some(source) = source {
-        source.capture_frame(&frame);
-    }
-
-    // Mirror the same I420 buffer to the renderer for self-preview.
-    if let Some(tx) = preview {
-        let bytes = pack_frame_bytes(
-            LOCAL_CAMERA_PREVIEW_KEY,
-            out_w,
-            out_h,
-            timestamp_us,
-            &frame.buffer,
-        );
-        let _ = tx.send(Arc::new(bytes));
-    }
 }

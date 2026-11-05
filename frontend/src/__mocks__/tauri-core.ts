@@ -1214,6 +1214,25 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'screenshare_ws_url':
       return null;
 
+    // Screen share / camera: a spec seeds `screenSources` / `cameras`; the default lists are
+    // empty, which the Linux path reads as "the portal picks".
+    case 'enumerate_screen_sources':
+      return (
+        (preload.screenSources as { displays: unknown[]; windows: unknown[] } | undefined) ?? {
+          displays: [],
+          windows: [],
+        }
+      );
+    case 'list_video_devices':
+      return (preload.cameras as { cameras: unknown[] } | undefined) ?? { cameras: [] };
+    case 'start_screen_share':
+    case 'stop_screen_share':
+    case 'cancel_screen_share_picker':
+    case 'start_camera':
+    case 'stop_camera':
+    case 'set_video_wants':
+      return null;
+
     // The "use the byte path" sentinel (#874); a spec may serve a key via `publicFileUrls`.
     case 'get_public_file_url': {
       const { key } = args as { key: string };

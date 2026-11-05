@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use pollis_capture_proto::{now_us, CaptureMsg};
+use pollis_capture_proto::{now_us, CaptureLimits, CaptureMsg};
 use tokio::sync::mpsc;
 use xcb::{shm, x, Xid};
 
@@ -115,8 +115,17 @@ fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion>
     })
 }
 
-/// Synchronous SHM capture loop: one Format, then a Frame per ~60 Hz tick, until `stop`.
-pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
+/// A static screen still gets one frame a second, so a viewer who joins mid-share receives
+/// a keyframe without waiting for something to move.
+const KEEPALIVE: Duration = Duration::from_secs(1);
+
+/// Synchronous SHM capture loop: one Format, then a Frame per tick (the publish rate, else
+/// 60 Hz) while the screen changes, until `stop`.
+pub fn run_x11_capture(
+    tx: mpsc::Sender<CaptureMsg>,
+    stop: Arc<AtomicBool>,
+    limits: CaptureLimits,
+) -> Result<()> {
     let (conn, screen_num) = xcb::Connection::connect_with_extensions(
         None,
         &[xcb::Extension::Shm, xcb::Extension::RandR],
@@ -155,13 +164,7 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
     let frame_bytes = width as usize * height as usize * bytes_per_pixel;
 
     // MIT-SHM segment sized for one full frame.
-    let shmid = unsafe {
-        libc::shmget(
-            libc::IPC_PRIVATE,
-            frame_bytes,
-            libc::IPC_CREAT | 0o600,
-        )
-    };
+    let shmid = unsafe { libc::shmget(libc::IPC_PRIVATE, frame_bytes, libc::IPC_CREAT | 0o600) };
     if shmid < 0 {
         return Err(anyhow!("shmget({frame_bytes}) failed"));
     }
@@ -209,10 +212,15 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         return Ok(());
     }
 
-    // ~60 Hz producer-side pacing so full-frame copies don't peg a core.
-    let frame_interval = Duration::from_nanos(1_000_000_000 / 60);
-    let slice =
-        unsafe { std::slice::from_raw_parts(shmaddr as *const u8, frame_bytes) };
+    // Producer-side pacing at the publish rate: a grab the encoder would drop is wasted.
+    let frame_interval = limits
+        .frame_interval()
+        .unwrap_or(Duration::from_nanos(1_000_000_000 / 60));
+    let slice = unsafe { std::slice::from_raw_parts(shmaddr as *const u8, frame_bytes) };
+    // The last frame sent, for the unchanged-screen check (a memcmp is ~0.3 ms at 1080p
+    // against ~2 ms to copy, convert and encode a frame nobody can tell from the last).
+    let mut previous: Vec<u8> = Vec::new();
+    let mut last_sent: Option<Instant> = None;
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -243,25 +251,34 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         let stride = width as u32 * bytes_per_pixel as u32;
         let timestamp_us = now_us();
 
-        // Copy out of SHM before the next GetImage; last-frame-wins.
-        let bgrx = slice.to_vec();
-        if tx
-            .try_send(CaptureMsg::Frame {
-                width: width as u32,
-                height: height as u32,
-                stride,
-                timestamp_us,
-                bgrx,
-            })
-            .is_err()
-        {
-            // Full (drop, last-frame-wins) or receiver gone (exit).
-            if tx.is_closed() {
-                break;
+        let unchanged = previous.len() == slice.len() && previous.as_slice() == slice;
+        let keepalive_due = last_sent.is_none_or(|t| t.elapsed() >= KEEPALIVE);
+        if !unchanged || keepalive_due {
+            // Copy out of SHM before the next GetImage; last-frame-wins.
+            let bgrx = slice.to_vec();
+            if !unchanged {
+                previous.clear();
+                previous.extend_from_slice(&bgrx);
+            }
+            last_sent = Some(Instant::now());
+            if tx
+                .try_send(CaptureMsg::Frame {
+                    width: width as u32,
+                    height: height as u32,
+                    stride,
+                    timestamp_us,
+                    bgrx,
+                })
+                .is_err()
+            {
+                // Full (drop, last-frame-wins) or receiver gone (exit).
+                if tx.is_closed() {
+                    break;
+                }
             }
         }
 
-        // Pace to ~60 Hz.
+        // Pace to the tick.
         let elapsed = tick_start.elapsed();
         if elapsed < frame_interval {
             std::thread::sleep(frame_interval - elapsed);

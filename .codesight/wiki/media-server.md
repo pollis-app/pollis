@@ -13,12 +13,14 @@ token-gated routes (same secret, 403 on anything else):
   decrypted plaintext is handed out as a `Bytes` (`Bytes::from(Vec)`), so a range
   slice is a zero-copy view into it.
 - **`GET /ws/screenshare/{token}`** (`ws_screenshare`) — a WebSocket that streams
-  **decoded remote screenshare frames** (packed I420, the `pack_frame_bytes` wire
-  format) as binary messages. The renderer uploads the Y/U/V planes into a WebGL
+  **decoded video frames** — remote screen shares and cameras, and the sharer's
+  own previews — as binary messages (packed I420, the `pack_frame_bytes` wire
+  format). The renderer uploads the Y/U/V planes into a WebGL
   YUV→RGB shader — the transport the `rustwebrtc` PoC proved sustains 1080p60+
   where per-frame Tauri IPC `Channel` dispatch stalled on V8 GC (#305 Phase 1).
   One frame stream serves every track; the renderer dispatches by the `track_key`
-  in each frame header.
+  in each frame header. (The per-frame IPC `Channel` it replaced,
+  `subscribe_screen_share_frames`, is gone.)
 
 Both routes gate on the one `token_ok` helper — a constant-time compare against
 the secret minted at unlock, where a missing token counts the same as a wrong one
@@ -197,12 +199,24 @@ tricks; a local stub that streams 64 MiB is abandoned at a 32 KiB cap, and a bod
 under its cap still arrives whole) and `pollis_relay::http::deadline_tests` (a
 black-hole peer ends as a timeout instead of hanging).
 
-## Zero-copy screenshare frame fan-out (#480)
+## Latest-frame-wins, zero-copy frame fan-out (#480)
 
-Decoded screenshare frames are fanned out to every connected WebView subscriber
-over a `tokio::sync::broadcast` channel of `Arc<Vec<u8>>`. Each subscriber's
-`pump_frames` loop forwards a frame **zero-copy**: the decoded I420 frame lives
-once behind the `Arc<Vec<u8>>` shared across all subscribers, and
+Decoded video frames reach every connected frame socket through
+`media_server::FrameFanout`: **one slot per track per subscriber**. A producer
+(the remote drain task, or a local pump's self-preview) replaces its track's slot
+and wakes the subscriber; the subscriber's `pump_frames` loop takes every track's
+newest frame, sends them one at a time, and only then takes the next batch. So a
+renderer that falls behind sees each track's newest frame, never a queue of stale
+ones, and at most one frame per track is ever waiting on a socket — the
+semantics of a `tokio::sync::watch` per track, in a form a dynamic set of tracks
+can be awaited as one. (A `broadcast::channel(8)` used to sit here: at 1080p30 its
+eight slots plus the loopback socket buffers were a 250–500 ms reservoir
+whenever the WebKit main thread was busy.) Every accepted socket also gets a
+small `SO_SNDBUF` (`FrameListener`), so a stalled reader backpressures the pump
+within a frame or two rather than 4 MB later.
+
+Each send is **zero-copy**: the decoded I420 frame lives once behind the
+`Arc<Vec<u8>>` shared across all subscribers, and
 `Bytes::from_owner(SharedFrame(arc))` (axum 0.8) hands axum a `Bytes` that
 *borrows* that shared buffer rather than memcpy-ing a full-resolution frame per
 subscriber per frame. The `Arc` refcount — not a copy — is what fans the frame
@@ -212,11 +226,19 @@ out; the frame's memory frees exactly when the last subscriber's `Bytes` drops.
 `Bytes::from_owner` requires `AsRef<[u8]>`, which `Arc<Vec<u8>>` does not impl
 directly (`AsRef<Vec<u8>>` yes, `AsRef<[u8]>` no).
 
-Lagged receivers (a stalled WebView) drop the oldest frames rather than
-back-pressuring the decoder — latest-frame-wins. Two process-wide relaxed atomic
-counters make the win measurable: `FRAMES_SENT` (frames handed to a socket, one
-per client per frame) and `FRAMES_DROPPED` (frames a lagged receiver never got),
-read via `frame_fanout_counters()`.
+Two process-wide relaxed atomic counters make the behaviour measurable:
+`FRAMES_SENT` (frames handed to a socket, one per client per frame) and
+`FRAMES_DROPPED` (frames replaced in a slot before a socket took them), read via
+`frame_fanout_counters()`.
+
+What arrives on the socket is also bounded at the source: a tile reports the
+size it draws at and whether it is visible (`set_video_wants`, see
+[commands.md](./commands.md)); a remote track nobody shows is paused at the SFU
+and nothing is packed for it, and a track drawn small is packed small. On the
+renderer side `screenShareSession` notifies the stats hook at most twice a
+second and only when fps or dimensions changed, and `RemoteVideoTile` keeps one
+WebGL context per canvas (freed, with `WEBGL_lose_context`, on unmount), a
+backing store no larger than 2× its CSS box, and repacks padded strides.
 
 ## Mobile: no loopback server
 

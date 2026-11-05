@@ -276,8 +276,27 @@ class AppStore implements AppState {
     this.voiceState = { ...this.voiceState, micAvailable: available };
   }
 
-  shareStartPicking(sources: SourceList) {
+  /** The click landed: busy until the source list (or the Linux portal) answers. */
+  shareStartEnumerating() {
     if (this.voiceState.kind !== 'joined' || this.voiceState.share.kind !== 'idle') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, share: { kind: 'enumerating' } };
+  }
+
+  /** Enumeration ended without a share (a cancelled portal emits no event): back to idle. */
+  shareEnumerationSettled() {
+    if (this.voiceState.kind !== 'joined' || this.voiceState.share.kind !== 'enumerating') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, share: { kind: 'idle' } };
+  }
+
+  shareStartPicking(sources: SourceList) {
+    if (
+      this.voiceState.kind !== 'joined' ||
+      (this.voiceState.share.kind !== 'idle' && this.voiceState.share.kind !== 'enumerating')
+    ) {
       console.warn('[voiceState] shareStartPicking ignored:', this.voiceState.kind, 'share=', this.voiceState.kind === 'joined' ? this.voiceState.share.kind : 'n/a');
       return;
     }
@@ -296,8 +315,12 @@ class AppStore implements AppState {
       console.warn('[voiceState] shareStartStarting ignored:', this.voiceState.kind);
       return;
     }
-    // From idle (Linux portal path) or picking (macOS in-app picker).
-    if (this.voiceState.share.kind !== 'idle' && this.voiceState.share.kind !== 'picking') {
+    // From idle or enumerating (Linux portal path) or picking (macOS in-app picker).
+    if (
+      this.voiceState.share.kind !== 'idle' &&
+      this.voiceState.share.kind !== 'enumerating' &&
+      this.voiceState.share.kind !== 'picking'
+    ) {
       console.warn('[voiceState] shareStartStarting ignored, share=', this.voiceState.share.kind);
       return;
     }
@@ -384,8 +407,27 @@ class AppStore implements AppState {
     this.voiceState = { ...this.voiceState, share: { kind: 'idle' } };
   }
 
-  cameraStartPicking(cameras: CameraSource[]) {
+  /** The click landed: busy until the device list answers. */
+  cameraStartEnumerating() {
     if (this.voiceState.kind !== 'joined' || this.voiceState.camera.kind !== 'idle') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, camera: { kind: 'enumerating' } };
+  }
+
+  /** Enumeration ended without a capture: back to idle. */
+  cameraEnumerationSettled() {
+    if (this.voiceState.kind !== 'joined' || this.voiceState.camera.kind !== 'enumerating') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, camera: { kind: 'idle' } };
+  }
+
+  cameraStartPicking(cameras: CameraSource[]) {
+    if (
+      this.voiceState.kind !== 'joined' ||
+      (this.voiceState.camera.kind !== 'idle' && this.voiceState.camera.kind !== 'enumerating')
+    ) {
       console.warn('[voiceState] cameraStartPicking ignored:', this.voiceState.kind, 'camera=', this.voiceState.kind === 'joined' ? this.voiceState.camera.kind : 'n/a');
       return;
     }
@@ -404,8 +446,12 @@ class AppStore implements AppState {
       console.warn('[voiceState] cameraStartStarting ignored:', this.voiceState.kind);
       return;
     }
-    // From idle (a direct start) or picking (after a device pick).
-    if (this.voiceState.camera.kind !== 'idle' && this.voiceState.camera.kind !== 'picking') {
+    // From idle or enumerating (a direct start) or picking (after a device pick).
+    if (
+      this.voiceState.camera.kind !== 'idle' &&
+      this.voiceState.camera.kind !== 'enumerating' &&
+      this.voiceState.camera.kind !== 'picking'
+    ) {
       console.warn('[voiceState] cameraStartStarting ignored, camera=', this.voiceState.camera.kind);
       return;
     }

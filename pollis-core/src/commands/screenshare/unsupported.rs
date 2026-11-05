@@ -9,6 +9,7 @@ pub async fn start_screen_share(
     _selection: Option<pollis_capture_proto::Selection>,
     _max_framerate: Option<u32>,
     _with_audio: bool,
+    _max_height: Option<u32>,
 ) -> Result<()> {
     Err(crate::error::Error::Other(anyhow::anyhow!(
         "screen share is not implemented on this OS yet"

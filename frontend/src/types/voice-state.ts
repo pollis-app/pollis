@@ -71,6 +71,8 @@ export type VoiceState =
 /** Local screen share; only inside `joined`. */
 export type ShareState =
   | { kind: 'idle' }
+  /** Set synchronously on click, before `enumerate_screen_sources` resolves: the pill is busy and a second click is ignored. */
+  | { kind: 'enumerating' }
   | { kind: 'picking'; sources: SourceList }
   | {
       kind: 'starting';
@@ -100,6 +102,8 @@ export type ShareAudioState =
 /** Local webcam; only inside `joined`. `picking` always carries `cameras`. */
 export type CameraState =
   | { kind: 'idle' }
+  /** Set synchronously on click, before `list_video_devices` resolves. */
+  | { kind: 'enumerating' }
   | { kind: 'picking'; cameras: CameraSource[] }
   | { kind: 'starting'; startedAt: number }
   | {

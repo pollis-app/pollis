@@ -15,14 +15,15 @@ use crate::{error::Result, sink::EventSink, state::AppState};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub const LOCAL_CAMERA_PREVIEW_KEY: &str = "__local_camera_preview__";
 
-/// Self-preview throttle; peers still get full rate.
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+/// Self-preview throttle on the in-process Windows path; the helper paths follow the
+/// preview tile's wants instead (`screenshare::wants::PreviewMirror`).
+#[cfg(target_os = "windows")]
 pub(crate) const CAMERA_PREVIEW_MIN_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 
-mod state;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod capture;
+mod state;
 // Windows captures in-process via Media Foundation (see start_windows).
 #[cfg(target_os = "windows")]
 mod start_windows;
@@ -31,6 +32,8 @@ mod unsupported;
 
 pub use state::CameraState;
 
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+pub(crate) use capture::on_reader_exit as on_reader_exit_for_tests;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use capture::{
     list_video_devices, start_camera, start_camera_preview, stop_camera, stop_camera_preview,
@@ -48,10 +51,15 @@ pub use unsupported::{
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CameraEvent {
-    LocalStarted { width: u32, height: u32 },
+    LocalStarted {
+        width: u32,
+        height: u32,
+    },
     LocalStopped,
     /// Capture helper exited / errored before or during publish.
-    LocalError { message: String },
+    LocalError {
+        message: String,
+    },
 }
 
 pub async fn subscribe_camera_events(

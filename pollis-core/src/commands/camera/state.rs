@@ -42,6 +42,9 @@ pub struct CameraState {
     pub preview_writer: Option<tokio::net::unix::OwnedWriteHalf>,
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub preview_reader_task: Option<tokio::task::JoinHandle<()>>,
+
+    /// Same contract as `ScreenShareState::session_generation`.
+    pub session_generation: u64,
 }
 
 impl CameraState {
@@ -68,7 +71,21 @@ impl CameraState {
             preview_writer: None,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             preview_reader_task: None,
+            session_generation: 0,
         }
+    }
+
+    pub fn begin_session(&mut self) -> u64 {
+        self.session_generation += 1;
+        self.session_generation
+    }
+
+    pub fn end_session(&mut self) {
+        self.session_generation += 1;
+    }
+
+    pub fn is_session(&self, token: u64) -> bool {
+        self.session_generation == token
     }
 }
 

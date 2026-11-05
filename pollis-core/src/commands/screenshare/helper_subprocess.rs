@@ -8,10 +8,12 @@ use super::{fail_capture, state::HelperSession};
 
 /// Spawn the capture helper and accept its Unix-socket connection (split halves).
 ///
-/// `with_audio` is a spawn flag: Linux has no Select round trip (macOS ignores it).
+/// `with_audio` and `limits` are spawn flags: Linux has no Select round trip to carry them
+/// (macOS gets both on `Select` and ignores the flags).
 pub(super) async fn spawn_and_accept_helper(
     state: &Arc<AppState>,
     with_audio: bool,
+    limits: Option<pollis_capture_proto::CaptureLimits>,
 ) -> Result<HelperSession> {
     use tokio::net::UnixListener;
 
@@ -39,7 +41,8 @@ pub(super) async fn spawn_and_accept_helper(
             crate::diag!("[screenshare] locate helper: {e}");
             return Err(fail_capture(
                 state,
-                "Screen-capture helper not found. Reinstall Pollis or rebuild the capture helper.".into(),
+                "Screen-capture helper not found. Reinstall Pollis or rebuild the capture helper."
+                    .into(),
             )
             .await);
         }
@@ -53,6 +56,16 @@ pub(super) async fn spawn_and_accept_helper(
     command.arg("--socket").arg(&socket_path);
     if with_audio {
         command.arg("--audio");
+    }
+    if let Some(limits) = limits {
+        if limits.max_fps > 0 {
+            command.arg("--max-fps").arg(limits.max_fps.to_string());
+        }
+        if limits.max_height > 0 {
+            command
+                .arg("--max-height")
+                .arg(limits.max_height.to_string());
+        }
     }
     let helper = command
         .stdin(std::process::Stdio::null())

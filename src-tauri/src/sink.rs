@@ -18,7 +18,7 @@ where
     }
 }
 
-/// Binary frame channel: raw `Vec<u8>` payloads.
+/// Binary channel: raw `Vec<u8>` payloads (the terminal's output stream).
 pub struct RawChannelSink(pub Channel<InvokeResponseBody>);
 
 impl RawSink for RawChannelSink {

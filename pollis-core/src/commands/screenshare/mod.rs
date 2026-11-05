@@ -17,9 +17,12 @@ pub(crate) mod codec;
 mod commands;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod helper_subprocess;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) mod pump;
 mod remote_video;
 pub(crate) mod self_echo;
 mod state;
+pub(crate) mod wants;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod start_unix;
 #[cfg(target_os = "windows")]
@@ -29,16 +32,17 @@ mod windows_audio;
 mod stop;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported;
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod session_tests;
 
-pub use commands::{
-    screenshare_ws_url, subscribe_screen_share_events, subscribe_screen_share_frames,
-};
+pub use commands::{screenshare_ws_url, subscribe_screen_share_events};
 pub use remote_video::{
     on_participant_left, on_remote_video_subscribed, on_remote_video_unsubscribed,
     on_room_disconnected,
 };
 pub use state::ScreenShareState;
 pub use stop::stop_screen_share;
+pub use wants::{set_video_wants, VideoWants};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use state::HelperSession;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -49,9 +53,6 @@ pub use start_windows::{cancel_screen_share_picker, enumerate_screen_sources, st
 pub(super) use start_windows::WindowsPickerCache;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub use unsupported::{cancel_screen_share_picker, enumerate_screen_sources, start_screen_share};
-
-/// Re-export kept for `commands::screenshare::RawSink` imports.
-pub use crate::sink::RawSink;
 
 /// Screen vs camera for a remote video track, from its LiveKit `TrackSource`.
 /// Defaults to `Screen` for older backends that send no tag.
@@ -90,9 +91,6 @@ pub enum ScreenShareEvent {
 
 /// Sentinel track key for the sharer's own preview.
 pub const LOCAL_PREVIEW_KEY: &str = "__local_preview__";
-
-/// Self-preview rate cap; it only answers "is my stream going out?".
-pub(super) const PREVIEW_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Log the cause, emit `LocalError` and return a human error. Not for user cancels.
 pub(super) async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {

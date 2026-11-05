@@ -7,7 +7,7 @@ use livekit::track::{LocalAudioTrack, LocalVideoTrack};
 
 use crate::sink::EventSink;
 
-use super::{RawSink, ScreenShareEvent};
+use super::ScreenShareEvent;
 
 /// A connected capture-helper session: child plus split socket halves.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -19,7 +19,6 @@ pub struct HelperSession {
 
 pub struct ScreenShareState {
     pub events: Option<Arc<dyn EventSink<ScreenShareEvent>>>,
-    pub frames: Option<Arc<dyn RawSink>>,
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
@@ -51,6 +50,15 @@ pub struct ScreenShareState {
 
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+    /// Remote publications by track key, for carrying a tile's wants to the SFU.
+    pub remote_publications:
+        std::collections::HashMap<String, livekit::publication::RemoteTrackPublication>,
+    /// Per-track demand from the renderer's tiles (`wants.rs`), local preview keys included.
+    pub video_wants: std::collections::HashMap<String, super::wants::WantsTx>,
+
+    /// Bumped by every start and every effective stop; a start re-checks it after each await
+    /// so a stop that lands mid-handshake cannot be followed by a publish with no capture.
+    pub session_generation: u64,
 }
 
 impl Default for ScreenShareState {
@@ -63,7 +71,6 @@ impl ScreenShareState {
     pub fn new() -> Self {
         Self {
             events: None,
-            frames: None,
             local_track: None,
             local_source: None,
             local_audio_track: None,
@@ -83,6 +90,25 @@ impl ScreenShareState {
             #[cfg(target_os = "windows")]
             windows_picker: None,
             remote_drain_tasks: std::collections::HashMap::new(),
+            remote_publications: std::collections::HashMap::new(),
+            video_wants: std::collections::HashMap::new(),
+            session_generation: 0,
         }
+    }
+
+    /// Open a local session; the returned token is what [`is_session`](Self::is_session) checks.
+    pub fn begin_session(&mut self) -> u64 {
+        self.session_generation += 1;
+        self.session_generation
+    }
+
+    /// Invalidate every token handed out so far.
+    pub fn end_session(&mut self) {
+        self.session_generation += 1;
+    }
+
+    /// Whether no stop has happened since `token` was issued.
+    pub fn is_session(&self, token: u64) -> bool {
+        self.session_generation == token
     }
 }

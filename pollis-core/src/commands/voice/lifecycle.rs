@@ -288,6 +288,9 @@ pub async fn join_voice_channel(
 
     let mut room_options = RoomOptions::default();
     room_options.encryption = Some(e2ee_options);
+    // Subscriber-driven video: tiles report their size, the SFU sends only the layer that fits
+    // and pauses what nobody shows; the publisher stops encoding layers nobody takes.
+    (room_options.adaptive_stream, room_options.dynacast) = (true, true);
     let connect_fut = async {
         let r = Room::connect(&url, &token, room_options).await;
         let elapsed_ms = connect_started.elapsed().as_millis() as u64;

@@ -20,7 +20,6 @@ use livekit::{
     prelude::*,
     track::{LocalTrack, LocalVideoTrack},
 };
-use tokio::sync::broadcast;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{
@@ -36,9 +35,7 @@ use super::{fail_capture, CameraEvent, CAMERA_PREVIEW_MIN_INTERVAL, LOCAL_CAMERA
 /// `MF_SOURCE_READER_FIRST_VIDEO_STREAM` as the raw `u32` the calls want.
 const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
-pub async fn list_video_devices(
-    state: &Arc<AppState>,
-) -> Result<pollis_capture_proto::CameraList> {
+pub async fn list_video_devices(state: &Arc<AppState>) -> Result<pollis_capture_proto::CameraList> {
     // MF enumeration is blocking COM work — keep it off the tokio worker.
     let joined = tokio::task::spawn_blocking(enumerate_cameras_blocking)
         .await
@@ -106,7 +103,9 @@ unsafe fn get_allocated_string(
 ) -> Option<String> {
     let mut pwstr = PWSTR::null();
     let mut len: u32 = 0;
-    activate.GetAllocatedString(key, &mut pwstr, &mut len).ok()?;
+    activate
+        .GetAllocatedString(key, &mut pwstr, &mut len)
+        .ok()?;
     if pwstr.is_null() {
         return None;
     }
@@ -127,7 +126,7 @@ struct CameraCaptureFlags {
     device_id: String,
     source: NativeVideoSource,
     active: Arc<AtomicBool>,
-    frame_tx: broadcast::Sender<Arc<Vec<u8>>>,
+    frame_tx: Arc<crate::media_server::FrameFanout>,
 }
 
 pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()> {
@@ -288,7 +287,9 @@ fn run_capture_thread(
     crate::diag!("[camera] MF negotiated {width}x{height} RGB32 stride={stride}");
     let _ = size_tx.send(CamStart::Size(width, height));
 
-    if let Err(e) = unsafe { stream_frames(&reader, width, height, stride, &source, &active, &frame_tx) } {
+    if let Err(e) =
+        unsafe { stream_frames(&reader, width, height, stride, &source, &active, &frame_tx) }
+    {
         crate::diag!("[camera] MF capture error: {e}");
         if let Some(ev) = &events {
             let _ = ev.send(CameraEvent::LocalError {
@@ -316,8 +317,8 @@ unsafe fn open_source_reader(device_id: &str) -> AnyResult<IMFSourceReader> {
         PCWSTR(link.as_ptr()),
     )?;
 
-    let media_source = MFCreateDeviceSource(&dev_attrs)
-        .map_err(|e| anyhow!("camera no longer available: {e}"))?;
+    let media_source =
+        MFCreateDeviceSource(&dev_attrs).map_err(|e| anyhow!("camera no longer available: {e}"))?;
 
     // Reader attributes: turn on the source reader's Video Processor so it
     // color-converts (and, for MJPG cams, decodes) into our requested RGB32.
@@ -406,7 +407,7 @@ unsafe fn stream_frames(
     stride: i32,
     source: &NativeVideoSource,
     active: &AtomicBool,
-    frame_tx: &broadcast::Sender<Arc<Vec<u8>>>,
+    frame_tx: &Arc<crate::media_server::FrameFanout>,
 ) -> AnyResult<()> {
     let row_bytes = width as usize * 4;
     let abs_stride = (stride.unsigned_abs() as usize).max(row_bytes);
@@ -465,7 +466,8 @@ unsafe fn stream_frames(
         }
 
         let timestamp_us = now_us();
-        let show_preview = last_preview.map_or(true, |t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL);
+        let show_preview =
+            last_preview.map_or(true, |t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL);
         if show_preview {
             last_preview = Some(Instant::now());
         }
@@ -535,7 +537,7 @@ fn push_frame(
     timestamp_us: i64,
     bgrx: &[u8],
     // `Some` on the throttled frames that also feed the sharer's self-preview.
-    preview: Option<&broadcast::Sender<Arc<Vec<u8>>>>,
+    preview: Option<&Arc<crate::media_server::FrameFanout>>,
 ) {
     // libwebrtc + VP8 + libyuv I420 all require even dimensions.
     let w = (width & !1) as i32;
@@ -557,8 +559,14 @@ fn push_frame(
 
     // Mirror the same I420 buffer to the renderer for self-preview.
     if let Some(tx) = preview {
-        let bytes = pack_frame_bytes(LOCAL_CAMERA_PREVIEW_KEY, out_w, out_h, timestamp_us, &frame.buffer);
-        let _ = tx.send(Arc::new(bytes));
+        let bytes = pack_frame_bytes(
+            LOCAL_CAMERA_PREVIEW_KEY,
+            out_w,
+            out_h,
+            timestamp_us,
+            &frame.buffer,
+        );
+        tx.send(Arc::new(bytes));
     }
 }
 

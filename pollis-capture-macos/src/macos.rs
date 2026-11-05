@@ -94,8 +94,7 @@ fn install_accessory_app() {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
-    let mtm = MainThreadMarker::new()
-        .expect("install_accessory_app must run on the main thread");
+    let mtm = MainThreadMarker::new().expect("install_accessory_app must run on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     #[allow(deprecated)]
@@ -187,18 +186,13 @@ async fn run_screen(
 
     // Generous timeout for a human-paced pick.
     let mut reader = BufReader::with_capacity(4096, read_half);
-    let select = tokio::time::timeout(
-        std::time::Duration::from_secs(300),
-        read_msg(&mut reader),
-    )
-    .await
-    .map_err(|_| anyhow!("timed out waiting for screen-share selection"))?;
+    let select = tokio::time::timeout(std::time::Duration::from_secs(300), read_msg(&mut reader))
+        .await
+        .map_err(|_| anyhow!("timed out waiting for screen-share selection"))?;
     let selection = match select {
         Ok(Some(CaptureMsg::Select(sel))) => sel,
         Ok(Some(other)) => {
-            return Err(anyhow!(
-                "unexpected message before Select: {other:?}"
-            ));
+            return Err(anyhow!("unexpected message before Select: {other:?}"));
         }
         Ok(None) => {
             // Parent closed the socket: user cancelled. Not an error.
@@ -226,8 +220,7 @@ async fn run_screen(
             stop_for_cap,
         ) {
             eprintln!("[capture-mac] capture error: {e}");
-            let _ =
-                tx_for_cap.blocking_send(Wire::Bytes(encode_error(&format!("capture: {e}"))));
+            let _ = tx_for_cap.blocking_send(Wire::Bytes(encode_error(&format!("capture: {e}"))));
         }
     });
 
@@ -361,7 +354,10 @@ fn start_capture(
     use screencapturekit::stream::output_type::SCStreamOutputType;
     use screencapturekit::stream::sc_stream::SCStream;
 
-    let (filter, width, height) = match selection {
+    let limits = selection.limits();
+    // SCK reports displays and window frames in points; the stream is configured in pixels,
+    // so a Retina source captured at its point size came out at half resolution.
+    let (filter, points_w, points_h) = match selection {
         Selection::Display { id, .. } => {
             let display = cache
                 .displays
@@ -386,20 +382,43 @@ fn start_capture(
             (filter, w, h)
         }
     };
+    let scale = filter.point_pixel_scale();
+    let scale = if scale.is_finite() && scale >= 1.0 {
+        scale
+    } else {
+        1.0
+    };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let native_w = (points_w as f32 * scale).round() as u32;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let native_h = (points_h as f32 * scale).round() as u32;
 
-    // Round dimensions down to even for VP8 + I420 chroma alignment.
+    // The publish's ceiling, applied by SCK's own scaler; then even for VP8 + I420 chroma.
+    let (width, height) = limits
+        .fit(native_w, native_h)
+        .unwrap_or((native_w, native_h));
     let width = width & !1;
     let height = height & !1;
     if width == 0 || height == 0 {
         return Err(anyhow!("selected source reported zero size"));
     }
-    eprintln!("[capture-mac] capturing {width}x{height}");
+    eprintln!(
+        "[capture-mac] capturing {width}x{height} (source {native_w}x{native_h} at {scale}x, \
+         max_fps {})",
+        limits.max_fps
+    );
 
     let mut config = SCStreamConfiguration::new()
         .with_width(width)
         .with_height(height)
         .with_pixel_format(PixelFormat::BGRA)
         .with_shows_cursor(true);
+    if limits.max_fps > 0 {
+        use screencapturekit::cm::CMTime;
+        #[allow(clippy::cast_possible_wrap)]
+        let interval = CMTime::new(1, limits.max_fps as i32);
+        config = config.with_minimum_frame_interval(&interval);
+    }
     if with_audio {
         use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
         config = config
@@ -478,7 +497,11 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsAudioHandler {
         let Some(list) = sample.audio_buffer_list() else {
             return;
         };
-        let planes: Vec<&[u8]> = list.iter().map(|b| b.data()).filter(|d| !d.is_empty()).collect();
+        let planes: Vec<&[u8]> = list
+            .iter()
+            .map(|b| b.data())
+            .filter(|d| !d.is_empty())
+            .collect();
         if planes.is_empty() {
             return;
         }
@@ -517,9 +540,12 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsAudioHandler {
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0);
         // try_send: a stalled socket must not block SCK's queue (and so video).
-        let _ = self
-            .tx
-            .try_send(Wire::Bytes(encode_audio_frame(48_000, 1, timestamp_us, &pcm)));
+        let _ = self.tx.try_send(Wire::Bytes(encode_audio_frame(
+            48_000,
+            1,
+            timestamp_us,
+            &pcm,
+        )));
     }
 }
 

@@ -2,7 +2,7 @@
 //! pollis_core::commands::screenshare. Edit pollis-core, not here.
 
 use std::sync::Arc;
-use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::error::Result;
@@ -16,18 +16,6 @@ pub async fn subscribe_screen_share_events(
 ) -> Result<()> {
     pollis_core::commands::screenshare::subscribe_screen_share_events(
         Arc::new(crate::sink::ChannelSink(on_event)),
-        &state,
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn subscribe_screen_share_frames(
-    on_frame: Channel<InvokeResponseBody>,
-    state: State<'_, Arc<AppState>>,
-) -> Result<()> {
-    pollis_core::commands::screenshare::subscribe_screen_share_frames(
-        Arc::new(crate::sink::RawChannelSink(on_frame)),
         &state,
     )
     .await
@@ -56,6 +44,7 @@ pub async fn start_screen_share(
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
     with_audio: Option<bool>,
+    max_height: Option<u32>,
 ) -> Result<()> {
     // `Option<bool>` so callers that omit the argument still get a video-only share.
     pollis_core::commands::screenshare::start_screen_share(
@@ -63,6 +52,7 @@ pub async fn start_screen_share(
         selection,
         max_framerate,
         with_audio.unwrap_or(false),
+        max_height,
     )
     .await
 }
@@ -70,4 +60,13 @@ pub async fn start_screen_share(
 #[tauri::command]
 pub async fn stop_screen_share(state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::screenshare::stop_screen_share(&state).await
+}
+
+#[tauri::command]
+pub async fn set_video_wants(
+    state: State<'_, Arc<AppState>>,
+    track_key: String,
+    wants: Option<pollis_core::commands::screenshare::VideoWants>,
+) -> Result<()> {
+    pollis_core::commands::screenshare::set_video_wants(&state, track_key, wants).await
 }

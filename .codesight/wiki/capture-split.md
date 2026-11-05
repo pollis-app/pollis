@@ -21,23 +21,69 @@ Covers issues **#281** (Linux: no portal backend on Cinnamon/MATE/XFCE),
 
 All three capture helpers / paths emit frames over **one shared wire
 protocol** (`pollis-capture-proto`). The parent-process pipeline
-(socket reader, even-dimension floor, libyuv ARGB→I420, LiveKit publish)
-is identical regardless of where frames originate.
+(socket reader → converter thread → even-dimension floor → libyuv ARGB→I420 or a
+plane copy for I420 frames → resolution backstop → LiveKit publish → self-preview
+mirror) is identical regardless of where frames originate; it lives in
+`pollis-core/src/commands/screenshare/pump.rs` (`LocalVideoPump` + `PumpHandle`).
 
-Two things this pipeline no longer does, both removed deliberately:
+### The capture is bound to the publish
 
-- **No FPS or resolution cap.** There was a 1080p/60fps defensive clamp; it is
-  gone. Publishers send native capture resolution and native frame rate, because
-  VP8 software encode of a 4K/144 Hz source costs ~30–50% of one core on any
-  laptop we ship to. If that stops being true the answer is a user-facing setting
-  (#300), not a hardcoded ceiling. The even-dimension floor that I420 4:2:0 chroma
-  requires still happens per frame.
-- **No 2-second stall heartbeat.** There is no "stalled" or "paused" concept in
+Two user settings (Voice & Video → Screen Share) say what the publish will carry,
+and the capture is asked for no more than that — the encoder would only drop the
+excess after the parent had already paid to copy, convert and pack it:
+
+- **Capture Framerate** (`screen_share_max_fps`, 15/30/60, default 30) is the
+  encoder's `max_framerate` *and* the capture rate: PipeWire's `VideoFramerate`
+  preference, the X11 grab tick, SCK's `minimumFrameInterval`, WGC's
+  `MinimumUpdateIntervalSettings::Custom`. The parent's `FramePacer` is the
+  backstop for a backend that ignores the hint, and it runs *before* the
+  conversion.
+- **Share Resolution** (`screen_share_max_height`, 720p/1080p/1440p/Source,
+  default 1080p) is a height ceiling: PipeWire's `VideoSize` preference and SCK's
+  stream width/height (the backends that can scale for us); on X11 and WGC the
+  parent's libyuv `I420Scale` (`bound_to_limits`) does it. Aspect is kept, dims
+  stay even. "Source" sends the display's own size — a 4K or 5K Retina source then
+  costs 4–6× the CPU of 1080p, which is why it is not the default.
+
+Both travel to the helper as `CaptureLimits` — spawn flags on Linux (`--max-fps`,
+`--max-height`; the portal is the picker, so there is no later message), fields
+on `Selection` for macOS (defaulted, so an older sender still decodes).
+
+The macOS helper also configures SCK in **pixels, not points**:
+`SCDisplay::width/height` and `SCWindow::frame` are points, and a stream sized
+from them captured a Retina display at half resolution. The helper multiplies by
+`SCContentFilter::point_pixel_scale()` first, then applies the ceiling.
+
+The X11 backend grabs at the publish rate and **skips frames identical to the
+last one sent** (a `memcmp` at 1080p is ~0.3 ms against ~2 ms to copy, convert
+and encode a frame nobody can tell from the previous one), with a one-frame-a-
+second keep-alive so a viewer who joins mid-share still gets a keyframe without
+waiting for something on screen to move.
+
+### What the pipeline deliberately does not do
+
+- **No stall heartbeat.** There is no "stalled" or "paused" concept in
   screenshare at all. An earlier watchdog emitted `LocalStalled`/`RemoteStalled`
   and a "Stream paused" overlay, which misrepresented ordinary idle capture (a
   static screen on Wayland) as a failure. When capture is idle we simply stop
   pushing frames; the viewer keeps showing the last painted frame, which is
   indistinguishable from a stream of unchanging ones.
+- **No idle keep-alive from the parent.** Only the X11 grab (above) re-sends an
+  unchanged frame, because there the keyframe-on-join problem is otherwise real.
+
+### A share never outlives its capture
+
+Every start carries a **session token** (`ScreenShareState::begin_session`; the
+camera has the same). The start re-checks it after every await — the helper
+handshake and the publish run concurrently (`tokio::join!`) and either can take
+seconds — so a stop that lands in between ends the start quietly (publish rolled
+back) instead of leaving a published track with no capture behind it. The reader
+task's exit (helper EOF, a read error, a fatal helper error) runs the token-checked
+stop path (`stop_screen_share_if`) and *then* emits `LocalError`: the renderer sees
+`local_stopped` (share gone) before the reason, so it can never keep an `active`
+share whose last frame is frozen at every peer. A reader from a session the user
+already replaced finds its token stale and does nothing. Pinned by
+`screenshare/session_tests.rs`.
 
 ## The shared protocol — `pollis-capture-proto`
 
@@ -47,20 +93,31 @@ It is the single definition of the Unix-socket frame protocol.
 ```
 message := [ u8 type ][ u32 LE payload_len ][ payload ]
 
-0x01 Format   payload = [u32 LE width][u32 LE height]
-0x02 Frame    payload = [u32 w][u32 h][u32 stride][i64 ts_us][BGRx...]
-0xFF Error    payload = utf-8 message
+0x01 Format        payload = [u32 LE width][u32 LE height]
+0x02 Frame         payload = [u32 w][u32 h][u32 stride][i64 ts_us][BGRx...]
+0x03 Sources       helper → parent, JSON SourceList      (macOS screen picker)
+0x04 Select        parent → helper, JSON Selection       (macOS: pick + with_audio + CaptureLimits)
+0x05 Cameras       helper → parent, JSON CameraList      (camera mode)
+0x06 SelectCamera  parent → helper, JSON CameraSelection
+0x07 AudioFormat   payload = [u32 sample_rate][u32 channels]
+0x08 AudioFrame    payload = [u32 sample_rate][u32 channels][i64 ts_us][i16 PCM...]
+0x09 FrameI420     payload = [u32 w][u32 h][i64 ts_us][Y plane][U plane][V plane]
+0xFF Error         payload = utf-8 message (`audio:` prefix = non-fatal, see Shared audio)
 ```
 
-- Encoders: `encode_format`, `encode_frame_header`, `encode_error`,
-  `write_msg`. Used by `pollis-capture-linux` and `pollis-capture-macos`.
-- Decoder: `read_msg` — used by the parent in
-  `pollis-core/src/commands/screenshare/` (both the initial Format
-  read and the streaming reader task).
-- Wire bytes are **unchanged** from the original hand-rolled
-  encode/decode that lived separately in `pollis-capture-linux` and
-  `screenshare.rs`; the refactor only centralized them. Round-trip
-  tests pin the byte layout and opcodes.
+- `Frame` is what screen capture sends (BGRx is what every compositor/SCK/WGC
+  hands out); `FrameI420` is what a source that already has YUV sends — the Linux
+  webcam decodes YUYV (plane split, 0.4 ms at 720p against 2.8 ms to pack BGRx) and
+  MJPG (zune-jpeg to YCbCr, 2×2 chroma average) straight to tight I420 planes, so
+  the parent copies them into the encoder's buffer and never converts, and the
+  socket carries 1.5 instead of 4 bytes per pixel.
+- Encoders: `encode_format`, `encode_frame_header`, `encode_frame_i420_header`,
+  `encode_error`, the JSON `encode_*`, `write_msg`. Used by `pollis-capture-linux`
+  and `pollis-capture-macos`.
+- Decoders: `read_msg`, and `read_msg_pooled` — the parent's reader offers the
+  buffer the converter just finished with, so a steady stream allocates nothing
+  per frame.
+- Round-trip tests pin the byte layout and opcodes.
 
 Reused by: `pollis-capture-linux`, `pollis-capture-macos`, `pollis-core`.
 
@@ -128,6 +185,10 @@ Pixel format: a 24/32-bpp TrueColor `ZPixmap` on a little-endian X
 server is byte-order BGRX — exactly what the parent's `argb_to_i420`
 expects. The backend rejects big-endian / non-24/32-bpp servers loudly
 rather than ship miscolored frames.
+
+The PipeWire path offers only the 32-bit RGB family (BGRx/BGRA as is,
+RGBx/RGBA swizzled in the helper); a wider offer once let a compositor
+pick a layout the parent read as BGRx.
 
 #### X11 follow-up phases (OUT of v1, documented TODOs — not blockers)
 
@@ -277,11 +338,14 @@ messages — every helper delivers **BGRx**, so the parent's `convert_to_i420`
 ### Linux pixel-format policy (`pollis-capture-linux/src/camera.rs`)
 
 Prefers **MJPG** (the only HD format many UVC cams expose; some are
-MJPG-only), decoded to RGB with `zune-jpeg`, then packed BGRx. Falls back to
-raw **YUYV** (4:2:2), converted in-process via BT.601. H.264 is ignored
-(heavy decode, every UVC cam also offers MJPG/YUYV). Negotiates 1280×720 by
-default; the driver adjusts and we publish whatever it gives. Verified at
-**32 fps** (release) against an EMEET SmartCam S600.
+MJPG-only), decoded with `zune-jpeg` to YCbCr and subsampled into I420. Falls
+back to raw **YUYV** (4:2:2), split into I420 planes. Both are sent as
+`FrameI420`; no RGB pass anywhere. H.264 is ignored (heavy decode, every UVC
+cam also offers MJPG/YUYV). Negotiates 1280×720 by default; the driver adjusts
+and we publish whatever it gives. Verified at **32 fps** (release) against an
+EMEET SmartCam S600. The helper crates and `zune-jpeg` are built at
+`opt-level = 3` in release too (`Cargo.toml` profile overrides): the per-pixel
+loops ran ~15% slower size-optimised.
 
 ### Parent + frontend (`camera/` modules)
 
@@ -294,12 +358,17 @@ default; the driver adjusts and we publish whatever it gives. Verified at
   `stop_camera`, events via `CameraEvent` (`local_started/stopped/error`). The
   Windows path reuses the shared `convert_to_i420` + `pack_frame_bytes` codec
   primitives and the `LOCAL_CAMERA_PREVIEW_KEY` self-preview mirroring.
-- **Local self-preview**: the reader task mirrors each outgoing frame
-  (throttled) to the renderer over the *same* frame WebSocket screen share
-  uses, under `LOCAL_CAMERA_PREVIEW_KEY` (distinct from screen share's
-  `LOCAL_PREVIEW_KEY`).
+- **Local self-preview**: the pump mirrors outgoing frames to the renderer over
+  the *same* frame WebSocket screen share uses, under
+  `LOCAL_CAMERA_PREVIEW_KEY` (distinct from screen share's `LOCAL_PREVIEW_KEY`),
+  **sized and paced by what the preview tile reports** (`set_video_wants`, see
+  [commands.md](./commands.md)): a 640×360 / 5 fps default until the tile
+  mounts, then the tile's box at its paint rate, nothing while it is hidden.
 - **Remote camera**: every remote video track flows through the one shared
-  `on_remote_video_subscribed` drain + frame WS. The voice room loop reads
+  `on_remote_video_subscribed` drain + frame WS, subscriber-driven: the tile's
+  wants set the SFU layer (`update_video_dimensions`), pause a hidden track
+  (`set_enabled(false)`), pace the drain and bound what it packs
+  (`wants::WantState::pack_size`). The voice room loop reads
   the publication's `TrackSource` and tags `ScreenShareEvent::RemoteStarted`
   with a `source` (`screen` | `camera`); the renderer routes the track_key
   to the participant's camera axis (`appStore.cameraRemotes`) vs its
@@ -334,18 +403,23 @@ default; the driver adjusts and we publish whatever it gives. Verified at
   list to the frontend.
 - `cancel_screen_share_picker` — kills a parked picker helper when the
   user backs out of the in-app picker without selecting.
-- `start_screen_share(selection)` — reuses the parked picker helper if
-  present (macOS) or spawns a fresh helper (Linux portal path). On
-  macOS sends `MSG_SELECT` with the user's pick, then reads `Format`
-  from the same helper. Linux skips the Select (no such message). On
-  both, creates the LiveKit `NativeVideoSource` + track, publishes,
-  spawns the reader task.
-- Reader task — `read_msg` loop: FPS cap, `convert_and_cap`
-  (libyuv ARGB→I420 + 1080p downscale), `source.capture_frame`,
-  self-preview, 2 s stall heartbeat.
+- `start_screen_share(selection, max_framerate, with_audio, max_height)` —
+  reuses the parked picker helper if present (macOS) or spawns a fresh helper
+  (Linux portal path, limits as spawn flags). On macOS sends `MSG_SELECT` with
+  the user's pick + limits. Then **publishes the LiveKit track while the helper
+  negotiates** (`tokio::join!` of the publish and `await_format`; the
+  `NativeVideoSource` starts at the limit's size and follows the first frame),
+  spawns the reader task, and only then stores the session and announces
+  `LocalStarted`. Every step re-checks the session token.
+- Reader task — `read_msg_pooled` loop on the socket; frames go to the
+  converter thread (`PumpHandle`, newest-wins, one in flight) which runs the
+  `LocalVideoPump`: pacer → libyuv ARGB→I420 (or a plane copy for `FrameI420`)
+  → `bound_to_limits` → `source.capture_frame` → self-preview mirror. Shared
+  audio is handled inline (it is already 10 ms blocks).
 - `stop_screen_share` — Linux + macOS share one teardown: abort the
   reader task, kill the helper (killing the macOS helper IS the SCK
-  stop + picker deactivate, since SCK now lives entirely in it).
+  stop + picker deactivate, since SCK now lives entirely in it), then the
+  video and audio unpublishes run concurrently.
 
 ## Shared audio (#884)
 
