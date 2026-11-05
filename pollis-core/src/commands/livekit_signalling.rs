@@ -117,6 +117,17 @@ pub fn voice_presence_payload(channel_id: &str, joined: bool) -> Value {
     })
 }
 
+/// `voice_roster_changed`: "someone dropped out of this voice channel — refetch its roster".
+/// Published by a peer still in the room when the SFU reports a participant gone, so
+/// observers learn about a crashed participant who never sent `voice_left`. Identity-free
+/// (§5): the receiver refetches from the DS, it never trusts a name in the packet.
+pub fn voice_roster_changed_payload(channel_id: &str) -> Value {
+    json!({
+        "type": "voice_roster_changed",
+        "channel_id": channel_id,
+    })
+}
+
 /// `device_revoked` nudge sent to a user's own inbox room: "one of your devices
 /// was revoked — every device re-check whether it is still registered".
 ///

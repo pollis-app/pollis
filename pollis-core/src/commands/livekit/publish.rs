@@ -270,6 +270,29 @@ pub async fn publish_voice_presence(
     Ok(())
 }
 
+/// A peer still in the voice channel reports that the SFU dropped someone (#836/§5:
+/// identity-free; receivers refetch). No-op when not connected to the realtime room.
+pub async fn publish_voice_roster_changed(
+    state: &Arc<AppState>,
+    realtime_room: &str,
+    channel_id: &str,
+) {
+    let room = {
+        let lk = state.livekit.lock().await;
+        lk.rooms.get(realtime_room).map(|(r, _)| Arc::clone(r))
+    };
+    let Some(room) = room else { return };
+    let Ok(payload) = serde_json::to_vec(
+        &crate::commands::livekit_signalling::voice_roster_changed_payload(channel_id),
+    ) else {
+        return;
+    };
+    let _ = room
+        .local_participant()
+        .publish_data(DataPacket { payload, reliable: true, ..Default::default() })
+        .await;
+}
+
 /// Typing indicator; unreliable, re-sent while typing, no-op if not connected.
 pub async fn publish_typing(
     room_id: String,
@@ -385,8 +408,18 @@ pub async fn start_call(
     });
 
     let inbox = format!("inbox-{callee_id}");
-    let delivered =
-        crate::commands::mls::ds_livekit_send_data_delivered(state, &inbox, payload).await?;
+    // The caller joins `room_name` the moment this returns: have its token warm by then.
+    let warm = crate::commands::voice::prepare_voice_connection(
+        room_name.clone(),
+        caller_id.clone(),
+        caller_username.clone(),
+        state,
+    );
+    let (delivered, _) = tokio::join!(
+        crate::commands::mls::ds_livekit_send_data_delivered(state, &inbox, payload),
+        warm,
+    );
+    let delivered = delivered?;
     if !delivered {
         return Err(Error::Other(anyhow::anyhow!(
             "{CALL_UNREACHABLE}: no device of the callee is online"

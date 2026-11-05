@@ -26,6 +26,7 @@ pub use publish::{
     publish_member_role_changed_to_room,
     publish_membership_changed_to_room, publish_new_message_to_room, publish_ping,
     publish_to_room_server, publish_to_user_inbox, publish_typing, publish_voice_presence,
+    publish_voice_roster_changed,
     start_call, StartCallResult,
 };
 pub use realtime::{connect_rooms, subscribe_realtime};
@@ -188,6 +189,13 @@ pub(super) fn dispatch_data(
                 });
             }
         }
+        Some("voice_roster_changed") => {
+            if let Some(channel_id) = data.get("channel_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::VoiceRosterChanged {
+                    channel_id: channel_id.to_owned(),
+                });
+            }
+        }
         Some("edited_message") => {
             // §5: editor re-derived from the edit envelope on ingest.
             if let Some(message_id) = data.get("message_id").and_then(|v| v.as_str()) {
@@ -346,6 +354,7 @@ mod tests {
             sig::edited_message_payload(Some("c1"), Some("g1"), "m1"),
             sig::deleted_message_payload(Some("c1"), Some("g1"), "m1"),
             sig::membership_changed_payload("g1"),
+            sig::voice_roster_changed_payload("c1"),
             serde_json::json!({ "type": "join_requests_changed", "group_id": "g1" }),
             serde_json::to_value(RealtimeEvent::MemberRoleChanged { group_id: "g1".into() })
                 .unwrap(),
