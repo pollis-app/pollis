@@ -275,7 +275,7 @@ test.describe("chrome", () => {
           name: "mia",
           audio: { kind: "speaking" },
           isLocal: true,
-          screenShare: { kind: "none" },
+          video: { kind: "none" },
         },
         // The same person's second enrolled device — a different identity.
         {
@@ -283,7 +283,7 @@ test.describe("chrome", () => {
           name: "mia",
           audio: { kind: "speaking" },
           isLocal: false,
-          screenShare: { kind: "none" },
+          video: { kind: "none" },
         },
       ]);
     });
