@@ -747,7 +747,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**180 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**181 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -911,13 +911,14 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TextInput** — props: label, ariaLabel, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
 - **ThemedQr** — props: value, size, title — `frontend/src/components/ui/ThemedQr.tsx`
 
-### `components/Voice` (8)
+### `components/Voice` (9)
 
 - **CameraPicker** — `frontend/src/components/Voice/CameraPicker.tsx`
 - **RemoteUserVolumeSlider** — props: identity, participantName — `frontend/src/components/Voice/RemoteUserVolumeSlider.tsx`
 - **RemoteVideoTile** — `frontend/src/components/Voice/RemoteVideoTile.tsx`
 - **ScreenSharePicker** — `frontend/src/components/Voice/ScreenSharePicker.tsx`
 - **ScreenShareViewer** — `frontend/src/components/Voice/ScreenShareViewer.tsx`
+- **ShareResolutionSelect** — props: value, onChange — `frontend/src/components/Voice/ShareResolutionSelect.tsx`
 - **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
 - **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
 - **VoiceInputModeSelect** — props: value, onChange — `frontend/src/components/Voice/VoiceInputModeSelect.tsx`

@@ -1,4 +1,5 @@
-// Remote video: Rust decodes frames and pushes I420 planes; WebGL converts on a canvas.
+// Remote video: Rust decodes frames and pushes I420 planes over the loopback frame socket;
+// WebGL converts them on a canvas. The tile reports what it needs back to Rust (`videoWants`).
 
 import React, { useEffect, useRef } from "react";
 
@@ -21,6 +22,9 @@ const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
 const PREVIEW_WANT_FPS = 15;
 // A ceiling, not a target: the publisher's own cap is lower; "as fast as it arrives".
 const FULL_WANT_FPS = 60;
+// The backing store never exceeds this many device pixels per CSS pixel: past 2× the extra
+// texels only cost upload and GPU time, they cannot show.
+const MAX_BACKING_SCALE = 2;
 
 const VERT_SRC = `
 attribute vec2 a_pos;
@@ -65,6 +69,7 @@ function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLSha
 interface GLBundle {
   gl: WebGLRenderingContext;
   prog: WebGLProgram;
+  vbo: WebGLBuffer;
   texY: WebGLTexture;
   texU: WebGLTexture;
   texV: WebGLTexture;
@@ -72,6 +77,8 @@ interface GLBundle {
   yW: number; yH: number;
   uW: number; uH: number;
   vW: number; vH: number;
+  // Scratch for repacking a padded plane into a tight one; grown on demand.
+  scratch: Uint8Array;
 }
 
 function initGL(canvas: HTMLCanvasElement): GLBundle | null {
@@ -86,14 +93,18 @@ function initGL(canvas: HTMLCanvasElement): GLBundle | null {
   gl.attachShader(prog, vs);
   gl.attachShader(prog, fs);
   gl.linkProgram(prog);
+  // Linked into the program; the shader objects themselves are no longer needed.
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
     const log = gl.getProgramInfoLog(prog);
+    gl.deleteProgram(prog);
     throw new Error(`program link: ${log}`);
   }
   gl.useProgram(prog);
 
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  const vbo = gl.createBuffer()!;
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
   gl.bufferData(
     gl.ARRAY_BUFFER,
     new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
@@ -120,9 +131,48 @@ function initGL(canvas: HTMLCanvasElement): GLBundle | null {
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
   return {
-    gl, prog, texY, texU, texV,
+    gl, prog, vbo, texY, texU, texV,
     yW: 0, yH: 0, uW: 0, uH: 0, vW: 0, vH: 0,
+    scratch: new Uint8Array(0),
   };
+}
+
+/** Release every GPU object and the context itself; a canvas that merely unmounts keeps
+ *  its context (and its textures) alive until the GC finds it, and WebKit caps contexts. */
+function destroyGL(bundle: GLBundle) {
+  const { gl } = bundle;
+  gl.deleteTexture(bundle.texY);
+  gl.deleteTexture(bundle.texU);
+  gl.deleteTexture(bundle.texV);
+  gl.deleteBuffer(bundle.vbo);
+  gl.deleteProgram(bundle.prog);
+  const lose = gl.getExtension("WEBGL_lose_context");
+  if (lose) {
+    lose.loseContext();
+  }
+}
+
+/** The plane as a tight `width × height` block: the data itself when its stride already is,
+ *  else a row-by-row repack into the bundle's scratch (WebGL1 has no UNPACK_ROW_LENGTH). */
+function tight(
+  bundle: GLBundle,
+  data: Uint8Array,
+  width: number,
+  height: number,
+  stride: number,
+): Uint8Array {
+  if (stride === width) {
+    return data;
+  }
+  const need = width * height;
+  if (bundle.scratch.length < need) {
+    bundle.scratch = new Uint8Array(need);
+  }
+  const out = bundle.scratch.subarray(0, need);
+  for (let row = 0; row < height; row++) {
+    out.set(data.subarray(row * stride, row * stride + width), row * width);
+  }
+  return out;
 }
 
 function uploadPlane(
@@ -164,7 +214,37 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
   // Throttle to rAF; intermediate frames are dropped.
   const pendingRef = useRef<DecodedFrame | null>(null);
   const rafRef = useRef<number | null>(null);
+  const trailingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPaintAtRef = useRef<number>(0);
+  // The container's box in device pixels, from the wants observer: the backing store
+  // follows it (≤ 2× CSS size) rather than the source.
+  const boxPxRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+
+  // One GL context per canvas lifetime: textures and program are allocated once and freed
+  // (with the context) on unmount, never re-created when a prop changes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    if (initialWidth && initialHeight) {
+      // Before the first frame, size the box from what the publisher announced.
+      canvas.width = initialWidth;
+      canvas.height = initialHeight;
+    }
+    glRef.current = initGL(canvas);
+    if (!glRef.current) {
+      console.error("[RemoteVideoTile] WebGL init failed");
+    }
+    return () => {
+      if (glRef.current) {
+        destroyGL(glRef.current);
+        glRef.current = null;
+      }
+    };
+    // Mount-only on purpose: the announced size only seeds the box before the first frame,
+    // and a later change must not tear the context down.
+  }, []);
 
   // Report what this tile needs — its container's size in device pixels while it is on screen,
   // nothing while hidden — so Rust can pick the SFU layer, pause the track and pack to size.
@@ -179,15 +259,16 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
     let boxH = box.clientHeight;
     let intersecting = true;
     const report = () => {
+      const dpr = window.devicePixelRatio || 1;
+      boxPxRef.current = { w: Math.ceil(boxW * dpr), h: Math.ceil(boxH * dpr) };
       const shown = intersecting && document.visibilityState !== "hidden" && boxW > 0 && boxH > 0;
       if (!shown) {
         videoWants.report(trackKey, id, null);
         return;
       }
-      const dpr = window.devicePixelRatio || 1;
       videoWants.report(trackKey, id, {
-        width: Math.ceil(boxW * dpr),
-        height: Math.ceil(boxH * dpr),
+        width: boxPxRef.current.w,
+        height: boxPxRef.current.h,
         fps: preview ? PREVIEW_WANT_FPS : FULL_WANT_FPS,
       });
     };
@@ -220,50 +301,46 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
     if (!canvas) {
       return;
     }
-    if (initialWidth && initialHeight) {
-      canvas.width = initialWidth;
-      canvas.height = initialHeight;
-    }
-    glRef.current = initGL(canvas);
-    if (!glRef.current) {
-      console.error("[RemoteVideoTile] WebGL init failed");
-    }
 
     const render = () => {
       rafRef.current = null;
       lastPaintAtRef.current = performance.now();
       const frame = pendingRef.current;
       pendingRef.current = null;
-      if (!frame || !glRef.current) {
+      const bundle = glRef.current;
+      if (!frame || !bundle) {
         return;
       }
-      const bundle = glRef.current;
       const { gl } = bundle;
       const cW = (frame.width + 1) >> 1;
       const cH = (frame.height + 1) >> 1;
-      // Padded strides would need per-row uploads; bail rather than render garbage.
-      if (frame.yStride !== frame.width || frame.uStride !== cW || frame.vStride !== cW) {
-        return;
+      // Upload at source resolution; the GPU scales to the box. Padded strides (an AV1 or
+      // hardware decoder) are repacked tight.
+      const yPlane = tight(bundle, frame.y, frame.width, frame.height, frame.yStride);
+      const uPlane = tight(bundle, frame.u, cW, cH, frame.uStride);
+      const vPlane = tight(bundle, frame.v, cW, cH, frame.vStride);
+      // Backing store: the source, capped at MAX_BACKING_SCALE × the box. It never drops
+      // below the box, so the auto-sized canvas still fills its container.
+      const box = boxPxRef.current;
+      let bw = frame.width;
+      let bh = frame.height;
+      if (box.w > 0 && box.h > 0) {
+        const cap = Math.min(1, (box.w * MAX_BACKING_SCALE) / frame.width, (box.h * MAX_BACKING_SCALE) / frame.height);
+        if (cap < 1) {
+          bw = Math.max(2, Math.round(frame.width * cap));
+          bh = Math.max(2, Math.round(frame.height * cap));
+        }
       }
-      // Upload at source resolution; GPU scaling serves tile and fullscreen alike.
-      const yPlane = frame.y;
-      const uPlane = frame.u;
-      const vPlane = frame.v;
-      const yW = frame.width;
-      const yH = frame.height;
-      const uvW = cW;
-      const uvH = cH;
-      // Backing store follows the source; CSS sizing is independent.
-      if (canvas.width !== yW || canvas.height !== yH) {
-        canvas.width = yW;
-        canvas.height = yH;
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw;
+        canvas.height = bh;
       }
       const yAlloc = { w: bundle.yW, h: bundle.yH };
       const uAlloc = { w: bundle.uW, h: bundle.uH };
       const vAlloc = { w: bundle.vW, h: bundle.vH };
-      uploadPlane(gl, 0, bundle.texY, yPlane, yW, yH, yAlloc);
-      uploadPlane(gl, 1, bundle.texU, uPlane, uvW, uvH, uAlloc);
-      uploadPlane(gl, 2, bundle.texV, vPlane, uvW, uvH, vAlloc);
+      uploadPlane(gl, 0, bundle.texY, yPlane, frame.width, frame.height, yAlloc);
+      uploadPlane(gl, 1, bundle.texU, uPlane, cW, cH, uAlloc);
+      uploadPlane(gl, 2, bundle.texV, vPlane, cW, cH, vAlloc);
       bundle.yW = yAlloc.w; bundle.yH = yAlloc.h;
       bundle.uW = uAlloc.w; bundle.uH = uAlloc.h;
       bundle.vW = vAlloc.w; bundle.vH = vAlloc.h;
@@ -271,18 +348,30 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     };
 
-    const unsubscribe = screenShareSession.onFrame(trackKey, (frame) => {
-      pendingRef.current = frame;
-      // Preview 15fps cap.
-      if (preview) {
-        const elapsed = performance.now() - lastPaintAtRef.current;
-        if (elapsed < PREVIEW_MIN_PAINT_INTERVAL_MS) {
-          return;
-        }
-      }
+    const schedule = () => {
       if (rafRef.current === null) {
         rafRef.current = requestAnimationFrame(render);
       }
+    };
+
+    const unsubscribe = screenShareSession.onFrame(trackKey, (frame) => {
+      pendingRef.current = frame;
+      if (preview) {
+        const elapsed = performance.now() - lastPaintAtRef.current;
+        if (elapsed < PREVIEW_MIN_PAINT_INTERVAL_MS) {
+          // Inside the cap: a trailing paint, so the last frame of a burst still shows.
+          if (trailingRef.current === null) {
+            trailingRef.current = setTimeout(() => {
+              trailingRef.current = null;
+              if (pendingRef.current) {
+                schedule();
+              }
+            }, PREVIEW_MIN_PAINT_INTERVAL_MS - elapsed);
+          }
+          return;
+        }
+      }
+      schedule();
     });
 
     return () => {
@@ -291,10 +380,13 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
+      if (trailingRef.current !== null) {
+        clearTimeout(trailingRef.current);
+        trailingRef.current = null;
+      }
       pendingRef.current = null;
-      glRef.current = null;
     };
-  }, [trackKey, initialWidth, initialHeight, preview]);
+  }, [trackKey, preview]);
 
   return (
     <canvas

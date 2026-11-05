@@ -143,6 +143,12 @@ export interface FrameStats {
 type StatsListener = (stats: FrameStats) => void;
 
 const FPS_WINDOW_MS = 1000;
+/** Stats reach their listeners at most this often, and only when fps or size changed: a
+ *  per-frame notify re-rendered every tile at frame rate. */
+const STATS_MIN_INTERVAL_MS = 500;
+
+/** One decoder for every frame header; constructing one per frame was measurable. */
+const utf8 = new TextDecoder();
 
 /** Track key of the local preview (LOCAL_PREVIEW_KEY in pollis-core/src/commands/screenshare.rs). */
 export const LOCAL_PREVIEW_KEY = "__local_preview__";
@@ -154,6 +160,10 @@ class ScreenShareSession {
   private lastDims = new Map<string, { width: number; height: number }>();
   private lastBytes = new Map<string, number>();
   private statsListeners = new Map<string, Set<StatsListener>>();
+  // Per track: what the listeners last heard, when, and a trailing one-shot for a change
+  // that arrived inside the interval (so the last change of a burst is never lost).
+  private statsEmitted = new Map<string, { fps: number; width: number; height: number; at: number }>();
+  private statsTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Loopback WebSocket for frames; the per-frame IPC Channel stalled WebKitGTK on GC (#305).
   private frameSocket: WebSocket | null = null;
   private frameSocketReconnect: ReturnType<typeof setTimeout> | null = null;
@@ -196,6 +206,11 @@ class ScreenShareSession {
     this.fpsHistory.clear();
     this.lastDims.clear();
     this.lastBytes.clear();
+    this.statsEmitted.clear();
+    for (const timer of this.statsTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.statsTimers.clear();
   }
 
   /** Idempotent. Call once after auth so the backend Channels are wired. */
@@ -435,6 +450,52 @@ class ScreenShareSession {
     }
   }
 
+  /** Notify stats listeners at most every `STATS_MIN_INTERVAL_MS`, and only when the fps or
+   *  the dimensions changed; a change inside the interval is delivered by a trailing timer. */
+  private maybeEmitStats(trackKey: string, now: number): void {
+    const listeners = this.statsListeners.get(trackKey);
+    if (!listeners || listeners.size === 0) {
+      return;
+    }
+    const dims = this.lastDims.get(trackKey);
+    if (!dims) {
+      return;
+    }
+    const fps = this.computeFps(trackKey);
+    const last = this.statsEmitted.get(trackKey);
+    const changed =
+      !last || last.fps !== fps || last.width !== dims.width || last.height !== dims.height;
+    if (!changed) {
+      return;
+    }
+    const since = last ? now - last.at : Infinity;
+    if (since < STATS_MIN_INTERVAL_MS) {
+      if (!this.statsTimers.has(trackKey)) {
+        this.statsTimers.set(
+          trackKey,
+          setTimeout(() => {
+            this.statsTimers.delete(trackKey);
+            this.maybeEmitStats(trackKey, performance.now());
+          }, STATS_MIN_INTERVAL_MS - since),
+        );
+      }
+      return;
+    }
+    this.statsEmitted.set(trackKey, { fps, width: dims.width, height: dims.height, at: now });
+    const stats: FrameStats = {
+      fps,
+      dimensions: { ...dims },
+      lastFrameBytes: this.lastBytes.get(trackKey) ?? 0,
+    };
+    for (const fn of listeners) {
+      try {
+        fn(stats);
+      } catch (e) {
+        console.error("[screenshare] stats listener", e);
+      }
+    }
+  }
+
   // Wire format (matches pack_frame_bytes in screenshare.rs):
   //   u32 LE track_key_len
   //   utf-8 bytes
@@ -453,7 +514,7 @@ class ScreenShareSession {
     if (off + keyLen > buf.byteLength) {
       return;
     }
-    const trackKey = new TextDecoder().decode(new Uint8Array(buf, off, keyLen));
+    const trackKey = utf8.decode(new Uint8Array(buf, off, keyLen));
     off += keyLen;
     const width = dv.getUint32(off, true); off += 4;
     const height = dv.getUint32(off, true); off += 4;
@@ -484,21 +545,7 @@ class ScreenShareSession {
     }
     this.lastDims.set(trackKey, { width, height });
     this.lastBytes.set(trackKey, yLen + uLen + vLen);
-    const statsListeners = this.statsListeners.get(trackKey);
-    if (statsListeners && statsListeners.size > 0) {
-      const stats: FrameStats = {
-        fps: this.computeFps(trackKey),
-        dimensions: { width, height },
-        lastFrameBytes: yLen + uLen + vLen,
-      };
-      for (const fn of statsListeners) {
-        try {
-          fn(stats);
-        } catch (e) {
-          console.error("[screenshare] stats listener", e);
-        }
-      }
-    }
+    this.maybeEmitStats(trackKey, now);
 
     const listeners = this.listeners.get(trackKey);
     if (!listeners || listeners.size === 0) {

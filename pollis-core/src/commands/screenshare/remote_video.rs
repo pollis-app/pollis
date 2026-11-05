@@ -44,8 +44,8 @@ pub async fn on_remote_video_subscribed(
         }
         (ss.events.clone(), ss.frames.clone(), rx)
     };
-    // WebSocket fan-out, served at `/screenshare/<token>` (see `media_server.rs`).
-    let frame_tx = state.screenshare_frame_tx.clone();
+    // WebSocket fan-out, served at `/ws/screenshare/<token>` (see `media_server.rs`).
+    let frame_tx = Arc::clone(&state.screenshare_frame_tx);
 
     let mut stream = NativeVideoStream::new(track.rtc_track());
     let track_key_for_task = track_key.clone();
@@ -100,7 +100,7 @@ pub async fn on_remote_video_subscribed(
                     &packed,
                 );
                 let bytes = std::sync::Arc::new(bytes);
-                let _ = frame_tx.send(bytes.clone());
+                frame_tx.send(bytes.clone());
                 if let Some(sink) = &frames {
                     let _ = sink.send((*bytes).clone());
                 }

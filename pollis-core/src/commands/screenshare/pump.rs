@@ -23,7 +23,7 @@ pub(crate) struct LocalVideoPump {
     pacer: FramePacer,
     mirror: PreviewMirror,
     preview_key: &'static str,
-    preview_tx: tokio::sync::broadcast::Sender<Arc<Vec<u8>>>,
+    preview_tx: Arc<crate::media_server::FrameFanout>,
     /// The legacy Channel sink, kept until nothing registers one.
     frames: Option<Arc<dyn RawSink>>,
 }
@@ -34,7 +34,7 @@ impl LocalVideoPump {
         limits: ShareLimits,
         mirror: PreviewMirror,
         preview_key: &'static str,
-        preview_tx: tokio::sync::broadcast::Sender<Arc<Vec<u8>>>,
+        preview_tx: Arc<crate::media_server::FrameFanout>,
         frames: Option<Arc<dyn RawSink>>,
     ) -> Self {
         Self {
@@ -89,7 +89,7 @@ impl LocalVideoPump {
             timestamp_us,
             &mirrored,
         ));
-        let _ = self.preview_tx.send(Arc::clone(&bytes));
+        self.preview_tx.send(Arc::clone(&bytes));
         if let Some(sink) = &self.frames {
             let _ = sink.send((*bytes).clone());
         }

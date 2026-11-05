@@ -3,12 +3,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
-use crate::config::Config;
-use crate::db::local::LocalDb;
-use crate::keystore::{self, Keystore};
-use crate::commands::pin::UnlockState;
 #[cfg(feature = "media")]
 use crate::commands::camera::CameraState;
+use crate::commands::pin::UnlockState;
 #[cfg(feature = "media")]
 use crate::commands::screenshare::ScreenShareState;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -17,6 +14,9 @@ use crate::commands::terminal::PtySession;
 use crate::commands::voice::VoiceState;
 #[cfg(feature = "media")]
 use crate::commands::voice_test::VoiceTestState;
+use crate::config::Config;
+use crate::db::local::LocalDb;
+use crate::keystore::{self, Keystore};
 use crate::realtime::LiveKitState;
 
 #[derive(Clone)]
@@ -114,8 +114,9 @@ pub struct AppState {
     pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
     /// A `flush_outbox` that found a drain running asks it to go round again (#1335).
     pub outbox_rerun: Arc<AtomicBool>,
-    /// Decoded screenshare frames to the media server's WebSocket route. Small capacity; lagged receivers drop (latest-frame-wins).
-    pub screenshare_frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
+    /// Decoded video frames to the media server's WebSocket route: one latest-frame slot per
+    /// track per socket (`media_server::FrameFanout`).
+    pub screenshare_frame_tx: Arc<crate::media_server::FrameFanout>,
     /// The running overlay shim, or `None` when off; control-plane HTTP reads it via [`overlay_handle`](AppState::overlay_handle).
     ///
     /// Swapped live by `set_overlay_mode`; a `std::sync::Mutex` so the hot read holds no `.await`.
@@ -135,10 +136,7 @@ impl AppState {
     }
 
     /// Build AppState from parts; tests inject an [`InMemoryKeystore`].
-    pub fn new_with_parts(
-        config: Config,
-        keystore: Arc<dyn Keystore>,
-    ) -> Self {
+    pub fn new_with_parts(config: Config, keystore: Arc<dyn Keystore>) -> Self {
         Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
@@ -184,7 +182,7 @@ impl AppState {
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
             outbox_rerun: Arc::new(AtomicBool::new(false)),
-            screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,
+            screenshare_frame_tx: Arc::new(crate::media_server::FrameFanout::new()),
             overlay: std::sync::Mutex::new(None),
             state_lock: crate::notify::lock::SharedStateLock::new(
                 crate::notify::lock::LockPolicy::PerSection,
@@ -231,7 +229,6 @@ impl AppState {
             .await?)
     }
 
-
     /// Tear down long-lived tasks so the host process can exit. Idempotent.
     pub async fn shutdown(&self) {
         self.shutdown_signal.notify_waiters();
@@ -260,11 +257,7 @@ impl AppState {
                 voice.room.take()
             };
             if let Some(room) = room {
-                let _ = tokio::time::timeout(
-                    std::time::Duration::from_secs(3),
-                    room.close(),
-                )
-                .await;
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(3), room.close()).await;
             }
         }
     }
@@ -290,7 +283,8 @@ impl AppState {
     ) -> crate::error::Result<bool> {
         let db = LocalDb::open_for_user_in(&self.local_data_dir(), user_id, db_key)?;
 
-        let mls_empty: bool = db.conn()
+        let mls_empty: bool = db
+            .conn()
             .query_row("SELECT COUNT(*) FROM mls_kv", [], |r| r.get::<_, i64>(0))
             .map(|c| c == 0)
             .unwrap_or(true);
@@ -353,7 +347,10 @@ impl AppState {
     }
 
     pub fn check_not_outdated(&self) -> crate::error::Result<()> {
-        if self.update_required.load(std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .update_required
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             return Err(crate::error::Error::ClientOutdated);
         }
         Ok(())

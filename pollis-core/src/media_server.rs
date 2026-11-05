@@ -4,8 +4,9 @@
 //!
 //! A server because `asset://` fails for WebKitGTK `<audio>/<video>` and IPC blobs can't do HTTP Range.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::{
     body::Body,
@@ -35,12 +36,50 @@ pub fn frame_fanout_counters() -> (u64, u64) {
     )
 }
 
+/// Send buffer for every accepted loopback socket. Frames are big (3 MB at 1080p) and the
+/// pump sends one at a time; a small buffer means a stalled renderer backpressures the
+/// pump within a frame or two instead of a tunable 4 MB behind it.
+const FRAME_SOCKET_SNDBUF: usize = 256 * 1024;
+
+/// The media server's listener: a `TcpListener` whose accepted sockets get a small
+/// `SO_SNDBUF` (see [`FRAME_SOCKET_SNDBUF`]).
+struct FrameListener(tokio::net::TcpListener);
+
+impl axum::serve::Listener for FrameListener {
+    type Io = tokio::net::TcpStream;
+    type Addr = std::net::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            match self.0.accept().await {
+                Ok((stream, addr)) => {
+                    if let Err(e) =
+                        socket2::SockRef::from(&stream).set_send_buffer_size(FRAME_SOCKET_SNDBUF)
+                    {
+                        crate::diag!("[media_server] SO_SNDBUF: {e}");
+                    }
+                    return (stream, addr);
+                }
+                Err(e) => {
+                    crate::diag!("[media_server] accept: {e}");
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.0.local_addr()
+    }
+}
+
 /// Spawn the loopback media server on an OS-assigned port; returns it.
 ///
 /// `AppState::shutdown()` drains it gracefully so the host process can exit (#335).
 pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
+    let listener = FrameListener(listener);
 
     let shutdown_signal = state.shutdown_signal.clone();
     let app = Router::new()
@@ -283,8 +322,92 @@ async fn ws_screenshare(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    let rx = state.screenshare_frame_tx.subscribe();
-    ws.on_upgrade(move |socket| pump_frames(socket, rx))
+    let fanout = Arc::clone(&state.screenshare_frame_tx);
+    ws.on_upgrade(move |socket| pump_frames(socket, fanout))
+}
+
+/// Latest-frame-wins fan-out of packed video frames to the frame sockets.
+///
+/// One slot per track per subscriber: a producer replaces its track's slot and wakes the
+/// subscriber, which sends whatever is in the slots and only then takes the next. So a
+/// renderer that falls behind sees each track's newest frame, never a queue of stale ones,
+/// and at most one frame per track is ever waiting on a socket. (The semantics of a
+/// `tokio::sync::watch` per track, in a form a dynamic set of tracks can be awaited as one.)
+pub struct FrameFanout {
+    subscribers: Mutex<Vec<Arc<FrameSubscriber>>>,
+}
+
+struct FrameSubscriber {
+    slots: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+    notify: tokio::sync::Notify,
+}
+
+impl Default for FrameFanout {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FrameFanout {
+    pub fn new() -> Self {
+        Self {
+            subscribers: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Offer a packed frame (the track key is its header) to every subscriber; a frame
+    /// still waiting for the same track is replaced.
+    pub fn send(&self, frame: Arc<Vec<u8>>) {
+        let Some(track_key) = crate::commands::screenshare::codec::frame_track_key(&frame) else {
+            return;
+        };
+        let subscribers = self.subscribers.lock().unwrap().clone();
+        for sub in subscribers {
+            let replaced = sub
+                .slots
+                .lock()
+                .unwrap()
+                .insert(track_key.to_string(), Arc::clone(&frame))
+                .is_some();
+            if replaced {
+                FRAMES_DROPPED.fetch_add(1, Ordering::Relaxed);
+            }
+            sub.notify.notify_one();
+        }
+    }
+
+    pub fn receiver_count(&self) -> usize {
+        self.subscribers.lock().unwrap().len()
+    }
+
+    fn subscribe(&self) -> Arc<FrameSubscriber> {
+        let sub = Arc::new(FrameSubscriber {
+            slots: Mutex::new(HashMap::new()),
+            notify: tokio::sync::Notify::new(),
+        });
+        self.subscribers.lock().unwrap().push(Arc::clone(&sub));
+        sub
+    }
+
+    fn unsubscribe(&self, sub: &Arc<FrameSubscriber>) {
+        self.subscribers
+            .lock()
+            .unwrap()
+            .retain(|s| !Arc::ptr_eq(s, sub));
+    }
+}
+
+impl FrameSubscriber {
+    /// Wait for at least one frame, then take every track's newest.
+    async fn recv(&self) -> Vec<Arc<Vec<u8>>> {
+        loop {
+            let taken: Vec<_> = self.slots.lock().unwrap().drain().map(|(_, f)| f).collect();
+            if !taken.is_empty() {
+                return taken;
+            }
+            self.notify.notified().await;
+        }
+    }
 }
 
 /// Newtype so `Bytes::from_owner` can borrow an `Arc<Vec<u8>>` without copying.
@@ -296,31 +419,22 @@ impl AsRef<[u8]> for SharedFrame {
     }
 }
 
-/// Forward frames to one WebSocket client. Lagged receivers drop frames; never back-pressure.
+/// Forward frames to one WebSocket client: the newest per track, one send at a time, so a
+/// slow renderer is never behind a queue (a frame it cannot take yet is replaced, not kept).
 ///
 /// Zero-copy: every subscriber borrows the one `Arc` frame (#480).
-async fn pump_frames(
-    mut socket: WebSocket,
-    mut rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
-) {
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match rx.recv().await {
-            Ok(frame) => {
-                let payload = Bytes::from_owner(SharedFrame(frame));
-                if socket.send(Message::Binary(payload)).await.is_err() {
-                    break;
-                }
-                FRAMES_SENT.fetch_add(1, Ordering::Relaxed);
+async fn pump_frames(mut socket: WebSocket, fanout: Arc<FrameFanout>) {
+    let sub = fanout.subscribe();
+    'pump: loop {
+        for frame in sub.recv().await {
+            let payload = Bytes::from_owner(SharedFrame(frame));
+            if socket.send(Message::Binary(payload)).await.is_err() {
+                break 'pump;
             }
-            // Count overwritten frames as dropped and continue from the newest.
-            Err(RecvError::Lagged(skipped)) => {
-                FRAMES_DROPPED.fetch_add(skipped, Ordering::Relaxed);
-                continue;
-            }
-            Err(RecvError::Closed) => break,
+            FRAMES_SENT.fetch_add(1, Ordering::Relaxed);
         }
     }
+    fanout.unsubscribe(&sub);
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -371,10 +485,7 @@ mod tests {
 
     #[test]
     fn range_multi_falls_through() {
-        assert_eq!(
-            parse_single_range("bytes=0-10,20-30", 100),
-            Ok(None)
-        );
+        assert_eq!(parse_single_range("bytes=0-10,20-30", 100), Ok(None));
     }
 
     #[test]
@@ -418,6 +529,53 @@ mod tests {
         // Just prove the accessor wires to the two atomics.
         let (sent, dropped) = frame_fanout_counters();
         let _ = (sent, dropped);
+    }
+
+    fn packed(track_key: &str, tag: u8) -> Arc<Vec<u8>> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&(track_key.len() as u32).to_le_bytes());
+        v.extend_from_slice(track_key.as_bytes());
+        v.extend_from_slice(&[tag; 28]);
+        Arc::new(v)
+    }
+
+    // Two frames for one track before the subscriber wakes: only the newer is delivered.
+    #[tokio::test]
+    async fn a_subscriber_that_falls_behind_gets_each_tracks_newest_frame_only() {
+        let fanout = FrameFanout::new();
+        let sub = fanout.subscribe();
+        fanout.send(packed("a", 1));
+        fanout.send(packed("a", 2));
+        fanout.send(packed("b", 9));
+        let mut got = sub.recv().await;
+        got.sort_by(|x, y| x.as_slice().cmp(y.as_slice()));
+        assert_eq!(got.len(), 2, "one slot per track");
+        assert!(got
+            .iter()
+            .any(|f| f.as_slice() == packed("a", 2).as_slice()));
+        assert!(got
+            .iter()
+            .any(|f| f.as_slice() == packed("b", 9).as_slice()));
+        assert!(!got
+            .iter()
+            .any(|f| f.as_slice() == packed("a", 1).as_slice()));
+        // Nothing left: the next recv parks until a new frame arrives.
+        let parked = tokio::time::timeout(std::time::Duration::from_millis(50), sub.recv()).await;
+        assert!(parked.is_err());
+        fanout.send(packed("a", 3));
+        assert_eq!(sub.recv().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unsubscribed_sockets_stop_counting_as_receivers() {
+        let fanout = FrameFanout::new();
+        assert_eq!(fanout.receiver_count(), 0);
+        let sub = fanout.subscribe();
+        assert_eq!(fanout.receiver_count(), 1);
+        fanout.unsubscribe(&sub);
+        assert_eq!(fanout.receiver_count(), 0);
+        // A frame with no subscriber is simply dropped on the floor.
+        fanout.send(packed("a", 1));
     }
 
     /// Bring up the real server over a real cached file and return

@@ -20,7 +20,6 @@ use livekit::{
     prelude::*,
     track::{LocalTrack, LocalVideoTrack},
 };
-use tokio::sync::broadcast;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{
@@ -127,7 +126,7 @@ struct CameraCaptureFlags {
     device_id: String,
     source: NativeVideoSource,
     active: Arc<AtomicBool>,
-    frame_tx: broadcast::Sender<Arc<Vec<u8>>>,
+    frame_tx: Arc<crate::media_server::FrameFanout>,
 }
 
 pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()> {
@@ -406,7 +405,7 @@ unsafe fn stream_frames(
     stride: i32,
     source: &NativeVideoSource,
     active: &AtomicBool,
-    frame_tx: &broadcast::Sender<Arc<Vec<u8>>>,
+    frame_tx: &Arc<crate::media_server::FrameFanout>,
 ) -> AnyResult<()> {
     let row_bytes = width as usize * 4;
     let abs_stride = (stride.unsigned_abs() as usize).max(row_bytes);
@@ -535,7 +534,7 @@ fn push_frame(
     timestamp_us: i64,
     bgrx: &[u8],
     // `Some` on the throttled frames that also feed the sharer's self-preview.
-    preview: Option<&broadcast::Sender<Arc<Vec<u8>>>>,
+    preview: Option<&Arc<crate::media_server::FrameFanout>>,
 ) {
     // libwebrtc + VP8 + libyuv I420 all require even dimensions.
     let w = (width & !1) as i32;
@@ -558,7 +557,7 @@ fn push_frame(
     // Mirror the same I420 buffer to the renderer for self-preview.
     if let Some(tx) = preview {
         let bytes = pack_frame_bytes(LOCAL_CAMERA_PREVIEW_KEY, out_w, out_h, timestamp_us, &frame.buffer);
-        let _ = tx.send(Arc::new(bytes));
+        tx.send(Arc::new(bytes));
     }
 }
 

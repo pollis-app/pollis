@@ -117,6 +117,12 @@ pub(crate) fn bound_to_limits(mut buffer: I420Buffer, limits: &ShareLimits) -> I
     }
 }
 
+/// The track key a packed frame (see [`pack_frame_bytes`]) carries in its header.
+pub(crate) fn frame_track_key(frame: &[u8]) -> Option<&str> {
+    let len = u32::from_le_bytes(frame.get(0..4)?.try_into().ok()?) as usize;
+    std::str::from_utf8(frame.get(4..4 + len)?).ok()
+}
+
 // Frame wire format (Rust -> webview):
 // [ u32 LE track_key_len ][ track_key UTF-8 ]
 // [ u32 LE width ][ u32 LE height ]
