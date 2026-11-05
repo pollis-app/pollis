@@ -132,7 +132,10 @@ fn e2ee_room_options() -> livekit::RoomOptions {
     use livekit::e2ee::{E2eeOptions, EncryptionType};
     let kp = KeyProvider::with_shared_key(KeyProviderOptions::default(), vec![9u8; 32]);
     let mut options = livekit::RoomOptions::default();
-    options.encryption = Some(E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider: kp });
+    options.encryption = Some(E2eeOptions {
+        encryption_type: EncryptionType::Gcm,
+        key_provider: kp,
+    });
     options
 }
 
@@ -149,8 +152,15 @@ async fn cryptors_settle(room: &livekit::Room, expected: usize) -> usize {
 
 /// The real join/leave shape against a live SFU: two E2EE participants publish to each other
 /// (one sender + one receiver cryptor each), then `room.close()` + drop. Needs
-/// `POLLIS_TEST_LIVEKIT_URL` (the lab's `ws://127.0.0.1:7880`, dev key `devkey` / secret `secret`);
-/// skipped otherwise.
+/// `POLLIS_TEST_LIVEKIT_URL` (the lab's `ws://127.0.0.1:7880`, dev key `devkey` / secret `secret`).
+///
+/// Ignored because it FAILS on livekit 0.9.5: measured 4 → 8 → 10 transformer threads
+/// after three close+drop cycles (two participants, sender + receiver each), while the
+/// test above shows raw libwebrtc releases the thread the moment its PeerConnection is
+/// dropped. The SDK keeps its session (and so its PeerConnections) alive past `close()`;
+/// nothing on this side of the API can drop them. Run with `--ignored` to re-measure
+/// after an SDK bump.
+#[ignore = "upstream: livekit 0.9.5 leaks FrameCryptorTransformer threads past Room::close (see doc)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_closed_room_releases_its_transformer_threads() {
     use livekit::prelude::*;
@@ -159,24 +169,37 @@ async fn a_closed_room_releases_its_transformer_threads() {
         return;
     };
     let api_key = std::env::var("POLLIS_TEST_LIVEKIT_KEY").unwrap_or_else(|_| "devkey".into());
-    let api_secret = std::env::var("POLLIS_TEST_LIVEKIT_SECRET").unwrap_or_else(|_| "secret".into());
+    let api_secret =
+        std::env::var("POLLIS_TEST_LIVEKIT_SECRET").unwrap_or_else(|_| "secret".into());
     let room_name = format!("fc-threads-{}", std::process::id());
 
     let baseline = transformer_threads();
     let mut after_each_cycle = Vec::new();
     for cycle in 0..3 {
-        let (room_a, _events_a) = Room::connect(&url, &dev_token(&api_key, &api_secret, &room_name, "alice"), e2ee_room_options())
-            .await
-            .expect("alice connects");
-        let (room_b, _events_b) = Room::connect(&url, &dev_token(&api_key, &api_secret, &room_name, "bob"), e2ee_room_options())
-            .await
-            .expect("bob connects");
+        let (room_a, _events_a) = Room::connect(
+            &url,
+            &dev_token(&api_key, &api_secret, &room_name, "alice"),
+            e2ee_room_options(),
+        )
+        .await
+        .expect("alice connects");
+        let (room_b, _events_b) = Room::connect(
+            &url,
+            &dev_token(&api_key, &api_secret, &room_name, "bob"),
+            e2ee_room_options(),
+        )
+        .await
+        .expect("bob connects");
         let mut tracks = Vec::new();
         for room in [&room_a, &room_b] {
             let source = NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 1, 100);
-            let track = LocalAudioTrack::create_audio_track("mic", RtcAudioSource::Native(source.clone()));
+            let track =
+                LocalAudioTrack::create_audio_track("mic", RtcAudioSource::Native(source.clone()));
             room.local_participant()
-                .publish_track(LocalTrack::Audio(track.clone()), livekit::options::TrackPublishOptions::default())
+                .publish_track(
+                    LocalTrack::Audio(track.clone()),
+                    livekit::options::TrackPublishOptions::default(),
+                )
                 .await
                 .expect("publish");
             tracks.push((track, source));

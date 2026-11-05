@@ -16,7 +16,6 @@ import { voiceSession } from "../voice";
 import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { useReadReceipts } from "../hooks/useReadReceipts";
 import { useSendReadReceipts } from "../hooks/queries/usePreferences";
-import { warmVoiceChannel } from "../utils/voiceWarmup";
 import { PressButton } from "../components/ui/PressButton";
 import { PillButton } from "../components/ui/PillButton";
 import { ConversationHeader } from "../components/Layout/ConversationHeader";
@@ -101,13 +100,6 @@ export const DMPage: React.FC = observer(() => {
   const { togglePins, setSafety } = useRightPanel();
   const verificationByPeer = usePeerVerificationMap();
   const peerVerified = otherUserId ? verificationByPeer.get(otherUserId)?.verified === true : false;
-
-  // Pre-warm the LiveKit connection for a callable DM.
-  useEffect(() => {
-    if (canCall && otherUserId) {
-      warmVoiceChannel(`call-prewarm-${otherUserId}`);
-    }
-  }, [canCall, otherUserId]);
 
   const pendingDmRequest: PendingDmRequest | null = useMemo(() => {
     if (!pendingRequest || !pendingSender) {
@@ -218,11 +210,6 @@ export const DMPage: React.FC = observer(() => {
             data-testid="dm-header-call"
             onClick={() => {
               void startCall();
-            }}
-            onMouseEnter={() => {
-              if (otherUserId) {
-                warmVoiceChannel(`call-prewarm-${otherUserId}`);
-              }
             }}
             aria-label={t("conversation.call", { name: username })}
             title={t("conversation.call", { name: username })}

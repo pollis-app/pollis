@@ -34,11 +34,11 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     let bob_id = bob.user_id().to_owned();
 
     let (alice_key, alice_idx, alice_epoch, alice_group) =
-        voice_e2ee::derive_voice_key(&alice.state, &channel_id, &alice_id, None)
+        voice_e2ee::derive_voice_key(&alice.state, &channel_id, &alice_id, None, None)
             .await
             .expect("alice derive");
     let (bob_key, bob_idx, bob_epoch, bob_group) =
-        voice_e2ee::derive_voice_key(&bob.state, &channel_id, &bob_id, None)
+        voice_e2ee::derive_voice_key(&bob.state, &channel_id, &bob_id, None, None)
             .await
             .expect("bob derive");
 
@@ -98,15 +98,15 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
 
     let carol_id = carol.user_id().to_owned();
     let (alice_key2, alice_idx2, alice_epoch2, _) =
-        voice_e2ee::derive_voice_key(&alice.state, &channel_id, &alice_id, None)
+        voice_e2ee::derive_voice_key(&alice.state, &channel_id, &alice_id, None, None)
             .await
             .expect("alice derive @N+1");
     let (bob_key2, bob_idx2, bob_epoch2, _) =
-        voice_e2ee::derive_voice_key(&bob.state, &channel_id, &bob_id, None)
+        voice_e2ee::derive_voice_key(&bob.state, &channel_id, &bob_id, None, None)
             .await
             .expect("bob derive @N+1");
     let (carol_key, carol_idx, carol_epoch, _) =
-        voice_e2ee::derive_voice_key(&carol.state, &channel_id, &carol_id, None)
+        voice_e2ee::derive_voice_key(&carol.state, &channel_id, &carol_id, None, None)
             .await
             .expect("carol derive @N+1");
 

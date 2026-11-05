@@ -83,6 +83,10 @@ type RealtimeEvent =
     user_id: string;
   }
   | {
+    type: 'voice_roster_changed';
+    channel_id: string;
+  }
+  | {
     type: 'member_role_changed';
     group_id: string;
   }
@@ -453,6 +457,12 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.joinRequests(event.group_id),
         });
+        return;
+      }
+
+      if (event.type === 'voice_roster_changed') {
+        // A peer saw the SFU drop someone who never said goodbye; refetch, no cue.
+        invalidateVoiceRoom(queryClientRef.current, event.channel_id);
         return;
       }
 

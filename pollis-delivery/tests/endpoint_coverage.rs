@@ -67,7 +67,7 @@ async fn an_unrouted_path_is_observably_404() {
 fn the_endpoint_table_covers_the_whole_write_surface() {
     assert_eq!(
         pollis_api::ENDPOINTS.len(),
-        120,
+        121,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

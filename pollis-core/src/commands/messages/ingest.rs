@@ -207,7 +207,7 @@ static CHANNEL_GROUPS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Stri
 
 const CHANNEL_GROUPS_MAX: usize = 1024;
 
-fn cached_channel_group(channel_id: &str) -> Option<String> {
+pub(crate) fn cached_channel_group(channel_id: &str) -> Option<String> {
     CHANNEL_GROUPS
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -215,7 +215,7 @@ fn cached_channel_group(channel_id: &str) -> Option<String> {
         .cloned()
 }
 
-fn remember_channel_group(channel_id: &str, mls_group_id: &str) {
+pub(crate) fn remember_channel_group(channel_id: &str, mls_group_id: &str) {
     // An empty id is the DS not resolving it; never cache that.
     if mls_group_id.is_empty() {
         return;

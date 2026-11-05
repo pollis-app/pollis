@@ -1217,6 +1217,116 @@ pub async fn livekit_identities(
     Ok(ok_response::<LivekitIdentitiesBody>(LivekitIdentitiesResponse { identities }))
 }
 
+/// Most rooms one `room-counts` call may ask about; a sidebar has a handful.
+pub const ROOM_COUNTS_MAX: usize = 64;
+
+/// POST /v1/livekit/room-counts — voice participant counts for a batch of rooms
+/// in ONE request: the sidebar's badges, which used to cost one signed POST (and
+/// one DS→LiveKit call) per voice channel on every refresh. Rooms the signer is
+/// not a member of count 0 rather than failing the batch; so do empty, unhosted
+/// or unreachable rooms (it is a badge, not a roster).
+pub async fn livekit_room_counts(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<LivekitRoomCountsBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    if parsed.rooms.len() > ROOM_COUNTS_MAX {
+        return Ok(bad_request("too many rooms"));
+    }
+    let (api_key, api_secret, url) = match state.broker.livekit_ready() {
+        Some(t) => t,
+        None => return Ok(not_configured("livekit")),
+    };
+    let user_id = match resolve_user(&authed, parsed.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let mut rooms: Vec<String> = Vec::with_capacity(parsed.rooms.len());
+    for room in &parsed.rooms {
+        if !room.trim().is_empty() && !rooms.contains(room) {
+            rooms.push(room.clone());
+        }
+    }
+
+    // Members only, signed path only — the same rule as `participants`, per room.
+    let authorized: Vec<String> = if authed.is_some() {
+        let conn = state.db.conn().await?;
+        let mut ok = Vec::with_capacity(rooms.len());
+        for room in &rooms {
+            if is_member(&conn, room, &user_id).await? {
+                ok.push(room.clone());
+            }
+        }
+        ok
+    } else {
+        rooms.clone()
+    };
+
+    let mut set = tokio::task::JoinSet::new();
+    for room in authorized {
+        let (api_key, api_secret, url) = (api_key.to_string(), api_secret.to_string(), url.to_string());
+        set.spawn(async move {
+            let count = room_voice_count(&api_key, &api_secret, &url, &room).await;
+            (room, count)
+        });
+    }
+    let mut counted: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    while let Some(done) = set.join_next().await {
+        if let Ok((room, count)) = done {
+            counted.insert(room, count);
+        }
+    }
+    let counts = rooms
+        .into_iter()
+        .map(|room| LivekitRoomCount { count: counted.get(&room).copied().unwrap_or(0), room })
+        .collect();
+    Ok(ok_response::<LivekitRoomCountsBody>(LivekitRoomCountsResponse { counts }))
+}
+
+/// Voice participants in `room` via `RoomService/ListParticipants`: `view`
+/// receivers and identities that don't resolve under this room's key are not
+/// counted. Any failure is 0.
+async fn room_voice_count(api_key: &str, api_secret: &str, url: &str, room: &str) -> u32 {
+    let wire_room = crate::room_id::room_pseudonym(api_secret, room);
+    let Ok(token) =
+        sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
+    else {
+        return 0;
+    };
+    let endpoint = format!("{}/twirp/livekit.RoomService/ListParticipants", twirp_base(url));
+    #[derive(Deserialize)]
+    struct RsResp {
+        #[serde(default)]
+        participants: Vec<RsParticipant>,
+    }
+    #[derive(Deserialize)]
+    struct RsParticipant {
+        #[serde(default)]
+        identity: String,
+    }
+    let listed = crate::util::http_post(crate::util::Upstream::LiveKit, &endpoint)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "room": wire_room }))
+        .send()
+        .await;
+    let Ok(resp) = listed else { return 0 };
+    if !resp.status().is_success() {
+        return 0;
+    }
+    let Ok(parsed) = resp.json::<RsResp>().await else { return 0 };
+    parsed
+        .participants
+        .iter()
+        .filter(|p| {
+            crate::participant_id::resolve_participant(api_secret, room, &p.identity)
+                .is_some_and(|(_, kind)| kind != crate::participant_id::ParticipantKind::View)
+        })
+        .count() as u32
+}
+
 /// Default presigned-URL lifetime, in seconds.
 const PRESIGN_EXPIRES_SECS: u64 = 900;
 

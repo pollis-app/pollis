@@ -32,12 +32,24 @@ const VOICE_KEY_LEN: usize = 32;
 /// exporter secret backs the voice key.
 ///
 /// Group channel → parent group; DM → itself; `call-*` → the two users' 1:1 DM.
+///
+/// `group_hint` is the renderer's own knowledge of the channel's group (its
+/// `VoiceIntent.groupId`): with it, or with the channel already resolved once
+/// this process (`messages::ingest` remembers channel → group), the DS round
+/// trip is skipped. The DS answer is still what gets remembered.
 async fn resolve_mls_group_id(
     state: &Arc<AppState>,
     channel_id: &str,
     self_user_id: &str,
     counterparty_user_id: Option<&str>,
+    group_hint: Option<&str>,
 ) -> Result<String> {
+    if let Some(group) = group_hint.filter(|g| !g.is_empty()) {
+        return Ok(group.to_string());
+    }
+    if let Some(cached) = crate::commands::messages::cached_channel_group(channel_id) {
+        return Ok(cached);
+    }
     if channel_id.starts_with("call-") {
         let other = counterparty_user_id.ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
@@ -55,7 +67,9 @@ async fn resolve_mls_group_id(
     }
 
     // A channel resolves to its group; a DM id is its own MLS group.
-    crate::commands::mls::ds_reads::resolve_mls_group(state, channel_id).await
+    let resolved = crate::commands::mls::ds_reads::resolve_mls_group(state, channel_id).await?;
+    crate::commands::messages::remember_channel_group(channel_id, &resolved);
+    Ok(resolved)
 }
 
 /// Join-time entry: returns `(key, key_index, epoch, mls_group_id)`.
@@ -67,9 +81,11 @@ pub async fn derive_voice_key(
     channel_id: &str,
     self_user_id: &str,
     counterparty_user_id: Option<&str>,
+    group_hint: Option<&str>,
 ) -> Result<(Vec<u8>, i32, u64, String)> {
     let mls_group_id =
-        resolve_mls_group_id(state, channel_id, self_user_id, counterparty_user_id).await?;
+        resolve_mls_group_id(state, channel_id, self_user_id, counterparty_user_id, group_hint)
+            .await?;
     // Catch up MLS first, else peers on different epochs derive different keys.
     // Runs concurrently with the remote-epoch read, which can only be stale.
     let (_, remote_epoch) = tokio::join!(
@@ -170,6 +186,7 @@ pub async fn get_voice_e2ee_key(
         &channel_id,
         &user_id,
         counterparty_user_id.as_deref(),
+        None,
     )
     .await?;
     Ok(E2eeKeyInfo {
@@ -244,6 +261,35 @@ pub fn build_e2ee_options(key: Vec<u8>, key_index: i32) -> E2eeOptions {
         encryption_type: EncryptionType::Gcm,
         key_provider: kp,
     }
+}
+
+/// `E2eeOptions` whose ring holds NO key yet, so `Room::connect` can start while
+/// the MLS derivation is still running; [`arm_key_provider`] installs the key
+/// before anything is published. Every slot holds random bytes until then, so a
+/// frame that arrives early fails to decrypt rather than passing through.
+pub fn build_unarmed_e2ee_options() -> E2eeOptions {
+    let options = KeyProviderOptions {
+        key_ring_size: VOICE_KEY_RING_SIZE,
+        ..KeyProviderOptions::default()
+    };
+    let mut junk = vec![0u8; VOICE_KEY_LEN];
+    OsRng.fill_bytes(&mut junk);
+    // `with_shared_key` is the only constructor that marks the provider shared.
+    let kp = KeyProvider::with_shared_key(options, junk);
+    E2eeOptions {
+        encryption_type: EncryptionType::Gcm,
+        key_provider: kp,
+    }
+}
+
+/// Put the join key in slot `key_index` of a provider built by
+/// [`build_unarmed_e2ee_options`]; the placeholder in slot 0 is scrubbed unless
+/// that is the join slot. Returns whether the key landed.
+pub fn arm_key_provider(kp: &KeyProvider, key: Vec<u8>, key_index: i32) -> bool {
+    if key_index != 0 {
+        scrub_slot(kp, 0);
+    }
+    install_shared_key(kp, key, key_index)
 }
 
 /// Install `key` in slot `key_index`; read-back is the only failure signal.

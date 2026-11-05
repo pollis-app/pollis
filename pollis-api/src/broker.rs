@@ -48,6 +48,31 @@ pub struct LivekitParticipantsBody {
     pub user_id: Option<String>,
 }
 
+/// `POST /v1/livekit/room-counts` — voice participant counts for a BATCH of rooms
+/// in one request (the sidebar's badges). Additive: a DS without it answers 404
+/// and the client falls back to one `participants` call per room.
+#[derive(Serialize, Deserialize)]
+pub struct LivekitRoomCountsBody {
+    /// The logical rooms (voice channel ids) to count; capped server-side.
+    pub rooms: Vec<String>,
+    /// No-auth path only; ignored when auth is enforced.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LivekitRoomCount {
+    pub room: String,
+    pub count: u32,
+}
+
+/// Every requested room, in request order; rooms the caller may not read count 0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LivekitRoomCountsResponse {
+    #[serde(default)]
+    pub counts: Vec<LivekitRoomCount>,
+}
+
 /// Resolve opaque LiveKit participant identities back to Pollis users (#836).
 ///
 /// The per-room key stays server-side (#828); authz matches minting a token for `room`.

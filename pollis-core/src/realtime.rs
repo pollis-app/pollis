@@ -54,6 +54,10 @@ pub enum RealtimeEvent {
         channel_id: String,
         user_id: String,
     },
+    /// A peer in the voice channel saw the SFU drop someone: refetch the roster.
+    VoiceRosterChanged {
+        channel_id: String,
+    },
     /// Sent to a group room when a member's role changes (admin ↔ member).
     MemberRoleChanged {
         group_id: String,
