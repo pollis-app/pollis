@@ -207,7 +207,7 @@ static CHANNEL_GROUPS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Stri
 
 const CHANNEL_GROUPS_MAX: usize = 1024;
 
-fn cached_channel_group(channel_id: &str) -> Option<String> {
+pub(crate) fn cached_channel_group(channel_id: &str) -> Option<String> {
     CHANNEL_GROUPS
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -215,7 +215,7 @@ fn cached_channel_group(channel_id: &str) -> Option<String> {
         .cloned()
 }
 
-fn remember_channel_group(channel_id: &str, mls_group_id: &str) {
+pub(crate) fn remember_channel_group(channel_id: &str, mls_group_id: &str) {
     // An empty id is the DS not resolving it; never cache that.
     if mls_group_id.is_empty() {
         return;
@@ -326,27 +326,43 @@ async fn catch_up_once(
     );
 
     // Advance each watermark via the DS (best-effort). Envelope GC runs server-side (#689).
-    // Independent posts, so they and the receipts go out together (#1610).
-    let watermarks = futures_util::future::join_all(results.iter().filter_map(|res| {
-        let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) else {
-            return None;
-        };
-        let cid = res.conversation_id.clone();
-        let body = pollis_api::messages::WatermarkBody {
-            conversation_id: cid.clone(),
-            user_id: Some(user_id.to_string()),
-            device_id: did.clone(),
-            // The cursor (#1087). `last_fetched_at` rides along for the
-            // legacy column only; delivery and retention read `last_seq`.
-            last_seq: Some(*seq),
-            last_fetched_at: sent_at.clone(),
-        };
-        Some(async move {
-            if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
-                crate::diag!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
-            }
+    // Independent posts, so they and the receipts go out together (#1610). Nothing here
+    // waits on them: the pass's caller (a voice join among others) has what it came for,
+    // and the DS keeps the highest cursor whatever order two passes' posts land in.
+    let watermark_bodies: Vec<pollis_api::messages::WatermarkBody> = results
+        .iter()
+        .filter_map(|res| {
+            let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) else {
+                return None;
+            };
+            Some(pollis_api::messages::WatermarkBody {
+                conversation_id: res.conversation_id.clone(),
+                user_id: Some(user_id.to_string()),
+                device_id: did.clone(),
+                // The cursor (#1087). `last_fetched_at` rides along for the
+                // legacy column only; delivery and retention read `last_seq`.
+                last_seq: Some(*seq),
+                last_fetched_at: sent_at.clone(),
+            })
         })
-    }));
+        .collect();
+    let watermark_state = Arc::clone(state);
+    let watermarks = async move {
+        if watermark_bodies.is_empty() {
+            return;
+        }
+        tokio::spawn(async move {
+            futures_util::future::join_all(watermark_bodies.iter().map(|body| async {
+                if let Err(e) = crate::commands::mls::ds_post_ok(&watermark_state, body).await {
+                    crate::diag!(
+                        "[watermark] catch_up_group: DS advance failed for {}: {e}",
+                        body.conversation_id
+                    );
+                }
+            }))
+            .await;
+        });
+    };
 
     // Delivery receipts (#857), batched per conversation; `emit_receipt` re-checks the gates. Best-effort.
     let receipts = async {

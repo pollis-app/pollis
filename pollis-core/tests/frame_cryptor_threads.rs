@@ -149,8 +149,15 @@ async fn cryptors_settle(room: &livekit::Room, expected: usize) -> usize {
 
 /// The real join/leave shape against a live SFU: two E2EE participants publish to each other
 /// (one sender + one receiver cryptor each), then `room.close()` + drop. Needs
-/// `POLLIS_TEST_LIVEKIT_URL` (the lab's `ws://127.0.0.1:7880`, dev key `devkey` / secret `secret`);
-/// skipped otherwise.
+/// `POLLIS_TEST_LIVEKIT_URL` (the lab's `ws://127.0.0.1:7880`, dev key `devkey` / secret `secret`).
+///
+/// Ignored because it FAILS on livekit 0.9.5: measured 4 → 8 → 10 transformer threads
+/// after three close+drop cycles (two participants, sender + receiver each), while the
+/// test above shows raw libwebrtc releases the thread the moment its PeerConnection is
+/// dropped. The SDK keeps its session (and so its PeerConnections) alive past `close()`;
+/// nothing on this side of the API can drop them. Run with `--ignored` to re-measure
+/// after an SDK bump.
+#[ignore = "upstream: livekit 0.9.5 leaks FrameCryptorTransformer threads past Room::close (see doc)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_closed_room_releases_its_transformer_threads() {
     use livekit::prelude::*;

@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc, LazyLock,
 };
 use std::time::{Duration, Instant};
 
@@ -14,6 +14,7 @@ use livekit::{
     prelude::*,
     track::{LocalAudioTrack, LocalTrack, RemoteTrack},
 };
+use tokio::sync::Notify;
 
 use crate::{
     commands::{
@@ -29,7 +30,7 @@ use crate::{
     state::AppState,
 };
 
-use super::devices::get_device;
+use super::devices::{get_device, warm_device_cache};
 use super::gate::{TransmitGate, VoiceGateState, VoiceInputMode};
 use super::join::{
     classify_connect_error, classify_ds_error, disconnect_is_retryable, reconnect_delay,
@@ -42,6 +43,15 @@ use super::types::{
     user_id_from_voice_identity, JoinTimings, SendableStream, VoiceEvent, VoiceState,
     VoiceWarmup, VOICE_WARMUP_TTL,
 };
+
+/// How long the join waits for the microphone before going on listen-only.
+/// ALSA enumeration on a busy PipeWire box has been seen to take 4–8 s; the
+/// join must not.
+const MIC_OPEN_BUDGET: Duration = Duration::from_secs(6);
+
+/// How long a join waits for a warmup already in flight for its channel before
+/// minting its own token (the auto-join racing the route-entry warm).
+const WARM_INFLIGHT_WAIT: Duration = Duration::from_millis(1500);
 
 /// Mirror gate state onto the lock-free atomics the audio paths read.
 fn publish_gate(voice: &VoiceState, gate: &TransmitGate) {
@@ -89,7 +99,47 @@ pub async fn subscribe_voice_events(
     Ok(())
 }
 
-/// Warmup before Join: pre-mint the token and prime DNS/TLS/conn pool.
+/// Warmups in flight, by channel, so a join that arrives mid-warm waits for that
+/// token instead of minting a second one.
+static WARM_INFLIGHT: LazyLock<std::sync::Mutex<HashMap<String, Arc<Notify>>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+pub(super) fn warm_inflight(channel_id: &str) -> Option<Arc<Notify>> {
+    WARM_INFLIGHT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(channel_id)
+        .cloned()
+}
+
+/// Marks `channel_id` as warming; the returned guard clears it and wakes waiters.
+pub(super) fn begin_warm(channel_id: &str) -> Option<WarmGuard> {
+    let mut map = WARM_INFLIGHT.lock().unwrap_or_else(|p| p.into_inner());
+    if map.contains_key(channel_id) {
+        return None;
+    }
+    let notify = Arc::new(Notify::new());
+    map.insert(channel_id.to_string(), Arc::clone(&notify));
+    Some(WarmGuard { channel_id: channel_id.to_string(), notify })
+}
+
+pub(super) struct WarmGuard {
+    channel_id: String,
+    notify: Arc<Notify>,
+}
+
+impl Drop for WarmGuard {
+    fn drop(&mut self) {
+        WARM_INFLIGHT
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.channel_id);
+        self.notify.notify_waiters();
+    }
+}
+
+/// Warmup before Join: pre-mint the token, prime DNS/TLS, and enumerate the
+/// audio devices so the join opens the mic without an ALSA scan.
 /// Same channel_id is a no-op; a different one supersedes it.
 pub async fn prepare_voice_connection(
     channel_id: String,
@@ -115,6 +165,10 @@ pub async fn prepare_voice_connection(
             }
         }
     }
+    let Some(_warming) = begin_warm(&channel_id) else {
+        return Ok(());
+    };
+    warm_device_cache();
 
     // Pre-fetch the DS-minted token; best-effort.
     let (token, ds_url) = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
@@ -206,6 +260,7 @@ impl Drop for JoinGuard {
 #[derive(Default)]
 struct JoinPartial {
     room: Option<Arc<Room>>,
+    room_task: Option<tokio::task::JoinHandle<()>>,
     mic_stream: Option<SendableStream>,
     frame_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -215,10 +270,15 @@ impl JoinPartial {
         if let Some(t) = self.frame_task {
             t.abort();
         }
+        if let Some(t) = self.room_task {
+            t.abort();
+        }
         if let Ok(mut slot) = state.voice.lock().await.denoiser.lock() {
             *slot = None;
         }
         if let Some(room) = self.room {
+            // A room the task was already driving may be the one the state holds.
+            let _ = release_voice_resources(state, false, Some(&room)).await;
             // The caller is on its way out; closing can hang on a dead link.
             tokio::spawn(async move {
                 let _ = tokio::time::timeout(Duration::from_secs(5), room.close()).await;
@@ -248,6 +308,8 @@ pub async fn join_voice_channel(
     audio_processing: voice_apm::ApmConfig,
     // 1:1 call peer; required for `call-` rooms (no DB row), else ignored.
     counterparty_user_id: Option<String>,
+    // The channel's group as the renderer knows it: saves the MLS-group resolve round trip.
+    group_id: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
     // Refuse re-entry: two same-identity joins trip DuplicateIdentity.
@@ -273,6 +335,7 @@ pub async fn join_voice_channel(
         output_device,
         audio_processing,
         counterparty_user_id,
+        group_id,
     };
     match join_inner(&clock, args, state).await {
         Ok(()) => Ok(()),
@@ -291,19 +354,59 @@ struct JoinArgs {
     output_device: Option<String>,
     audio_processing: voice_apm::ApmConfig,
     counterparty_user_id: Option<String>,
+    group_id: Option<String>,
 }
 
 /// What the room task needs to translate and attribute events for one session.
 struct RoomContext {
     /// Logical room, to resolve room-scoped pseudonyms (#836).
     logical_room: String,
+    /// The realtime room whose members watch this voice channel (the group, or the DM).
+    presence_room: String,
     /// Self-hear filter: don't play this user's other devices (#140).
     local_user_id: String,
     local_identity: String,
     display_name: String,
-    apm_rate: u32,
+    /// Set once the mic is known (before `playback_ready` opens); 0 until then.
+    apm_rate: AtomicU32,
     /// Internal identities of the remote participants the renderer currently shows.
     known_remote: Arc<std::sync::Mutex<HashSet<String>>>,
+    /// Presence events run off the event loop but in arrival order.
+    presence_lane: Arc<tokio::sync::Mutex<()>>,
+    /// Raised once playback exists (or failed): `TrackSubscribed` must not register
+    /// a track before the mixer, which would drop it on `ensure_playback`.
+    playback_ready: Arc<Gate>,
+}
+
+/// A one-shot, many-waiter flag.
+#[derive(Default)]
+pub(super) struct Gate {
+    open: AtomicBool,
+    notify: Notify,
+}
+
+impl Gate {
+    fn open(&self) {
+        self.open.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        let notified = self.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.open.load(Ordering::Acquire) {
+            return;
+        }
+        notified.await;
+    }
+}
+
+/// The mic phase's outcome; listen-only when the device could not be opened in time.
+struct MicOutcome {
+    stream: Option<SendableStream>,
+    rate: u32,
+    init_ms: u64,
 }
 
 async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) -> std::result::Result<(), VoiceJoinError> {
@@ -315,6 +418,7 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         output_device,
         audio_processing,
         counterparty_user_id,
+        group_id,
     } = args;
     let join_start = Instant::now();
     let join_started_at_ms = std::time::SystemTime::now()
@@ -327,6 +431,13 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
     let device_id = state.device_id.lock().await.clone();
     let local_identity = voice_identity(&user_id, device_id.as_deref());
 
+    // A warm already running for this channel (route entry vs auto-join) is cheaper
+    // to wait for than a second mint.
+    if let Some(inflight) = warm_inflight(&channel_id) {
+        let _ = clock
+            .run("token", tokio::time::timeout(WARM_INFLIGHT_WAIT, inflight.notified()))
+            .await?;
+    }
     // VoiceWarmup is Drop: clone the token out, don't destructure.
     let cached_token: Option<(String, String)> = {
         let mut voice = state.voice.lock().await;
@@ -374,7 +485,6 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
     // #836: pin our pseudonym first so our own events land on our tile.
     pin_local_identity(state, &channel_id, &token, &local_identity, &display_name).await;
 
-    // Room connect and mic init run concurrently (tokio::join!).
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
     // Reset session gate bits; input mode (a pref) survives.
     let is_muted = {
@@ -387,139 +497,222 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         Arc::clone(&voice.transmit_muted)
     };
 
-    let input_device_clone = input_device.clone();
-
-    // Voice key from the MLS exporter; fail closed, never unencrypted.
-    // Must precede connect: `RoomOptions::encryption` carries the key.
-    let e2ee_start = Instant::now();
-    let derived = clock
-        .run(
-            "e2ee",
-            voice_e2ee::derive_voice_key(
-                state,
-                &channel_id,
-                &user_id,
-                counterparty_user_id.as_deref(),
-            ),
-        )
-        .await?;
-    let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) =
-        derived.map_err(|e| classify_ds_error(&e))?;
-    let e2ee_ms = e2ee_start.elapsed().as_millis() as u64;
-    let e2ee_options = voice_e2ee::build_e2ee_options(voice_key, voice_key_index);
-    let key_provider_for_state = e2ee_options.key_provider.clone();
-    crate::diag!(
-        "[voice] e2ee armed for {channel_id} (mls_group={voice_mls_group_id}, epoch={voice_epoch}, ring slot={voice_key_index})"
-    );
-
-    let connect_started = Instant::now();
-    let mic_started = Instant::now();
-    crate::diag!("[voice] connecting to room {channel_id} and opening mic in parallel…");
-
+    // E2EE: the provider goes into `RoomOptions` now, its key lands before anything
+    // is published; the MLS derivation runs alongside connect and the mic.
+    let e2ee_options = voice_e2ee::build_unarmed_e2ee_options();
+    let key_provider = e2ee_options.key_provider.clone();
     let mut room_options = RoomOptions::default();
     room_options.encryption = Some(e2ee_options);
     // Subscriber-driven video: tiles report their size, the SFU sends only the layer that fits
     // and pauses what nobody shows; the publisher stops encoding layers nobody takes.
     (room_options.adaptive_stream, room_options.dynacast) = (true, true);
-    let connect_fut = async {
-        let r = Room::connect(&url, &token, room_options).await;
-        let elapsed_ms = connect_started.elapsed().as_millis() as u64;
-        (r, elapsed_ms)
-    };
-    let mic_fut = async {
-        tokio::task::spawn_blocking(move || {
-            // Test seam: e2e listen-only path without unplugging a mic.
-            if std::env::var("POLLIS_DISABLE_MIC").is_ok() {
-                return Err(anyhow::anyhow!("mic disabled via POLLIS_DISABLE_MIC").into());
-            }
-            let host = cpal::default_host();
-            let dev = get_device(&host, input_device_clone.as_deref(), true)?;
-            crate::diag!("[voice] mic device opened");
-            let r = start_mic_stream(&dev, frame_tx, is_muted);
-            let elapsed_ms = mic_started.elapsed().as_millis() as u64;
-            r.map(|(stream, rate)| (stream, rate, elapsed_ms))
-        })
-        .await
+
+    let ctx = Arc::new(RoomContext {
+        logical_room: channel_id.clone(),
+        // Filled in once the derivation names the MLS group; see below.
+        presence_room: String::new(),
+        local_user_id: user_id.clone(),
+        local_identity: local_identity.clone(),
+        display_name: display_name.clone(),
+        apm_rate: AtomicU32::new(0),
+        known_remote: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        presence_lane: Arc::new(tokio::sync::Mutex::new(())),
+        playback_ready: Arc::new(Gate::default()),
+    });
+
+    crate::diag!("[voice] {channel_id}: connect ‖ mic+speaker ‖ MLS key, all at once");
+    let connect_started = Instant::now();
+    let connect_fut = {
+        let state = Arc::clone(state);
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let r = Room::connect(&url, &token, room_options).await;
+            let elapsed_ms = connect_started.elapsed().as_millis() as u64;
+            // The event task starts the moment the room exists: already-present peers'
+            // `TrackSubscribed` must not wait on the roster or the avatar lookup.
+            let r = r.map(|(room, events)| {
+                let room = Arc::new(room);
+                let task = tokio::spawn(run_room_task(state, Arc::clone(&room), events, ctx));
+                (room, task)
+            });
+            (r, elapsed_ms)
+        }
     };
 
-    // A cancelled connect drops the half-open session; a cancelled mic open
-    // finishes on its blocking thread and drops the stream there.
-    let (connect_pair, mic_res) = clock.run("connect", async { tokio::join!(connect_fut, mic_fut) }).await?;
-    let (connect_res, room_connect_ms) = connect_pair;
-    let (room, events) = match connect_res {
+    let e2ee_start = Instant::now();
+    let derive_fut = async {
+        let r = voice_e2ee::derive_voice_key(
+            state,
+            &channel_id,
+            &user_id,
+            counterparty_user_id.as_deref(),
+            group_id.as_deref(),
+        )
+        .await;
+        (r, e2ee_start.elapsed().as_millis() as u64)
+    };
+
+    // Mic → APM → speaker, chained: the speaker needs the mic's rate (A2 owns both
+    // bodies; this is only where they are called from).
+    let mic_started = Instant::now();
+    let input_device_clone = input_device.clone();
+    let audio_processing_for_mic = audio_processing.clone();
+    let output_device_for_mic = output_device.clone();
+    let voice_for_mic = Arc::clone(&state.voice);
+    let ctx_for_mic = Arc::clone(&ctx);
+    let mic_chain = async move {
+        let opened = tokio::time::timeout(
+            MIC_OPEN_BUDGET,
+            tokio::task::spawn_blocking(move || {
+                // Test seam: e2e listen-only path without unplugging a mic.
+                if std::env::var("POLLIS_DISABLE_MIC").is_ok() {
+                    return Err(anyhow::anyhow!("mic disabled via POLLIS_DISABLE_MIC").into());
+                }
+                let host = cpal::default_host();
+                let dev = get_device(&host, input_device_clone.as_deref(), true)?;
+                crate::diag!("[voice] mic device opened");
+                start_mic_stream(&dev, frame_tx, is_muted)
+            }),
+        )
+        .await;
+        // Mic is best-effort: on failure (or a device that takes longer than the
+        // budget) join listen-only. A late stream drops on its blocking thread.
+        let mic = match opened {
+            Ok(Ok(Ok((stream, rate)))) => MicOutcome {
+                stream: Some(stream),
+                rate,
+                init_ms: mic_started.elapsed().as_millis() as u64,
+            },
+            Ok(Ok(Err(e))) => {
+                crate::diag!("[voice] mic unavailable — joining listen-only: {e}");
+                MicOutcome { stream: None, rate: 48_000, init_ms: 0 }
+            }
+            Ok(Err(e)) => {
+                crate::diag!("[voice] mic init panicked — joining listen-only: {e}");
+                MicOutcome { stream: None, rate: 48_000, init_ms: 0 }
+            }
+            Err(_) => {
+                crate::diag!(
+                    "[voice] mic did not open within {}s — joining listen-only",
+                    MIC_OPEN_BUDGET.as_secs()
+                );
+                MicOutcome { stream: None, rate: 48_000, init_ms: 0 }
+            }
+        };
+        let has_mic = mic.stream.is_some();
+        // Listen-only still needs a nominal rate; 48 kHz.
+        let mic_rate = mic.rate;
+        ctx_for_mic.apm_rate.store(mic_rate, Ordering::Release);
+
+        // APM needs 8/16/32/48 kHz; skipped otherwise and on listen-only.
+        let apm_stage = if has_mic {
+            match voice_apm::ApmStage::new(mic_rate, audio_processing_for_mic.clone()) {
+                Ok(stage) => Some(stage),
+                Err(e) => {
+                    crate::diag!("[voice] APM disabled: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let apm_handle = apm_stage.as_ref().map(|s| s.handle());
+        let apm_frame_samples = voice_apm::frame_samples(mic_rate);
+
+        // RNNoise is 48 kHz-only; other rates pass straight to APM.
+        let denoiser_arc = Arc::clone(&{
+            let voice = voice_for_mic.lock().await;
+            Arc::clone(&voice.denoiser)
+        });
+        {
+            let mut slot = denoiser_arc.lock().unwrap();
+            *slot = if has_mic && audio_processing_for_mic.click_suppression && mic_rate == voice_denoiser::REQUIRED_RATE_HZ {
+                crate::diag!("[voice/rnnoise] engaged @ {mic_rate} Hz");
+                Some(voice_denoiser::DenoiserStage::new())
+            } else {
+                if has_mic && audio_processing_for_mic.click_suppression {
+                    crate::diag!(
+                        "[voice/rnnoise] requested but mic rate is {mic_rate} Hz; \
+                         RNNoise needs 48000 Hz — disabling for this session"
+                    );
+                }
+                None
+            };
+        }
+
+        // Open playback before any TrackSubscribed is processed (the gate below).
+        let speaker_ok = match ensure_playback(
+            Arc::clone(&voice_for_mic),
+            output_device_for_mic,
+            apm_handle.clone(),
+            mic_rate,
+            apm_frame_samples,
+        )
+        .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
+                false
+            }
+        };
+        ctx_for_mic.playback_ready.open();
+        (mic, apm_stage, apm_handle, denoiser_arc, speaker_ok)
+    };
+
+    let ((connect_res, room_connect_ms), (mic, apm_stage, apm_handle, denoiser_arc, speaker_ok), (derive_res, e2ee_ms)) =
+        match clock.run("connect", async { tokio::join!(connect_fut, mic_chain, derive_fut) }).await {
+            Ok(all) => all,
+            Err(e) => {
+                // The gate opens on every path so a task already spawned never parks forever.
+                ctx.playback_ready.open();
+                partial.discard(state).await;
+                return Err(e);
+            }
+        };
+    partial.mic_stream = mic.stream;
+    let has_mic = partial.mic_stream.is_some();
+    let mic_rate = mic.rate;
+    let mic_init_ms = mic.init_ms;
+
+    let (room, room_task) = match connect_res {
         Ok(pair) => pair,
         Err(e) => {
-            if let Ok(Ok((stream, _, _))) = mic_res {
-                partial.mic_stream = Some(stream);
-            }
             let err = classify_connect_error(&e);
             partial.discard(state).await;
             return Err(err);
         }
     };
-
-    // Mic is best-effort: on failure join listen-only.
-    let mic = match mic_res {
-        Ok(Ok(v)) => Some(v),
-        Ok(Err(e)) => {
-            crate::diag!("[voice] mic unavailable — joining listen-only: {e}");
-            None
-        }
-        Err(e) => {
-            crate::diag!("[voice] mic init panicked — joining listen-only: {e}");
-            None
-        }
-    };
-    let has_mic = mic.is_some();
-    // Listen-only still needs a nominal rate; 48 kHz.
-    let mic_rate = mic.as_ref().map(|(_, r, _)| *r).unwrap_or(48_000);
-    let mic_init_ms = mic.as_ref().map(|(_, _, ms)| *ms).unwrap_or(0);
-    let mic_stream = mic.map(|(s, _, _)| s);
+    partial.room = Some(Arc::clone(&room));
+    partial.room_task = Some(room_task);
     if has_mic {
         crate::diag!("[voice] connected to room {channel_id}, mic at {mic_rate} Hz");
     } else {
         crate::diag!("[voice] connected to room {channel_id}, listen-only (no mic)");
     }
 
-    let room = Arc::new(room);
-    partial.room = Some(Arc::clone(&room));
-    partial.mic_stream = mic_stream;
-
-    // APM needs 8/16/32/48 kHz; skipped otherwise and on listen-only.
-    let apm_stage = if has_mic {
-        match voice_apm::ApmStage::new(mic_rate, audio_processing.clone()) {
-            Ok(stage) => Some(stage),
-            Err(e) => {
-                crate::diag!("[voice] APM disabled: {e}");
-                None
-            }
+    // Voice key from the MLS exporter; fail closed, never unencrypted.
+    let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) = match derive_res {
+        Ok(t) => t,
+        Err(e) => {
+            let err = classify_ds_error(&e);
+            partial.discard(state).await;
+            return Err(err);
         }
-    } else {
-        None
     };
-    let apm_handle = apm_stage.as_ref().map(|s| s.handle());
-    let apm_frame_samples = voice_apm::frame_samples(mic_rate);
-
-    // RNNoise is 48 kHz-only; other rates pass straight to APM.
-    let denoiser_arc = Arc::clone(&{
-        let voice = state.voice.lock().await;
-        Arc::clone(&voice.denoiser)
-    });
-    {
-        let mut slot = denoiser_arc.lock().unwrap();
-        *slot = if has_mic && audio_processing.click_suppression && mic_rate == voice_denoiser::REQUIRED_RATE_HZ {
-            crate::diag!("[voice/rnnoise] engaged @ {mic_rate} Hz");
-            Some(voice_denoiser::DenoiserStage::new())
-        } else {
-            if has_mic && audio_processing.click_suppression {
-                crate::diag!(
-                    "[voice/rnnoise] requested but mic rate is {mic_rate} Hz; \
-                     RNNoise needs 48000 Hz — disabling for this session"
-                );
-            }
-            None
-        };
+    if !voice_e2ee::arm_key_provider(&key_provider, voice_key, voice_key_index) {
+        partial.discard(state).await;
+        return Err(VoiceJoinError::Internal { detail: "voice key install rejected".into() });
     }
+    crate::diag!(
+        "[voice] e2ee armed for {channel_id} (mls_group={voice_mls_group_id}, epoch={voice_epoch}, ring slot={voice_key_index})"
+    );
+    // The room task only needs this for a `ParticipantDisconnected` nudge, which it
+    // can't see before the join is stored; set once, read after.
+    let ctx = Arc::new(RoomContext {
+        presence_room: voice_mls_group_id.clone(),
+        ..RoomContext::clone_from(&ctx)
+    });
 
     let mut audio_source_opt: Option<NativeAudioSource> = None;
     let mut local_track_opt: Option<LocalAudioTrack> = None;
@@ -665,37 +858,9 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         partial.frame_task = Some(frame_task);
     }
 
-    // Open playback before the event loop: first TrackSubscribed needs it.
-    let speaker_ok = match clock
-        .run(
-            "speaker",
-            ensure_playback(
-                Arc::clone(&state.voice),
-                output_device.clone(),
-                apm_handle.clone(),
-                mic_rate,
-                apm_frame_samples,
-            ),
-        )
-        .await
-    {
-        Ok(Ok(())) => true,
-        Ok(Err(e)) => {
-            crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
-            false
-        }
-        Err(e) => {
-            partial.discard(state).await;
-            return Err(e);
-        }
-    };
-
-    // Seed roster only; TrackSubscribed attaches tracks (twice would race).
+    // Seed roster: names now (one DS resolve), avatars after `Ok` (one more, off the join).
     let roster_start = Instant::now();
-    let seeded = match clock
-        .run("roster", roster_snapshot(state, &room, &channel_id, Some(&local_identity)))
-        .await
-    {
+    let seeded = match clock.run("roster", roster_identities(state, &room, &channel_id)).await {
         Ok(s) => s,
         Err(e) => {
             partial.discard(state).await;
@@ -703,6 +868,10 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         }
     };
     let roster_ms = roster_start.elapsed().as_millis() as u64;
+    {
+        let mut known = ctx.known_remote.lock().unwrap();
+        known.extend(seeded.iter().map(|p| p.identity.clone()));
+    }
 
     let total_join_ms = join_start.elapsed().as_millis() as u64;
     let timings = JoinTimings {
@@ -728,25 +897,20 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         total_join_ms,
     );
 
-    let known_remote: HashSet<String> = seeded.remote.iter().map(|p| p.identity.clone()).collect();
-    let ctx = Arc::new(RoomContext {
-        logical_room: channel_id.clone(),
-        local_user_id: user_id.clone(),
-        local_identity: local_identity.clone(),
-        display_name: display_name.clone(),
-        apm_rate: mic_rate,
-        known_remote: Arc::new(std::sync::Mutex::new(known_remote)),
-    });
-
-    // Store the session and start its event task under ONE lock: a `Disconnected`
-    // that races the store must find the room it belongs to, not an empty slot.
+    // Store the session under ONE lock, checking the task is still driving a live
+    // room: a `Disconnected` that raced the join must not be stored as a session.
     let mut voice = state.voice.lock().await;
     if clock_cancelled(&voice) {
         drop(voice);
         partial.discard(state).await;
         return Err(VoiceJoinError::Cancelled);
     }
-    let JoinPartial { room: _, mic_stream, frame_task } = partial;
+    if partial.room_task.as_ref().is_some_and(|t| t.is_finished()) {
+        drop(voice);
+        partial.discard(state).await;
+        return Err(VoiceJoinError::LivekitUnreachable { detail: "room closed during join".into() });
+    }
+    let JoinPartial { room: _, room_task, mic_stream, frame_task } = partial;
     if let Some(t) = voice.room_task.take() { t.abort(); }
     if let Some(t) = voice.frame_task.take() { t.abort(); }
     voice.room = Some(Arc::clone(&room));
@@ -755,19 +919,14 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
     voice.audio_source = audio_source_opt;
     voice.input_stream = mic_stream;
     voice.frame_task = frame_task;
+    voice.room_task = room_task;
     voice.current_input_device = input_device;
     voice.apm = apm_stage;
-    voice.e2ee_key_provider = Some(key_provider_for_state);
+    voice.e2ee_key_provider = Some(key_provider);
     voice.e2ee_mls_group_id = Some(voice_mls_group_id);
     voice.e2ee_epoch = voice_epoch;
     voice.e2ee_key_index = voice_key_index;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
-    voice.room_task = Some(tokio::spawn(run_room_task(
-        Arc::clone(state),
-        Arc::clone(&room),
-        events,
-        ctx,
-    )));
 
     // Publications start unmuted; sync so PTT joins aren't shown hot.
     {
@@ -775,15 +934,12 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         apply_gate_to_room(&voice, &gate);
     }
 
+    let mut avatar_wanted: Vec<(String, String, bool)> = Vec::with_capacity(seeded.len() + 1);
+    avatar_wanted.push((local_identity.clone(), display_name.clone(), false));
     if let Some(ch) = &voice.channel {
-        let _ = ch.send(VoiceEvent::ParticipantJoined {
-            identity: local_identity.clone(),
-            name: display_name.clone(),
-            is_muted: false,
-            avatar_url: seeded.local_avatar_url,
-        });
-        for p in seeded.remote {
+        for p in seeded {
             crate::diag!("[voice] existing participant: {} muted={}", p.identity, p.is_muted);
+            avatar_wanted.push((p.identity.clone(), p.name.clone(), p.is_muted));
             let _ = ch.send(p.joined_event());
         }
         // Tell the renderer if this session can transmit (listen-only UI) and hear.
@@ -798,8 +954,51 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
             });
         }
     }
+    drop(voice);
+
+    // Avatars arrive as a second `participant_joined` per tile (an upsert in the
+    // renderer), so the join never waits on them.
+    tokio::spawn(deliver_avatars(Arc::clone(state), avatar_wanted));
 
     Ok(())
+}
+
+impl RoomContext {
+    /// A copy sharing every live handle (gate, roster, lane); only plain fields are duplicated.
+    fn clone_from(other: &Arc<RoomContext>) -> RoomContext {
+        RoomContext {
+            logical_room: other.logical_room.clone(),
+            presence_room: other.presence_room.clone(),
+            local_user_id: other.local_user_id.clone(),
+            local_identity: other.local_identity.clone(),
+            display_name: other.display_name.clone(),
+            apm_rate: AtomicU32::new(other.apm_rate.load(Ordering::Acquire)),
+            known_remote: Arc::clone(&other.known_remote),
+            presence_lane: Arc::clone(&other.presence_lane),
+            playback_ready: Arc::clone(&other.playback_ready),
+        }
+    }
+}
+
+/// One batched avatar lookup, then a `participant_joined` upsert per tile that has one.
+async fn deliver_avatars(state: Arc<AppState>, wanted: Vec<(String, String, bool)>) {
+    let identities: Vec<String> = wanted.iter().map(|(i, _, _)| i.clone()).collect();
+    let avatars = lookup_avatar_urls_for_identities(&state, &identities).await;
+    if avatars.is_empty() {
+        return;
+    }
+    let voice = state.voice.lock().await;
+    let Some(ch) = &voice.channel else { return };
+    for (identity, name, is_muted) in wanted {
+        if let Some(url) = avatars.get(&identity) {
+            let _ = ch.send(VoiceEvent::ParticipantJoined {
+                identity,
+                name,
+                is_muted,
+                avatar_url: Some(url.clone()),
+            });
+        }
+    }
 }
 
 /// Whether the in-flight join's cancel flag is up; read under the voice lock.
@@ -826,25 +1025,16 @@ impl SeededParticipant {
     }
 }
 
-struct RosterSnapshot {
-    remote: Vec<SeededParticipant>,
-    local_avatar_url: Option<String>,
-}
-
-/// Everyone in `room` right now, resolved (#836) and with avatars, in TWO DS
-/// round trips whatever the room size: one batched identity resolve, one batched
-/// avatar lookup (the local identity rides along when given).
-async fn roster_snapshot(
+/// Everyone in `room` right now, resolved (#836) in ONE batched DS call; no avatars.
+async fn roster_identities(
     state: &Arc<AppState>,
     room: &Room,
     logical_room: &str,
-    local_identity: Option<&str>,
-) -> RosterSnapshot {
+) -> Vec<SeededParticipant> {
     let participants = room.remote_participants();
-    // #836: resolve all pseudonyms in ONE batched DS call.
     let seen: Vec<String> = participants.keys().map(|k| k.to_string()).collect();
     let resolved = resolve_participants(state, logical_room, &seen).await;
-    let existing: Vec<(String, String, bool)> = participants
+    participants
         .into_values()
         .filter_map(|p| {
             let wire = p.identity().to_string();
@@ -858,34 +1048,16 @@ async fn roster_snapshot(
             }
             // Seed mute state: TrackMuted only fires on transitions.
             let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
-            Some((identity, name, is_muted))
+            Some(SeededParticipant { identity, name, is_muted, avatar_url: None })
         })
-        .collect();
-    // All avatars (self + roster) in ONE DS round trip, not N+1.
-    let mut avatar_identities: Vec<String> = Vec::with_capacity(existing.len() + 1);
-    if let Some(local) = local_identity {
-        avatar_identities.push(local.to_string());
-    }
-    avatar_identities.extend(existing.iter().map(|(identity, _, _)| identity.clone()));
-    let avatars = lookup_avatar_urls_for_identities(state, &avatar_identities).await;
-    let local_avatar_url = local_identity.and_then(|l| avatars.get(l).cloned());
-    let remote = existing
-        .into_iter()
-        .map(|(identity, name, is_muted)| SeededParticipant {
-            avatar_url: avatars.get(&identity).cloned(),
-            identity,
-            name,
-            is_muted,
-        })
-        .collect();
-    RosterSnapshot { remote, local_avatar_url }
+        .collect()
 }
 
 /// Re-emit the roster after a link recovered: whoever vanished meanwhile leaves,
 /// everyone present (re)joins. Both are idempotent for the renderer.
 async fn reseed_roster(state: &Arc<AppState>, room: &Room, ctx: &RoomContext) {
-    let snapshot = roster_snapshot(state, room, &ctx.logical_room, None).await;
-    let present: HashSet<String> = snapshot.remote.iter().map(|p| p.identity.clone()).collect();
+    let snapshot = roster_identities(state, room, &ctx.logical_room).await;
+    let present: HashSet<String> = snapshot.iter().map(|p| p.identity.clone()).collect();
     let gone: Vec<String> = {
         let mut known = ctx.known_remote.lock().unwrap();
         let gone = known.difference(&present).cloned().collect();
@@ -895,15 +1067,22 @@ async fn reseed_roster(state: &Arc<AppState>, room: &Room, ctx: &RoomContext) {
     for identity in &gone {
         crate::commands::screenshare::on_participant_left(identity, state).await;
     }
-    let voice = state.voice.lock().await;
-    if let Some(ch) = &voice.channel {
-        for identity in gone {
-            let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
-        }
-        for p in snapshot.remote {
-            let _ = ch.send(p.joined_event());
+    let wanted: Vec<(String, String, bool)> = snapshot
+        .iter()
+        .map(|p| (p.identity.clone(), p.name.clone(), p.is_muted))
+        .collect();
+    {
+        let voice = state.voice.lock().await;
+        if let Some(ch) = &voice.channel {
+            for identity in gone {
+                let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
+            }
+            for p in snapshot {
+                let _ = ch.send(p.joined_event());
+            }
         }
     }
+    tokio::spawn(deliver_avatars(Arc::clone(state), wanted));
 }
 
 /// Whether `room` is still the session the state holds (a leave swaps it out).
@@ -939,12 +1118,15 @@ async fn run_room_task(
     mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     ctx: Arc<RoomContext>,
 ) {
+    // Nothing is registered before the mixer exists (it would be dropped by `ensure_playback`).
+    ctx.playback_ready.wait().await;
     // The SDK's own resume/restart is attempt 1 of an episode; ours count on from there.
     let mut episode_attempt: u32 = 0;
     loop {
         let end = drive_room_events(&state, &room, &mut events, &ctx, &mut episode_attempt).await;
         if !is_current_room(&state, &room).await {
             // Left (or replaced) while we were draining; whoever did it released the state.
+            // A join still in flight sees `is_finished()` and treats the room as dead.
             return;
         }
         let reason = match end {
@@ -989,6 +1171,9 @@ enum ReconnectEnd {
     Left,
     GaveUp(VoiceJoinError),
 }
+
+/// The voice session's name in the SFU gate's prober election.
+const SFU_GATE_VOICE: &str = "voice";
 
 /// Re-mint and reconnect until [`VOICE_RECONNECT_WINDOW`] runs out. Each attempt
 /// is a reaction to the previous failure, never a periodic poll.
@@ -1047,6 +1232,8 @@ async fn reconnect_session(
             encryption_type: livekit::e2ee::EncryptionType::Gcm,
             key_provider,
         });
+        // Same subscriber-driven video settings as the join (see `join_inner`).
+        (options.adaptive_stream, options.dynacast) = (true, true);
         let (new_room, new_events) = match Room::connect(&url, &token, options).await {
             Ok(pair) => pair,
             Err(e) => {
@@ -1104,9 +1291,6 @@ async fn reconnect_session(
     Err(ReconnectEnd::GaveUp(last_error))
 }
 
-/// The voice session's name in the SFU gate's prober election.
-const SFU_GATE_VOICE: &str = "voice";
-
 /// Drop every remote track's drain and buffer; the speaker stream and mixer stay
 /// up for the tracks the next room subscribes.
 async fn clear_remote_audio_tracks(state: &Arc<AppState>) {
@@ -1123,6 +1307,42 @@ async fn clear_remote_audio_tracks(state: &Arc<AppState>) {
     let _ = buffers.lock().map(|mut guard| guard.clear());
 }
 
+/// A participant came or went: resolve, attribute and tell the renderer, off the
+/// event loop (two DS round trips) but in arrival order (the lane).
+fn spawn_presence_event(state: &Arc<AppState>, ctx: &Arc<RoomContext>, p: RemoteParticipant, joined: bool) {
+    let state = Arc::clone(state);
+    let ctx = Arc::clone(ctx);
+    tokio::spawn(async move {
+        let _ordered = ctx.presence_lane.lock().await;
+        let wire = p.identity().to_string();
+        // Same filter as the seed roster — see `roster_identities`.
+        if is_view_identity(&wire) {
+            return;
+        }
+        // #836: translate before anything downstream sees it.
+        let (identity, name) = resolve_participant(&state, &ctx.logical_room, &wire).await;
+        if is_view_identity(&identity) {
+            return;
+        }
+        if joined {
+            crate::diag!("[voice] participant joined: {identity}");
+            let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
+            let avatar_url = lookup_avatar_url_for_identity(&state, &identity).await;
+            ctx.known_remote.lock().unwrap().insert(identity.clone());
+            emit(&state, VoiceEvent::ParticipantJoined { identity, name, is_muted, avatar_url }).await;
+        } else {
+            crate::diag!("[voice] participant left: {identity}");
+            ctx.known_remote.lock().unwrap().remove(&identity);
+            // Clear their screenshare so a stale tile doesn't linger.
+            crate::commands::screenshare::on_participant_left(&identity, &state).await;
+            emit(&state, VoiceEvent::ParticipantLeft { identity }).await;
+            // Observers outside the room only hear `voice_left` from a peer who left
+            // cleanly; a crash is reported by whoever is still here. Idempotent: a refetch.
+            crate::commands::livekit::publish_voice_roster_changed(&state, &ctx.presence_room, &ctx.logical_room).await;
+        }
+    });
+}
+
 /// Drain one room's events until its stream ends.
 async fn drive_room_events(
     state: &Arc<AppState>,
@@ -1135,58 +1355,13 @@ async fn drive_room_events(
     let voice_arc = &state.voice;
     let logical_room = &ctx.logical_room;
     let local_user_id = &ctx.local_user_id;
-    let apm_rate_for_room = ctx.apm_rate;
     while let Some(event) = events.recv().await {
         match event {
             RoomEvent::ParticipantConnected(p) => {
-                let wire = p.identity().to_string();
-                // Same filter as the seed loop above — see comment there.
-                if is_view_identity(&wire) {
-                    continue;
-                }
-                // #836: translate before anything downstream sees it.
-                let (identity, name) =
-                    resolve_participant(state_for_room, logical_room, &wire).await;
-                if is_view_identity(&identity) {
-                    continue;
-                }
-                crate::diag!("[voice] participant joined: {identity}");
-                let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
-                let avatar_url =
-                    lookup_avatar_url_for_identity(state_for_room, &identity).await;
-                ctx.known_remote.lock().unwrap().insert(identity.clone());
-                let voice = voice_arc.lock().await;
-                if let Some(ch) = &voice.channel {
-                    let _ = ch.send(VoiceEvent::ParticipantJoined {
-                        identity,
-                        name,
-                        is_muted,
-                        avatar_url,
-                    });
-                }
+                spawn_presence_event(state, ctx, p, true);
             }
             RoomEvent::ParticipantDisconnected(p) => {
-                let wire = p.identity().to_string();
-                if is_view_identity(&wire) {
-                    continue;
-                }
-                let (identity, _) =
-                    resolve_participant(state_for_room, logical_room, &wire).await;
-                if is_view_identity(&identity) {
-                    continue;
-                }
-                crate::diag!("[voice] participant left: {identity}");
-                ctx.known_remote.lock().unwrap().remove(&identity);
-                // Clear their screenshare so a stale tile doesn't linger.
-                crate::commands::screenshare::on_participant_left(
-                    &identity,
-                    state_for_room,
-                )
-                .await;
-                let voice = voice_arc.lock().await;
-                if let Some(ch) = &voice.channel {
-                    let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
-                }
+                spawn_presence_event(state, ctx, p, false);
             }
             RoomEvent::TrackSubscribed { track, publication, participant } => {
                 let (participant_identity, _) = resolve_participant(
@@ -1218,7 +1393,7 @@ async fn drive_room_events(
                             track_key,
                             Arc::clone(voice_arc),
                             participant_identity,
-                            apm_rate_for_room,
+                            ctx.apm_rate.load(Ordering::Acquire),
                             is_shared_audio,
                         )
                         .await;
@@ -1466,12 +1641,14 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
 
     let room = release_voice_resources(state, true, None).await;
 
-    // Close outside the lock, with a timeout (broken networks hang).
+    // Close in the background, with a timeout (broken networks hang): the next
+    // join starts now. The SFU evicts the stale participant on its own — the
+    // per-room pseudonym is deterministic, so the rejoin is a DuplicateIdentity
+    // for the old session, not for the new one.
     if let Some(room) = room {
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            room.close(),
-        ).await;
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(Duration::from_secs(5), room.close()).await;
+        });
     }
 
     Ok(())

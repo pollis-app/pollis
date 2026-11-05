@@ -4,6 +4,86 @@ use crate::error::Result;
 
 use super::types::AudioDevice;
 
+/// Virtual ALSA devices known to crash or produce no audio.
+#[cfg(target_os = "linux")]
+const BLOCKED_ALSA: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
+
+/// cpal's ALSA enumeration OPENS every PCM it lists (hundreds of ms, seconds on
+/// a busy PipeWire box), and the join did it on every mic open. The list only
+/// changes when hardware does, so it is kept for a while and refreshed by the
+/// warmup, by `list_audio_devices`, and when a lookup misses.
+#[cfg(target_os = "linux")]
+mod enum_cache {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    pub struct Snapshot {
+        pub at: Instant,
+        pub input: Vec<cpal::Device>,
+        pub output: Vec<cpal::Device>,
+    }
+
+    pub static CACHE: Mutex<Option<Snapshot>> = Mutex::new(None);
+    pub const TTL: Duration = Duration::from_secs(300);
+}
+
+/// The usable devices of one direction, from the cache when fresh.
+#[cfg(target_os = "linux")]
+fn enumerate_cached(host: &cpal::Host, is_input: bool, refresh: bool) -> Result<Vec<cpal::Device>> {
+    if !refresh {
+        let cache = enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(snap) = cache.as_ref().filter(|s| s.at.elapsed() < enum_cache::TTL) {
+            let list = if is_input { &snap.input } else { &snap.output };
+            return Ok(list.clone());
+        }
+    }
+    let started = std::time::Instant::now();
+    let keep = |d: &cpal::Device| {
+        d.name()
+            .ok()
+            .map(|n| !BLOCKED_ALSA.contains(&n.as_str()))
+            .unwrap_or(true)
+    };
+    let input: Vec<cpal::Device> = host
+        .input_devices()
+        .map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
+        .filter(keep)
+        .collect();
+    let output: Vec<cpal::Device> = host
+        .output_devices()
+        .map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
+        .filter(keep)
+        .collect();
+    crate::diag!(
+        "[voice] enumerated {} input / {} output devices in {:.0}ms (blocked filtered)",
+        input.len(),
+        output.len(),
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    let list = if is_input { input.clone() } else { output.clone() };
+    *enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner()) =
+        Some(enum_cache::Snapshot { at: std::time::Instant::now(), input, output });
+    Ok(list)
+}
+
+/// Enumerate on a blocking thread now so the next join finds the list warm.
+pub(crate) fn warm_device_cache() {
+    #[cfg(target_os = "linux")]
+    {
+        let fresh = {
+            let cache = enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner());
+            cache.as_ref().is_some_and(|s| s.at.elapsed() < enum_cache::TTL)
+        };
+        if fresh {
+            return;
+        }
+        tokio::task::spawn_blocking(|| {
+            let host = cpal::default_host();
+            let _ = enumerate_cached(&host, true, true);
+        });
+    }
+}
+
 pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
     // "default"/"" mean the OS default, not a device named "default".
     let name = name.filter(|n| !n.is_empty() && *n != "default");
@@ -12,26 +92,9 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
             // Linux: ALSA's default may be a virtual device (vdownmix) that crashes.
             #[cfg(target_os = "linux")]
             {
-                // Virtual ALSA devices known to crash or produce no audio.
-                let blocked: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
                 let preferred: &[&str] = &["pipewire", "pulse", "default"];
 
-                let iter = if is_input {
-                    host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
-                } else {
-                    host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
-                };
-                let devices: Vec<cpal::Device> = iter
-                    .filter(|d| {
-                        d.name()
-                            .ok()
-                            .map(|n| !blocked.contains(&n.as_str()))
-                            .unwrap_or(true)
-                    })
-                    .collect();
-
-                crate::diag!("[voice] available {} devices (blocked filtered): {}",
-                    if is_input { "input" } else { "output" }, devices.len());
+                let devices = enumerate_cached(host, is_input, false)?;
 
                 let found = preferred.iter().find_map(|&pref| {
                     devices.iter().position(|d| d.name().ok().as_deref() == Some(pref))
@@ -76,11 +139,22 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                     return get_device(host, None, is_input);
                 }
             }
+            // Linux: the cached list first; a miss (hot-plug) re-enumerates once.
+            #[cfg(target_os = "linux")]
+            let found = {
+                let by_name = |list: Vec<cpal::Device>| list.into_iter().find(|d| d.name().ok().as_deref() == Some(n));
+                match by_name(enumerate_cached(host, is_input, false)?) {
+                    Some(d) => Some(d),
+                    None => by_name(enumerate_cached(host, is_input, true)?),
+                }
+            };
+            #[cfg(not(target_os = "linux"))]
             let mut iter = if is_input {
                 host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             } else {
                 host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             };
+            #[cfg(not(target_os = "linux"))]
             let found = iter.find(|d| d.name().ok().as_deref() == Some(n));
             // macOS: HFP AirPods can vanish from output_devices(); try all scopes.
             #[cfg(target_os = "macos")]
@@ -207,6 +281,9 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     tokio::task::spawn_blocking(|| {
         let host = cpal::default_host();
         let mut devices = Vec::new();
+        // The settings page is where a newly plugged device is looked for: refresh the join's cache too.
+        #[cfg(target_os = "linux")]
+        let _ = enumerate_cached(&host, true, true);
 
         match host.input_devices() {
             Ok(inputs) => {

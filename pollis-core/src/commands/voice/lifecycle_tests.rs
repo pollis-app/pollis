@@ -9,7 +9,7 @@ use crate::keystore::InMemoryKeystore;
 use crate::state::AppState;
 
 use super::join::{JoinCancel, VoiceJoinError};
-use super::lifecycle::{join_voice_channel, leave_voice_channel};
+use super::lifecycle::{begin_warm, join_voice_channel, leave_voice_channel, warm_inflight};
 
 fn state() -> Arc<AppState> {
     Arc::new(AppState::new_with_parts(
@@ -26,6 +26,7 @@ async fn join(state: &Arc<AppState>) -> Result<(), Error> {
         None,
         None,
         crate::commands::voice_apm::ApmConfig::default(),
+        None,
         None,
         state,
     )
@@ -80,4 +81,22 @@ async fn a_leave_outside_a_join_cancels_nothing() {
     state.voice.lock().await.join_cancel = Some(Arc::clone(&cancel));
     leave_voice_channel(&state).await.expect("leave");
     assert!(!cancel.is_cancelled());
+}
+
+/// One warm per channel at a time; a join that arrives mid-warm can wait on it, and
+/// the guard's drop wakes that waiter whichever way the warm ended.
+#[tokio::test]
+async fn a_warm_in_flight_is_visible_to_a_join_and_released_when_it_ends() {
+    let guard = begin_warm("warm-chan").expect("first warm starts");
+    assert!(begin_warm("warm-chan").is_none(), "a second warm for the same channel is a no-op");
+    assert!(begin_warm("other-chan").is_some(), "other channels are independent");
+    let inflight = warm_inflight("warm-chan").expect("visible while in flight");
+    let waiter = tokio::spawn(async move { inflight.notified().await });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    drop(guard);
+    tokio::time::timeout(std::time::Duration::from_secs(2), waiter)
+        .await
+        .expect("the waiter is woken by the guard's drop")
+        .unwrap();
+    assert!(warm_inflight("warm-chan").is_none());
 }
