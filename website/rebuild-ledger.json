@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-05T18:35:15Z",
+  "generated_at": "2026-11-05T18:57:52Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
@@ -23,8 +23,8 @@
       "event": "workflow_run",
       "run_id": "41690570875",
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/41690570875",
-      "classification": null,
-      "evidence": null
+      "classification": "environment_drift",
+      "evidence": "v1.18.3, runner-image drift, classified by the workflow itself (\"verdict: environment_drift\") and since proven by a rerun. The release (41679376236 build-linux) built on ubuntu22@20261101.347.1; this rebuild landed seventy minutes later on the older ubuntu22@20261026.341.1 (the re-imaged ubuntu-22.04 label rolled out gradually), same helper image ubuntu24@20261026.354.1 on both. Logged payload a6087ede…, rebuilt b4dd645e…. The run split the diff by origin: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 2\" and \"everything else (built from Pollis source): 0\" — libbrotlicommon.so.1 and libbrotlidec.so.1 from the two images (libbrotlicommon .text 0x701a vs 0x6f9a), so usr/bin/pollis reproduced. The 83,455,572 differing bytes are compression smear across the squashfs. Proven: rerun 42082219385 (2026-11-05) landed on the release image ubuntu22@20261101.347.1 and reproduced a6087ede… byte-for-byte, verdict reproduced. Same source, one variable changed, matching bytes. Not a finding against the shipped binary."
     },
     {
       "tag": "v1.18.3",
