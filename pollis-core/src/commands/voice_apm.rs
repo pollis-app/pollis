@@ -5,15 +5,17 @@
 //! Pipeline (per voice session, one [`ApmStage`] for the lifetime of the join):
 //!
 //! ```text
-//!   cpal mic capture (10ms i16 mono @ APM rate)
-//!     ─→ run_capture(processor, frame)        // AGC + NS + HPF + AEC capture side
+//!   cpal mic capture ─→ resample to 48 kHz (10 ms i16 mono)
+//!     ─→ run_capture_into(processor, frame)   // AGC + NS + HPF + AEC capture side
 //!     ─→ LiveKit NativeAudioSource.capture_frame
 //!
-//!   mixed remote playback (10ms f32 mono @ APM rate, what's hitting the speaker)
+//!   mixed remote playback (10 ms f32 mono @ 48 kHz, what's hitting the speaker)
 //!     ─→ analyze_render(processor, frame)     // AEC render reference
 //! ```
 //!
-//! APM rate = the cpal mic rate (8/16/32/48 kHz).
+//! APM always runs at the pipeline's fixed 48 kHz (`voice::resampler::MIX_RATE_HZ`);
+//! the device rates are resampled at the edges, so a Bluetooth mic or a
+//! 44.1 kHz-only card never changes what APM sees.
 //!
 //! Windows: the sys crate has no MSVC build, so these are no-op stubs.
 
@@ -263,9 +265,22 @@ pub fn run_capture(
     expected_len: usize,
 ) -> Result<(), webrtc_audio_processing::Error> {
     debug_assert_eq!(samples.len(), expected_len, "capture frame size mismatch");
-    let mut channel: Vec<f32> = samples.iter().map(|s| *s as f32 / 32_768.0).collect();
-    processor.process_capture_frame([channel.as_mut_slice()])?;
-    for (dst, src) in samples.iter_mut().zip(channel.iter()) {
+    let mut channel: Vec<f32> = Vec::with_capacity(samples.len());
+    run_capture_into(processor, samples, &mut channel)
+}
+
+/// `run_capture` for the hot path: `scratch` is reused, so steady state
+/// never allocates.
+#[cfg(not(target_os = "windows"))]
+pub fn run_capture_into(
+    processor: &Processor,
+    samples: &mut [i16],
+    scratch: &mut Vec<f32>,
+) -> Result<(), webrtc_audio_processing::Error> {
+    scratch.clear();
+    scratch.extend(samples.iter().map(|s| *s as f32 / 32_768.0));
+    processor.process_capture_frame([scratch.as_mut_slice()])?;
+    for (dst, src) in samples.iter_mut().zip(scratch.iter()) {
         *dst = (*src * 32_767.0).clamp(-32_768.0, 32_767.0) as i16;
     }
     Ok(())
@@ -277,6 +292,16 @@ pub fn run_capture(
     _processor: &Processor,
     _samples: &mut [i16],
     _expected_len: usize,
+) -> Result<(), std::convert::Infallible> {
+    Ok(())
+}
+
+/// Windows no-op passthrough.
+#[cfg(target_os = "windows")]
+pub fn run_capture_into(
+    _processor: &Processor,
+    _samples: &mut [i16],
+    _scratch: &mut Vec<f32>,
 ) -> Result<(), std::convert::Infallible> {
     Ok(())
 }

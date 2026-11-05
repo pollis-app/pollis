@@ -1,26 +1,18 @@
 use std::{
-    collections::{HashMap, VecDeque},
-    sync::{
-        atomic::AtomicBool,
-        Arc, Mutex,
-    },
+    collections::HashMap,
+    sync::{atomic::AtomicBool, Arc, Mutex},
     time::{Duration, Instant},
 };
 
-use libwebrtc::{
-    audio_source::native::NativeAudioSource,
-};
-use livekit::{
-    e2ee::key_provider::KeyProvider,
-    prelude::*,
-    track::LocalAudioTrack,
-};
+use libwebrtc::audio_source::native::NativeAudioSource;
+use livekit::{e2ee::key_provider::KeyProvider, prelude::*, track::LocalAudioTrack};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::{
-    voice_apm,
-    voice_denoiser,
-};
+use crate::commands::{voice_apm, voice_denoiser};
+
+use super::capture::CaptureTask;
+use super::levels::LevelsHub;
+use super::mixer::MixerShared;
 
 /// Warm-cached LiveKit token + DNS/TLS warmup for one channel.
 pub struct VoiceWarmup {
@@ -72,15 +64,31 @@ pub enum VoiceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         avatar_url: Option<String>,
     },
-    ParticipantLeft { identity: String },
-    Muted { identity: String },
-    Unmuted { identity: String },
+    ParticipantLeft {
+        identity: String,
+    },
+    Muted {
+        identity: String,
+    },
+    Unmuted {
+        identity: String,
+    },
     /// Whether the local session has a working mic; `false` = listen-only.
-    MicAvailability { identity: String, available: bool },
-    SpeakingStarted { identity: String },
-    SpeakingStopped { identity: String },
-    /// ~20 Hz 0..1 band levels; `levels::BAND_COUNT` must match the renderer.
-    AudioBands { identity: String, bands: Vec<f32> },
+    MicAvailability {
+        identity: String,
+        available: bool,
+    },
+    SpeakingStarted {
+        identity: String,
+    },
+    SpeakingStopped {
+        identity: String,
+    },
+    /// Every source's latest 0..1 band levels, one event per 50 ms tick
+    /// (`levels::LevelsHub`); `levels::BAND_COUNT` must match the renderer.
+    AudioBands {
+        levels: Vec<AudioBandsEntry>,
+    },
     /// LiveKit's categorical quality: "excellent" | "good" | "poor" | "lost".
     ConnectionQualityChanged {
         identity: String,
@@ -108,6 +116,13 @@ pub enum VoiceEvent {
     },
 }
 
+/// One participant's band levels inside `VoiceEvent::AudioBands`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AudioBandsEntry {
+    pub identity: String,
+    pub bands: Vec<f32>,
+}
+
 #[derive(Serialize)]
 pub struct AudioDevice {
     pub id: String,
@@ -117,68 +132,63 @@ pub struct AudioDevice {
 
 // All remote audio mixes into one cpal stream: the single AEC render tap.
 
-/// Per-track f32 mono ring buffers, keyed by `"{identity}-{sid}"`.
-pub type TrackBuffers = Arc<Mutex<HashMap<String, VecDeque<f32>>>>;
-
-/// 200 ms at 48 kHz mono; older samples are dropped.
-pub(crate) const TRACK_BUFFER_CAP_SAMPLES: usize = 9_600;
-
 pub struct PlaybackState {
-    /// Per-remote-track f32 mono ring buffers fed by drain tasks.
-    pub track_buffers: TrackBuffers,
-    /// The single shared cpal output stream. `None` until `start_playback`.
+    /// Track rings + mixer state, shared with the live output callback.
+    /// Outlives every output stream, so a speaker switch never drops a track.
+    pub(crate) shared: Arc<MixerShared>,
+    /// The single shared cpal output stream. `None` until `ensure_playback`.
     pub output_stream: Option<SendableStream>,
-    /// Interleaved-f32 ring drained by the cpal callback, shared with the mixer.
-    pub output_ring: Option<Arc<Mutex<VecDeque<f32>>>>,
     pub output_channels: u32,
     pub output_sample_rate: u32,
     pub output_device_name: Option<String>,
-    /// Per-track NativeAudioStream drain tasks.
+    /// Per-track NativeAudioStream drain tasks, keyed by `"{identity}-{sid}"`.
     pub drain_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
-    /// Raw RtcAudioTrack refs, kept so `set_voice_output_device` can rebuild
-    /// the speaker stream while preserving subscriptions.
-    pub rtc_tracks: HashMap<String, libwebrtc::audio_track::RtcAudioTrack>,
-    /// Identity per `track_key`, used by `set_voice_output_device` to
-    /// re-emit speaking events on the new pipeline if needed.
-    pub identities: HashMap<String, String>,
-    /// Per-user gain keyed by bare `user_id`; absent = unity.
-    pub user_volumes: Arc<Mutex<HashMap<String, f32>>>,
-    /// Single mixer task running at 10 ms cadence.
-    pub mixer_task: Option<tokio::task::JoinHandle<()>>,
+    /// Per-user gain keyed by bare `user_id`; absent = unity. Tracks that
+    /// subscribe later inherit it.
+    pub user_volumes: HashMap<String, f32>,
 }
 
 impl PlaybackState {
-    fn new() -> Self {
+    fn new(
+        deafened: Arc<AtomicBool>,
+        self_echo: crate::commands::screenshare::self_echo::SelfEchoSlot,
+    ) -> Self {
         Self {
-            track_buffers: Arc::new(Mutex::new(HashMap::new())),
+            shared: Arc::new(MixerShared::new(deafened, self_echo)),
             output_stream: None,
-            output_ring: None,
             output_channels: 0,
             output_sample_rate: 0,
             output_device_name: None,
             drain_tasks: HashMap::new(),
-            rtc_tracks: HashMap::new(),
-            identities: HashMap::new(),
-            user_volumes: Arc::new(Mutex::new(HashMap::new())),
-            mixer_task: None,
+            user_volumes: HashMap::new(),
         }
     }
 
-    /// Stop everything but keep track refs, so `start_playback` can reattach.
-    pub(crate) fn stop_all(&mut self) {
+    /// Drop the output stream only; drain tasks and rings keep running so
+    /// `ensure_playback` can open another device without losing a track.
+    /// Returns the stream so the caller can drop it off the async worker.
+    pub(crate) fn stop_output(&mut self) -> Option<SendableStream> {
+        self.output_sample_rate = 0;
+        self.output_channels = 0;
+        self.output_device_name = None;
+        self.output_stream.take()
+    }
+
+    /// Drop every remote track's drain task and ring, keeping the output
+    /// stream and the AEC tap (in-session reconnect: the next room's tracks
+    /// land in the same mixer).
+    pub(crate) fn stop_tracks(&mut self) {
         for (_, t) in self.drain_tasks.drain() {
             t.abort();
         }
-        if let Some(t) = self.mixer_task.take() {
-            t.abort();
-        }
-        self.output_stream = None;
-        self.output_ring = None;
-        self.output_sample_rate = 0;
-        self.output_channels = 0;
-        if let Ok(mut buffers) = self.track_buffers.lock() {
-            buffers.clear();
-        }
+        self.shared.clear_tracks();
+    }
+
+    /// End of session: output, every drain task, every ring, the AEC tap.
+    pub(crate) fn stop_all(&mut self) -> Option<SendableStream> {
+        self.stop_tracks();
+        self.shared.set_apm(None);
+        self.stop_output()
     }
 }
 
@@ -207,12 +217,14 @@ pub struct VoiceState {
     pub local_track: Option<LocalAudioTrack>,
     pub audio_source: Option<NativeAudioSource>,
     pub input_stream: Option<SendableStream>,
-    pub frame_task: Option<tokio::task::JoinHandle<()>>,
+    /// The mic DSP thread (`capture.rs`); `None` outside a call or listen-only.
+    pub frame_task: Option<CaptureTask>,
     pub room_task: Option<tokio::task::JoinHandle<()>>,
     pub playback: Arc<Mutex<PlaybackState>>,
     /// PTT/mute/deafen state machine (#849); the atomics below derive from it.
     pub gate: Arc<Mutex<super::gate::TransmitGate>>,
-    /// Derived: capture callback drops frames (mute, deafen or idle PTT).
+    /// Derived: the capture thread sends silence instead of audio (mute,
+    /// deafen or idle PTT); processing and the local meter continue.
     pub transmit_muted: Arc<AtomicBool>,
     /// Derived: mixer outputs silence; tracks keep draining to stay live.
     pub deafened: Arc<AtomicBool>,
@@ -225,8 +237,10 @@ pub struct VoiceState {
     pub current_input_device: Option<String>,
     /// APM stage for the current session; `None` outside a call.
     pub apm: Option<voice_apm::ApmStage>,
-    /// RNNoise ahead of APM; `None` outside a call or when the mic isn't 48 kHz.
+    /// RNNoise ahead of APM; `None` outside a call or when disabled.
     pub denoiser: Arc<Mutex<Option<voice_denoiser::DenoiserStage>>>,
+    /// Batches every source's meter levels into one event per tick.
+    pub(crate) levels: Arc<LevelsHub>,
     /// Next channel's precomputed token + DNS/TLS warmer.
     pub warmup: Option<VoiceWarmup>,
     /// Most recent `join_voice_channel` timing record.
@@ -253,6 +267,9 @@ impl Default for VoiceState {
 
 impl VoiceState {
     pub fn new() -> Self {
+        let deafened = Arc::new(AtomicBool::new(false));
+        let shared_audio_render: crate::commands::screenshare::self_echo::SelfEchoSlot =
+            Arc::new(Mutex::new(None));
         Self {
             channel: None,
             room: None,
@@ -261,23 +278,27 @@ impl VoiceState {
             input_stream: None,
             frame_task: None,
             room_task: None,
-            playback: Arc::new(Mutex::new(PlaybackState::new())),
+            playback: Arc::new(Mutex::new(PlaybackState::new(
+                Arc::clone(&deafened),
+                Arc::clone(&shared_audio_render),
+            ))),
             gate: Arc::new(Mutex::new(super::gate::TransmitGate::new())),
             transmit_muted: Arc::new(AtomicBool::new(false)),
-            deafened: Arc::new(AtomicBool::new(false)),
+            deafened,
             self_muted: Arc::new(AtomicBool::new(false)),
             joining: Arc::new(AtomicBool::new(false)),
             join_cancel: None,
             current_input_device: None,
             apm: None,
             denoiser: Arc::new(Mutex::new(None)),
+            levels: Arc::new(LevelsHub::new()),
             warmup: None,
             last_join_timings: Arc::new(Mutex::new(None)),
             e2ee_key_provider: None,
             e2ee_mls_group_id: None,
             e2ee_epoch: 0,
             e2ee_key_index: 0,
-            shared_audio_render: Arc::new(Mutex::new(None)),
+            shared_audio_render,
         }
     }
 }
