@@ -26,7 +26,7 @@ use super::{
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
     self_echo::SelfEchoCanceller,
-    stop::stop_screen_share,
+    stop::{stop_screen_share, stop_screen_share_if},
     RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
 };
 
@@ -164,11 +164,14 @@ pub async fn start_screen_share(
     }
 
     // Park the session so a concurrent stop can kill it; writer stays open (EOF exits).
-    {
+    // The token is re-checked after every await below: a stop that lands mid-handshake
+    // must end here, not in a published track with no capture behind it.
+    let token = {
         let mut ss = state.screenshare.lock().await;
         ss.local_helper = Some(session.child);
         ss.local_writer = Some(session.writer);
-    }
+        ss.begin_session()
+    };
 
     // Read until a dimension message (Format or leading Frame) or Error.
     // Tolerant loop: Wayland may send Frame first; skip other benign messages.
@@ -305,6 +308,10 @@ pub async fn start_screen_share(
                 .await);
             }
             Ok(None) => {
+                // A stop during the handshake kills the helper; that EOF is not a failure.
+                if session_ended(state, token).await {
+                    return Ok(());
+                }
                 crate::diag!("[screenshare] helper closed socket before format");
                 stop_screen_share(state).await.ok();
                 return Err(fail_capture(
@@ -314,6 +321,9 @@ pub async fn start_screen_share(
                 .await);
             }
             Err(e) => {
+                if session_ended(state, token).await {
+                    return Ok(());
+                }
                 crate::diag!("[screenshare] helper read error: {e}");
                 stop_screen_share(state).await.ok();
                 return Err(fail_capture(
@@ -324,6 +334,9 @@ pub async fn start_screen_share(
             }
         }
     };
+    if session_ended(state, token).await {
+        return Ok(());
+    }
 
     if width == 0 || height == 0 {
         crate::diag!("[screenshare] helper announced zero-size format");
@@ -371,18 +384,25 @@ pub async fn start_screen_share(
         .await);
     }
     crate::diag!("[screenshare] track published");
+    if session_ended(state, token).await {
+        // Stopped while publishing: roll the publish back; the stop already announced itself.
+        let sid = track.sid();
+        let _ = room.local_participant().unpublish_track(&sid).await;
+        return Ok(());
+    }
 
-    // Reader task owns socket + source; on EOF it exits, stop_screen_share cleans up.
+    // Reader task owns socket + source; on exit it runs the stop path (never a zombie share).
     let source_for_task = source.clone();
     // Self-preview rides the same WebSocket broadcast as remote tiles.
     let preview_tx = state.screenshare_frame_tx.clone();
-    let (events_for_task, frames_for_task) = {
+    let frames_for_task = {
         let ss = state.screenshare.lock().await;
-        (ss.events.clone(), ss.frames.clone())
+        ss.frames.clone()
     };
     let state_for_task = Arc::clone(state);
     let room_for_task = room.clone();
     let reader_task = tokio::spawn(async move {
+        let state_for_exit = Arc::clone(&state_for_task);
         let mut last_preview: Option<std::time::Instant> = None;
         // Shared-audio pump: inert until the helper announces a format.
         let mut audio_source: Option<libwebrtc::audio_source::native::NativeAudioSource> = None;
@@ -501,18 +521,30 @@ pub async fn start_screen_share(
                         .await;
                         continue;
                     }
-                    if let Some(ev) = &events_for_task {
-                        let _ = ev.send(ScreenShareEvent::LocalError { message });
-                    }
+                    crate::diag!("[screenshare] helper error mid-share: {message}");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Screen capture failed. Please try sharing again.".into(),
+                    );
                     break;
                 }
-                Ok(None) => break,
+                Ok(None) => {
+                    crate::diag!("[screenshare] helper closed socket mid-share");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Screen sharing stopped: the capture source ended.".into(),
+                    );
+                    break;
+                }
                 Err(e) => {
-                    if let Some(ev) = &events_for_task {
-                        let _ = ev.send(ScreenShareEvent::LocalError {
-                            message: format!("read: {e}"),
-                        });
-                    }
+                    crate::diag!("[screenshare] reader error mid-share: {e}");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Lost the screen-capture connection. Please try sharing again.".into(),
+                    );
                     break;
                 }
             }
@@ -522,6 +554,13 @@ pub async fn start_screen_share(
     // Save state and announce; the helper was parked earlier.
     {
         let mut ss = state.screenshare.lock().await;
+        if !ss.is_session(token) {
+            drop(ss);
+            reader_task.abort();
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Ok(());
+        }
         ss.local_source = Some(source);
         ss.local_track = Some(track);
         ss.local_reader_task = Some(reader_task);
@@ -530,6 +569,34 @@ pub async fn start_screen_share(
         }
     }
     Ok(())
+}
+
+/// True once a stop has invalidated `token` (see `ScreenShareState::begin_session`).
+async fn session_ended(state: &Arc<AppState>, token: u64) -> bool {
+    !state.screenshare.lock().await.is_session(token)
+}
+
+/// The reader task's exit: run the stop path for this session, then tell the renderer why.
+///
+/// Spawned rather than awaited, because the stop aborts the reader task itself and an
+/// `.await` inside the aborted task would never resume past the unpublish. `LocalStopped`
+/// lands first (the share is gone), `LocalError` second (why), so the renderer never
+/// keeps an `active` share with a frozen last frame at every peer.
+pub(super) fn on_reader_exit(state: Arc<AppState>, token: u64, message: String) {
+    tokio::spawn(async move {
+        let live = state.screenshare.lock().await.is_session(token);
+        if !live {
+            return;
+        }
+        let _ = stop_screen_share_if(&state, token).await;
+        let ev = {
+            let ss = state.screenshare.lock().await;
+            ss.events.clone()
+        };
+        if let Some(ev) = ev {
+            let _ = ev.send(ScreenShareEvent::LocalError { message });
+        }
+    });
 }
 
 /// Publish the shared-audio track; a repeat `AudioFormat` only retunes.

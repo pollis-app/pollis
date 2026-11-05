@@ -16,6 +16,11 @@ export function toggleCamera(camera: CameraState): void {
     return;
   }
 
+  // The device list is still being awaited: a second click is the same intent.
+  if (camera.kind === "enumerating") {
+    return;
+  }
+
   // Any other non-idle state: force-stop to recover.
   if (camera.kind !== "idle") {
     cameraSession
@@ -25,6 +30,8 @@ export function toggleCamera(camera: CameraState): void {
     return;
   }
 
+  // Busy on the same frame as the click, before anything is awaited.
+  appStore.cameraStartEnumerating();
   (async () => {
     try {
       const list = await cameraSession.listDevices();

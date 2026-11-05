@@ -29,6 +29,8 @@ mod windows_audio;
 mod stop;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported;
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod session_tests;
 
 pub use commands::{
     screenshare_ws_url, subscribe_screen_share_events, subscribe_screen_share_frames,

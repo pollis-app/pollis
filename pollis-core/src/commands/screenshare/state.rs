@@ -51,6 +51,10 @@ pub struct ScreenShareState {
 
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+
+    /// Bumped by every start and every effective stop; a start re-checks it after each await
+    /// so a stop that lands mid-handshake cannot be followed by a publish with no capture.
+    pub session_generation: u64,
 }
 
 impl Default for ScreenShareState {
@@ -83,6 +87,23 @@ impl ScreenShareState {
             #[cfg(target_os = "windows")]
             windows_picker: None,
             remote_drain_tasks: std::collections::HashMap::new(),
+            session_generation: 0,
         }
+    }
+
+    /// Open a local session; the returned token is what [`is_session`](Self::is_session) checks.
+    pub fn begin_session(&mut self) -> u64 {
+        self.session_generation += 1;
+        self.session_generation
+    }
+
+    /// Invalidate every token handed out so far.
+    pub fn end_session(&mut self) {
+        self.session_generation += 1;
+    }
+
+    /// Whether no stop has happened since `token` was issued.
+    pub fn is_session(&self, token: u64) -> bool {
+        self.session_generation == token
     }
 }

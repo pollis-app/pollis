@@ -35,6 +35,8 @@ pub use state::CameraState;
 pub use capture::{
     list_video_devices, start_camera, start_camera_preview, stop_camera, stop_camera_preview,
 };
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+pub(crate) use capture::on_reader_exit as on_reader_exit_for_tests;
 #[cfg(target_os = "windows")]
 pub use start_windows::{
     list_video_devices, start_camera, start_camera_preview, stop_camera, stop_camera_preview,

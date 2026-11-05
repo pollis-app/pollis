@@ -1,4 +1,6 @@
 // Screen-share picker (#1040): a switch flipped before the preference reply must not be overwritten.
+// Plus the toggles' busy state: a click is `enumerating` on the same frame, and a second click
+// while the source list is in flight starts nothing.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -9,8 +11,9 @@ const VOICE_CHANNEL_ID = "c_lounge";
 
 const DISPLAY = { id: "d1", name: "Display 1", width: 1920, height: 1080 };
 
-function preload(preferences: Record<string, unknown>) {
+function preload(preferences: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   return {
+    ...extra,
     session: ME,
     profile: { id: ME.id, username: ME.username },
     groups: [
@@ -40,17 +43,24 @@ function preload(preferences: Record<string, unknown>) {
 }
 
 type TestWindow = Window & {
-  __pollisStore: Record<string, Function>;
+  __pollisStore: Record<string, Function> & {
+    voiceState: { kind: string; share?: { kind: string }; camera?: { kind: string } };
+  };
   __tauriHold: (cmd: string) => void;
   __tauriRelease: (cmd: string) => void;
   __tauriLastArgs: Record<string, unknown>;
+  __tauriInvokeCounts: Record<string, number>;
 };
 
 /** Boot into the voice channel, joined, with the share still idle. */
-async function joinVoice(page: Page, preferences: Record<string, unknown>) {
+async function joinVoice(
+  page: Page,
+  preferences: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+) {
   await page.addInitScript((data) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
-  }, preload(preferences));
+  }, preload(preferences, extra));
   await page.goto("/");
   await expect(page.getByTestId("app-ready")).toBeAttached();
 
@@ -146,5 +156,92 @@ test.describe("screen-share picker — share sound switch", () => {
     await releasePreferences(page);
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await expect(page.getByTestId("screen-share-audio-scope")).toBeHidden();
+  });
+});
+
+function shareKind(page: Page) {
+  return page.evaluate(
+    () => (window as unknown as TestWindow).__pollisStore.voiceState.share?.kind ?? null,
+  );
+}
+
+function cameraKind(page: Page) {
+  return page.evaluate(
+    () => (window as unknown as TestWindow).__pollisStore.voiceState.camera?.kind ?? null,
+  );
+}
+
+function invokeCount(page: Page, cmd: string) {
+  return page.evaluate(
+    (c) => (window as unknown as TestWindow).__tauriInvokeCounts[c] ?? 0,
+    cmd,
+  );
+}
+
+test.describe("screen-share and camera toggles — busy while enumerating", () => {
+  test("a share click is enumerating at once; a second click starts no second flow", async ({
+    page,
+  }) => {
+    await joinVoice(page, {}, { screenSources: { displays: [DISPLAY], windows: [] } });
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).__tauriHold("enumerate_screen_sources");
+    });
+
+    await page.getByTestId("voice-tray-screenshare").click();
+    expect(await shareKind(page)).toBe("enumerating");
+    await page.getByTestId("voice-tray-screenshare").click();
+    expect(await shareKind(page)).toBe("enumerating");
+    expect(await invokeCount(page, "enumerate_screen_sources")).toBe(1);
+
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).__tauriRelease("enumerate_screen_sources");
+    });
+    await expect(page.getByTestId("screen-share-picker")).toBeVisible();
+    expect(await shareKind(page)).toBe("picking");
+  });
+
+  test("the Linux portal path stays enumerating until the start resolves, then settles to idle on a cancel", async ({
+    page,
+  }) => {
+    // An empty source list means the portal picks; a cancelled portal resolves with no event.
+    await joinVoice(page, {});
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).__tauriHold("start_screen_share");
+    });
+
+    await page.getByTestId("voice-tray-screenshare").click();
+    await expect.poll(() => invokeCount(page, "start_screen_share")).toBe(1);
+    expect(await shareKind(page)).toBe("enumerating");
+    await page.getByTestId("voice-tray-screenshare").click();
+    expect(await invokeCount(page, "start_screen_share")).toBe(1);
+    expect(await invokeCount(page, "enumerate_screen_sources")).toBe(1);
+
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).__tauriRelease("start_screen_share");
+    });
+    await expect.poll(() => shareKind(page)).toBe("idle");
+  });
+
+  test("a camera click is enumerating at once and lands in the picker when several cameras answer", async ({
+    page,
+  }) => {
+    await joinVoice(
+      page,
+      {},
+      { cameras: { cameras: [{ id: "a", name: "Cam A" }, { id: "b", name: "Cam B" }] } },
+    );
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).__tauriHold("list_video_devices");
+    });
+
+    await page.getByTestId("voice-tray-camera").click();
+    expect(await cameraKind(page)).toBe("enumerating");
+    await page.getByTestId("voice-tray-camera").click();
+    expect(await invokeCount(page, "list_video_devices")).toBe(1);
+
+    await page.evaluate(() => {
+      (window as unknown as TestWindow).__tauriRelease("list_video_devices");
+    });
+    await expect.poll(() => cameraKind(page)).toBe("picking");
   });
 });

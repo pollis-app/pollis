@@ -290,13 +290,15 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     }
     let _ = session.writer.flush().await;
 
-    // Park the session so a concurrent `stop_camera` can kill it.
+    // Park the session so a concurrent `stop_camera` can kill it. The token is re-checked
+    // after every await below (see `CameraState::begin_session`).
     let mut reader = session.reader;
-    {
+    let token = {
         let mut cam = state.camera.lock().await;
         cam.local_helper = Some(session.child);
         cam.local_writer = Some(session.writer);
-    }
+        cam.begin_session()
+    };
 
     // Read the negotiated Format (or a leading self-describing Frame).
     let read = tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut reader)).await;
@@ -324,6 +326,10 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
             .await);
         }
         Ok(Ok(None)) => {
+            // A stop during the handshake kills the helper; that EOF is not a failure.
+            if session_ended(state, token).await {
+                return Ok(());
+            }
             stop_camera(state).await.ok();
             return Err(fail_capture(
                 state,
@@ -332,6 +338,9 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
             .await);
         }
         Ok(Err(e)) => {
+            if session_ended(state, token).await {
+                return Ok(());
+            }
             stop_camera(state).await.ok();
             return Err(fail_capture(state, format!("Camera read error: {e}")).await);
         }
@@ -344,6 +353,9 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
             .await);
         }
     };
+    if session_ended(state, token).await {
+        return Ok(());
+    }
 
     if width == 0 || height == 0 {
         stop_camera(state).await.ok();
@@ -388,9 +400,17 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         .await);
     }
 
+    if session_ended(state, token).await {
+        // Stopped while publishing: roll the publish back; the stop already announced itself.
+        let sid = track.sid();
+        let _ = room.local_participant().unpublish_track(&sid).await;
+        return Ok(());
+    }
+
     // Reader task feeds the source and mirrors throttled self-preview frames.
     let source_for_task = source.clone();
     let preview_tx = state.screenshare_frame_tx.clone();
+    let state_for_exit = Arc::clone(state);
     let reader_task = tokio::spawn(async move {
         let mut last_preview: Option<std::time::Instant> = None;
         loop {
@@ -430,11 +450,29 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                 | Ok(Some(CaptureMsg::AudioFrame { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
                     crate::diag!("[camera] helper error mid-stream: {message}");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        format!("Camera capture failed: {message}"),
+                    );
                     break;
                 }
-                Ok(None) => break,
+                Ok(None) => {
+                    crate::diag!("[camera] helper closed socket mid-stream");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Camera stopped: the capture device went away.".into(),
+                    );
+                    break;
+                }
                 Err(e) => {
                     crate::diag!("[camera] reader error: {e}");
+                    on_reader_exit(
+                        state_for_exit,
+                        token,
+                        "Lost the camera-capture connection. Please try again.".into(),
+                    );
                     break;
                 }
             }
@@ -443,6 +481,13 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
 
     {
         let mut cam = state.camera.lock().await;
+        if !cam.is_session(token) {
+            drop(cam);
+            reader_task.abort();
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Ok(());
+        }
         cam.local_source = Some(source);
         cam.local_track = Some(track);
         cam.local_reader_task = Some(reader_task);
@@ -453,8 +498,42 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     Ok(())
 }
 
+/// True once a stop has invalidated `token` (see `CameraState::begin_session`).
+async fn session_ended(state: &Arc<AppState>, token: u64) -> bool {
+    !state.camera.lock().await.is_session(token)
+}
+
+/// The reader task's exit: stop this session, then tell the renderer why. Spawned, not
+/// awaited — the stop aborts the reader task itself (see screenshare's `on_reader_exit`).
+pub(crate) fn on_reader_exit(state: Arc<AppState>, token: u64, message: String) {
+    tokio::spawn(async move {
+        let live = state.camera.lock().await.is_session(token);
+        if !live {
+            return;
+        }
+        let _ = stop_camera_if(&state, token).await;
+        let ev = {
+            let cam = state.camera.lock().await;
+            cam.events.clone()
+        };
+        if let Some(ev) = ev {
+            let _ = ev.send(CameraEvent::LocalError { message });
+        }
+    });
+}
+
 /// Tear down the camera capture; safe when nothing is live.
 pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
+    stop_session(state, None).await
+}
+
+/// Stop only if `token` is still the live session (a reader that died after the user
+/// already restarted must not kill the new capture).
+pub(super) async fn stop_camera_if(state: &Arc<AppState>, token: u64) -> Result<()> {
+    stop_session(state, Some(token)).await
+}
+
+async fn stop_session(state: &Arc<AppState>, token: Option<u64>) -> Result<()> {
     let track;
     let source_to_drop;
     let mut helper;
@@ -464,6 +543,11 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     let room;
     {
         let mut cam = state.camera.lock().await;
+        if let Some(token) = token {
+            if !cam.is_session(token) {
+                return Ok(());
+            }
+        }
         track = cam.local_track.take();
         source_to_drop = cam.local_source.take();
         helper = cam.local_helper.take();
@@ -472,17 +556,18 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
         // Closing the writer sends the helper EOF.
         cam.local_writer = None;
         ev_opt = cam.events.clone();
+
+        let had_session = track.is_some()
+            || source_to_drop.is_some()
+            || helper.is_some()
+            || reader.is_some()
+            || picker.is_some();
+        if !had_session {
+            return Ok(());
+        }
+        cam.end_session();
         let voice = state.voice.lock().await;
         room = voice.room.clone();
-    }
-
-    let had_session = track.is_some()
-        || source_to_drop.is_some()
-        || helper.is_some()
-        || reader.is_some()
-        || picker.is_some();
-    if !had_session {
-        return Ok(());
     }
 
     // Abort the reader, then kill the helper (it owns the AVCaptureSession).
