@@ -27,8 +27,7 @@ is running but hung — that drops every live call.
 
 Reach for it when joins fail with "Couldn't reach the voice server". After the
 2026-10-17 kernel-update reboot, LiveKit came back but nginx exited 255 and
-stayed down for six days despite `restart: unless-stopped`. The external probe
-(below) now presses this button itself after ten minutes of failure.
+stayed down for six days despite `restart: unless-stopped`.
 
 ## Self-healing
 
@@ -41,65 +40,9 @@ What keeps the 2026-10-17 outage from recurring, and where each piece lives:
 | container up but not serving | healthchecks: `livekit` → `GET http://127.0.0.1:7880/` must answer; `nginx` → `GET http://127.0.0.1/healthz` (served by nginx itself on the port-80 vhost) must answer 200 | `docker-compose.yml`, `nginx.conf` |
 | fresh `compose up` racing the boot | `depends_on: livekit: condition: service_healthy` on nginx (only at `compose up`; the daemon's boot-time restart ignores it, which is why the resolver is the real fix) | `docker-compose.yml` |
 | a "successful" restart or deploy that recovered nothing | both workflows wait up to 120 s for every service's healthcheck to be `healthy` and fail loudly otherwise | `livekit-restart.yml`, `livekit-deploy.yml` |
-| nobody notices for six days | the external probe below: alert after ten minutes, dispatch `livekit-restart.yml`, expose the state for `status.pollis.com` | `livekit/probe/` |
+| nobody notices for six days | `status.pollis.com` probes `https://rtc.pollis.com/` live on every page load ("Voice & video" row); no cron, by decision — a timer-driven probe was judged cost for ambiguous value | `archon` repo, `src/health.ts` |
 
 `docker compose ps` shows the health column; `docker inspect -f '{{.State.Health.Status}}' livekit-nginx-1` gives it directly.
-
-## External probe (`livekit/probe/`)
-
-A Cloudflare cron Worker (`*/5 * * * *`) that watches the stack from outside the
-box, because a monitor on the box cannot report that the box went quiet. Each
-run:
-
-1. `GET https://rtc.pollis.com/` must answer **200 `OK`** — the full path
-   (TLS → nginx SNI demux → `http` vhost → `livekit:7880`).
-2. A **STUN Binding Request over TLS to `turn.pollis.com:443`** must come back as
-   a Binding Success Response. LiveKit's TURN listener answers one without
-   credentials, so this proves the `stream` terminator routed the SNI to
-   LiveKit's TURN server, not merely that something on 443 completed a
-   handshake. (`printf '\x00\x01\x00\x00\x21\x12\xa4\x42pollisprobe1' | openssl
-   s_client -connect turn.pollis.com:443 -servername turn.pollis.com -quiet | xxd`
-   shows the same `0101` reply by hand.)
-
-Two consecutive failing runs (ten minutes) mark the stack **down**: it posts to
-the alert webhook and dispatches `livekit-restart.yml` through the GitHub API,
-then re-dispatches at most every 30 minutes and reminds hourly until the first
-green run, which posts the recovery and the outage length. The decision logic
-is `src/logic.ts` (pure; `pnpm test` runs it under `node --test`), the I/O is
-`src/index.ts`.
-
-`GET https://<worker>/` returns the last result as JSON (`{ok, since,
-checked_at, rtc, turn}`; 503 while down, `Cache-Control: no-store`, CORS `*`).
-**`status.pollis.com` lives in the `archon` repo, not here** — add a "Voice
-server" row there that reads this URL; the probe reads nothing from the
-requests it receives, keeps no per-request state and logs nothing
-(`observability.enabled: false`, `logpush: false`, as the DS Worker configs).
-
-**Deploy (manual, from a checkout — there is no workflow for it):**
-
-```bash
-cd livekit/probe
-pnpm install --ignore-workspace          # outside the root pnpm workspace, like mobile/
-pnpm test && pnpm typecheck
-pnpm exec wrangler login                 # dan@pollis.com account (docs/deployments.md)
-pnpm exec wrangler secret put GITHUB_DISPATCH_TOKEN
-pnpm exec wrangler secret put ALERT_WEBHOOK_URL   # optional
-pnpm exec wrangler deploy
-# Smoke: force one run and read the state back.
-curl -sS "https://pollis-livekit-probe.<account>.workers.dev/"
-```
-
-Secrets (not created by this repo — set them with `wrangler secret put` above):
-
-| Secret | What |
-|--------|------|
-| `GITHUB_DISPATCH_TOKEN` | A **fine-grained** PAT: repository access = `pollis-app/pollis` only, permissions = **Actions: Read and write** and nothing else (that is the one scope `POST …/actions/workflows/livekit-restart.yml/dispatches` needs). Name it `livekit-probe`, set an expiry, and note it in the GitHub-side settings record (`docs/ci-trust.md`). The restart workflow has no `environment:` gate, so the dispatch runs unattended — which is the point. |
-| `ALERT_WEBHOOK_URL` | Optional incoming webhook. The body is `{"content": msg, "text": msg}`, which Discord- and Slack-style hooks both read. Unset → no alerts, the dispatch still happens. |
-
-To run it locally against the live endpoints without any secret (it then
-dispatches nothing): `pnpm exec wrangler dev --test-scheduled`, then
-`curl 'http://127.0.0.1:8787/__scheduled?cron=*/5+*+*+*+*'` and `curl
-http://127.0.0.1:8787/`.
 
 ## Stack
 
@@ -118,7 +61,6 @@ livekit/
   docker-compose.yml   # livekit + nginx: ports, healthchecks, restart policy
   livekit.yml          # non-secret; deploy appends the keys: block from secrets
   nginx.conf           # LiveKit ingress: SNI demux on 443 (web + TURNS)
-  probe/               # Cloudflare cron Worker watching rtc/turn from outside
   DEPLOY.md
 ```
 
@@ -361,8 +303,7 @@ echo "net.core.rmem_default=5000000" >> /etc/sysctl.conf
 ```
 
 ### 4. Deploy
-Hit the **Deploy LiveKit + nginx** button, then deploy the external probe
-("External probe" above) and point its alert webhook somewhere a human reads.
+Hit the **Deploy LiveKit + nginx** button, then open `status.pollis.com` and check the "Voice & video" row is green.
 
 ## LiveKit API keys
 
@@ -552,10 +493,8 @@ peer connections to whichever node they land on.
    `/v1/livekit/token` and returns that `url`. Additive: a DS without the
    header or the vars behaves exactly as today, and every shipped client
    already follows `url`.
-5. **Probe.** One `livekit/probe/` deployment per region (`wrangler deploy
-   --name pollis-livekit-probe-<region>` with `RTC_URL`/`TURN_HOST` vars
-   overridden), or one Worker iterating a list — either way one row per node
-   on `status.pollis.com`.
+5. **Status page.** One "Voice & video" row per node on `status.pollis.com`
+   (archon `probeVoice`, live on page load).
 6. **Verify.** From each region: `curl https://rtc-<region>.pollis.com` → `OK`;
    a token minted via that region's DS answers with the matching `url`; two
    clients in different regions join one room and `livekit_participant_total`
@@ -620,8 +559,8 @@ is stored on the VPS beyond Alloy's WAL.
    `livekit_participant_total` (both labelled by `node_id`), `process_cpu_seconds_total`;
    `livekit_node_packet_total`, `livekit_forward_latency` and the
    `livekit_quality_score` histogram appear once media flows. Useful first
-   alerts: `up{job="livekit"} == 0` for 5 min (scraper cannot reach LiveKit —
-   pair with the external probe, which sees the public path), and
+   alerts: `up{job="livekit"} == 0` for 5 min (scraper cannot reach LiveKit;
+   `status.pollis.com` shows the public path), and
    `rate(livekit_node_packet_total[5m])` against the transfer budget in
    "Capacity".
 

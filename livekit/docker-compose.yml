@@ -19,7 +19,7 @@
 # in the wrong order (2026-10-17: nginx exited 255 with "host not found in
 # upstream" and stayed down six days) no longer takes the ingress down. The
 # restart workflow refuses to report success until both healthchecks are green,
-# and livekit/probe/ watches from outside.
+# and status.pollis.com checks rtc.pollis.com on every page load.
 #
 # Deploys go through .github/workflows/livekit-deploy.yml (manual button). Do not
 # hand-edit on the box — `main` carries the canonical config.
