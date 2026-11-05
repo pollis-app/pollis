@@ -13,6 +13,7 @@ import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { toggleCamera } from "../../camera/cameraActions";
 import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf, isMediaBusy } from "../../types/voice-state";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
+import { IconSpinner } from "../ui/IconSpinner";
 import { SignalBars } from "./SignalBars";
 import { useShortcutLabel } from "../../keyboard";
 import {
@@ -196,7 +197,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }
         square
       >
-        {shareBusy ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
+        {shareBusy ? <IconSpinner size={12} /> : shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
 
       {/* Indicator only: audio can't change mid-share. */}
@@ -258,7 +259,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }
         square
       >
-        {cameraBusy ? <LoadingSpinner size="sm" /> : cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
+        {cameraBusy ? <IconSpinner size={12} /> : cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
       </PillButton>
 
       <PillButton

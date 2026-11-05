@@ -7,6 +7,8 @@ import { useTranslation } from "react-i18next";
 interface LoadingSpinnerProps {
   size?: "sm" | "base" | "lg";
   className?: string;
+  /** `inherit` takes the parent's text colour, e.g. dark on a filled accent button. */
+  tone?: "accent" | "inherit";
 }
 
 /**
@@ -49,6 +51,7 @@ interface LoadingSpinnerProps {
 export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   size = "base",
   className = "",
+  tone = "accent",
 }) => {
   const { t } = useTranslation("common");
   const sizeClasses = {
@@ -59,7 +62,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
 
   return (
     <span
-      className={`loader-spinner inline-block font-mono text-accent ${sizeClasses[size]} ${className}`}
+      className={`loader-spinner inline-block font-mono ${tone === "accent" ? "text-accent" : ""} ${sizeClasses[size]} ${className}`}
       aria-label={t("a11y.loading")}
     />
   );

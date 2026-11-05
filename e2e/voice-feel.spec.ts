@@ -274,6 +274,40 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("voice-tray-camera")).not.toHaveAttribute("data-busy", "true");
     });
 
+    test("a busy pill keeps the exact box of its idle icon (no layout shift)", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await joinVoice(page);
+      const candidates = [
+        "voice-tray-screenshare", "voice-tray-camera",
+        "voice-bar-screenshare-button", "voice-bar-camera-button",
+        "sidebar-voice-screenshare",
+      ];
+      // Each skin draws a different subset (the refined skin has no VoiceBar).
+      const ids: string[] = [];
+      for (const id of candidates) {
+        if (await page.getByTestId(id).count()) {
+          ids.push(id);
+        }
+      }
+      expect(ids.length).toBeGreaterThanOrEqual(3);
+      const boxes = async () =>
+        Promise.all(ids.map(async (id) => {
+          const b = await page.getByTestId(id).boundingBox();
+          return b && { w: Math.round(b.width), h: Math.round(b.height) };
+        }));
+      const idle = await boxes();
+      await page.evaluate(() => {
+        const store = (window as unknown as TestWindow).__pollisStore;
+        store.shareStartStarting(false);
+        store.cameraStartStarting();
+      });
+      for (const id of ids) {
+        await expect(page.getByTestId(id)).toHaveAttribute("data-busy", "true");
+      }
+      expect(await boxes()).toEqual(idle);
+    });
+
     test("a camera failure is shown in the status bar and dismissing clears it", async ({ page }) => {
       await boot(page, skin);
       await openVoiceChannel(page);
