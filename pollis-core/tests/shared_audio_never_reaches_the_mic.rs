@@ -121,37 +121,87 @@ fn shared_audio_is_never_used_as_a_render_reference() {
     }
 }
 
-/// The voice mixer is the one sanctioned caller, and it must stay one.
+/// Every `.rs` file under `src/commands/voice/`.
+fn voice_sources() -> Vec<(String, String)> {
+    let dir = src_root().join("commands").join("voice");
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("voice dir") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("file name")
+            .to_string();
+        out.push((name, std::fs::read_to_string(&path).expect("read")));
+    }
+    assert!(
+        out.len() > 5,
+        "expected the voice module to have several files; found {} — \
+         has the module moved? This test would silently pass over nothing.",
+        out.len()
+    );
+    out
+}
+
+/// The output mixer is the one sanctioned source of the render reference —
+/// it is the only code that knows what is about to hit the speaker — and it
+/// must stay the only one: a second feed would desynchronise the canceller.
 #[test]
 fn the_voice_mixer_is_the_only_source_of_the_self_echo_render_reference() {
-    let playback = code_only(&read("commands/voice/playback.rs"));
+    let mixer = code_only(&read("commands/voice/mixer.rs"));
     assert!(
-        playback.contains("self_echo::analyze_render"),
+        mixer.contains("self_echo::analyze_render"),
         "the voice mixer no longer feeds the shared-audio echo canceller. \
          Without that reference the canceller has nothing to subtract, and \
          a Linux screen share with sound re-publishes every participant's \
          voice back to them a few hundred milliseconds late."
     );
+    // Both taps are taken from the same mix frame, in the same place.
+    assert!(
+        mixer.contains("voice_apm::analyze_render"),
+        "the voice mixer no longer feeds the mic AEC its render reference; \
+         echo cancellation is running blind."
+    );
+    for (name, src) in voice_sources() {
+        if name == "mixer.rs" {
+            continue;
+        }
+        let code = code_only(&src);
+        assert!(
+            !code.contains("analyze_render"),
+            "voice/{name} calls analyze_render. The render reference is \
+             produced in exactly one place, the output mixer's frame render \
+             (voice/mixer.rs), where it is literally what the speaker is \
+             about to play; a second caller would feed the cancellers a \
+             signal that is not."
+        );
+    }
 }
 
-/// The microphone's own capture loop must not learn about shared audio.
+/// The microphone's own capture path must not learn about shared audio.
 #[test]
 fn the_microphone_capture_path_knows_nothing_about_shared_audio() {
-    let code = code_only(&read("commands/voice/lifecycle.rs"));
-    for banned in [
-        "screenshare::audio",
-        "SharedAudioResampler",
-        "SelfEchoCanceller",
-        "publish_shared_audio_track",
-    ] {
-        assert!(
-            !code.contains(banned),
-            "voice/lifecycle.rs references `{banned}`. The mic capture path \
-             must stay unaware of shared audio — the two signals have the \
-             same shape (10 ms mono i16 @ 48 kHz), so a wrong wire here \
-             compiles and runs, and only announces itself as a shared video \
-             audible inside someone's microphone track."
-        );
+    for file in ["commands/voice/lifecycle.rs", "commands/voice/capture.rs"] {
+        let code = code_only(&read(file));
+        for banned in [
+            "screenshare::audio",
+            "SharedAudioResampler",
+            "SelfEchoCanceller",
+            "self_echo",
+            "publish_shared_audio_track",
+        ] {
+            assert!(
+                !code.contains(banned),
+                "{file} references `{banned}`. The mic capture path must \
+                 stay unaware of shared audio — the two signals have the \
+                 same shape (10 ms mono i16 @ 48 kHz), so a wrong wire here \
+                 compiles and runs, and only announces itself as a shared \
+                 video audible inside someone's microphone track."
+            );
+        }
     }
 }
 
