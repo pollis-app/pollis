@@ -88,6 +88,10 @@ share is running, so the cost is one uncontended lock per frame.
   `MixerShared` (rings, slots, gains, the APM tap) outlives every stream, so every
   participant keeps playing; the new stream's first callback trims each ring back to
   the pre-roll so nothing stale is played.
+- **In-session reconnect** (`lifecycle::reconnect_session`): `PlaybackState::stop_tracks`
+  drops the dead room's drains and rings but keeps the output stream, the mixer and
+  the AEC tap; the mic stream, its DSP thread and APM are untouched, and the new
+  room's `TrackSubscribed`s land in the same mixer.
 - **Volume**: `set_remote_user_volume` stores the gain on `PlaybackState::user_volumes`
   (so later tracks of that user inherit it) and writes the atomic on every live slot.
   No map is cloned per tick.
