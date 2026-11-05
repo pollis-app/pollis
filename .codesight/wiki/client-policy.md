@@ -135,8 +135,8 @@ builds carry the real `mobile/package.json` version.
   event re-checks (throttled by the core); `onUpgradeRequired` in `bridge/invoke.ts` turns any
   command's `upgrade_required` into the page.
 - **Mobile**: the same page in place of the whole navigation stack, before the PIN/email screen;
-  its button opens the install's update destination (`lib/installChannel.ts`: the App Store once
-  `IOS_APP_STORE_ID` is set, TestFlight until then; Play for a Play build; pollis.com/android for
+  its button opens the install's update destination (`lib/installChannel.ts`: the App Store listing via
+  `IOS_APP_STORE_ID` (TestFlight if it is null); Play for a Play build; pollis.com/android for
   the sideload APK). Re-checked on `AppState` → `active`; `upgrade_required` from any bridge call
   shows it.
 - **CLI**: `--help` / `--version` never touch it. A non-interactive run pays for no fetch before

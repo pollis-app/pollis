@@ -406,10 +406,11 @@ expo-constants embeds during the **native** build (Gradle preBuild →
 `assets/app.config`; the Xcode phase → `EXConstants.bundle/app.config`), so the
 env of the Gradle/Xcode step decides it, and an OTA update cannot change it
 (`lib/buildInfo.ts` reads that embedded copy, never `Constants.expoConfig`).
-`store` opens the Play listing on Android, and on iOS TestFlight — one IPA
-serves TestFlight and the App Store, so no build can tell them apart — until
-`IOS_APP_STORE_ID` in `lib/installChannel.ts` is set to the App Store record's
-Apple ID (JS, so an OTA carries it). `sideload` opens pollis.com/android, `dev`
+`store` opens the Play listing on Android, and the App Store listing on iOS
+(`IOS_APP_STORE_ID` in `lib/installChannel.ts`, the record's Apple ID). One IPA
+serves TestFlight and the App Store, so no build can tell them apart: TestFlight
+installs get the App Store listing too. Null it to fall back to TestFlight (JS,
+so an OTA carries it). `sideload` opens pollis.com/android, `dev`
 pollis.com. Pass the sideload key as an env var, never as `-PPOLLIS_RELEASE_KEY`:
 Gradle would sign with it but the config would not see it. The channel is
 stripped from the fingerprint (`fingerprint.config.js`), so it never moves a
