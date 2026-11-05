@@ -269,7 +269,18 @@ async function main() {
     console.log("[voice-channel] A: left (join CTA reappeared)");
     await waitForParticipantCount(B.browser, "B", 1, CONVERGE_TIMEOUT_MS);
     await shot(B.browser, "voice-channel-B-one.png");
-    console.log("[voice-channel] SUCCESS: B saw A leave (back to 1 participant)");
+    console.log("[voice-channel] B saw A leave (back to 1 participant)");
+
+    // A rejoins straight after leaving: the previous room's close runs in the background and the
+    // SFU evicts the stale participant, so the rejoin must neither wait on it nor be refused.
+    console.log("[voice-channel] A: rejoining immediately");
+    await joinVoice(A.browser, "A");
+    await waitForParticipantCount(A.browser, "A", 2, CONVERGE_TIMEOUT_MS);
+    await waitForParticipantCount(B.browser, "B", 2, CONVERGE_TIMEOUT_MS);
+    await h.clickTestId(A.browser, "voice-tray-leave");
+    await h.waitTestId(A.browser, "voice-join-cta", 30000);
+    await waitForParticipantCount(B.browser, "B", 1, CONVERGE_TIMEOUT_MS);
+    console.log("[voice-channel] SUCCESS: A's immediate rejoin converged on both sides, then left again");
     code = 0;
   } catch (err) {
     console.error("[voice-channel] FAILED:", err.message);

@@ -1160,7 +1160,7 @@ build):
 | `two-client-call.js` | 1:1 call place + accept (B answers from the #1639 takeover, hovering Accept first), both sides see each other | yes (+ LiveKit) |
 | `two-client-camera.js` | camera on → the peer renders the remote tile | yes (+ LiveKit) |
 | `two-client-screenshare.js` | screenshare → the peer renders the remote tile | yes (+ LiveKit) |
-| `two-client-voice-channel.js` | voice channel join/leave, participant counts converge | yes (+ LiveKit) |
+| `two-client-voice-channel.js` | voice channel join/leave, participant counts converge; then an immediate rejoin after leaving (the old room closes in the background) converges too | yes (+ LiveKit) |
 | `voice-reconnect.js` | both in a voice channel, the SFU container is stopped for longer than the SDK's own retry window (75 s): neither client drops to the join CTA, and both see each other again after it restarts (in-session re-mint + reconnect) | yes (+ LiveKit, Docker) |
 | `voice-channel-no-mic.js` | joining a voice channel with no microphone degrades instead of failing | yes (+ LiveKit) |
 
