@@ -1999,6 +1999,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_audio_devices':
       return [];
 
+    // Session lifecycle: a join succeeds instantly, so a spec can drive `VoiceSessionManager` itself.
+    case 'join_voice_channel':
+    case 'get_device_id':
+    case 'leave_voice_channel':
+    case 'subscribe_voice_events':
+    case 'get_last_join_timings':
+    case 'set_remote_user_volume':
     case 'prepare_voice_connection':
     case 'publish_voice_presence':
     case 'publish_typing':

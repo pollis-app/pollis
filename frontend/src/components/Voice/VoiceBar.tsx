@@ -11,7 +11,8 @@ import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { toggleCamera } from "../../camera/cameraActions";
-import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf } from "../../types/voice-state";
+import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf, isMediaBusy } from "../../types/voice-state";
+import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { useShortcutLabel } from "../../keyboard";
 import {
   micControlTitleKey,
@@ -44,9 +45,11 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const shareActive = share.kind === 'active';
   // Any non-idle state is a "stop" (clears `starting` and `failed`).
   const shareInFlight = share.kind !== 'idle';
+  const shareBusy = isMediaBusy(share);
   const camera = cameraOf(voiceState);
   const cameraActive = camera.kind === 'active';
   const cameraInFlight = camera.kind !== 'idle';
+  const cameraBusy = isMediaBusy(camera);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -111,6 +114,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
           onClick={toggleMute}
           title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
           aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
+          aria-pressed={micIndicator === "muted" || micIndicator === "deafened"}
           square
         >
           {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -139,6 +143,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={toggleDeafen}
         title={t(deafenControlTitleKey(gate.deafened))}
         aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
+        aria-pressed={gate.deafened}
         square
       >
         {gate.deafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
@@ -147,6 +152,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       {/* macOS uses the in-app picker (SCContentSharingPicker crashes, #283); an empty source list means a system picker. */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
+        data-busy={shareBusy || undefined}
+        aria-pressed={shareActive}
         accent={shareInFlight ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={() => toggleScreenShare(share)}
         title={
@@ -167,7 +174,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }
         square
       >
-        {shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
+        {shareBusy ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
 
       {/* Indicator only: audio can't change mid-share. */}
@@ -207,6 +214,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       {/* Camera: starts directly with one, else CameraPicker. */}
       <PillButton
         data-testid="voice-bar-camera-button"
+        data-busy={cameraBusy || undefined}
+        aria-pressed={cameraActive}
         accent={cameraInFlight && !cameraActive ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={() => toggleCamera(camera)}
         title={
@@ -227,7 +236,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }
         square
       >
-        {cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
+        {cameraBusy ? <LoadingSpinner size="sm" /> : cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
       </PillButton>
 
       <PillButton

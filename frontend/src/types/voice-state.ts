@@ -63,10 +63,22 @@ export type VoiceState =
       gate: VoiceGateState;
       /** False when joined listen-only (no capture device). */
       micAvailable: boolean;
+      /** LiveKit is re-establishing the room; the session stays `joined` throughout. */
+      reconnecting: { attempt: number } | null;
       share: ShareState;
       camera: CameraState;
     }
   | { kind: 'leaving'; channelId: string };
+
+/** A transient device/source enumeration (`kind: 'enumerating'`, added by the share/camera actions); drawn as busy. */
+export function isEnumerating(state: { kind: string }): boolean {
+  return state.kind === 'enumerating';
+}
+
+/** Share/camera states that should draw a spinner: enumerating sources or bringing the track up. */
+export function isMediaBusy(state: { kind: string }): boolean {
+  return isEnumerating(state) || state.kind === 'starting';
+}
 
 /** Local screen share; only inside `joined`. */
 export type ShareState =

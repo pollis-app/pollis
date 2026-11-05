@@ -448,6 +448,13 @@
    color: var(--c-accent);
 }
 
+/* While connecting the gate has no room to act on; Leave stays live. */
+.vs-tray-btn:disabled {
+   opacity: 0.5;
+   cursor: default;
+   pointer-events: none;
+}
+
 .vs-tray-btn.on {
    background: var(--c-accent);
    color: var(--c-bg);

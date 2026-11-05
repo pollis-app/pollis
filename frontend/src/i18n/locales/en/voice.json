@@ -186,6 +186,9 @@
     "busy": "A voice session is already in progress.",
     "generic": "Couldn't join voice. Try again."
   },
+  "disconnected": {
+    "lost": "Voice connection lost — rejoin the channel to continue."
+  },
   "shareError": {
     "cancelled": "Screen share cancelled — no window or screen was picked.",
     "unsupportedDesktop": "Screen sharing isn't available on this desktop environment. It has no screen-sharing backend (xdg-desktop-portal ScreenCast). Use GNOME, KDE, or an X11 session.",

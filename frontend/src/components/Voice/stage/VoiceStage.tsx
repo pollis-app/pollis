@@ -7,7 +7,7 @@ import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, V
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
-import { shareOf, cameraOf, screenshareOf, gateOf, micIndicatorOf } from "../../../types/voice-state";
+import { shareOf, cameraOf, screenshareOf, gateOf, micIndicatorOf, isMediaBusy } from "../../../types/voice-state";
 import { useShortcutLabel } from "../../../keyboard";
 import {
   micControlTitleKey,
@@ -24,6 +24,7 @@ import { disambiguateVoiceNames } from "../../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity, voiceUserKey } from "../../../voice/identity";
 import { voiceSession } from "../../../voice";
 import { Button } from "../../ui/Button";
+import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { NavigableGrid } from "../../ui/NavigableGrid";
 import { ScreenSharePicker } from "../ScreenSharePicker";
 import { CameraPicker } from "../CameraPicker";
@@ -70,12 +71,14 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const shareActive = share.kind === "active";
     const sharePicking = share.kind === "picking";
     const shareInFlight = share.kind !== "idle";
+    const shareBusy = isMediaBusy(share);
     const shareLocalDims = shareActive ? share.dimensions : null;
 
     const camera = cameraOf(voiceState);
     const cameraActive = camera.kind === "active";
     const cameraPicking = camera.kind === "picking";
     const cameraInFlight = camera.kind !== "idle";
+    const cameraBusy = isMediaBusy(camera);
     const cameraLocalDims = cameraActive ? camera.dimensions : null;
 
     const isJoining = voiceState.kind === "joining";
@@ -321,11 +324,12 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           )}
         </div>
 
-        {/* Default tray only once joined; a `footer` override always renders. */}
+        {/* The tray mounts with the join (not after it) so the footer never jumps in late, and Leave
+            stays reachable while connecting; a `footer` override always renders. */}
         {footer ? (
           footer
-        ) : voiceState.kind === "joined" ? (
-          <div className="vs-foot">
+        ) : voiceState.kind === "joined" || voiceState.kind === "joining" ? (
+          <div className="vs-foot" data-phase={voiceState.kind}>
             <div className="vs-foot-side">
               {isInCall || callMode ? (
                 <div className="vs-tray">
@@ -341,6 +345,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       data-mic-state={micIndicator}
                       title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
                       aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
+                      aria-pressed={micIndicator === "muted" || micIndicator === "deafened"}
+                      disabled={isJoining}
                       onClick={() => voiceSession.toggleMute()}
                     >
                       {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -367,6 +373,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     data-deafened={gate.deafened}
                     title={t(deafenControlTitleKey(gate.deafened))}
                     aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
+                    aria-pressed={gate.deafened}
+                    disabled={isJoining}
                     onClick={() => voiceSession.toggleDeafen()}
                   >
                     {gate.deafened ? <VolumeX size={15} /> : <Volume2 size={15} />}
@@ -374,20 +382,26 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   <button
                     className={"vs-tray-btn" + (shareActive ? " on" : "")}
                     data-testid="voice-tray-screenshare"
+                    data-busy={shareBusy || undefined}
                     title={shareActive ? t("controls.stopScreenShare") : shareInFlight ? t("controls.cancelRecover") : t("controls.shareScreen")}
                     aria-label={shareActive ? t("controls.stopScreenShare") : t("controls.shareScreen")}
+                    aria-pressed={shareActive}
+                    disabled={isJoining}
                     onClick={() => toggleScreenShare(share)}
                   >
-                    {shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
+                    {shareBusy ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
                   </button>
                   <button
                     className={"vs-tray-btn" + (cameraActive ? " on" : "")}
                     data-testid="voice-tray-camera"
+                    data-busy={cameraBusy || undefined}
                     title={cameraActive ? t("controls.turnOffCamera") : cameraPicking ? t("common:actions.cancel") : cameraInFlight ? t("controls.cancelRecover") : t("controls.turnOnCamera")}
                     aria-label={cameraActive ? t("controls.turnOffCamera") : t("controls.turnOnCamera")}
+                    aria-pressed={cameraActive}
+                    disabled={isJoining}
                     onClick={() => toggleCamera(camera)}
                   >
-                    {cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
+                    {cameraBusy ? <LoadingSpinner size="sm" /> : cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
                   </button>
                   <div className="vs-tray-sep" />
                   {leaveButton}
@@ -406,13 +420,6 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               >
                 <SlidersHorizontal size={15} /> {t("stage.settingsLink")}
               </button>
-            </div>
-          </div>
-        ) : callMode ? (
-          // Connecting: only hang-up is reachable.
-          <div className="vs-foot">
-            <div className="vs-foot-side">
-              <div className="vs-tray">{leaveButton}</div>
             </div>
           </div>
         ) : null}

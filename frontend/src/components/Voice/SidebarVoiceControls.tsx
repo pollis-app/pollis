@@ -41,6 +41,7 @@ export const SidebarVoiceControls: React.FC = observer(() => {
           data-mic-state={micIndicator}
           onClick={() => voiceSession.toggleMute()}
           aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
+          aria-pressed={micIndicator === "muted" || micIndicator === "deafened"}
           title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
           className={`icon-btn-sm ${MIC_TONE[micIndicator]}`}
         >
@@ -71,6 +72,7 @@ export const SidebarVoiceControls: React.FC = observer(() => {
         data-deafened={gate.deafened}
         onClick={() => voiceSession.toggleDeafen()}
         aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
+        aria-pressed={gate.deafened}
         title={t(deafenControlTitleKey(gate.deafened))}
         className={`icon-btn-sm ${gate.deafened ? "text-danger hover:text-danger" : ""}`}
       >
