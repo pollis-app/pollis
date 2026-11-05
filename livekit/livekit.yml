@@ -14,6 +14,14 @@ rtc:
   use_external_ip: true
   use_ice_lite: true
 
+# Metrics. LiveKit serves Prometheus metrics on a SEPARATE listener at
+# :6789/metrics (never on the signalling port 7880), so nothing reaches the
+# internet through nginx; docker-compose.yml publishes it to the host loopback
+# only, for a local scraper (DEPLOY.md → "Metrics"). Node-level counters only —
+# no participant identities and no client addresses.
+prometheus:
+  port: 6789
+
 # TURN — the relay fallback for clients that cannot get a direct UDP route
 # (corporate/hotel/carrier NAT, UDP-blocking VPNs). Two listeners:
 #

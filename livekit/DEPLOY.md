@@ -409,4 +409,62 @@ docker compose exec -T livekit sh -c 'ss -lun' | awk '$5 ~ /:3[0-9]{4}$/' | wc -
 - Do not widen much further without re-measuring: every published port is
   iptables state, and with the userland proxy accidentally re-enabled it is also
   two processes per port (see §1b).
-- LiveKit exposes Prometheus metrics at `/metrics` for future monitoring.
+- Metrics are on a separate loopback-only port, not on `/metrics` of the public
+  vhost — see "Metrics".
+
+## Metrics
+
+LiveKit serves Prometheus metrics only when `prometheus.port` is set
+(`livekit.yml`: `6789`), and only on that port — `https://rtc.pollis.com/metrics`
+is a 404 and must stay one. `docker-compose.yml` publishes the port as
+`127.0.0.1:6789:6789`, so on the box:
+
+```bash
+curl -s http://127.0.0.1:6789/metrics | head
+```
+
+and nothing off the box can reach it (no firewall rule, no nginx route). The
+series are node-level — rooms, participants, tracks, bytes, packet loss, CPU —
+with no participant identity and no client address.
+
+**Minimal scrape recipe — Grafana Alloy → Grafana Cloud (free tier).** Alloy
+runs on the box as a systemd service and pushes to a hosted Prometheus; nothing
+is stored on the VPS beyond Alloy's WAL.
+
+1. Create a free Grafana Cloud stack; under *Connections → Add new connection →
+   Hosted Prometheus metrics* take the remote-write URL, the instance id
+   (username) and an API token with the `MetricsPublisher` role. Keep the token
+   in Doppler (`prd_prod`, `GRAFANA_CLOUD_METRICS_TOKEN`); it is a push-only
+   credential.
+2. Install Alloy from Grafana's apt repo
+   (`https://grafana.com/docs/alloy/latest/set-up/install/linux/`) and write
+   `/etc/alloy/config.alloy`:
+   ```alloy
+   prometheus.scrape "livekit" {
+     targets    = [{ __address__ = "127.0.0.1:6789", job = "livekit" }]
+     forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+     scrape_interval = "30s"
+   }
+
+   prometheus.remote_write "grafana_cloud" {
+     endpoint {
+       url = "https://<stack>.grafana.net/api/prom/push"
+       basic_auth {
+         username      = "<instance id>"
+         password_file = "/etc/alloy/grafana-cloud-token"
+       }
+     }
+   }
+   ```
+   with the token in `/etc/alloy/grafana-cloud-token` (`chmod 600`, owner
+   `alloy`), then `systemctl enable --now alloy`.
+3. Verify in Grafana Cloud's Explore: `livekit_room_total` and
+   `livekit_participant_total` (both labelled by `node_id`), `process_cpu_seconds_total`;
+   `livekit_node_packet_total`, `livekit_forward_latency` and the
+   `livekit_quality_score` histogram appear once media flows. Useful first
+   alerts: `up{job="livekit"} == 0` for 5 min (scraper cannot reach LiveKit —
+   pair with the external probe, which sees the public path), and
+   `rate(livekit_node_packet_total[5m])` against the transfer budget in
+   "Capacity".
+
+Alloy sees only the loopback endpoint; it never touches client traffic.

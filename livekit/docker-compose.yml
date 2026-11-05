@@ -32,6 +32,10 @@ services:
       # TURN over UDP (turn.udp_port in livekit.yml). Also the STUN server
       # clients are handed — without it LiveKit hands out Google's public STUN.
       - "3478:3478/udp"
+      # Prometheus metrics (prometheus.port in livekit.yml): host LOOPBACK only,
+      # for a scraper running on the box. Never a public bind — the metrics
+      # name rooms and counts, and nothing else on this stack is unauthenticated.
+      - "127.0.0.1:6789:6789"
       # 5349 is NOT published. TURNS now arrives on 443, is terminated by nginx
       # and forwarded over the compose network to livekit:5349 as plaintext —
       # so the TURN listener must not be reachable from the internet at all.
