@@ -1,7 +1,7 @@
 // App-level push listeners, once signed in. No permission prompt here (see app/chat/[id].tsx). A tap is held until past the PIN (#1422).
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter, useSegments } from "expo-router";
+import { usePathname, useRouter, useSegments } from "expo-router";
 import { useObserver } from "mobx-react-lite";
 import { appStore } from "../stores/appStore";
 import {
@@ -10,6 +10,7 @@ import {
   takeLaunchNotificationData,
 } from "../lib/push";
 import { createTapGate, type TapGate } from "../lib/push/tapGate";
+import { tapNavigation } from "../lib/push/tapNavigation";
 import { syncOpenConversationToNative } from "../lib/push/openConversation";
 import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
@@ -34,6 +35,9 @@ export function usePushNotifications() {
 
   const routerRef = useRef(router);
   routerRef.current = router;
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   const { openConversation } = useOpenConversation();
   const openRef = useRef(openConversation);
   openRef.current = openConversation;
@@ -48,15 +52,24 @@ export function usePushNotifications() {
         if (!conv) {
           return;
         }
-        const ck = toConversationKind(conv.kind);
-        if (ck) {
-          openRef.current({ id: conv.conversationId, kind: ck });
+        const nav = tapNavigation(pathnameRef.current, conv.conversationId);
+        if (nav === "none") {
           return;
         }
-        routerRef.current.push({
+        const ck = toConversationKind(conv.kind);
+        if (ck) {
+          openRef.current({ id: conv.conversationId, kind: ck }, { replace: nav === "replace" });
+          return;
+        }
+        const href = {
           pathname: "/chat/[id]",
           params: { id: conv.conversationId, kind: conv.kind },
-        });
+        } as const;
+        if (nav === "replace") {
+          routerRef.current.replace(href);
+        } else {
+          routerRef.current.push(href);
+        }
       })();
     }),
   );
