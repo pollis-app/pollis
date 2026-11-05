@@ -12,7 +12,7 @@ import { userIdFromVoiceIdentity } from './identity';
 import { joinErrorMessageKey, legacyJoinErrorKey, parseVoiceJoinError } from './joinError';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
-import { audioLevels } from './audioLevels';
+import { audioLevels, type AudioBandsEntry } from './audioLevels';
 import { audioSetMuted, audioSetSpeaking } from './participantAudio';
 import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
 
@@ -33,7 +33,7 @@ export type VoiceEvent =
   | { type: 'mic_availability'; identity: string; available: boolean }
   | { type: 'speaking_started'; identity: string }
   | { type: 'speaking_stopped'; identity: string }
-  | { type: 'audio_bands'; identity: string; bands: number[] }
+  | { type: 'audio_bands'; levels: AudioBandsEntry[] }
   | { type: 'connection_quality_changed'; identity: string; quality: VoiceConnectionQuality }
   | {
       type: 'voice_e2ee_key_rotated';
@@ -634,7 +634,7 @@ class VoiceSessionManager {
       }
       case 'audio_bands': {
         // High-frequency; bypasses setState (see `audioLevels.ts`).
-        audioLevels.push(event.identity, event.bands);
+        audioLevels.pushBatch(event.levels);
         break;
       }
       case 'connection_quality_changed': {

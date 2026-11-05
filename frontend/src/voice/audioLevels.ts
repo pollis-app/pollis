@@ -1,9 +1,16 @@
-// Per-identity pub/sub for ~20 Hz `audio_bands` levels, kept out of observable state; tiles write CSS vars via refs.
+// Per-identity pub/sub for `audio_bands` levels, kept out of observable state; tiles write CSS vars via refs.
+// The backend batches every participant into one event per 50 ms tick (`levels::LevelsHub`).
 
 import { userIdFromVoiceIdentity } from "./identity";
 
 /** Band count — MUST match `levels::BAND_COUNT` in pollis-core. */
 export const BAND_COUNT = 3;
+
+/** One participant's entry in an `audio_bands` event (`AudioBandsEntry` in pollis-core). */
+export interface AudioBandsEntry {
+  identity: string;
+  bands: number[];
+}
 
 type Listener = (bands: number[]) => void;
 
@@ -50,6 +57,13 @@ class AudioLevels {
     }
     for (const cb of set) {
       cb(bands);
+    }
+  }
+
+  /** One batched tick: every entry the backend currently has levels for. */
+  pushBatch(levels: AudioBandsEntry[]): void {
+    for (const entry of levels) {
+      this.push(entry.identity, entry.bands);
     }
   }
 

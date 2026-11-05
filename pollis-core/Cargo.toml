@@ -54,6 +54,7 @@ media = [
     "dep:livekit-signaling",
     "dep:libwebrtc",
     "dep:cpal",
+    "dep:rtrb",
     "dep:rodio",
     "dep:webrtc-audio-processing",
 ]
@@ -282,6 +283,9 @@ livekit = { version = "0.9", features = ["rustls-tls-webpki-roots"], optional = 
 livekit-signaling = { version = "0.1", optional = true }
 libwebrtc = { version = "0.3", optional = true }
 cpal = { version = "0.15", optional = true }
+# Lock-free SPSC rings between the audio threads and the voice DSP (already
+# in the tree via libwebrtc).
+rtrb = { version = "0.3", optional = true }
 rodio = { version = "0.19", default-features = false, features = ["wav"], optional = true }
 
 # Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us

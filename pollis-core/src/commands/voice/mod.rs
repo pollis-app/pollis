@@ -1,5 +1,6 @@
 //! Voice commands; re-exports keep `pollis_core::commands::voice::*` stable.
 
+mod capture;
 mod devices;
 mod gate;
 mod join;
@@ -7,14 +8,19 @@ mod levels;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
+mod limiter;
+mod mixer;
 mod playback;
+mod resampler;
 mod streams;
 mod types;
 
 pub use types::{
-    user_id_from_voice_identity, AudioDevice, JoinTimings, PlaybackState, SendableStream,
-    TrackBuffers, VoiceEvent, VoiceState, VoiceWarmup,
+    user_id_from_voice_identity, AudioBandsEntry, AudioDevice, JoinTimings, PlaybackState,
+    SendableStream, VoiceEvent, VoiceState, VoiceWarmup,
 };
+
+pub use capture::CaptureTask;
 
 pub use gate::{TransmitGate, VoiceGateState, VoiceInputMode};
 
