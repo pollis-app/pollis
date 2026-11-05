@@ -275,7 +275,10 @@ either, operators included.** IPs are used for rate limiting only, and only as k
 - **LiveKit (calls).** The media server must see the client IP to route media; it keeps no logs of it:
   nginx access and error logs are off, the PROXY-protocol hop that carried the client address to nginx is
   gone, LiveKit logs at `warn`, and both containers run with docker `logging: driver: none`
-  (`livekit/`, see `livekit/DEPLOY.md` → "No client IPs in logs").
+  (`livekit/`, see `livekit/DEPLOY.md` → "No client IPs in logs"). The STUN/TURN servers it hands
+  clients are its own (`turn.udp_port` + `turn.domain` in `livekit/livekit.yml`): with no TURN/UDP
+  listener configured LiveKit falls back to Google's public STUN servers, which would have every client
+  send its address to a third party on every join.
 - **Device names.** Clients used to register a device as `"{hostname} ({os})"`, and hostnames can embed
   an address (`ip-10-0-0-12`). Clients now register an OS label ("macOS desktop"); the DS redacts any
   IP-shaped token in a device name or security-log note on write (`pollis-delivery/src/util.rs`

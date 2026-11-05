@@ -29,6 +29,9 @@ services:
     ports:
       - "7881:7881"             # ICE TCP candidates
       - "7882:7882/udp"         # ICE UDP (single-port mux)
+      # TURN over UDP (turn.udp_port in livekit.yml). Also the STUN server
+      # clients are handed — without it LiveKit hands out Google's public STUN.
+      - "3478:3478/udp"
       # 5349 is NOT published. TURNS now arrives on 443, is terminated by nginx
       # and forwarded over the compose network to livekit:5349 as plaintext —
       # so the TURN listener must not be reachable from the internet at all.

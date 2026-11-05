@@ -224,9 +224,12 @@ curl -fsSL https://get.docker.com | sh
 ufw allow 80/tcp && ufw allow 443/tcp
 ufw allow 7881/tcp          # ICE TCP
 ufw allow 7882/udp          # ICE UDP
+ufw allow 3478/udp          # TURN over UDP (doubles as the STUN server clients are handed)
 ufw allow 30000:30999/udp   # TURN relay media ports
 ufw reload
 ```
+Upgrading an existing box for TURN/UDP is the one `ufw allow 3478/udp` line;
+the deploy workflow refuses to run until it is there.
 Note: if the host (e.g. Hostinger) has a control-panel firewall, open the same
 ports there too — it overrides UFW.
 
@@ -353,11 +356,17 @@ docker run --rm --entrypoint /livekit-server \
 |----------|----------|
 | WebSocket (prod) | `wss://rtc.pollis.com` |
 | HTTP API | `https://rtc.pollis.com` |
+| TURN/UDP + STUN | `turn:31.97.140.76:3478?transport=udp` |
 | TURNS (relay fallback) | `turns:turn.pollis.com:443?transport=tcp` |
 
-Clients do not configure TURN — LiveKit hands the URL above to every participant
-in the ICE server list. The `:443` is hardcoded in LiveKit, not derived from
-`turn.tls_port`.
+Clients do not configure TURN or STUN — LiveKit hands both URLs above to every
+participant in the ICE server list, with per-participant credentials. The
+`:443` is hardcoded in LiveKit, not derived from `turn.tls_port`; the UDP URL
+is built from `rtc.node_ip` + `turn.udp_port`. **Without `turn.udp_port`
+LiveKit hands out Google's public STUN servers instead** (`DefaultStunServers`
+in `pkg/service/roommanager.go`), which disclosed every client's IP to a third
+party on every join (`docs/metadata-retention-policy.md` §3) — keep the UDP
+listener configured, published and open.
 
 ## Useful commands (on the box)
 

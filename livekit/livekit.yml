@@ -14,10 +14,22 @@ rtc:
   use_external_ip: true
   use_ice_lite: true
 
-# TURNS — TURN over TLS, the fallback path for clients that cannot get a direct
-# UDP route (corporate/hotel/carrier NAT, UDP-blocking VPNs).
+# TURN — the relay fallback for clients that cannot get a direct UDP route
+# (corporate/hotel/carrier NAT, UDP-blocking VPNs). Two listeners:
 #
-# THE PORT IS NOT CONFIGURABLE. LiveKit hardcodes the URL it hands to clients as
+#   turn:<node ip>:3478?transport=udp      (udp_port, straight to LiveKit)
+#   turns:turn.pollis.com:443?transport=tcp (tls_port, terminated by nginx)
+#
+# udp_port is what gives clients a UDP relay AND a STUN server. With it unset,
+# LiveKit hands every participant Google's public STUN servers instead
+# (pkg/service/roommanager.go `iceServersForParticipant`: no TURN/UDP and no
+# `rtc.stun_servers` → `DefaultStunServers`), so every client disclosed its IP
+# to a third party on every join — against docs/metadata-retention-policy.md
+# §3. With udp_port set, LiveKit's own TURN listener doubles as the STUN
+# server and no Google server is handed out. Published in docker-compose.yml
+# and open in the host firewall (3478/udp), in lockstep with this.
+#
+# THE TLS PORT IS NOT CONFIGURABLE. LiveKit hardcodes the URL it hands to clients as
 # `turns:<domain>:443?transport=tcp` (pkg/service/roommanager.go; unchanged through v1.13.9) — it
 # does NOT interpolate tls_port. `tls_port` below only decides which port the
 # server LISTENS on. So while this said `tls_port: 5349`, every client was told
@@ -39,6 +51,7 @@ rtc:
 turn:
   enabled: true
   domain: turn.pollis.com
+  udp_port: 3478
   tls_port: 5349
   external_tls: true
   # UDP ports LiveKit allocates to relay media. One port per TURN allocation,
