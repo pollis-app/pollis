@@ -15,8 +15,8 @@ export type UpdateDestination = {
 
 export const ANDROID_PACKAGE = "com.pollis.mobile";
 
-// The App Store record's Apple ID; null while iOS is TestFlight-only. JS, so an OTA carries it.
-export const IOS_APP_STORE_ID: string | null = null;
+// The App Store record's Apple ID (live since 1.0.20). JS, so an OTA carries it.
+export const IOS_APP_STORE_ID: string | null = "6827840396";
 
 export const SIDELOAD_PAGE_URL = "https://pollis.com/android";
 export const WEBSITE_URL = "https://pollis.com/";
