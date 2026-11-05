@@ -12,7 +12,7 @@ import { SidebarVoiceControls } from "../Voice/SidebarVoiceControls";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf, isMediaBusy } from "../../types/voice-state";
 import { PressButton } from "../ui/PressButton";
-import { LoadingSpinner } from "../ui/LoaderSpinner";
+import { IconSpinner } from "../ui/IconSpinner";
 
 /** Refined skin's identity panel at the sidebar bottom; while in voice it also carries the full voice controls (AppShell hides `VoiceBar` in refined). */
 export const SidebarProfilePanel: React.FC = observer(() => {
@@ -145,7 +145,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             title={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
             className={`icon-btn-sm ${shareActive ? "text-accent hover:text-accent" : ""}`}
           >
-            {isMediaBusy(share) ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
+            {isMediaBusy(share) ? <IconSpinner size={15} /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
           </button>
           <button
             type="button"

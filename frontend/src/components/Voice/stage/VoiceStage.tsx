@@ -25,6 +25,7 @@ import { userIdFromVoiceIdentity, voiceUserKey } from "../../../voice/identity";
 import { voiceSession } from "../../../voice";
 import { Button } from "../../ui/Button";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
+import { IconSpinner } from "../../ui/IconSpinner";
 import { NavigableGrid } from "../../ui/NavigableGrid";
 import { ScreenSharePicker } from "../ScreenSharePicker";
 import { CameraPicker } from "../CameraPicker";
@@ -505,7 +506,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     disabled={isJoining}
                     onClick={() => toggleScreenShare(share)}
                   >
-                    {shareBusy ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
+                    {shareBusy ? <IconSpinner size={15} /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
                   </button>
                   <button
                     className={"vs-tray-btn" + (cameraActive ? " on" : "")}
@@ -517,7 +518,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     disabled={isJoining}
                     onClick={() => toggleCamera(camera)}
                   >
-                    {cameraBusy ? <LoadingSpinner size="sm" /> : cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
+                    {cameraBusy ? <IconSpinner size={15} /> : cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
                   </button>
                   <div className="vs-tray-sep" />
                   {leaveButton}
