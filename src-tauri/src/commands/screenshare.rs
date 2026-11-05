@@ -56,6 +56,7 @@ pub async fn start_screen_share(
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
     with_audio: Option<bool>,
+    max_height: Option<u32>,
 ) -> Result<()> {
     // `Option<bool>` so callers that omit the argument still get a video-only share.
     pollis_core::commands::screenshare::start_screen_share(
@@ -63,6 +64,7 @@ pub async fn start_screen_share(
         selection,
         max_framerate,
         with_audio.unwrap_or(false),
+        max_height,
     )
     .await
 }

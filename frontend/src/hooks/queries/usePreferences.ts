@@ -77,6 +77,8 @@ export interface PreferencesData {
   click_suppression?: boolean;
   /** Screen-share fps ceiling, one of `SCREEN_SHARE_FPS_OPTIONS`. */
   screen_share_max_fps?: number;
+  /** Screen-share height ceiling, one of `SCREEN_SHARE_RESOLUTION_OPTIONS`; `0` = the source's own size. */
+  screen_share_max_height?: number;
   /** Share machine sound; stored because Linux has no in-app picker. Absent → off. */
   screen_share_audio?: boolean;
   auto_join_voice?: boolean;
@@ -109,6 +111,23 @@ export interface PreferencesData {
 /** Screen-share framerate presets, in fps. */
 export const SCREEN_SHARE_FPS_OPTIONS = [15, 30, 60] as const;
 export const SCREEN_SHARE_FPS_DEFAULT = 30;
+
+/** Screen-share resolution presets as a height ceiling; `0` means the source's own size. */
+export const SCREEN_SHARE_RESOLUTION_OPTIONS = [720, 1080, 1440, 0] as const;
+export const SCREEN_SHARE_RESOLUTION_DEFAULT = 1080;
+
+/** Snap to an allowed preset; default if invalid. */
+export function clampScreenShareResolution(v: number | undefined): number {
+  if (v === undefined || !Number.isFinite(v)) {
+    return SCREEN_SHARE_RESOLUTION_DEFAULT;
+  }
+  if (v === 0) {
+    return 0;
+  }
+  return SCREEN_SHARE_RESOLUTION_OPTIONS.filter((opt) => opt !== 0).reduce((best, opt) =>
+    Math.abs(opt - v) < Math.abs(best - v) ? opt : best,
+  );
+}
 
 /** Shared audio is opt-in. See `screen_share_audio`. */
 export const SCREEN_SHARE_AUDIO_DEFAULT = false;
@@ -299,6 +318,9 @@ export function usePreferences() {
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
         screen_share_max_fps: clampScreenShareFps(
           getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+        ),
+        screen_share_max_height: clampScreenShareResolution(
+          getPreference<number>(json, "screen_share_max_height", SCREEN_SHARE_RESOLUTION_DEFAULT),
         ),
         screen_share_audio: getPreference<boolean>(
           json,

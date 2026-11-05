@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use pollis_capture_proto::{write_msg, CaptureMsg};
+use pollis_capture_proto::{write_msg, CaptureLimits, CaptureMsg};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
@@ -28,6 +28,14 @@ struct Args {
     /// trip to carry the decision on, unlike macOS. Ignored in camera mode.
     #[arg(long, default_value_t = false)]
     audio: bool,
+    /// Frames per second the publish will carry; the capture is asked for no more
+    /// (PipeWire framerate preference, X11 tick). 0 = the source's own rate.
+    #[arg(long, default_value_t = 0)]
+    max_fps: u32,
+    /// Tallest frame the publish will carry; the capture is asked for no more (PipeWire
+    /// size preference). 0 = the source's own size. Ignored in camera mode.
+    #[arg(long, default_value_t = 0)]
+    max_height: u32,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -88,9 +96,7 @@ async fn probe_backend() -> Backend {
         eprintln!("[capture] probe: Wayland + ScreenCast portal -> Portal backend");
         Backend::Portal
     } else {
-        eprintln!(
-            "[capture] probe: Wayland but no ScreenCast portal backend -> Unsupported"
-        );
+        eprintln!("[capture] probe: Wayland but no ScreenCast portal backend -> Unsupported");
         Backend::Unsupported
     }
 }
@@ -134,10 +140,19 @@ pub fn run() -> Result<()> {
         .enable_all()
         .build()?;
 
-    rt.block_on(async move { run_async(&args.socket, args.mode, args.audio).await })
+    let limits = CaptureLimits {
+        max_fps: args.max_fps,
+        max_height: args.max_height,
+    };
+    rt.block_on(async move { run_async(&args.socket, args.mode, args.audio, limits).await })
 }
 
-async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
+async fn run_async(
+    socket_path: &str,
+    mode: Mode,
+    audio: bool,
+    limits: CaptureLimits,
+) -> Result<()> {
     eprintln!("[capture] connecting to parent socket {socket_path} (mode={mode:?})");
     let mut sock = UnixStream::connect(socket_path)
         .await
@@ -153,19 +168,22 @@ async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     let backend = probe_backend().await;
 
     match backend {
-        Backend::Portal => run_portal(&mut sock, audio).await,
-        Backend::X11 => {
-            run_x11(&mut sock, audio).await
-        }
+        Backend::Portal => run_portal(&mut sock, audio, limits).await,
+        Backend::X11 => run_x11(&mut sock, audio, limits).await,
         Backend::Unsupported => {
             // Distinct from user-denial: the parent shows an unsupported-DE UI.
             let msg = "unsupported: Screen sharing requires xdg-desktop-portal \
                        with a ScreenCast backend; your desktop environment does \
                        not provide one.";
             eprintln!("[capture] {msg}");
-            write_msg(&mut sock, &CaptureMsg::Error { message: msg.into() })
-                .await
-                .ok();
+            write_msg(
+                &mut sock,
+                &CaptureMsg::Error {
+                    message: msg.into(),
+                },
+            )
+            .await
+            .ok();
             Err(anyhow!("no ScreenCast portal backend"))
         }
     }
@@ -193,7 +211,7 @@ pub(crate) async fn drain_to_socket(
 /// unchanged from before the split — only the wire encode now goes
 /// through the shared `pollis-capture-proto` crate instead of the
 /// hand-rolled `write_msg`/`send_error` that used to live here.
-async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
+async fn run_portal(sock: &mut UnixStream, audio: bool, limits: CaptureLimits) -> Result<()> {
     eprintln!("[capture] opening portal (waits for user picker)");
 
     let (node_id, fd) = match open_portal().await {
@@ -239,7 +257,7 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
         .name("pollis-capture-pw".into())
         .spawn(move || {
             eprintln!("[capture/pw] thread entered");
-            if let Err(e) = pw::run_pipewire(node_id, fd, tx_for_video, stop_for_thread) {
+            if let Err(e) = pw::run_pipewire(node_id, fd, tx_for_video, stop_for_thread, limits) {
                 eprintln!("[capture/pw] error: {e}");
             }
             eprintln!("[capture/pw] thread exiting");
@@ -261,7 +279,7 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
 /// The X11 backend (issue #281). Spawns the synchronous xcb/SHM capture
 /// loop on its own thread and drains its frames to the socket exactly
 /// the way the portal path drains the pipewire thread.
-async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
+async fn run_x11(sock: &mut UnixStream, audio: bool, limits: CaptureLimits) -> Result<()> {
     eprintln!("[capture] starting X11 (xcb/SHM/RandR) backend");
 
     // Deeper with audio: a dropped audio block is an audible gap.
@@ -274,7 +292,9 @@ async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
         .name("pollis-capture-x11".into())
         .spawn(move || {
             eprintln!("[capture/x11] thread entered");
-            if let Err(e) = crate::x11::run_x11_capture(tx_for_video.clone(), stop_for_thread) {
+            if let Err(e) =
+                crate::x11::run_x11_capture(tx_for_video.clone(), stop_for_thread, limits)
+            {
                 eprintln!("[capture/x11] error: {e}");
                 let _ = tx_for_video.blocking_send(CaptureMsg::Error {
                     message: format!("x11: {e}"),
@@ -376,7 +396,7 @@ unsafe fn libc_pdeathsig(sig: i32) {
 
 mod pw {
     use anyhow::Result;
-    use pollis_capture_proto::{now_us, CaptureMsg};
+    use pollis_capture_proto::{now_us, CaptureLimits, CaptureMsg};
     use std::os::fd::OwnedFd;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -387,6 +407,7 @@ mod pw {
         fd: OwnedFd,
         tx: mpsc::Sender<CaptureMsg>,
         stop: Arc<AtomicBool>,
+        limits: CaptureLimits,
     ) -> Result<()> {
         use pipewire as pw;
         use pw::{properties::properties, spa};
@@ -427,7 +448,9 @@ mod pw {
                 eprintln!("[capture/pw] state {:?} -> {:?}", old, new);
             })
             .param_changed(move |_, ud, id, param| {
-                let Some(param) = param else { return; };
+                let Some(param) = param else {
+                    return;
+                };
                 if id != pw::spa::param::ParamType::Format.as_raw() {
                     return;
                 }
@@ -453,7 +476,10 @@ mod pw {
                         w,
                         h
                     );
-                    let _ = tx_for_format.try_send(CaptureMsg::Format { width: w, height: h });
+                    let _ = tx_for_format.try_send(CaptureMsg::Format {
+                        width: w,
+                        height: h,
+                    });
                 }
             })
             .process(move |stream, ud| {
@@ -461,7 +487,9 @@ mod pw {
                     mainloop_for_quit.quit();
                     return;
                 }
-                let Some(mut buffer) = stream.dequeue_buffer() else { return; };
+                let Some(mut buffer) = stream.dequeue_buffer() else {
+                    return;
+                };
                 let datas = buffer.datas_mut();
                 if datas.is_empty() {
                     return;
@@ -501,6 +529,23 @@ mod pw {
             })
             .register()?;
 
+        // The size and rate we would like: a preference, not a demand. Most compositors
+        // offer only their native size, and the parent scales down what arrives taller
+        // than the limit; the ranges stay wide so a fixed-rate compositor still negotiates.
+        let preferred_size = match limits.max_height {
+            0 => pw::spa::utils::Rectangle {
+                width: 7680,
+                height: 4320,
+            },
+            h => pw::spa::utils::Rectangle {
+                width: h * 16 / 9,
+                height: h,
+            },
+        };
+        let preferred_fps = match limits.max_fps {
+            0 => 60,
+            fps => fps,
+        };
         // Negotiate BGRx (libwebrtc's argb_to_i420 reads the same byte
         // order on little-endian).
         let obj = pw::spa::pod::object!(
@@ -537,25 +582,35 @@ mod pw {
                 pw::spa::param::video::VideoFormat::I420,
                 pw::spa::param::video::VideoFormat::NV12
             ),
-            // Prefer 1080p; most compositors offer only native size, which the parent accepts.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoSize,
                 Choice,
                 Range,
                 Rectangle,
-                pw::spa::utils::Rectangle { width: 1920, height: 1080 },
-                pw::spa::utils::Rectangle { width: 1, height: 1 },
-                pw::spa::utils::Rectangle { width: 7680, height: 4320 }
+                preferred_size,
+                pw::spa::utils::Rectangle {
+                    width: 1,
+                    height: 1
+                },
+                pw::spa::utils::Rectangle {
+                    width: 7680,
+                    height: 4320
+                }
             ),
-            // Prefer 60fps (MAX_SHARE_FPS); the parent drops anything faster.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoFramerate,
                 Choice,
                 Range,
                 Fraction,
-                pw::spa::utils::Fraction { num: 60, denom: 1 },
+                pw::spa::utils::Fraction {
+                    num: preferred_fps,
+                    denom: 1
+                },
                 pw::spa::utils::Fraction { num: 0, denom: 1 },
-                pw::spa::utils::Fraction { num: 1000, denom: 1 }
+                pw::spa::utils::Fraction {
+                    num: 1000,
+                    denom: 1
+                }
             ),
         );
         let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(

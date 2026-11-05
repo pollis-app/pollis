@@ -5,8 +5,7 @@
 use std::sync::Arc;
 
 use libwebrtc::{
-    prelude::{RtcVideoSource, VideoFrame, VideoRotation},
-    video_frame::VideoBuffer,
+    prelude::RtcVideoSource,
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
@@ -22,12 +21,14 @@ use super::{
         audio_error_message, emit, publish_shared_audio_track, unpublish_shared_audio,
         SharedAudioResampler, SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ,
     },
-    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
+    codec::{pick_screenshare_codec, resolve_screenshare_encoding, ShareLimits},
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
+    pump::LocalVideoPump,
     self_echo::SelfEchoCanceller,
     stop::{stop_screen_share, stop_screen_share_if},
-    RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
+    wants::{wants_channel, PreviewMirror},
+    ScreenShareEvent, LOCAL_PREVIEW_KEY,
 };
 
 /// macOS: spawn the helper to enumerate sources and park it for the pick.
@@ -40,8 +41,8 @@ pub async fn enumerate_screen_sources(
     // Discard any previous picker session that never got chosen.
     cancel_screen_share_picker(state).await.ok();
 
-    // Video-only at spawn: macOS gets the audio choice later, in `Select`.
-    let mut session = spawn_and_accept_helper(state, false).await?;
+    // Video-only, unbounded at spawn: macOS gets the audio choice and the limits in `Select`.
+    let mut session = spawn_and_accept_helper(state, false, None).await?;
     let msg = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         read_msg(&mut session.reader),
@@ -100,14 +101,23 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
 }
 
 /// `with_audio` is the source of truth (macOS: on `Selection`; Linux: spawn flag).
+/// `max_height` is the "share resolution" setting (`None`/`0` = source); with the fps it
+/// bounds the capture itself, not only the publish.
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
     with_audio: bool,
+    max_height: Option<u32>,
 ) -> Result<()> {
-    use pollis_capture_proto::encode_select;
+    use pollis_capture_proto::{encode_select, CaptureLimits};
     use tokio::io::AsyncWriteExt;
+
+    let limits = ShareLimits::resolve(max_framerate, max_height);
+    let capture_limits = CaptureLimits {
+        max_fps: limits.max_fps,
+        max_height: limits.max_height.unwrap_or(0),
+    };
 
     let room = {
         let voice = state.voice.lock().await;
@@ -121,9 +131,7 @@ pub async fn start_screen_share(
     {
         let has_prev = {
             let ss = state.screenshare.lock().await;
-            ss.local_track.is_some()
-                || ss.local_helper.is_some()
-                || ss.local_reader_task.is_some()
+            ss.local_track.is_some() || ss.local_helper.is_some() || ss.local_reader_task.is_some()
         };
         if has_prev {
             let _ = stop_screen_share(state).await;
@@ -137,16 +145,24 @@ pub async fn start_screen_share(
     };
     let mut session = match parked {
         Some(s) => s,
-        None => spawn_and_accept_helper(state, with_audio).await?,
+        None => spawn_and_accept_helper(state, with_audio, Some(capture_limits)).await?,
     };
 
-    // Stamp the audio decision onto the selection for the parked macOS helper.
+    // Stamp the audio decision and the limits onto the selection for the parked macOS helper.
     let selection = selection.map(|sel| match sel {
         pollis_capture_proto::Selection::Display { id, .. } => {
-            pollis_capture_proto::Selection::Display { id, with_audio }
+            pollis_capture_proto::Selection::Display {
+                id,
+                with_audio,
+                limits: capture_limits,
+            }
         }
         pollis_capture_proto::Selection::Window { id, .. } => {
-            pollis_capture_proto::Selection::Window { id, with_audio }
+            pollis_capture_proto::Selection::Window {
+                id,
+                with_audio,
+                limits: capture_limits,
+            }
         }
     });
 
@@ -156,7 +172,8 @@ pub async fn start_screen_share(
             crate::diag!("[screenshare] send Select: {e}");
             return Err(fail_capture(
                 state,
-                "Could not deliver the screen-share selection to the helper. Please try again.".into(),
+                "Could not deliver the screen-share selection to the helper. Please try again."
+                    .into(),
             )
             .await);
         }
@@ -208,7 +225,8 @@ pub async fn start_screen_share(
             Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
                 crate::diag!(
                     "[screenshare] helper sent frame before format; deriving {}x{}",
-                    width, height
+                    width,
+                    height
                 );
                 break (width & !1, height & !1);
             }
@@ -228,11 +246,10 @@ pub async fn start_screen_share(
                 continue;
             }
             Ok(Some(
-                other
-                @ (CaptureMsg::Sources(_)
-                    | CaptureMsg::Select(_)
-                    | CaptureMsg::Cameras(_)
-                    | CaptureMsg::SelectCamera(_)),
+                other @ (CaptureMsg::Sources(_)
+                | CaptureMsg::Select(_)
+                | CaptureMsg::Cameras(_)
+                | CaptureMsg::SelectCamera(_)),
             )) => {
                 skipped += 1;
                 let kind = match other {
@@ -352,10 +369,8 @@ pub async fn start_screen_share(
         VideoResolution { width, height },
         true, /* is_screencast */
     );
-    let track = LocalVideoTrack::create_video_track(
-        "screenshare",
-        RtcVideoSource::Native(source.clone()),
-    );
+    let track =
+        LocalVideoTrack::create_video_track("screenshare", RtcVideoSource::Native(source.clone()));
     crate::diag!("[screenshare] publishing track {}x{}", width, height);
     // Pin encoding: the SDK preset caps sub-1080p shares at 15 fps.
     let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
@@ -379,7 +394,8 @@ pub async fn start_screen_share(
         stop_screen_share(state).await.ok();
         return Err(fail_capture(
             state,
-            "Could not publish the screen-share to the call. Check your connection and try again.".into(),
+            "Could not publish the screen-share to the call. Check your connection and try again."
+                .into(),
         )
         .await);
     }
@@ -392,18 +408,23 @@ pub async fn start_screen_share(
     }
 
     // Reader task owns socket + source; on exit it runs the stop path (never a zombie share).
-    let source_for_task = source.clone();
-    // Self-preview rides the same WebSocket broadcast as remote tiles.
-    let preview_tx = state.screenshare_frame_tx.clone();
-    let frames_for_task = {
-        let ss = state.screenshare.lock().await;
-        ss.frames.clone()
+    // Self-preview rides the same WebSocket broadcast as remote tiles, sized and paced by
+    // what its own tile reports.
+    let mut pump = {
+        let mut ss = state.screenshare.lock().await;
+        LocalVideoPump::new(
+            Some(source.clone()),
+            limits,
+            PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
+            LOCAL_PREVIEW_KEY,
+            state.screenshare_frame_tx.clone(),
+            ss.frames.clone(),
+        )
     };
     let state_for_task = Arc::clone(state);
     let room_for_task = room.clone();
     let reader_task = tokio::spawn(async move {
         let state_for_exit = Arc::clone(&state_for_task);
-        let mut last_preview: Option<std::time::Instant> = None;
         // Shared-audio pump: inert until the helper announces a format.
         let mut audio_source: Option<libwebrtc::audio_source::native::NativeAudioSource> = None;
         let mut resampler: Option<SharedAudioResampler> = None;
@@ -432,28 +453,7 @@ pub async fn start_screen_share(
                     timestamp_us,
                     bgrx,
                 })) => {
-                    // Self-preview at full rate; the WS+WebGL path is cheap.
-                    let show_preview = last_preview
-                        .is_none_or(|t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
-                    if show_preview {
-                        last_preview = Some(std::time::Instant::now());
-                    }
-                    let preview = if show_preview {
-                        frames_for_task.as_ref().map(|s| s.as_ref())
-                    } else {
-                        None
-                    };
-                    let preview_ws = Some(&preview_tx);
-                    push_frame(
-                        &source_for_task,
-                        width,
-                        height,
-                        stride,
-                        timestamp_us,
-                        &bgrx,
-                        preview,
-                        preview_ws,
-                    );
+                    pump.push(width, height, stride, timestamp_us, &bgrx);
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {
                     // Mid-stream renegotiation: NativeVideoSource tolerates size changes.
@@ -660,54 +660,6 @@ async fn push_shared_audio(
         };
         if let Err(e) = source.capture_frame(&frame).await {
             crate::diag!("[screenshare/audio] capture_frame error: {e:?}");
-        }
-    }
-}
-
-// A frame's geometry, timing and two optional sinks — a per-frame hot path where
-// packing these into a struct would allocate or copy on every frame.
-#[allow(clippy::too_many_arguments)]
-fn push_frame(
-    source: &NativeVideoSource,
-    width: u32,
-    height: u32,
-    stride: u32,
-    timestamp_us: i64,
-    bgrx: &[u8],
-    preview: Option<&dyn RawSink>,
-    preview_ws: Option<&tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>>,
-) {
-    // libwebrtc/VP8/I420 need even dims; crop down.
-    let w = (width & !1) as i32;
-    let h = (height & !1) as i32;
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    // Convert (BGRx == little-endian ARGB) to I420 at native res.
-    let buffer = convert_to_i420(w, h, stride, bgrx);
-    let (out_w, out_h) = (buffer.width(), buffer.height());
-    let frame = VideoFrame {
-        rotation: VideoRotation::VideoRotation0,
-        timestamp_us,
-        // No packet-trailer features are negotiated, so there is no metadata to attach.
-        frame_metadata: None,
-        buffer,
-    };
-    source.capture_frame(&frame);
-    if preview.is_some() || preview_ws.is_some() {
-        let bytes = pack_frame_bytes(
-            LOCAL_PREVIEW_KEY,
-            out_w,
-            out_h,
-            timestamp_us,
-            &frame.buffer,
-        );
-        let bytes = std::sync::Arc::new(bytes);
-        if let Some(tx) = preview_ws {
-            let _ = tx.send(bytes.clone());
-        }
-        if let Some(sink) = preview {
-            let _ = sink.send((*bytes).clone());
         }
     }
 }

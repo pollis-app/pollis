@@ -166,7 +166,9 @@ pub struct SourceList {
 
 /// What the user picked in the in-app picker. Parent → helper.
 ///
-/// `with_audio` rides here because the macOS helper spawns before the picker; defaulted for old frontends.
+/// `with_audio` and the limits ride here because the macOS helper spawns before the picker
+/// (there is no later message to carry them); every field past `id` is defaulted so an
+/// older sender still decodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Selection {
@@ -174,12 +176,47 @@ pub enum Selection {
         id: u32,
         #[serde(default)]
         with_audio: bool,
+        #[serde(default, flatten)]
+        limits: CaptureLimits,
     },
     Window {
         id: u32,
         #[serde(default)]
         with_audio: bool,
+        #[serde(default, flatten)]
+        limits: CaptureLimits,
     },
+}
+
+/// What the publish will carry, so the capture never produces more than that.
+/// `0` means unbounded for both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureLimits {
+    /// Frames per second the capture should not exceed.
+    #[serde(default)]
+    pub max_fps: u32,
+    /// Tallest frame to produce; a taller source is captured scaled down, aspect kept.
+    #[serde(default)]
+    pub max_height: u32,
+}
+
+impl CaptureLimits {
+    /// The even `(w, h)` a `(w, h)` source should be captured at under `max_height`, or
+    /// `None` when it already fits.
+    pub fn fit(&self, width: u32, height: u32) -> Option<(u32, u32)> {
+        if self.max_height == 0 || height <= self.max_height || height == 0 {
+            return None;
+        }
+        let w =
+            ((width as u64 * self.max_height as u64 + height as u64 / 2) / height as u64) as u32;
+        Some((w.max(2) & !1, self.max_height.max(2) & !1))
+    }
+
+    /// The capture tick for `max_fps`, or `None` for "as fast as the source".
+    pub fn frame_interval(&self) -> Option<std::time::Duration> {
+        (self.max_fps > 0)
+            .then(|| std::time::Duration::from_nanos(1_000_000_000 / self.max_fps as u64))
+    }
 }
 
 impl Selection {
@@ -187,6 +224,12 @@ impl Selection {
     pub fn with_audio(&self) -> bool {
         match self {
             Self::Display { with_audio, .. } | Self::Window { with_audio, .. } => *with_audio,
+        }
+    }
+
+    pub fn limits(&self) -> CaptureLimits {
+        match self {
+            Self::Display { limits, .. } | Self::Window { limits, .. } => *limits,
         }
     }
 }
@@ -327,9 +370,7 @@ where
     W: AsyncWriteExt + Unpin,
 {
     match msg {
-        CaptureMsg::Format { width, height } => {
-            w.write_all(&encode_format(*width, *height)).await
-        }
+        CaptureMsg::Format { width, height } => w.write_all(&encode_format(*width, *height)).await,
         CaptureMsg::Frame {
             width,
             height,
@@ -337,8 +378,7 @@ where
             timestamp_us,
             bgrx,
         } => {
-            let header =
-                encode_frame_header(*width, *height, *stride, *timestamp_us, bgrx.len());
+            let header = encode_frame_header(*width, *height, *stride, *timestamp_us, bgrx.len());
             w.write_all(&header).await?;
             w.write_all(bgrx).await
         }
@@ -349,15 +389,23 @@ where
         CaptureMsg::AudioFormat {
             sample_rate,
             channels,
-        } => w.write_all(&encode_audio_format(*sample_rate, *channels)).await,
+        } => {
+            w.write_all(&encode_audio_format(*sample_rate, *channels))
+                .await
+        }
         CaptureMsg::AudioFrame {
             sample_rate,
             channels,
             timestamp_us,
             pcm,
         } => {
-            w.write_all(&encode_audio_frame(*sample_rate, *channels, *timestamp_us, pcm))
-                .await
+            w.write_all(&encode_audio_frame(
+                *sample_rate,
+                *channels,
+                *timestamp_us,
+                pcm,
+            ))
+            .await
         }
         CaptureMsg::Error { message } => w.write_all(&encode_error(message)).await,
     }
@@ -619,35 +667,76 @@ mod tests {
         match roundtrip(CaptureMsg::Select(Selection::Display {
             id: 7,
             with_audio: false,
+            limits: CaptureLimits::default(),
         }))
         .await
         {
-            CaptureMsg::Select(Selection::Display { id, with_audio }) => {
+            CaptureMsg::Select(Selection::Display {
+                id,
+                with_audio,
+                limits,
+            }) => {
                 assert_eq!(id, 7);
                 assert!(!with_audio);
+                assert_eq!(limits, CaptureLimits::default());
             }
             _ => panic!("wrong variant"),
         }
         match roundtrip(CaptureMsg::Select(Selection::Window {
             id: 13,
             with_audio: true,
+            limits: CaptureLimits {
+                max_fps: 30,
+                max_height: 1080,
+            },
         }))
         .await
         {
-            CaptureMsg::Select(Selection::Window { id, with_audio }) => {
+            CaptureMsg::Select(Selection::Window {
+                id,
+                with_audio,
+                limits,
+            }) => {
                 assert_eq!(id, 13);
                 assert!(with_audio);
+                assert_eq!(
+                    limits,
+                    CaptureLimits {
+                        max_fps: 30,
+                        max_height: 1080
+                    }
+                );
             }
             _ => panic!("wrong variant"),
         }
     }
 
-    // A Select from a pre-audio frontend has no `with_audio`; it must decode as video-only.
+    // A Select from a pre-audio frontend has no `with_audio`; it must decode as video-only,
+    // and one without limits as unbounded.
     #[test]
     fn select_without_with_audio_defaults_to_video_only() {
         let sel: Selection = serde_json::from_str(r#"{"kind":"display","id":3}"#).unwrap();
         assert!(!sel.with_audio());
+        assert_eq!(sel.limits(), CaptureLimits::default());
         assert!(matches!(sel, Selection::Display { id: 3, .. }));
+    }
+
+    #[test]
+    fn capture_limits_fit_and_tick() {
+        let none = CaptureLimits::default();
+        assert_eq!(none.fit(3840, 2160), None);
+        assert_eq!(none.frame_interval(), None);
+        let l = CaptureLimits {
+            max_fps: 30,
+            max_height: 1080,
+        };
+        assert_eq!(l.fit(1920, 1080), None);
+        assert_eq!(l.fit(3840, 2160), Some((1920, 1080)));
+        assert_eq!(l.fit(2560, 1600), Some((1728, 1080)));
+        assert_eq!(
+            l.frame_interval(),
+            Some(std::time::Duration::from_nanos(33_333_333))
+        );
     }
 
     #[tokio::test]

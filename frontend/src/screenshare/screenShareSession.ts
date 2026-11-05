@@ -9,9 +9,11 @@ import { appStore } from "../stores/appStore";
 import { voiceSession } from "../voice/VoiceSessionManager";
 import {
   clampScreenShareFps,
+  clampScreenShareResolution,
   getPreference,
   SCREEN_SHARE_AUDIO_DEFAULT,
   SCREEN_SHARE_FPS_DEFAULT,
+  SCREEN_SHARE_RESOLUTION_DEFAULT,
 } from "../hooks/queries/usePreferences";
 import { isMac } from "../utils/platform";
 import { playSfx, SFX } from "../utils/sfx";
@@ -313,12 +315,13 @@ class ScreenShareSession {
 
   /** Start the share. `selection` only on macOS/Windows; `withAudio` is separate because Linux has no selection. */
   async start(selection?: Selection, withAudio = false): Promise<void> {
-    const maxFramerate = await this.resolveMaxFramerate();
+    const { maxFramerate, maxHeight } = await this.resolveLimits();
     this.pendingWithAudio = withAudio;
     await invoke("start_screen_share", {
       selection: selection ?? null,
       maxFramerate,
       withAudio,
+      maxHeight,
     });
   }
 
@@ -347,19 +350,28 @@ class ScreenShareSession {
     }
   }
 
-  /** The framerate preference, read directly (non-React); default on error. */
-  private async resolveMaxFramerate(): Promise<number> {
+  /** The framerate + resolution preferences, read directly (non-React); defaults on error. */
+  private async resolveLimits(): Promise<{ maxFramerate: number; maxHeight: number }> {
+    const defaults = {
+      maxFramerate: SCREEN_SHARE_FPS_DEFAULT,
+      maxHeight: SCREEN_SHARE_RESOLUTION_DEFAULT,
+    };
     const userId = appStore.currentUser?.id;
     if (!userId) {
-      return SCREEN_SHARE_FPS_DEFAULT;
+      return defaults;
     }
     try {
       const json = await invoke<string>("get_preferences", { userId });
-      return clampScreenShareFps(
-        getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
-      );
+      return {
+        maxFramerate: clampScreenShareFps(
+          getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+        ),
+        maxHeight: clampScreenShareResolution(
+          getPreference<number>(json, "screen_share_max_height", SCREEN_SHARE_RESOLUTION_DEFAULT),
+        ),
+      };
     } catch {
-      return SCREEN_SHARE_FPS_DEFAULT;
+      return defaults;
     }
   }
 

@@ -17,6 +17,8 @@ pub(crate) mod codec;
 mod commands;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod helper_subprocess;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) mod pump;
 mod remote_video;
 pub(crate) mod self_echo;
 mod state;
@@ -94,9 +96,6 @@ pub enum ScreenShareEvent {
 
 /// Sentinel track key for the sharer's own preview.
 pub const LOCAL_PREVIEW_KEY: &str = "__local_preview__";
-
-/// Self-preview rate cap; it only answers "is my stream going out?".
-pub(super) const PREVIEW_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Log the cause, emit `LocalError` and return a human error. Not for user cancels.
 pub(super) async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {

@@ -361,7 +361,10 @@ fn start_capture(
     use screencapturekit::stream::output_type::SCStreamOutputType;
     use screencapturekit::stream::sc_stream::SCStream;
 
-    let (filter, width, height) = match selection {
+    let limits = selection.limits();
+    // SCK reports displays and window frames in points; the stream is configured in pixels,
+    // so a Retina source captured at its point size came out at half resolution.
+    let (filter, points_w, points_h) = match selection {
         Selection::Display { id, .. } => {
             let display = cache
                 .displays
@@ -386,20 +389,37 @@ fn start_capture(
             (filter, w, h)
         }
     };
+    let scale = filter.point_pixel_scale();
+    let scale = if scale.is_finite() && scale >= 1.0 { scale } else { 1.0 };
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let native_w = (points_w as f32 * scale).round() as u32;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let native_h = (points_h as f32 * scale).round() as u32;
 
-    // Round dimensions down to even for VP8 + I420 chroma alignment.
+    // The publish's ceiling, applied by SCK's own scaler; then even for VP8 + I420 chroma.
+    let (width, height) = limits.fit(native_w, native_h).unwrap_or((native_w, native_h));
     let width = width & !1;
     let height = height & !1;
     if width == 0 || height == 0 {
         return Err(anyhow!("selected source reported zero size"));
     }
-    eprintln!("[capture-mac] capturing {width}x{height}");
+    eprintln!(
+        "[capture-mac] capturing {width}x{height} (source {native_w}x{native_h} at {scale}x, \
+         max_fps {})",
+        limits.max_fps
+    );
 
     let mut config = SCStreamConfiguration::new()
         .with_width(width)
         .with_height(height)
         .with_pixel_format(PixelFormat::BGRA)
         .with_shows_cursor(true);
+    if limits.max_fps > 0 {
+        use screencapturekit::cm::CMTime;
+        #[allow(clippy::cast_possible_wrap)]
+        let interval = CMTime::new(1, limits.max_fps as i32);
+        config = config.with_minimum_frame_interval(&interval);
+    }
     if with_audio {
         use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
         config = config

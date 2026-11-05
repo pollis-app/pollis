@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use libwebrtc::{
-    prelude::{RtcVideoSource, VideoBuffer, VideoFrame, VideoRotation},
+    prelude::RtcVideoSource,
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
@@ -13,13 +13,35 @@ use livekit::{
 };
 
 use crate::commands::screenshare::{
-    codec::{convert_to_i420, pack_frame_bytes},
+    codec::ShareLimits,
     helper_subprocess::locate_capture_helper,
+    pump::LocalVideoPump,
+    wants::{wants_channel, PreviewMirror},
     HelperSession,
 };
 use crate::{error::Result, state::AppState};
 
-use super::{fail_capture, CameraEvent, CAMERA_PREVIEW_MIN_INTERVAL, LOCAL_CAMERA_PREVIEW_KEY};
+use super::{fail_capture, CameraEvent, LOCAL_CAMERA_PREVIEW_KEY};
+
+/// The camera publishes at 30 fps and its own size; the pump's pacer matches the encoder.
+const CAMERA_LIMITS: ShareLimits = ShareLimits {
+    max_fps: 30,
+    max_height: None,
+};
+
+/// A pump for the local camera: the publish source (or none for the settings preview) plus
+/// the self-preview mirror, sized and paced by what the preview tile reports.
+async fn camera_pump(state: &Arc<AppState>, source: Option<NativeVideoSource>) -> LocalVideoPump {
+    let mut ss = state.screenshare.lock().await;
+    LocalVideoPump::new(
+        source,
+        CAMERA_LIMITS,
+        PreviewMirror::new(wants_channel(&mut ss, LOCAL_CAMERA_PREVIEW_KEY)),
+        LOCAL_CAMERA_PREVIEW_KEY,
+        state.screenshare_frame_tx.clone(),
+        None,
+    )
+}
 
 /// Helper `Cameras`/`Format` timeout; long enough for the macOS TCC prompt.
 const HELPER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -151,9 +173,7 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
 }
 
 /// Enumerate cameras via the helper and park it for `start_camera`.
-pub async fn list_video_devices(
-    state: &Arc<AppState>,
-) -> Result<pollis_capture_proto::CameraList> {
+pub async fn list_video_devices(state: &Arc<AppState>) -> Result<pollis_capture_proto::CameraList> {
     use pollis_capture_proto::{read_msg, CaptureMsg};
 
     // Discard any previous enumeration session that was never started.
@@ -174,11 +194,7 @@ pub async fn list_video_devices(
         Ok(Ok(Some(CaptureMsg::Cameras(list)))) => list,
         Ok(Ok(Some(CaptureMsg::Error { message }))) => {
             let _ = session.child.kill().await;
-            return Err(fail_capture(
-                state,
-                format!("Could not list cameras: {message}"),
-            )
-            .await);
+            return Err(fail_capture(state, format!("Could not list cameras: {message}")).await);
         }
         Ok(Ok(Some(_other))) => {
             let _ = session.child.kill().await;
@@ -190,11 +206,9 @@ pub async fn list_video_devices(
         }
         Ok(Ok(None)) => {
             let _ = session.child.kill().await;
-            return Err(fail_capture(
-                state,
-                "Camera helper exited before listing devices.".into(),
-            )
-            .await);
+            return Err(
+                fail_capture(state, "Camera helper exited before listing devices.".into()).await,
+            );
         }
         Ok(Err(e)) => {
             let _ = session.child.kill().await;
@@ -407,12 +421,10 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         return Ok(());
     }
 
-    // Reader task feeds the source and mirrors throttled self-preview frames.
-    let source_for_task = source.clone();
-    let preview_tx = state.screenshare_frame_tx.clone();
+    // Reader task feeds the source and mirrors self-preview frames as the preview tile wants.
+    let mut pump = camera_pump(state, Some(source.clone())).await;
     let state_for_exit = Arc::clone(state);
     let reader_task = tokio::spawn(async move {
-        let mut last_preview: Option<std::time::Instant> = None;
         loop {
             match read_msg(&mut reader).await {
                 Ok(Some(CaptureMsg::Frame {
@@ -422,21 +434,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                     timestamp_us,
                     bgrx,
                 })) => {
-                    let show_preview = last_preview
-                        .map(|t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL)
-                        .unwrap_or(true);
-                    if show_preview {
-                        last_preview = Some(std::time::Instant::now());
-                    }
-                    push_frame(
-                        Some(&source_for_task),
-                        width,
-                        height,
-                        stride,
-                        timestamp_us,
-                        &bgrx,
-                        show_preview.then_some(&preview_tx),
-                    );
+                    pump.push(width, height, stride, timestamp_us, &bgrx);
                 }
                 // Mid-stream renegotiation: harmless to ignore.
                 Ok(Some(CaptureMsg::Format { .. })) => {}
@@ -635,7 +633,9 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
 
     if let Err(e) = session
         .writer
-        .write_all(&encode_select_camera(&CameraSelection { id: device_id.clone() }))
+        .write_all(&encode_select_camera(&CameraSelection {
+            id: device_id.clone(),
+        }))
         .await
     {
         crate::diag!("[camera] preview send SelectCamera: {e}");
@@ -682,9 +682,8 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
     }
 
     // Reader task: preview only, no LiveKit publish.
-    let preview_tx = state.screenshare_frame_tx.clone();
+    let mut pump = camera_pump(state, None).await;
     let reader_task = tokio::spawn(async move {
-        let mut last_preview: Option<std::time::Instant> = None;
         loop {
             match read_msg(&mut reader).await {
                 Ok(Some(CaptureMsg::Frame {
@@ -694,13 +693,7 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
                     timestamp_us,
                     bgrx,
                 })) => {
-                    let show = last_preview
-                        .map(|t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL)
-                        .unwrap_or(true);
-                    if show {
-                        last_preview = Some(std::time::Instant::now());
-                        push_frame(None, width, height, stride, timestamp_us, &bgrx, Some(&preview_tx));
-                    }
+                    pump.push(width, height, stride, timestamp_us, &bgrx);
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
@@ -748,51 +741,6 @@ pub async fn stop_camera_preview(state: &Arc<AppState>) -> Result<()> {
 
 /// Camera-tuned `(max_framerate, max_bitrate)`: 30 fps, ≈0.07 bits/pixel/frame.
 fn resolve_camera_encoding(width: u32, height: u32) -> (f64, u64) {
-    let max_bitrate =
-        ((width as u64) * (height as u64) * 30 * 7 / 100).clamp(500_000, 5_000_000);
+    let max_bitrate = ((width as u64) * (height as u64) * 30 * 7 / 100).clamp(500_000, 5_000_000);
     (30.0, max_bitrate)
-}
-
-fn push_frame(
-    // `None` on the preview-only path.
-    source: Option<&NativeVideoSource>,
-    width: u32,
-    height: u32,
-    stride: u32,
-    timestamp_us: i64,
-    bgrx: &[u8],
-    // `Some` on throttled frames that also feed the local preview.
-    preview: Option<&tokio::sync::broadcast::Sender<Arc<Vec<u8>>>>,
-) {
-    // libwebrtc + VP8 + libyuv I420 all require even dimensions.
-    let w = (width & !1) as i32;
-    let h = (height & !1) as i32;
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    // BGRA (== little-endian ARGB) → I420 at native resolution.
-    let buffer = convert_to_i420(w, h, stride, bgrx);
-    let (out_w, out_h) = (buffer.width(), buffer.height());
-    let frame = VideoFrame {
-        rotation: VideoRotation::VideoRotation0,
-        timestamp_us,
-        // No packet-trailer features are negotiated, so there is no metadata to attach.
-        frame_metadata: None,
-        buffer,
-    };
-    if let Some(source) = source {
-        source.capture_frame(&frame);
-    }
-
-    // Mirror the same I420 buffer to the renderer for self-preview.
-    if let Some(tx) = preview {
-        let bytes = pack_frame_bytes(
-            LOCAL_CAMERA_PREVIEW_KEY,
-            out_w,
-            out_h,
-            timestamp_us,
-            &frame.buffer,
-        );
-        let _ = tx.send(Arc::new(bytes));
-    }
 }

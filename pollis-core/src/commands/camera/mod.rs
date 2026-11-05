@@ -15,8 +15,9 @@ use crate::{error::Result, sink::EventSink, state::AppState};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub const LOCAL_CAMERA_PREVIEW_KEY: &str = "__local_camera_preview__";
 
-/// Self-preview throttle; peers still get full rate.
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+/// Self-preview throttle on the in-process Windows path; the helper paths follow the
+/// preview tile's wants instead (`screenshare::wants::PreviewMirror`).
+#[cfg(target_os = "windows")]
 pub(crate) const CAMERA_PREVIEW_MIN_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 

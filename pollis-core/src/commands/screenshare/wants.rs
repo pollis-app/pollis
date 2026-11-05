@@ -74,9 +74,50 @@ impl WantState {
 pub type WantsTx = watch::Sender<WantState>;
 pub type WantsRx = watch::Receiver<WantState>;
 
+/// What a self-preview is held to until its tile reports: a small, slow mirror. It only
+/// answers "is my stream going out?", and the tile corrects it within a frame of mounting.
+const PREVIEW_DEFAULT: VideoWants = VideoWants {
+    width: 640,
+    height: 360,
+    fps: 5,
+};
+
+/// The sharer's own mirror of what it publishes, paced and sized by its tile's wants.
+pub(crate) struct PreviewMirror {
+    rx: WantsRx,
+    last: Option<std::time::Instant>,
+}
+
+impl PreviewMirror {
+    pub fn new(rx: WantsRx) -> Self {
+        Self { rx, last: None }
+    }
+
+    /// For a decoded `(w, h)` frame: `None` = don't mirror this one; `Some(None)` = mirror as
+    /// is; `Some(Some((w, h)))` = scale to that first.
+    pub fn plan(
+        &mut self,
+        decoded: (u32, u32),
+        now: std::time::Instant,
+    ) -> Option<Option<(u32, u32)>> {
+        let want = match *self.rx.borrow() {
+            WantState::Hidden => return None,
+            WantState::Unknown => WantState::Wanted(PREVIEW_DEFAULT),
+            w => w,
+        };
+        if let Some(interval) = want.min_interval() {
+            if self.last.is_some_and(|t| now.duration_since(t) < interval) {
+                return None;
+            }
+        }
+        self.last = Some(now);
+        Some(want.pack_size(decoded))
+    }
+}
+
 /// The watch for `track_key`, created on first use so a tile that reports before the drain
 /// task registers is not lost.
-pub(super) fn wants_channel(ss: &mut super::ScreenShareState, track_key: &str) -> WantsRx {
+pub(crate) fn wants_channel(ss: &mut super::ScreenShareState, track_key: &str) -> WantsRx {
     if let Some(tx) = ss.video_wants.get(track_key) {
         return tx.subscribe();
     }
@@ -164,6 +205,37 @@ mod tests {
         assert_eq!(wanted(2000, 300, 15).pack_size((1920, 1080)), None);
         // A zero want is "unknown size", not a zero-size frame.
         assert_eq!(wanted(0, 0, 15).pack_size((1920, 1080)), None);
+    }
+
+    #[test]
+    fn preview_mirror_is_small_and_slow_until_its_tile_reports() {
+        let (tx, rx) = watch::channel(WantState::Unknown);
+        let mut m = PreviewMirror::new(rx);
+        let t0 = std::time::Instant::now();
+        // Unknown: 5 fps and scaled to the 640×360 default.
+        assert_eq!(m.plan((1920, 1080), t0), Some(Some((640, 360))));
+        assert_eq!(
+            m.plan((1920, 1080), t0 + std::time::Duration::from_millis(100)),
+            None
+        );
+        assert_eq!(
+            m.plan((1920, 1080), t0 + std::time::Duration::from_millis(200)),
+            Some(Some((640, 360)))
+        );
+        // The tile reports a big, fast view: mirrored as is at its rate.
+        tx.send_replace(wanted(1920, 1080, 30));
+        let t1 = t0 + std::time::Duration::from_secs(1);
+        assert_eq!(m.plan((1920, 1080), t1), Some(None));
+        assert_eq!(
+            m.plan((1920, 1080), t1 + std::time::Duration::from_millis(10)),
+            None
+        );
+        // Hidden: nothing is mirrored at all.
+        tx.send_replace(WantState::Hidden);
+        assert_eq!(
+            m.plan((1920, 1080), t1 + std::time::Duration::from_secs(1)),
+            None
+        );
     }
 
     #[test]

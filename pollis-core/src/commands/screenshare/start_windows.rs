@@ -7,8 +7,7 @@
 use std::sync::Arc;
 
 use libwebrtc::{
-    prelude::{RtcVideoSource, VideoFrame, VideoRotation},
-    video_frame::VideoBuffer,
+    prelude::RtcVideoSource,
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
@@ -21,8 +20,11 @@ use windows_capture::{monitor::Monitor, window::Window};
 use crate::{error::Result, state::AppState};
 
 use super::{
-    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
-    fail_capture, RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
+    codec::{pick_screenshare_codec, resolve_screenshare_encoding, ShareLimits},
+    fail_capture,
+    pump::LocalVideoPump,
+    wants::{wants_channel, PreviewMirror},
+    ScreenShareEvent, LOCAL_PREVIEW_KEY,
 };
 
 // 320×200 (16:10) picker thumbnails, sent as PNG data URLs.
@@ -68,8 +70,11 @@ pub async fn start_screen_share(
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
     with_audio: bool,
+    max_height: Option<u32>,
 ) -> Result<()> {
     use std::sync::atomic::AtomicBool;
+
+    let limits = ShareLimits::resolve(max_framerate, max_height);
 
     let room = {
         let voice = state.voice.lock().await;
@@ -170,19 +175,26 @@ pub async fn start_screen_share(
     }
     crate::diag!("[screenshare] track published");
 
-    // Fresh per-session fence + the self-preview frames sink.
+    // Fresh per-session fence + the publish pump (encoder frames and the self-preview mirror,
+    // sized and paced by what the preview tile reports).
     let active_flag = std::sync::Arc::new(AtomicBool::new(true));
-    let (frames_sink, events_sink) = {
-        let ss = state.screenshare.lock().await;
-        (ss.frames.clone(), ss.events.clone())
+    let (pump, events_sink) = {
+        let mut ss = state.screenshare.lock().await;
+        let pump = LocalVideoPump::new(
+            Some(source.clone()),
+            limits,
+            PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
+            LOCAL_PREVIEW_KEY,
+            state.screenshare_frame_tx.clone(),
+            ss.frames.clone(),
+        );
+        (pump, ss.events.clone())
     };
-    let preview_tx = state.screenshare_frame_tx.clone();
 
     let flags = WindowsCaptureFlags {
-        source: source.clone(),
         active: std::sync::Arc::clone(&active_flag),
-        frames: frames_sink,
-        frame_tx: preview_tx,
+        pump,
+        limits,
     };
     // Thread reports size/cancel/error via oneshot, then blocks in start().
     let (size_tx, size_rx) = tokio::sync::oneshot::channel::<WgcStart>();
@@ -381,6 +393,11 @@ fn run_capture_thread(
         MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
     };
 
+    // WGC's default interval is the monitor refresh (144 Hz and up): ask for the publish
+    // rate instead, so frames the encoder would drop are never captured.
+    let update_interval = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(
+        1_000_000 / flags.limits.max_fps.max(1) as u64,
+    ));
     // Bgra8 matches the macOS/Linux byte order for argb_to_i420 (no swizzle).
     macro_rules! settings_for {
         ($item:expr) => {
@@ -389,7 +406,7 @@ fn run_capture_thread(
                 CursorCaptureSettings::WithCursor,
                 DrawBorderSettings::Default,
                 SecondaryWindowSettings::Default,
-                MinimumUpdateIntervalSettings::Default,
+                update_interval,
                 DirtyRegionSettings::Default,
                 ColorFormat::Bgra8,
                 flags,
@@ -883,19 +900,15 @@ impl Drop for ScopedBitmap {
 }
 
 struct WindowsCaptureFlags {
-    source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    frames: Option<Arc<dyn RawSink>>,
-    frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
+    pump: LocalVideoPump,
+    limits: ShareLimits,
 }
 
 struct WindowsCaptureHandler {
-    source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    frames: Option<Arc<dyn RawSink>>,
-    frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
     // &mut self (WGC serializes callbacks), so no Mutex needed.
-    last_preview: Option<std::time::Instant>,
+    pump: LocalVideoPump,
 }
 
 impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandler {
@@ -906,11 +919,8 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
         ctx: windows_capture::capture::Context<Self::Flags>,
     ) -> std::result::Result<Self, Self::Error> {
         Ok(Self {
-            source: ctx.flags.source,
             active: ctx.flags.active,
-            frames: ctx.flags.frames,
-            frame_tx: ctx.flags.frame_tx,
-            last_preview: None,
+            pump: ctx.flags.pump,
         })
     }
 
@@ -934,77 +944,12 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0);
-        // Preview every frame, as in start_unix.rs.
-        let preview = match &self.frames {
-            Some(sink)
-                if self
-                    .last_preview
-                    .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL) =>
-            {
-                self.last_preview = Some(std::time::Instant::now());
-                Some(sink.as_ref())
-            }
-            _ => None,
-        };
-        push_frame_windows(
-            &self.source,
-            width,
-            height,
-            stride,
-            timestamp_us,
-            bgra,
-            preview,
-            Some(&self.frame_tx),
-        );
+        // WGC Bgra8 == little-endian ARGB; the pump paces, scales to the limit and mirrors.
+        self.pump.push(width, height, stride, timestamp_us, bgra);
         Ok(())
     }
 
     fn on_closed(&mut self) -> std::result::Result<(), Self::Error> {
         Ok(())
-    }
-}
-
-fn push_frame_windows(
-    source: &NativeVideoSource,
-    width: u32,
-    height: u32,
-    stride: u32,
-    timestamp_us: i64,
-    bgra: &[u8],
-    preview: Option<&dyn RawSink>,
-    preview_ws: Option<&tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>>,
-) {
-    // VP8 + I420 require even dimensions.
-    let w = (width & !1) as i32;
-    let h = (height & !1) as i32;
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    // Convert (WGC Bgra8 == little-endian ARGB) to I420 at native res.
-    let buffer = convert_to_i420(w, h, stride, bgra);
-    let (out_w, out_h) = (buffer.width(), buffer.height());
-    let frame = VideoFrame {
-        rotation: VideoRotation::VideoRotation0,
-        timestamp_us,
-        // No packet-trailer features are negotiated, so there is no metadata to attach.
-        frame_metadata: None,
-        buffer,
-    };
-    source.capture_frame(&frame);
-    if preview.is_some() || preview_ws.is_some() {
-        let bytes = pack_frame_bytes(
-            LOCAL_PREVIEW_KEY,
-            out_w,
-            out_h,
-            timestamp_us,
-            &frame.buffer,
-        );
-        let bytes = std::sync::Arc::new(bytes);
-        if let Some(tx) = preview_ws {
-            let _ = tx.send(bytes.clone());
-        }
-        if let Some(sink) = preview {
-            let _ = sink.send((*bytes).clone());
-        }
     }
 }
