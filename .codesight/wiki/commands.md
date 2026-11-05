@@ -649,7 +649,7 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 ## screenshare (`commands/screenshare/`) and camera (`commands/camera/`)
 Capture, publish and the remote drain are described in [capture-split.md](./capture-split.md); the frame WebSocket in [media-server.md](./media-server.md). Both lifecycles carry a **session token** (`ScreenShareState::begin_session` / `CameraState::begin_session`): a start re-checks it after every await, so a stop that lands during the helper handshake or the publish ends the start quietly instead of leaving a published track with no capture behind it, and a reader task whose capture dies mid-share runs the stop path (`stop_screen_share_if` / `stop_camera_if`, token-checked, so a reader from a session the user already replaced cannot kill the new one) and then reports `LocalError` — never a frozen "sharing" state.
 - `enumerate_screen_sources()` → `SourceList` — macOS/Windows: the in-app picker's list (the macOS helper is spawned and parked here). Linux: empty, meaning the portal picks. The renderer's share state is `enumerating` from the click until this (or, on Linux, the start) resolves; a second click meanwhile is ignored.
-- `cancel_screen_share_picker()`, `start_screen_share(selection?, max_framerate?, with_audio?)`, `stop_screen_share()`, `subscribe_screen_share_events(on_event)`, `screenshare_ws_url()` → the loopback frame socket URL or `null`.
+- `cancel_screen_share_picker()`, `start_screen_share(selection?, max_framerate?, with_audio?, max_height?)` (`max_height` is the share-resolution setting, `0`/absent = source), `stop_screen_share()`, `subscribe_screen_share_events(on_event)`, `screenshare_ws_url()` → the loopback frame socket URL or `null`. (`subscribe_screen_share_frames`, the per-frame IPC `Channel` the frame socket replaced in #305, is gone — nothing called it.)
 - `set_video_wants(track_key, wants: { width, height, fps } | null)` — **subscriber-driven video.** Every `RemoteVideoTile` reports its container's size in device pixels while it is on screen (ResizeObserver + IntersectionObserver + page visibility), and `null` when hidden; `frontend/src/screenshare/videoWants.ts` folds the tiles showing one track into a single demand (max size, max fps) and sends it only when it changes. Rust (`screenshare/wants.rs`) keeps it per track in a `watch`: for a remote track it calls `RemoteTrackPublication::update_video_dimensions` so the SFU sends the simulcast layer that fits, and `set_enabled(false)` for a hidden one so nothing is received or decoded; the drain task skips packing while hidden, paces to the wanted fps, and `I420Scale`s to the wanted box before packing when the decoded frame is at least 2× larger. The room joins with `adaptive_stream` + `dynacast`, so the publisher also stops encoding layers nobody subscribes to. The two local self-preview keys (`__local_preview__`, `__local_camera_preview__`) report through the same path.
 - camera: `list_video_devices()` → `CameraList` (helper parked for `start_camera`), `start_camera(device_id)`, `stop_camera()`, `start_camera_preview(device_id)` / `stop_camera_preview()` (settings self-preview, no publish), `subscribe_camera_events(on_event)`.
 
@@ -773,7 +773,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`staging`** — `discard_staged_attachment`, `stage_attachment`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_key_change_notices`, `list_peer_verifications`, `set_contact_verified`
-- **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
+- **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
 - **`sfx`** — `play_sfx`, `start_ring`, `stop_ring`
 - **`terminal`** — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
@@ -858,7 +858,7 @@ than hand-edit.
 
 **`voice_test`** (7) — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
 
-**`screenshare`** (8) — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
+**`screenshare`** (7) — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
 
 **`camera`** (6) — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 

@@ -590,7 +590,6 @@ pub fn run() {
             commands::voice_test::play_test_tone,
             commands::voice_test::stop_test_playback,
             commands::screenshare::subscribe_screen_share_events,
-            commands::screenshare::subscribe_screen_share_frames,
             commands::screenshare::screenshare_ws_url,
             commands::screenshare::enumerate_screen_sources,
             commands::screenshare::cancel_screen_share_picker,

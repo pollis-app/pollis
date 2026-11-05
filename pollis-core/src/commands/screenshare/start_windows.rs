@@ -109,27 +109,19 @@ pub async fn start_screen_share(
             drop(ss);
             match sel {
                 pollis_capture_proto::Selection::Display { id, .. } => {
-                    let monitor = cache
-                        .displays
-                        .into_iter()
-                        .nth(id as usize)
-                        .ok_or_else(|| {
-                            crate::error::Error::Other(anyhow::anyhow!(
-                                "selected display no longer available — re-open the picker"
-                            ))
-                        })?;
+                    let monitor = cache.displays.into_iter().nth(id as usize).ok_or_else(|| {
+                        crate::error::Error::Other(anyhow::anyhow!(
+                            "selected display no longer available — re-open the picker"
+                        ))
+                    })?;
                     CaptureSource::Monitor(monitor)
                 }
                 pollis_capture_proto::Selection::Window { id, .. } => {
-                    let window = cache
-                        .windows
-                        .into_iter()
-                        .nth(id as usize)
-                        .ok_or_else(|| {
-                            crate::error::Error::Other(anyhow::anyhow!(
-                                "selected window no longer available — re-open the picker"
-                            ))
-                        })?;
+                    let window = cache.windows.into_iter().nth(id as usize).ok_or_else(|| {
+                        crate::error::Error::Other(anyhow::anyhow!(
+                            "selected window no longer available — re-open the picker"
+                        ))
+                    })?;
                     CaptureSource::Window(window)
                 }
             }
@@ -144,10 +136,8 @@ pub async fn start_screen_share(
         },
         true, /* is_screencast */
     );
-    let track = LocalVideoTrack::create_video_track(
-        "screenshare",
-        RtcVideoSource::Native(source.clone()),
-    );
+    let track =
+        LocalVideoTrack::create_video_track("screenshare", RtcVideoSource::Native(source.clone()));
     // See start_unix.rs.
     let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
     if let Err(e) = room
@@ -169,7 +159,8 @@ pub async fn start_screen_share(
         crate::diag!("[screenshare] publish error: {e}");
         return Err(fail_capture(
             state,
-            "Could not publish the screen-share to the call. Check your connection and try again.".into(),
+            "Could not publish the screen-share to the call. Check your connection and try again."
+                .into(),
         )
         .await);
     }
@@ -185,8 +176,7 @@ pub async fn start_screen_share(
             limits,
             PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
             LOCAL_PREVIEW_KEY,
-            state.screenshare_frame_tx.clone(),
-            ss.frames.clone(),
+            Arc::clone(&state.screenshare_frame_tx),
         );
         (pump, ss.events.clone())
     };
@@ -260,15 +250,16 @@ async fn start_windows_audio(
     room: &std::sync::Arc<livekit::Room>,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
-    use super::audio::{emit, publish_shared_audio_track, SharedAudioResampler,
-        SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ};
+    use super::audio::{
+        emit, publish_shared_audio_track, SharedAudioResampler, SHARED_AUDIO_FRAME_SAMPLES,
+        SHARED_AUDIO_RATE_HZ,
+    };
     use super::windows_audio::{run_loopback_capture, AudioBlock};
 
     // 32 blocks ≈ 300 ms: absorbs hiccups without hiding a stalled consumer.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AudioBlock>(32);
     // std's Result: `crate::error::Result` is a one-generic alias.
-    let (start_tx, start_rx) =
-        tokio::sync::oneshot::channel::<std::result::Result<(), String>>();
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel::<std::result::Result<(), String>>();
     let active_for_thread = std::sync::Arc::clone(&active);
     let capture_thread = std::thread::Builder::new()
         .name("wasapi-screenshare-audio".into())
@@ -438,8 +429,7 @@ fn run_capture_thread(
                 Err(e) => {
                     crate::diag!("[screenshare] WGC picker size: {e}");
                     let _ = size_tx.send(WgcStart::Failed(
-                        "Could not read the selected screen-share source. Please try again."
-                            .into(),
+                        "Could not read the selected screen-share source. Please try again.".into(),
                     ));
                     return;
                 }
@@ -448,7 +438,8 @@ fn run_capture_thread(
             let height = (sh.max(0) as u32) & !1;
             if width == 0 || height == 0 {
                 let _ = size_tx.send(WgcStart::Failed(
-                    "The selected screen-share source has an invalid size. Please try again.".into(),
+                    "The selected screen-share source has an invalid size. Please try again."
+                        .into(),
                 ));
                 return;
             }
@@ -458,7 +449,9 @@ fn run_capture_thread(
             if let Err(e) = WindowsCaptureHandler::start(settings) {
                 crate::diag!("[screenshare] WGC start/stop: {e}");
                 if let Some(ev) = &events_for_thread {
-                    let _ = ev.send(ScreenShareEvent::LocalError { message: started_msg.into() });
+                    let _ = ev.send(ScreenShareEvent::LocalError {
+                        message: started_msg.into(),
+                    });
                 }
             }
         }
@@ -484,7 +477,9 @@ fn run_capture_thread(
             if let Err(e) = WindowsCaptureHandler::start(settings) {
                 crate::diag!("[screenshare] WGC start/stop: {e}");
                 if let Some(ev) = &events_for_thread {
-                    let _ = ev.send(ScreenShareEvent::LocalError { message: started_msg.into() });
+                    let _ = ev.send(ScreenShareEvent::LocalError {
+                        message: started_msg.into(),
+                    });
                 }
             }
         }
@@ -493,7 +488,8 @@ fn run_capture_thread(
                 (Ok(w), Ok(h)) if w > 0 && h > 0 => ((w as u32) & !1, (h as u32) & !1),
                 _ => {
                     let _ = size_tx.send(WgcStart::Failed(
-                        "Could not read the selected window's size. The window may have closed.".into(),
+                        "Could not read the selected window's size. The window may have closed."
+                            .into(),
                     ));
                     return;
                 }
@@ -510,7 +506,9 @@ fn run_capture_thread(
             if let Err(e) = WindowsCaptureHandler::start(settings) {
                 crate::diag!("[screenshare] WGC start/stop: {e}");
                 if let Some(ev) = &events_for_thread {
-                    let _ = ev.send(ScreenShareEvent::LocalError { message: started_msg.into() });
+                    let _ = ev.send(ScreenShareEvent::LocalError {
+                        message: started_msg.into(),
+                    });
                 }
             }
         }
@@ -525,8 +523,7 @@ struct EnumeratedSources {
 }
 
 fn enumerate_blocking() -> Result<EnumeratedSources> {
-    let monitors = Monitor::enumerate()
-        .map_err(|e| anyhow::anyhow!("enumerate monitors: {e}"))?;
+    let monitors = Monitor::enumerate().map_err(|e| anyhow::anyhow!("enumerate monitors: {e}"))?;
     let mut display_sources = Vec::with_capacity(monitors.len());
     let mut display_handles = Vec::with_capacity(monitors.len());
     for (idx, monitor) in monitors.into_iter().enumerate() {
@@ -548,8 +545,7 @@ fn enumerate_blocking() -> Result<EnumeratedSources> {
         display_handles.push(monitor);
     }
 
-    let windows = Window::enumerate()
-        .map_err(|e| anyhow::anyhow!("enumerate windows: {e}"))?;
+    let windows = Window::enumerate().map_err(|e| anyhow::anyhow!("enumerate windows: {e}"))?;
     let mut window_sources = Vec::with_capacity(windows.len());
     let mut window_handles = Vec::with_capacity(windows.len());
     for window in windows.into_iter() {
@@ -628,8 +624,8 @@ fn is_window_user_facing(window: &Window, title: &str, app_name: &str) -> bool {
 fn capture_monitor_thumbnail(monitor: &Monitor) -> Option<String> {
     use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleBitmap, CreateCompatibleDC, GetDC, GetMonitorInfoW, HALFTONE, HMONITOR,
-        MONITORINFO, MONITORINFOEXW, SRCCOPY, SelectObject, SetStretchBltMode, StretchBlt,
+        CreateCompatibleBitmap, CreateCompatibleDC, GetDC, GetMonitorInfoW, SelectObject,
+        SetStretchBltMode, StretchBlt, HALFTONE, HMONITOR, MONITORINFO, MONITORINFOEXW, SRCCOPY,
     };
 
     unsafe {
@@ -704,8 +700,8 @@ fn capture_monitor_thumbnail(monitor: &Monitor) -> Option<String> {
 fn capture_window_thumbnail(window: &Window) -> Option<String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleBitmap, CreateCompatibleDC, GetDC, HALFTONE, SRCCOPY, SelectObject,
-        SetStretchBltMode, StretchBlt,
+        CreateCompatibleBitmap, CreateCompatibleDC, GetDC, SelectObject, SetStretchBltMode,
+        StretchBlt, HALFTONE, SRCCOPY,
     };
     use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;

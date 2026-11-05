@@ -7,7 +7,7 @@ use livekit::track::{LocalAudioTrack, LocalVideoTrack};
 
 use crate::sink::EventSink;
 
-use super::{RawSink, ScreenShareEvent};
+use super::ScreenShareEvent;
 
 /// A connected capture-helper session: child plus split socket halves.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -19,7 +19,6 @@ pub struct HelperSession {
 
 pub struct ScreenShareState {
     pub events: Option<Arc<dyn EventSink<ScreenShareEvent>>>,
-    pub frames: Option<Arc<dyn RawSink>>,
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
@@ -72,7 +71,6 @@ impl ScreenShareState {
     pub fn new() -> Self {
         Self {
             events: None,
-            frames: None,
             local_track: None,
             local_source: None,
             local_audio_track: None,

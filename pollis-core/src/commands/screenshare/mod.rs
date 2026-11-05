@@ -35,9 +35,7 @@ mod unsupported;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod session_tests;
 
-pub use commands::{
-    screenshare_ws_url, subscribe_screen_share_events, subscribe_screen_share_frames,
-};
+pub use commands::{screenshare_ws_url, subscribe_screen_share_events};
 pub use remote_video::{
     on_participant_left, on_remote_video_subscribed, on_remote_video_unsubscribed,
     on_room_disconnected,
@@ -55,9 +53,6 @@ pub use start_windows::{cancel_screen_share_picker, enumerate_screen_sources, st
 pub(super) use start_windows::WindowsPickerCache;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub use unsupported::{cancel_screen_share_picker, enumerate_screen_sources, start_screen_share};
-
-/// Re-export kept for `commands::screenshare::RawSink` imports.
-pub use crate::sink::RawSink;
 
 /// Screen vs camera for a remote video track, from its LiveKit `TrackSource`.
 /// Defaults to `Screen` for older backends that send no tag.

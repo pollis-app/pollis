@@ -421,10 +421,14 @@ mod pw {
         struct Data {
             format: spa::param::video::VideoInfoRaw,
             announced: Option<(u32, u32)>,
+            /// The compositor chose RGBx/RGBA: swap R and B on the way out, so the
+            /// parent's one BGRx path never sees the other byte order.
+            swap_rb: bool,
         }
         let data = Data {
             format: Default::default(),
             announced: None,
+            swap_rb: false,
         };
 
         let stream = pw::stream::StreamRc::new(
@@ -463,6 +467,11 @@ mod pw {
                     return;
                 }
                 ud.format.parse(param).ok();
+                ud.swap_rb = matches!(
+                    ud.format.format(),
+                    pw::spa::param::video::VideoFormat::RGBx
+                        | pw::spa::param::video::VideoFormat::RGBA
+                );
                 let w = ud.format.size().width;
                 let h = ud.format.size().height;
                 if w == 0 || h == 0 {
@@ -518,7 +527,12 @@ mod pw {
                     return;
                 }
                 // Copy out before the buffer returns to rotation; last-frame-wins.
-                let bgrx = slice[..size].to_vec();
+                let mut bgrx = slice[..size].to_vec();
+                if ud.swap_rb {
+                    for px in bgrx.chunks_exact_mut(4) {
+                        px.swap(0, 2);
+                    }
+                }
                 let _ = tx_for_proc.try_send(CaptureMsg::Frame {
                     width,
                     height,
@@ -561,7 +575,9 @@ mod pw {
                 Id,
                 pw::spa::param::format::MediaSubtype::Raw
             ),
-            // Wide format set: compositors differ (KWin BGRx/BGRA, Mutter RGBx/RGBA).
+            // Only the 32-bit RGB family the frame path can carry: BGRx/BGRA as is, RGBx/RGBA
+            // swizzled above. Compositors differ (KWin BGRx/BGRA, Mutter RGBx/RGBA); a wider
+            // offer once let a compositor pick a layout the parent read as BGRx.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoFormat,
                 Choice,
@@ -571,16 +587,7 @@ mod pw {
                 pw::spa::param::video::VideoFormat::BGRx,
                 pw::spa::param::video::VideoFormat::BGRA,
                 pw::spa::param::video::VideoFormat::RGBx,
-                pw::spa::param::video::VideoFormat::RGBA,
-                pw::spa::param::video::VideoFormat::RGB,
-                pw::spa::param::video::VideoFormat::BGR,
-                pw::spa::param::video::VideoFormat::xRGB,
-                pw::spa::param::video::VideoFormat::xBGR,
-                pw::spa::param::video::VideoFormat::ARGB,
-                pw::spa::param::video::VideoFormat::ABGR,
-                pw::spa::param::video::VideoFormat::YUY2,
-                pw::spa::param::video::VideoFormat::I420,
-                pw::spa::param::video::VideoFormat::NV12
+                pw::spa::param::video::VideoFormat::RGBA
             ),
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoSize,

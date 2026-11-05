@@ -15,7 +15,7 @@ use livekit::{
 use crate::commands::screenshare::{
     codec::ShareLimits,
     helper_subprocess::locate_capture_helper,
-    pump::LocalVideoPump,
+    pump::{FrameIn, LocalVideoPump, PumpHandle},
     wants::{wants_channel, PreviewMirror},
     HelperSession,
 };
@@ -38,8 +38,7 @@ async fn camera_pump(state: &Arc<AppState>, source: Option<NativeVideoSource>) -
         CAMERA_LIMITS,
         PreviewMirror::new(wants_channel(&mut ss, LOCAL_CAMERA_PREVIEW_KEY)),
         LOCAL_CAMERA_PREVIEW_KEY,
-        state.screenshare_frame_tx.clone(),
-        None,
+        Arc::clone(&state.screenshare_frame_tx),
     )
 }
 
@@ -233,7 +232,9 @@ pub async fn list_video_devices(state: &Arc<AppState>) -> Result<pollis_capture_
 }
 
 pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()> {
-    use pollis_capture_proto::{encode_select_camera, read_msg, CameraSelection, CaptureMsg};
+    use pollis_capture_proto::{
+        encode_select_camera, read_msg, read_msg_pooled, CameraSelection, CaptureMsg,
+    };
     use tokio::io::AsyncWriteExt;
 
     let room = {
@@ -318,7 +319,8 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     let read = tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut reader)).await;
     let (width, height) = match read {
         Ok(Ok(Some(CaptureMsg::Format { width, height }))) => (width & !1, height & !1),
-        Ok(Ok(Some(CaptureMsg::Frame { width, height, .. }))) => (width & !1, height & !1),
+        Ok(Ok(Some(CaptureMsg::Frame { width, height, .. })))
+        | Ok(Ok(Some(CaptureMsg::FrameI420 { width, height, .. }))) => (width & !1, height & !1),
         Ok(Ok(Some(CaptureMsg::Error { message }))) => {
             stop_camera(state).await.ok();
             let lower = message.to_lowercase();
@@ -421,12 +423,14 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         return Ok(());
     }
 
-    // Reader task feeds the source and mirrors self-preview frames as the preview tile wants.
-    let mut pump = camera_pump(state, Some(source.clone())).await;
+    // Reader task feeds the converter; the self-preview follows the preview tile's wants.
+    let pump = camera_pump(state, Some(source.clone())).await;
     let state_for_exit = Arc::clone(state);
     let reader_task = tokio::spawn(async move {
+        let frames = PumpHandle::spawn(pump);
         loop {
-            match read_msg(&mut reader).await {
+            let mut spare = frames.take_spare();
+            match read_msg_pooled(&mut reader, &mut spare).await {
                 Ok(Some(CaptureMsg::Frame {
                     width,
                     height,
@@ -434,7 +438,26 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                     timestamp_us,
                     bgrx,
                 })) => {
-                    pump.push(width, height, stride, timestamp_us, &bgrx);
+                    frames.offer(FrameIn::Bgrx {
+                        width,
+                        height,
+                        stride,
+                        timestamp_us,
+                        bytes: bgrx,
+                    });
+                }
+                Ok(Some(CaptureMsg::FrameI420 {
+                    width,
+                    height,
+                    timestamp_us,
+                    planes,
+                })) => {
+                    frames.offer(FrameIn::I420 {
+                        width,
+                        height,
+                        timestamp_us,
+                        planes,
+                    });
                 }
                 // Mid-stream renegotiation: harmless to ignore.
                 Ok(Some(CaptureMsg::Format { .. })) => {}
@@ -597,7 +620,9 @@ async fn stop_session(state: &Arc<AppState>, token: Option<u64>) -> Result<()> {
 /// Preview-only capture for settings (#434): no room, no publish.
 /// Uses `preview_*` slots, so an in-call camera keeps running.
 pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> Result<()> {
-    use pollis_capture_proto::{encode_select_camera, read_msg, CameraSelection, CaptureMsg};
+    use pollis_capture_proto::{
+        encode_select_camera, read_msg, read_msg_pooled, CameraSelection, CaptureMsg,
+    };
     use tokio::io::AsyncWriteExt;
 
     // Restart from a clean slate: tear down any lingering preview capture.
@@ -658,7 +683,9 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
     // Read the negotiated Format (or a leading Frame); only start matters.
     let read = tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut reader)).await;
     match read {
-        Ok(Ok(Some(CaptureMsg::Format { .. }))) | Ok(Ok(Some(CaptureMsg::Frame { .. }))) => {}
+        Ok(Ok(Some(CaptureMsg::Format { .. })))
+        | Ok(Ok(Some(CaptureMsg::Frame { .. })))
+        | Ok(Ok(Some(CaptureMsg::FrameI420 { .. }))) => {}
         Ok(Ok(Some(CaptureMsg::Error { message }))) => {
             stop_camera_preview(state).await.ok();
             let lower = message.to_lowercase();
@@ -682,10 +709,12 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
     }
 
     // Reader task: preview only, no LiveKit publish.
-    let mut pump = camera_pump(state, None).await;
+    let pump = camera_pump(state, None).await;
     let reader_task = tokio::spawn(async move {
+        let frames = PumpHandle::spawn(pump);
         loop {
-            match read_msg(&mut reader).await {
+            let mut spare = frames.take_spare();
+            match read_msg_pooled(&mut reader, &mut spare).await {
                 Ok(Some(CaptureMsg::Frame {
                     width,
                     height,
@@ -693,7 +722,26 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
                     timestamp_us,
                     bgrx,
                 })) => {
-                    pump.push(width, height, stride, timestamp_us, &bgrx);
+                    frames.offer(FrameIn::Bgrx {
+                        width,
+                        height,
+                        stride,
+                        timestamp_us,
+                        bytes: bgrx,
+                    });
+                }
+                Ok(Some(CaptureMsg::FrameI420 {
+                    width,
+                    height,
+                    timestamp_us,
+                    planes,
+                })) => {
+                    frames.offer(FrameIn::I420 {
+                        width,
+                        height,
+                        timestamp_us,
+                        planes,
+                    });
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {

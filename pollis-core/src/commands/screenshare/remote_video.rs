@@ -35,14 +35,14 @@ pub async fn on_remote_video_subscribed(
         })
     };
 
-    let (events, frames, wants_rx) = {
+    let (events, wants_rx) = {
         let mut ss = state.screenshare.lock().await;
         let rx = wants_channel(&mut ss, &track_key);
         if let Some(publication) = publication {
             ss.remote_publications
                 .insert(track_key.clone(), publication);
         }
-        (ss.events.clone(), ss.frames.clone(), rx)
+        (ss.events.clone(), rx)
     };
     // WebSocket fan-out, served at `/ws/screenshare/<token>` (see `media_server.rs`).
     let frame_tx = Arc::clone(&state.screenshare_frame_tx);
@@ -85,8 +85,8 @@ pub async fn on_remote_video_subscribed(
                     });
                 }
             }
-            // Pack once for WS subscribers and any legacy Channel sink.
-            if frame_tx.receiver_count() > 0 || frames.is_some() {
+            // Pack once for the frame-socket subscribers.
+            if frame_tx.receiver_count() > 0 {
                 last_packed = Some(std::time::Instant::now());
                 let packed = match want.pack_size((w, h)) {
                     Some((tw, th)) => i420.scale(tw as i32, th as i32),
@@ -99,11 +99,7 @@ pub async fn on_remote_video_subscribed(
                     frame.timestamp_us,
                     &packed,
                 );
-                let bytes = std::sync::Arc::new(bytes);
-                frame_tx.send(bytes.clone());
-                if let Some(sink) = &frames {
-                    let _ = sink.send((*bytes).clone());
-                }
+                frame_tx.send(std::sync::Arc::new(bytes));
             }
         }
     });

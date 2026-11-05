@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-// Two-client screenshare (#570 M3c): B sees A's remote screenshare tile; on Xvfb capture is the X11 root grab.
+// Two-client screenshare (#570 M3c): B sees A's remote screenshare tile and paints frames; on
+// Xvfb capture is the X11 root grab. Then A's capture helper is killed mid-share: the share
+// must end on both sides (no frozen "sharing" state) and A must be able to share again.
 
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const h = require("./lib/harness");
 
 const ARTIFACTS = path.join(__dirname, "artifacts");
@@ -27,6 +30,10 @@ const LOCAL_SHARE_TIMEOUT_MS = 60_000;
 const REMOTE_SHARE_TIMEOUT_MS = 120_000;
 // Defensive: how long to wait for an in-app picker (Linux enumerates empty, so none).
 const PICKER_PROBE_MS = 6_000;
+// B's tile must paint (WebGL draw) within this of appearing: frames flow end to end.
+const FIRST_PAINT_TIMEOUT_MS = 30_000;
+// After A's capture helper dies, both sides must drop the share within this.
+const SHARE_GONE_TIMEOUT_MS = 30_000;
 
 // App env as in two-client-call.js, plus GDK_BACKEND / XDG_SESSION_TYPE=x11 to pin the X11 capture path.
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
@@ -265,6 +272,74 @@ async function remoteScreenshareTiles(browser) {
   }, [LOCAL_PREVIEW_KEY, LOCAL_CAMERA_PREVIEW_KEY]);
 }
 
+// Count WebGL draws on every remote-video-tile canvas from now on (the tile paints one per frame).
+async function installDrawCounter(browser) {
+  await browser.execute(() => {
+    if (window.__e2eDraws) {
+      return;
+    }
+    const draws = (window.__e2eDraws = {});
+    const original = WebGLRenderingContext.prototype.drawArrays;
+    WebGLRenderingContext.prototype.drawArrays = function (...args) {
+      try {
+        const key = this.canvas && this.canvas.getAttribute("data-testid");
+        draws[key] = (draws[key] || 0) + 1;
+      } catch (_) {}
+      return original.apply(this, args);
+    };
+  });
+}
+
+// B: poll until the remote tile has painted at least one frame.
+async function waitForRemoteFramePainted(browser, tag, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const painted = await browser.execute((localKeys) => {
+      const draws = window.__e2eDraws || {};
+      return Object.entries(draws).some(([key, n]) => {
+        const track = key.slice("remote-video-tile-".length);
+        return n > 0 && !localKeys.includes(track);
+      });
+    }, [LOCAL_PREVIEW_KEY, LOCAL_CAMERA_PREVIEW_KEY]).catch(() => false);
+    if (painted) {
+      console.log(`[two-client-screenshare] ${tag}: remote tile painted a frame`);
+      return;
+    }
+    await h.sleep(500);
+  }
+  throw new Error(`${tag}: the remote screenshare tile appeared but never painted a frame`);
+}
+
+// Poll until no remote screenshare tile is on screen.
+async function waitForRemoteShareGone(browser, tag, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const tiles = await remoteScreenshareTiles(browser).catch(() => []);
+    if (tiles.length === 0) {
+      console.log(`[two-client-screenshare] ${tag}: remote screenshare tile is gone`);
+      return;
+    }
+    await h.sleep(1000);
+  }
+  throw new Error(`${tag}: the remote screenshare tile stayed on screen after A's capture died`);
+}
+
+// A: poll until the local self-preview is gone (the share ended on A's side).
+async function waitForLocalShareGone(browser, tag, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  const testId = `remote-video-tile-${LOCAL_PREVIEW_KEY}`;
+  while (Date.now() < end) {
+    if (!(await h.present(browser, testId))) {
+      console.log(`[two-client-screenshare] ${tag}: local self-preview is gone (share ended)`);
+      return;
+    }
+    await h.sleep(1000);
+  }
+  throw new Error(
+    `${tag}: the local self-preview stayed up after the capture helper died — a zombie share`
+  );
+}
+
 // B: poll until A's remote screenshare tile renders. This is the M3c assertion.
 async function waitForRemoteShare(browser, tag, timeoutMs) {
   const end = Date.now() + timeoutMs;
@@ -374,9 +449,34 @@ async function main() {
     await shot(A.browser, "two-client-screenshare-A-sharing.png");
 
     console.log("[two-client-screenshare] B: waiting for A's remote screenshare tile…");
+    await installDrawCounter(B.browser);
     await waitForRemoteShare(B.browser, "B", REMOTE_SHARE_TIMEOUT_MS);
     await shot(B.browser, "two-client-screenshare-B-sees-share.png");
     console.log("[two-client-screenshare] SUCCESS: B sees A's remote screenshare tile");
+    await waitForRemoteFramePainted(B.browser, "B", FIRST_PAINT_TIMEOUT_MS);
+
+    // A's capture helper dies under it (a crashed or killed helper, a revoked source): the
+    // share must end on A (no frozen self-preview) and at B (no frozen last frame).
+    console.log("[two-client-screenshare] killing A's capture helper mid-share");
+    const killed = spawnSync("pkill", ["-f", "pollis-capture-linux"], { encoding: "utf8" });
+    if (killed.status !== 0) {
+      throw new Error("pkill found no pollis-capture-linux helper to kill — was A really capturing?");
+    }
+    await waitForLocalShareGone(A.browser, "A", SHARE_GONE_TIMEOUT_MS);
+    await waitForRemoteShareGone(B.browser, "B", SHARE_GONE_TIMEOUT_MS);
+    await shot(A.browser, "two-client-screenshare-A-after-helper-died.png");
+
+    // And A can share again: the dead session must not have poisoned the next one.
+    console.log("[two-client-screenshare] A: sharing again after the helper died");
+    // A failed share shows its reason on the pill; one click resets it, the next starts.
+    await clickScreenShareToggle(A.browser, "A");
+    await h.sleep(1500);
+    if (!(await h.present(A.browser, `remote-video-tile-${LOCAL_PREVIEW_KEY}`))) {
+      await startScreenShare(A.browser, "A");
+    }
+    await waitForLocalSharePreview(A.browser, "A", LOCAL_SHARE_TIMEOUT_MS);
+    await waitForRemoteShare(B.browser, "B", REMOTE_SHARE_TIMEOUT_MS);
+    console.log("[two-client-screenshare] SUCCESS: A shared again and B sees it");
 
     // Stop the share + hang up (best-effort — the run already succeeded).
     await clickScreenShareToggle(A.browser, "A").catch(() => {});

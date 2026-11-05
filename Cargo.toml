@@ -82,6 +82,17 @@ lto = true
 opt-level = "s"
 strip = true
 
+# The capture helpers and their JPEG decoder are the per-pixel hot path (see the dev
+# override above); size-optimised they run ~15% slower per frame for a few KB saved.
+[profile.release.package.pollis-capture-linux]
+opt-level = 3
+[profile.release.package.pollis-capture-macos]
+opt-level = 3
+[profile.release.package.zune-jpeg]
+opt-level = 3
+[profile.release.package.zune-core]
+opt-level = 3
+
 # OpenMLS is pinned to an upstream commit, not a crates.io release (#668).
 #
 # Post-quantum SIGNATURES live only on `main`, behind the

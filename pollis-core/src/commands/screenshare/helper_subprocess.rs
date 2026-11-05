@@ -41,7 +41,8 @@ pub(super) async fn spawn_and_accept_helper(
             crate::diag!("[screenshare] locate helper: {e}");
             return Err(fail_capture(
                 state,
-                "Screen-capture helper not found. Reinstall Pollis or rebuild the capture helper.".into(),
+                "Screen-capture helper not found. Reinstall Pollis or rebuild the capture helper."
+                    .into(),
             )
             .await);
         }
@@ -61,7 +62,9 @@ pub(super) async fn spawn_and_accept_helper(
             command.arg("--max-fps").arg(limits.max_fps.to_string());
         }
         if limits.max_height > 0 {
-            command.arg("--max-height").arg(limits.max_height.to_string());
+            command
+                .arg("--max-height")
+                .arg(limits.max_height.to_string());
         }
     }
     let helper = command

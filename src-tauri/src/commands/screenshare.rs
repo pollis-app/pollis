@@ -2,7 +2,7 @@
 //! pollis_core::commands::screenshare. Edit pollis-core, not here.
 
 use std::sync::Arc;
-use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::error::Result;
@@ -16,18 +16,6 @@ pub async fn subscribe_screen_share_events(
 ) -> Result<()> {
     pollis_core::commands::screenshare::subscribe_screen_share_events(
         Arc::new(crate::sink::ChannelSink(on_event)),
-        &state,
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn subscribe_screen_share_frames(
-    on_frame: Channel<InvokeResponseBody>,
-    state: State<'_, Arc<AppState>>,
-) -> Result<()> {
-    pollis_core::commands::screenshare::subscribe_screen_share_frames(
-        Arc::new(crate::sink::RawChannelSink(on_frame)),
         &state,
     )
     .await
