@@ -8,6 +8,8 @@ interface PillButtonProps {
   children: React.ReactNode;
   "data-testid"?: string;
   "aria-label"?: string;
+  /** Toggle state for assistive tech; omitted for plain actions. */
+  "aria-pressed"?: boolean;
   /** Any `data-*` attribute, forwarded verbatim (e.g. `data-mic-state`, #849). */
   [dataAttribute: `data-${string}`]: unknown;
 }
@@ -21,6 +23,7 @@ export const PillButton: React.FC<PillButtonProps> = ({
   children,
   "data-testid": testId,
   "aria-label": ariaLabel,
+  "aria-pressed": ariaPressed,
   ...rest
 }) => {
   // Only `data-*`: className and style stay owned here.
@@ -33,6 +36,7 @@ export const PillButton: React.FC<PillButtonProps> = ({
       data-testid={testId}
       {...dataAttributes}
       aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
       title={title}
       onClick={onClick}
       className="flex items-center justify-center font-mono transition-colors cursor-pointer rounded-[3px] border border-solid border-[var(--pill-accent)] bg-[var(--pill-accent)] text-bg hover:bg-bg hover:text-[var(--pill-accent)]"

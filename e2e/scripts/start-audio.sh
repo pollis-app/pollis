@@ -34,6 +34,53 @@ SOURCE_NAME="pollis_vmic"
 
 log() { echo "[start-audio] $*" >&2; }
 
+# Emit one `export` line (stdout) and, in CI, a $GITHUB_ENV line.
+emit() {
+  local key="$1" value="$2"
+  echo "export ${key}=${value}"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    echo "${key}=${value}" >> "$GITHUB_ENV"
+  fi
+}
+
+# --- PipeWire host (a developer box) ------------------------------------------
+# cpal prefers ALSA's `pipewire` PCM over `pulse` (pollis-core voice/devices.rs
+# `preferred`), so on a PipeWire desktop PULSE_SINK/PULSE_SOURCE are ignored and
+# a test client would open the HOST default devices — the developer's real
+# headset. Instead: virtual nodes on the host PipeWire, plus a per-client
+# `$XDG_CONFIG_HOME/alsa/asoundrc` that pins the `pipewire` PCM to them. The
+# harness hands client A `POLLIS_E2E_XDG_A` and client B `POLLIS_E2E_XDG_B`
+# (e2e/lib/harness.js `startClient`). Host defaults are never touched.
+if pactl info 2>/dev/null | grep -q "on PipeWire"; then
+  log "PipeWire host: pinning per-client virtual devices (host defaults untouched)"
+  mkdir -p "$PULSE_DIR"
+  : > "$PULSE_DIR/pw-modules.txt"
+  for n in pollis_vspk_a pollis_vspk_b pollis_vmic_a pollis_vmic_b; do
+    id=$(pactl load-module module-null-sink "sink_name=$n" rate=48000 channels=2 "sink_properties=device.description=$n")
+    echo "$n $id" >> "$PULSE_DIR/pw-modules.txt"
+  done
+  for c in a b; do
+    id=$(pactl load-module module-remap-source "master=pollis_vmic_$c.monitor" "source_name=pollis_vmic_${c}_src" "source_properties=device.description=pollis_vmic_${c}_src")
+    echo "pollis_vmic_${c}_src $id" >> "$PULSE_DIR/pw-modules.txt"
+    mkdir -p "$PULSE_DIR/xdg-$c/alsa"
+    cat > "$PULSE_DIR/xdg-$c/alsa/asoundrc" <<EOF
+# Written by e2e/scripts/start-audio.sh: this client's ALSA 'pipewire' PCM is pinned to the
+# lab's virtual devices, so it never captures from or plays to the host's real hardware.
+pcm.!pipewire {
+  type pipewire
+  playback_node "pollis_vspk_$c"
+  capture_node "pollis_vmic_${c}_src"
+  hint { show on description "PipeWire (pollis e2e $c)" }
+}
+EOF
+  done
+  log "pw modules: $(tr '\n' ' ' < "$PULSE_DIR/pw-modules.txt")"
+  emit POLLIS_E2E_XDG_A "$PULSE_DIR/xdg-a"
+  emit POLLIS_E2E_XDG_B "$PULSE_DIR/xdg-b"
+  log "virtual audio ready (PipeWire)"
+  exit 0
+fi
+
 command -v pulseaudio >/dev/null 2>&1 || {
   log "ERROR: pulseaudio not installed — add it via e2e/scripts/install-system-deps.sh"
   exit 1
@@ -43,6 +90,7 @@ command -v pactl >/dev/null 2>&1 || {
   exit 1
 }
 
+# --- PulseAudio host (CI runner) ------------------------------------------------
 # Clear any daemon/socket from a prior run so module-load state is deterministic.
 log "resetting any prior PulseAudio daemon"
 PULSE_RUNTIME_PATH="$PULSE_DIR" pulseaudio --kill >/dev/null 2>&1 || true
@@ -133,13 +181,6 @@ EOF
 # PULSE_SERVER: explicit socket (survives the app's separate dbus session).
 # PULSE_SINK / PULSE_SOURCE: per-client default overrides (belt-and-suspenders
 # alongside the pactl set-default above and the ALSA default route).
-emit() {
-  local key="$1" value="$2"
-  echo "export ${key}=${value}"
-  if [ -n "${GITHUB_ENV:-}" ]; then
-    echo "${key}=${value}" >> "$GITHUB_ENV"
-  fi
-}
 emit PULSE_SERVER "$PULSE_SERVER_ADDR"
 emit PULSE_RUNTIME_PATH "$PULSE_DIR"
 emit PULSE_SINK "$SINK_NAME"

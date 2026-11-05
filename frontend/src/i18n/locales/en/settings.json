@@ -370,7 +370,9 @@
     "voiceToggleMute": "Toggle mute",
     "voiceToggleDeafen": "Toggle deafen",
     "voicePushToTalk": "Push to talk (hold)",
-    "voiceLeave": "Leave call"
+    "voiceLeave": "Leave call",
+    "voiceToggleCamera": "Toggle camera",
+    "voiceToggleScreenShare": "Toggle screen share"
   },
   "notify": {
     "enrollmentTitle": "New device sign-in",

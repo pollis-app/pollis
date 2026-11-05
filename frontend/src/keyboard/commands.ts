@@ -14,7 +14,9 @@ export type ShortcutCommandId =
   | "voice.toggleMute"
   | "voice.toggleDeafen"
   | "voice.pushToTalk"
-  | "voice.leave";
+  | "voice.leave"
+  | "voice.toggleCamera"
+  | "voice.toggleScreenShare";
 
 export type ShortcutCategory =
   | "Application"
@@ -123,6 +125,18 @@ export const SHORTCUT_COMMANDS: Record<
     titleKey: "shortcuts.voiceLeave",
     category: "Voice",
     defaultCombo: "mod+shift+h",
+  },
+  "voice.toggleCamera": {
+    id: "voice.toggleCamera",
+    titleKey: "shortcuts.voiceToggleCamera",
+    category: "Voice",
+    defaultCombo: "mod+shift+v",
+  },
+  "voice.toggleScreenShare": {
+    id: "voice.toggleScreenShare",
+    titleKey: "shortcuts.voiceToggleScreenShare",
+    category: "Voice",
+    defaultCombo: "mod+shift+s",
   },
 };
 

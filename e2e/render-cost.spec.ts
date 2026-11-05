@@ -1,6 +1,7 @@
-// Message-log render cost (#874): memoised rows must not re-render needlessly, yet must still update.
+// Message-log + voice-stage render cost (#874): memoised rows and tiles must not re-render needlessly, yet must still update.
 
 import { test, expect, type Page } from "./lib/zero-loss";
+import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
@@ -287,3 +288,146 @@ for (const skin of SKINS) {
     });
   });
 }
+
+// ---- Voice stage ------------------------------------------------------------
+
+const VOICE_GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1VGR";
+const VOICE_CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1VCH";
+const VOICE_CHANNEL_NAME = "standup";
+const REMOTE = ["voice-u-bob", "voice-u-carol", "voice-u-dave"] as const;
+
+function voicePreloadState(skin: Skin) {
+  return {
+    session: USER,
+    profile: { id: USER.id, username: USER.username },
+    preferences: JSON.stringify({ skin }),
+    groups: [{ id: VOICE_GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() }],
+    channels: {
+      [VOICE_GROUP_ID]: [
+        { id: CHANNEL_ID, group_id: VOICE_GROUP_ID, name: "general", channel_type: "text" },
+        { id: VOICE_CHANNEL_ID, group_id: VOICE_GROUP_ID, name: VOICE_CHANNEL_NAME, channel_type: "voice" },
+      ],
+    },
+    dmChannels: [],
+    messages: {},
+    bookmarks: [],
+  };
+}
+
+type VoiceWindow = Window & { __pollisVoice: { injectEvent: (event: unknown) => void } };
+
+async function injectVoice(page: Page, event: Record<string, unknown>) {
+  await page.evaluate((e) => (window as unknown as VoiceWindow).__pollisVoice.injectEvent(e), event);
+}
+
+/** Boot straight into a joined voice channel with three remote participants on the stage. */
+async function bootVoiceStage(page: Page, skin: Skin) {
+  await page.addInitScript((preload) => {
+    (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+      plugins: {},
+      transformCallback: () => 0,
+      convertFileSrc: (path: string) => path,
+      registerListener: () => {},
+      unregisterListener: () => {},
+      runCallback: () => {},
+      invoke: () => Promise.resolve(null),
+    };
+  }, voicePreloadState(skin));
+  await page.goto("/");
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await page.getByTestId("sidebar").getByRole("button", { name: VOICE_CHANNEL_NAME }).click();
+  await page.getByTestId("voice-join-cta").click();
+  await expect(page.getByTestId("voice-tray-mute")).toBeEnabled();
+  for (const identity of REMOTE) {
+    await injectVoice(page, { type: "participant_joined", identity, name: identity.slice("voice-u-".length), is_muted: false });
+  }
+  for (const identity of REMOTE) {
+    await expect(page.getByTestId(`voice-tile-${identity}`)).toBeVisible();
+  }
+  expect(await renders(page, "StageTile")).toBeGreaterThan(0);
+}
+
+/** Wait until no tile has rendered for three quiet polls. */
+async function settleStage(page: Page) {
+  let previous = -1;
+  let stableFor = 0;
+  await expect
+    .poll(
+      async () => {
+        const current = await renders(page, "StageTile");
+        stableFor = current === previous ? stableFor + 1 : 0;
+        previous = current;
+        return stableFor >= 3;
+      },
+      { intervals: [100, 100, 100, 100, 200, 200, 400] },
+    )
+    .toBe(true);
+}
+
+// The stage is the same in both skins; run it once.
+const stageTest = skinAgnosticTest("terminal");
+
+stageTest.describe("voice stage render cost", () => {
+  /** Every StageTile render since `before` belongs to `tileKey`: the other tiles rendered zero times. */
+  async function expectOnlyTileRendered(page: Page, before: Record<string, number>, tileKey: string) {
+    const all = (await renders(page, "StageTile")) - (before["StageTile"] ?? 0);
+    const one = (await renders(page, `StageTile:${tileKey}`)) - (before[`StageTile:${tileKey}`] ?? 0);
+    expect(one).toBeGreaterThan(0);
+    expect(all).toBe(one);
+    for (const other of [`voice-${USER.id}`, ...REMOTE].filter((k) => k !== tileKey)) {
+      expect((await renders(page, `StageTile:${other}`)) - (before[`StageTile:${other}`] ?? 0)).toBe(0);
+    }
+  }
+
+  async function tileCounts(page: Page): Promise<Record<string, number>> {
+    return page.evaluate(() => ({ ...((window as unknown as { __pollisRenders?: Record<string, number> }).__pollisRenders ?? {}) }));
+  }
+
+  stageTest("a speaking event re-renders one tile", async ({ page }) => {
+    await bootVoiceStage(page, "terminal");
+    await settleStage(page);
+    const before = await tileCounts(page);
+    const shellBefore = await renders(page, "AppShell");
+
+    await injectVoice(page, { type: "speaking_started", identity: REMOTE[0] });
+    await expect(page.getByTestId(`voice-tile-${REMOTE[0]}`)).toHaveClass(/speaking/);
+
+    await expectOnlyTileRendered(page, before, REMOTE[0]);
+    // The shell must not wake either: the store mirror writes only what changed.
+    expect(await renders(page, "AppShell")).toBe(shellBefore);
+  });
+
+  stageTest("a remote quality change re-renders only that tile", async ({ page }) => {
+    await bootVoiceStage(page, "terminal");
+    await settleStage(page);
+    const before = await tileCounts(page);
+
+    await injectVoice(page, { type: "connection_quality_changed", identity: REMOTE[1], quality: "poor" });
+    await expect(page.getByTestId(`voice-tile-quality-${REMOTE[1]}`)).toHaveAttribute("data-quality", "poor");
+
+    await expectOnlyTileRendered(page, before, REMOTE[1]);
+  });
+
+  stageTest("an idle stage renders nothing", async ({ page }) => {
+    await bootVoiceStage(page, "terminal");
+    await settleStage(page);
+    const before = await renders(page, "StageTile");
+    await page.waitForTimeout(1000);
+    expect(await renders(page, "StageTile")).toBe(before);
+  });
+
+  stageTest("a mute click re-renders the local tile only", async ({ page }) => {
+    await bootVoiceStage(page, "terminal");
+    await settleStage(page);
+    const before = await tileCounts(page);
+
+    await page.getByTestId("voice-tray-mute").click();
+    await expect(page.getByTestId("voice-tray-mute")).toHaveAttribute("data-mic-state", "muted");
+    await settleStage(page);
+
+    // Optimistic paint, then Rust's identical snapshot: only the local tile is touched.
+    await expectOnlyTileRendered(page, before, `voice-${USER.id}`);
+  });
+});

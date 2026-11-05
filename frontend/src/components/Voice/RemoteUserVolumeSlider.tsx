@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "../../bridge";
 import { Volume2 } from "lucide-react";
@@ -17,7 +17,10 @@ interface RemoteUserVolumeSliderProps {
   participantName: string;
 }
 
-/** Per-remote-user volume (0..2), applied by the Rust mixer and persisted in preferences. */
+/**
+ * Per-remote-user volume (0..2). Every input event reaches the Rust mixer live; the preferences
+ * blob is written once, when the drag or key press ends, so a drag is not N preference saves.
+ */
 export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
   identity,
   participantName,
@@ -27,39 +30,46 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
 
   const userId = userIdFromVoiceIdentity(identity);
   const stored = query.data?.user_volumes?.[userId];
-  const value = clampRemoteUserVolume(stored ?? REMOTE_USER_VOLUME_DEFAULT);
+  const persisted = clampRemoteUserVolume(stored ?? REMOTE_USER_VOLUME_DEFAULT);
 
-  const handleChange = useCallback(
+  // The thumb follows the pointer; `persisted` only re-seeds it while nothing is being dragged.
+  const [value, setValue] = useState(persisted);
+  const dirty = useRef(false);
+  useEffect(() => {
+    if (!dirty.current) {
+      setValue(persisted);
+    }
+  }, [persisted]);
+
+  const handleInput = useCallback(
     (next: number) => {
       const clamped = clampRemoteUserVolume(next);
-
-      // Mixer updates live while dragging; only the prefs save is throttled.
-      invoke("set_remote_user_volume", { userId, volume: clamped }).catch(
-        (e) => {
-          console.warn(
-            "[RemoteUserVolumeSlider] set_remote_user_volume failed:",
-            e,
-          );
-        },
-      );
-
-      const prev: PreferencesData = query.data ?? {};
-      const prevVolumes = prev.user_volumes ?? {};
-      const nextVolumes: { [userId: string]: number } = { ...prevVolumes };
-      if (Math.abs(clamped - REMOTE_USER_VOLUME_DEFAULT) < 0.001) {
-        delete nextVolumes[userId];
-      } else {
-        nextVolumes[userId] = clamped;
-      }
-      const nextPrefs: PreferencesData = {
-        ...prev,
-        user_volumes:
-          Object.keys(nextVolumes).length > 0 ? nextVolumes : undefined,
-      };
-      save(nextPrefs);
+      dirty.current = true;
+      setValue(clamped);
+      invoke("set_remote_user_volume", { userId, volume: clamped }).catch((e) => {
+        console.warn("[RemoteUserVolumeSlider] set_remote_user_volume failed:", e);
+      });
     },
-    [userId, save, query.data],
+    [userId],
   );
+
+  const commit = useCallback(() => {
+    if (!dirty.current) {
+      return;
+    }
+    dirty.current = false;
+    const prev: PreferencesData = query.data ?? {};
+    const nextVolumes: { [userId: string]: number } = { ...(prev.user_volumes ?? {}) };
+    if (Math.abs(value - REMOTE_USER_VOLUME_DEFAULT) < 0.001) {
+      delete nextVolumes[userId];
+    } else {
+      nextVolumes[userId] = value;
+    }
+    save({
+      ...prev,
+      user_volumes: Object.keys(nextVolumes).length > 0 ? nextVolumes : undefined,
+    });
+  }, [userId, save, query.data, value]);
 
   const pct =
     ((value - REMOTE_USER_VOLUME_MIN) /
@@ -75,7 +85,10 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         max={REMOTE_USER_VOLUME_MAX}
         step={0.05}
         value={value}
-        onChange={(e) => handleChange(Number(e.target.value))}
+        onChange={(e) => handleInput(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
         aria-label={t("tile.volumeFor", { name: participantName })}
         data-testid={`voice-volume-slider-${userId}`}
         className="

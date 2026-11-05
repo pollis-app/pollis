@@ -8,30 +8,63 @@ import type { VoiceConnectionQuality } from "../../../types";
 import { Avatar } from "../../ui/Avatar";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { RemoteUserVolumeSlider } from "../RemoteUserVolumeSlider";
+import { SignalBars } from "../SignalBars";
 import { RemoteVideoTile } from "../RemoteVideoTile";
 import { useScreenShareStats } from "../../../screenshare/useScreenShareStats";
 import { audioLevels, BAND_COUNT } from "../../../voice/audioLevels";
+import { probeRender } from "../../../utils/renderProbe";
 
-// Live meter: per-band levels written as CSS variables via a ref, no React state.
-const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
+/** Local level above which a muted user is "talking into a muted mic" (Discord's hint). */
+const MUTED_TALK_LEVEL = 0.25;
+/** How long the hint stays after the last loud frame, so it doesn't flicker between words. */
+const MUTED_TALK_HOLD_MS = 1500;
+
+// Live meter: per-band levels written as CSS variables via a ref, no React state. With
+// `mutedLocal`, loud frames also toggle `data-talking-muted` on the tile (the DSP chain keeps the
+// local meter running while muted; only the frames sent to the room are zeroed).
+const LiveWaveform: React.FC<{ identity: string; mutedLocal?: boolean }> = ({ identity, mutedLocal = false }) => {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) {
       return;
     }
+    const tile = el.closest<HTMLElement>(".vs-tile");
+    let hold: ReturnType<typeof setTimeout> | null = null;
+    const clearHint = () => {
+      tile?.removeAttribute("data-talking-muted");
+      hold = null;
+    };
+    // A 0..1 scale factor: the bars animate `transform`, so a level change never relayouts.
     const apply = (bands: number[]) => {
+      let peak = 0;
       for (let i = 0; i < BAND_COUNT; i++) {
-        const pct = Math.max(8, Math.round((bands[i] ?? 0) * 100));
-        el.style.setProperty(`--eq${i}`, `${pct}%`);
+        const level = bands[i] ?? 0;
+        peak = Math.max(peak, level);
+        const scale = Math.max(0.08, Math.round(level * 100) / 100);
+        el.style.setProperty(`--eq${i}`, String(scale));
+      }
+      if (mutedLocal && peak >= MUTED_TALK_LEVEL && tile) {
+        tile.setAttribute("data-talking-muted", "true");
+        if (hold !== null) {
+          clearTimeout(hold);
+        }
+        hold = setTimeout(clearHint, MUTED_TALK_HOLD_MS);
       }
     };
     const seed = audioLevels.get(identity);
     if (seed) {
       apply(seed);
     }
-    return audioLevels.subscribe(identity, apply);
-  }, [identity]);
+    const off = audioLevels.subscribe(identity, apply);
+    return () => {
+      off();
+      if (hold !== null) {
+        clearTimeout(hold);
+      }
+      clearHint();
+    };
+  }, [identity, mutedLocal]);
 
   return (
     <div className="vs-eq" ref={ref} aria-hidden="true">
@@ -62,6 +95,10 @@ export interface StageTileModel {
   isSpeaking: boolean;
   connectionQuality?: VoiceConnectionQuality;
   isConnecting?: boolean;
+  /** Local tile while LiveKit re-establishes the room. */
+  isReconnecting?: boolean;
+  /** Remote tile whose media is paused by our reconnect; drawn dimmed. */
+  stale?: boolean;
   media: TileMedia;
 }
 
@@ -74,34 +111,17 @@ interface Props {
   onView?: (trackKey: string) => void;
 }
 
-function signalClass(q: VoiceConnectionQuality | undefined): string {
-  switch (q) {
-    case "poor":
-    case "lost":
-      return "poor";
-    case "good":
-      return "fair";
-    default:
-      return "good";
-  }
-}
-
-export const StageTile: React.FC<Props> = ({
+const StageTileImpl: React.FC<Props> = ({
   participant: p,
   mode,
   focused = false,
   onFocus,
   onView,
 }) => {
+  probeRender("StageTile");
+  // Per-tile count, so a spec can prove a change touched exactly one tile.
+  probeRender(`StageTile:${p.tileKey}`);
   const { t } = useTranslation("voice");
-  // Literal keys so `scripts/i18n-check.mjs` resolves them; the enum is a wire value.
-  const qualityLabels: Record<VoiceConnectionQuality, string> = {
-    excellent: t("tile.qualityExcellent"),
-    good: t("tile.qualityGood"),
-    poor: t("tile.qualityPoor"),
-    lost: t("tile.qualityLost"),
-  };
-  const qualityLabel = qualityLabels[p.connectionQuality ?? "excellent"];
   const big = mode === "big";
   const preview = mode === "preview";
   const media = p.media;
@@ -134,15 +154,36 @@ export const StageTile: React.FC<Props> = ({
     p.isSpeaking && "speaking",
     focusable && "clickable",
     focused && "focused",
+    p.stale && "stale",
   ]
     .filter(Boolean)
     .join(" ");
+
+  const micLabel = p.isMuted
+    ? t("tile.micMuted")
+    : p.isSpeaking
+      ? t("tile.micSpeaking")
+      : t("tile.micOpen");
 
   return (
     <div
       className={cls}
       data-testid={`voice-tile-${p.tileKey}`}
+      // A video tile is a button that spotlights itself; audio tiles are plain regions.
+      role={focusable ? "button" : undefined}
+      tabIndex={focusable ? 0 : undefined}
+      aria-label={focusable ? t("tile.spotlightNamed", { name: p.name }) : undefined}
       onClick={focusable ? () => onFocus?.(p.tileKey) : undefined}
+      onKeyDown={
+        focusable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onFocus?.(p.tileKey);
+              }
+            }
+          : undefined
+      }
     >
       <div className="vs-tile-stage">
         {media.kind === "screenshare" || media.kind === "camera" ? (
@@ -160,7 +201,13 @@ export const StageTile: React.FC<Props> = ({
               alt={p.name}
               testId={`voice-tile-avatar-${p.tileKey}`}
             />
-            {!preview && <LiveWaveform identity={p.identity} />}
+            {!preview && <LiveWaveform identity={p.identity} mutedLocal={p.isLocal && p.isMuted} />}
+            {p.isLocal && p.isMuted && !preview && (
+              // Shown by CSS only while `data-talking-muted` is set (speech into a muted mic).
+              <span className="vs-muted-hint" data-testid={`voice-tile-muted-hint-${p.tileKey}`} role="status">
+                {t("tile.mutedHint")}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -168,34 +215,31 @@ export const StageTile: React.FC<Props> = ({
       <div className="vs-tl">
         <span className={"vs-name" + (p.isLocal ? " host" : "")}>
           {p.isMuted ? (
-            <span className="vs-ic danger"><MicOff size={13} /></span>
+            <span className="vs-ic danger" role="img" aria-label={micLabel} title={micLabel}><MicOff size={13} /></span>
           ) : (
-            <span className={"vs-ic" + (p.isSpeaking ? " accent" : "")}><Mic size={13} /></span>
+            <span className={"vs-ic" + (p.isSpeaking ? " accent" : "")} role="img" aria-label={micLabel} title={micLabel}><Mic size={13} /></span>
           )}
           <bdi className="vs-nm" title={p.name}>{p.name}</bdi>
         </span>
       </div>
 
       <div className="vs-tr">
-        {p.isConnecting ? (
+        {p.isConnecting || p.isReconnecting ? (
           <span
-            data-testid={`voice-tile-connecting-${p.tileKey}`}
-            className="flex items-center leading-none"
-            title={t("tile.connectingTitle")}
-            aria-label={t("tile.connectingLabel")}
+            data-testid={`voice-tile-${p.isReconnecting ? "reconnecting" : "connecting"}-${p.tileKey}`}
+            className="vs-tag flex items-center gap-1.5 leading-none"
+            title={p.isReconnecting ? t("tile.reconnectingTitle") : t("tile.connectingTitle")}
+            aria-label={p.isReconnecting ? t("tile.reconnectingLabel") : t("tile.connectingLabel")}
           >
             <LoadingSpinner size="sm" />
+            {p.isReconnecting ? t("stage.reconnecting") : null}
           </span>
         ) : (
-          <span
-            className="vs-tag vs-pad6"
-            data-testid={`voice-tile-quality-${p.tileKey}`}
-            title={t("tile.quality", { quality: qualityLabel })}
-          >
-            <span className={"vs-sig " + signalClass(p.connectionQuality)}>
-              <i /><i /><i /><i />
-            </span>
-          </span>
+          <SignalBars
+            quality={p.connectionQuality}
+            testId={`voice-tile-quality-${p.tileKey}`}
+            className="vs-pad6"
+          />
         )}
       </div>
 
@@ -253,3 +297,6 @@ export const StageTile: React.FC<Props> = ({
     </div>
   );
 };
+
+/** Memoised: `VoiceStage` hands every tile a reference-stable model, so a speaking event re-renders one tile. */
+export const StageTile = React.memo(StageTileImpl);

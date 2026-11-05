@@ -77,6 +77,7 @@
     "declineCall": "Decline call",
     "dismissVoiceError": "Dismiss voice error",
     "dismissScreenShareError": "Dismiss screen share error",
+    "dismissCameraError": "Dismiss camera error",
     "syncing": "syncing…"
   },
   "shell": {

@@ -10,8 +10,9 @@ import { Avatar } from "../ui/Avatar";
 import { voiceSession } from "../../voice";
 import { SidebarVoiceControls } from "../Voice/SidebarVoiceControls";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
-import { shareOf } from "../../types/voice-state";
+import { shareOf, isMediaBusy } from "../../types/voice-state";
 import { PressButton } from "../ui/PressButton";
+import { LoadingSpinner } from "../ui/LoaderSpinner";
 
 /** Refined skin's identity panel at the sidebar bottom; while in voice it also carries the full voice controls (AppShell hides `VoiceBar` in refined). */
 export const SidebarProfilePanel: React.FC = observer(() => {
@@ -27,6 +28,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
   const handle = profile?.username ? `@${profile.username}` : null;
 
   const inVoice = voiceState.kind === "joined";
+  const reconnecting = inVoice ? voiceState.reconnecting : null;
   const voiceChannelId = inVoice ? voiceState.channelId : null;
   const share = shareOf(voiceState);
   const shareActive = share.kind === "active";
@@ -115,12 +117,19 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             title={returnToVoiceLabel}
             className="group flex min-w-0 flex-1 cursor-pointer flex-col text-start leading-tight"
           >
-            <span
-              className="text-2xs font-semibold"
-              style={{ color: "var(--c-voice-connected, var(--c-accent))" }}
-            >
-              {t("profile.voiceConnected")}
-            </span>
+            {reconnecting ? (
+              <span
+                className="text-2xs font-semibold text-warning"
+                data-testid="sidebar-voice-reconnecting"
+                role="status"
+              >
+                {tVoice("bar.reconnecting")}
+              </span>
+            ) : (
+              <span className="text-2xs font-semibold text-connected">
+                {t("profile.voiceConnected")}
+              </span>
+            )}
             <span className="truncate text-2xs text-muted transition-colors group-hover:text-fg group-hover:underline">
               {voiceChannelName}
             </span>
@@ -131,11 +140,12 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             data-testid="sidebar-voice-screenshare"
             onClick={() => toggleScreenShare(share)}
             aria-label={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
+            aria-pressed={shareActive}
+            data-busy={isMediaBusy(share) || undefined}
             title={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
-            className="icon-btn-sm"
-            style={shareActive ? { color: "var(--c-accent)" } : undefined}
+            className={`icon-btn-sm ${shareActive ? "text-accent hover:text-accent" : ""}`}
           >
-            {shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
+            {isMediaBusy(share) ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
           </button>
           <button
             type="button"

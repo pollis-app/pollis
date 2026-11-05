@@ -1,7 +1,8 @@
 import { makeAutoObservable } from 'mobx';
 import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant, ClientPolicyStatus } from '../types';
 import type { ShareAudioState, VoiceState, VoiceGateState } from '../types/voice-state';
-import { VOICE_GATE_INITIAL } from '../types/voice-state';
+import { VOICE_GATE_INITIAL, voiceCounterpartyUserId } from '../types/voice-state';
+import { userIdFromVoiceIdentity } from '../voice/identity';
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
 import { isSpeaking } from '../voice/participantAudio';
@@ -210,7 +211,7 @@ class AppStore implements AppState {
       console.warn('[voiceState] voiceStartJoining ignored:', this.voiceState.kind);
       return;
     }
-    this.voiceState = { kind: 'joining', channelId, counterpartyUserId };
+    this.voiceState = { kind: 'joining', channelId, counterpartyUserId, gate: VOICE_GATE_INITIAL };
     this.voiceError = null;
   }
 
@@ -219,18 +220,35 @@ class AppStore implements AppState {
       console.warn('[voiceState] voiceJoined ignored:', this.voiceState.kind);
       return;
     }
-    const { channelId, counterpartyUserId } = this.voiceState;
+    const { channelId, counterpartyUserId, gate } = this.voiceState;
     this.voiceState = {
       kind: 'joined',
       channelId,
       counterpartyUserId,
-      micMuted: false,
-      gate: VOICE_GATE_INITIAL,
+      micMuted: gate.self_muted,
+      gate,
       // Assume a mic until the backend says otherwise via `mic_availability`.
       micAvailable: true,
+      speakerAvailable: true,
+      reconnecting: null,
       share: { kind: 'idle' },
       camera: { kind: 'idle' },
     };
+  }
+
+  voiceSetSpeakerAvailable(available: boolean) {
+    if (this.voiceState.kind !== 'joined') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, speakerAvailable: available };
+  }
+
+  /** Mirror of the manager's reconnect state; `null` once the room is back. */
+  voiceSetReconnecting(reconnecting: { attempt: number } | null) {
+    if (this.voiceState.kind !== 'joined') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, reconnecting };
   }
 
   voiceJoinFailed(error: string) {
@@ -261,12 +279,13 @@ class AppStore implements AppState {
     this.voiceState = { ...this.voiceState, micMuted: muted };
   }
 
-  /** Mirror the Rust-owned gate snapshot (#849); `micMuted` follows it. */
+  /** Mirror the Rust-owned gate snapshot (#849); `micMuted` follows it. While `joining` it is the manager's prediction. */
   voiceSetGate(gate: VoiceGateState) {
-    if (this.voiceState.kind !== 'joined') {
-      return;
+    if (this.voiceState.kind === 'joined') {
+      this.voiceState = { ...this.voiceState, gate, micMuted: gate.self_muted };
+    } else if (this.voiceState.kind === 'joining') {
+      this.voiceState = { ...this.voiceState, gate };
     }
-    this.voiceState = { ...this.voiceState, gate, micMuted: gate.self_muted };
   }
 
   voiceSetMicAvailable(available: boolean) {
@@ -507,6 +526,16 @@ class AppStore implements AppState {
     return this.voiceParticipants
       .filter((p) => isSpeaking(p.audio))
       .map((p) => p.identity);
+  }
+
+  /** The 1:1 call peer's display name once they are in the room; a computed, so observers only wake when the name changes, not on every speaking flip (#874). */
+  get voiceCounterpartyName(): string | null {
+    const peerId = voiceCounterpartyUserId(this.voiceState);
+    if (!peerId) {
+      return null;
+    }
+    const peer = this.voiceParticipants.find((p) => userIdFromVoiceIdentity(p.identity) === peerId);
+    return peer?.name ?? null;
   }
 
   get isLocalSpeaking(): boolean {

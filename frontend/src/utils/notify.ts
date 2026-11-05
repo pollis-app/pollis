@@ -1,5 +1,5 @@
 import { sendNotification } from '../bridge';
-import { playSfx } from './sfx';
+import { playSfx, type SfxName } from './sfx';
 import { logIgnored } from './log';
 import { appStore } from '../stores/appStore';
 import i18n from '../i18n';
@@ -11,6 +11,10 @@ export type Category =
   | 'voice_other_leave'
   | 'voice_self_join'
   | 'voice_self_leave'
+  | 'voice_self_mute'
+  | 'voice_self_unmute'
+  | 'voice_self_deafen'
+  | 'voice_self_undeafen'
   | 'dm_request'
   | 'group_invite'
   | 'enrollment'
@@ -19,7 +23,7 @@ export type Category =
   | 'user_mention';
 
 type CategoryConfig = {
-  sound?: 'ping' | 'join' | 'leave';
+  sound?: SfxName;
   osNotif?: boolean;
   alert?: boolean;
   overlay?: boolean;
@@ -41,6 +45,10 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   voice_other_leave: { sound: 'leave'                                                             },
   voice_self_join:   { sound: 'join'                                                              },
   voice_self_leave:  { sound: 'leave'                                                             },
+  voice_self_mute:   { sound: 'mute'                                                              },
+  voice_self_unmute: { sound: 'unmute'                                                            },
+  voice_self_deafen: { sound: 'deafen'                                                            },
+  voice_self_undeafen: { sound: 'undeafen'                                                        },
   dm_request:        { sound: 'ping',  osNotif: true,               alert: true                   },
   group_invite:      { sound: 'ping',  osNotif: true,               alert: true                   },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },

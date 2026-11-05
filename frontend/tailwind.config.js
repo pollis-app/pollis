@@ -30,6 +30,7 @@ export default {
         hover: 'var(--c-hover)',
         active: 'var(--c-active)',
         danger: 'var(--c-danger)',
+        warning: 'var(--c-warning)',
         // "In a voice room" green. Not re-skinned, like the accents.
         connected: 'var(--c-voice-connected)',
         // Fixed dark text for a bright runtime fill (admin name chip) → `text-ink`.

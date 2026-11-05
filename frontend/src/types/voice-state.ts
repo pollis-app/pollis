@@ -53,6 +53,8 @@ export type VoiceState =
       channelId: string;
       /** Other user in a 1:1 call (`call-*` room); null otherwise. */
       counterpartyUserId: string | null;
+      /** Mute/deafen chosen while connecting; carried into `joined` and replayed onto Rust by the manager. */
+      gate: VoiceGateState;
     }
   | {
       kind: 'joined';
@@ -63,10 +65,24 @@ export type VoiceState =
       gate: VoiceGateState;
       /** False when joined listen-only (no capture device). */
       micAvailable: boolean;
+      /** False when the speaker failed to open (`speaker_availability`). */
+      speakerAvailable: boolean;
+      /** LiveKit is re-establishing the room; the session stays `joined` throughout. */
+      reconnecting: { attempt: number } | null;
       share: ShareState;
       camera: CameraState;
     }
   | { kind: 'leaving'; channelId: string };
+
+/** A transient device/source enumeration (`kind: 'enumerating'`, added by the share/camera actions); drawn as busy. */
+export function isEnumerating(state: { kind: string }): boolean {
+  return state.kind === 'enumerating';
+}
+
+/** Share/camera states that should draw a spinner: enumerating sources or bringing the track up. */
+export function isMediaBusy(state: { kind: string }): boolean {
+  return isEnumerating(state) || state.kind === 'starting';
+}
 
 /** Local screen share; only inside `joined`. */
 export type ShareState =
@@ -177,7 +193,7 @@ export function cameraOf(s: VoiceState): CameraState {
 }
 
 export function gateOf(s: VoiceState): VoiceGateState {
-  return s.kind === 'joined' ? s.gate : VOICE_GATE_INITIAL;
+  return s.kind === 'joined' || s.kind === 'joining' ? s.gate : VOICE_GATE_INITIAL;
 }
 
 export function isCameraActive(s: VoiceState): boolean {

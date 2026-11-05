@@ -18,9 +18,11 @@ export type VoiceTestPhase =
 
 export type TonePreset = "sweep" | "chime";
 
+type LevelListener = (peak: number, rms: number) => void;
+
 interface UseVoiceTestResult {
-  peak: number;
-  rms: number;
+  /** Level frames (~33 Hz) for a ref-driven meter; never React state, so the page doesn't re-render per frame. */
+  subscribeLevel: (listener: LevelListener) => () => void;
   monitor: boolean;
   phase: VoiceTestPhase;
   error: string | null;
@@ -34,8 +36,13 @@ interface UseVoiceTestResult {
 
 /** Voice Settings pre-flight test: one Channel for level frames and events, plus the voice_test commands. */
 export function useVoiceTest(): UseVoiceTestResult {
-  const [peak, setPeak] = useState(0);
-  const [rms, setRms] = useState(0);
+  const levelListeners = useRef(new Set<LevelListener>());
+  const subscribeLevel = useCallback((listener: LevelListener) => {
+    levelListeners.current.add(listener);
+    return () => {
+      levelListeners.current.delete(listener);
+    };
+  }, []);
   const [phase, setPhase] = useState<VoiceTestPhase>("idle");
   const [monitor, setMonitorState] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +54,9 @@ export function useVoiceTest(): UseVoiceTestResult {
   }, []);
 
   const resetMeter = useCallback(() => {
-    setPeak(0);
-    setRms(0);
+    for (const listener of levelListeners.current) {
+      listener(0, 0);
+    }
   }, []);
 
   useEffect(() => {
@@ -56,8 +64,9 @@ export function useVoiceTest(): UseVoiceTestResult {
     ch.onmessage = (ev) => {
       switch (ev.type) {
         case "frame":
-          setPeak(ev.peak);
-          setRms(ev.rms);
+          for (const listener of levelListeners.current) {
+            listener(ev.peak, ev.rms);
+          }
           break;
         case "recording_started":
           phaseRef.current = "recording";
@@ -68,14 +77,12 @@ export function useVoiceTest(): UseVoiceTestResult {
         case "playback_started":
           phaseRef.current = "playing";
           setPhase("playing");
-          setPeak(0);
-          setRms(0);
+          resetMeter();
           break;
         case "playback_finished":
           phaseRef.current = "idle";
           setPhase("idle");
-          setPeak(0);
-          setRms(0);
+          resetMeter();
           break;
       }
     };
@@ -88,7 +95,7 @@ export function useVoiceTest(): UseVoiceTestResult {
       invoke("stop_mic_test").catch((e) => console.warn("stop_mic_test failed", e));
       invoke("stop_test_playback").catch((e) => console.warn("stop_test_playback failed", e));
     };
-  }, []);
+  }, [resetMeter]);
 
   const startMicTest = useCallback(
     async (inputDeviceId: string, outputDeviceId: string, mon: boolean) => {
@@ -183,8 +190,7 @@ export function useVoiceTest(): UseVoiceTestResult {
   }, [setPhaseBoth]);
 
   return {
-    peak,
-    rms,
+    subscribeLevel,
     monitor,
     phase,
     error,

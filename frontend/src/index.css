@@ -74,6 +74,9 @@
     /* ── Danger / error (validation errors, unverified states) ──── */
     --c-danger: #ff6b6b;
 
+    /* ── Warning / degraded (fair connection, reconnecting) ──────── */
+    --c-warning: #f0c674;
+
     /* ── Voice-connected label (fixed, hue-independent) ─────────── */
     --c-voice-connected: hsl(150 55% 62%);
 

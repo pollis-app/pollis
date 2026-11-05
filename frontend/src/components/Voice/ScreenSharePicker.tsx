@@ -166,13 +166,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
             {tab === "displays" ? t("share.noDisplays") : t("share.noWindows")}
           </div>
         ) : (
-          <div
-            className="grid gap-2"
-            style={{
-              gridTemplateColumns:
-                "repeat(auto-fill, minmax(180px, 1fr))",
-            }}
-          >
+          <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(11.25rem,1fr))]">
             {tab === "displays"
               ? displays.map((d) => (
                   <DisplayCard
@@ -222,17 +216,11 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     onClick={onPick}
     disabled={disabled}
     data-testid={testId}
-    className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-[6px]"
-    style={{ minHeight: 100 }}
+    className="min-h-[6.25rem] text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
   >
     <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
-      <div
-        className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted"
-        style={{
-          // Fixed 16:10 (the requested thumbnail size) keeps the grid even.
-          aspectRatio: "16 / 10",
-        }}
-      >
+      {/* Fixed 16:10 (the requested thumbnail size) keeps the grid even. */}
+      <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">
         {thumbnail ? (
           // alt="": the title labels it. object-contain avoids cropping.
           <img
@@ -250,10 +238,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
           {title}
         </div>
         {subtitle ? (
-          <div
-            className="truncate text-muted"
-            style={{ fontSize: 10 }}
-          >
+          <div className="truncate text-muted text-2xs">
             {subtitle}
           </div>
         ) : null}

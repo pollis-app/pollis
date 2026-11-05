@@ -13,8 +13,9 @@ import { joinErrorMessageKey, legacyJoinErrorKey, parseVoiceJoinError } from './
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
 import { audioLevels, type AudioBandsEntry } from './audioLevels';
-import { audioSetMuted, audioSetSpeaking } from './participantAudio';
+import { audioSetMuted, audioSetSpeaking, isMuted } from './participantAudio';
 import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
+import { COALESCED_GATE_COMMANDS, predictGate, type GateCommand } from './gatePredict';
 
 export const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -42,7 +43,12 @@ export type VoiceEvent =
       epoch: number;
       mls_group_id: string;
     }
-  | { type: 'disconnected' };
+  | { type: 'reconnecting'; attempt: number }
+  | { type: 'reconnected' }
+  /** Once after join when the speaker failed to open (mirror of `mic_availability`). */
+  | { type: 'speaker_availability'; identity: string; available: boolean }
+  /** `error` is present when the session ended on a failure (reconnect gave up, SFU evicted us); absent on a normal leave. */
+  | { type: 'disconnected'; error?: { kind: string; detail?: string } | null };
 
 /** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
 export interface JoinTimings {
@@ -82,7 +88,11 @@ export interface VoiceSessionState {
   gate: VoiceGateState;
   /** False when joined listen-only (no capture device). */
   micAvailable: boolean;
-  /** Last error from a failed join. Cleared on the next intent change. */
+  /** False when the speaker failed to open: joined, but hearing no one. */
+  speakerAvailable: boolean;
+  /** LiveKit is re-establishing the room (attempt count from Rust); still `joined`, never idle. */
+  reconnecting: { attempt: number } | null;
+  /** Last error from a failed join or a lost connection. Cleared on the next intent change. */
   error: string | null;
 }
 
@@ -132,6 +142,8 @@ const INITIAL_STATE: VoiceSessionState = {
   isMuted: false,
   gate: VOICE_GATE_INITIAL,
   micAvailable: true,
+  speakerAvailable: true,
+  reconnecting: null,
   error: null,
 };
 
@@ -168,6 +180,14 @@ class VoiceSessionManager {
   private localIdentity: string | null = null;
   private preferencesProvider: (() => PreferencesData | undefined) | null = null;
 
+  /** Gate commands run in order on this chain; `gateInFlight` is what's queued or awaiting Rust. */
+  private gateChain: Promise<void> = Promise.resolve();
+  private gateInFlight = new Set<GateCommand>();
+  /** The explicit mute in force when we deafened, for predicting the undeafen (`TransmitGate::muted_before_deafen`). */
+  private mutedBeforeDeafen: boolean | null = null;
+  /** Mute/deafen clicks made while still joining: drawn now, replayed onto Rust once the room is up (its join resets the gate). */
+  private preJoinGate: GateCommand[] = [];
+
   /** Subscribe to state changes. Returns an unsubscribe function. */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
@@ -197,6 +217,9 @@ class VoiceSessionManager {
     if (opts.preferencesProvider) {
       this.preferencesProvider = opts.preferencesProvider;
     }
+    // Warm the two cached handles now, so the first join's local tile mounts on the click frame.
+    void this.ensureDeviceId();
+    void this.ensureEventsChannel().catch(logIgnored);
   }
 
   /** Set the desired channel (`null` leaves). Idempotent; only the latest intent is honored. */
@@ -206,7 +229,34 @@ class VoiceSessionManager {
     }
     this.intent = target;
     this.intentTs = target ? performance.now() : null;
+    // Leaving while a join is still in flight: show idle now; the join's own tail tears Rust down
+    // once it returns (or A1's deadline fires), so a hung join is never a stuck screen.
+    if (target === null && this.state.phase === 'joining') {
+      // Rust cancels an in-flight join at its next phase; the pending join then rejects as
+      // cancelled, which `executeJoin` drops because the intent moved on.
+      invoke('leave_voice_channel').catch(logIgnored);
+      this.preJoinGate = [];
+      this.localIdentity = null;
+      this.setState({
+        phase: 'idle',
+        channelId: null,
+        counterpartyUserId: null,
+        groupId: null,
+        participants: [],
+        isMuted: false,
+        gate: gateForNewSession(this.state.gate),
+        reconnecting: null,
+      });
+    }
     void this.reconcile();
+  }
+
+  /** Test-only (Playwright): feed a Rust-shaped `VoiceEvent` as if the events channel delivered it. */
+  injectEvent(event: VoiceEvent): void {
+    if (import.meta.env.VITE_PLAYWRIGHT !== 'true') {
+      return;
+    }
+    this.handleEvent(event);
   }
 
   leave(): void {
@@ -247,35 +297,89 @@ class VoiceSessionManager {
     await this.applyGate('get_voice_gate_state');
   }
 
-  /** Run one gate command and mirror its full snapshot; the renderer never predicts transitions. */
-  private async applyGate(
-    command: string,
+  /**
+   * Run one gate command: draw the predicted snapshot now, then mirror Rust's. Commands run in
+   * order on one chain so a PTT keyup can never overtake its keydown; a failed call re-reads the
+   * gate so an optimistic state can't outlive the truth.
+   */
+  private applyGate(
+    command: GateCommand,
     args?: Record<string, unknown>,
-    opts?: { requireJoined?: boolean },
+    opts?: { requireJoined?: boolean; replay?: boolean },
   ): Promise<void> {
-    if ((opts?.requireJoined ?? true) && this.state.phase !== 'joined') {
-      return;
+    // Discord lets you mute/deafen while connecting: the toggle shows at once and lands after the join.
+    if (this.state.phase === 'joining' && COALESCED_GATE_COMMANDS.has(command)) {
+      const predicted = predictGate(this.state.gate, command, args, this.mutedBeforeDeafen);
+      if (predicted) {
+        this.adoptGate(predicted);
+        this.preJoinGate.push(command);
+      }
+      return Promise.resolve();
     }
-    try {
-      // A null gate must not become a silent no-op (#888): bail loudly and keep the last state.
-      const gate = await invoke<VoiceGateState | null>(command, args);
-      if (!gate) {
-        console.error(`[voice] ${command} returned no gate state; leaving the previous gate in place`);
+    if ((opts?.requireJoined ?? true) && this.state.phase !== 'joined') {
+      return Promise.resolve();
+    }
+    if (!opts?.replay && COALESCED_GATE_COMMANDS.has(command) && this.gateInFlight.has(command)) {
+      return this.gateChain;
+    }
+    // A replayed pre-join toggle was already drawn; predicting again would undo it.
+    const predicted = opts?.replay ? null : predictGate(this.state.gate, command, args, this.mutedBeforeDeafen);
+    if (predicted) {
+      this.adoptGate(predicted);
+    }
+    this.gateInFlight.add(command);
+    // Rust stays authoritative: whenever a reply can't be adopted, re-read the gate so the
+    // optimistic state is rolled back to the last real one rather than left standing.
+    const resync = async (): Promise<void> => {
+      if (command === 'get_voice_gate_state') {
         return;
       }
-      const localIdentity = this.localIdentity;
-      // The local tile shows muted whenever we aren't transmitting.
-      const participants = localIdentity
-        ? this.state.participants.map((p) =>
-            p.identity === localIdentity
-              ? { ...p, audio: audioSetMuted(p.audio, !gate.transmitting) }
-              : p,
-          )
-        : this.state.participants;
-      this.setState({ gate, isMuted: gate.self_muted, participants });
-    } catch (e) {
-      console.warn(`[voice] ${command} failed:`, e);
+      await invoke<VoiceGateState | null>('get_voice_gate_state')
+        .then((gate) => {
+          if (gate) {
+            this.adoptGate(gate);
+          }
+        })
+        .catch(logIgnored);
+    };
+    const run = async (): Promise<void> => {
+      try {
+        // A null gate must not become a silent no-op (#888): say so, then fall back to the truth.
+        const gate = await invoke<VoiceGateState | null>(command, args);
+        if (!gate) {
+          console.error(`[voice] ${command} returned no gate state; leaving the previous gate in place`);
+          await resync();
+          return;
+        }
+        this.adoptGate(gate);
+      } catch (e) {
+        console.warn(`[voice] ${command} failed:`, e);
+        await resync();
+      } finally {
+        this.gateInFlight.delete(command);
+      }
+    };
+    this.gateChain = this.gateChain.then(run, run);
+    return this.gateChain;
+  }
+
+  /** Mirror a gate snapshot (predicted or Rust's) onto the state and the local tile. */
+  private adoptGate(gate: VoiceGateState): void {
+    if (gate.deafened && !this.state.gate.deafened) {
+      this.mutedBeforeDeafen = this.state.gate.self_muted;
+    } else if (!gate.deafened) {
+      this.mutedBeforeDeafen = null;
     }
+    const localIdentity = this.localIdentity;
+    // The local tile shows muted whenever we aren't transmitting.
+    const participants = localIdentity
+      ? this.state.participants.map((p) =>
+          p.identity === localIdentity
+            ? { ...p, audio: audioSetMuted(p.audio, !gate.transmitting) }
+            : p,
+        )
+      : this.state.participants;
+    this.setState({ gate, isMuted: gate.self_muted, participants });
   }
 
   async setInputDevice(deviceName: string): Promise<void> {
@@ -393,15 +497,23 @@ class VoiceSessionManager {
     const displayName = user.username ?? user.id;
     const avatarKey = store.userAvatarUrl ?? null;
 
-    await this.ensureEventsChannel();
-    // The device id first, so the optimistic tile's identity matches the seed's.
-    await this.ensureDeviceId();
-    const localIdentity = this.localVoiceIdentity(userId);
-    this.localIdentity = localIdentity;
-
     const intentTs = this.intentTs ?? performance.now();
     this.intentTs = null;
 
+    const localTile = (identity: string): VoiceParticipant => ({
+      identity,
+      name: displayName,
+      audio: { kind: 'idle' },
+      video: { kind: 'none' },
+      isLocal: true,
+      avatarKey,
+    });
+
+    // Synchronous with the click: the stage, tray and status flip before any IPC round-trip.
+    // The device id is normally cached (see `configure`); until it is, the local tile is provisional.
+    const provisionalIdentity = this.localVoiceIdentity(userId);
+    this.localIdentity = provisionalIdentity;
+    this.preJoinGate = [];
     this.setState({
       phase: 'joining',
       channelId: target.channelId,
@@ -410,18 +522,27 @@ class VoiceSessionManager {
       isMuted: false,
       gate: gateForNewSession(this.state.gate),
       micAvailable: true,
-      participants: [
-        {
-          identity: localIdentity,
-          name: displayName,
-          audio: { kind: 'idle' },
-          video: { kind: 'none' },
-          isLocal: true,
-          avatarKey,
-        },
-      ],
+      speakerAvailable: true,
+      reconnecting: null,
+      participants: [localTile(provisionalIdentity)],
       error: null,
     });
+
+    await this.ensureEventsChannel();
+    // The device id before `join_voice_channel`, so the tile's identity matches the seed's.
+    await this.ensureDeviceId();
+    if (this.abandoned(target)) {
+      return true;
+    }
+    const localIdentity = this.localVoiceIdentity(userId);
+    if (localIdentity !== provisionalIdentity) {
+      this.localIdentity = localIdentity;
+      this.setState({
+        participants: this.state.participants.map((p) =>
+          p.identity === provisionalIdentity ? localTile(localIdentity) : p,
+        ),
+      });
+    }
 
     const { input, output } = readDevicePrefs();
     const audioProcessing = this.resolveApmConfig();
@@ -429,20 +550,23 @@ class VoiceSessionManager {
     try {
       await invoke('join_voice_channel', {
         channelId: target.channelId,
+        // Lets Rust skip the MLS-group resolve round-trip (A1); ignored by builds that predate it.
+        groupId: target.groupId,
         userId,
         displayName,
         inputDevice: input,
         outputDevice: output,
         audioProcessing,
         counterpartyUserId: target.counterpartyUserId ?? null,
-        // The channel's group, so Rust needn't ask the DS which MLS group backs it.
-        groupId: target.groupId,
       });
     } catch (e) {
       const raw = errorMessage(e);
       const msg = friendlyJoinError(raw);
       console.error('[voice] join_voice_channel failed:', raw);
       invoke('leave_voice_channel').catch((e) => console.warn('leave_voice_channel failed', e));
+      if (this.abandoned(target)) {
+        return false;
+      }
       this.localIdentity = null;
       this.setState({
         phase: 'idle',
@@ -451,7 +575,8 @@ class VoiceSessionManager {
         groupId: null,
         participants: [],
         isMuted: false,
-      gate: gateForNewSession(this.state.gate),
+        gate: gateForNewSession(this.state.gate),
+        reconnecting: null,
         error: msg,
       });
       return false;
@@ -471,7 +596,8 @@ class VoiceSessionManager {
         groupId: null,
         participants: [],
         isMuted: false,
-      gate: gateForNewSession(this.state.gate),
+        gate: gateForNewSession(this.state.gate),
+        reconnecting: null,
       });
       return true;
     }
@@ -490,7 +616,13 @@ class VoiceSessionManager {
     this.current = { intent: target, userId, displayName };
     this.setState({ phase: 'joined' });
 
-    // Adopt Rust's gate: a reload mid-call leaves this mirror stale.
+    // Land the toggles made while connecting, in order, then adopt Rust's gate (a reload mid-call
+    // leaves this mirror stale). All on the one chain, so the sync can't overtake a replay.
+    const replay = this.preJoinGate;
+    this.preJoinGate = [];
+    for (const command of replay) {
+      void this.applyGate(command, undefined, { replay: true });
+    }
     void this.syncGate();
 
     const intentToInvokeMs = Math.round(performance.now() - intentTs);
@@ -534,6 +666,7 @@ class VoiceSessionManager {
       participants: [],
       isMuted: false,
       gate: gateForNewSession(this.state.gate),
+      reconnecting: null,
     });
 
     if (left) {
@@ -552,27 +685,53 @@ class VoiceSessionManager {
     return this.deviceId ? `voice-${userId}:${this.deviceId}` : `voice-${userId}`;
   }
 
-  /** Fetch and cache `device_id`, retrying while null. */
-  private async ensureDeviceId(): Promise<void> {
-    if (this.deviceId) {
-      return;
-    }
-    try {
-      this.deviceId = (await invoke<string | null>('get_device_id')) ?? null;
-    } catch (e) {
-      console.warn('[voice] get_device_id failed; using user-scoped voice identity:', e);
-      this.deviceId = null;
-    }
+  /** True once the user has moved on from `target` (left, or chose another room) mid-join. */
+  private abandoned(target: VoiceIntent): boolean {
+    return !sameIntent(this.intent, target) || !this.guardsPass();
   }
 
-  private async ensureEventsChannel(): Promise<void> {
-    if (this.eventsAttached) {
-      return;
+  private deviceIdLookup: Promise<void> | null = null;
+
+  /** Fetch and cache `device_id`, retrying while null. Concurrent callers share one lookup. */
+  private ensureDeviceId(): Promise<void> {
+    if (this.deviceId) {
+      return Promise.resolve();
     }
-    const channel = new Channel<VoiceEvent>();
-    channel.onmessage = (event) => this.handleEvent(event);
-    await invoke('subscribe_voice_events', { onEvent: channel });
-    this.eventsAttached = true;
+    if (!this.deviceIdLookup) {
+      this.deviceIdLookup = invoke<string | null>('get_device_id')
+        .then((id) => {
+          this.deviceId = id ?? null;
+        })
+        .catch((e) => {
+          console.warn('[voice] get_device_id failed; using user-scoped voice identity:', e);
+          this.deviceId = null;
+        })
+        .finally(() => {
+          this.deviceIdLookup = null;
+        });
+    }
+    return this.deviceIdLookup;
+  }
+
+  private eventsSubscription: Promise<void> | null = null;
+
+  /** Subscribe once; a second caller while the first is in flight shares it (one channel, no duplicate events). */
+  private ensureEventsChannel(): Promise<void> {
+    if (this.eventsAttached) {
+      return Promise.resolve();
+    }
+    if (!this.eventsSubscription) {
+      const channel = new Channel<VoiceEvent>();
+      channel.onmessage = (event) => this.handleEvent(event);
+      this.eventsSubscription = invoke('subscribe_voice_events', { onEvent: channel })
+        .then(() => {
+          this.eventsAttached = true;
+        })
+        .finally(() => {
+          this.eventsSubscription = null;
+        });
+    }
+    return this.eventsSubscription;
   }
 
   private handleEvent(event: VoiceEvent): void {
@@ -581,13 +740,17 @@ class VoiceSessionManager {
 
     switch (event.type) {
       case 'participant_joined': {
+        // An upsert: the seed roster is re-sent with avatars (and after a reconnect), so what the
+        // room already told us about this participant survives.
+        const prev = this.state.participants.find((p) => p.identity === event.identity);
         const next: VoiceParticipant = {
           identity: event.identity,
           name: event.name,
-          audio: event.is_muted ? { kind: 'muted' } : { kind: 'idle' },
+          audio: event.is_muted ? { kind: 'muted' } : prev && !isMuted(prev.audio) ? prev.audio : { kind: 'idle' },
           video: preservedVideo(this.state.participants, event.identity),
           isLocal: event.identity === localIdentity,
-          avatarKey: event.avatar_url ?? null,
+          avatarKey: event.avatar_url ?? prev?.avatarKey ?? null,
+          connectionQuality: prev?.connectionQuality,
         };
         this.setState({ participants: upsertParticipant(this.state.participants, next) });
         break;
@@ -612,6 +775,12 @@ class VoiceSessionManager {
       case 'mic_availability': {
         if (event.identity === localIdentity) {
           this.setState({ micAvailable: event.available });
+        }
+        break;
+      }
+      case 'speaker_availability': {
+        if (event.identity === localIdentity) {
+          this.setState({ speakerAvailable: event.available });
         }
         break;
       }
@@ -654,7 +823,32 @@ class VoiceSessionManager {
         // Rust re-keys all media; nothing to rotate here.
         break;
       }
+      case 'reconnecting': {
+        if (this.state.phase === 'joined') {
+          this.setState({ reconnecting: { attempt: event.attempt } });
+        }
+        break;
+      }
+      case 'reconnected': {
+        if (this.state.phase === 'joined') {
+          this.setState({ reconnecting: null });
+          // The gate survives in Rust; re-adopt it in case a keyup landed while the room was away.
+          void this.syncGate();
+        }
+        break;
+      }
       case 'disconnected': {
+        // A room we still wanted went away (the user's own leave clears the intent first): say so
+        // instead of silently vanishing, then tear down to idle.
+        const unexpected =
+          this.intent !== null && this.current !== null && sameIntent(this.intent, this.current.intent);
+        if (unexpected) {
+          // A typed reason (A1's `VoiceJoinError`) goes through the same wording as a failed join.
+          const typed = event.error
+            ? friendlyJoinError(`voice_join:${event.error.kind}${event.error.detail ? `: ${event.error.detail}` : ''}`)
+            : '';
+          this.setState({ reconnecting: null, error: typed || i18n.t('voice:disconnected.lost') });
+        }
         this.intent = null;
         void this.reconcile();
         break;
@@ -762,6 +956,14 @@ function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
 
 export const voiceSession = new VoiceSessionManager();
 
+/** The manager error last pushed to the store; a dismissed error must not resurface on the next notification. */
+let mirroredError: string | null = null;
+// What the store last received. The store deep-observes what it is handed, so `store.voiceState.gate`
+// is a proxy that never `===` the manager's object: comparing against the store would re-write (and
+// re-render every `voiceState` observer) on each speaking flip.
+let mirroredGate: VoiceGateState | null = null;
+let mirroredParticipants: VoiceParticipant[] | null = null;
+
 /** Mirror the manager's state onto the store; the manager is the source of truth. */
 voiceSession.subscribe(() => {
   const s = voiceSession.getSnapshot();
@@ -775,10 +977,6 @@ voiceSession.subscribe(() => {
       } else if (v.kind === 'joined') {
         store.voiceLeft();
       }
-      // A joining → idle with an error still surfaces as a join failure.
-      if (s.error && store.voiceError !== s.error) {
-        store.setVoiceError(s.error);
-      }
       break;
     }
     case 'joining': {
@@ -787,6 +985,11 @@ voiceSession.subscribe(() => {
       } else if (v.kind === 'joining' && s.channelId && (v.channelId !== s.channelId || v.counterpartyUserId !== s.counterpartyUserId)) {
         store.voiceLeft();
         store.voiceStartJoining(s.channelId, s.counterpartyUserId);
+      }
+      // A mute/deafen chosen while connecting draws now (the store's `joining` carries the gate).
+      if (appStore.voiceState.kind === 'joining' && mirroredGate !== s.gate) {
+        mirroredGate = s.gate;
+        store.voiceSetGate(s.gate);
       }
       break;
     }
@@ -798,7 +1001,8 @@ voiceSession.subscribe(() => {
         store.voiceJoined();
       }
       const after = appStore.voiceState;
-      if (after.kind === 'joined' && after.gate !== s.gate) {
+      if (after.kind === 'joined' && mirroredGate !== s.gate) {
+        mirroredGate = s.gate;
         store.voiceSetGate(s.gate);
       }
       if (after.kind === 'joined' && after.micMuted !== s.isMuted) {
@@ -806,6 +1010,12 @@ voiceSession.subscribe(() => {
       }
       if (after.kind === 'joined' && after.micAvailable !== s.micAvailable) {
         store.voiceSetMicAvailable(s.micAvailable);
+      }
+      if (after.kind === 'joined' && after.speakerAvailable !== s.speakerAvailable) {
+        store.voiceSetSpeakerAvailable(s.speakerAvailable);
+      }
+      if (after.kind === 'joined' && (after.reconnecting?.attempt ?? null) !== (s.reconnecting?.attempt ?? null)) {
+        store.voiceSetReconnecting(s.reconnecting);
       }
       break;
     }
@@ -817,7 +1027,8 @@ voiceSession.subscribe(() => {
     }
   }
 
-  if (store.voiceParticipants !== s.participants) {
+  if (mirroredParticipants !== s.participants) {
+    mirroredParticipants = s.participants;
     store.setVoiceParticipants(s.participants);
   }
   // Unpin a fullscreen view whose screenshare ended; the local preview pin is separate.
@@ -830,7 +1041,8 @@ voiceSession.subscribe(() => {
       store.setViewingScreenShareTrackKey(null);
     }
   }
-  if (store.voiceError !== s.error) {
+  if (s.error !== mirroredError) {
+    mirroredError = s.error;
     store.setVoiceError(s.error);
   }
 });

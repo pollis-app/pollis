@@ -658,11 +658,8 @@ function emojiDataUrl(shortcode: string, contentHash: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-/** Snapshot as `TransmitGate::snapshot`; `nullGateCommands` makes a command resolve null (#888). */
-function gateSnapshot(command?: string): Record<string, unknown> | null {
-  if (command && (preload.nullGateCommands ?? []).includes(command)) {
-    return null;
-  }
+/** Snapshot as `TransmitGate::snapshot`; `nullGateCommands` is handled before dispatch (#888). */
+function gateSnapshot(_command?: string): Record<string, unknown> | null {
   const gate = store.voiceGate;
   const transmitting = gate.self_muted
     ? false
@@ -877,6 +874,11 @@ function searchMessagesMock(
 }
 
 function handleCommand(command: string, args: Record<string, unknown>): unknown {
+  // #888: a gate command that yields no snapshot also applied nothing, so the renderer's optimistic
+  // paint must roll back to the unchanged truth on its re-read.
+  if ((preload.nullGateCommands ?? []).includes(command)) {
+    return null;
+  }
   switch (command) {
     case 'get_session':
       return store.session;
@@ -1994,11 +1996,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_voice_gate_state':
       return gateSnapshot(command);
 
+    // Nothing to capture in a browser: the toggles take their no-source branches.
+    case 'list_video_devices':
+      return { cameras: [] };
+    case 'enumerate_screen_sources':
+      return { displays: [], windows: [] };
+
     case 'list_voice_participants':
     case 'list_voice_room_counts':
     case 'list_audio_devices':
       return [];
 
+    // Session lifecycle: a join succeeds instantly, so a spec can drive `VoiceSessionManager` itself.
+    case 'join_voice_channel':
+    case 'get_device_id':
+    case 'leave_voice_channel':
+    case 'subscribe_voice_events':
+    case 'get_last_join_timings':
+    case 'set_remote_user_volume':
     case 'prepare_voice_connection':
     case 'publish_voice_presence':
     case 'publish_typing':

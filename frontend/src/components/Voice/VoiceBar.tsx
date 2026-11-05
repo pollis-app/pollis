@@ -11,7 +11,9 @@ import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { toggleCamera } from "../../camera/cameraActions";
-import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf } from "../../types/voice-state";
+import { shareOf, cameraOf, gateOf, micIndicatorOf, activeCallIdOf, isMediaBusy } from "../../types/voice-state";
+import { LoadingSpinner } from "../ui/LoaderSpinner";
+import { SignalBars } from "./SignalBars";
 import { useShortcutLabel } from "../../keyboard";
 import {
   micControlTitleKey,
@@ -44,9 +46,11 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const shareActive = share.kind === 'active';
   // Any non-idle state is a "stop" (clears `starting` and `failed`).
   const shareInFlight = share.kind !== 'idle';
+  const shareBusy = isMediaBusy(share);
   const camera = cameraOf(voiceState);
   const cameraActive = camera.kind === 'active';
   const cameraInFlight = camera.kind !== 'idle';
+  const cameraBusy = isMediaBusy(camera);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -58,8 +62,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const toggleDeafen = () => voiceSession.toggleDeafen();
   const leave = () => voiceSession.leave();
 
+  const reconnecting = voiceState.kind === "joined" ? voiceState.reconnecting : null;
   // Exclude every identity of the local user (other devices, reconnect overlap), not just `isLocal`.
-  const localIdentity = voiceParticipants.find((p) => p.isLocal)?.identity ?? null;
+  const local = voiceParticipants.find((p) => p.isLocal) ?? null;
+  const localIdentity = local?.identity ?? null;
   const localUserId = localIdentity ? userIdFromVoiceIdentity(localIdentity) : null;
   const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter(
     (id) => userIdFromVoiceIdentity(id) !== localUserId,
@@ -70,6 +76,25 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const participantCount = new Set(
     voiceParticipants.map((p) => userIdFromVoiceIdentity(p.identity)),
   ).size;
+
+  // Who is streaming their screen (remote only; our own share is on the pill), by distinct user.
+  const sharerNames = (() => {
+    const names = disambiguateVoiceNames(voiceParticipants);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of voiceParticipants) {
+      if (p.isLocal || p.video.kind !== "screenshare") {
+        continue;
+      }
+      const userId = userIdFromVoiceIdentity(p.identity);
+      if (seen.has(userId)) {
+        continue;
+      }
+      seen.add(userId);
+      out.push(names.get(p.identity) ?? p.name);
+    }
+    return out;
+  })();
 
   return (
     <div
@@ -111,6 +136,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
           onClick={toggleMute}
           title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
           aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
+          aria-pressed={micIndicator === "muted" || micIndicator === "deafened"}
           square
         >
           {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -139,6 +165,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={toggleDeafen}
         title={t(deafenControlTitleKey(gate.deafened))}
         aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
+        aria-pressed={gate.deafened}
         square
       >
         {gate.deafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
@@ -147,6 +174,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       {/* macOS uses the in-app picker (SCContentSharingPicker crashes, #283); an empty source list means a system picker. */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
+        data-busy={shareBusy || undefined}
+        aria-pressed={shareActive}
         accent={shareInFlight ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={() => toggleScreenShare(share)}
         title={
@@ -167,7 +196,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }
         square
       >
-        {shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
+        {shareBusy ? <LoadingSpinner size="sm" /> : shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
 
       {/* Indicator only: audio can't change mid-share. */}
@@ -207,6 +236,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       {/* Camera: starts directly with one, else CameraPicker. */}
       <PillButton
         data-testid="voice-bar-camera-button"
+        data-busy={cameraBusy || undefined}
+        aria-pressed={cameraActive}
         accent={cameraInFlight && !cameraActive ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={() => toggleCamera(camera)}
         title={
@@ -227,7 +258,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }
         square
       >
-        {cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
+        {cameraBusy ? <LoadingSpinner size="sm" /> : cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
       </PillButton>
 
       <PillButton
@@ -243,18 +274,46 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
 
       <span className="text-line">|</span>
 
+      {reconnecting ? (
+        <span
+          data-testid="voice-bar-reconnecting"
+          role="status"
+          className="flex items-center gap-1 text-warning"
+        >
+          <LoadingSpinner size="sm" />
+          {t("bar.reconnecting")}
+        </span>
+      ) : (
+        <SignalBars quality={local?.connectionQuality} testId="voice-bar-quality" />
+      )}
+
       <span data-testid="voice-bar-participant-count" className="text-dim">
         {t("bar.participants", { count: participantCount })}
       </span>
 
+      {/* Discord's "X is streaming" line, outside the stage so it shows from any page. */}
+      {sharerNames.length > 0 ? (
+        <span
+          data-testid="voice-bar-sharing"
+          className="flex items-center gap-1 min-w-0 truncate text-danger"
+          title={sharerNames.join(", ")}
+        >
+          <Monitor size={12} className="shrink-0" />
+          <span className="truncate">
+            {sharerNames.length === 1
+              ? t("bar.sharing", { name: sharerNames[0] })
+              : t("bar.sharingMany", { count: sharerNames.length })}
+          </span>
+        </span>
+      ) : null}
+
       <span
         data-testid="voice-bar-security-indicator"
-        style={{ marginInlineStart: "auto" }}
-        className="flex items-center gap-1 text-dim"
+        className="ms-auto flex items-center gap-1 text-dim"
       >
         {lastRemoteSpeakerId
           ? <>
-            <Volume2 size={12} style={{ verticalAlign: "middle" }} />
+            <Volume2 size={12} className="align-middle" />
             {disambiguateVoiceNames(voiceParticipants).get(lastRemoteSpeakerId)
               ?? voiceParticipants.find(p => p.identity === lastRemoteSpeakerId)?.name}
           </>
@@ -266,14 +325,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={() => navigate({ to: "/voice-settings" })}
         aria-label={t("bar.settings")}
         title={t("bar.settings")}
-        className="flex items-center justify-center transition-colors flex-shrink-0 text-muted hover:text-accent border-0"
-        style={{
-          width: 20,
-          height: 20,
-          background: "none",
-          padding: 0,
-          cursor: "pointer",
-        }}
+        className="flex size-5 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 transition-colors text-muted hover:text-accent"
       >
         <SlidersHorizontal size={14} />
       </button>

@@ -8,6 +8,8 @@ import i18n from "./i18n";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { appStore } from "./stores/appStore";
+import { voiceSession } from "./voice";
+import { audioLevels } from "./voice/audioLevels";
 
 // Platform tag for CSS (e.g. macOS already rounds corners).
 const ua = navigator.userAgent;
@@ -22,6 +24,8 @@ document.documentElement.dataset.platform = platformTag;
 
 if (import.meta.env.VITE_PLAYWRIGHT === 'true') {
   (window as any).__pollisStore = appStore;
+  (window as any).__pollisVoice = voiceSession;
+  (window as any).__pollisAudioLevels = audioLevels;
 }
 
 const container = document.getElementById("root");
