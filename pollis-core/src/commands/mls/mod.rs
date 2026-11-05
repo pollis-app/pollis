@@ -40,7 +40,6 @@ pub use device::{
 
 pub(crate) use ds_client::{
     current_user_id, decode_response, ds_claim_key_package, ds_livekit_send_data,
-    ds_livekit_send_data_delivered,
     ds_livekit_token, ds_post, ds_post_envelope, ds_post_json, ds_post_ok, ds_post_plain,
     ds_post_session_ok, ds_post_signed_or_session, ds_post_signed_or_session_json,
     ds_post_signed_or_session_ok, EnvelopePost,
@@ -50,6 +49,9 @@ pub(crate) use ds_client::{
 pub(crate) use ds_client::ds_livekit_participants;
 #[cfg(feature = "media")]
 pub(crate) use ds_client::ds_livekit_room_counts;
+// The ring's "was anybody home" answer; only the desktop call path asks.
+#[cfg(feature = "media")]
+pub(crate) use ds_client::ds_livekit_send_data_delivered;
 // #836 identity resolution: desktop's realtime loop, and mobile's JS data channel (#1635).
 pub(crate) use ds_client::ds_livekit_identities;
 

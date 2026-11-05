@@ -138,6 +138,7 @@ pub use ingest::{
     ingest_dm_envelopes, ingest_dm_envelopes_inner,
 };
 // The channel → MLS group memo (#1610), shared with the voice join so it skips the resolve POST.
+#[cfg(feature = "media")]
 pub(crate) use ingest::{cached_channel_group, remember_channel_group};
 // What ingest tried to open, and what it reported (#1629).
 #[cfg(feature = "test-harness")]
