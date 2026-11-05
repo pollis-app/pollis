@@ -55,7 +55,11 @@ void main() {
 `;
 
 function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLShader {
-  const sh = gl.createShader(type)!;
+  const sh = gl.createShader(type);
+  if (!sh) {
+    // A context that is already lost hands out nulls; see `initGL`'s caller.
+    throw new Error("shader create: context lost");
+  }
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
@@ -137,8 +141,10 @@ function initGL(canvas: HTMLCanvasElement): GLBundle | null {
   };
 }
 
-/** Release every GPU object and the context itself; a canvas that merely unmounts keeps
- *  its context (and its textures) alive until the GC finds it, and WebKit caps contexts. */
+/** Release every GPU object; a canvas that merely unmounts keeps its textures alive until
+ *  the GC finds it. The context itself is left to the GC: `WEBGL_lose_context.loseContext()`
+ *  on WebKitGTK (software GL, Xvfb) left every context created afterwards lost at birth
+ *  (`createShader` → null), which took the whole renderer down at the next tile. */
 function destroyGL(bundle: GLBundle) {
   const { gl } = bundle;
   gl.deleteTexture(bundle.texY);
@@ -146,10 +152,6 @@ function destroyGL(bundle: GLBundle) {
   gl.deleteTexture(bundle.texV);
   gl.deleteBuffer(bundle.vbo);
   gl.deleteProgram(bundle.prog);
-  const lose = gl.getExtension("WEBGL_lose_context");
-  if (lose) {
-    lose.loseContext();
-  }
 }
 
 /** The plane as a tight `width × height` block: the data itself when its stride already is,
@@ -232,9 +234,16 @@ const RemoteVideoTileImpl: React.FC<Props> = ({
       canvas.width = initialWidth;
       canvas.height = initialHeight;
     }
-    glRef.current = initGL(canvas);
+    // A tile that cannot get a working context stays black; it must never throw into the
+    // error boundary and take the call UI with it.
+    try {
+      glRef.current = initGL(canvas);
+    } catch (e) {
+      glRef.current = null;
+      console.error("[RemoteVideoTile] WebGL init failed", e);
+    }
     if (!glRef.current) {
-      console.error("[RemoteVideoTile] WebGL init failed");
+      console.error("[RemoteVideoTile] no WebGL context for", trackKey);
     }
     return () => {
       if (glRef.current) {
