@@ -96,6 +96,33 @@ jobs:
               printf '::error::Not every service is running. Expected:\n%s\nRunning:\n%s\n' "${want}" "${have}"
               exit 1
             fi
+
+            # Running is not serving: both services carry a compose healthcheck
+            # (livekit answers GET / on 7880, nginx answers /healthz on 80), and
+            # a restart that cannot show both green within two minutes has not
+            # recovered anything — fail loudly rather than let a "successful"
+            # run mask a container that is up and dead.
+            deadline=$(( $(date +%s) + 120 ))
+            while :; do
+              unhealthy=""
+              for svc in ${want}; do
+                cid="$(docker compose ps -q "${svc}" < /dev/null)"
+                status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "${cid}")"
+                if [ "${status}" != "healthy" ]; then
+                  unhealthy="${unhealthy} ${svc}=${status}"
+                fi
+              done
+              if [ -z "${unhealthy}" ]; then
+                echo "healthchecks: all green"
+                break
+              fi
+              if [ "$(date +%s)" -ge "${deadline}" ]; then
+                printf '::error::Healthchecks not green after 120s:%s\n' "${unhealthy}"
+                docker compose ps -a < /dev/null
+                exit 1
+              fi
+              sleep 5
+            done
           REMOTE
 
       - name: Validate — LiveKit up

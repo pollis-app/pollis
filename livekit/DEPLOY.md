@@ -20,13 +20,86 @@ graceful nginx reload. No manual SSH. See "Workflow requirements" below.
 `.github/workflows/livekit-restart.yml` SSHes in with the same key and host vars
 and runs `docker compose up -d` in `/root/livekit`: it starts any
 stopped container and touches nothing else (no config sync, no keys, no pull).
-It fails unless every compose service is running and `https://rtc.pollis.com/`
-answers. Tick `restart` to also `docker compose restart` both containers, for
-one that is running but hung — that drops every live call.
+It fails unless every compose service is running, **both compose healthchecks
+report `healthy` within two minutes**, and `https://rtc.pollis.com/` answers.
+Tick `restart` to also `docker compose restart` both containers, for one that
+is running but hung — that drops every live call.
 
 Reach for it when joins fail with "Couldn't reach the voice server". After the
 2026-10-17 kernel-update reboot, LiveKit came back but nginx exited 255 and
-stayed down for six days despite `restart: unless-stopped`.
+stayed down for six days despite `restart: unless-stopped`. The external probe
+(below) now presses this button itself after ten minutes of failure.
+
+## Self-healing
+
+What keeps the 2026-10-17 outage from recurring, and where each piece lives:
+
+| Failure | Defence | Where |
+|---------|---------|-------|
+| nginx starts before `livekit` has a DNS entry → "host not found in upstream", exit 255 | `resolver 127.0.0.11 valid=10s` + variable `proxy_pass` targets in both the `http` and `stream` contexts: the name is resolved per connection, never at config load, so nginx boots regardless and follows a recreated container's new IP without a reload | `nginx.conf` |
+| container stopped by a reboot / daemon restart | `restart: always` on both services (`unless-stopped` does not restart a container the daemon shutdown stopped) | `docker-compose.yml` |
+| container up but not serving | healthchecks: `livekit` → `GET http://127.0.0.1:7880/` must answer; `nginx` → `GET http://127.0.0.1/healthz` (served by nginx itself on the port-80 vhost) must answer 200 | `docker-compose.yml`, `nginx.conf` |
+| fresh `compose up` racing the boot | `depends_on: livekit: condition: service_healthy` on nginx (only at `compose up`; the daemon's boot-time restart ignores it, which is why the resolver is the real fix) | `docker-compose.yml` |
+| a "successful" restart or deploy that recovered nothing | both workflows wait up to 120 s for every service's healthcheck to be `healthy` and fail loudly otherwise | `livekit-restart.yml`, `livekit-deploy.yml` |
+| nobody notices for six days | the external probe below: alert after ten minutes, dispatch `livekit-restart.yml`, expose the state for `status.pollis.com` | `livekit/probe/` |
+
+`docker compose ps` shows the health column; `docker inspect -f '{{.State.Health.Status}}' livekit-nginx-1` gives it directly.
+
+## External probe (`livekit/probe/`)
+
+A Cloudflare cron Worker (`*/5 * * * *`) that watches the stack from outside the
+box, because a monitor on the box cannot report that the box went quiet. Each
+run:
+
+1. `GET https://rtc.pollis.com/` must answer **200 `OK`** — the full path
+   (TLS → nginx SNI demux → `http` vhost → `livekit:7880`).
+2. A **STUN Binding Request over TLS to `turn.pollis.com:443`** must come back as
+   a Binding Success Response. LiveKit's TURN listener answers one without
+   credentials, so this proves the `stream` terminator routed the SNI to
+   LiveKit's TURN server, not merely that something on 443 completed a
+   handshake. (`printf '\x00\x01\x00\x00\x21\x12\xa4\x42pollisprobe1' | openssl
+   s_client -connect turn.pollis.com:443 -servername turn.pollis.com -quiet | xxd`
+   shows the same `0101` reply by hand.)
+
+Two consecutive failing runs (ten minutes) mark the stack **down**: it posts to
+the alert webhook and dispatches `livekit-restart.yml` through the GitHub API,
+then re-dispatches at most every 30 minutes and reminds hourly until the first
+green run, which posts the recovery and the outage length. The decision logic
+is `src/logic.ts` (pure; `pnpm test` runs it under `node --test`), the I/O is
+`src/index.ts`.
+
+`GET https://<worker>/` returns the last result as JSON (`{ok, since,
+checked_at, rtc, turn}`; 503 while down, `Cache-Control: no-store`, CORS `*`).
+**`status.pollis.com` lives in the `archon` repo, not here** — add a "Voice
+server" row there that reads this URL; the probe reads nothing from the
+requests it receives, keeps no per-request state and logs nothing
+(`observability.enabled: false`, `logpush: false`, as the DS Worker configs).
+
+**Deploy (manual, from a checkout — there is no workflow for it):**
+
+```bash
+cd livekit/probe
+pnpm install --ignore-workspace          # outside the root pnpm workspace, like mobile/
+pnpm test && pnpm typecheck
+pnpm exec wrangler login                 # dan@pollis.com account (docs/deployments.md)
+pnpm exec wrangler secret put GITHUB_DISPATCH_TOKEN
+pnpm exec wrangler secret put ALERT_WEBHOOK_URL   # optional
+pnpm exec wrangler deploy
+# Smoke: force one run and read the state back.
+curl -sS "https://pollis-livekit-probe.<account>.workers.dev/"
+```
+
+Secrets (not created by this repo — set them with `wrangler secret put` above):
+
+| Secret | What |
+|--------|------|
+| `GITHUB_DISPATCH_TOKEN` | A **fine-grained** PAT: repository access = `pollis-app/pollis` only, permissions = **Actions: Read and write** and nothing else (that is the one scope `POST …/actions/workflows/livekit-restart.yml/dispatches` needs). Name it `livekit-probe`, set an expiry, and note it in the GitHub-side settings record (`docs/ci-trust.md`). The restart workflow has no `environment:` gate, so the dispatch runs unattended — which is the point. |
+| `ALERT_WEBHOOK_URL` | Optional incoming webhook. The body is `{"content": msg, "text": msg}`, which Discord- and Slack-style hooks both read. Unset → no alerts, the dispatch still happens. |
+
+To run it locally against the live endpoints without any secret (it then
+dispatches nothing): `pnpm exec wrangler dev --test-scheduled`, then
+`curl 'http://127.0.0.1:8787/__scheduled?cron=*/5+*+*+*+*'` and `curl
+http://127.0.0.1:8787/`.
 
 ## Stack
 
@@ -74,10 +147,13 @@ block (`ssl_preread`), because only one process can bind 443:
 > ~60 days after every renewal. LiveKit no longer gets `/etc/letsencrypt`
 > mounted at all.
 
-> **Ordering dependency:** nginx resolves `proxy_pass` upstreams at config load,
-> so upstream containers must be **up before nginx starts or reloads** —
-> otherwise nginx fails with "host not found in upstream". The deploy workflow
-> runs `nginx -t` before reloading to catch this.
+> **No ordering dependency any more:** both `proxy_pass` targets are variables
+> resolved per connection through Docker's DNS (`resolver 127.0.0.11
+> valid=10s`), so nginx starts and reloads whether or not `livekit` is
+> resolvable at that moment — a literal upstream name was resolved once at
+> config load and was fatal when unknown, which is what took the ingress down
+> on 2026-10-17 (see "Self-healing"). An unresolvable name now costs a 502 on
+> that request, not the process.
 
 > **Connection accounting:** a 443 connection now costs **four** `worker_connections`
 > slots (stream accept, stream→loopback, loopback accept, upstream) rather than

@@ -13,6 +13,14 @@
 # human-readable tag is cosmetic when an @sha256 digest is present. Bump these
 # deliberately when upgrading.
 #
+# Self-healing: both services carry a healthcheck and `restart: always`, nginx
+# starts only once livekit is healthy, and nginx.conf resolves `livekit` at
+# request time rather than at boot — so a reboot that brings the containers up
+# in the wrong order (2026-10-17: nginx exited 255 with "host not found in
+# upstream" and stayed down six days) no longer takes the ingress down. The
+# restart workflow refuses to report success until both healthchecks are green,
+# and livekit/probe/ watches from outside.
+#
 # Deploys go through .github/workflows/livekit-deploy.yml (manual button). Do not
 # hand-edit on the box — `main` carries the canonical config.
 services:
@@ -46,7 +54,18 @@ services:
       # `turn.external_tls: true` nginx terminates TURNS, so LiveKit never reads
       # a TLS keypair — one fewer process holding the private key.
     command: --config /etc/livekit.yml
-    restart: unless-stopped
+    # LiveKit answers GET / with "OK" on 7880 once it is serving. busybox wget
+    # is in the image (Alpine); the check talks to the container's own loopback
+    # so it never leaves the box.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:7880/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # `always`, not `unless-stopped`: after a host reboot a container that was
+    # stopped by the daemon shutdown must come back regardless of how it ended.
+    restart: always
     # No container log. LiveKit logs participant connections and ICE candidates,
     # which carry client IPs, and no client IP may be readable on this box —
     # operators included. livekit.yml also drops the level to warn. Changing a
@@ -66,9 +85,22 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       # Cloudflare Origin cert — api / api-dev / deploy .pollis.com (delivery + watchtower).
       - /etc/ssl/cloudflare:/etc/ssl/cloudflare:ro
+    # Ordering at `compose up`: nginx waits for livekit's healthcheck. This is
+    # belt-and-braces with the runtime resolver in nginx.conf — the daemon's
+    # own restart-on-boot ignores depends_on, which is why the resolver is the
+    # real fix and this only keeps a fresh `up` from serving 502s for a moment.
     depends_on:
-      - livekit
-    restart: unless-stopped
+      livekit:
+        condition: service_healthy
+    # /healthz is a 200 served by nginx itself on the port-80 vhost (nginx.conf):
+    # green means the master and its workers are up and serving the config.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: always
     # No container log: nginx's would carry client IPs. nginx.conf also turns
     # off its access and error logs; this covers anything written to stdout.
     logging:

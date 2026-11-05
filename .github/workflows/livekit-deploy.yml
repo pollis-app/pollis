@@ -233,6 +233,31 @@ jobs:
 
             docker compose ps < /dev/null
 
+            # Both services must report their compose healthcheck green (same
+            # gate as livekit-restart.yml): a deploy whose containers are up
+            # but not serving is a failed deploy.
+            deadline=$(( $(date +%s) + 120 ))
+            while :; do
+              unhealthy=""
+              for svc in $(docker compose config --services < /dev/null); do
+                cid="$(docker compose ps -q "${svc}" < /dev/null)"
+                status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "${cid}")"
+                if [ "${status}" != "healthy" ]; then
+                  unhealthy="${unhealthy} ${svc}=${status}"
+                fi
+              done
+              if [ -z "${unhealthy}" ]; then
+                echo "healthchecks: all green"
+                break
+              fi
+              if [ "$(date +%s)" -ge "${deadline}" ]; then
+                printf '::error::Healthchecks not green after 120s:%s\n' "${unhealthy}"
+                docker compose ps -a < /dev/null
+                exit 1
+              fi
+              sleep 5
+            done
+
             # No client IP may be readable on this box, operators included
             # (#1235). The compose file sets both containers' log driver to
             # `none`; changing it recreated them above, which discarded their
