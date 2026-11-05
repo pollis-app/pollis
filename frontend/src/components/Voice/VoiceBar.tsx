@@ -77,6 +77,25 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
     voiceParticipants.map((p) => userIdFromVoiceIdentity(p.identity)),
   ).size;
 
+  // Who is streaming their screen (remote only; our own share is on the pill), by distinct user.
+  const sharerNames = (() => {
+    const names = disambiguateVoiceNames(voiceParticipants);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of voiceParticipants) {
+      if (p.isLocal || p.video.kind !== "screenshare") {
+        continue;
+      }
+      const userId = userIdFromVoiceIdentity(p.identity);
+      if (seen.has(userId)) {
+        continue;
+      }
+      seen.add(userId);
+      out.push(names.get(p.identity) ?? p.name);
+    }
+    return out;
+  })();
+
   return (
     <div
       data-testid="voice-bar"
@@ -272,14 +291,29 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {t("bar.participants", { count: participantCount })}
       </span>
 
+      {/* Discord's "X is streaming" line, outside the stage so it shows from any page. */}
+      {sharerNames.length > 0 ? (
+        <span
+          data-testid="voice-bar-sharing"
+          className="flex items-center gap-1 min-w-0 truncate text-danger"
+          title={sharerNames.join(", ")}
+        >
+          <Monitor size={12} className="shrink-0" />
+          <span className="truncate">
+            {sharerNames.length === 1
+              ? t("bar.sharing", { name: sharerNames[0] })
+              : t("bar.sharingMany", { count: sharerNames.length })}
+          </span>
+        </span>
+      ) : null}
+
       <span
         data-testid="voice-bar-security-indicator"
-        style={{ marginInlineStart: "auto" }}
-        className="flex items-center gap-1 text-dim"
+        className="ms-auto flex items-center gap-1 text-dim"
       >
         {lastRemoteSpeakerId
           ? <>
-            <Volume2 size={12} style={{ verticalAlign: "middle" }} />
+            <Volume2 size={12} className="align-middle" />
             {disambiguateVoiceNames(voiceParticipants).get(lastRemoteSpeakerId)
               ?? voiceParticipants.find(p => p.identity === lastRemoteSpeakerId)?.name}
           </>
@@ -291,14 +325,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={() => navigate({ to: "/voice-settings" })}
         aria-label={t("bar.settings")}
         title={t("bar.settings")}
-        className="flex items-center justify-center transition-colors flex-shrink-0 text-muted hover:text-accent border-0"
-        style={{
-          width: 20,
-          height: 20,
-          background: "none",
-          padding: 0,
-          cursor: "pointer",
-        }}
+        className="flex size-5 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 transition-colors text-muted hover:text-accent"
       >
         <SlidersHorizontal size={14} />
       </button>

@@ -29,7 +29,9 @@
     "participants_one": "{{count}} participant",
     "participants_other": "{{count}} participants",
     "settings": "Voice settings",
-    "reconnecting": "Reconnecting…"
+    "reconnecting": "Reconnecting…",
+    "sharing": "{{name}} is sharing their screen",
+    "sharingMany": "{{count}} people are sharing their screens"
   },
   "stage": {
     "emptyRoster": "No one in this channel",
@@ -44,7 +46,11 @@
     "reconnectingAttempt": "Reconnecting… (attempt {{attempt}})",
     "ringing": "Ringing…",
     "calling": "Calling…",
-    "settingsLink": "Voice Settings"
+    "settingsLink": "Voice Settings",
+    "speakerUnavailable": "No speaker — you won't hear anyone until an output device is available.",
+    "layoutGrid": "Show everyone (grid)",
+    "layoutSpotlight": "Spotlight the stream",
+    "startedSpeaking": "{{name}} started speaking"
   },
   "tile": {
     "connectingTitle": "Connecting…",
@@ -62,6 +68,11 @@
     "fullscreenLabel": "Open fullscreen",
     "spotlightTitle": "spotlight",
     "spotlightLabel": "Spotlight this video",
+    "spotlightNamed": "{{name}} — spotlight this video",
+    "micMuted": "Muted",
+    "micSpeaking": "Speaking",
+    "micOpen": "Microphone on",
+    "mutedHint": "You're muted — unmute to be heard",
     "volumeFor": "Output volume for {{name}}"
   },
   "share": {
@@ -89,6 +100,11 @@
     "you": "you",
     "closeLabel": "Close stream",
     "closeTitle": "Close stream (Esc)"
+  },
+  "sidebar": {
+    "membersLabel": "In this voice channel",
+    "memberMuted": "Muted",
+    "memberLive": "Sharing their screen"
   },
   "inputMode": {
     "heading": "Input Mode",

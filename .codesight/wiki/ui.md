@@ -272,6 +272,55 @@ Concretely, in the message log:
   keystroke in the edit bar; unstable identities there re-render the entire log.
 - Reply targets are resolved once into a `Map` by `MessageList`, not with a
   `find()` per row.
+### Voice stage and controls
+
+The voice UI is `components/Voice/stage/VoiceStage.tsx` (the channel/call screen),
+`VoiceBar.tsx` (terminal's bottom strip), `SidebarProfilePanel` + `SidebarVoiceControls`
+(refined's sidebar strip) and `VoiceChannelMembers` (the roster under each sidebar voice
+channel). All of them read `appStore.voiceState` / `voiceParticipants`, which
+`voice/VoiceSessionManager.ts` mirrors from its own state; Rust owns the truth.
+
+- **Same-frame feedback.** Mute, deafen, input mode and push-to-talk draw their predicted
+  result on the click frame (`voice/gatePredict.ts`, a pure port of `TransmitGate`), then
+  adopt Rust's snapshot. Gate commands run in order on one chain so a PTT keyup can never
+  overtake its keydown; the two toggles coalesce (a second click while one is in flight is
+  dropped), and any reply that can't be adopted re-reads the gate so the optimistic state is
+  rolled back, never left standing (`e2e/voice-feel.spec.ts`, the #888 case in
+  `e2e/voice-sidebar-parity.spec.ts`). `phase: 'joining'` is set synchronously in
+  `setIntent`, so the stage, the `.vs-foot` tray and the status flip before any IPC; the tray
+  renders through `joining` with its controls parked and Leave live, and leaving mid-join
+  shows idle at once (Rust is torn down when the join returns or A1's deadline fires).
+- **Busy pills.** `isMediaBusy()` (`types/voice-state.ts`) draws a spinner and `data-busy` on
+  the camera / screenshare pills for `enumerating` (set by the actions) and `starting`.
+- **Reconnect.** `reconnecting { attempt }` / `reconnected` events keep the session `joined`:
+  a `.vs-notice` row above the stage (never an overlay), "Reconnecting…" on the local tile and
+  in both strips, remote tiles dimmed via `.stale`. A `disconnected` that the user did not ask
+  for sets `voiceError` ("Voice connection lost") before tearing down. A dismissed error stays
+  dismissed: the mirror pushes an error only when it changes.
+- **Connection quality** is `unknown` (dim bars) until the first
+  `connection_quality_changed`; `SignalBars` draws it on tiles, the voice bar and the sidebar
+  strip.
+- **Render cost.** `StageTile` is `React.memo`; `VoiceStage` hands each tile a
+  reference-stable model (and the same `items` array when nothing changed), so one speaking
+  flip re-renders exactly one tile. The mirror compares against what it last pushed, not
+  against the store: the store deep-observes what it is given, so `store.voiceState.gate`
+  is a proxy that never `===` the manager's object, and a store compare rewrote `voiceState`
+  (waking `AppShell` and every page) on every speaking event. `AppShell` reads the computed
+  `voiceCounterpartyName` rather than the participants list for the same reason. EQ bars
+  animate `transform: scaleY(var(--eqN))` (0..1), not `height`; the settings mic meter and the
+  tile waveform are ref-written. Pinned by the stage cases in `e2e/render-cost.spec.ts`.
+- **No overlay.** Fullscreen is a *focus mode* inside `.vs-body` (`ScreenShareViewer`
+  renders the one stream as a big `StageTile`, header hidden, tray kept), so there is exactly
+  one WebGL consumer per track. Esc (`nav.back`), the X or a double-click leaves it. Grid ↔
+  spotlight is a tray toggle while someone streams.
+- **Accessibility.** Toggles carry `aria-pressed`; video tiles are `role="button"` with
+  Enter/Space spotlighting (and `NavigableGrid`'s `onActivate`); `SpeakingAnnouncer` is a
+  throttled `aria-live="polite"` region naming who started speaking; the mic glyph on a tile
+  has a label.
+- **Cues and shortcuts.** Mute/unmute/deafen/undeafen request `play_sfx` names that Rust
+  does not ship yet (dormant until the assets land). `voice.toggleCamera` (mod+shift+v) and
+  `voice.toggleScreenShare` (mod+shift+s) live in `keyboard/commands.ts`.
+
 ### The windowed log (#874)
 
 **The log is virtualised.** `MessageList` keeps only the visible slice of the
@@ -747,7 +796,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**181 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**185 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -911,16 +960,20 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TextInput** — props: label, ariaLabel, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
 - **ThemedQr** — props: value, size, title — `frontend/src/components/ui/ThemedQr.tsx`
 
-### `components/Voice` (9)
+### `components/Voice` (13)
 
 - **CameraPicker** — `frontend/src/components/Voice/CameraPicker.tsx`
+- **MicLevelMeter** — props: subscribe, label, testId — `frontend/src/components/Voice/MicLevelMeter.tsx`
 - **RemoteUserVolumeSlider** — props: identity, participantName — `frontend/src/components/Voice/RemoteUserVolumeSlider.tsx`
 - **RemoteVideoTile** — `frontend/src/components/Voice/RemoteVideoTile.tsx`
 - **ScreenSharePicker** — `frontend/src/components/Voice/ScreenSharePicker.tsx`
-- **ScreenShareViewer** — `frontend/src/components/Voice/ScreenShareViewer.tsx`
+- **ScreenShareViewer** — props: tile, onClose — `frontend/src/components/Voice/ScreenShareViewer.tsx`
 - **ShareResolutionSelect** — props: value, onChange — `frontend/src/components/Voice/ShareResolutionSelect.tsx`
 - **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
+- **SignalBars** — props: quality, testId, className — `frontend/src/components/Voice/SignalBars.tsx`
+- **SpeakingAnnouncer** — `frontend/src/components/Voice/SpeakingAnnouncer.tsx`
 - **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
+- **VoiceChannelMembers** — props: channelId, enabled — `frontend/src/components/Voice/VoiceChannelMembers.tsx`
 - **VoiceInputModeSelect** — props: value, onChange — `frontend/src/components/Voice/VoiceInputModeSelect.tsx`
 
 ### `components/Voice/stage` (2)

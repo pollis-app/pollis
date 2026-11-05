@@ -13,7 +13,6 @@ import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { useHydrateUnread, useSyncReadCursors } from "../../hooks/queries/useUnread";
-import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
 import { screenShareSession } from "../../screenshare/screenShareSession";
 import { cameraSession } from "../../camera/cameraSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -42,7 +41,9 @@ import { usePreferences } from "../../hooks/queries/usePreferences";
 // Longer than the caller's own 30 s ring (Call.tsx) so a healthy cancel always wins.
 const INCOMING_RING_TIMEOUT_MS = 45_000;
 import { voiceSession } from "../../voice";
-import { userIdFromVoiceIdentity } from "../../voice/identity";
+import { toggleScreenShare } from "../../screenshare/screenShareActions";
+import { toggleCamera } from "../../camera/cameraActions";
+import { shareOf, cameraOf } from "../../types/voice-state";
 import { useGlobalShortcut } from "../../keyboard";
 import type { RouterContext } from "../../types/router";
 import { PressButton } from "../ui/PressButton";
@@ -421,6 +422,22 @@ export const AppShell: React.FC = observer(() => {
     { enabled: !!activeVoiceChannelId },
   );
 
+  // Camera and screenshare need a connected room; the toggles read the live state at keypress.
+  useGlobalShortcut(
+    "voice.toggleCamera",
+    () => {
+      toggleCamera(cameraOf(appStore.voiceState));
+    },
+    { enabled: voiceState.kind === "joined" },
+  );
+  useGlobalShortcut(
+    "voice.toggleScreenShare",
+    () => {
+      toggleScreenShare(shareOf(appStore.voiceState));
+    },
+    { enabled: voiceState.kind === "joined" },
+  );
+
   // Escape = one history step, same guard as the breadcrumb back chevron. No preventDefault (capture-phase cancel handlers).
   useGlobalShortcut(
     "nav.back",
@@ -561,7 +578,6 @@ export const AppShell: React.FC = observer(() => {
 
       <BreadcrumbNav />
 
-      {/* The screen-share viewer mounts inside, so the chrome stays interactive. */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
         <div
@@ -575,7 +591,6 @@ export const AppShell: React.FC = observer(() => {
           }}
         >
           <Outlet />
-          <ScreenShareViewer />
         </div>
         {/* Right panel (#824): a flex sibling, so it reflows the log. */}
         {!isTerminal && <RightPanel />}

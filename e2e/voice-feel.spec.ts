@@ -259,3 +259,157 @@ for (const skin of SKINS) {
     });
   });
 }
+
+// ---- Discord parity: roster, sharing line, layout, focus mode, shortcuts ----
+
+const SHARE_KEY = "track-bob-screen";
+
+for (const skin of SKINS) {
+  test.describe(`voice parity — ${skin} skin`, () => {
+    test("the sidebar lists who is in the room, with speaking and muted glyphs", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await joinVoice(page);
+      await inject(page, { type: "participant_joined", identity: BOB_IDENTITY, name: "bob", is_muted: false });
+      await inject(page, { type: "participant_joined", identity: "voice-u_carol", name: "carol", is_muted: true });
+
+      const members = page.getByTestId(`sidebar-voice-members-${VOICE_CHANNEL_ID}`);
+      await expect(members).toBeVisible();
+      await expect(members.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-u_bob`)).toContainText("bob");
+      await expect(members.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-u_carol`)).toHaveAttribute("data-muted", "true");
+      await expect(members.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-${ME.id}`)).toBeVisible();
+
+      await inject(page, { type: "speaking_started", identity: BOB_IDENTITY });
+      await expect(members.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-u_bob`)).toHaveAttribute("data-speaking", "true");
+      await inject(page, { type: "speaking_stopped", identity: BOB_IDENTITY });
+      await expect(members.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-u_bob`)).not.toHaveAttribute("data-speaking", "true");
+
+      await inject(page, { type: "participant_left", identity: BOB_IDENTITY });
+      await expect(members.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-u_bob`)).toHaveCount(0);
+    });
+
+    test("a remote screenshare: 'X is sharing' outside the stage, grid/spotlight toggle, and focus mode without an overlay", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await joinVoice(page);
+      await inject(page, { type: "participant_joined", identity: BOB_IDENTITY, name: "bob", is_muted: false });
+      await page.evaluate(
+        ({ identity, key }) =>
+          (window as unknown as { __pollisVoice: { setScreenShare: Function } }).__pollisVoice.setScreenShare(identity, {
+            trackKey: key,
+            width: 1280,
+            height: 720,
+          }),
+        { identity: BOB_IDENTITY, key: SHARE_KEY },
+      );
+
+      // Spotlight by default: the share is the big tile, the others are film cells.
+      const screenTile = page.getByTestId(`voice-tile-${BOB_IDENTITY}:screen`);
+      await expect(screenTile).toBeVisible();
+      await expect(page.locator(".vs-spotlight")).toBeVisible();
+      if (skin === "terminal") {
+        await expect(page.getByTestId("voice-bar-sharing")).toContainText("bob is sharing");
+      }
+      const roster = page.getByTestId(`sidebar-voice-members-${VOICE_CHANNEL_ID}`);
+      await expect(roster.getByTestId(`sidebar-voice-member-${VOICE_CHANNEL_ID}-u_bob`).getByLabel("Sharing their screen")).toBeVisible();
+
+      // Grid keeps everyone equal while the stream continues.
+      const layout = page.getByTestId("voice-layout-toggle");
+      await expect(layout).toHaveAttribute("data-layout", "spotlight");
+      await layout.click();
+      await expect(layout).toHaveAttribute("data-layout", "grid");
+      await expect(layout).toHaveAttribute("aria-pressed", "true");
+      await expect(page.locator(".vs-spotlight")).toHaveCount(0);
+      await expect(page.getByTestId("voice-channel-view")).toBeVisible();
+      await expect(screenTile).toBeVisible();
+
+      // The stream tile is a button: Enter spotlights it.
+      await expect(screenTile).toHaveAttribute("role", "button");
+      await screenTile.focus();
+      await page.keyboard.press("Enter");
+      await layout.click();
+      await expect(page.locator(".vs-spot-main").getByTestId(`voice-tile-${BOB_IDENTITY}:screen`)).toBeVisible();
+
+      // Fullscreen is focus mode inside the stage body: no overlay, header gone, tray kept, one canvas.
+      await screenTile.hover();
+      await screenTile.getByLabel("Open fullscreen").click();
+      const viewer = page.getByTestId("screenshare-viewer");
+      await expect(viewer).toBeVisible();
+      await expect(viewer).toContainText("watching bob");
+      expect(await viewer.evaluate((el) => getComputedStyle(el).position)).not.toBe("absolute");
+      expect(await viewer.evaluate((el) => getComputedStyle(el).position)).not.toBe("fixed");
+      await expect(page.locator(".vs-body").getByTestId("screenshare-viewer")).toBeVisible();
+      await expect(page.getByTestId(`remote-video-tile-${SHARE_KEY}`)).toHaveCount(1);
+      await expect(page.getByTestId("voice-tray-leave")).toBeVisible();
+      await expect(page.getByTestId("voice-layout-toggle")).toHaveCount(0);
+
+      await page.keyboard.press("Escape");
+      await expect(viewer).toHaveCount(0);
+      await expect(page.locator(".vs-spotlight")).toBeVisible();
+
+      // Stream ends: the sharing line and the LIVE glyph go away.
+      await page.evaluate((key) => (window as unknown as { __pollisVoice: { clearScreenShare: Function } }).__pollisVoice.clearScreenShare(key), SHARE_KEY);
+      await expect(screenTile).toHaveCount(0);
+      if (skin === "terminal") {
+        await expect(page.getByTestId("voice-bar-sharing")).toHaveCount(0);
+      }
+    });
+
+    test("camera and screenshare have keyboard shortcuts that read the live state", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await joinVoice(page);
+      const mod = process.platform === "darwin" ? "Meta" : "Control";
+      // Outside a room the combos do nothing; inside, they hit the same toggles as the pills.
+      await page.keyboard.press(`${mod}+Shift+KeyV`);
+      await expect.poll(() => invokeCount(page, "list_video_devices")).toBeGreaterThan(0);
+      await page.keyboard.press(`${mod}+Shift+KeyS`);
+      await expect.poll(() => invokeCount(page, "enumerate_screen_sources")).toBeGreaterThan(0);
+    });
+  });
+}
+
+// ---- Cross-lane contracts (A1 typed disconnect + speaker availability; A2 local meter while muted) ----
+
+for (const skin of SKINS) {
+  test.describe(`voice contracts — ${skin} skin`, () => {
+    test("a typed disconnect reason is surfaced; a speaker failure is a notice, not a drop", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await joinVoice(page);
+
+      await inject(page, { type: "speaker_availability", identity: LOCAL_IDENTITY, available: false });
+      await expect(page.getByTestId("voice-stage-speaker-unavailable")).toBeVisible();
+      await expect(page.getByTestId("voice-tray-mute")).toBeVisible();
+      await inject(page, { type: "speaker_availability", identity: LOCAL_IDENTITY, available: true });
+      await expect(page.getByTestId("voice-stage-speaker-unavailable")).toHaveCount(0);
+
+      await inject(page, { type: "disconnected", error: { kind: "livekit_unreachable", detail: "signal failure" } });
+      await expect(page.getByTestId("voice-join-cta")).toBeVisible();
+      // Either A1's friendly wording or the raw typed reason: never silent.
+      await expect(page.getByTestId("status-bar-voice-error")).toContainText(/voice server|livekit_unreachable/);
+    });
+
+    test("talking into a muted mic shows the muted hint on the local tile", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await joinVoice(page);
+      const hint = page.getByTestId(`voice-tile-muted-hint-${LOCAL_IDENTITY}`);
+      await expect(hint).toHaveCount(0);
+
+      await page.getByTestId("voice-tray-mute").click();
+      await expect(page.getByTestId("voice-tray-mute")).toHaveAttribute("data-mic-state", "muted");
+      await expect(hint).toBeAttached();
+      await expect(hint).toBeHidden();
+
+      // The local meter keeps running while muted; a loud frame lights the hint.
+      await page.evaluate((id) => (window as unknown as { __pollisAudioLevels: { push: Function } }).__pollisAudioLevels.push(id, [0.6, 0.7, 0.5]), LOCAL_IDENTITY);
+      await expect(hint).toBeVisible();
+      await expect(page.getByTestId(`voice-tile-${LOCAL_IDENTITY}`)).toHaveAttribute("data-talking-muted", "true");
+
+      // Unmuting drops it on the spot.
+      await page.getByTestId("voice-tray-mute").click();
+      await expect(hint).toHaveCount(0);
+    });
+  });
+}

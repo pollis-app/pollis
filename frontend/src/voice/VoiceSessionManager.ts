@@ -45,7 +45,10 @@ export type VoiceEvent =
     }
   | { type: 'reconnecting'; attempt: number }
   | { type: 'reconnected' }
-  | { type: 'disconnected' };
+  /** Once after join when the speaker failed to open (mirror of `mic_availability`). */
+  | { type: 'speaker_availability'; identity: string; available: boolean }
+  /** `error` is present when the session ended on a failure (reconnect gave up, SFU evicted us); absent on a normal leave. */
+  | { type: 'disconnected'; error?: { kind: string; detail?: string } | null };
 
 /** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
 export interface JoinTimings {
@@ -85,6 +88,8 @@ export interface VoiceSessionState {
   gate: VoiceGateState;
   /** False when joined listen-only (no capture device). */
   micAvailable: boolean;
+  /** False when the speaker failed to open: joined, but hearing no one. */
+  speakerAvailable: boolean;
   /** LiveKit is re-establishing the room (attempt count from Rust); still `joined`, never idle. */
   reconnecting: { attempt: number } | null;
   /** Last error from a failed join or a lost connection. Cleared on the next intent change. */
@@ -137,6 +142,7 @@ const INITIAL_STATE: VoiceSessionState = {
   isMuted: false,
   gate: VOICE_GATE_INITIAL,
   micAvailable: true,
+  speakerAvailable: true,
   reconnecting: null,
   error: null,
 };
@@ -224,6 +230,9 @@ class VoiceSessionManager {
     // Leaving while a join is still in flight: show idle now; the join's own tail tears Rust down
     // once it returns (or A1's deadline fires), so a hung join is never a stuck screen.
     if (target === null && this.state.phase === 'joining') {
+      // Rust cancels an in-flight join at its next phase; the pending join then rejects as
+      // cancelled, which `executeJoin` drops because the intent moved on.
+      invoke('leave_voice_channel').catch(logIgnored);
       this.localIdentity = null;
       this.setState({
         phase: 'idle',
@@ -499,6 +508,7 @@ class VoiceSessionManager {
       isMuted: false,
       gate: gateForNewSession(this.state.gate),
       micAvailable: true,
+      speakerAvailable: true,
       reconnecting: null,
       participants: [localTile(provisionalIdentity)],
       error: null,
@@ -744,6 +754,12 @@ class VoiceSessionManager {
         }
         break;
       }
+      case 'speaker_availability': {
+        if (event.identity === localIdentity) {
+          this.setState({ speakerAvailable: event.available });
+        }
+        break;
+      }
       case 'speaking_started':
       case 'speaking_stopped': {
         const speaking = event.type === 'speaking_started';
@@ -803,7 +819,11 @@ class VoiceSessionManager {
         const unexpected =
           this.intent !== null && this.current !== null && sameIntent(this.intent, this.current.intent);
         if (unexpected) {
-          this.setState({ reconnecting: null, error: i18n.t('voice:disconnected.lost') });
+          // A typed reason (A1's `VoiceJoinError`) goes through the same wording as a failed join.
+          const typed = event.error
+            ? friendlyJoinError(`voice_join:${event.error.kind}${event.error.detail ? `: ${event.error.detail}` : ''}`)
+            : '';
+          this.setState({ reconnecting: null, error: typed || i18n.t('voice:disconnected.lost') });
         }
         this.intent = null;
         void this.reconcile();
@@ -961,6 +981,9 @@ voiceSession.subscribe(() => {
       }
       if (after.kind === 'joined' && after.micAvailable !== s.micAvailable) {
         store.voiceSetMicAvailable(s.micAvailable);
+      }
+      if (after.kind === 'joined' && after.speakerAvailable !== s.speakerAvailable) {
+        store.voiceSetSpeakerAvailable(s.speakerAvailable);
       }
       if (after.kind === 'joined' && (after.reconnecting?.attempt ?? null) !== (s.reconnecting?.attempt ?? null)) {
         store.voiceSetReconnecting(s.reconnecting);

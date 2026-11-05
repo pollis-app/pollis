@@ -98,10 +98,31 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
     }
   });
 
+  // Mute / deafen cues: one per real transition of the adopted gate while joined. The optimistic
+  // snapshot and Rust's agreeing reply are one transition; a rollback is a second, audible one.
+  let lastGate = voiceSession.getSnapshot().gate;
+  let lastPhase = voiceSession.getSnapshot().phase;
+  const offGate = voiceSession.subscribe(() => {
+    const { gate, phase } = voiceSession.getSnapshot();
+    const wasJoined = lastPhase === 'joined';
+    lastPhase = phase;
+    const prev = lastGate;
+    lastGate = gate;
+    if (!wasJoined || phase !== 'joined' || prev === gate) {
+      return;
+    }
+    if (prev.deafened !== gate.deafened) {
+      notify(gate.deafened ? 'voice_self_deafen' : 'voice_self_undeafen');
+    } else if (prev.self_muted !== gate.self_muted) {
+      notify(gate.self_muted ? 'voice_self_mute' : 'voice_self_unmute');
+    }
+  });
+
   return {
     dispose: () => {
       offJoined();
       offLeft();
+      offGate();
       if (pendingLeaveSfx !== null) {
         clearTimeout(pendingLeaveSfx);
         pendingLeaveSfx = null;

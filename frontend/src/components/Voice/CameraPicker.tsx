@@ -80,10 +80,7 @@ export const CameraPicker: React.FC = observer(() => {
       </header>
 
       <div className="flex-1 overflow-auto p-3">
-        <div
-          className="grid gap-2"
-          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}
-        >
+        <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(11.25rem,1fr))]">
           {cameras.map((c) => (
             <button
               key={c.id}
@@ -91,16 +88,10 @@ export const CameraPicker: React.FC = observer(() => {
               onClick={() => handlePick(c)}
               disabled={busy}
               data-testid={`camera-picker-device-${c.id}`}
-              className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-[6px]"
-              style={{ minHeight: 100 }}
+              className="min-h-[6.25rem] text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
             >
               <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
-                <div
-                  className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted"
-                  style={{
-                    aspectRatio: "16 / 10",
-                  }}
-                >
+                <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">
                   <Video size={32} />
                 </div>
                 <div className="p-2">

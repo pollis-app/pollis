@@ -1996,6 +1996,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_voice_gate_state':
       return gateSnapshot(command);
 
+    // Nothing to capture in a browser: the toggles take their no-source branches.
+    case 'list_video_devices':
+      return { cameras: [] };
+    case 'enumerate_screen_sources':
+      return { displays: [], windows: [] };
+
     case 'list_voice_participants':
     case 'list_voice_room_counts':
     case 'list_audio_devices':

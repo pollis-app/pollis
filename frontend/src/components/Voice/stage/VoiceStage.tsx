@@ -1,9 +1,9 @@
-// Voice channel content: picking (source picker), preview (roster + Join), spotlight (focused video + filmstrip), or grid. Reads appStore directly.
+// Voice channel content: picking (source picker), preview (roster + Join), focus (one stream, chrome hidden), spotlight (focused video + filmstrip), or grid. Reads appStore directly.
 
 import React, { useCallback, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal, LayoutGrid, Focus } from "lucide-react";
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
@@ -28,6 +28,8 @@ import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { NavigableGrid } from "../../ui/NavigableGrid";
 import { ScreenSharePicker } from "../ScreenSharePicker";
 import { CameraPicker } from "../CameraPicker";
+import { ScreenShareViewer } from "../ScreenShareViewer";
+import { SpeakingAnnouncer } from "../SpeakingAnnouncer";
 import { StageTile, type StageTileModel } from "./StageTile";
 import { probeRender } from "../../../utils/renderProbe";
 import "./voice-stage.css";
@@ -60,6 +62,11 @@ function sameTileModel(a: StageTileModel, b: StageTileModel): boolean {
   );
 }
 
+/** Which stream a tile model carries, or null for an audio-only tile. */
+function trackKeyOf(p: StageTileModel): string | null {
+  return p.media.kind === "audio" ? null : p.media.trackKey;
+}
+
 interface VoiceStageProps {
   channelName: string;
   isInCall: boolean;
@@ -73,6 +80,8 @@ interface VoiceStageProps {
   /** 1:1 DM call: auto-joins and rings, no pre-join roster; leave becomes a hang-up reachable while connecting. */
   callMode?: boolean;
 }
+
+type StageLayout = "auto" | "grid";
 
 export const VoiceStage: React.FC<VoiceStageProps> = observer(
   ({
@@ -94,6 +103,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       voiceActiveSpeakerIds,
       voiceState,
       cameraRemotes,
+      viewingScreenShareTrackKey,
       setViewingScreenShareTrackKey,
     } = appStore;
 
@@ -113,7 +123,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     const isJoining = voiceState.kind === "joining";
     const reconnecting = voiceState.kind === "joined" ? voiceState.reconnecting : null;
-    const micMuted = voiceState.kind === "joined" ? voiceState.micMuted : false;
+    const speakerUnavailable = voiceState.kind === "joined" && !voiceState.speakerAvailable;
     const gate = gateOf(voiceState);
     // Four states (`micIndicatorOf`): PTT-idle and deafened close the mic too.
     const micIndicator = micIndicatorOf(gate);
@@ -122,6 +132,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const micAvailable = voiceState.kind === "joined" ? voiceState.micAvailable : true;
 
     const [focusId, setFocusId] = useState<string | null>(null);
+    // "auto" spotlights whoever streams (Discord's default); "grid" keeps everyone equal while they do.
+    const [layout, setLayout] = useState<StageLayout>("auto");
     // Previous render's models by tile key: an unchanged tile keeps its reference, so one
     // participant's speaking flip re-renders exactly that tile (#874 for the stage). The list is
     // kept too, so a render that changes nothing hands the grid the same array.
@@ -130,7 +142,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       list: [],
     });
 
-    // Drop any fullscreen stream on leave (the viewer lives in AppShell).
+    // Drop any focused stream on leave.
     React.useEffect(() => {
       return () => setViewingScreenShareTrackKey(null);
     }, [setViewingScreenShareTrackKey]);
@@ -238,13 +250,17 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     // A call is always in its room, so no pre-join preview.
     const stageLive = isInCall || callMode;
     const previewState = !stageLive;
-    const spotlight = stageLive && streamers.length > 0;
+    const spotlight = stageLive && streamers.length > 0 && layout !== "grid";
     // An explicit pick wins, else a screenshare, else the first video.
     const focused =
       streamers.find((p) => p.tileKey === focusId) ??
       streamers.find((p) => p.media.kind === "screenshare") ??
       streamers[0] ??
       null;
+    // Focus mode: one stream fills the body, the only video consumer for that track.
+    const focusView = stageLive && viewingScreenShareTrackKey
+      ? streamers.find((p) => trackKeyOf(p) === viewingScreenShareTrackKey) ?? null
+      : null;
 
     const hasRemoteParticipant = mergedParticipants.some((p) => !p.isLocal);
     const ringStatus =
@@ -269,6 +285,13 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       (trackKey: string) => setViewingScreenShareTrackKey(trackKey),
       [setViewingScreenShareTrackKey],
     );
+    const closeFocus = useCallback(() => setViewingScreenShareTrackKey(null), [setViewingScreenShareTrackKey]);
+    // Enter on a focused grid cell spotlights a video tile (audio tiles have nothing to spotlight).
+    const onActivate = useCallback((p: StageTileModel) => {
+      if (p.media.kind !== "audio") {
+        setFocusId(p.tileKey);
+      }
+    }, []);
     const renderPreviewCell = useCallback(
       (p: StageTileModel, { focused: f }: { focused: boolean }) => (
         <StageTile participant={p} mode="preview" focused={f} onView={onView} />
@@ -277,7 +300,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     );
     const renderGridCell = useCallback(
       (p: StageTileModel, { focused: f }: { focused: boolean }) => (
-        <StageTile participant={p} mode="grid" focused={f} onView={onView} />
+        <StageTile participant={p} mode="grid" focused={f} onFocus={setFocusId} onView={onView} />
       ),
       [onView],
     );
@@ -302,23 +325,28 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     );
 
     return (
-      <div className="vs-stage font-mono text-xs">
-        <div
-          className="flex items-center px-4 flex-shrink-0 h-bar border-b border-line text-muted"
-        >
-          <button
-            onClick={onBack}
-            aria-label={t("common:actions.back")}
-            className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-muted hover:text-accent"
+      <div className="vs-stage font-mono text-xs" data-focus={focusView ? "true" : undefined}>
+        {/* Focus mode hides the header: the stream gets the whole body, the tray stays. */}
+        {!focusView && (
+          <div
+            className="flex items-center px-4 flex-shrink-0 h-bar border-b border-line text-muted"
           >
-            <ArrowLeft size={12} className="rtl-mirror" />
-          </button>
-          <span style={{ flex: 1 }} className="flex items-center gap-1.5 text-accent">
-            {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
-            {channelName}
-          </span>
-          {headerActions && <div className="flex items-center gap-2">{headerActions}</div>}
-        </div>
+            <button
+              onClick={onBack}
+              aria-label={t("common:actions.back")}
+              className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-muted hover:text-accent"
+            >
+              <ArrowLeft size={12} className="rtl-mirror" />
+            </button>
+            <span style={{ flex: 1 }} className="flex items-center gap-1.5 text-accent">
+              {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
+              {channelName}
+            </span>
+            {headerActions && <div className="flex items-center gap-2">{headerActions}</div>}
+          </div>
+        )}
+
+        {stageLive && <SpeakingAnnouncer />}
 
         <div className="vs-body">
           {reconnecting && (
@@ -327,6 +355,12 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               {reconnecting.attempt > 1
                 ? t("stage.reconnectingAttempt", { attempt: reconnecting.attempt })
                 : t("stage.reconnecting")}
+            </div>
+          )}
+          {speakerUnavailable && !reconnecting && (
+            <div className="vs-notice" role="status" data-testid="voice-stage-speaker-unavailable">
+              <VolumeX size={13} />
+              {t("stage.speakerUnavailable")}
             </div>
           )}
           {sharePicking ? (
@@ -360,6 +394,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 </>
               )}
             </div>
+          ) : focusView ? (
+            <ScreenShareViewer tile={focusView} onClose={closeFocus} />
           ) : spotlight ? (
             <div className="vs-spotlight" data-testid="voice-channel-view">
               <div className="vs-spot-main">
@@ -395,6 +431,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 autoFocus={false}
                 minCellWidth={180}
                 maxCellWidth={240}
+                onActivate={onActivate}
                 renderCell={renderGridCell}
               />
             </>
@@ -490,6 +527,20 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               )}
             </div>
             <div className="vs-foot-side right">
+              {/* Grid ↔ spotlight only matters while someone streams. */}
+              {stageLive && streamers.length > 0 && !focusView && (
+                <button
+                  className={"vs-tray-btn" + (layout === "grid" ? " on" : "")}
+                  data-testid="voice-layout-toggle"
+                  data-layout={layout === "grid" ? "grid" : "spotlight"}
+                  title={layout === "grid" ? t("stage.layoutSpotlight") : t("stage.layoutGrid")}
+                  aria-label={layout === "grid" ? t("stage.layoutSpotlight") : t("stage.layoutGrid")}
+                  aria-pressed={layout === "grid"}
+                  onClick={() => setLayout(layout === "grid" ? "auto" : "grid")}
+                >
+                  {layout === "grid" ? <Focus size={15} /> : <LayoutGrid size={15} />}
+                </button>
+              )}
               <button
                 className="flex items-center gap-2 text-xs transition-colors text-muted hover:text-fg"
                 data-testid="voice-settings-link"

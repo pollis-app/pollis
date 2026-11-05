@@ -229,10 +229,18 @@ class AppStore implements AppState {
       gate: VOICE_GATE_INITIAL,
       // Assume a mic until the backend says otherwise via `mic_availability`.
       micAvailable: true,
+      speakerAvailable: true,
       reconnecting: null,
       share: { kind: 'idle' },
       camera: { kind: 'idle' },
     };
+  }
+
+  voiceSetSpeakerAvailable(available: boolean) {
+    if (this.voiceState.kind !== 'joined') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, speakerAvailable: available };
   }
 
   /** Mirror of the manager's reconnect state; `null` once the room is back. */

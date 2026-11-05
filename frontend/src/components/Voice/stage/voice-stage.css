@@ -5,9 +5,10 @@
    Rounded corners + accent-with-opacity are the only liberties.
 
    Ported from the design handoff but rewired onto the app's own
-   theme tokens (--c-*) so the stage tracks the user's accent/theme
-   instead of a hard-coded green. Only the red/amber status colors
-   are local constants (the app has no dedicated tokens for them).
+   theme tokens (--c-*) so the stage tracks the user's accent/theme;
+   status colours are the shared --c-danger / --c-warning tokens.
+   Scalable sizes are rem so the stage follows the font preference;
+   px is reserved for hairlines and bar widths.
    ============================================================ */
 
 .vs-stage {
@@ -23,9 +24,8 @@
    --vs-ink-dim: var(--c-text-dim);
    --vs-ink-faint: var(--c-text-muted);
 
-   --vs-red: hsl(0 70% 60%);
-   --vs-red-dim: hsl(0 70% 50% / 0.5);
-   --vs-amber: #f0c674;
+   --vs-red: var(--c-danger);
+   --vs-red-dim: color-mix(in srgb, var(--c-danger) 50%, transparent);
 
    /* Fixed footer height — keeps the tray row from shifting layout as it
      swaps between the not-joined Join button and the in-call tray. */
@@ -62,8 +62,50 @@
    min-height: 0;
    display: flex;
    flex-direction: column;
-   padding: 18px;
-   gap: 14px;
+   padding: 1.125rem;
+   gap: 0.875rem;
+}
+
+/* focus mode — one stream fills the body; a slim in-flow bar carries the label and close. */
+.vs-focus {
+   flex: 1;
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+}
+
+.vs-focus-bar {
+   flex: 0 0 auto;
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 0.5rem;
+   padding: 0 0.75rem;
+   height: 1.75rem;
+   font-size: 0.75rem;
+   color: var(--vs-ink-dim);
+   background: var(--vs-panel);
+   border-bottom: 1px solid var(--vs-line);
+}
+
+.vs-focus-close {
+   display: inline-flex;
+   align-items: center;
+   padding: 0;
+   background: none;
+   border: 0;
+   color: var(--vs-ink-dim);
+}
+
+.vs-focus-close:hover {
+   color: var(--c-accent);
+}
+
+.vs-focus-main {
+   flex: 1 1 auto;
+   min-height: 0;
+   display: flex;
+   padding: 0.5rem;
 }
 
 .vs-spot-main {
@@ -75,14 +117,14 @@
 .vs-film {
    flex: 0 0 auto;
    display: flex;
-   gap: 12px;
+   gap: 0.75rem;
    overflow-x: auto;
    padding: 2px;
 }
 
 .vs-film-cell {
-   flex: 0 0 208px;
-   width: 208px;
+   flex: 0 0 13rem;
+   width: 13rem;
    aspect-ratio: 16/10;
 }
 
@@ -169,6 +211,23 @@
    color: var(--c-accent);
 }
 
+/* "You're muted" — only while the local mic hears speech behind a mute (`data-talking-muted`). */
+.vs-muted-hint {
+   display: none;
+   margin-top: 0.5rem;
+   padding: 0.1875rem 0.5rem;
+   border-radius: 6px;
+   font-size: 0.6875rem;
+   letter-spacing: .04em;
+   color: var(--c-warning);
+   border: 1px solid color-mix(in srgb, var(--c-warning) 50%, transparent);
+   background: var(--vs-panel-2);
+}
+
+.vs-tile[data-talking-muted="true"] .vs-muted-hint {
+   display: inline-block;
+}
+
 /* live audio meter — BAND_COUNT bars driven by per-source levels via the
    --eqN custom properties (0..1, set on the element by LiveWaveform). Falls
    back to a fixed "glyph" shape until levels arrive. The bars are full height
@@ -215,54 +274,54 @@
    itself is of course never mirrored. */
 .vs-tl {
    position: absolute;
-   top: 8px;
-   inset-inline-start: 8px;
+   top: 0.5rem;
+   inset-inline-start: 0.5rem;
    z-index: 3;
    display: flex;
    align-items: center;
-   gap: 6px;
-   max-width: calc(100% - 16px);
+   gap: 0.375rem;
+   max-width: calc(100% - 1rem);
 }
 
 .vs-tr {
    position: absolute;
-   top: 8px;
-   inset-inline-end: 8px;
+   top: 0.5rem;
+   inset-inline-end: 0.5rem;
    z-index: 3;
    display: flex;
    align-items: center;
-   gap: 6px;
+   gap: 0.375rem;
 }
 
 .vs-bl {
    position: absolute;
-   bottom: 8px;
-   inset-inline-start: 8px;
+   bottom: 0.5rem;
+   inset-inline-start: 0.5rem;
    z-index: 3;
    display: flex;
    align-items: center;
-   gap: 6px;
+   gap: 0.375rem;
 }
 
 .vs-br {
    position: absolute;
-   bottom: 8px;
-   inset-inline-end: 8px;
+   bottom: 0.5rem;
+   inset-inline-end: 0.5rem;
    z-index: 3;
    display: flex;
    align-items: center;
-   gap: 6px;
+   gap: 0.375rem;
 }
 
 .vs-name {
    display: inline-flex;
    align-items: center;
-   gap: 6px;
+   gap: 0.375rem;
    background: var(--vs-panel-2);
    border: 1px solid var(--vs-line);
    border-radius: 6px;
-   padding: 3px 8px;
-   font-size: 12px;
+   padding: 0.1875rem 0.5rem;
+   font-size: 0.75rem;
    color: var(--vs-ink);
    max-width: 100%;
 }
@@ -293,26 +352,28 @@
    color: var(--vs-red);
 }
 
+/* `.vs-tag` / `.vs-sig` also draw outside the stage (voice bar, sidebar strip), so they read the
+   app tokens directly rather than the stage aliases. */
 .vs-tag {
    display: inline-flex;
    align-items: center;
-   gap: 5px;
-   background: var(--vs-panel-2);
-   border: 1px solid var(--vs-line);
+   gap: 0.3125rem;
+   background: var(--c-surface-raised);
+   border: 1px solid var(--c-border);
    border-radius: 6px;
-   padding: 3px 7px;
-   font-size: 11px;
-   color: var(--vs-ink-dim);
+   padding: 0.1875rem 0.4375rem;
+   font-size: 0.6875rem;
+   color: var(--c-text-dim);
    letter-spacing: .02em;
 }
 
 .vs-pad6 {
-   padding: 3px 6px;
+   padding: 0.1875rem 0.375rem;
 }
 
 .vs-tag.live {
-   color: var(--vs-red);
-   border-color: var(--vs-red-dim);
+   color: var(--c-danger);
+   border-color: color-mix(in srgb, var(--c-danger) 50%, transparent);
    font-weight: 600;
    letter-spacing: .08em;
 }
@@ -326,12 +387,12 @@
    display: flex;
    align-items: flex-end;
    gap: 2px;
-   height: 13px;
+   height: 0.8125rem;
 }
 
 .vs-sig i {
    width: 3px;
-   background: var(--vs-ink-faint);
+   background: var(--c-text-muted);
    border-radius: 1px;
 }
 
@@ -363,12 +424,12 @@
 .vs-sig.fair i:nth-child(1),
 .vs-sig.fair i:nth-child(2),
 .vs-sig.fair i:nth-child(3) {
-   background: var(--vs-amber);
+   background: var(--c-warning);
 }
 
 .vs-sig.poor i:nth-child(1),
 .vs-sig.poor i:nth-child(2) {
-   background: var(--vs-red);
+   background: var(--c-danger);
 }
 
 /* hover controls — opaque, instant (no scrim, no fade). Mouse-hover only. */
@@ -379,16 +440,22 @@
    display: none;
    align-items: center;
    justify-content: center;
-   gap: 10px;
+   gap: 0.625rem;
 }
 
-.vs-tile:hover .vs-hover {
+.vs-tile:hover .vs-hover,
+.vs-tile:focus-visible .vs-hover {
    display: flex;
 }
 
+.vs-tile:focus-visible {
+   outline: none;
+   border-color: var(--c-accent);
+}
+
 .vs-hbtn {
-   width: 38px;
-   height: 38px;
+   width: 2.375rem;
+   height: 2.375rem;
    border-radius: 8px;
    display: grid;
    place-items: center;
@@ -407,17 +474,17 @@
    directional meaning; it is left physical deliberately. */
 .vs-vol {
    position: absolute;
-   left: 8px;
-   right: 8px;
-   bottom: 8px;
+   left: 0.5rem;
+   right: 0.5rem;
+   bottom: 0.5rem;
    z-index: 4;
    display: none;
    align-items: center;
-   gap: 8px;
+   gap: 0.5rem;
    background: var(--vs-panel-2);
    border: 1px solid var(--vs-line);
    border-radius: 7px;
-   padding: 6px 9px;
+   padding: 0.375rem 0.5625rem;
 }
 
 .vs-tile:hover .vs-vol,
@@ -437,10 +504,9 @@
    height: calc(var(--vs-foot-h) - 1px);
    display: flex;
    align-items: center;
-   gap: 12px;
-   padding: 0 12px;
+   gap: 0.75rem;
+   padding: 0 0.75rem;
    border-top: 1px solid var(--c-border);
-
 }
 
 .vs-foot-side {
@@ -452,17 +518,18 @@
 
 .vs-foot-side.right {
    justify-content: flex-end;
+   gap: 0.75rem;
 }
 
 .vs-tray {
    display: flex;
    align-items: center;
-   gap: 6px;
+   gap: 0.375rem;
 }
 
 .vs-tray-btn {
-   width: 28px;
-   height: 28px;
+   width: 1.75rem;
+   height: 1.75rem;
    border-radius: 6px;
    display: grid;
    place-items: center;
@@ -512,26 +579,26 @@
 .vs-tray-leave {
    display: inline-flex;
    align-items: center;
-   gap: 6px;
-   height: 28px;
-   padding: 0 10px;
+   gap: 0.375rem;
+   height: 1.75rem;
+   padding: 0 0.625rem;
    border-radius: 6px;
    background: var(--vs-panel);
    border: 1px solid var(--vs-red-dim);
    color: var(--vs-red);
-   font-size: 12px;
+   font-size: 0.75rem;
    font-weight: 600;
    letter-spacing: .04em;
 }
 
 .vs-tray-leave:hover {
-   background: hsl(0 70% 50% / 0.12);
+   background: color-mix(in srgb, var(--c-danger) 12%, transparent);
    border-color: var(--vs-red);
 }
 
 .vs-tray-sep {
    width: 1px;
-   height: 18px;
+   height: 1.125rem;
    background: var(--vs-line);
    margin: 0 2px;
 }
@@ -541,8 +608,8 @@
 .vs-call-status {
    flex: 0 0 auto;
    text-align: center;
-   padding: 10px 12px;
-   font-size: 12px;
+   padding: 0.625rem 0.75rem;
+   font-size: 0.75rem;
    color: var(--vs-ink-dim);
    letter-spacing: .04em;
 }
@@ -563,11 +630,11 @@
    flex-direction: column;
    align-items: center;
    justify-content: center;
-   gap: 16px;
+   gap: 1rem;
 }
 
 .vs-preview-empty-label {
-   font-size: 12px;
+   font-size: 0.75rem;
    color: var(--vs-ink-dim);
 }
 
@@ -576,7 +643,7 @@
    display: flex;
    align-items: center;
    justify-content: center;
-   padding: 16px;
+   padding: 1rem;
 }
 
 /* scrollbars */

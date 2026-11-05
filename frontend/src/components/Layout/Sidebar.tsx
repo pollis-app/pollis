@@ -33,6 +33,7 @@ import { useSkin } from "../../hooks/queries/usePreferences";
 import { probeRender } from "../../utils/renderProbe";
 import { PresenceAvatar } from "../ui/PresenceAvatar";
 import { SidebarProfilePanel } from "./SidebarProfilePanel";
+import { VoiceChannelMembers } from "../Voice/VoiceChannelMembers";
 import { ResizeHandle } from "./ResizeHandle";
 import { usePanelWidth } from "./usePanelWidth";
 import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
@@ -211,10 +212,10 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                         ? unread
                         : null;
                     return (
-                      // Voice can auto-join (others see it), so stays on click (#1529).
+                      <React.Fragment key={ch.id}>
+                      {/* Voice can auto-join (others see it), so stays on click (#1529). */}
                       <Row
                         activateOn={isVoice ? "click" : "press"}
-                        key={ch.id}
                         indent={2}
                         isActive={isActive}
                         onClick={() =>
@@ -246,6 +247,11 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                           ) : null
                         }
                       />
+                      {/* Who is in the room, under the row (Discord); the roster is only fetched for non-empty rooms. */}
+                      {isVoice && (voiceCount > 0 || isActive) && (
+                        <VoiceChannelMembers channelId={ch.id} enabled={voiceCount > 0} />
+                      )}
+                      </React.Fragment>
                     );
                   })}
               </li>

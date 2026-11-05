@@ -13,4 +13,11 @@ export const SFX = {
   join: 'join',
   /** Another user left a voice channel. */
   leave: 'leave',
+  /** Self mute / unmute / deafen / undeafen cues (Discord's clicks). `play_sfx` ignores a name it has no asset for. */
+  mute: 'mute',
+  unmute: 'unmute',
+  deafen: 'deafen',
+  undeafen: 'undeafen',
 } as const;
+
+export type SfxName = (typeof SFX)[keyof typeof SFX];

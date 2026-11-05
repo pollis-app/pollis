@@ -63,6 +63,8 @@ export type VoiceState =
       gate: VoiceGateState;
       /** False when joined listen-only (no capture device). */
       micAvailable: boolean;
+      /** False when the speaker failed to open (`speaker_availability`). */
+      speakerAvailable: boolean;
       /** LiveKit is re-establishing the room; the session stays `joined` throughout. */
       reconnecting: { attempt: number } | null;
       share: ShareState;
