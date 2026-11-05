@@ -8,80 +8,111 @@ use super::types::AudioDevice;
 #[cfg(target_os = "linux")]
 const BLOCKED_ALSA: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
 
-/// cpal's ALSA enumeration OPENS every PCM it lists (hundreds of ms, seconds on
-/// a busy PipeWire box), and the join did it on every mic open. The list only
-/// changes when hardware does, so it is kept for a while and refreshed by the
-/// warmup, by `list_audio_devices`, and when a lookup misses.
+/// The ALSA PCMs cpal's `get_device(None)` picks from, best first. On a PipeWire box
+/// `pipewire` is the first hint that opens, so a scan that stops at it opens two PCMs,
+/// not every HDMI/USB one after it.
+#[cfg(target_os = "linux")]
+const PREFERRED_ALSA: &[&str] = &["pipewire", "pulse", "default"];
+
+/// cpal's ALSA enumeration OPENS every PCM it lists (hundreds of ms, seconds on a
+/// busy PipeWire box), and the join did that on every mic open. What is kept is only
+/// the NAMES (a `cpal::Device` holds open PCM handles, and idle PipeWire handles cost
+/// threads and memory); with the names known, the join scans lazily and stops at the
+/// best preferred PCM present. Refreshed by the warmup and `list_audio_devices`.
 #[cfg(target_os = "linux")]
 mod enum_cache {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    pub struct Snapshot {
+    pub struct Names {
         pub at: Instant,
-        pub input: Vec<cpal::Device>,
-        pub output: Vec<cpal::Device>,
+        pub input: Vec<String>,
+        pub output: Vec<String>,
     }
 
-    pub static CACHE: Mutex<Option<Snapshot>> = Mutex::new(None);
+    pub static CACHE: Mutex<Option<Names>> = Mutex::new(None);
     pub const TTL: Duration = Duration::from_secs(300);
 }
 
-/// The usable devices of one direction, from the cache when fresh.
+/// The cached names for one direction, if fresh.
 #[cfg(target_os = "linux")]
-fn enumerate_cached(host: &cpal::Host, is_input: bool, refresh: bool) -> Result<Vec<cpal::Device>> {
-    if !refresh {
-        let cache = enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(snap) = cache.as_ref().filter(|s| s.at.elapsed() < enum_cache::TTL) {
-            let list = if is_input { &snap.input } else { &snap.output };
-            return Ok(list.clone());
-        }
-    }
+fn cached_names(is_input: bool) -> Option<Vec<String>> {
+    let cache = enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    cache
+        .as_ref()
+        .filter(|n| n.at.elapsed() < enum_cache::TTL)
+        .map(|n| if is_input { n.input.clone() } else { n.output.clone() })
+}
+
+/// Full enumeration (every PCM opened and dropped again); only the names are kept.
+#[cfg(target_os = "linux")]
+fn refresh_names(host: &cpal::Host) -> Result<()> {
     let started = std::time::Instant::now();
-    let keep = |d: &cpal::Device| {
-        d.name()
-            .ok()
-            .map(|n| !BLOCKED_ALSA.contains(&n.as_str()))
-            .unwrap_or(true)
-    };
-    let input: Vec<cpal::Device> = host
-        .input_devices()
-        .map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
-        .filter(keep)
-        .collect();
-    let output: Vec<cpal::Device> = host
-        .output_devices()
-        .map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
-        .filter(keep)
-        .collect();
+    fn names(it: impl Iterator<Item = cpal::Device>) -> Vec<String> {
+        it.filter_map(|d| d.name().ok())
+            .filter(|n| !BLOCKED_ALSA.contains(&n.as_str()))
+            .collect()
+    }
+    let input = names(host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?);
+    let output = names(host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?);
     crate::diag!(
         "[voice] enumerated {} input / {} output devices in {:.0}ms (blocked filtered)",
         input.len(),
         output.len(),
         started.elapsed().as_secs_f64() * 1000.0
     );
-    let list = if is_input { input.clone() } else { output.clone() };
     *enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner()) =
-        Some(enum_cache::Snapshot { at: std::time::Instant::now(), input, output });
-    Ok(list)
+        Some(enum_cache::Names { at: std::time::Instant::now(), input, output });
+    Ok(())
 }
 
-/// Enumerate on a blocking thread now so the next join finds the list warm.
+/// Enumerate on a blocking thread now so the next join knows which PCM to stop at.
 pub(crate) fn warm_device_cache() {
     #[cfg(target_os = "linux")]
     {
         let fresh = {
             let cache = enum_cache::CACHE.lock().unwrap_or_else(|p| p.into_inner());
-            cache.as_ref().is_some_and(|s| s.at.elapsed() < enum_cache::TTL)
+            cache.as_ref().is_some_and(|n| n.at.elapsed() < enum_cache::TTL)
         };
         if fresh {
             return;
         }
         tokio::task::spawn_blocking(|| {
             let host = cpal::default_host();
-            let _ = enumerate_cached(&host, true, true);
+            let _ = refresh_names(&host);
         });
     }
+}
+
+/// The best preferred PCM a scan should stop at, or `None` when the names are unknown
+/// (then the scan stops at the first preferred one it meets).
+#[cfg(target_os = "linux")]
+fn preferred_target(names: &[String]) -> Option<&'static str> {
+    PREFERRED_ALSA.iter().copied().find(|p| names.iter().any(|n| n == p))
+}
+
+/// Walk the hints in order, opening as few PCMs as possible: stop at `target` (or
+/// the first preferred name when none is known); else the first useful device.
+#[cfg(target_os = "linux")]
+fn pick_lazily(iter: impl Iterator<Item = cpal::Device>, target: Option<&str>) -> Option<cpal::Device> {
+    let mut first_useful: Option<cpal::Device> = None;
+    for d in iter {
+        let Ok(name) = d.name() else { continue };
+        if BLOCKED_ALSA.contains(&name.as_str()) {
+            continue;
+        }
+        let hit = match target {
+            Some(t) => name == t,
+            None => PREFERRED_ALSA.contains(&name.as_str()),
+        };
+        if hit {
+            return Some(d);
+        }
+        if first_useful.is_none() && is_useful_device(&name) {
+            first_useful = Some(d);
+        }
+    }
+    first_useful
 }
 
 pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
@@ -92,21 +123,14 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
             // Linux: ALSA's default may be a virtual device (vdownmix) that crashes.
             #[cfg(target_os = "linux")]
             {
-                let preferred: &[&str] = &["pipewire", "pulse", "default"];
-
-                let devices = enumerate_cached(host, is_input, false)?;
-
-                let found = preferred.iter().find_map(|&pref| {
-                    devices.iter().position(|d| d.name().ok().as_deref() == Some(pref))
-                });
-                if let Some(idx) = found {
-                    devices.into_iter().nth(idx)
+                let names = cached_names(is_input);
+                let target = names.as_deref().and_then(preferred_target);
+                let iter = if is_input {
+                    host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
                 } else {
-                    // Else the first useful device (e.g. hw:CARD=...,DEV=0)
-                    devices
-                        .into_iter()
-                        .find(|d| d.name().ok().map(|n| is_useful_device(&n)).unwrap_or(false))
-                }
+                    host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
+                };
+                pick_lazily(iter, target)
             }
             #[cfg(target_os = "macos")]
             {
@@ -139,22 +163,11 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                     return get_device(host, None, is_input);
                 }
             }
-            // Linux: the cached list first; a miss (hot-plug) re-enumerates once.
-            #[cfg(target_os = "linux")]
-            let found = {
-                let by_name = |list: Vec<cpal::Device>| list.into_iter().find(|d| d.name().ok().as_deref() == Some(n));
-                match by_name(enumerate_cached(host, is_input, false)?) {
-                    Some(d) => Some(d),
-                    None => by_name(enumerate_cached(host, is_input, true)?),
-                }
-            };
-            #[cfg(not(target_os = "linux"))]
             let mut iter = if is_input {
                 host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             } else {
                 host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             };
-            #[cfg(not(target_os = "linux"))]
             let found = iter.find(|d| d.name().ok().as_deref() == Some(n));
             // macOS: HFP AirPods can vanish from output_devices(); try all scopes.
             #[cfg(target_os = "macos")]
@@ -281,9 +294,9 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     tokio::task::spawn_blocking(|| {
         let host = cpal::default_host();
         let mut devices = Vec::new();
-        // The settings page is where a newly plugged device is looked for: refresh the join's cache too.
+        // The settings page is where a newly plugged device is looked for: refresh the join's name cache too.
         #[cfg(target_os = "linux")]
-        let _ = enumerate_cached(&host, true, true);
+        let _ = refresh_names(&host);
 
         match host.input_devices() {
             Ok(inputs) => {
