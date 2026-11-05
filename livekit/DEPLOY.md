@@ -286,6 +286,59 @@ touches the stack.
   ```
   Renewal is `--standalone` too, so the timer needs nginx off port 80 for the
   moment it runs; if renewals start failing, switch the lineage to `--webroot`.
+
+  **How the served chain is produced.** nginx serves
+  `/etc/letsencrypt/live/rtc.pollis.com/fullchain.pem` verbatim on both SNIs;
+  certbot writes that file at every renewal from the chain the ACME server
+  returns, so the chain is a property of the *lineage's renewal config*
+  (`/etc/letsencrypt/renewal/rtc.pollis.com.conf`), not of anything in this
+  repo. Let's Encrypt's default ECDSA chain today is **four** certificates —
+  leaf ← `YE2` ← `ISRG Root YE` (cross-signed by `ISRG Root X2`) ← `ISRG Root
+  X2` (cross-signed by `ISRG Root X1`), 4,884 bytes on the wire; the last one
+  (2,160 bytes) exists only for clients that trust X1 but not X2. The
+  shorter alternative is the X2-anchored chain (drops that last cert), chosen
+  by certbot's `--preferred-chain`, which persists across renewals once it is
+  in the renewal config:
+  ```bash
+  # /etc/letsencrypt/renewal/rtc.pollis.com.conf, under [renewalparams]:
+  preferred_chain = ISRG Root X2
+  # then re-issue once (standalone needs port 80, as above):
+  cd /root/livekit && docker compose stop nginx
+  certbot renew --cert-name rtc.pollis.com --force-renewal
+  docker compose start nginx
+  # verify: 3 certs, topmost issued by ISRG Root X2
+  echo | openssl s_client -connect rtc.pollis.com:443 -servername rtc.pollis.com -showcerts 2>/dev/null | grep -c 'BEGIN CERT'
+  ```
+  (`certbot certonly … --preferred-chain "ISRG Root X2"` does the same on a
+  fresh box; a preference that matches no offered chain falls back to the
+  default with a warning, so it cannot leave the lineage without a cert.)
+
+  **Decide before applying it.** Per Let's Encrypt's compatibility list, ISRG
+  Root X2 is trusted *directly* only by Android ≥ 14, iOS ≥ 16 / macOS ≥ 13,
+  Firefox ≥ 97 and Windows with root auto-update. Desktop Pollis verifies
+  through rustls' bundled Mozilla roots (`livekit` crate feature
+  `rustls-tls-webpki-roots`), which include X2 — fine. The mobile app's
+  realtime rooms, however, connect through the native LiveKit SDK on the **OS
+  trust store**: iOS ≥ 16.4 (the app's floor) is fine, but an **Android 7–13
+  phone would fail TLS to `rtc.pollis.com`** and lose every realtime room.
+  The saving is ~2 KB of the first handshake per connection — about one TCP
+  segment within the initial congestion window, nowhere near a round trip.
+  Recommendation: leave the default (X1-anchored) chain until the mobile
+  Android floor is 14, and note the choice here when it changes. Rollback is
+  removing the `preferred_chain` line and renewing again.
+
+  **Session resumption.** Both TLS terminators in `nginx.conf` keep sessions
+  for a day (`ssl_session_timeout 1d`, shared caches `SSL_WEB` / `SSL_TURN`,
+  tickets on) so the app's start-up warmup still pays off at join time; nginx's
+  default was five minutes. Check it is live:
+  ```bash
+  echo | openssl s_client -connect rtc.pollis.com:443 -servername rtc.pollis.com -sess_out /tmp/s 2>/dev/null | grep -i 'session-id\|lifetime'
+  sleep 400   # past the old 5-minute window
+  echo | openssl s_client -connect rtc.pollis.com:443 -servername rtc.pollis.com -sess_in /tmp/s 2>/dev/null | grep -i 'reused'
+  ```
+  `TLS session ticket lifetime hint: 86400` and `Reused, TLSv1.3` are the pass
+  conditions. A reload regenerates the ticket key, so outstanding tickets stop
+  resuming after a cert renewal — expected, one full handshake per client.
 - **DNS:** `turn.pollis.com` needs an **A record straight to the VPS
   (`31.97.140.76`), DNS-only — no Cloudflare proxy.** A proxied record resolves
   to Cloudflare, which does not speak TURN. The deploy workflow refuses to run
