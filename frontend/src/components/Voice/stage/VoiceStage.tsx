@@ -62,6 +62,9 @@ function sameTileModel(a: StageTileModel, b: StageTileModel): boolean {
   );
 }
 
+/** Stable key accessor: an inline arrow would defeat the grid's memo on every stage render. */
+const tileKeyOf = (p: StageTileModel): string => p.tileKey;
+
 /** Which stream a tile model carries, or null for an audio-only tile. */
 function trackKeyOf(p: StageTileModel): string | null {
   return p.media.kind === "audio" ? null : p.media.trackKey;
@@ -380,7 +383,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 <>
                   <NavigableGrid<StageTileModel>
                     items={previewPeople}
-                    getKey={(p) => p.tileKey}
+                    getKey={tileKeyOf}
                     autoFocus={false}
                     minCellWidth={180}
                     maxCellWidth={240}
@@ -425,7 +428,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               )}
               <NavigableGrid<StageTileModel>
                 items={people}
-                getKey={(p) => p.tileKey}
+                getKey={tileKeyOf}
                 testId="voice-channel-view"
                 emptyLabel={callMode ? t("stage.calling") : t("stage.connecting")}
                 autoFocus={false}
