@@ -38,6 +38,9 @@ import { loadDeviceCallRingtone } from "../../utils/notify";
 import { logIgnored } from "../../utils/log";
 import { probeRender } from "../../utils/renderProbe";
 import { usePreferences } from "../../hooks/queries/usePreferences";
+
+// Longer than the caller's own 30 s ring (Call.tsx) so a healthy cancel always wins.
+const INCOMING_RING_TIMEOUT_MS = 45_000;
 import { voiceSession } from "../../voice";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { useGlobalShortcut } from "../../keyboard";
@@ -114,6 +117,20 @@ export const AppShell: React.FC = observer(() => {
   const skin = useSkin();
   // Panel state lives in `useRightPanel`; only the toggle is needed here.
   const { toggle: toggleRightPanel } = useRightPanel();
+
+  // A ring the caller's cancel never reached (lost packet, caller crashed) must still end.
+  useEffect(() => {
+    if (!incomingCall) {
+      return;
+    }
+    const { callId } = incomingCall;
+    const timer = setTimeout(() => {
+      if (appStore.incomingCall?.callId === callId) {
+        appStore.setIncomingCall(null);
+      }
+    }, INCOMING_RING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [incomingCall]);
 
   // Ringtone loop runs in Rust; needs both the ringtone toggle and allow_sound_effects.
   useEffect(() => {

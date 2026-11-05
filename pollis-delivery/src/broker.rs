@@ -704,22 +704,34 @@ pub async fn livekit_send_data(
         return Ok(not_configured("livekit"));
     }
     match room_send_data(&state, &parsed.room, &payload).await {
-        Ok(()) => Ok(ok_response::<LivekitSendDataBody>(LivekitSendDataResponse { ok: true })),
+        Ok(outcome) => Ok(ok_response::<LivekitSendDataBody>(LivekitSendDataResponse {
+            ok: true,
+            delivered: Some(outcome == SendOutcome::Delivered),
+        })),
         Err(e) => Ok(bad_gateway(e)),
     }
 }
 
+/// What became of an accepted `SendData`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// LiveKit took it for a hosted room.
+    Delivered,
+    /// Nobody is in the room (or it does not exist); nothing was fanned out.
+    RoomEmpty,
+}
+
 /// Fan out a JSON control payload to a LiveKit room via server-side
 /// `RoomService/SendData`. A room with no participants (a 404, or the 503
-/// [`send_data_room_is_empty`] recognises) is treated as success, matching the
-/// fire-and-forget nudge semantics.
+/// [`send_data_room_is_empty`] recognises) is accepted as [`SendOutcome::RoomEmpty`]:
+/// a nudge has nobody to reach, but a ring must know its callee was absent.
 ///
 /// Shared with server-side emitters (e.g. `bootstrap::enrollment_request`, whose pre-enrollment device cannot sign).
 pub async fn room_send_data(
     state: &AppState,
     room: &str,
     payload: &serde_json::Value,
-) -> Result<(), String> {
+) -> Result<SendOutcome, String> {
     let (api_key, api_secret, url) = state
         .broker
         .livekit_ready()
@@ -743,7 +755,8 @@ pub async fn room_send_data(
         .await;
 
     match sent {
-        Ok(r) if r.status().is_success() || r.status() == StatusCode::NOT_FOUND => Ok(()),
+        Ok(r) if r.status().is_success() => Ok(SendOutcome::Delivered),
+        Ok(r) if r.status() == StatusCode::NOT_FOUND => Ok(SendOutcome::RoomEmpty),
         Ok(r) => {
             let status = r.status();
             let text = r.text().await.unwrap_or_default();
@@ -756,7 +769,7 @@ pub async fn room_send_data(
                     route = "livekit.RoomService/SendData",
                     "livekit: no server for room (empty or unhosted); nudge treated as delivered"
                 );
-                return Ok(());
+                return Ok(SendOutcome::RoomEmpty);
             }
             Err(format!("SendData {status}: {text}"))
         }

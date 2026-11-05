@@ -353,7 +353,14 @@ pub struct StartCallResult {
     pub room_name: String,
 }
 
-/// Start a 1:1 call: mint a room and ring the callee's inbox (offline = missed).
+/// The error a `start_call` returns when the callee had no device online to ring.
+/// The renderer matches the exact prefix, like `device_revoked`.
+pub const CALL_UNREACHABLE: &str = "call_unreachable";
+
+/// Start a 1:1 call: mint a room and ring the callee's inbox.
+///
+/// Awaits the DS's answer so a refused ring (403) or an empty inbox (nobody
+/// online) is an error here, not a call page ringing at nobody.
 ///
 /// Doesn't join the caller; the frontend does that after this returns.
 pub async fn start_call(
@@ -377,12 +384,22 @@ pub async fn start_call(
         "caller_username": caller_username,
     });
 
-    publish_to_user_inbox(state, &callee_id, payload).await?;
+    let inbox = format!("inbox-{callee_id}");
+    let delivered =
+        crate::commands::mls::ds_livekit_send_data_delivered(state, &inbox, payload).await?;
+    if !delivered {
+        return Err(Error::Other(anyhow::anyhow!(
+            "{CALL_UNREACHABLE}: no device of the callee is online"
+        )));
+    }
 
     Ok(StartCallResult { call_id, room_name })
 }
 
 /// Tell the other party a pending call ended (hung up or declined).
+///
+/// Idempotent on the receiver, so a transient DS failure is retried once; a
+/// lost cancel is a callee ringing at nobody.
 pub async fn cancel_call(
     other_user_id: String,
     call_id: String,
@@ -397,10 +414,38 @@ pub async fn cancel_call(
         "call_id": call_id,
     });
 
-    publish_to_user_inbox(state, &other_user_id, payload).await?;
-
-    Ok(())
+    let inbox = format!("inbox-{other_user_id}");
+    match crate::commands::mls::ds_livekit_send_data(state, &inbox, payload.clone()).await {
+        Ok(()) => Ok(()),
+        Err(first) if is_transient_ds_error(&first) => {
+            crate::diag!("[call] cancel_call: transient DS failure, retrying once: {first}");
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            crate::commands::mls::ds_livekit_send_data(state, &inbox, payload).await
+        }
+        Err(e) => Err(e),
+    }
 }
+
+/// A failure the next attempt might not repeat: the link, not the request.
+fn is_transient_ds_error(e: &Error) -> bool {
+    match e {
+        Error::Network(_) => true,
+        Error::Other(inner) => {
+            if let Some(refused) = inner.downcast_ref::<crate::commands::mls::ds_client::DsRefused>() {
+                return refused.status.is_server_error();
+            }
+            let text = inner.to_string();
+            text.contains("error sending request")
+                || text.contains("timed out")
+                || text.contains("connection refused")
+                || text.contains(" 502")
+                || text.contains(" 503")
+                || text.contains(" 504")
+        }
+        _ => false,
+    }
+}
+
 
 /// Tell this user's other devices to stop ringing (`call_canceled` to own inbox).
 ///
@@ -422,4 +467,29 @@ pub async fn dismiss_call_on_my_devices(
     publish_to_user_inbox(state, &user_id, payload).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod cancel_retry_tests {
+    use super::*;
+
+    #[test]
+    fn only_link_failures_and_5xx_are_retried() {
+        let transient = [
+            Error::Other(anyhow::anyhow!("error sending request for url (http://ds)")),
+            Error::Other(anyhow::anyhow!("ds_livekit_send_data 503 Service Unavailable: no server")),
+            Error::Other(anyhow::anyhow!("request timed out")),
+        ];
+        for e in transient {
+            assert!(is_transient_ds_error(&e), "{e}");
+        }
+        let final_ = [
+            Error::Other(anyhow::anyhow!("ds_livekit_send_data 403 Forbidden: not allowed")),
+            Error::Other(anyhow::anyhow!("no active user for DS request signing")),
+            Error::DeviceRevoked,
+        ];
+        for e in final_ {
+            assert!(!is_transient_ds_error(&e), "{e}");
+        }
+    }
 }

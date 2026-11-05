@@ -490,8 +490,12 @@ mod tests {
             r#"{"token":"jwt","url":"wss://sfu"}"#,
         );
         round_trip(
-            &broker::LivekitSendDataResponse { ok: true },
+            &broker::LivekitSendDataResponse { ok: true, delivered: None },
             r#"{"ok":true}"#,
+        );
+        round_trip(
+            &broker::LivekitSendDataResponse { ok: true, delivered: Some(false) },
+            r#"{"ok":true,"delivered":false}"#,
         );
         round_trip(
             &broker::R2PresignResponse {

@@ -26,6 +26,7 @@ import { keyChangeNoticeKeys, peerVerificationKeys } from './queries/useUserProf
 import { listPendingEnrollmentRequests } from '../services/api';
 import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
 import i18n from '../i18n';
+import { warmVoiceChannel } from '../utils/voiceWarmup';
 
 // Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
 type RealtimeEvent =
@@ -546,6 +547,8 @@ export function useLiveKitRealtime() {
           callerId: event.caller_id,
           callerUsername: event.caller_username,
         });
+        // Accepting is the likely next click; have the room's token ready for it.
+        warmVoiceChannel(event.room_name);
         notify('incoming_call', {
           title: i18n.t('voice:notify.incomingCallTitle'),
           body: i18n.t('voice:notify.incomingCallBody', { name: event.caller_username }),

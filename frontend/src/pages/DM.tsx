@@ -21,6 +21,7 @@ import { PressButton } from "../components/ui/PressButton";
 import { PillButton } from "../components/ui/PillButton";
 import { ConversationHeader } from "../components/Layout/ConversationHeader";
 import { activeCallIdOf, voiceCounterpartyUserId } from "../types/voice-state";
+import { errorMessage } from "../utils/errorMessage";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -143,6 +144,13 @@ export const DMPage: React.FC = observer(() => {
       navigate({ to: "/call/$callId", params: { callId: result.call_id } });
     } catch (err) {
       console.error("[call] start_call failed:", err);
+      // `call_unreachable` is the exact prefix pollis-core returns when no device was there to ring.
+      const message = errorMessage(err);
+      appStore.setVoiceError(
+        message.startsWith("call_unreachable")
+          ? t("voice:call.unreachable")
+          : t("voice:joinError.generic"),
+      );
     }
   };
 

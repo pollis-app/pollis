@@ -111,6 +111,11 @@ pub struct LivekitTokenResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LivekitSendDataResponse {
     pub ok: bool,
+    /// `Some(false)` when LiveKit reported the room empty or unhosted: accepted,
+    /// but nobody was there to receive it (a ring to an offline callee). Absent
+    /// from a DS that predates the field, which a client reads as delivered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<bool>,
 }
 
 /// One opaque LiveKit participant identity, resolved back to a Pollis user
