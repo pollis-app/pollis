@@ -51,6 +51,7 @@ fuzzing = []
 # it — preserving today's platform matrix exactly.
 media = [
     "dep:livekit",
+    "dep:livekit-signaling",
     "dep:libwebrtc",
     "dep:cpal",
     "dep:rodio",
@@ -274,6 +275,9 @@ verifiable-log-serve = { path = "../verifiable-log-serve", default-features = fa
 # - livekit/libwebrtc: Rust LiveKit realtime/media engine.
 # - cpal/rodio: host audio I/O for voice + sound effects.
 livekit = { version = "0.9", features = ["rustls-tls-webpki-roots"], optional = true }
+# `SignalError` is not re-exported by `livekit`; the join path matches on it to tell a
+# rejected token (401/403) from an unreachable SFU. Already in the lockfile via livekit.
+livekit-signaling = { version = "0.1", optional = true }
 libwebrtc = { version = "0.3", optional = true }
 cpal = { version = "0.15", optional = true }
 rodio = { version = "0.19", default-features = false, features = ["wav"], optional = true }

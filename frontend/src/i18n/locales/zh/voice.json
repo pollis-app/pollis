@@ -95,7 +95,8 @@
     "deleting": "删除中…"
   },
   "call": {
-    "defaultTitle": "通话"
+    "defaultTitle": "通话",
+    "unreachable": "对方目前无法接通 — 其所有设备均不在线。"
   },
   "settings": {
     "title": "语音与视频",
@@ -167,7 +168,14 @@
   },
   "joinError": {
     "unreachable": "无法连接到语音服务器 — 请检查网络后重试。",
-    "notConfigured": "此服务器未配置语音功能。"
+    "notConfigured": "此服务器未配置语音功能。",
+    "notMember": "你已不再是此频道的成员。",
+    "noMlsGroup": "此对话的密钥尚未同步到此设备 — 先打开一次对话，然后重试。",
+    "tokenRejected": "语音服务器拒绝了此设备的凭据。请稍后重试。",
+    "publishFailed": "已连接，但无法发布麦克风。请重试。",
+    "deadline": "加入耗时过长，已放弃。请重试。",
+    "busy": "已有语音会话正在进行。",
+    "generic": "无法加入语音。请重试。"
   },
   "shareError": {
     "cancelled": "屏幕共享已取消 — 未选择窗口或屏幕。",
