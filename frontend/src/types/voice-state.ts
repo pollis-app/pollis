@@ -53,6 +53,8 @@ export type VoiceState =
       channelId: string;
       /** Other user in a 1:1 call (`call-*` room); null otherwise. */
       counterpartyUserId: string | null;
+      /** Mute/deafen chosen while connecting; carried into `joined` and replayed onto Rust by the manager. */
+      gate: VoiceGateState;
     }
   | {
       kind: 'joined';
@@ -191,7 +193,7 @@ export function cameraOf(s: VoiceState): CameraState {
 }
 
 export function gateOf(s: VoiceState): VoiceGateState {
-  return s.kind === 'joined' ? s.gate : VOICE_GATE_INITIAL;
+  return s.kind === 'joined' || s.kind === 'joining' ? s.gate : VOICE_GATE_INITIAL;
 }
 
 export function isCameraActive(s: VoiceState): boolean {

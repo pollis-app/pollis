@@ -288,8 +288,10 @@ channel). All of them read `appStore.voiceState` / `voiceParticipants`, which
   rolled back, never left standing (`e2e/voice-feel.spec.ts`, the #888 case in
   `e2e/voice-sidebar-parity.spec.ts`). `phase: 'joining'` is set synchronously in
   `setIntent`, so the stage, the `.vs-foot` tray and the status flip before any IPC; the tray
-  renders through `joining` with its controls parked and Leave live, and leaving mid-join
-  shows idle at once (Rust is torn down when the join returns or A1's deadline fires).
+  renders through `joining`: mute and deafen work (drawn at once, replayed onto Rust once the
+  room is up, since Rust's join resets the gate), camera/share are parked, Leave is live, and
+  leaving mid-join shows idle at once (Rust is torn down when the join returns or A1's deadline
+  fires).
 - **Busy pills.** `isMediaBusy()` (`types/voice-state.ts`) draws a spinner and `data-busy` on
   the camera / screenshare pills for `enumerating` (set by the actions) and `starting`.
 - **Reconnect.** `reconnecting { attempt }` / `reconnected` events keep the session `joined`:

@@ -212,11 +212,15 @@ function clientPorts(index = 0) {
 // Spawn tauri-driver + a webdriverio session for one client; `appEnv` is the app's full env.
 async function startClient({ index = 0, appEnv, settleMs = 6000, label = `client${index}` }) {
   const { driverPort, nativePort } = clientPorts(index);
-  console.log(`[e2e] ${label}: tauri-driver :${driverPort} (native :${nativePort})`);
+  // On a PipeWire host start-audio.sh pins each client's ALSA devices through its own
+  // $XDG_CONFIG_HOME (see that script); without it a client opens the host's real mic/speaker.
+  const xdg = process.env[index === 0 ? "POLLIS_E2E_XDG_A" : "POLLIS_E2E_XDG_B"];
+  const env = xdg ? { ...appEnv, XDG_CONFIG_HOME: xdg } : appEnv;
+  console.log(`[e2e] ${label}: tauri-driver :${driverPort} (native :${nativePort})${xdg ? ` audio via ${xdg}` : ""}`);
   const tauriDriver = spawn(
     TAURI_DRIVER,
     ["--port", String(driverPort), "--native-port", String(nativePort)],
-    { stdio: ["ignore", "inherit", "inherit"], env: appEnv }
+    { stdio: ["ignore", "inherit", "inherit"], env }
   );
   await waitPort(driverPort, "127.0.0.1", 15000);
 

@@ -135,6 +135,31 @@ for (const skin of SKINS) {
       await expect.poll(() => invokeCount(page, "toggle_voice_mute")).toBe(2);
     });
 
+    test("a deafen clicked while still connecting shows at once and lands once the room is up", async ({ page }) => {
+      await boot(page, skin);
+      await openVoiceChannel(page);
+      await hold(page, "join_voice_channel");
+      await page.getByTestId("voice-join-cta").click();
+      const mute = page.getByTestId("voice-tray-mute");
+      const deafen = page.getByTestId("voice-tray-deafen");
+      await expect(page.locator(".vs-foot")).toHaveAttribute("data-phase", "joining");
+
+      await deafen.click();
+      await expect(deafen).toHaveAttribute("data-deafened", "true");
+      await expect(mute).toHaveAttribute("data-mic-state", "deafened");
+      // Nothing reaches Rust until the join returns: its join would reset the gate underneath us.
+      expect(await invokeCount(page, "toggle_voice_deafen")).toBe(0);
+
+      await release(page, "join_voice_channel");
+      await expect(page.locator(".vs-foot")).toHaveAttribute("data-phase", "joined");
+      await expect.poll(() => invokeCount(page, "toggle_voice_deafen")).toBe(1);
+      // Rust agrees (the mock's gate deafened on the replay), so the state holds after the sync.
+      await expect(deafen).toHaveAttribute("data-deafened", "true");
+      await expect(mute).toHaveAttribute("data-mic-state", "deafened");
+      await deafen.click();
+      await expect(mute).toHaveAttribute("data-mic-state", "live");
+    });
+
     test("deafen predicts its mute and the undeafen restores what was there", async ({ page }) => {
       await boot(page, skin);
       await openVoiceChannel(page);
@@ -160,10 +185,11 @@ for (const skin of SKINS) {
 
       await hold(page, "join_voice_channel");
       await page.getByTestId("voice-join-cta").click();
-      // Same frame as the click: tray present, controls parked, Leave live, local tile connecting.
+      // Same frame as the click: tray present, media parked, mute/deafen/Leave live, local tile connecting.
       const foot = page.locator(".vs-foot");
       await expect(foot).toHaveAttribute("data-phase", "joining");
-      await expect(page.getByTestId("voice-tray-mute")).toBeDisabled();
+      await expect(page.getByTestId("voice-tray-screenshare")).toBeDisabled();
+      await expect(page.getByTestId("voice-tray-mute")).toBeEnabled();
       await expect(page.getByTestId("voice-tray-leave")).toBeEnabled();
       await expect(page.getByTestId(`voice-tile-connecting-${LOCAL_IDENTITY}`)).toBeVisible();
 

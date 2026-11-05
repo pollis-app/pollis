@@ -441,8 +441,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           )}
         </div>
 
-        {/* The tray mounts with the join (not after it) so the footer never jumps in late, and Leave
-            stays reachable while connecting; a `footer` override always renders. */}
+        {/* The tray mounts with the join (not after it) so the footer never jumps in late; mute,
+            deafen and Leave work while connecting (camera/share need the room); a `footer` override
+            always renders. */}
         {footer ? (
           footer
         ) : voiceState.kind === "joined" || voiceState.kind === "joining" ? (
@@ -463,7 +464,6 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
                       aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
                       aria-pressed={micIndicator === "muted" || micIndicator === "deafened"}
-                      disabled={isJoining}
                       onClick={() => voiceSession.toggleMute()}
                     >
                       {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -491,7 +491,6 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     title={t(deafenControlTitleKey(gate.deafened))}
                     aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
                     aria-pressed={gate.deafened}
-                    disabled={isJoining}
                     onClick={() => voiceSession.toggleDeafen()}
                   >
                     {gate.deafened ? <VolumeX size={15} /> : <Volume2 size={15} />}

@@ -13,7 +13,7 @@ import { joinErrorMessageKey, legacyJoinErrorKey, parseVoiceJoinError } from './
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
 import { audioLevels, type AudioBandsEntry } from './audioLevels';
-import { audioSetMuted, audioSetSpeaking } from './participantAudio';
+import { audioSetMuted, audioSetSpeaking, isMuted } from './participantAudio';
 import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
 import { COALESCED_GATE_COMMANDS, predictGate, type GateCommand } from './gatePredict';
 
@@ -185,6 +185,8 @@ class VoiceSessionManager {
   private gateInFlight = new Set<GateCommand>();
   /** The explicit mute in force when we deafened, for predicting the undeafen (`TransmitGate::muted_before_deafen`). */
   private mutedBeforeDeafen: boolean | null = null;
+  /** Mute/deafen clicks made while still joining: drawn now, replayed onto Rust once the room is up (its join resets the gate). */
+  private preJoinGate: GateCommand[] = [];
 
   /** Subscribe to state changes. Returns an unsubscribe function. */
   subscribe(listener: Listener): () => void {
@@ -233,6 +235,7 @@ class VoiceSessionManager {
       // Rust cancels an in-flight join at its next phase; the pending join then rejects as
       // cancelled, which `executeJoin` drops because the intent moved on.
       invoke('leave_voice_channel').catch(logIgnored);
+      this.preJoinGate = [];
       this.localIdentity = null;
       this.setState({
         phase: 'idle',
@@ -302,15 +305,25 @@ class VoiceSessionManager {
   private applyGate(
     command: GateCommand,
     args?: Record<string, unknown>,
-    opts?: { requireJoined?: boolean },
+    opts?: { requireJoined?: boolean; replay?: boolean },
   ): Promise<void> {
+    // Discord lets you mute/deafen while connecting: the toggle shows at once and lands after the join.
+    if (this.state.phase === 'joining' && COALESCED_GATE_COMMANDS.has(command)) {
+      const predicted = predictGate(this.state.gate, command, args, this.mutedBeforeDeafen);
+      if (predicted) {
+        this.adoptGate(predicted);
+        this.preJoinGate.push(command);
+      }
+      return Promise.resolve();
+    }
     if ((opts?.requireJoined ?? true) && this.state.phase !== 'joined') {
       return Promise.resolve();
     }
-    if (COALESCED_GATE_COMMANDS.has(command) && this.gateInFlight.has(command)) {
+    if (!opts?.replay && COALESCED_GATE_COMMANDS.has(command) && this.gateInFlight.has(command)) {
       return this.gateChain;
     }
-    const predicted = predictGate(this.state.gate, command, args, this.mutedBeforeDeafen);
+    // A replayed pre-join toggle was already drawn; predicting again would undo it.
+    const predicted = opts?.replay ? null : predictGate(this.state.gate, command, args, this.mutedBeforeDeafen);
     if (predicted) {
       this.adoptGate(predicted);
     }
@@ -500,6 +513,7 @@ class VoiceSessionManager {
     // The device id is normally cached (see `configure`); until it is, the local tile is provisional.
     const provisionalIdentity = this.localVoiceIdentity(userId);
     this.localIdentity = provisionalIdentity;
+    this.preJoinGate = [];
     this.setState({
       phase: 'joining',
       channelId: target.channelId,
@@ -536,6 +550,8 @@ class VoiceSessionManager {
     try {
       await invoke('join_voice_channel', {
         channelId: target.channelId,
+        // Lets Rust skip the MLS-group resolve round-trip (A1); ignored by builds that predate it.
+        groupId: target.groupId,
         userId,
         displayName,
         inputDevice: input,
@@ -602,7 +618,13 @@ class VoiceSessionManager {
     this.current = { intent: target, userId, displayName };
     this.setState({ phase: 'joined' });
 
-    // Adopt Rust's gate: a reload mid-call leaves this mirror stale.
+    // Land the toggles made while connecting, in order, then adopt Rust's gate (a reload mid-call
+    // leaves this mirror stale). All on the one chain, so the sync can't overtake a replay.
+    const replay = this.preJoinGate;
+    this.preJoinGate = [];
+    for (const command of replay) {
+      void this.applyGate(command, undefined, { replay: true });
+    }
     void this.syncGate();
 
     const intentToInvokeMs = Math.round(performance.now() - intentTs);
@@ -720,13 +742,17 @@ class VoiceSessionManager {
 
     switch (event.type) {
       case 'participant_joined': {
+        // An upsert: the seed roster is re-sent with avatars (and after a reconnect), so what the
+        // room already told us about this participant survives.
+        const prev = this.state.participants.find((p) => p.identity === event.identity);
         const next: VoiceParticipant = {
           identity: event.identity,
           name: event.name,
-          audio: event.is_muted ? { kind: 'muted' } : { kind: 'idle' },
+          audio: event.is_muted ? { kind: 'muted' } : prev && !isMuted(prev.audio) ? prev.audio : { kind: 'idle' },
           video: preservedVideo(this.state.participants, event.identity),
           isLocal: event.identity === localIdentity,
-          avatarKey: event.avatar_url ?? null,
+          avatarKey: event.avatar_url ?? prev?.avatarKey ?? null,
+          connectionQuality: prev?.connectionQuality,
         };
         this.setState({ participants: upsertParticipant(this.state.participants, next) });
         break;
@@ -961,6 +987,11 @@ voiceSession.subscribe(() => {
       } else if (v.kind === 'joining' && s.channelId && (v.channelId !== s.channelId || v.counterpartyUserId !== s.counterpartyUserId)) {
         store.voiceLeft();
         store.voiceStartJoining(s.channelId, s.counterpartyUserId);
+      }
+      // A mute/deafen chosen while connecting draws now (the store's `joining` carries the gate).
+      if (appStore.voiceState.kind === 'joining' && mirroredGate !== s.gate) {
+        mirroredGate = s.gate;
+        store.voiceSetGate(s.gate);
       }
       break;
     }

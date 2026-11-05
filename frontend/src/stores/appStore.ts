@@ -211,7 +211,7 @@ class AppStore implements AppState {
       console.warn('[voiceState] voiceStartJoining ignored:', this.voiceState.kind);
       return;
     }
-    this.voiceState = { kind: 'joining', channelId, counterpartyUserId };
+    this.voiceState = { kind: 'joining', channelId, counterpartyUserId, gate: VOICE_GATE_INITIAL };
     this.voiceError = null;
   }
 
@@ -220,13 +220,13 @@ class AppStore implements AppState {
       console.warn('[voiceState] voiceJoined ignored:', this.voiceState.kind);
       return;
     }
-    const { channelId, counterpartyUserId } = this.voiceState;
+    const { channelId, counterpartyUserId, gate } = this.voiceState;
     this.voiceState = {
       kind: 'joined',
       channelId,
       counterpartyUserId,
-      micMuted: false,
-      gate: VOICE_GATE_INITIAL,
+      micMuted: gate.self_muted,
+      gate,
       // Assume a mic until the backend says otherwise via `mic_availability`.
       micAvailable: true,
       speakerAvailable: true,
@@ -279,12 +279,13 @@ class AppStore implements AppState {
     this.voiceState = { ...this.voiceState, micMuted: muted };
   }
 
-  /** Mirror the Rust-owned gate snapshot (#849); `micMuted` follows it. */
+  /** Mirror the Rust-owned gate snapshot (#849); `micMuted` follows it. While `joining` it is the manager's prediction. */
   voiceSetGate(gate: VoiceGateState) {
-    if (this.voiceState.kind !== 'joined') {
-      return;
+    if (this.voiceState.kind === 'joined') {
+      this.voiceState = { ...this.voiceState, gate, micMuted: gate.self_muted };
+    } else if (this.voiceState.kind === 'joining') {
+      this.voiceState = { ...this.voiceState, gate };
     }
-    this.voiceState = { ...this.voiceState, gate, micMuted: gate.self_muted };
   }
 
   voiceSetMicAvailable(available: boolean) {

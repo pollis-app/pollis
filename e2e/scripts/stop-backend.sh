@@ -42,6 +42,15 @@ docker rm -f "$LIVEKIT_CONTAINER" >/dev/null 2>&1 || true
 log "stopping PulseAudio daemon"
 PULSE_RUNTIME_PATH="$PULSE_DIR" pulseaudio --kill >/dev/null 2>&1 || true
 pkill -9 -x pulseaudio >/dev/null 2>&1 || true
+# PipeWire host: unload every virtual node start-audio.sh loaded, then a name sweep as a backstop.
+if [ -f "$PULSE_DIR/pw-modules.txt" ]; then
+  tac "$PULSE_DIR/pw-modules.txt" | while read -r _name id; do
+    pactl unload-module "$id" >/dev/null 2>&1 || true
+  done
+fi
+pactl list short modules 2>/dev/null | grep -E "pollis_(vmic|vspk)" | cut -f1 | while read -r id; do
+  pactl unload-module "$id" >/dev/null 2>&1 || true
+done
 rm -rf "$PULSE_DIR" || true
 
 # Virtual camera (issue #570, M3b) — only present for the two-client-camera flow.
