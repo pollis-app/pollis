@@ -88,8 +88,14 @@ async fn a_leave_outside_a_join_cancels_nothing() {
 #[tokio::test]
 async fn a_warm_in_flight_is_visible_to_a_join_and_released_when_it_ends() {
     let guard = begin_warm("warm-chan").expect("first warm starts");
-    assert!(begin_warm("warm-chan").is_none(), "a second warm for the same channel is a no-op");
-    assert!(begin_warm("other-chan").is_some(), "other channels are independent");
+    assert!(
+        begin_warm("warm-chan").is_none(),
+        "a second warm for the same channel is a no-op"
+    );
+    assert!(
+        begin_warm("other-chan").is_some(),
+        "other channels are independent"
+    );
     let inflight = warm_inflight("warm-chan").expect("visible while in flight");
     let waiter = tokio::spawn(async move { inflight.notified().await });
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;

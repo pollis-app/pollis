@@ -77,7 +77,11 @@ async fn seed_actor(db: &Db, user_id: &str) -> Actor {
         )
         .await
         .unwrap();
-    Actor { user_id: user_id.to_string(), device_id, key }
+    Actor {
+        user_id: user_id.to_string(),
+        device_id,
+        key,
+    }
 }
 
 async fn seed_group(db: &Db, group: &str, members: &[&str]) {
@@ -141,11 +145,19 @@ async fn fake_livekit(table: Vec<(String, Vec<String>)>) -> String {
                 let room = body["room"].as_str().unwrap_or_default().to_string();
                 match table.iter().find(|(r, _)| *r == room) {
                     Some((_, ids)) => {
-                        let participants: Vec<serde_json::Value> =
-                            ids.iter().map(|i| serde_json::json!({ "identity": i })).collect();
-                        (StatusCode::OK, Json(serde_json::json!({ "participants": participants })))
+                        let participants: Vec<serde_json::Value> = ids
+                            .iter()
+                            .map(|i| serde_json::json!({ "identity": i }))
+                            .collect();
+                        (
+                            StatusCode::OK,
+                            Json(serde_json::json!({ "participants": participants })),
+                        )
                     }
-                    None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "msg": "room not found" }))),
+                    None => (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({ "msg": "room not found" })),
+                    ),
                 }
             }
         }),
@@ -171,7 +183,10 @@ async fn counts_of(router: Router, req: Request<Body>) -> (StatusCode, serde_jso
     let resp = router.oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -183,26 +198,47 @@ async fn one_call_counts_every_room_and_hides_what_the_signer_may_not_read() {
     seed_group(&db, "g-3", &["bob", "carol"]).await;
 
     let voice = |room: &str, user: &str| {
-        participant_pseudonym(API_SECRET, room, user, &format!("dev-{user}"), ParticipantKind::Voice)
+        participant_pseudonym(
+            API_SECRET,
+            room,
+            user,
+            &format!("dev-{user}"),
+            ParticipantKind::Voice,
+        )
     };
     let view = |room: &str, user: &str| {
-        participant_pseudonym(API_SECRET, room, user, &format!("dev-{user}"), ParticipantKind::View)
+        participant_pseudonym(
+            API_SECRET,
+            room,
+            user,
+            &format!("dev-{user}"),
+            ParticipantKind::View,
+        )
     };
     let table = vec![
         // g-1: two voice participants, one screenshare receiver, one forgery.
         (
             room_pseudonym(API_SECRET, "g-1"),
-            vec![voice("g-1", "bob"), voice("g-1", "carol"), view("g-1", "alice"), "not-ours".into()],
+            vec![
+                voice("g-1", "bob"),
+                voice("g-1", "carol"),
+                view("g-1", "alice"),
+                "not-ours".into(),
+            ],
         ),
         // g-2: nobody (LiveKit has no such room → 404).
         // g-3: busy, but alice is not a member.
-        (room_pseudonym(API_SECRET, "g-3"), vec![voice("g-3", "bob"), voice("g-3", "carol")]),
+        (
+            room_pseudonym(API_SECRET, "g-3"),
+            vec![voice("g-3", "bob"), voice("g-3", "carol")],
+        ),
     ];
     let url = fake_livekit(table).await;
     let state = AppState::new(db.arc(), true).with_broker_config(livekit_broker(&url));
     let router = build_router_with_state(state);
 
-    let (status, body) = counts_of(router, signed_counts(&alice, &["g-1", "g-2", "g-3", "g-1"])).await;
+    let (status, body) =
+        counts_of(router, signed_counts(&alice, &["g-1", "g-2", "g-3", "g-1"])).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["counts"],
