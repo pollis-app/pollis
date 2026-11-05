@@ -252,18 +252,28 @@ stop someone moving the tag that fires it.
 ### LiveKit + nginx — media SFU (voice / video / screenshare)
 - **From:** `livekit/` (compose + nginx ingress; runs **upstream** LiveKit images, not our build)
 - **Versions:** `livekit/livekit-server:v1.13.9` + `nginx:1.30-alpine`, digest-pinned in `livekit/docker-compose.yml`; `e2e/scripts/start-livekit.sh` pins the same LiveKit tag so the two-client e2e runs exercise it. Before a bump, `trivy image --severity HIGH,CRITICAL <image>` the candidate (the 2026-10 scan, `docs/security/dependency-scan-2026-10.md`, found 1.10.0 carrying a critical OpenSSL).
-- **Pipeline:** `.github/workflows/livekit-deploy.yml` — `workflow_dispatch` (env choice prod/dev). SSH + compose on the VPS.
-- **Restart (no deploy):** `.github/workflows/livekit-restart.yml` — `workflow_dispatch`, also a button in archon (Overview → voice server). Same SSH key and host vars as the deploy (but no `livekit-prod` environment, so it never records a deployment that `release-impact.sh` would read as live config); runs `docker compose up -d` in `/root/livekit` (starts any stopped container, changes no config, renders no keys), fails unless every service is running and `https://rtc.pollis.com/` answers. `restart: true` also runs `docker compose restart` for a hung-but-running container (drops live calls). Use it when voice/video joins fail with "Couldn't reach the voice server" — e.g. 2026-10-17, when nginx exited 255 after a kernel-update reboot and stayed down six days.
-- **Runs at:** VPS. Frames are E2EE (the SFU forwards ciphertext).
+- **Pipeline:** `.github/workflows/livekit-deploy.yml` — `workflow_dispatch` (env choice prod/dev). SSH + compose on the VPS. **A deploy restarts `livekit` and drops every live call**; the workflow waits for both compose healthchecks to go green and fails otherwise.
+- **Restart (no deploy):** `.github/workflows/livekit-restart.yml` — `workflow_dispatch`, also a button in archon (Overview → voice server), and **dispatched automatically by the external probe** (below) after ten minutes of failure. Same SSH key and host vars as the deploy (but no `livekit-prod` environment, so it never records a deployment that `release-impact.sh` would read as live config); runs `docker compose up -d` in `/root/livekit` (starts any stopped container, changes no config, renders no keys), fails unless every service is running, **both healthchecks are green within 120 s**, and `https://rtc.pollis.com/` answers. `restart: true` also runs `docker compose restart` for a hung-but-running container (drops live calls). Use it when voice/video joins fail with "Couldn't reach the voice server" — e.g. 2026-10-17, when nginx exited 255 after a kernel-update reboot and stayed down six days.
+- **Self-healing (since the 2026-10-17 outage):** nginx resolves `livekit` per connection (`resolver 127.0.0.11`, variable `proxy_pass`) instead of at config load, so it boots whatever the container order; both services have healthchecks and `restart: always`; nginx `depends_on` a healthy `livekit`. `livekit/DEPLOY.md` → "Self-healing".
+- **External probe:** `livekit/probe/` — a Cloudflare cron Worker (`*/5 * * * *`) that fetches `https://rtc.pollis.com/` (expects `200 OK`) and sends a STUN Binding Request over TLS to `turn.pollis.com:443` (expects a Binding Success Response from LiveKit's TURN listener). Two consecutive failures alert (webhook) and dispatch `livekit-restart.yml` via the GitHub API (fine-grained PAT, Actions read/write on this repo only), with a 30-minute re-dispatch cooldown; its `GET /` serves the last result for `status.pollis.com` (archon) to show. **Deployed by hand** with `wrangler deploy` from `livekit/probe/` (no workflow); secrets and the smoke test are in `livekit/DEPLOY.md` → "External probe".
+- **Metrics:** LiveKit's Prometheus endpoint is on `127.0.0.1:6789` on the box only (never the public vhost); the Grafana Alloy → Grafana Cloud scrape recipe is in `livekit/DEPLOY.md` → "Metrics".
+- **Runs at:** VPS (Hostinger KVM 2, Boston). Frames are E2EE (the SFU forwards ciphertext).
 - **Ingress:** everything on **443**, split by TLS SNI in nginx's `stream` block —
   `rtc.pollis.com` → HTTPS/WSS → `livekit:7880`; `turn.pollis.com` → TURNS,
   terminated by nginx → `livekit:5349`. TURN *must* be on 443 (LiveKit hardcodes
   `turns:<domain>:443` in the ICE servers it hands clients, and 443 is what
-  restrictive networks let through). Host prerequisites the pipeline cannot
-  create — a DNS-only A record for `turn.pollis.com`, a cert with that SAN, and
-  `"userland-proxy": false` in `/etc/docker/daemon.json` — are **preflight-gated**
+  restrictive networks let through). TURN over UDP (and the STUN server clients
+  are handed) is `31.97.140.76:3478` straight to LiveKit — without it LiveKit
+  hands out Google's public STUN, a client-IP disclosure
+  (`docs/metadata-retention-policy.md` §3). ICE media ports: 7881/tcp,
+  7882-7883/udp (mux), 30000-30999/udp (relay). Host prerequisites the pipeline cannot
+  create — a DNS-only A record for `turn.pollis.com`, a cert with that SAN,
+  `"userland-proxy": false` in `/etc/docker/daemon.json`, and the ufw rules
+  for 3478, 7882-7883 and the relay range — are **preflight-gated**
   in the workflow, which aborts rather than deploying a silently-broken relay.
-  Details + relay-port sizing: `livekit/DEPLOY.md`.
+  Both TLS terminators resume sessions for a day (the app's start-up warmup
+  then pays off at join time).
+- **Capacity:** bounded by peer connections (≈12 per signed-in user from the per-conversation realtime rooms → ~150 concurrent users on this box), then by the 8 TB/month transfer cap (~25 Mbit/s average ≈ 13 continuous 720p streams); the relay range (1000 ports ≈ 1000 relayed peer connections) comes after. Regional scale-out is a documented runbook (Redis + `regionaware` node selector + per-node ingress + the DS picking the SFU `url` from the Worker's request country): `livekit/DEPLOY.md` → "Capacity" and "Tier 2 — regional nodes".
 
 ### Relay pool — closed-overlay first-party relay nodes
 - **STATUS: SWITCHED OFF.** `hydra_enabled` defaults to `false` in `infra/relay-hydra/variables.tf`, so the AWS pool runs **no nodes**, has **no ASGs**, and has **no reconciler Lambda or EventBridge schedule**. The signed-directory hosting (S3 + CloudFront + the `relays.pollis.com` ACM cert) and every SSM parameter are deliberately kept — they cost ~$0 and make switching back on a single `terraform apply` instead of a repeat of the ACM/CAA/DNS stand-up. `relays.pollis.com/directory.json` still serves the last directory the reconciler signed; it is **expired**, and every client rejects an expired directory. **Back on:** flip that one variable's default to `true` and `AWS_PROFILE=pollis terraform apply` from `infra/relay-hydra/`. **Client impact:** none — the overlay is opt-in and off by default in every shipped build (no workflow sets `POLLIS_OVERLAY`), `Prefer` falls back to a direct dial, and only a user who explicitly chose **Strict** sees the documented degraded-send behaviour. Everything below describes the pool as it works **when it is on**.

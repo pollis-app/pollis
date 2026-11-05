@@ -164,13 +164,20 @@ jobs:
             #    allocates but the firewall drops are the silent-relay-failure
             #    bug this deploy is fixing. Only enforced when ufw is the active
             #    firewall — a control-panel firewall can't be checked from here.
+            #    Same for TURN/UDP (3478): LiveKit advertises it as the
+            #    STUN+TURN server, and a dropped port there means every client
+            #    silently loses STUN and the UDP relay. And the ICE/UDP mux
+            #    range (7882-7883): LiveKit spreads connections across both
+            #    ports, so a firewall that passes only 7882 drops half of them.
             if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
-              if ! ufw status | grep -q '30000:30999/udp'; then
-                echo "::error::ufw does not allow 30000:30999/udp. Run 'ufw allow 30000:30999/udp' (see livekit/DEPLOY.md)."
-                fail=1
-              fi
+              for rule in '30000:30999/udp' '3478/udp' '7882:7883/udp'; do
+                if ! ufw status | grep -q "${rule}"; then
+                  echo "::error::ufw does not allow ${rule}. Run 'ufw allow ${rule}' (see livekit/DEPLOY.md)."
+                  fail=1
+                fi
+              done
             else
-              echo "::warning::ufw inactive or absent — verify the relay range 30000-30999/udp is open in the host control-panel firewall."
+              echo "::warning::ufw inactive or absent — verify 30000-30999/udp, 3478/udp and 7882-7883/udp are open in the host control-panel firewall."
             fi
 
             exit "${fail}"
@@ -232,6 +239,31 @@ jobs:
             docker compose exec -T nginx nginx -T < /dev/null 2>/dev/null | grep -E "worker_processes|worker_connections" || true
 
             docker compose ps < /dev/null
+
+            # Both services must report their compose healthcheck green (same
+            # gate as livekit-restart.yml): a deploy whose containers are up
+            # but not serving is a failed deploy.
+            deadline=$(( $(date +%s) + 120 ))
+            while :; do
+              unhealthy=""
+              for svc in $(docker compose config --services < /dev/null); do
+                cid="$(docker compose ps -q "${svc}" < /dev/null)"
+                status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "${cid}")"
+                if [ "${status}" != "healthy" ]; then
+                  unhealthy="${unhealthy} ${svc}=${status}"
+                fi
+              done
+              if [ -z "${unhealthy}" ]; then
+                echo "healthchecks: all green"
+                break
+              fi
+              if [ "$(date +%s)" -ge "${deadline}" ]; then
+                printf '::error::Healthchecks not green after 120s:%s\n' "${unhealthy}"
+                docker compose ps -a < /dev/null
+                exit 1
+              fi
+              sleep 5
+            done
 
             # No client IP may be readable on this box, operators included
             # (#1235). The compose file sets both containers' log driver to

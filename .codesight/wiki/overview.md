@@ -247,7 +247,9 @@ full detail: `docs/metadata-retention-policy.md` §3.
   per-boot key) is computed in the accept loop; the per-IP connection and
   circuit maps hold only `IpKey`s.
 - **LiveKit.** Needs the IP to route media; keeps no logs (`livekit/DEPLOY.md`
-  → "No client IPs in logs").
+  → "No client IPs in logs"). The STUN/TURN servers it hands clients are its
+  own (`turn.udp_port` + `turn.domain` in `livekit/livekit.yml`); with no
+  TURN/UDP listener LiveKit would hand out Google's public STUN instead.
 - **LiveKit client info (#1320).** Every join carries a `ClientInfo`: SDK
   (`rust`) and version, protocol numbers, SDK capability flags, OS name and OS
   version (`os_info`), and — new in livekit 0.9 — a device model (the SMBIOS
