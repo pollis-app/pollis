@@ -343,6 +343,22 @@ pub async fn ds_livekit_participants(
     Ok(parsed.participants)
 }
 
+/// Voice participant counts for many rooms in ONE DS call; desktop-only.
+///
+/// An older DS answers 404 (an `Err` here); the caller falls back per room.
+#[cfg(feature = "media")]
+pub async fn ds_livekit_room_counts(
+    state: &Arc<AppState>,
+    rooms: Vec<String>,
+) -> Result<Vec<pollis_api::broker::LivekitRoomCount>> {
+    let body = pollis_api::broker::LivekitRoomCountsBody {
+        rooms,
+        user_id: Some(current_user_id(state).await?),
+    };
+    let parsed = ds_post_json(state, &body).await?;
+    Ok(parsed.counts)
+}
+
 /// One participant identity resolved back to a Pollis user (#836).
 pub use pollis_api::broker::ResolvedIdentity;
 

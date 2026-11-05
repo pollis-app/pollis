@@ -264,6 +264,7 @@ endpoints! {
     Client   broker::LivekitSendDataBody        => "/v1/livekit/send-data",              broker::LivekitSendDataResponse;
     Client   broker::LivekitParticipantsBody    => "/v1/livekit/participants",           broker::LivekitParticipantsResponse;
     Client   broker::LivekitIdentitiesBody      => "/v1/livekit/identities",             broker::LivekitIdentitiesResponse;
+    Client   broker::LivekitRoomCountsBody      => "/v1/livekit/room-counts",            broker::LivekitRoomCountsResponse;
     Client   broker::R2PresignBody              => "/v1/r2/presign",                     broker::R2PresignResponse, idempotent;
 
     // All POST: the signature does not cover a query string (#681).
@@ -496,6 +497,12 @@ mod tests {
         round_trip(
             &broker::LivekitSendDataResponse { ok: true, delivered: Some(false) },
             r#"{"ok":true,"delivered":false}"#,
+        );
+        round_trip(
+            &broker::LivekitRoomCountsResponse {
+                counts: vec![broker::LivekitRoomCount { room: "c1".into(), count: 2 }],
+            },
+            r#"{"counts":[{"room":"c1","count":2}]}"#,
         );
         round_trip(
             &broker::R2PresignResponse {
