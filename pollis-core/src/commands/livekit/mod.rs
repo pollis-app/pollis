@@ -9,6 +9,7 @@ mod legacy;
 mod participants;
 mod publish;
 mod realtime;
+mod sfu_gate;
 
 pub(crate) use identity::{
     is_view_identity, lookup_avatar_url_for_identity, lookup_avatar_urls_for_identities,
@@ -28,6 +29,23 @@ pub use publish::{
     start_call, StartCallResult,
 };
 pub use realtime::{connect_rooms, subscribe_realtime};
+pub use sfu_gate::{sfu_gate, Role as SfuRole, SfuGate};
+
+/// Whether a failed `Room::connect` means the SFU itself could not be reached
+/// (as opposed to a rejected token or an internal failure): signal/connection
+/// errors only, the same split `voice::join::classify_connect_error` makes.
+pub(crate) fn sfu_unreachable(e: &livekit::RoomError) -> bool {
+    use livekit::rtc_engine::EngineError;
+    use livekit_signaling::SignalError;
+    match e {
+        livekit::RoomError::Engine(EngineError::Signal(SignalError::Client(status, _))) => {
+            !matches!(status.as_u16(), 401 | 403)
+        }
+        livekit::RoomError::Engine(EngineError::Signal(_))
+        | livekit::RoomError::Engine(EngineError::Connection(_)) => true,
+        _ => false,
+    }
+}
 
 /// A data packet's publisher, resolved from its pseudonym (#836); `None` = DS/unresolved.
 ///

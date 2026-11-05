@@ -2,8 +2,11 @@
 
 mod devices;
 mod gate;
+mod join;
 mod levels;
 mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 mod playback;
 mod streams;
 mod types;
@@ -14,6 +17,8 @@ pub use types::{
 };
 
 pub use gate::{TransmitGate, VoiceGateState, VoiceInputMode};
+
+pub use join::{JoinCancel, VoiceJoinError, VOICE_JOIN_DEADLINE, VOICE_RECONNECT_WINDOW};
 
 pub(crate) use streams::{start_mic_stream, start_speaker_stream};
 

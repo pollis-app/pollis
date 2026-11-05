@@ -41,6 +41,10 @@ pub enum Error {
     #[error("upgrade_required")]
     UpgradeRequired,
 
+    /// A voice join failed; `Display` is the `voice_join:<kind>` wire form the renderer matches.
+    #[error("{0}")]
+    VoiceJoin(crate::commands::voice_join_error::VoiceJoinError),
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }

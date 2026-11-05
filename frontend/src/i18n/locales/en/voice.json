@@ -100,7 +100,8 @@
     "deleting": "Deleting…"
   },
   "call": {
-    "defaultTitle": "Call"
+    "defaultTitle": "Call",
+    "unreachable": "They're not reachable right now — none of their devices is online."
   },
   "settings": {
     "title": "Voice & Video",
@@ -176,7 +177,14 @@
   },
   "joinError": {
     "unreachable": "Couldn't reach the voice server — check your connection and try again.",
-    "notConfigured": "Voice is not configured on this server."
+    "notConfigured": "Voice is not configured on this server.",
+    "notMember": "You're not a member of this channel any more.",
+    "noMlsGroup": "This conversation's keys aren't on this device yet — open it once, then try again.",
+    "tokenRejected": "The voice server refused this device's credentials. Try again in a moment.",
+    "publishFailed": "Connected, but the microphone couldn't be published. Try again.",
+    "deadline": "Joining took too long and was abandoned. Try again.",
+    "busy": "A voice session is already in progress.",
+    "generic": "Couldn't join voice. Try again."
   },
   "shareError": {
     "cancelled": "Screen share cancelled — no window or screen was picked.",

@@ -96,7 +96,8 @@
     "deleting": "Eliminando…"
   },
   "call": {
-    "defaultTitle": "Llamada"
+    "defaultTitle": "Llamada",
+    "unreachable": "No está disponible ahora mismo: ninguno de sus dispositivos está en línea."
   },
   "settings": {
     "title": "Voz y vídeo",
@@ -172,7 +173,14 @@
   },
   "joinError": {
     "unreachable": "No se ha podido contactar con el servidor de voz: comprueba tu conexión e inténtalo de nuevo.",
-    "notConfigured": "La voz no está configurada en este servidor."
+    "notConfigured": "La voz no está configurada en este servidor.",
+    "notMember": "Ya no eres miembro de este canal.",
+    "noMlsGroup": "Las claves de esta conversación aún no están en este dispositivo: ábrela una vez e inténtalo de nuevo.",
+    "tokenRejected": "El servidor de voz rechazó las credenciales de este dispositivo. Inténtalo de nuevo en un momento.",
+    "publishFailed": "Conectado, pero no se pudo publicar el micrófono. Inténtalo de nuevo.",
+    "deadline": "La conexión tardó demasiado y se abandonó. Inténtalo de nuevo.",
+    "busy": "Ya hay una sesión de voz en curso.",
+    "generic": "No se pudo unir a la voz. Inténtalo de nuevo."
   },
   "shareError": {
     "cancelled": "Compartir pantalla cancelado: no se eligió ninguna ventana ni pantalla.",

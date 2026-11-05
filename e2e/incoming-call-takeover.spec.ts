@@ -133,17 +133,21 @@ for (const skin of SKINS) {
       await page.screenshot({ path: `artifacts/incoming-call-takeover-${skin}.png` });
     });
 
-    agnosticTest("hovering Accept pre-warms the call room; accepting joins it", async ({ page }) => {
+    agnosticTest("the ring itself pre-warms the call room; hovering Accept mints nothing more; accepting joins it", async ({ page }) => {
       await bootInChannel(page, skin);
-      await ring(page);
-      await expect(page.getByTestId("incoming-call-takeover")).toBeVisible();
       await page.evaluate(() => {
         (window as unknown as { __resetTauriInvokeCounts: () => void }).__resetTauriInvokeCounts();
       });
-
-      await page.getByTestId("incoming-call-accept").hover();
+      await ring(page);
+      await expect(page.getByTestId("incoming-call-takeover")).toBeVisible();
+      // The invite is intent enough: the real room's token is warm before Accept is even shown.
       await expect.poll(() => count(page, "prepare_voice_connection")).toBe(1);
       expect((await lastArgs(page, "prepare_voice_connection"))?.channelId).toBe(ROOM);
+
+      // Hovering Accept is still an intent signal, but it must not mint a second token for a warm room.
+      await page.getByTestId("incoming-call-accept").hover();
+      await page.waitForTimeout(300);
+      expect(await count(page, "prepare_voice_connection")).toBe(1);
 
       await page.getByTestId("incoming-call-accept").click();
       await expect(page.getByTestId("incoming-call-takeover")).toHaveCount(0);

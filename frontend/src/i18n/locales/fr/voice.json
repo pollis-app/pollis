@@ -96,7 +96,8 @@
     "deleting": "Suppression…"
   },
   "call": {
-    "defaultTitle": "Appel"
+    "defaultTitle": "Appel",
+    "unreachable": "Cette personne est injoignable pour le moment — aucun de ses appareils n'est en ligne."
   },
   "settings": {
     "title": "Voix et vidéo",
@@ -172,7 +173,14 @@
   },
   "joinError": {
     "unreachable": "Impossible de joindre le serveur vocal — vérifiez votre connexion et réessayez.",
-    "notConfigured": "Le vocal n'est pas configuré sur ce serveur."
+    "notConfigured": "Le vocal n'est pas configuré sur ce serveur.",
+    "notMember": "Vous n'êtes plus membre de ce salon.",
+    "noMlsGroup": "Les clés de cette conversation ne sont pas encore sur cet appareil — ouvrez-la une fois, puis réessayez.",
+    "tokenRejected": "Le serveur vocal a refusé les identifiants de cet appareil. Réessayez dans un instant.",
+    "publishFailed": "Connecté, mais le micro n'a pas pu être publié. Réessayez.",
+    "deadline": "La connexion a pris trop de temps et a été abandonnée. Réessayez.",
+    "busy": "Une session vocale est déjà en cours.",
+    "generic": "Impossible de rejoindre le vocal. Réessayez."
   },
   "shareError": {
     "cancelled": "Partage d'écran annulé — aucune fenêtre ni aucun écran n'a été sélectionné.",

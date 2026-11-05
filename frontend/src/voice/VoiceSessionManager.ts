@@ -9,6 +9,7 @@ import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
 import type { ParticipantVideo, VoiceGateState, VoiceInputMode } from '../types/voice-state';
 import { VOICE_GATE_INITIAL } from '../types/voice-state';
 import { userIdFromVoiceIdentity } from './identity';
+import { joinErrorMessageKey, legacyJoinErrorKey, parseVoiceJoinError } from './joinError';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
 import { audioLevels } from './audioLevels';
@@ -134,23 +135,19 @@ const INITIAL_STATE: VoiceSessionState = {
   error: null,
 };
 
-/** Collapse LiveKit connectivity errors into one line; others pass through. Resolved per call via `i18n.t`. */
+/**
+ * The line to show for a failed join. Typed `voice_join:<kind>` errors are matched on
+ * their kind (`joinError.ts`); an empty string means "nothing to show" (the user
+ * cancelled). Older cores' English falls back to the substring heuristics.
+ */
 function friendlyJoinError(raw: string): string {
-  const m = raw.toLowerCase();
-  if (
-    m.includes('validate request timed out') ||
-    m.includes('signal failure') ||
-    m.includes('timed out') ||
-    m.includes('error sending request') ||
-    m.includes('connection refused') ||
-    m.includes('dns')
-  ) {
-    return i18n.t('voice:joinError.unreachable');
+  const typed = parseVoiceJoinError(raw);
+  if (typed) {
+    const key = joinErrorMessageKey(typed.kind);
+    return key ? i18n.t(key) : '';
   }
-  if (m.includes('not configured')) {
-    return i18n.t('voice:joinError.notConfigured');
-  }
-  return raw;
+  const legacy = legacyJoinErrorKey(raw);
+  return legacy ? i18n.t(legacy) : raw;
 }
 
 /** Owns the voice session outside React: `setIntent` coalesces, so effect re-runs can't race join/leave. */
@@ -750,7 +747,7 @@ function pad(label: string): string {
 function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
   return [
     `[voice/join] timings (channel=${t.channel_id}):`,
-    `  intent_to_invoke: ${intentToInvokeMs}ms (setIntent → invoke('join_voice_channel'))`,
+    `  intent_to_joined: ${intentToInvokeMs}ms (setIntent → joined, includes IPC + total_join)`,
     `  ${pad('jwt_mint')}${t.jwt_mint_ms}ms`,
     `  ${pad('e2ee')}${t.e2ee_ms}ms (MLS resolve + catch-up, blocks the connect)`,
     `  ${pad('room_connect')}${t.room_connect_ms}ms`,

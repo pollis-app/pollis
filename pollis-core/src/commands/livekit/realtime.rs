@@ -206,14 +206,24 @@ pub async fn connect_rooms(
                         );
 
                         let mut backoff = if alive_dur.as_secs() < 10 { 30u64 } else { 5 };
+                        let gate = super::sfu_gate::sfu_gate();
                         loop {
-                            tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+                            // During an SFU outage only the prober dials; the rest park here and
+                            // follow it back, so the DS mints one token per probe, not one per room.
+                            if gate.is_down() && gate.report_down(&room_id_owned) == super::sfu_gate::Role::Waiter {
+                                crate::diag!("[realtime] room {room_id_owned}: SFU down, waiting for the probe");
+                                gate.wait_up(std::time::Duration::from_secs(300)).await;
+                                backoff = 5;
+                            } else {
+                                tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+                            }
 
                             // Removed from the room map (left/logged out): stop reconnecting.
                             {
                                 let lk = lk_arc_task.lock().await;
                                 if !lk.rooms.contains_key(&room_id_owned) {
                                     crate::diag!("[realtime] room {room_id_owned} removed, stopping reconnect");
+                                    gate.release_prober(&room_id_owned);
                                     return;
                                 }
                             }
@@ -232,6 +242,7 @@ pub async fn connect_rooms(
                                 Ok((new_room, mut new_events)) => {
                                     let new_room = Arc::new(new_room);
                                     crate::diag!("[realtime] reconnected room {room_id_owned}");
+                                    gate.report_up();
 
                                     // Let the frontend resync state that drifted during the outage.
                                     {
@@ -268,6 +279,9 @@ pub async fn connect_rooms(
                                 }
                                 Err(e) => {
                                     crate::diag!("[realtime] reconnect failed for room {room_id_owned}: {e}");
+                                    if super::sfu_unreachable(&e) {
+                                        gate.report_down(&room_id_owned);
+                                    }
                                     backoff = (backoff * 2).min(300);
                                 }
                             }

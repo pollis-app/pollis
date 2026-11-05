@@ -289,6 +289,16 @@ pub async fn ds_livekit_send_data(
     room: &str,
     payload: serde_json::Value,
 ) -> Result<()> {
+    ds_livekit_send_data_delivered(state, room, payload).await.map(|_| ())
+}
+
+/// [`ds_livekit_send_data`] that also says whether anyone was in the room to
+/// receive it. `true` from a DS that predates the `delivered` field.
+pub async fn ds_livekit_send_data_delivered(
+    state: &Arc<AppState>,
+    room: &str,
+    payload: serde_json::Value,
+) -> Result<bool> {
     // No-auth fallback for the acting user — see `ds_livekit_token`.
     let body = pollis_api::broker::LivekitSendDataBody {
         room: room.to_string(),
@@ -303,7 +313,8 @@ pub async fn ds_livekit_send_data(
             "ds_livekit_send_data {status}: {txt}"
         )));
     }
-    Ok(())
+    let parsed = decode_response::<pollis_api::broker::LivekitSendDataBody>(resp).await?;
+    Ok(parsed.delivered.unwrap_or(true))
 }
 
 /// List a voice room's roster via the DS (server-side `ListParticipants`).

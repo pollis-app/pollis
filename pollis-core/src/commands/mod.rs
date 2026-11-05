@@ -72,6 +72,8 @@ pub mod voice_e2ee;
 pub mod voice_e2ee;
 // Outside the media gate so the mapping is tested on every target.
 pub mod voice_key_ring;
+// Typed join failures; always compiled because `error::Error` names them.
+pub mod voice_join_error;
 #[cfg(feature = "media")]
 pub mod voice_denoiser;
 #[cfg(feature = "media")]

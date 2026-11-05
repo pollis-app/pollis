@@ -520,6 +520,10 @@ async fn livekit_answering(status: StatusCode, body: &'static str) -> String {
 }
 
 async fn nudge_against(status: StatusCode, body: &'static str) -> StatusCode {
+    nudge_against_with_body(status, body).await.0
+}
+
+async fn nudge_against_with_body(status: StatusCode, body: &'static str) -> (StatusCode, serde_json::Value) {
     let db = fresh_db().await;
     let member = seed_actor(&db, "alice").await;
     seed_group(&db, "g-1", &["alice", "bob"]).await;
@@ -533,9 +537,10 @@ async fn nudge_against(status: StatusCode, body: &'static str) -> StatusCode {
     );
     let resp = router.oneshot(req).await.unwrap();
     let status = resp.status();
-    let _ = resp.into_body().collect().await;
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     drop(db);
-    status
+    (status, body)
 }
 
 /// LiveKit's answer for a room nobody has joined.
@@ -547,6 +552,25 @@ async fn an_empty_room_is_nothing_to_notify_not_a_bad_gateway() {
         nudge_against(StatusCode::SERVICE_UNAVAILABLE, NO_ROOM).await,
         StatusCode::OK
     );
+}
+
+/// A ring must learn that nobody was home: the empty room is accepted (`ok`)
+/// but reported undelivered, while a hosted room reports delivered.
+#[tokio::test]
+async fn an_empty_room_is_accepted_but_reported_undelivered() {
+    let (status, body) = nudge_against_with_body(StatusCode::SERVICE_UNAVAILABLE, NO_ROOM).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["delivered"], false);
+
+    let (status, body) = nudge_against_with_body(StatusCode::NOT_FOUND, "room not found").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["delivered"], false);
+
+    let (status, body) = nudge_against_with_body(StatusCode::OK, "{}").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["delivered"], true);
 }
 
 /// Only that exact answer is forgiven; a real LiveKit failure still reads as one.

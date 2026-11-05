@@ -6225,6 +6225,7 @@ dependencies = [
  "libwebrtc",
  "livekit",
  "livekit-protocol",
+ "livekit-signaling",
  "ml-dsa",
  "nix 0.30.1",
  "nnnoiseless",

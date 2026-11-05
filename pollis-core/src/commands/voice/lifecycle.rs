@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -30,12 +31,16 @@ use crate::{
 
 use super::devices::get_device;
 use super::gate::{TransmitGate, VoiceGateState, VoiceInputMode};
+use super::join::{
+    classify_connect_error, classify_ds_error, disconnect_is_retryable, reconnect_delay,
+    JoinCancel, JoinClock, VoiceJoinError, VOICE_JOIN_DEADLINE, VOICE_RECONNECT_WINDOW,
+};
 use super::levels::BandAnalyzer;
 use super::playback::{ensure_playback, register_remote_track};
 use super::streams::start_mic_stream;
 use super::types::{
-    user_id_from_voice_identity, JoinTimings, VoiceEvent, VoiceState, VoiceWarmup,
-    VOICE_WARMUP_TTL,
+    user_id_from_voice_identity, JoinTimings, SendableStream, VoiceEvent, VoiceState,
+    VoiceWarmup, VOICE_WARMUP_TTL,
 };
 
 /// Mirror gate state onto the lock-free atomics the audio paths read.
@@ -121,31 +126,12 @@ pub async fn prepare_voice_connection(
     };
 
     // Best-effort; a racing Join costs at most one extra TLS handshake.
-    let warm_url = ds_url.clone();
-    let task = tokio::spawn(async move {
-        let twirp = if let Some(rest) = warm_url.strip_prefix("wss://") {
-            format!("https://{rest}")
-        } else if let Some(rest) = warm_url.strip_prefix("ws://") {
-            format!("http://{rest}")
-        } else {
-            warm_url.clone()
-        };
-        let probe = format!("{twirp}/rtc/validate");
-        // The SHARED client, so the warmed pool and TLS cache survive (§14.4).
-        let client = crate::net::overlay::http_client(None);
-        let started = Instant::now();
-        match client.get(&probe).timeout(Duration::from_secs(5)).send().await {
-            Ok(_resp) => {
-                crate::diag!(
-                    "[voice] warmup probe to {twirp} completed in {:.0}ms",
-                    started.elapsed().as_secs_f64() * 1000.0
-                );
-            }
-            Err(e) => {
-                crate::diag!("[voice] warmup probe failed (non-fatal): {e}");
-            }
-        }
-    });
+    let task = tokio::spawn(warmup_probe(
+        Arc::clone(state),
+        channel_id.clone(),
+        token.clone(),
+        ds_url.clone(),
+    ));
 
     // Replacing an entry drops it, aborting its probe task.
     let mut voice = state.voice.lock().await;
@@ -162,8 +148,94 @@ pub async fn prepare_voice_connection(
     Ok(())
 }
 
+/// The SFU's token check (`/rtc/validate`, the same probe the SDK runs before a
+/// websocket), which warms DNS/TLS and proves the warm token. A rejected token
+/// is dropped from the warmup so the join mints a fresh one instead of dialling
+/// with one the SFU has already refused.
+async fn warmup_probe(state: Arc<AppState>, channel_id: String, token: String, ws_url: String) {
+    let twirp = livekit_http_base(&ws_url);
+    let probe = format!("{twirp}/rtc/validate?access_token={token}");
+    // The SHARED client, so the warmed pool and TLS cache survive (§14.4).
+    let client = crate::net::overlay::http_client(None);
+    let started = Instant::now();
+    let status = match client.get(&probe).timeout(Duration::from_secs(5)).send().await {
+        Ok(resp) => resp.status(),
+        Err(e) => {
+            crate::diag!("[voice] warmup probe to {twirp} failed (non-fatal): {e}");
+            return;
+        }
+    };
+    let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+    if status.is_success() {
+        crate::diag!("[voice] warmup probe to {twirp} validated the token in {elapsed:.0}ms");
+        return;
+    }
+    crate::diag!("[voice] warmup probe to {twirp} rejected the token ({status}); discarding the warm entry");
+    let mut voice = state.voice.lock().await;
+    if voice
+        .warmup
+        .as_ref()
+        .is_some_and(|w| w.channel_id == channel_id && w.token == token)
+    {
+        voice.warmup = None;
+    }
+}
+
+/// The SFU's HTTP origin for its websocket address (`wss://` → `https://`).
+fn livekit_http_base(ws_url: &str) -> String {
+    if let Some(rest) = ws_url.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = ws_url.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else {
+        ws_url.to_string()
+    }
+}
+
+/// Clears the `joining` flag when the join returns, whichever way.
+struct JoinGuard(Arc<AtomicBool>);
+
+impl Drop for JoinGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// Everything a join has acquired so far, so a failed or cancelled later phase
+/// can give it all back instead of leaving a room open or a mic held.
+#[derive(Default)]
+struct JoinPartial {
+    room: Option<Arc<Room>>,
+    mic_stream: Option<SendableStream>,
+    frame_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl JoinPartial {
+    async fn discard(self, state: &Arc<AppState>) {
+        if let Some(t) = self.frame_task {
+            t.abort();
+        }
+        if let Ok(mut slot) = state.voice.lock().await.denoiser.lock() {
+            *slot = None;
+        }
+        if let Some(room) = self.room {
+            // The caller is on its way out; closing can hang on a dead link.
+            tokio::spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(5), room.close()).await;
+            });
+        }
+        if let Some(stream) = self.mic_stream {
+            // Drop off-worker, else macOS's mic indicator can stick on.
+            let _ = tokio::task::spawn_blocking(move || drop(stream)).await;
+        }
+    }
+}
+
 /// Connect to a LiveKit voice room, publish the local microphone, and start
 /// the remote-playback pipeline (single shared mixer + cpal output stream).
+///
+/// Every phase runs under [`VOICE_JOIN_DEADLINE`] and the cancel flag a
+/// concurrent `leave_voice_channel` raises; failures are typed [`VoiceJoinError`]s.
 // Mirrors the `#[tauri::command]` shim's signature, which is the IPC contract the
 // renderer calls by argument name — it cannot be regrouped on this side alone.
 #[allow(clippy::too_many_arguments)]
@@ -178,29 +250,78 @@ pub async fn join_voice_channel(
     counterparty_user_id: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // Refuse re-entry: two same-identity joins trip DuplicateIdentity.
+    let (cancel, _join_guard) = {
+        let mut voice = state.voice.lock().await;
+        if voice.room.is_some() {
+            return Err(VoiceJoinError::AlreadyJoined.into());
+        }
+        if voice.joining.swap(true, Ordering::AcqRel) {
+            return Err(VoiceJoinError::JoinInProgress.into());
+        }
+        let cancel = Arc::new(JoinCancel::default());
+        voice.join_cancel = Some(Arc::clone(&cancel));
+        (cancel, JoinGuard(Arc::clone(&voice.joining)))
+    };
+    let clock = JoinClock::new(cancel, VOICE_JOIN_DEADLINE);
+
+    let args = JoinArgs {
+        channel_id,
+        user_id,
+        display_name,
+        input_device,
+        output_device,
+        audio_processing,
+        counterparty_user_id,
+    };
+    match join_inner(&clock, args, state).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            crate::diag!("[voice] join failed: {e}");
+            Err(e.into())
+        }
+    }
+}
+
+struct JoinArgs {
+    channel_id: String,
+    user_id: String,
+    display_name: String,
+    input_device: Option<String>,
+    output_device: Option<String>,
+    audio_processing: voice_apm::ApmConfig,
+    counterparty_user_id: Option<String>,
+}
+
+/// What the room task needs to translate and attribute events for one session.
+struct RoomContext {
+    /// Logical room, to resolve room-scoped pseudonyms (#836).
+    logical_room: String,
+    /// Self-hear filter: don't play this user's other devices (#140).
+    local_user_id: String,
+    local_identity: String,
+    display_name: String,
+    apm_rate: u32,
+    /// Internal identities of the remote participants the renderer currently shows.
+    known_remote: Arc<std::sync::Mutex<HashSet<String>>>,
+}
+
+async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) -> std::result::Result<(), VoiceJoinError> {
+    let JoinArgs {
+        channel_id,
+        user_id,
+        display_name,
+        input_device,
+        output_device,
+        audio_processing,
+        counterparty_user_id,
+    } = args;
     let join_start = Instant::now();
     let join_started_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-
-    // Refuse re-entry: two same-identity joins trip DuplicateIdentity.
-    let _join_guard = {
-        let voice = state.voice.lock().await;
-        if voice.room.is_some() {
-            return Err(anyhow::anyhow!("already connected to a voice channel").into());
-        }
-        if voice.joining.swap(true, Ordering::AcqRel) {
-            return Err(anyhow::anyhow!("voice channel join already in progress").into());
-        }
-        struct JoinGuard(Arc<AtomicBool>);
-        impl Drop for JoinGuard {
-            fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
-            }
-        }
-        JoinGuard(Arc::clone(&voice.joining))
-    };
+    let mut partial = JoinPartial::default();
 
     // Per-device identity (#140) so a user's second device isn't kicked.
     let device_id = state.device_id.lock().await.clone();
@@ -238,13 +359,16 @@ pub async fn join_voice_channel(
         }
         None => {
             let jwt_start = Instant::now();
-            let pair = crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await?;
+            let minted = clock
+                .run("token", crate::commands::mls::ds_livekit_token(state, &channel_id, "voice"))
+                .await?;
+            let pair = minted.map_err(|e| classify_ds_error(&e))?;
             jwt_mint_ms = jwt_start.elapsed().as_millis() as u64;
             pair
         }
     };
     if url.is_empty() {
-        return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
+        return Err(VoiceJoinError::NotConfigured);
     }
 
     // #836: pin our pseudonym first so our own events land on our tile.
@@ -268,13 +392,19 @@ pub async fn join_voice_channel(
     // Voice key from the MLS exporter; fail closed, never unencrypted.
     // Must precede connect: `RoomOptions::encryption` carries the key.
     let e2ee_start = Instant::now();
-    let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) = voice_e2ee::derive_voice_key(
-        state,
-        &channel_id,
-        &user_id,
-        counterparty_user_id.as_deref(),
-    )
-    .await?;
+    let derived = clock
+        .run(
+            "e2ee",
+            voice_e2ee::derive_voice_key(
+                state,
+                &channel_id,
+                &user_id,
+                counterparty_user_id.as_deref(),
+            ),
+        )
+        .await?;
+    let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) =
+        derived.map_err(|e| classify_ds_error(&e))?;
     let e2ee_ms = e2ee_start.elapsed().as_millis() as u64;
     let e2ee_options = voice_e2ee::build_e2ee_options(voice_key, voice_key_index);
     let key_provider_for_state = e2ee_options.key_provider.clone();
@@ -312,10 +442,21 @@ pub async fn join_voice_channel(
         .await
     };
 
-    let (connect_pair, mic_res) = tokio::join!(connect_fut, mic_fut);
+    // A cancelled connect drops the half-open session; a cancelled mic open
+    // finishes on its blocking thread and drops the stream there.
+    let (connect_pair, mic_res) = clock.run("connect", async { tokio::join!(connect_fut, mic_fut) }).await?;
     let (connect_res, room_connect_ms) = connect_pair;
-    let (room, mut events) =
-        connect_res.map_err(|e| anyhow::anyhow!("LiveKit connect: {e}"))?;
+    let (room, events) = match connect_res {
+        Ok(pair) => pair,
+        Err(e) => {
+            if let Ok(Ok((stream, _, _))) = mic_res {
+                partial.mic_stream = Some(stream);
+            }
+            let err = classify_connect_error(&e);
+            partial.discard(state).await;
+            return Err(err);
+        }
+    };
 
     // Mic is best-effort: on failure join listen-only.
     let mic = match mic_res {
@@ -341,6 +482,8 @@ pub async fn join_voice_channel(
     }
 
     let room = Arc::new(room);
+    partial.room = Some(Arc::clone(&room));
+    partial.mic_stream = mic_stream;
 
     // APM needs 8/16/32/48 kHz; skipped otherwise and on listen-only.
     let apm_stage = if has_mic {
@@ -380,7 +523,6 @@ pub async fn join_voice_channel(
 
     let mut audio_source_opt: Option<NativeAudioSource> = None;
     let mut local_track_opt: Option<LocalAudioTrack> = None;
-    let mut frame_task_opt: Option<tokio::task::JoinHandle<()>> = None;
     let mut first_publish_ms: u64 = 0;
 
     if has_mic {
@@ -403,13 +545,27 @@ pub async fn join_voice_channel(
 
         crate::diag!("[voice] publishing track…");
         let publish_start = Instant::now();
-        room.local_participant()
-            .publish_track(
-                LocalTrack::Audio(local_track.clone()),
-                TrackPublishOptions::default(),
+        let published = match clock
+            .run(
+                "publish",
+                room.local_participant().publish_track(
+                    LocalTrack::Audio(local_track.clone()),
+                    TrackPublishOptions::default(),
+                ),
             )
             .await
-            .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                partial.discard(state).await;
+                return Err(e);
+            }
+        };
+        if let Err(e) = published {
+            let err = VoiceJoinError::PublishFailed { detail: format!("publish track: {e}") };
+            partial.discard(state).await;
+            return Err(err);
+        }
         first_publish_ms = publish_start.elapsed().as_millis() as u64;
         // Move the new mic cryptor (slot 0) to the join epoch's slot.
         let moved = voice_e2ee::apply_sender_key_index(&room, voice_key_index);
@@ -506,314 +662,49 @@ pub async fn join_voice_channel(
 
         audio_source_opt = Some(audio_source);
         local_track_opt = Some(local_track);
-        frame_task_opt = Some(frame_task);
+        partial.frame_task = Some(frame_task);
     }
 
     // Open playback before the event loop: first TrackSubscribed needs it.
-    if let Err(e) = ensure_playback(
-        Arc::clone(&state.voice),
-        output_device.clone(),
-        apm_handle.clone(),
-        mic_rate,
-        apm_frame_samples,
-    )
-    .await
+    let speaker_ok = match clock
+        .run(
+            "speaker",
+            ensure_playback(
+                Arc::clone(&state.voice),
+                output_device.clone(),
+                apm_handle.clone(),
+                mic_rate,
+                apm_frame_samples,
+            ),
+        )
+        .await
     {
-        crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
-    }
+        Ok(Ok(())) => true,
+        Ok(Err(e)) => {
+            crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
+            false
+        }
+        Err(e) => {
+            partial.discard(state).await;
+            return Err(e);
+        }
+    };
 
     // Seed roster only; TrackSubscribed attaches tracks (twice would race).
     let roster_start = Instant::now();
-    // #836: resolve all pseudonyms in ONE batched DS call.
-    let seen: Vec<String> = room
-        .remote_participants()
-        .into_values()
-        .map(|p| p.identity().to_string())
-        .collect();
-    let resolved = resolve_participants(state, &channel_id, &seen).await;
-    let existing_remote: Vec<(String, String, bool)> = room
-        .remote_participants()
-        .into_values()
-        .filter_map(|p| {
-            let wire = p.identity().to_string();
-            let (identity, name) = resolved
-                .get(&wire)
-                .cloned()
-                .unwrap_or_else(|| (wire.clone(), String::new()));
-            // Skip `view` clients (both resolved and wire forms).
-            if is_view_identity(&identity) || is_view_identity(&wire) {
-                return None;
-            }
-            // Seed mute state: TrackMuted only fires on transitions.
-            let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
-            Some((identity, name, is_muted))
-        })
-        .collect();
-    // All avatars (self + roster) in ONE DS round trip, not N+1.
-    let mut avatar_identities: Vec<String> = Vec::with_capacity(existing_remote.len() + 1);
-    avatar_identities.push(local_identity.clone());
-    avatar_identities.extend(existing_remote.iter().map(|(identity, _, _)| identity.clone()));
-    let avatars = lookup_avatar_urls_for_identities(state, &avatar_identities).await;
-    let local_avatar_url = avatars.get(&local_identity).cloned();
-    let existing_with_avatars: Vec<(String, String, bool, Option<String>)> = existing_remote
-        .into_iter()
-        .map(|(identity, name, is_muted)| {
-            let avatar = avatars.get(&identity).cloned();
-            (identity, name, is_muted, avatar)
-        })
-        .collect();
-    let roster_ms = roster_start.elapsed().as_millis() as u64;
+    let seeded = match clock
+        .run("roster", roster_snapshot(state, &room, &channel_id, Some(&local_identity)))
+        .await
     {
-        let voice = state.voice.lock().await;
-        if let Some(ch) = &voice.channel {
-            let _ = ch.send(VoiceEvent::ParticipantJoined {
-                identity: local_identity.clone(),
-                name: display_name.clone(),
-                is_muted: false,
-                avatar_url: local_avatar_url,
-            });
-            for (identity, name, is_muted, avatar_url) in existing_with_avatars {
-                crate::diag!("[voice] existing participant: {} muted={}", identity, is_muted);
-                let _ = ch.send(VoiceEvent::ParticipantJoined {
-                    identity,
-                    name,
-                    is_muted,
-                    avatar_url,
-                });
-            }
+        Ok(s) => s,
+        Err(e) => {
+            partial.discard(state).await;
+            return Err(e);
         }
-    }
-
-    let voice_arc = Arc::clone(&state.voice);
-    let state_for_room = Arc::clone(state);
-    // Logical room, to resolve room-scoped pseudonyms (#836).
-    let logical_room = channel_id.clone();
-    let apm_rate_for_room = mic_rate;
-    // Self-hear filter: don't play this user's other devices (#140).
-    let local_user_id = user_id.clone();
-    let room_task = tokio::spawn(async move {
-        while let Some(event) = events.recv().await {
-            match event {
-                RoomEvent::ParticipantConnected(p) => {
-                    let wire = p.identity().to_string();
-                    // Same filter as the seed loop above — see comment there.
-                    if is_view_identity(&wire) {
-                        continue;
-                    }
-                    // #836: translate before anything downstream sees it.
-                    let (identity, name) =
-                        resolve_participant(&state_for_room, &logical_room, &wire).await;
-                    if is_view_identity(&identity) {
-                        continue;
-                    }
-                    crate::diag!("[voice] participant joined: {identity}");
-                    let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
-                    let avatar_url =
-                        lookup_avatar_url_for_identity(&state_for_room, &identity).await;
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ParticipantJoined {
-                            identity,
-                            name,
-                            is_muted,
-                            avatar_url,
-                        });
-                    }
-                }
-                RoomEvent::ParticipantDisconnected(p) => {
-                    let wire = p.identity().to_string();
-                    if is_view_identity(&wire) {
-                        continue;
-                    }
-                    let (identity, _) =
-                        resolve_participant(&state_for_room, &logical_room, &wire).await;
-                    if is_view_identity(&identity) {
-                        continue;
-                    }
-                    crate::diag!("[voice] participant left: {identity}");
-                    // Clear their screenshare so a stale tile doesn't linger.
-                    crate::commands::screenshare::on_participant_left(
-                        &identity,
-                        &state_for_room,
-                    )
-                    .await;
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
-                    }
-                }
-                RoomEvent::TrackSubscribed { track, publication, participant } => {
-                    let (participant_identity, _) = resolve_participant(
-                        &state_for_room,
-                        &logical_room,
-                        &participant.identity().to_string(),
-                    )
-                    .await;
-                    match track {
-                        RemoteTrack::Audio(audio_track) => {
-                            // #140: never play our other devices' mic.
-                            if user_id_from_voice_identity(&participant_identity) == local_user_id {
-                                crate::diag!(
-                                    "[voice] skipping own-device audio track for self-hear mute: {participant_identity}"
-                                );
-                                continue;
-                            }
-                            let track_key = format!("{}-{}", participant_identity, audio_track.sid());
-                            // TrackSource marks shared audio.
-                            let is_shared_audio = matches!(
-                                publication.source(),
-                                livekit::track::TrackSource::ScreenshareAudio
-                            );
-                            crate::diag!(
-                                "[voice] track subscribed: {track_key} (shared_audio={is_shared_audio})"
-                            );
-                            register_remote_track(
-                                audio_track.rtc_track(),
-                                track_key,
-                                Arc::clone(&voice_arc),
-                                participant_identity,
-                                apm_rate_for_room,
-                                is_shared_audio,
-                            )
-                            .await;
-                        }
-                        RemoteTrack::Video(video_track) => {
-                            let track_key = format!("{}-{}", participant_identity, video_track.sid());
-                            // TrackSource tells screen share from webcam.
-                            let source = match publication.source() {
-                                livekit::track::TrackSource::Camera => {
-                                    crate::commands::screenshare::RemoteVideoSource::Camera
-                                }
-                                _ => crate::commands::screenshare::RemoteVideoSource::Screen,
-                            };
-                            crate::diag!("[voice] video track subscribed: {track_key} (source={source:?})");
-                            crate::commands::screenshare::on_remote_video_subscribed(
-                                video_track,
-                                participant_identity,
-                                source,
-                                &state_for_room,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
-                    let (participant_identity, _) = resolve_participant(
-                        &state_for_room,
-                        &logical_room,
-                        &participant.identity().to_string(),
-                    )
-                    .await;
-                    match track {
-                        RemoteTrack::Audio(audio_track) => {
-                            let track_key = format!("{}-{}", participant_identity, audio_track.sid());
-                            crate::diag!("[voice] track unsubscribed: {track_key}");
-                            let voice = voice_arc.lock().await;
-                            let mut pb = voice.playback.lock().unwrap();
-                            if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
-                            pb.rtc_tracks.remove(&track_key);
-                            pb.identities.remove(&track_key);
-                            let buffers_arc = Arc::clone(&pb.track_buffers);
-                            drop(pb);
-                            drop(voice);
-                            buffers_arc.lock().unwrap().remove(&track_key);
-                        }
-                        RemoteTrack::Video(video_track) => {
-                            crate::commands::screenshare::on_remote_video_unsubscribed(
-                                video_track,
-                                participant_identity,
-                                &state_for_room,
-                            )
-                            .await;
-                        }
-                    }
-                }
-
-                RoomEvent::TrackMuted { participant, publication: _ } => {
-                    let (identity, _) = resolve_participant(
-                        &state_for_room,
-                        &logical_room,
-                        &participant.identity().to_string(),
-                    )
-                    .await;
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::Muted { identity });
-                    }
-                }
-                RoomEvent::TrackUnmuted { participant, publication: _ } => {
-                    let (identity, _) = resolve_participant(
-                        &state_for_room,
-                        &logical_room,
-                        &participant.identity().to_string(),
-                    )
-                    .await;
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::Unmuted { identity });
-                    }
-                }
-
-                RoomEvent::Disconnected { reason } => {
-                    crate::diag!("[voice] disconnected: {reason:?}");
-                    {
-                        let voice = voice_arc.lock().await;
-                        if let Some(ch) = &voice.channel {
-                            let _ = ch.send(VoiceEvent::Disconnected);
-                        }
-                    }
-                    crate::commands::screenshare::on_room_disconnected(&state_for_room).await;
-                    // We ARE room_task (breaking next), so don't abort it.
-                    let _ = release_voice_resources(&state_for_room, false).await;
-                    break;
-                }
-                RoomEvent::ConnectionStateChanged(conn_state) => {
-                    crate::diag!("[voice] connection state: {conn_state:?}");
-                }
-                // #1097: logged so e2e can assert voice forward secrecy.
-                RoomEvent::E2eeStateChanged { participant, state } => {
-                    let (identity, _) = resolve_participant(
-                        &state_for_room,
-                        &logical_room,
-                        &participant.identity().to_string(),
-                    )
-                    .await;
-                    crate::diag!(
-                        "[voice-e2ee] frame state for {identity}: {state:?}"
-                    );
-                }
-                RoomEvent::LocalTrackPublished { .. } => {
-                    // New cryptors start on slot 0; move to current epoch.
-                    voice_e2ee::sync_local_sender_key_index(&state_for_room).await;
-                }
-                RoomEvent::ConnectionQualityChanged { quality, participant } => {
-                    let quality_str = match quality {
-                        ConnectionQuality::Excellent => "excellent",
-                        ConnectionQuality::Good => "good",
-                        ConnectionQuality::Poor => "poor",
-                        ConnectionQuality::Lost => "lost",
-                    };
-                    let (identity, _) = resolve_participant(
-                        &state_for_room,
-                        &logical_room,
-                        &participant.identity().to_string(),
-                    )
-                    .await;
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ConnectionQualityChanged {
-                            identity,
-                            quality: quality_str.to_string(),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
+    };
+    let roster_ms = roster_start.elapsed().as_millis() as u64;
 
     let total_join_ms = join_start.elapsed().as_millis() as u64;
-
     let timings = JoinTimings {
         channel_id: channel_id.clone(),
         jwt_mint_ms,
@@ -837,16 +728,33 @@ pub async fn join_voice_channel(
         total_join_ms,
     );
 
+    let known_remote: HashSet<String> = seeded.remote.iter().map(|p| p.identity.clone()).collect();
+    let ctx = Arc::new(RoomContext {
+        logical_room: channel_id.clone(),
+        local_user_id: user_id.clone(),
+        local_identity: local_identity.clone(),
+        display_name: display_name.clone(),
+        apm_rate: mic_rate,
+        known_remote: Arc::new(std::sync::Mutex::new(known_remote)),
+    });
+
+    // Store the session and start its event task under ONE lock: a `Disconnected`
+    // that races the store must find the room it belongs to, not an empty slot.
     let mut voice = state.voice.lock().await;
+    if clock_cancelled(&voice) {
+        drop(voice);
+        partial.discard(state).await;
+        return Err(VoiceJoinError::Cancelled);
+    }
+    let JoinPartial { room: _, mic_stream, frame_task } = partial;
     if let Some(t) = voice.room_task.take() { t.abort(); }
     if let Some(t) = voice.frame_task.take() { t.abort(); }
-    voice.room = Some(room);
+    voice.room = Some(Arc::clone(&room));
     // All `None` on the listen-only path (no mic captured/published).
     voice.local_track = local_track_opt;
     voice.audio_source = audio_source_opt;
     voice.input_stream = mic_stream;
-    voice.frame_task = frame_task_opt;
-    voice.room_task = Some(room_task);
+    voice.frame_task = frame_task;
     voice.current_input_device = input_device;
     voice.apm = apm_stage;
     voice.e2ee_key_provider = Some(key_provider_for_state);
@@ -854,6 +762,12 @@ pub async fn join_voice_channel(
     voice.e2ee_epoch = voice_epoch;
     voice.e2ee_key_index = voice_key_index;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
+    voice.room_task = Some(tokio::spawn(run_room_task(
+        Arc::clone(state),
+        Arc::clone(&room),
+        events,
+        ctx,
+    )));
 
     // Publications start unmuted; sync so PTT joins aren't shown hot.
     {
@@ -861,15 +775,597 @@ pub async fn join_voice_channel(
         apply_gate_to_room(&voice, &gate);
     }
 
-    // Tell the renderer if this session can transmit (listen-only UI).
     if let Some(ch) = &voice.channel {
+        let _ = ch.send(VoiceEvent::ParticipantJoined {
+            identity: local_identity.clone(),
+            name: display_name.clone(),
+            is_muted: false,
+            avatar_url: seeded.local_avatar_url,
+        });
+        for p in seeded.remote {
+            crate::diag!("[voice] existing participant: {} muted={}", p.identity, p.is_muted);
+            let _ = ch.send(p.joined_event());
+        }
+        // Tell the renderer if this session can transmit (listen-only UI) and hear.
         let _ = ch.send(VoiceEvent::MicAvailability {
             identity: local_identity.clone(),
             available: has_mic,
         });
+        if !speaker_ok {
+            let _ = ch.send(VoiceEvent::SpeakerAvailability {
+                identity: local_identity.clone(),
+                available: false,
+            });
+        }
     }
 
     Ok(())
+}
+
+/// Whether the in-flight join's cancel flag is up; read under the voice lock.
+fn clock_cancelled(voice: &VoiceState) -> bool {
+    voice.join_cancel.as_ref().is_some_and(|c| c.is_cancelled())
+}
+
+/// One remote participant as the renderer first learns of it.
+struct SeededParticipant {
+    identity: String,
+    name: String,
+    is_muted: bool,
+    avatar_url: Option<String>,
+}
+
+impl SeededParticipant {
+    fn joined_event(self) -> VoiceEvent {
+        VoiceEvent::ParticipantJoined {
+            identity: self.identity,
+            name: self.name,
+            is_muted: self.is_muted,
+            avatar_url: self.avatar_url,
+        }
+    }
+}
+
+struct RosterSnapshot {
+    remote: Vec<SeededParticipant>,
+    local_avatar_url: Option<String>,
+}
+
+/// Everyone in `room` right now, resolved (#836) and with avatars, in TWO DS
+/// round trips whatever the room size: one batched identity resolve, one batched
+/// avatar lookup (the local identity rides along when given).
+async fn roster_snapshot(
+    state: &Arc<AppState>,
+    room: &Room,
+    logical_room: &str,
+    local_identity: Option<&str>,
+) -> RosterSnapshot {
+    let participants = room.remote_participants();
+    // #836: resolve all pseudonyms in ONE batched DS call.
+    let seen: Vec<String> = participants.keys().map(|k| k.to_string()).collect();
+    let resolved = resolve_participants(state, logical_room, &seen).await;
+    let existing: Vec<(String, String, bool)> = participants
+        .into_values()
+        .filter_map(|p| {
+            let wire = p.identity().to_string();
+            let (identity, name) = resolved
+                .get(&wire)
+                .cloned()
+                .unwrap_or_else(|| (wire.clone(), String::new()));
+            // Skip `view` clients (both resolved and wire forms).
+            if is_view_identity(&identity) || is_view_identity(&wire) {
+                return None;
+            }
+            // Seed mute state: TrackMuted only fires on transitions.
+            let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
+            Some((identity, name, is_muted))
+        })
+        .collect();
+    // All avatars (self + roster) in ONE DS round trip, not N+1.
+    let mut avatar_identities: Vec<String> = Vec::with_capacity(existing.len() + 1);
+    if let Some(local) = local_identity {
+        avatar_identities.push(local.to_string());
+    }
+    avatar_identities.extend(existing.iter().map(|(identity, _, _)| identity.clone()));
+    let avatars = lookup_avatar_urls_for_identities(state, &avatar_identities).await;
+    let local_avatar_url = local_identity.and_then(|l| avatars.get(l).cloned());
+    let remote = existing
+        .into_iter()
+        .map(|(identity, name, is_muted)| SeededParticipant {
+            avatar_url: avatars.get(&identity).cloned(),
+            identity,
+            name,
+            is_muted,
+        })
+        .collect();
+    RosterSnapshot { remote, local_avatar_url }
+}
+
+/// Re-emit the roster after a link recovered: whoever vanished meanwhile leaves,
+/// everyone present (re)joins. Both are idempotent for the renderer.
+async fn reseed_roster(state: &Arc<AppState>, room: &Room, ctx: &RoomContext) {
+    let snapshot = roster_snapshot(state, room, &ctx.logical_room, None).await;
+    let present: HashSet<String> = snapshot.remote.iter().map(|p| p.identity.clone()).collect();
+    let gone: Vec<String> = {
+        let mut known = ctx.known_remote.lock().unwrap();
+        let gone = known.difference(&present).cloned().collect();
+        *known = present;
+        gone
+    };
+    for identity in &gone {
+        crate::commands::screenshare::on_participant_left(identity, state).await;
+    }
+    let voice = state.voice.lock().await;
+    if let Some(ch) = &voice.channel {
+        for identity in gone {
+            let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
+        }
+        for p in snapshot.remote {
+            let _ = ch.send(p.joined_event());
+        }
+    }
+}
+
+/// Whether `room` is still the session the state holds (a leave swaps it out).
+async fn is_current_room(state: &Arc<AppState>, room: &Arc<Room>) -> bool {
+    state
+        .voice
+        .lock()
+        .await
+        .room
+        .as_ref()
+        .is_some_and(|r| Arc::ptr_eq(r, room))
+}
+
+async fn emit(state: &Arc<AppState>, event: VoiceEvent) {
+    let voice = state.voice.lock().await;
+    if let Some(ch) = &voice.channel {
+        let _ = ch.send(event);
+    }
+}
+
+/// How one room's event stream ended.
+enum StreamEnd {
+    Disconnected(livekit::DisconnectReason),
+    Closed,
+}
+
+/// Owns the session from join to teardown: drains one room's events, and when
+/// the SFU drops a link it can't recover, re-mints a token and connects again
+/// inside the same session (mic, APM, playback and key provider all kept).
+async fn run_room_task(
+    state: Arc<AppState>,
+    mut room: Arc<Room>,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    ctx: Arc<RoomContext>,
+) {
+    // The SDK's own resume/restart is attempt 1 of an episode; ours count on from there.
+    let mut episode_attempt: u32 = 0;
+    loop {
+        let end = drive_room_events(&state, &room, &mut events, &ctx, &mut episode_attempt).await;
+        if !is_current_room(&state, &room).await {
+            // Left (or replaced) while we were draining; whoever did it released the state.
+            return;
+        }
+        let reason = match end {
+            StreamEnd::Disconnected(r) => r,
+            StreamEnd::Closed => livekit::DisconnectReason::UnknownReason,
+        };
+        if !disconnect_is_retryable(reason) {
+            let error = (reason != livekit::DisconnectReason::ClientInitiated).then(|| VoiceJoinError::Internal {
+                detail: format!("disconnected: {reason:?}"),
+            });
+            finish_session(&state, &room, error).await;
+            return;
+        }
+        crate::diag!("[voice] link lost ({reason:?}); reconnecting in-session");
+        match reconnect_session(&state, &room, &ctx, &mut episode_attempt).await {
+            Ok((new_room, new_events)) => {
+                room = new_room;
+                events = new_events;
+                episode_attempt = 0;
+            }
+            Err(ReconnectEnd::Left) => return,
+            Err(ReconnectEnd::GaveUp(error)) => {
+                finish_session(&state, &room, Some(error)).await;
+                return;
+            }
+        }
+    }
+}
+
+/// Final teardown from inside the room task: tell the renderer, then release
+/// everything (the task itself is left to return).
+async fn finish_session(state: &Arc<AppState>, room: &Arc<Room>, error: Option<VoiceJoinError>) {
+    crate::diag!("[voice] session over: {error:?}");
+    emit(state, VoiceEvent::Disconnected { error }).await;
+    crate::commands::screenshare::on_room_disconnected(state).await;
+    // We ARE room_task (returning next), so don't abort it.
+    let _ = release_voice_resources(state, false, Some(room)).await;
+}
+
+enum ReconnectEnd {
+    /// The user left during the attempt; nothing to report.
+    Left,
+    GaveUp(VoiceJoinError),
+}
+
+/// Re-mint and reconnect until [`VOICE_RECONNECT_WINDOW`] runs out. Each attempt
+/// is a reaction to the previous failure, never a periodic poll.
+async fn reconnect_session(
+    state: &Arc<AppState>,
+    old_room: &Arc<Room>,
+    ctx: &Arc<RoomContext>,
+    episode_attempt: &mut u32,
+) -> std::result::Result<(Arc<Room>, tokio::sync::mpsc::UnboundedReceiver<RoomEvent>), ReconnectEnd> {
+    // Local shares published into the dead room; their state resets like a leave's.
+    crate::commands::screenshare::on_room_disconnected(state).await;
+    let _ = crate::commands::camera::stop_camera(state).await;
+    clear_remote_audio_tracks(state).await;
+
+    let window_end = Instant::now() + VOICE_RECONNECT_WINDOW;
+    let mut last_error = VoiceJoinError::LivekitUnreachable { detail: "reconnect window elapsed".into() };
+    let mut attempt: u32 = 0;
+    let gate = crate::commands::livekit::sfu_gate();
+    while Instant::now() < window_end {
+        attempt += 1;
+        *episode_attempt += 1;
+        emit(state, VoiceEvent::Reconnecting { attempt: *episode_attempt }).await;
+        // A known SFU outage: let the realtime prober dial; we follow it back.
+        if gate.is_down() && gate.report_down(SFU_GATE_VOICE) == crate::commands::livekit::SfuRole::Waiter {
+            let remaining = window_end.saturating_duration_since(Instant::now());
+            gate.wait_up(remaining).await;
+        } else {
+            tokio::time::sleep(reconnect_delay(attempt)).await;
+        }
+        if !is_current_room(state, old_room).await {
+            gate.release_prober(SFU_GATE_VOICE);
+            return Err(ReconnectEnd::Left);
+        }
+
+        // Fresh token every time: the SDK's own retries reuse the join token, which
+        // the DS mints for 15 minutes, so a long outage needs a new one.
+        let (token, url) = match crate::commands::mls::ds_livekit_token(state, &ctx.logical_room, "voice").await {
+            Ok(pair) => pair,
+            Err(e) => {
+                last_error = classify_ds_error(&e);
+                crate::diag!("[voice] reconnect attempt {attempt}: token mint failed: {e}");
+                continue;
+            }
+        };
+        pin_local_identity(state, &ctx.logical_room, &token, &ctx.local_identity, &ctx.display_name).await;
+
+        let key_provider = {
+            let voice = state.voice.lock().await;
+            match voice.e2ee_key_provider.clone() {
+                Some(kp) => kp,
+                None => return Err(ReconnectEnd::Left),
+            }
+        };
+        let mut options = RoomOptions::default();
+        options.encryption = Some(livekit::e2ee::E2eeOptions {
+            encryption_type: livekit::e2ee::EncryptionType::Gcm,
+            key_provider,
+        });
+        let (new_room, new_events) = match Room::connect(&url, &token, options).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                last_error = classify_connect_error(&e);
+                if matches!(last_error, VoiceJoinError::LivekitUnreachable { .. }) {
+                    gate.report_down(SFU_GATE_VOICE);
+                }
+                crate::diag!("[voice] reconnect attempt {attempt}: connect failed: {e}");
+                continue;
+            }
+        };
+        gate.report_up();
+        let new_room = Arc::new(new_room);
+
+        // Swap only if nobody left meanwhile; otherwise the new room is ours to close.
+        let (local_track, key_index) = {
+            let mut voice = state.voice.lock().await;
+            let still_ours = voice.room.as_ref().is_some_and(|r| Arc::ptr_eq(r, old_room));
+            if !still_ours {
+                drop(voice);
+                let _ = tokio::time::timeout(Duration::from_secs(5), new_room.close()).await;
+                return Err(ReconnectEnd::Left);
+            }
+            voice.room = Some(Arc::clone(&new_room));
+            (voice.local_track.clone(), voice.e2ee_key_index)
+        };
+
+        if let Some(track) = local_track {
+            match new_room
+                .local_participant()
+                .publish_track(LocalTrack::Audio(track), TrackPublishOptions::default())
+                .await
+            {
+                Ok(_) => {
+                    let moved = voice_e2ee::apply_sender_key_index(&new_room, key_index);
+                    crate::diag!("[voice] reconnected: mic republished ({moved} sender cryptor(s) on ring slot {key_index})");
+                }
+                Err(e) => {
+                    crate::diag!("[voice] reconnected listen-only: republish failed: {e}");
+                    emit(state, VoiceEvent::MicAvailability { identity: ctx.local_identity.clone(), available: false }).await;
+                }
+            }
+        }
+        {
+            let voice = state.voice.lock().await;
+            let gate = voice.gate.lock().unwrap();
+            apply_gate_to_room(&voice, &gate);
+        }
+        reseed_roster(state, &new_room, ctx).await;
+        emit(state, VoiceEvent::Reconnected).await;
+        crate::diag!("[voice] reconnected in-session after {attempt} attempt(s)");
+        return Ok((new_room, new_events));
+    }
+    gate.release_prober(SFU_GATE_VOICE);
+    Err(ReconnectEnd::GaveUp(last_error))
+}
+
+/// The voice session's name in the SFU gate's prober election.
+const SFU_GATE_VOICE: &str = "voice";
+
+/// Drop every remote track's drain and buffer; the speaker stream and mixer stay
+/// up for the tracks the next room subscribes.
+async fn clear_remote_audio_tracks(state: &Arc<AppState>) {
+    let buffers = {
+        let voice = state.voice.lock().await;
+        let mut pb = voice.playback.lock().unwrap();
+        for (_, t) in pb.drain_tasks.drain() {
+            t.abort();
+        }
+        pb.rtc_tracks.clear();
+        pb.identities.clear();
+        Arc::clone(&pb.track_buffers)
+    };
+    let _ = buffers.lock().map(|mut guard| guard.clear());
+}
+
+/// Drain one room's events until its stream ends.
+async fn drive_room_events(
+    state: &Arc<AppState>,
+    room: &Arc<Room>,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    ctx: &Arc<RoomContext>,
+    episode_attempt: &mut u32,
+) -> StreamEnd {
+    let state_for_room = state;
+    let voice_arc = &state.voice;
+    let logical_room = &ctx.logical_room;
+    let local_user_id = &ctx.local_user_id;
+    let apm_rate_for_room = ctx.apm_rate;
+    while let Some(event) = events.recv().await {
+        match event {
+            RoomEvent::ParticipantConnected(p) => {
+                let wire = p.identity().to_string();
+                // Same filter as the seed loop above — see comment there.
+                if is_view_identity(&wire) {
+                    continue;
+                }
+                // #836: translate before anything downstream sees it.
+                let (identity, name) =
+                    resolve_participant(state_for_room, logical_room, &wire).await;
+                if is_view_identity(&identity) {
+                    continue;
+                }
+                crate::diag!("[voice] participant joined: {identity}");
+                let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
+                let avatar_url =
+                    lookup_avatar_url_for_identity(state_for_room, &identity).await;
+                ctx.known_remote.lock().unwrap().insert(identity.clone());
+                let voice = voice_arc.lock().await;
+                if let Some(ch) = &voice.channel {
+                    let _ = ch.send(VoiceEvent::ParticipantJoined {
+                        identity,
+                        name,
+                        is_muted,
+                        avatar_url,
+                    });
+                }
+            }
+            RoomEvent::ParticipantDisconnected(p) => {
+                let wire = p.identity().to_string();
+                if is_view_identity(&wire) {
+                    continue;
+                }
+                let (identity, _) =
+                    resolve_participant(state_for_room, logical_room, &wire).await;
+                if is_view_identity(&identity) {
+                    continue;
+                }
+                crate::diag!("[voice] participant left: {identity}");
+                ctx.known_remote.lock().unwrap().remove(&identity);
+                // Clear their screenshare so a stale tile doesn't linger.
+                crate::commands::screenshare::on_participant_left(
+                    &identity,
+                    state_for_room,
+                )
+                .await;
+                let voice = voice_arc.lock().await;
+                if let Some(ch) = &voice.channel {
+                    let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
+                }
+            }
+            RoomEvent::TrackSubscribed { track, publication, participant } => {
+                let (participant_identity, _) = resolve_participant(
+                    state_for_room,
+                    logical_room,
+                    &participant.identity().to_string(),
+                )
+                .await;
+                match track {
+                    RemoteTrack::Audio(audio_track) => {
+                        // #140: never play our other devices' mic.
+                        if user_id_from_voice_identity(&participant_identity) == local_user_id {
+                            crate::diag!(
+                                "[voice] skipping own-device audio track for self-hear mute: {participant_identity}"
+                            );
+                            continue;
+                        }
+                        let track_key = format!("{}-{}", participant_identity, audio_track.sid());
+                        // TrackSource marks shared audio.
+                        let is_shared_audio = matches!(
+                            publication.source(),
+                            livekit::track::TrackSource::ScreenshareAudio
+                        );
+                        crate::diag!(
+                            "[voice] track subscribed: {track_key} (shared_audio={is_shared_audio})"
+                        );
+                        register_remote_track(
+                            audio_track.rtc_track(),
+                            track_key,
+                            Arc::clone(voice_arc),
+                            participant_identity,
+                            apm_rate_for_room,
+                            is_shared_audio,
+                        )
+                        .await;
+                    }
+                    RemoteTrack::Video(video_track) => {
+                        let track_key = format!("{}-{}", participant_identity, video_track.sid());
+                        // TrackSource tells screen share from webcam.
+                        let source = match publication.source() {
+                            livekit::track::TrackSource::Camera => {
+                                crate::commands::screenshare::RemoteVideoSource::Camera
+                            }
+                            _ => crate::commands::screenshare::RemoteVideoSource::Screen,
+                        };
+                        crate::diag!("[voice] video track subscribed: {track_key} (source={source:?})");
+                        crate::commands::screenshare::on_remote_video_subscribed(
+                            video_track,
+                            participant_identity,
+                            source,
+                            state_for_room,
+                        )
+                        .await;
+                    }
+                }
+            }
+            RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
+                let (participant_identity, _) = resolve_participant(
+                    state_for_room,
+                    logical_room,
+                    &participant.identity().to_string(),
+                )
+                .await;
+                match track {
+                    RemoteTrack::Audio(audio_track) => {
+                        let track_key = format!("{}-{}", participant_identity, audio_track.sid());
+                        crate::diag!("[voice] track unsubscribed: {track_key}");
+                        let voice = voice_arc.lock().await;
+                        let mut pb = voice.playback.lock().unwrap();
+                        if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
+                        pb.rtc_tracks.remove(&track_key);
+                        pb.identities.remove(&track_key);
+                        let buffers_arc = Arc::clone(&pb.track_buffers);
+                        drop(pb);
+                        drop(voice);
+                        buffers_arc.lock().unwrap().remove(&track_key);
+                    }
+                    RemoteTrack::Video(video_track) => {
+                        crate::commands::screenshare::on_remote_video_unsubscribed(
+                            video_track,
+                            participant_identity,
+                            state_for_room,
+                        )
+                        .await;
+                    }
+                }
+            }
+
+            RoomEvent::TrackMuted { participant, publication: _ } => {
+                let (identity, _) = resolve_participant(
+                    state_for_room,
+                    logical_room,
+                    &participant.identity().to_string(),
+                )
+                .await;
+                let voice = voice_arc.lock().await;
+                if let Some(ch) = &voice.channel {
+                    let _ = ch.send(VoiceEvent::Muted { identity });
+                }
+            }
+            RoomEvent::TrackUnmuted { participant, publication: _ } => {
+                let (identity, _) = resolve_participant(
+                    state_for_room,
+                    logical_room,
+                    &participant.identity().to_string(),
+                )
+                .await;
+                let voice = voice_arc.lock().await;
+                if let Some(ch) = &voice.channel {
+                    let _ = ch.send(VoiceEvent::Unmuted { identity });
+                }
+            }
+
+            RoomEvent::Disconnected { reason } => {
+                crate::diag!("[voice] disconnected: {reason:?}");
+                return StreamEnd::Disconnected(reason);
+            }
+            // The SDK is resuming or restarting the link itself (same token).
+            RoomEvent::Reconnecting => {
+                *episode_attempt = (*episode_attempt).max(1);
+                crate::diag!("[voice] SDK reconnecting (attempt {episode_attempt})");
+                emit(state, VoiceEvent::Reconnecting { attempt: *episode_attempt }).await;
+            }
+            RoomEvent::Reconnected => {
+                crate::diag!("[voice] SDK reconnected");
+                *episode_attempt = 0;
+                {
+                    let voice = voice_arc.lock().await;
+                    let gate = voice.gate.lock().unwrap();
+                    apply_gate_to_room(&voice, &gate);
+                }
+                voice_e2ee::sync_local_sender_key_index(state_for_room).await;
+                reseed_roster(state_for_room, room, ctx).await;
+                emit(state, VoiceEvent::Reconnected).await;
+            }
+            RoomEvent::ConnectionStateChanged(conn_state) => {
+                crate::diag!("[voice] connection state: {conn_state:?}");
+            }
+            // #1097: logged so e2e can assert voice forward secrecy.
+            RoomEvent::E2eeStateChanged { participant, state } => {
+                let (identity, _) = resolve_participant(
+                    state_for_room,
+                    logical_room,
+                    &participant.identity().to_string(),
+                )
+                .await;
+                crate::diag!(
+                    "[voice-e2ee] frame state for {identity}: {state:?}"
+                );
+            }
+            RoomEvent::LocalTrackPublished { .. } => {
+                // New cryptors start on slot 0; move to current epoch.
+                voice_e2ee::sync_local_sender_key_index(state_for_room).await;
+            }
+            RoomEvent::ConnectionQualityChanged { quality, participant } => {
+                let quality_str = match quality {
+                    ConnectionQuality::Excellent => "excellent",
+                    ConnectionQuality::Good => "good",
+                    ConnectionQuality::Poor => "poor",
+                    ConnectionQuality::Lost => "lost",
+                };
+                let (identity, _) = resolve_participant(
+                    state_for_room,
+                    logical_room,
+                    &participant.identity().to_string(),
+                )
+                .await;
+                let voice = voice_arc.lock().await;
+                if let Some(ch) = &voice.channel {
+                    let _ = ch.send(VoiceEvent::ConnectionQualityChanged {
+                        identity,
+                        quality: quality_str.to_string(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    StreamEnd::Closed
 }
 
 /// Return the most recent `join_voice_channel` timing record, if any.
@@ -882,15 +1378,24 @@ pub async fn get_last_join_timings(
 }
 
 /// Tear down voice resources; returns the room for the caller to close.
-/// Pass `abort_room_task = false` from inside the room task itself.
+/// Pass `abort_room_task = false` from inside the room task itself, and
+/// `only_if = Some(room)` to release nothing unless that room is still the
+/// live session (a stale task must not tear down its successor).
 /// Idempotent.
 async fn release_voice_resources(
     state: &Arc<AppState>,
     abort_room_task: bool,
+    only_if: Option<&Arc<Room>>,
 ) -> Option<Arc<Room>> {
     // Don't hold the lock across room.close(): it hangs on a broken network.
     let (room, input_stream, output_stream) = {
         let mut voice = state.voice.lock().await;
+        if let Some(expected) = only_if {
+            let is_live = voice.room.as_ref().is_some_and(|r| Arc::ptr_eq(r, expected));
+            if !is_live {
+                return None;
+            }
+        }
 
         // Kill the frame feed first.
         if let Some(t) = voice.frame_task.take() { t.abort(); }
@@ -944,12 +1449,22 @@ async fn release_voice_resources(
 }
 
 pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
+    // A join still in flight stops at its next phase and gives back what it holds.
+    {
+        let voice = state.voice.lock().await;
+        if voice.joining.load(Ordering::Acquire) {
+            if let Some(cancel) = &voice.join_cancel {
+                cancel.cancel();
+            }
+        }
+    }
+
     // room_task abort skips on_room_disconnected; stop here.
     crate::commands::screenshare::stop_screen_share(state).await.ok();
     // Same for the webcam, which publishes into this room.
     crate::commands::camera::stop_camera(state).await.ok();
 
-    let room = release_voice_resources(state, true).await;
+    let room = release_voice_resources(state, true, None).await;
 
     // Close outside the lock, with a timeout (broken networks hang).
     if let Some(room) = room {

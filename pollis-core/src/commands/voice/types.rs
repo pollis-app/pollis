@@ -93,7 +93,19 @@ pub enum VoiceEvent {
         epoch: u64,
         mls_group_id: String,
     },
-    Disconnected,
+    /// Whether the local session can hear; `false` = the speaker failed to open.
+    SpeakerAvailability { identity: String, available: bool },
+    /// The link dropped and the session is trying to recover without leaving;
+    /// `attempt` counts this episode's tries (1 = the SDK's own resume/restart).
+    Reconnecting { attempt: u32 },
+    /// The session recovered on a live link; the roster was re-seeded just before.
+    Reconnected,
+    /// The session is over. `error` is set when it ended on a failure the
+    /// in-session reconnect could not fix; absent when the user left.
+    Disconnected {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<crate::commands::voice_join_error::VoiceJoinError>,
+    },
 }
 
 #[derive(Serialize)]
@@ -208,6 +220,8 @@ pub struct VoiceState {
     pub self_muted: Arc<AtomicBool>,
     /// Join in flight; blocks a racing join (DuplicateIdentity).
     pub joining: Arc<AtomicBool>,
+    /// Raised by `leave_voice_channel` to abort the join `joining` guards.
+    pub join_cancel: Option<Arc<super::join::JoinCancel>>,
     pub current_input_device: Option<String>,
     /// APM stage for the current session; `None` outside a call.
     pub apm: Option<voice_apm::ApmStage>,
@@ -253,6 +267,7 @@ impl VoiceState {
             deafened: Arc::new(AtomicBool::new(false)),
             self_muted: Arc::new(AtomicBool::new(false)),
             joining: Arc::new(AtomicBool::new(false)),
+            join_cancel: None,
             current_input_device: None,
             apm: None,
             denoiser: Arc::new(Mutex::new(None)),
