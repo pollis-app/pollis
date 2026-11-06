@@ -2,6 +2,7 @@ New
 • Get a notification when someone sends you a message request. Tap it to see the request.
 
 Fixes
+• The message box stays above the keyboard after you open a notification or send several messages quickly.
 • A new direct message shows the other person's name right away.
 • Tapping a notification for the chat you're in no longer opens it twice.
 • Someone you blocked can no longer trigger notifications.
