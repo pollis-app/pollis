@@ -41,8 +41,10 @@ tags:
 # neither its cells nor its "Use" button are in the accessibility hierarchy, so
 # on iOS this is the one place a point tap is the only way in. Pass the two
 # points per device: PICK_POINT is the grid's first cell (the photo `addMedia`
-# just seeded, newest first), USE_POINT the crop's "Use".
-#   iPad Pro 13-inch (M5): -e PICK_POINT=39%,35% -e USE_POINT=61%,35%
+# just seeded, newest first), USE_POINT the crop's confirm ("Use" on iPad,
+# "Choose" on iPhone). scripts/maestro-run.sh passes them per platform:
+#   iPhone 18 Pro:         PICK_POINT=16%,24% USE_POINT=89%,92%
+#   iPad Pro 13-inch (M5): PICK_POINT=39%,35% USE_POINT=61%,35%
 # Android's picker labels its cells as everywhere else, and its cropper's
 # confirm is found by text or id.
 - runFlow:

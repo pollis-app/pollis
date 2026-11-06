@@ -23,6 +23,10 @@ tags:
     id: "row-self-user-settings"
 - assertVisible:
     id: "screen-self-user-settings"
+# Below the fold since the profile photo block (#1680): a tap on a half-shown
+# button lands on the Save bar under it. A plain scroll, because iOS reports
+# the clipped button's whole frame, so scrollUntilVisible sees it "visible".
+- scroll
 - tapOn:
     id: "btn-change-email"
 - assertVisible:

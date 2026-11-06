@@ -43,7 +43,9 @@ appId: ${MAESTRO_APP_ID}
 - assertVisible:
     id: "screen-direct"
 
-# Baseline: the toggle is at the bottom, and the point tap reaches it.
+# Baseline: the toggle is at the bottom, and the point tap reaches it. Phones
+# draw it at 92% of the height, the iPad lower (maestro-run.sh passes
+# SCAN_TOGGLE_POINT for it).
 - tapOn:
     id: "tab-link-device"
 - assertVisible:
@@ -52,7 +54,7 @@ appId: ${MAESTRO_APP_ID}
     id: "keyboard-closed"
 - takeScreenshot: keyboard-recovery-01-baseline
 - tapOn:
-    point: "50%,92%"
+    point: ${SCAN_TOGGLE_POINT || "50%,92%"}
 - assertVisible:
     id: "input-scan-code"
 
@@ -76,7 +78,7 @@ appId: ${MAESTRO_APP_ID}
     timeout: 3000
 - takeScreenshot: keyboard-recovery-02-after-navigation
 - tapOn:
-    point: "50%,92%"
+    point: ${SCAN_TOGGLE_POINT || "50%,92%"}
 - assertVisible:
     id: "input-scan-code"
 
@@ -104,7 +106,7 @@ appId: ${MAESTRO_APP_ID}
     timeout: 3000
 - takeScreenshot: keyboard-recovery-03-after-background
 - tapOn:
-    point: "50%,92%"
+    point: ${SCAN_TOGGLE_POINT || "50%,92%"}
 - assertVisible:
     id: "input-scan-code"
 
@@ -131,8 +133,9 @@ appId: ${MAESTRO_APP_ID}
 # so its keypad sits at the bottom even straight after the keyboard-up transition:
 # a point tap at 50%,90% must land on the bottom row's "0" key (72pt keys, 20pt
 # under the last row, plus the bottom inset). Stranded, that spot is empty.
+# The iPad centres the keypad, so maestro-run.sh passes PIN_ZERO_POINT there.
 - tapOn:
-    point: "50%,90%"
+    point: ${PIN_ZERO_POINT || "50%,90%"}
 - assertVisible: "1 of 4 digits entered"
 - tapOn:
     id: "btn-pin-back"

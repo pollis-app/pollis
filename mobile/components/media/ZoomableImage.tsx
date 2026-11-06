@@ -16,6 +16,8 @@ import type { MessageAttachment } from "../../types";
 const MAX_SCALE = 5;
 const DOUBLE_TAP_SCALE = 2.5;
 const RESET_MS = 180;
+// Full-size, as KeyboardProbe: Android's hierarchy omits a tiny empty view.
+const PROBE = { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 } as const;
 
 export function ZoomableImage({
   attachment,
@@ -33,6 +35,7 @@ export function ZoomableImage({
   testID?: string;
 }) {
   const { t } = useTranslation("mobile");
+  const [rendered, setRendered] = useState(false);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const tx = useSharedValue(0);
@@ -156,23 +159,33 @@ export function ZoomableImage({
   }));
 
   return (
-    <GestureDetector gesture={gesture}>
+    <View style={{ width, height }}>
+      <GestureDetector gesture={gesture}>
+        <View
+          testID={testID}
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={attachment.filename}
+          accessibilityHint={t("media.zoomHint")}
+          style={{ width, height, overflow: "hidden" }}
+        >
+          <Animated.View style={[{ width, height }, animatedStyle]}>
+            <MediaImage
+              attachment={attachment}
+              contentFit="contain"
+              style={{ width, height, borderRadius: 0, backgroundColor: "transparent" }}
+              onRenderedChange={setRendered}
+            />
+          </Animated.View>
+        </View>
+      </GestureDetector>
+      {/* The page is one accessible element, which hides MediaImage's own testID on iOS. */}
       <View
-        testID={testID}
-        accessible
-        accessibilityRole="image"
-        accessibilityLabel={attachment.filename}
-        accessibilityHint={t("media.zoomHint")}
-        style={{ width, height, overflow: "hidden" }}
-      >
-        <Animated.View style={[{ width, height }, animatedStyle]}>
-          <MediaImage
-            attachment={attachment}
-            contentFit="contain"
-            style={{ width, height, borderRadius: 0, backgroundColor: "transparent" }}
-          />
-        </Animated.View>
-      </View>
-    </GestureDetector>
+        testID={rendered ? "media-image-rendered" : "media-image-loading"}
+        collapsable={false}
+        pointerEvents="none"
+        style={PROBE}
+      />
+    </View>
   );
 }

@@ -95,12 +95,24 @@ tags:
     optional: true
 
 # ── Double tap, then dismiss ────────────────────────────────────────────
-- doubleTapOn:
-    text: "Reply to .*: reply target\\. .*: swipe reply, .*"
-- extendedWaitUntil:
-    visible:
-      id: "bar-reply"
-    timeout: 4000
+# On the iOS simulator the first double tap after the send and hideKeyboard is
+# sometimes lost (by hand it always lands), so try up to three times; the bar
+# must still appear.
+- repeat:
+    while:
+      notVisible:
+        id: "bar-reply"
+    times: 3
+    commands:
+      - doubleTapOn:
+          text: "Reply to .*: reply target\\. .*: swipe reply, .*"
+      - extendedWaitUntil:
+          visible:
+            id: "bar-reply"
+          timeout: 4000
+          optional: true
+- assertVisible:
+    id: "bar-reply"
 - assertNotVisible:
     id: "btn-edit"
 - takeScreenshot: reply-03-double-tapped

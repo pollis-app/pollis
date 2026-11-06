@@ -1,0 +1,64 @@
+appId: ${MAESTRO_APP_ID}
+---
+# The system photo picker on iPad (iOS 27): a centred popover drawn out of
+# process, so none of its cells, menus or buttons are in the accessibility
+# hierarchy and the text taps the phone flows use find nothing. Point taps are
+# the only way in; the popover sits in the same place for every caller.
+# maestro-run.sh passes IPAD=1 on the iPad; callers run this instead of their
+# phone steps there.
+#
+#   CELLS    how many of the newest items to select (1-6), newest first
+#   CONFIRM  "1" when multiple selection is on, so the picker needs its ✓
+#
+# Measured on iPad Pro 13-inch (M5): the grid is 5 columns of ~11% from x 39%,
+# rows from y 35% at ~9% spacing; Sort and Filter sits bottom-left of the grid.
+- extendedWaitUntil:
+    visible:
+      id: "settle-picker"
+    timeout: 3000
+    optional: true
+# Sort by date added (see pick-newest-photo.yaml, #1530), then the first cells.
+- tapOn:
+    point: "36%,72%"
+- tapOn:
+    point: "40%,47%"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    point: "39%,35%"
+- runFlow:
+    when:
+      true: ${Number(CELLS) >= 2}
+    commands:
+      - tapOn:
+          point: "50%,35%"
+- runFlow:
+    when:
+      true: ${Number(CELLS) >= 3}
+    commands:
+      - tapOn:
+          point: "62%,35%"
+- runFlow:
+    when:
+      true: ${Number(CELLS) >= 4}
+    commands:
+      - tapOn:
+          point: "73%,35%"
+- runFlow:
+    when:
+      true: ${Number(CELLS) >= 5}
+    commands:
+      - tapOn:
+          point: "84%,35%"
+- runFlow:
+    when:
+      true: ${Number(CELLS) >= 6}
+    commands:
+      - tapOn:
+          point: "39%,44%"
+- runFlow:
+    when:
+      true: ${CONFIRM == "1"}
+    commands:
+      - tapOn:
+          point: "86%,28%"

@@ -622,8 +622,13 @@ function TextChat(props: ChatViewProps = {}) {
       return null;
     }
     const peerMsg = messages.find((m) => m.sender_id !== currentUser?.id);
-    return peerMsg?.sender_username ?? null;
-  }, [kind, messages, currentUser?.id]);
+    if (peerMsg?.sender_username) {
+      return peerMsg.sender_username;
+    }
+    // A DM opened before anyone wrote in it: name it from its members.
+    const names = dmPeers.map((p) => p.username).filter(Boolean);
+    return names.length > 0 ? names.join(", ") : null;
+  }, [kind, messages, currentUser?.id, dmPeers]);
 
   const title =
     (displayName && displayName.trim()) ||

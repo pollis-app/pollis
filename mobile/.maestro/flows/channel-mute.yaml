@@ -71,8 +71,10 @@ tags:
     id: "btn-menu-cancel"
 
 # ── The channel list marks it ────────────────────────────────────────────
+# On iPad the channel is the two-pane's right pane, with no back button.
 - tapOn:
     id: "btn-back"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "row-channel-.*-muted"
@@ -104,8 +106,10 @@ tags:
     checked: false
 - tapOn:
     id: "btn-menu-cancel"
+# On iPad the channel is the two-pane's right pane, with no back button.
 - tapOn:
     id: "btn-back"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "panel-group"
