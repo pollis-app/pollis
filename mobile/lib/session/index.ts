@@ -7,6 +7,7 @@ import { clearMediaCache } from "../media/cache";
 import { clearExportArchives } from "../exportDir";
 import { clearEmojiCache } from "../emojiCache";
 import { clearAvatarCache } from "../avatarCache";
+import { clearAllDrafts } from "../drafts";
 import { oncePerProcess, sweepPlaintext, tearDownSession } from "./teardown";
 
 export function endSession(): Promise<void> {
@@ -27,6 +28,7 @@ export function endSession(): Promise<void> {
     clearExportArchives,
     clearEmojiCache,
     clearAvatarCache,
+    clearDrafts: clearAllDrafts,
   });
 }
 

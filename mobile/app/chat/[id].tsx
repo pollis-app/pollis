@@ -84,6 +84,7 @@ import { haptic } from "../../lib/haptics";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
+import { conversationDraftKey, useDraft } from "../../hooks/useDraft";
 
 // Props embed this screen in the iPad right pane; route usage passes none.
 type ChatViewProps = {
@@ -117,7 +118,7 @@ function TextChat(props: ChatViewProps = {}) {
     props.name ?? (typeof params.name === "string" ? params.name : undefined);
   const openMedia = useOpenMediaViewer(conversationId, kind);
 
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useDraft(conversationDraftKey(kind, conversationId));
   const [pendingAttachments, setPendingAttachments] = useState<
     PickedAttachment[]
   >([]);

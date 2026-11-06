@@ -12,6 +12,8 @@ export interface SessionTeardownDeps {
   clearEmojiCache: () => Promise<void>;
   // Profile pictures of the people this account talks to.
   clearAvatarCache: () => Promise<void>;
+  // Unsent composer text, held in memory.
+  clearDrafts: () => void;
 }
 
 // Every wipe runs even if one fails: a disk hiccup must not strand an ended session.
@@ -28,6 +30,7 @@ async function runAll(label: string, wipes: Array<() => Promise<void>>): Promise
 export async function tearDownSession(deps: SessionTeardownDeps): Promise<void> {
   deps.resetStore();
   deps.leaveSignedInScreens();
+  deps.clearDrafts();
   await runAll("session teardown", [
     deps.clearQueryCache,
     deps.clearMediaCache,

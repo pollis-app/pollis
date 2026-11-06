@@ -26,6 +26,7 @@ import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useTheme } from "../../components/theme";
+import { useDraft } from "../../hooks/useDraft";
 
 /** Slack-style thread screen (#831); state is isolated per thread (#837). */
 function ThreadScreen() {
@@ -45,7 +46,7 @@ function ThreadScreen() {
   const title =
     typeof params.name === "string" ? params.name : t("panel.thread");
 
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useDraft(threadId ? `thread:${threadId}` : null);
   const listRef = useRef<FlatList<Message>>(null);
   const currentUser = appStore.currentUser;
 

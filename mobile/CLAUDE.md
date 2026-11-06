@@ -1362,6 +1362,12 @@ Current state:
   to a non-prod DS); a store, APK or OTA build refuses to configure while it is
   set, so clear it in `mobile/.env` first (`docs/deployments.md`, "Dev gate"). Full
   sign-in verified end-to-end on an Android emulator against the live dev DS.
+- **Composer drafts (desktop's `utils/drafts.ts`):** unsent text in a chat,
+  thread or the Vault survives leaving the screen. `lib/drafts.ts` is a byte copy
+  of desktop's in-memory store (`tests/drafts.test.ts` fails on drift),
+  `hooks/useDraft.ts` binds a composer to it under desktop's keys
+  (`channel:` / `conv:` / `thread:` / `vault`), and `endSession()` clears it.
+  Never persisted to disk. Maestro: `flows/composer-draft.yaml`.
 - **Pinned messages (#1315, desktop's #99):** client-only, over the bridge's
   existing `pin_message` / `unpin_message` / `list_pinned_messages` arms
   (`hooks/queries/usePins.ts`, a port of desktop's). Same semantics, because
