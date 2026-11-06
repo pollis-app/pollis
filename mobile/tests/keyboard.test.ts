@@ -164,8 +164,8 @@ test("keyboard-controller is patched to keep JS in step with the real keyboard, 
 // FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS on, native evicts a view's last animated value 2 s after
 // it settles and relies on a 500 ms JS timer to have copied it into React state first. That timer
 // misses whenever it is paused (the app in the background) or late (a busy JS thread at resume), and
-// 4.5.1 stops it for good once its view count drifts below zero (a nested component registers one
-// tag once but unregisters it twice, as chat rows unmount). The value is then lost, and the next
+// 4.5.1 also stops it whenever its view count drifts to zero with views still mounted (nested
+// animated components sharing one tag register it once but unregister it twice). The value is then lost, and the next
 // React render of the screen puts React's stale padding back: the composer under the keyboard after
 // a few sends (rapid-send), or mid-screen with no keyboard after a notification tap. With the flag
 // off, Reanimated keeps the value and re-applies it on every React commit. Static flags are compiled

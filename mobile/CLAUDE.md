@@ -1272,15 +1272,17 @@ Reanimated animated style and Reanimated 4.5 can drop it. With its static flag
 a view's last animated value 2 s after it settles and counts on a 500 ms JS
 timer (`PropsRegistryGarbageCollector`) to have copied it into React state
 first. That timer misses when it is paused (the app in the background) or late
-(a busy JS thread at resume), and 4.5.1 stops it outright once its view count
-drifts below zero: a nested component (a `GestureDetector` around an
-`Animated.View`, as in every chat row) registers one tag once but unregisters
-it twice, so leaving a chat with messages stops it. The value is then lost,
+(a busy JS thread at resume), and 4.5.1 also stops it whenever its view count
+drifts to zero with views still mounted: nested animated components that share
+one view tag register it once but unregister it twice. In rapid-send, leaving
+the first chat logged the timer stopping with a count of 0 and 3 views live,
+and it did not tick again for ~48 s. The value is then lost,
 and the next React render of the screen (a send, a new row, a navigation) puts
 React's stale copy back: the composer under the keyboard after a few sends in
 a second chat (rapid-send part 2 failed this way on every Android run, the
-`keyboard-open` probe up and `heightWhenOpened` right), or the composer
-mid-screen with no keyboard after a notification tap brought the app forward.
+`keyboard-open` probe up and `heightWhenOpened` right), or, the same loss the
+other way round, the composer mid-screen with no keyboard after a notification
+tap brought the app forward (reported on phones).
 `package.json` → `reanimated.staticFeatureFlags` turns the flag off, so the
 registry keeps each value and re-applies it on every React commit (the
 commit hook; nothing then depends on a JS timer). It is compiled into the binary on both platforms
