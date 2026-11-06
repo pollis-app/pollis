@@ -231,12 +231,10 @@ pub async fn dm_push_plan(
         }
         match membership(conn, dm_channel_id, &user).await? {
             Some(Membership::Accepted) => plan.members.push(user),
-            Some(Membership::Pending) => {
-                if claim_request_push(conn, dm_channel_id, &user).await {
-                    plan.requests.push(user);
-                }
+            Some(Membership::Pending) if claim_request_push(conn, dm_channel_id, &user).await => {
+                plan.requests.push(user);
             }
-            None => {}
+            Some(Membership::Pending) | None => {}
         }
     }
     Ok(plan)
@@ -2782,7 +2780,7 @@ mod tests {
             assert_eq!(m["data"]["d"], serde_json::json!([h]));
         }
         // The foreground catch-up agrees, and nothing is left to clear.
-        assert_eq!(dismissed_handles(&c, "bob-1734", &[h.clone()]).await, vec![h]);
+        assert_eq!(dismissed_handles(&c, "bob-1734", std::slice::from_ref(&h)).await, vec![h]);
         assert!(outstanding_handles(&c, "bob-1734", &["d1".to_string()]).await.is_empty());
     }
 }
