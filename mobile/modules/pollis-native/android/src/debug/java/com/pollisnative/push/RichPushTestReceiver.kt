@@ -39,7 +39,8 @@ class RichPushTestReceiver : BroadcastReceiver() {
     Thread {
       try {
         if (fake != null) {
-          RichPushHandler.handle(context, handle, data, null, System.currentTimeMillis()) { _, _, _ -> fake }
+          // Named: since #1673 a trailing lambda binds to the last parameter, `note`.
+          RichPushHandler.handle(context, handle, data, null, System.currentTimeMillis(), fetch = { _, _, _ -> fake })
         } else {
           RichPushHandler.handle(context, handle, data, null, System.currentTimeMillis())
         }

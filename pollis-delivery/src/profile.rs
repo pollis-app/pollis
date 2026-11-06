@@ -53,6 +53,27 @@ pub(crate) async fn is_blocked_either_way(
     Ok(rows.next().await?.is_some())
 }
 
+/// Every DM both users are members of (accepted or pending).
+async fn shared_dm_channels(
+    conn: &Connection,
+    user_a: &str,
+    user_b: &str,
+) -> anyhow::Result<Vec<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT a.dm_channel_id FROM dm_channel_member a \
+             JOIN dm_channel_member b ON b.dm_channel_id = a.dm_channel_id \
+             WHERE a.user_id = ?1 AND b.user_id = ?2",
+            libsql::params![user_a.to_string(), user_b.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        out.push(row.get::<String>(0)?);
+    }
+    Ok(out)
+}
+
 pub async fn update_profile(
     State(state): State<AppState>,
     req: RawRequest,
@@ -348,6 +369,11 @@ pub async fn block_user(
             .unwrap_or_else(|| parsed.0.blocker_id.clone());
         let rooms = crate::broker::shared_dm_rooms(&conn, &blocker, &parsed.0.blocked_id).await?;
         crate::broker::evict_user_from_rooms(&state, &rooms, &parsed.0.blocked_id).await;
+        // #1734: the blocker's notifications for every DM with the blocked user
+        // (a pending request among them) leave all of the blocker's devices.
+        let dms = shared_dm_channels(&conn, &blocker, &parsed.0.blocked_id).await?;
+        crate::push::dismiss_conversations_now(state.db.clone(), &conn, &blocker, &dms, Vec::new())
+            .await;
     }
     outcome_response::<AddBlock>(outcome)
 }
@@ -547,6 +573,19 @@ pub async fn create_dm(
             CreatedDm::Blocked,
         )),
         DmOutcome::Created { id, existing } => {
+            // #1734: a new request notifies its recipients' phones, once. An existing DM
+            // returned by the dedupe is not a new request.
+            if !existing {
+                let requester = authed
+                    .clone()
+                    .unwrap_or_else(|| parsed.creator_id.clone());
+                crate::push::spawn_dm_request_push(
+                    state.db.clone(),
+                    id.clone(),
+                    requester,
+                    parsed.member_ids.clone(),
+                );
+            }
             match crate::directory::dm_row(&conn, &id, existing).await? {
                 Some(dm) => Ok(crate::writes::ok_response::<CreateDmBody>(dm)),
                 None => Err(AppError(anyhow::anyhow!(
@@ -696,7 +735,22 @@ pub async fn accept_dm(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<AcceptDmBody>(apply_accept_dm(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_accept_dm(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        let user = authed.clone().unwrap_or_else(|| parsed.user_id.clone());
+        // #1734: the request notification leaves every device, and a request that
+        // comes back later is pushed once again.
+        crate::push::reset_request_push(&conn, &parsed.dm_channel_id, &user).await;
+        crate::push::dismiss_conversations_now(
+            state.db.clone(),
+            &conn,
+            &user,
+            std::slice::from_ref(&parsed.dm_channel_id),
+            Vec::new(),
+        )
+        .await;
+    }
+    outcome_response::<AcceptDmBody>(outcome)
 }
 
 /// Flip the actor's own `accepted_at` from NULL → now; scoped to `user_id`, idempotent.
@@ -746,7 +800,19 @@ pub async fn add_dm_member(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<AddDmMemberBody>(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
+    let already = is_dm_member(&conn, &parsed.dm_channel_id, &parsed.user_id).await?;
+    let outcome = apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?;
+    // #1734: being added makes a pending request; push it, once.
+    if matches!(outcome, WriteOutcome::Ok) && !already {
+        let adder = authed.clone().unwrap_or_else(|| parsed.added_by.clone());
+        crate::push::spawn_dm_request_push(
+            state.db.clone(),
+            parsed.dm_channel_id.clone(),
+            adder,
+            vec![parsed.user_id.clone()],
+        );
+    }
+    outcome_response::<AddDmMemberBody>(outcome)
 }
 
 /// Add a DM member and seed their watermarks; the actor must be a current member.
@@ -803,7 +869,21 @@ pub async fn remove_dm_member(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    // #1734: the removed member's notifications for the DM leave their devices.
+    // The handles are read BEFORE the removal, whose teardown may delete them.
+    let dm = std::slice::from_ref(&parsed.dm_channel_id);
+    let handles = crate::push::outstanding_handles(&conn, &parsed.user_id, dm).await;
     let (outcome, torn_down) = apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        crate::push::dismiss_conversations_now(
+            state.db.clone(),
+            &conn,
+            &parsed.user_id,
+            dm,
+            handles,
+        )
+        .await;
+    }
     // Same follow-through `/v1/dm/leave` has: the control-plane tables live on
     // the log DB, which the main-DB transaction cannot reach.
     if matches!(outcome, WriteOutcome::Ok) && torn_down {
@@ -883,7 +963,15 @@ pub async fn leave_dm(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    // #1734: leaving (declining a request) clears its notifications on every device.
+    // The handles are read BEFORE the leave, whose teardown may delete them.
+    let user = authed.clone().unwrap_or_else(|| parsed.user_id.clone());
+    let dm = std::slice::from_ref(&parsed.dm_channel_id);
+    let handles = crate::push::outstanding_handles(&conn, &user, dm).await;
     let (outcome, torn_down) = apply_leave_dm(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        crate::push::dismiss_conversations_now(state.db.clone(), &conn, &user, dm, handles).await;
+    }
     if matches!(outcome, WriteOutcome::Ok) && torn_down {
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(

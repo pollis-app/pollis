@@ -37,7 +37,26 @@ class RichPushNotifier(private val context: Context) {
       RichPush.Plan.Silent -> manager.cancel(handle, NOTIFICATION_ID)
       RichPush.Plan.Generic -> notify(handle, generic(handle, data, messageId, sentTime).build())
       is RichPush.Plan.Rich -> notify(handle, rich(handle, plan, data, messageId, sentTime))
+      is RichPush.Plan.Request -> notify(handle, request(handle, plan, data, messageId, sentTime))
     }
+  }
+
+  /**
+   * #1734: "Message request" and who is asking, nothing they wrote. One per request: it replaces
+   * any notification already showing for the DM (the request's creation, then its first message).
+   * Same tag/id and tap intent as every other post, so #1508 clears it on accept, leave or block,
+   * and a tap opens the request list.
+   */
+  private fun request(handle: String, plan: RichPush.Plan.Request, data: Map<String, String>, messageId: String?, sentTime: Long): android.app.Notification {
+    takePreviousFor(plan.conversationId, handle)
+    val extras = Bundle().apply { putString(EXTRA_CONVERSATION, plan.conversationId) }
+    val builder = base(handle, data, messageId, sentTime)
+      .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+      .setContentTitle(context.getString(R.string.pollis_push_request_title))
+      .setContentText(context.getString(R.string.pollis_push_request_body, plan.requester))
+      .addExtras(extras)
+    safeAvatar(plan.requester, rounded = false)?.let { builder.setLargeIcon(it) }
+    return builder.build()
   }
 
   private fun notify(handle: String, notification: android.app.Notification) {

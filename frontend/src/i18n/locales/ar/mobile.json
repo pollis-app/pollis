@@ -362,7 +362,9 @@
     "bodyVoice": "رسالة صوتية",
     "bodySensitive": "محتوى حساس",
     "nameOnlyBody": "أرسل رسالة",
-    "groupTitle": "{{sender}} · {{conversation}}"
+    "groupTitle": "{{sender}} · {{conversation}}",
+    "requestTitle": "طلب مراسلة",
+    "requestBody": "يريد {{sender}} مراسلتك"
   },
   "search": {
     "channels": "القنوات",

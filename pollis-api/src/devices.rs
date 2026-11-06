@@ -72,6 +72,19 @@ pub struct PushTokenBody {
 /// Android: a data-push handler, so the DS sends a data-only `{h}` message.
 pub const PUSH_CAP_RICH: &str = "rich";
 
+/// #1734: the client knows the `dm_request` push kind. A handle of that kind
+/// resolves to a pending DM request: the client shows "Message request" and the
+/// requester's name (never a preview) and a tap opens the request list.
+///
+/// A token without it keeps the pre-#1734 behaviour: no push when a request is
+/// created, and the request's first message as an ordinary `dm` push.
+pub const PUSH_CAP_DM_REQUEST: &str = "dm_request";
+
+/// #1734: the push kind of a pending DM request, as minted in `push_handle.kind`
+/// and returned by `/v1/push/resolve`. Only ever minted for a token with
+/// [`PUSH_CAP_DM_REQUEST`].
+pub const PUSH_KIND_DM_REQUEST: &str = "dm_request";
+
 /// The MLS code point of `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`
 /// — the post-quantum suite, and since #669 the only suite Pollis uses. It is
 /// also the default for any request that does not name one.

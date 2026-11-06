@@ -365,6 +365,20 @@ one request drops Direct to 1 and blocking the other sender clears it
 (`2-requests.yaml`); declining one invite drops Groups to 1 and accepting the
 other clears it (`3-invites.yaml`).
 
+**DM request push (automated, Android, real pushes, #1734):** `mobile/scripts/maestro-dm-request-push.sh <android-device>`
+— `pollis-tui`'s `dm_request_peer` example plays two strangers (dev DS running
+#1734). Needs a Release build of a #1734 binary against that DS, on an emulator
+with Play services. The device signs up, the script grants the notification
+permission and the app registers and backgrounds
+(`two-client/dm-request-push/1-signup.yaml`, `2-register-and-background.yaml`).
+Stranger A's request must leave exactly one notification, "Message request" /
+"<A> wants to message you" (read with `dumpsys notification`). A's first message
+re-posts it under a new handle and A's second posts nothing (same single
+notification, same handle). Tapping it opens `screen-dm-requests`, not the chat,
+and the request is accepted (`3-tap-opens-requests.yaml`). Stranger B's request
+is then accepted from the request list without tapping its notification, and
+the tray must empty (`4-accept-clears.yaml`).
+
 **Store-listing screenshots:** `mobile/scripts/maestro-store-shots.sh <device> [out-dir]`
 — `pollis-tui`'s `store_shots_peer` example plays the second person (dev DS
 only). The device shoots sign-in, signs up, makes "Design Team" with #General,

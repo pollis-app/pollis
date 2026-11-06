@@ -12,4 +12,6 @@
     <string name="pollis_push_body_sensitive">Contenu sensible</string>
     <string name="pollis_push_name_only_body">Vous a envoyé un message</string>
     <string name="pollis_push_group_title">%1$s · %2$s</string>
+    <string name="pollis_push_request_title">Demande de message</string>
+    <string name="pollis_push_request_body">%1$s souhaite vous envoyer un message</string>
 </resources>

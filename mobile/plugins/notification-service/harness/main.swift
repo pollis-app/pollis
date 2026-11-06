@@ -42,6 +42,10 @@ func item(_ extra: String) -> String {
   "{\"conversation_id\":\"c1\",\"message_id\":\"m1\",\"sender_name\":\"Ana\",\"conversation_title\":null,\"is_dm\":true,\"body\":\"hi there\",\"body_key\":null,\"muted\":false\(extra)}"
 }
 
+func dmItemIsRequest() -> Bool {
+  (try? JSONDecoder().decode(PollisNotifyItem.self, from: Data(item("").utf8)))?.isRequest ?? true
+}
+
 let keepsHandle: (UNNotificationContent) -> Bool = { c in
   ((c.userInfo["body"] as? [String: Any])?["h"] as? String) == "handle-1"
 }
@@ -93,6 +97,21 @@ check("no escrow yet (none, empty): generic", c.title == "New message" && c.thre
 let mention = item(",\"mention\":true")
 c = run("{\"ok\":true,\"mode\":\"full\",\"items\":[\(mention)]}")
 check("a mention (muted:false, extra field) is shown", c.title == "Ana" && c.body == "hi there", c.title)
+
+// #1734: a DM request names the requester and nothing they wrote, in both modes.
+let request = "{\"conversation_id\":\"d9\",\"message_id\":\"\",\"sender_name\":\"Ana L.\",\"conversation_title\":null,\"is_dm\":true,\"body\":\"\",\"body_key\":null,\"muted\":false,\"mention\":false,\"kind\":\"dm_request\"}"
+for mode in ["full", "name"] {
+  c = run("{\"ok\":true,\"mode\":\"\(mode)\",\"items\":[\(request)]}")
+  check("request (\(mode)): title", c.title == "Message request", c.title)
+  check("request (\(mode)): requester named, no preview", c.body == "Ana L. wants to message you", c.body)
+  check("request (\(mode)): thread = DM", c.threadIdentifier == "d9", c.threadIdentifier)
+  check("request (\(mode)): routing data untouched", keepsHandle(c))
+}
+c = run("{\"ok\":true,\"mode\":\"none\",\"items\":[]}")
+check("request under Nothing: generic", c.title == "New message" && c.body == "You have a new message")
+let requestItem = try! JSONDecoder().decode(PollisNotifyItem.self, from: Data(request.utf8))
+check("request kind decodes", requestItem.isRequest)
+check("no kind (older core) = a message", !dmItemIsRequest())
 
 c = run("{\"ok\":false,\"reason\":\"lock_busy\"}")
 check("failure: original as it arrived", c.title == "New message" && c.body == "You have a new message" && keepsHandle(c))

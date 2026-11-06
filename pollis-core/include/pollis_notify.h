@@ -28,7 +28,7 @@ extern "C" {
 //     "message_id":"...","sender_name":"...","conversation_title":"..."|null,
 //     "is_dm":true,"body":"...",
 //     "body_key":"attachment|image|video|voice|sensitive"|null,
-//     "muted":false,"mention":false}]}
+//     "muted":false,"mention":false,"kind":"message|dm_request"}]}
 //   {"ok":false,"reason":"not_logged_in|lock_busy|timeout|network|decrypt|internal"}
 //
 // items are the messages THIS call stored, oldest first, so a message is returned by at most
@@ -39,6 +39,10 @@ extern "C" {
 // and the message does not @mention this user (hosts must not show it); "mention" is true when
 // it does. mode "none" with no items means the user chose Nothing, or has not unlocked the app
 // since installing this build: show the generic text.
+// "kind" (#1734; absent from older cores = "message"): "dm_request" is a pending DM request
+// the user has not accepted. Nothing in it is fetched or decrypted; the one item has the
+// requester's display name as sender_name, an empty body and message_id, and is never muted.
+// Hosts show "Message request" with the name, no preview, and route a tap to the request list.
 char *pollis_notify_fetch(const char *data_dir, const char *handle, uint32_t budget_ms);
 
 // Add `line` to the diagnostics log under "[notify]" (e.g. the OS's network restrictions when a

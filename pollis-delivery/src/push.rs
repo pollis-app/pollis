@@ -12,6 +12,11 @@
 //!
 //! A read sends a silent `{ d: [handles] }` push to clear them (#1508); see [`dismiss_push`].
 //!
+//! A DM request (#1734) pushes its pending recipient once when it is created and
+//! once more on its first message, never again until accepted, and never across a
+//! block; see [`notify_dm_request`] and [`dm_push_plan`]. Accepting, leaving or
+//! blocking clears it ([`dismiss_conversations_now`]).
+//!
 //! Best-effort throughout: a push that fails to send must never fail a send that
 //! already landed.
 //!
@@ -145,35 +150,279 @@ pub async fn notify_new_message_at(
         return Ok(());
     }
 
-    let tokens = push_tokens(conn, &user_ids).await?;
+    // `kind` mirrors the values the mobile push router understands
+    // (mobile/hooks/usePushNotifications.ts): "channel" | "dm" | "dm_request".
+    if !is_dm(conn, conversation_id).await? {
+        return fan_out(conn, expo_url, conversation_id, &user_ids, "channel").await;
+    }
+    let plan = dm_push_plan(conn, conversation_id, sender_id, user_ids).await?;
+    fan_out(conn, expo_url, conversation_id, &plan.members, "dm").await?;
+    fan_out_request(conn, expo_url, conversation_id, &plan.requests, RequestPush::FirstMessage)
+        .await
+}
+
+/// Push every device of `user_ids` with handles of one `kind`.
+async fn fan_out(
+    conn: &Connection,
+    expo_url: &str,
+    conversation_id: &str,
+    user_ids: &[String],
+    kind: &str,
+) -> anyhow::Result<()> {
+    if user_ids.is_empty() {
+        return Ok(());
+    }
+    let tokens = push_tokens(conn, user_ids).await?;
     if tokens.is_empty() {
         return Ok(());
     }
-
-    // `kind` mirrors the values the mobile push router understands
-    // (mobile/hooks/usePushNotifications.ts): "channel" | "dm".
-    let kind = if is_dm(conn, conversation_id).await? {
-        "dm"
-    } else {
-        "channel"
-    };
-
-    let handles = mint_push_handles(conn, &user_ids, conversation_id, kind).await;
-
+    let handles = mint_push_handles(conn, user_ids, conversation_id, kind).await;
     let messages: Vec<serde_json::Value> = tokens
         .iter()
         .map(|t| expo_message(&t.token, t.platform.as_deref(), t.caps, handles.get(&t.user_id)))
         .collect();
     let push_tokens: Vec<String> = tokens.into_iter().map(|t| t.token).collect();
+    send_all(conn, expo_url, &messages, &push_tokens).await;
+    Ok(())
+}
 
+/// POST `messages` to Expo in batches; `tokens[i]` is the token `messages[i]` is addressed to.
+async fn send_all(
+    conn: &Connection,
+    expo_url: &str,
+    messages: &[serde_json::Value],
+    tokens: &[String],
+) {
     let auth = expo_token();
-    for (chunk, chunk_tokens) in messages
-        .chunks(EXPO_BATCH)
-        .zip(push_tokens.chunks(EXPO_BATCH))
-    {
+    for (chunk, chunk_tokens) in messages.chunks(EXPO_BATCH).zip(tokens.chunks(EXPO_BATCH)) {
         send_batch(conn, expo_url, auth, chunk, chunk_tokens, stats()).await;
     }
+}
+
+/// Whom a DM message wakes (#1734), split by each recipient's membership.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DmPushPlan {
+    /// Accepted members: the ordinary `dm` push.
+    pub members: Vec<String>,
+    /// Pending members for whom this is the request's one message-time push.
+    pub requests: Vec<String>,
+}
+
+/// Split a DM send's recipients (#1734).
+///
+/// * A recipient in a block with the sender, either way, is never pushed. A block
+///   resets the blocker's `accepted_at` and the blocked user can still send into
+///   the DM, so before this the blocker was pushed for every message.
+/// * An accepted member gets the ordinary push.
+/// * A pending member is pushed for the request's FIRST message only: the send
+///   that claims `request_pushed_at` (migration 000044) pushes, and every later
+///   message waits unpushed until they accept. A DS running before that migration
+///   cannot claim, and pushes as it did before.
+pub async fn dm_push_plan(
+    conn: &Connection,
+    dm_channel_id: &str,
+    sender_id: &str,
+    recipients: Vec<String>,
+) -> anyhow::Result<DmPushPlan> {
+    let mut plan = DmPushPlan::default();
+    for user in recipients {
+        if crate::profile::is_blocked_either_way(conn, sender_id, &user).await? {
+            continue;
+        }
+        match membership(conn, dm_channel_id, &user).await? {
+            Some(Membership::Accepted) => plan.members.push(user),
+            Some(Membership::Pending) if claim_request_push(conn, dm_channel_id, &user).await => {
+                plan.requests.push(user);
+            }
+            Some(Membership::Pending) | None => {}
+        }
+    }
+    Ok(plan)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Membership {
+    Accepted,
+    Pending,
+}
+
+async fn membership(
+    conn: &Connection,
+    dm_channel_id: &str,
+    user_id: &str,
+) -> anyhow::Result<Option<Membership>> {
+    let mut rows = conn
+        .query(
+            "SELECT accepted_at IS NOT NULL FROM dm_channel_member \
+             WHERE dm_channel_id = ?1 AND user_id = ?2",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) if row.get::<i64>(0)? != 0 => Some(Membership::Accepted),
+        Some(_) => Some(Membership::Pending),
+        None => None,
+    })
+}
+
+/// Take a pending request's one message-time push. True = this send pushes.
+async fn claim_request_push(conn: &Connection, dm_channel_id: &str, user_id: &str) -> bool {
+    let claimed = conn
+        .execute(
+            "UPDATE dm_channel_member SET request_pushed_at = datetime('now') \
+             WHERE dm_channel_id = ?1 AND user_id = ?2 \
+               AND accepted_at IS NULL AND request_pushed_at IS NULL",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+        )
+        .await;
+    match claimed {
+        Ok(n) => n > 0,
+        Err(e) => {
+            // Before migration 000044: push, as before #1734.
+            tracing::debug!("dm request push claim skipped: {e}");
+            true
+        }
+    }
+}
+
+/// Forget an accepted member's message-time request push, so a request that
+/// comes back later (a block resets `accepted_at`; an unblock resurfaces the DM
+/// as a request) is pushed once again. Best-effort: before migration 000044 there
+/// is nothing to forget.
+pub async fn reset_request_push(conn: &Connection, dm_channel_id: &str, user_id: &str) {
+    let reset = conn
+        .execute(
+            "UPDATE dm_channel_member SET request_pushed_at = NULL \
+             WHERE dm_channel_id = ?1 AND user_id = ?2 AND accepted_at IS NOT NULL",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+        )
+        .await;
+    if let Err(e) = reset {
+        tracing::debug!("dm request push reset skipped: {e}");
+    }
+}
+
+/// Which of a DM request's two pushes this is (#1734).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestPush {
+    /// The request was just created, or the member just added. Only a token that
+    /// knows the `dm_request` kind is pushed: before #1734 a request pushed nothing.
+    Created,
+    /// The request's first message. A token that knows the kind gets a
+    /// `dm_request` handle; any other gets the plain `dm` push it always got.
+    FirstMessage,
+}
+
+/// Push a pending DM request to `user_ids` (#1734). The wire is the same
+/// content-free `{h}` and generic text as every push; only the handle's kind
+/// differs, so a capable client resolves it to "Message request" plus the
+/// requester's name, and a tap opens the request list.
+async fn fan_out_request(
+    conn: &Connection,
+    expo_url: &str,
+    dm_channel_id: &str,
+    user_ids: &[String],
+    which: RequestPush,
+) -> anyhow::Result<()> {
+    if user_ids.is_empty() {
+        return Ok(());
+    }
+    let pushed = |caps: PushCaps| caps.dm_request() || which == RequestPush::FirstMessage;
+    let tokens: Vec<PushTarget> = push_tokens(conn, user_ids)
+        .await?
+        .into_iter()
+        .filter(|t| pushed(t.caps))
+        .collect();
+    let mut capable_users: Vec<String> = Vec::new();
+    let mut legacy_users: Vec<String> = Vec::new();
+    for t in &tokens {
+        let bucket = if t.caps.dm_request() {
+            &mut capable_users
+        } else {
+            &mut legacy_users
+        };
+        if !bucket.contains(&t.user_id) {
+            bucket.push(t.user_id.clone());
+        }
+    }
+    let requests = mint_push_handles(
+        conn,
+        &capable_users,
+        dm_channel_id,
+        pollis_api::devices::PUSH_KIND_DM_REQUEST,
+    )
+    .await;
+    let legacy = mint_push_handles(conn, &legacy_users, dm_channel_id, "dm").await;
+    let mut messages = Vec::with_capacity(tokens.len());
+    let mut message_tokens = Vec::with_capacity(tokens.len());
+    for t in tokens {
+        let handle = if t.caps.dm_request() {
+            requests.get(&t.user_id)
+        } else {
+            legacy.get(&t.user_id)
+        };
+        messages.push(expo_message(&t.token, t.platform.as_deref(), t.caps, handle));
+        message_tokens.push(t.token);
+    }
+    send_all(conn, expo_url, &messages, &message_tokens).await;
     Ok(())
+}
+
+/// A DM request was created, or a member added to a DM (#1734): push each pending
+/// recipient once. Nobody in a block with the requester, either way, and nobody who
+/// already accepted, is pushed.
+pub async fn notify_dm_request(
+    conn: &Connection,
+    dm_channel_id: &str,
+    requester_id: &str,
+    recipients: &[String],
+) -> anyhow::Result<()> {
+    notify_dm_request_at(conn, EXPO_PUSH_URL, dm_channel_id, requester_id, recipients).await
+}
+
+/// [`notify_dm_request`] against an explicit Expo URL, for tests.
+pub async fn notify_dm_request_at(
+    conn: &Connection,
+    expo_url: &str,
+    dm_channel_id: &str,
+    requester_id: &str,
+    recipients: &[String],
+) -> anyhow::Result<()> {
+    let mut pending: Vec<String> = Vec::new();
+    for user in recipients {
+        if user == requester_id || pending.contains(user) {
+            continue;
+        }
+        if crate::profile::is_blocked_either_way(conn, requester_id, user).await? {
+            continue;
+        }
+        if membership(conn, dm_channel_id, user).await? == Some(Membership::Pending) {
+            pending.push(user.clone());
+        }
+    }
+    fan_out_request(conn, expo_url, dm_channel_id, &pending, RequestPush::Created).await
+}
+
+/// [`notify_dm_request`] off the request path: a push must never delay or fail the write.
+pub fn spawn_dm_request_push(
+    db: std::sync::Arc<crate::db::Db>,
+    dm_channel_id: String,
+    requester_id: String,
+    recipients: Vec<String>,
+) {
+    tokio::spawn(async move {
+        let conn = match db.conn().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("dm request push: conn failed: {e}");
+                return;
+            }
+        };
+        if let Err(e) = notify_dm_request(&conn, &dm_channel_id, &requester_id, &recipients).await {
+            // No ids: push logs name nothing (#1423).
+            tracing::warn!("dm request push failed: {e}");
+        }
+    });
 }
 
 /// The users a send wakes: every member but the sender, narrowed to
@@ -653,15 +902,20 @@ async fn conversation_recipients(
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PushCaps {
     rich: bool,
+    dm_request: bool,
 }
 
 impl PushCaps {
     const RICH: i64 = 1;
+    const DM_REQUEST: i64 = 2;
 
     /// The registration's `caps`, reduced to the ones this DS knows. Missing or unknown = none.
     pub fn from_wire(caps: &[String]) -> Self {
         Self {
             rich: caps.iter().any(|c| c == pollis_api::devices::PUSH_CAP_RICH),
+            dm_request: caps
+                .iter()
+                .any(|c| c == pollis_api::devices::PUSH_CAP_DM_REQUEST),
         }
     }
 
@@ -669,20 +923,29 @@ impl PushCaps {
     pub fn from_bits(bits: i64) -> Self {
         Self {
             rich: bits & Self::RICH != 0,
+            dm_request: bits & Self::DM_REQUEST != 0,
         }
     }
 
     pub fn bits(self) -> i64 {
+        let mut bits = 0;
         if self.rich {
-            Self::RICH
-        } else {
-            0
+            bits |= Self::RICH;
         }
+        if self.dm_request {
+            bits |= Self::DM_REQUEST;
+        }
+        bits
     }
 
     /// The client rewrites the notification itself after decrypting on device.
     pub fn rich(self) -> bool {
         self.rich
+    }
+
+    /// The client knows the `dm_request` push kind (#1734).
+    pub fn dm_request(self) -> bool {
+        self.dm_request
     }
 }
 
@@ -1138,6 +1401,97 @@ pub fn queue_dismissals(
     schedule
 }
 
+/// `user_id`'s outstanding (undismissed, unexpired) handles for `conversation_ids`.
+/// Read-only: taken before a write whose teardown may delete them, so the silent
+/// push can still name them afterwards ([`dismiss_conversations_now`]).
+pub async fn outstanding_handles(
+    conn: &Connection,
+    user_id: &str,
+    conversation_ids: &[String],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for conversation_id in conversation_ids {
+        let rows = conn
+            .query(
+                "SELECT handle FROM push_handle \
+                 WHERE user_id = ?1 AND conversation_id = ?2 AND dismissed_at IS NULL \
+                   AND created_at >= datetime('now', ?3)",
+                libsql::params![
+                    user_id.to_string(),
+                    conversation_id.clone(),
+                    format!("-{PUSH_HANDLE_TTL_DAYS} days")
+                ],
+            )
+            .await;
+        let mut rows = match rows {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!("push outstanding lookup skipped: {e}");
+                return out;
+            }
+        };
+        while let Ok(Some(row)) = rows.next().await {
+            if let Ok(h) = row.get::<String>(0) {
+                out.push(h);
+            }
+        }
+    }
+    out
+}
+
+/// Clear `user_id`'s notifications for `conversation_ids` on every device (#1734):
+/// a request was accepted, left, removed or blocked. Call only once that write has
+/// landed. Stamps the handles still there (as a read does, #1508) and schedules the
+/// coalesced silent push for them plus `taken_before`, the
+/// [`outstanding_handles`] read before a write that may have deleted them.
+/// Best-effort; never fails the write.
+pub async fn dismiss_conversations_now(
+    db: std::sync::Arc<crate::db::Db>,
+    conn: &Connection,
+    user_id: &str,
+    conversation_ids: &[String],
+    taken_before: Vec<String>,
+) {
+    dismiss_conversations_at(
+        db,
+        conn,
+        EXPO_PUSH_URL,
+        DISMISS_COALESCE,
+        user_id,
+        conversation_ids,
+        taken_before,
+    )
+    .await;
+}
+
+/// [`dismiss_conversations_now`] against an explicit Expo URL and window, for tests.
+/// Returns the handles it queued.
+pub async fn dismiss_conversations_at(
+    db: std::sync::Arc<crate::db::Db>,
+    conn: &Connection,
+    expo_url: &str,
+    delay: std::time::Duration,
+    user_id: &str,
+    conversation_ids: &[String],
+    taken_before: Vec<String>,
+) -> Vec<String> {
+    let entries: Vec<DismissEntry> = conversation_ids
+        .iter()
+        .map(|c| DismissEntry {
+            conversation_id: c.clone(),
+            read_secs_ago: 0,
+        })
+        .collect();
+    let mut handles = mark_dismissed(conn, user_id, &entries, crate::util::now_unix() as i64).await;
+    for h in taken_before {
+        if !handles.contains(&h) {
+            handles.push(h);
+        }
+    }
+    queue_dismissals(db, expo_url.to_string(), delay, user_id, handles.clone());
+    handles
+}
+
 /// POST `/v1/push/dismiss` — the caller read these conversations; clear their
 /// notifications on every device of theirs (#1508).
 ///
@@ -1274,8 +1628,22 @@ mod tests {
         assert!(expo_message("t", Some("ios"), NONE, Some(&h)).get("channelId").is_none());
     }
 
-    const NONE: PushCaps = PushCaps { rich: false };
-    const RICH: PushCaps = PushCaps { rich: true };
+    const NONE: PushCaps = PushCaps {
+        rich: false,
+        dm_request: false,
+    };
+    const RICH: PushCaps = PushCaps {
+        rich: true,
+        dm_request: false,
+    };
+    const DM_REQUEST: PushCaps = PushCaps {
+        rich: false,
+        dm_request: true,
+    };
+    const RICH_DM_REQUEST: PushCaps = PushCaps {
+        rich: true,
+        dm_request: true,
+    };
 
     /// Every combination a send can build, so the privacy checks cover them all.
     fn every_variant(handle: &String) -> Vec<(String, serde_json::Value)> {
@@ -1409,8 +1777,14 @@ mod tests {
         assert_eq!(wire(&["future"]).bits(), 0);
         assert_eq!(PushCaps::from_bits(0), NONE);
         assert_eq!(PushCaps::from_bits(1), RICH);
-        assert_eq!(PushCaps::from_bits(0b110), NONE);
-        assert_eq!(PushCaps::from_bits(0b111), RICH);
+        assert_eq!(PushCaps::from_bits(0b100), NONE);
+        assert_eq!(PushCaps::from_bits(0b101), RICH);
+        assert_eq!(PushCaps::from_bits(0b110), DM_REQUEST);
+        assert_eq!(PushCaps::from_bits(0b111), RICH_DM_REQUEST);
+        assert_eq!(wire(&["dm_request"]), DM_REQUEST);
+        assert_eq!(wire(&["dm_request"]).bits(), 2);
+        assert_eq!(wire(&["rich", "dm_request"]).bits(), 3);
+        assert_eq!(wire(&["DM_REQUEST", "dm-request"]), NONE);
     }
 
     /// The real fan-out reads `caps` per token: one user's rich Android and plain
@@ -2152,5 +2526,261 @@ mod tests {
         assert!(queue_dismissals(db.clone(), url, window, "carol-1508", vec!["h3".into()]));
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    // #1734: DM requests.
+
+    /// A DM `d1` alice created for bob, still a pending request. Bob has a phone
+    /// that knows the `dm_request` kind (rich Android, caps 3) and an older iPad that
+    /// does not (caps 0). Alice has a phone too, so a push to the sender would show.
+    async fn request_fixture() -> Connection {
+        let c = conn().await;
+        for sql in [
+            "INSERT INTO conversation (id, kind) VALUES ('d1', 'dm')",
+            "INSERT INTO dm_channel (id, created_by) VALUES ('d1', 'alice')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, accepted_at) \
+             VALUES ('d1', 'alice', 'alice', '2026-11-01T00:00:00Z')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, accepted_at) \
+             VALUES ('d1', 'bob', 'alice', NULL)",
+            "INSERT INTO push_token (token, user_id, platform, updated_at, caps) \
+             VALUES ('ExponentPushToken[bob-new]', 'bob', 'android', '2026-11-01T00:00:00Z', 3)",
+            "INSERT INTO push_token (token, user_id, platform, updated_at, caps) \
+             VALUES ('ExponentPushToken[bob-old]', 'bob', 'ios', '2026-11-01T00:00:00Z', 0)",
+        ] {
+            c.execute(sql, ()).await.unwrap();
+        }
+        add_token(&c, "ExponentPushToken[alice]", "alice").await;
+        c
+    }
+
+    /// Every message the fake Expo was sent, flattened.
+    fn sent(seen: &std::sync::Arc<Mutex<Vec<serde_json::Value>>>) -> Vec<serde_json::Value> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .flat_map(|b| b.as_array().cloned().unwrap_or_default())
+            .collect()
+    }
+
+    /// `(token, kind the handle resolves to for its owner)` per message, sorted.
+    async fn pushed_kinds(c: &Connection, msgs: &[serde_json::Value]) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for m in msgs {
+            let to = m["to"].as_str().unwrap().to_string();
+            let owner = if to.contains("bob") { "bob" } else { "alice" };
+            let h = m["data"]["h"].as_str().expect("routed");
+            let (conv, kind) = lookup_push_handle(c, owner, h).await.unwrap().expect("resolves");
+            assert_eq!(conv, "d1");
+            // Content-free whatever the kind: the handle and nothing else.
+            assert_eq!(m["data"].as_object().unwrap().keys().collect::<Vec<_>>(), vec!["h"], "{m}");
+            out.push((to, kind));
+        }
+        out.sort();
+        out
+    }
+
+    async fn send_in_d1(c: &Connection, url: &str, sender: &str) {
+        let audience = PushAudience::from_send(Some(vec![]), None).unwrap();
+        notify_new_message_at(c, url, "d1", sender, &audience).await.unwrap();
+    }
+
+    /// Creating a request pushes the pending recipient once, and only on a device that
+    /// knows the kind: an older build was never pushed for a new request, and still is not.
+    #[tokio::test]
+    async fn a_new_request_pushes_the_pending_member_on_capable_devices_only() {
+        let c = request_fixture().await;
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        let members = vec!["alice".to_string(), "bob".to_string()];
+        notify_dm_request_at(&c, &url, "d1", "alice", &members).await.unwrap();
+        let msgs = sent(&seen);
+        assert_eq!(
+            pushed_kinds(&c, &msgs).await,
+            vec![("ExponentPushToken[bob-new]".to_string(), "dm_request".to_string())]
+        );
+        // The rich Android envelope, generic on the wire: no title, no body, no sender.
+        let m = &msgs[0];
+        assert!(m.get("title").is_none() && m.get("body").is_none(), "{m}");
+    }
+
+    /// The request's first message pushes once (the new kind where it is known, the
+    /// plain `dm` push the older build always got elsewhere); later ones push nobody
+    /// until the request is accepted.
+    #[tokio::test]
+    async fn a_pending_request_pushes_its_first_message_only() {
+        let c = request_fixture().await;
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        send_in_d1(&c, &url, "alice").await;
+        assert_eq!(
+            pushed_kinds(&c, &sent(&seen)).await,
+            vec![
+                ("ExponentPushToken[bob-new]".to_string(), "dm_request".to_string()),
+                ("ExponentPushToken[bob-old]".to_string(), "dm".to_string()),
+            ]
+        );
+        for _ in 0..3 {
+            send_in_d1(&c, &url, "alice").await;
+        }
+        assert_eq!(sent(&seen).len(), 2, "no repeat while pending: {:?}", sent(&seen));
+    }
+
+    /// Once accepted, the DM pushes like any other, every message, as `dm`.
+    #[tokio::test]
+    async fn an_accepted_request_pushes_every_message_normally() {
+        let c = request_fixture().await;
+        c.execute(
+            "UPDATE dm_channel_member SET accepted_at = '2026-11-02T00:00:00Z' WHERE user_id = 'bob'",
+            (),
+        )
+        .await
+        .unwrap();
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        send_in_d1(&c, &url, "alice").await;
+        send_in_d1(&c, &url, "alice").await;
+        let kinds = pushed_kinds(&c, &sent(&seen)).await;
+        assert_eq!(kinds.len(), 4, "{kinds:?}");
+        assert!(kinds.iter().all(|(_, k)| k == "dm"), "{kinds:?}");
+        // Nor is an accepted member pushed for a "new request".
+        let before = sent(&seen).len();
+        notify_dm_request_at(&c, &url, "d1", "alice", &["bob".to_string()]).await.unwrap();
+        assert_eq!(sent(&seen).len(), before);
+    }
+
+    /// A blocked pair is never pushed, in either direction, for the request or any
+    /// message, including after the block reset the blocker's acceptance.
+    #[tokio::test]
+    async fn a_blocked_pair_is_never_pushed() {
+        for (blocker, blocked) in [("bob", "alice"), ("alice", "bob")] {
+            let c = request_fixture().await;
+            c.execute(
+                "INSERT INTO user_block (blocker_id, blocked_id) VALUES (?1, ?2)",
+                libsql::params![blocker, blocked],
+            )
+            .await
+            .unwrap();
+            let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+            notify_dm_request_at(&c, &url, "d1", "alice", &["bob".to_string()]).await.unwrap();
+            send_in_d1(&c, &url, "alice").await;
+            // Accepted, then blocked (the block nulls `accepted_at` again): still nothing.
+            c.execute(
+                "UPDATE dm_channel_member SET accepted_at = '2026-11-02T00:00:00Z' WHERE user_id = 'bob'",
+                (),
+            )
+            .await
+            .unwrap();
+            send_in_d1(&c, &url, "alice").await;
+            assert!(sent(&seen).is_empty(), "{blocker} blocked {blocked}: {:?}", sent(&seen));
+        }
+    }
+
+    /// Accepting forgets the request push, so a request that comes back (block, then
+    /// unblock, resurfaces the DM as one) is pushed once more, and once only.
+    #[tokio::test]
+    async fn a_request_that_comes_back_is_pushed_once_again() {
+        let c = request_fixture().await;
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        send_in_d1(&c, &url, "alice").await;
+        assert_eq!(sent(&seen).len(), 2);
+        c.execute(
+            "UPDATE dm_channel_member SET accepted_at = '2026-11-02T00:00:00Z' WHERE user_id = 'bob'",
+            (),
+        )
+        .await
+        .unwrap();
+        reset_request_push(&c, "d1", "bob").await;
+        c.execute("UPDATE dm_channel_member SET accepted_at = NULL WHERE user_id = 'bob'", ())
+            .await
+            .unwrap();
+        send_in_d1(&c, &url, "alice").await;
+        send_in_d1(&c, &url, "alice").await;
+        assert_eq!(sent(&seen).len(), 4, "{:?}", sent(&seen));
+    }
+
+    /// A #1734 DS on a database without migration 000044 cannot claim, so it pushes a
+    /// pending request's messages as every DS before it did, rather than none of them.
+    #[tokio::test]
+    async fn before_the_migration_a_pending_request_pushes_as_it_always_did() {
+        let c = request_fixture().await;
+        c.execute("ALTER TABLE dm_channel_member DROP COLUMN request_pushed_at", ())
+            .await
+            .unwrap();
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        send_in_d1(&c, &url, "alice").await;
+        send_in_d1(&c, &url, "alice").await;
+        assert_eq!(sent(&seen).len(), 4, "{:?}", sent(&seen));
+        // Accepting still works there: the reset is best-effort.
+        reset_request_push(&c, "d1", "bob").await;
+    }
+
+    /// However many sends a pending request sees, exactly one claims its push, and an
+    /// accepted member is never put in the request half.
+    #[tokio::test]
+    async fn exactly_one_send_claims_the_request_push() {
+        let c = request_fixture().await;
+        let mut claimed = 0;
+        for _ in 0..5 {
+            let plan = dm_push_plan(&c, "d1", "alice", vec!["bob".to_string()]).await.unwrap();
+            assert!(plan.members.is_empty());
+            if plan.requests == ["bob"] {
+                claimed += 1;
+            }
+        }
+        assert_eq!(claimed, 1);
+        let reply = dm_push_plan(&c, "d1", "bob", vec!["alice".to_string()]).await.unwrap();
+        assert_eq!(reply, DmPushPlan { members: vec!["alice".to_string()], requests: vec![] });
+    }
+
+    /// Accepting (or leaving, or blocking) clears the request's notification from every
+    /// one of the recipient's devices, and from nobody else's.
+    #[tokio::test]
+    async fn settling_a_request_dismisses_its_notification_everywhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.db");
+        let db = std::sync::Arc::new(
+            crate::db::Db::connect_local(path.to_str().unwrap()).await.unwrap(),
+        );
+        let c = db.conn().await.unwrap();
+        pollis_schema::apply::single_db(&c).await.unwrap();
+        for sql in [
+            "INSERT INTO conversation (id, kind) VALUES ('d1', 'dm')",
+            "INSERT INTO dm_channel (id, created_by) VALUES ('d1', 'alice-1734')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, accepted_at) \
+             VALUES ('d1', 'alice-1734', 'alice-1734', '2026-11-01T00:00:00Z')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, accepted_at) \
+             VALUES ('d1', 'bob-1734', 'alice-1734', NULL)",
+            "INSERT INTO push_token (token, user_id, platform, updated_at, caps) \
+             VALUES ('ExponentPushToken[bob-a]', 'bob-1734', 'android', '2026-11-01T00:00:00Z', 3)",
+            "INSERT INTO push_token (token, user_id, platform, updated_at, caps) \
+             VALUES ('ExponentPushToken[bob-b]', 'bob-1734', 'ios', '2026-11-01T00:00:00Z', 2)",
+        ] {
+            c.execute(sql, ()).await.unwrap();
+        }
+        add_token(&c, "ExponentPushToken[alice-1734]", "alice-1734").await;
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        notify_dm_request_at(&c, &url, "d1", "alice-1734", &["bob-1734".to_string()])
+            .await
+            .unwrap();
+        let request = sent(&seen);
+        assert_eq!(request.len(), 2);
+        let h = request[0]["data"]["h"].as_str().unwrap().to_string();
+
+        let before = outstanding_handles(&c, "bob-1734", &["d1".to_string()]).await;
+        assert_eq!(before, vec![h.clone()]);
+        let window = std::time::Duration::from_millis(100);
+        let queued =
+            dismiss_conversations_at(db.clone(), &c, &url, window, "bob-1734", &["d1".to_string()], before)
+                .await;
+        assert_eq!(queued, vec![h.clone()]);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        let all = sent(&seen);
+        let dismissals: Vec<&serde_json::Value> = all.iter().filter(|m| m["data"].get("d").is_some()).collect();
+        let mut to: Vec<&str> = dismissals.iter().map(|m| m["to"].as_str().unwrap()).collect();
+        to.sort();
+        assert_eq!(to, vec!["ExponentPushToken[bob-a]", "ExponentPushToken[bob-b]"]);
+        for m in dismissals {
+            assert_eq!(m["data"]["d"], serde_json::json!([h]));
+        }
+        // The foreground catch-up agrees, and nothing is left to clear.
+        assert_eq!(dismissed_handles(&c, "bob-1734", std::slice::from_ref(&h)).await, vec![h]);
+        assert!(outstanding_handles(&c, "bob-1734", &["d1".to_string()]).await.is_empty());
     }
 }

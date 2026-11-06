@@ -98,6 +98,16 @@ final class NotificationService: UNNotificationServiceExtension {
     }
 
     let content = (original.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
+    // #1734: a pending DM request names who is asking and nothing they wrote. A plain banner, not
+    // a communication notification: it is not a message from a contact yet. `userInfo` keeps `h`,
+    // so a tap resolves it to the request list.
+    if item.isRequest {
+      content.title = L10n.requestTitle
+      content.body = String(format: L10n.requestBody, item.senderName)
+      content.threadIdentifier = item.conversationId
+      completion(content)
+      return
+    }
     let isGroup = !item.isDm
     let conversation = item.conversationTitle?.isEmpty == false ? item.conversationTitle : nil
     if isGroup, let conversation {
@@ -247,6 +257,10 @@ struct PollisNotifyItem: Decodable {
   let body: String
   let bodyKey: String?
   let muted: Bool
+  // "message", or "dm_request" for a pending DM request (#1734). Absent (an older core) = message.
+  let kind: String
+
+  var isRequest: Bool { kind == "dm_request" }
 
   enum CodingKeys: String, CodingKey {
     case conversationId = "conversation_id"
@@ -257,6 +271,7 @@ struct PollisNotifyItem: Decodable {
     case body
     case bodyKey = "body_key"
     case muted
+    case kind
   }
 
   init(from decoder: Decoder) throws {
@@ -270,6 +285,7 @@ struct PollisNotifyItem: Decodable {
     bodyKey = try c.decodeIfPresent(String.self, forKey: .bodyKey)
     // Unknown means do not show.
     muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? true
+    kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "message"
   }
 }
 
@@ -309,4 +325,6 @@ enum L10n {
   static var video: String { NSLocalizedString("bodyVideo", comment: "") }
   static var voice: String { NSLocalizedString("bodyVoice", comment: "") }
   static var sensitive: String { NSLocalizedString("bodySensitive", comment: "") }
+  static var requestTitle: String { NSLocalizedString("requestTitle", comment: "") }
+  static var requestBody: String { NSLocalizedString("requestBody", comment: "") }
 }

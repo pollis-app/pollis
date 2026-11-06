@@ -10,13 +10,24 @@
 
 export const RICH_PUSH_CAP = "rich";
 
+// "dm_request" (#1734): this binary knows the `dm_request` push kind — its core resolves it to
+// "Message request" + the requester's name, its native handlers show that, and its JS routes a
+// tap to the request list. The DS then pushes a new request, and a request's first message under
+// that kind. Asked for only when the embedded `extra.dmRequestPush === true` (app.json), so a
+// binary from before #1734 keeps today's pushes.
+export const DM_REQUEST_PUSH_CAP = "dm_request";
+
 export function pushCapsFor(embeddedExtra: unknown, platform: string): string[] {
   if (typeof embeddedExtra !== "object" || embeddedExtra === null) {
     return [];
   }
+  const caps: string[] = [];
   const rich = (embeddedExtra as { richPush?: unknown }).richPush;
-  if (typeof rich !== "object" || rich === null) {
-    return [];
+  if (typeof rich === "object" && rich !== null && (rich as Record<string, unknown>)[platform] === true) {
+    caps.push(RICH_PUSH_CAP);
   }
-  return (rich as Record<string, unknown>)[platform] === true ? [RICH_PUSH_CAP] : [];
+  if ((embeddedExtra as { dmRequestPush?: unknown }).dmRequestPush === true) {
+    caps.push(DM_REQUEST_PUSH_CAP);
+  }
+  return caps;
 }

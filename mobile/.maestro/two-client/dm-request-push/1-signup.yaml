@@ -1,0 +1,15 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DM REQUEST PUSH (#1734), part 1 of 4 — driven by scripts/maestro-dm-request-push.sh.
+# Sign up a fresh account. Nothing has asked for the notification permission yet
+# (the app asks on the first conversation opened, and this account opens none), so
+# the script grants it with `pm grant` after this flow, and part 2 registers.
+
+- runFlow: ../../subflows/sign-in.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-direct"
+    timeout: 30000
+- takeScreenshot: dm-request-push-01-signed-up

@@ -330,7 +330,9 @@
     "bodyVoice": "Mensaje de voz",
     "bodySensitive": "Contenido sensible",
     "nameOnlyBody": "Te envió un mensaje",
-    "groupTitle": "{{sender}} · {{conversation}}"
+    "groupTitle": "{{sender}} · {{conversation}}",
+    "requestTitle": "Solicitud de mensaje",
+    "requestBody": "{{sender}} quiere enviarte un mensaje"
   },
   "search": {
     "channels": "Canales",
