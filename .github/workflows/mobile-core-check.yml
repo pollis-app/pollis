@@ -39,7 +39,9 @@
 #           ubrn module, and this workflow. Runs everything.
 #   app     the JS app and the catalogues Metro bundles from frontend/. Runs
 #           android-build + expo-doctor; the Rust cross-compiles (one of them on
-#           a 10x macOS runner) cannot see a JS change.
+#           a 10x macOS runner) cannot see a JS change. mobile/'s tests, release
+#           scripts, Maestro flows, docs and release bookkeeping never reach a
+#           binary, so they are on `tests`, not here.
 #   tests   files outside mobile/ that mobile/tests or the OTA worker tests read
 #           (desktop mirrors in frontend/src, the DS Worker's update routes, the
 #           release workflows the OTA tests pin). Runs expo-doctor only.
@@ -141,12 +143,19 @@ jobs:
               # reads, and the module is what android-build generates into.
               - 'mobile/modules/pollis-native/**'
               - '.github/workflows/mobile-core-check.yml'
-            app:
-              - 'mobile/**'
-              # Metro bundles these straight from frontend/ (metro.config.js
-              # watchFolders, #1074).
+            # Metro bundles these straight from frontend/ (metro.config.js
+            # watchFolders, #1074).
+            app_catalogues:
               - 'frontend/src/i18n/locales/**'
             tests:
+              # mobile/ files that never reach a binary (see the `app` step below):
+              # only the unit tests can see them.
+              - 'mobile/tests/**'
+              - 'mobile/scripts/**'
+              - 'mobile/.maestro/**'
+              - 'mobile/**/*.md'
+              - 'mobile/store/runtime-versions.json'
+              - 'mobile/store/release-notes/**'
               # Desktop originals the mobile tests hold their mirrors to
               # (identityFields, username, securityEvents, enrollmentSas, ...).
               - 'frontend/src/**'
@@ -161,12 +170,32 @@ jobs:
               - 'pollis-delivery/wrangler.*.jsonc'
               - '.github/workflows/mobile-ota-release.yml'
               - '.github/workflows/mobile-apk-release.yml'
+      - name: Detect app changes (mobile/ minus what never ships)
+        id: app
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # `every`: a file counts only when it matches all of these, i.e. it is
+          # under mobile/ and is none of the tests, release scripts, Maestro
+          # flows, docs or release bookkeeping. A PR touching only those used to
+          # pay for a 3-ABI android-build; the `tests` surface runs expo-doctor
+          # (the unit tests) for them instead.
+          predicate-quantifier: every
+          filters: |
+            app:
+              - 'mobile/**'
+              - '!mobile/tests/**'
+              - '!mobile/scripts/**'
+              - '!mobile/.maestro/**'
+              - '!mobile/**/*.md'
+              - '!mobile/store/runtime-versions.json'
+              - '!mobile/store/release-notes/**'
       - name: Decide which mobile jobs must run
         id: decide
         env:
           EVENT: ${{ github.event_name }}
           NATIVE: ${{ steps.filter.outputs.native }}
-          APP: ${{ steps.filter.outputs.app }}
+          APP: ${{ steps.app.outputs.app == 'true' || steps.filter.outputs.app_catalogues == 'true' }}
           TESTS: ${{ steps.filter.outputs.tests }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then

@@ -7,10 +7,31 @@ name: Supply Chain
 # A new/bumped crate that trips an advisory, an unlisted license, an untrusted
 # source, or an unvetted review now fails the PR.
 
+# Only what cargo-deny / cargo-vet read: manifests, the lockfile, their config
+# and the vet store. A new advisory against an unchanged lockfile is caught by
+# the weekly run instead of by whichever unrelated PR happened to run next.
 on:
   pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'deny.toml'
+      - 'supply-chain/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/supply-chain.yml'
   push:
     branches: [main]
+    paths:
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'deny.toml'
+      - 'supply-chain/**'
+      - '.cargo/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/supply-chain.yml'
+  schedule:
+    - cron: '17 6 * * 1'
   workflow_dispatch:
 
 permissions:
