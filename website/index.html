@@ -29,7 +29,8 @@
 <body>
   <header class="site-nav">
     <div class="site-nav-inner">
-      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis"
+          width="72" height="27" /></a>
       <nav class="site-nav-links" aria-label="Primary">
         <a href="index.html#download">Download</a>
         <a href="security.html">Security</a>
@@ -64,17 +65,14 @@
 
       <p class="description">
         Secure, private communication for teams and individuals.
-        Messages, files, and voice calls are end-to-end encrypted with MLS (Messaging Layer Security). Our servers store and forward only ciphertext.
+        Messages, files, and voice calls are end-to-end encrypted with MLS (Messaging Layer Security). Our servers store
+        and forward only ciphertext.
       </p>
 
       <div class="cta-group">
         <a href="#download" class="btn btn-primary">Download</a>
         <a href="security.html" class="btn btn-secondary">How it works</a>
       </div>
-
-      <p class="small-print">
-        Every message reaches every device that was in the conversation when it was sent.
-      </p>
     </div>
 
     <!-- Download section -->
@@ -122,7 +120,9 @@
             <a class="linux-format-link" href="https://cdn.pollis.com/releases/latest/pollis-latest-linux.AppImage"
               data-platform="linux">.AppImage</a>
           </div>
-          <span class="download-detail">Arch Linux: <code>yay -S pollis</code> (<a href="https://aur.archlinux.org/packages/pollis" class="aur-link" target="_blank" rel="noopener noreferrer">AUR</a>)</span>
+          <span class="download-detail">Arch Linux: <code>yay -S pollis</code> (<a
+              href="https://aur.archlinux.org/packages/pollis" class="aur-link" target="_blank"
+              rel="noopener noreferrer">AUR</a>)</span>
         </div>
         <!-- Google Play first; the APK goes through the Android page rather than
              straight to the file: a sideloaded install needs its certificate check and
@@ -144,19 +144,23 @@
       </div>
 
       <div class="install-group">
-        <h3 class="install-group-title">Or install from a terminal <span class="install-group-os">macOS &amp; Linux</span></h3>
+        <h3 class="install-group-title">Or install from a terminal <span class="install-group-os">macOS &amp;
+            Linux</span></h3>
         <div class="install-block">
           <code id="install-cmd" class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/install.sh | bash</code>
-        <button class="install-copy" id="install-copy-btn" aria-label="Copy install command" title="Copy">
-          <svg id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
-            <rect x="9" y="9" width="13" height="13" rx="2"/>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-          </svg>
-          <svg id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true" style="display:none">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        </button>
-      </div>
+          <button class="install-copy" id="install-copy-btn" aria-label="Copy install command" title="Copy">
+            <svg id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            <svg id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"
+              style="display:none">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </button>
+        </div>
         <!-- Arch is called out here, not only on the download card: this block is
            what a Linux user copies, and on Arch the packaged build is the right
            answer. install.sh detects pacman and redirects rather than laying
@@ -171,21 +175,21 @@
            it next to the download so checking is one command, not a research task. -->
       <details class="verify-disclosure">
         <summary>Check what you downloaded <span class="verify-tag" data-verify-tag></span></summary>
-      <section class="verify-downloads" aria-labelledby="verify-downloads-heading">
-        <h3 class="visually-hidden" id="verify-downloads-heading">Check what you downloaded</h3>
-        <p class="verify-intro">
-          The SHA-256 of every release is published to a public, append-only
-          transparency log. Hash your download and compare it with the value below.
-          If they match, you have the exact bytes Pollis published.
-        </p>
-        <ul class="verify-list" data-verify-list>
-          <li class="verify-note">Loading published hashes…</li>
-        </ul>
-        <p class="verify-foot">
-          For inclusion proofs against the signed log, and whether a build
-          reproduces from source, see <a href="/artifacts">artifacts</a>.
-        </p>
-      </section>
+        <section class="verify-downloads" aria-labelledby="verify-downloads-heading">
+          <h3 class="visually-hidden" id="verify-downloads-heading">Check what you downloaded</h3>
+          <p class="verify-intro">
+            The SHA-256 of every release is published to a public, append-only
+            transparency log. Hash your download and compare it with the value below.
+            If they match, you have the exact bytes Pollis published.
+          </p>
+          <ul class="verify-list" data-verify-list>
+            <li class="verify-note">Loading published hashes…</li>
+          </ul>
+          <p class="verify-foot">
+            For inclusion proofs against the signed log, and whether a build
+            reproduces from source, see <a href="/artifacts">artifacts</a>.
+          </p>
+        </section>
       </details>
     </section>
 
@@ -200,19 +204,24 @@
       </p>
       <span class="install-label">macOS &amp; Linux</span>
       <div class="install-block">
-        <code id="install-cmd-cli" class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash</code>
+        <code id="install-cmd-cli"
+          class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash</code>
         <button class="install-copy" id="install-copy-btn-cli" aria-label="Copy install command" title="Copy">
-          <svg id="icon-copy-cli" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
-            <rect x="9" y="9" width="13" height="13" rx="2"/>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          <svg id="icon-copy-cli" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
-          <svg id="icon-check-cli" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true" style="display:none">
-            <polyline points="20 6 9 17 4 12"/>
+          <svg id="icon-check-cli" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round" width="18" height="18" aria-hidden="true"
+            style="display:none">
+            <polyline points="20 6 9 17 4 12" />
           </svg>
         </button>
       </div>
       <p class="terminal-note">
-        Windows: grab the <a id="cli-windows-link" href="https://cdn.pollis.com/releases/cli/latest.json" class="aur-link" data-cli-platform="windows">standalone <code>pollis.exe</code></a>.
+        Windows: grab the <a id="cli-windows-link" href="https://cdn.pollis.com/releases/cli/latest.json"
+          class="aur-link" data-cli-platform="windows">standalone <code>pollis.exe</code></a>.
       </p>
     </section>
   </main>
@@ -226,7 +235,8 @@
           <li><a href="android.html">Android</a></li>
           <li><a href="index.html#terminal">Terminal client</a></li>
           <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
-          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a>
+          </li>
         </ul>
       </div>
       <div class="site-footer-col">
