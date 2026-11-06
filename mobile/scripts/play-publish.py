@@ -3,7 +3,10 @@
 
 The Android counterpart of asc-upload-screenshots.py / asc-push-metadata.py:
 
-    mobile/scripts/play-publish.py upload  [--track alpha] [--status draft] [AAB]
+    mobile/scripts/play-publish.py upload  [--track alpha] [--status draft] [--notes-file F] [AAB]
+    mobile/scripts/play-publish.py promote <versionCode> --tracks alpha,production
+                                           [--name N] [--notes-file F] [--dry-run]
+    mobile/scripts/play-publish.py tracks
     mobile/scripts/play-publish.py listing [--icon PNG] [--feature-graphic PNG]
                                            [--phone PNG ...] [--dry-run]
 
@@ -47,6 +50,17 @@ DEFAULT_AAB = os.path.join(HERE, "..", "android", "app", "build", "outputs", "bu
 
 # Play's own field limits; checked locally so the error names the field.
 LIMITS = {"title": 30, "shortDescription": 80, "fullDescription": 4000}
+# "What's new" per language.
+NOTES_LIMIT = 500
+
+
+def read_notes(args):
+    text = args.notes
+    if getattr(args, "notes_file", None):
+        text = open(args.notes_file).read().strip()
+    if text and len(text) > NOTES_LIMIT:
+        die(f"release notes are {len(text)} chars; Play allows {NOTES_LIMIT}")
+    return text
 
 
 def die(msg):
@@ -261,10 +275,43 @@ def cmd_upload(args):
         # so continue it under a fresh one.
         e.token = access_token(sa)
         release = {"name": args.name or vc, "versionCodes": [vc], "status": args.status}
-        if args.notes:
-            release["releaseNotes"] = [{"language": "en-US", "text": args.notes}]
+        notes = read_notes(args)
+        if notes:
+            release["releaseNotes"] = [{"language": "en-US", "text": notes}]
         e.call("PUT", f"/tracks/{args.track}", {"track": args.track, "releases": [release]})
         print(f"track {args.track}: {args.status} release {release['name']}")
+
+
+def cmd_promote(args):
+    """Put an uploaded versionCode on more tracks, completed, in one edit.
+
+    A release on production goes to Google's review on commit (unless the app
+    uses managed publishing) and rolls out once approved.
+    """
+    notes = read_notes(args)
+    tracks = [t.strip() for t in args.tracks.split(",") if t.strip()]
+    release = {"name": args.name or args.version_code, "versionCodes": [args.version_code], "status": "completed"}
+    if notes:
+        release["releaseNotes"] = [{"language": "en-US", "text": notes}]
+    print(f"promote {args.version_code} -> {', '.join(tracks)}" + (f", notes {len(notes)} chars" if notes else ""))
+    if args.dry_run:
+        print("dry run — nothing sent")
+        return
+    with Edit(access_token(service_account())) as e:
+        for t in tracks:
+            e.call("PUT", f"/tracks/{t}", {"track": t, "releases": [release]})
+            print(f"  {t}: completed release {release['name']}")
+
+
+def cmd_tracks(args):
+    e = Edit(access_token(service_account()))
+    e.__enter__()
+    try:
+        for t in ("internal", "alpha", "beta", "production"):
+            rel = e.call("GET", f"/tracks/{t}").get("releases", [])
+            print(t, json.dumps([{k: r.get(k) for k in ("name", "versionCodes", "status")} for r in rel]))
+    finally:
+        e._discard()
 
 
 def cmd_listing(args):
@@ -318,7 +365,20 @@ def main():
     up.add_argument("--status", default="draft", help="draft | completed | inProgress | halted")
     up.add_argument("--name", help="release name shown in the console")
     up.add_argument("--notes", help="en-US release notes")
+    up.add_argument("--notes-file", help="en-US release notes from a file (≤500 chars)")
     up.set_defaults(fn=cmd_upload)
+
+    pr = sub.add_parser("promote", help="put an uploaded versionCode on tracks (production = review, then rollout)")
+    pr.add_argument("version_code")
+    pr.add_argument("--tracks", default="alpha,production")
+    pr.add_argument("--name", help="release name shown in the console")
+    pr.add_argument("--notes", help="en-US release notes")
+    pr.add_argument("--notes-file", help="en-US release notes from a file (≤500 chars)")
+    pr.add_argument("--dry-run", action="store_true")
+    pr.set_defaults(fn=cmd_promote)
+
+    tr = sub.add_parser("tracks", help="show every track's releases (read-only)")
+    tr.set_defaults(fn=cmd_tracks)
 
     li = sub.add_parser("listing", help="push copy, contact details and images")
     li.add_argument("--icon", help="512x512 PNG")
