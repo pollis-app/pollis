@@ -1,0 +1,19 @@
+-- #1734: a DM request notifies the recipient's phone once, not once per message.
+--
+-- The DS pushes a pending member when the request is created (to clients that
+-- know the `dm_request` push kind), and once more when the request's first
+-- message arrives while it is still pending. Every later message waits, unpushed,
+-- until the member accepts; after that the DM pushes like any other. Without a
+-- bound, a request from a stranger would be a way to fill someone's lock screen.
+--
+-- `request_pushed_at` is that one message-time push: the DS claims it with
+-- `UPDATE ... SET request_pushed_at = now WHERE accepted_at IS NULL AND
+-- request_pushed_at IS NULL`, so of two concurrent sends exactly one pushes.
+-- Accepting clears it, so a request that comes back (a block resets the
+-- blocker's `accepted_at`, and an unblock resurfaces the DM as a request) is
+-- again pushed at most once.
+--
+-- Additive and backward-compatible: a nullable ADD COLUMN. A DS from before
+-- #1734 neither reads nor writes it; a #1734 DS running before this migration
+-- fails the claim and pushes as before (best-effort, like every push).
+ALTER TABLE dm_channel_member ADD COLUMN request_pushed_at TEXT;
