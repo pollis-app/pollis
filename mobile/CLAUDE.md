@@ -1265,6 +1265,36 @@ screen. `<Screen>` draws the invisible `keyboard-open` /
 `keyboard-closed` probe (`components/KeyboardProbe.tsx`) and
 `.maestro/flows/keyboard-recovery.yaml` is the device-tier proof.
 
+Lost padding (Reanimated settled props): JS can hold the right keyboard state
+and the screen still be laid out wrong, because the padding itself is a
+Reanimated animated style and Reanimated 4.5 can drop it. With its static flag
+`FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS` on (4.5's default), native evicts
+a view's last animated value 2 s after it settles and counts on a 500 ms JS
+timer (`PropsRegistryGarbageCollector`) to have copied it into React state
+first. That timer misses when it is paused (the app in the background) or late
+(a busy JS thread at resume), and 4.5.1 stops it outright once its view count
+drifts below zero: a nested component (a `GestureDetector` around an
+`Animated.View`, as in every chat row) registers one tag once but unregisters
+it twice, so leaving a chat with messages stops it. The value is then lost,
+and the next React render of the screen (a send, a new row, a navigation) puts
+React's stale copy back: the composer under the keyboard after a few sends in
+a second chat (rapid-send part 2 failed this way on every Android run, the
+`keyboard-open` probe up and `heightWhenOpened` right), or the composer
+mid-screen with no keyboard after a notification tap brought the app forward.
+`package.json` → `reanimated.staticFeatureFlags` turns the flag off, so the
+registry keeps each value and re-applies it on every React commit (the
+commit hook; nothing then depends on a JS timer). It is compiled into the binary on both platforms
+(Gradle and the podspec read it from `package.json`), so it reaches phones only
+with a store build. Upstream fixed the count (it uses the map size) and keeps a
+settled value until React confirms it (react-native-reanimated#10874), neither
+in a 4.5.x release; re-check the flag when Reanimated moves past both.
+`tests/keyboard.test.ts` pins it. `rapid-send` is the device proof (its burst
+asserts Send is on screen before every tap; it failed there on every Android
+run without the flag); keyboard-recovery step 7 (Android: Home with the
+keyboard up, a deep link onto another screen, then back) covers the
+notification path, which the emulator does not strand on its own because it
+applies the background hide only at resume.
+
 Screens whose only input is the PIN keypad (`PinKeypad`) never show the
 system keyboard, so they never avoid one: `<Screen avoidKeyboard={false}>`
 renders no `KeyboardAvoidingView` at all, and no stale keyboard state can pad
