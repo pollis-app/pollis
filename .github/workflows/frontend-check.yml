@@ -10,6 +10,20 @@ name: Frontend check
 on:
   pull_request:
     branches: [main]
+    # Process-only PRs (skills, docs, mobile release scripts/flows/notes) cannot change
+    # this job's outcome, so they don't start it. Later patterns win: the tests read
+    # .codesight/wiki/ui.md and mobile/lib/ mirrors, and i18n-check scans mobile code,
+    # so those stay in. Nothing requires this check, so a skipped run blocks no merge.
+    paths:
+      - '**'
+      - '!.claude/**'
+      - '!docs/**'
+      - '!**/*.md'
+      - '.codesight/wiki/ui.md'
+      - '!mobile/scripts/**'
+      - '!mobile/tests/**'
+      - '!mobile/.maestro/**'
+      - '!mobile/store/**'
 
 permissions:
   contents: read

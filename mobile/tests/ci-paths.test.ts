@@ -29,15 +29,28 @@ function triggerPaths(event: "push" | "pull_request", src = workflow): string[] 
 const pushPaths = () => triggerPaths("push");
 
 function matches(pattern: string, file: string): boolean {
+  // Globstar as paths-filter (picomatch) reads it: `**/` also matches zero directories.
   const re = pattern
-    .split("**")
-    .map((part) => part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*"))
-    .join(".*");
+    .split("**/")
+    .map((seg) =>
+      seg
+        .split("**")
+        .map((part) => part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*"))
+        .join(".*"),
+    )
+    .join("(?:.*/)?");
   return new RegExp(`^${re}$`).test(file);
 }
 
 const native = filter("native");
-const app = filter("app");
+// The `app` step uses predicate-quantifier `every`: a file is an app change when
+// it matches every positive pattern and no `!` one.
+const appEvery = filter("app");
+const appCatalogues = filter("app_catalogues");
+const app = [...appEvery.filter((p) => !p.startsWith("!")), ...appCatalogues];
+const isApp = (file: string) =>
+  appCatalogues.some((p) => matches(p, file)) ||
+  appEvery.every((p) => (p.startsWith("!") ? !matches(p.slice(1), file) : matches(p, file)));
 const tests = filter("tests");
 
 test("the native filter covers every crate the mobile build compiles", () => {
@@ -52,8 +65,30 @@ test("the native filter covers every crate the mobile build compiles", () => {
 });
 
 test("the app filter covers the JS app and the catalogues Metro bundles", () => {
-  assert.ok(app.some((p) => matches(p, "mobile/app/_layout.tsx")));
-  assert.ok(app.some((p) => matches(p, "frontend/src/i18n/locales/en/common.json")));
+  for (const file of [
+    "mobile/app/_layout.tsx",
+    "mobile/package.json",
+    "mobile/app.config.js",
+    "mobile/plugins/withRichPush.js",
+    "mobile/store/ota-code-signing.pem",
+    "frontend/src/i18n/locales/en/common.json",
+  ]) {
+    assert.ok(isApp(file), `${file} reaches the binary but is not an app change`);
+  }
+});
+
+test("mobile/ files that never ship skip android-build but still run the unit tests", () => {
+  for (const file of [
+    "mobile/tests/ci-paths.test.ts",
+    "mobile/scripts/store-build.sh",
+    "mobile/.maestro/flows/auth.yaml",
+    "mobile/CLAUDE.md",
+    "mobile/store/runtime-versions.json",
+    "mobile/store/release-notes/1.0.30.ios.txt",
+  ]) {
+    assert.ok(!isApp(file), `${file} never reaches a binary but counts as an app change`);
+    assert.ok(tests.some((p) => matches(p, file)), `${file} is on no surface, so its unit tests would not run`);
+  }
 });
 
 test("every file outside mobile/ that these tests read is on a filter", () => {
