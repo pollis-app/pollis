@@ -389,20 +389,28 @@ a:hover {
   grid-column: span 3;
 }
 
-/* Apple's badge artwork is used as supplied: no recolouring, no border. */
-.app-store-badge {
+/* Store badges are used as their owners supply them: no recolouring, no border. */
+.store-badge {
   display: inline-flex;
   margin: 0.15rem 0 0.25rem;
   border-radius: 7px;
 }
 
-.app-store-badge img {
+.store-badge img {
   display: block;
   height: 40px;
   width: auto;
 }
 
-.app-store-badge:focus-visible {
+/* Google's PNG includes its clear space (about a sixth of the height on each
+   side), so it is drawn taller and the clear space overlaps the margins, which
+   makes its artwork the same 40px height as Apple's. */
+.store-badge--play img {
+  height: 60px;
+  margin: -10px;
+}
+
+.store-badge:focus-visible {
   outline: 2px solid var(--c-accent);
   outline-offset: 2px;
 }
