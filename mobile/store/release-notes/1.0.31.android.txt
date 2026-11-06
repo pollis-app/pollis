@@ -1,0 +1,8 @@
+New
+• Get a notification when someone sends you a message request. Tap it to see the request.
+
+Fixes
+• A new direct message shows the other person's name right away.
+• Tapping a notification for the chat you're in no longer opens it twice.
+• Someone you blocked can no longer trigger notifications.
+• A request you haven't accepted no longer notifies you for every message.
