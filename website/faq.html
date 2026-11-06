@@ -186,7 +186,7 @@
         <div class="faq-question">What is Pollis?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>A messaging app with group channels and direct messages, like Slack, for Mac, Windows, Linux and Android, with iOS on the way. Your messages are encrypted on your device before they leave it, so the people running Pollis can't read them.</p>
+            <p>A messaging app with group channels and direct messages, like Slack, for Mac, Windows, Linux, iPhone, iPad and Android. Your messages are encrypted on your device before they leave it, so the people running Pollis can't read them.</p>
           </div>
           <div class="dev">
             <p>Tauri desktop client with a React UI, an Expo / React Native mobile app, and a terminal client, all on one Rust core (<code>pollis-core</code>; mobile reaches it through uniffi) for cryptography and MLS group state. Every database read and write goes through the Delivery Service (an in-repo axum server); the client holds no database credential, and <code>pollis-core</code> links no remote database driver, only SQLCipher for its local store. Attachment bytes go straight to R2 on presigned URLs the Delivery Service issues. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>. The database and Delivery Service see ciphertext envelopes and routing metadata, never plaintext.</p>
@@ -290,7 +290,7 @@
         <div class="faq-question">Which platforms are supported?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>macOS, Windows, Linux and Android. iOS is in testing and not on the App Store yet. There is also a terminal client for macOS, Linux and Windows.</p>
+            <p>macOS, Windows, Linux, iPhone, iPad and Android. There is also a terminal client for macOS, Linux and Windows.</p>
           </div>
           <div class="dev">
             <p>macOS (Apple Silicon), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID (notarized) on macOS, Azure Trusted Signing on Windows. Android: a sideload APK per ABI (<code>arm64-v8a</code>, <code>armeabi-v7a</code>, <code>x86_64</code>) on <a href="android.html">pollis.com/android</a>, signed with a pinned key. Terminal client (<code>pollis</code>): Linux, macOS (Apple Silicon), Windows.</p>
@@ -302,10 +302,10 @@
         <div class="faq-question">Is there an iOS or Android app?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Android, yes: get it <a href="https://play.google.com/store/apps/details?id=com.pollis.mobile" target="_blank" rel="noopener noreferrer">on Google Play</a>, or download the signed APK from <a href="android.html">pollis.com/android</a> if you do not use Play. The iOS app is in testing and not on the App Store yet.</p>
+            <p>Yes. iPhone and iPad: get it <a href="https://apps.apple.com/us/app/pollis/id6827840396" target="_blank" rel="noopener noreferrer">on the App Store</a>. Android: get it <a href="https://play.google.com/store/apps/details?id=com.pollis.mobile" target="_blank" rel="noopener noreferrer">on Google Play</a>, or download the signed APK from <a href="android.html">pollis.com/android</a> if you do not use Play.</p>
           </div>
           <div class="dev">
-            <p>A React Native / Expo app in <code>mobile/</code> on the same Rust core (<code>pollis-core</code>) through uniffi bindings. Android ships on Google Play and as a signed sideload APK (<code>mobile-apk-release.yml</code>, certificate SHA-256 pinned on <a href="android.html">the Android page</a>); Google re-signs the Play build, so Play and sideload installs can't update each other. iOS is on TestFlight, not yet on the App Store. Mobile has no voice or video (by design) and is not yet in the binary transparency log.</p>
+            <p>A React Native / Expo app in <code>mobile/</code> on the same Rust core (<code>pollis-core</code>) through uniffi bindings. Android ships on Google Play and as a signed sideload APK (<code>mobile-apk-release.yml</code>, certificate SHA-256 pinned on <a href="android.html">the Android page</a>); Google re-signs the Play build, so Play and sideload installs can't update each other. iOS ships on the App Store (iPhone and iPad, one universal app). Mobile has no voice or video (by design) and is not yet in the binary transparency log.</p>
           </div>
         </div>
       </div>
