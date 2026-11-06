@@ -53,6 +53,7 @@ pub async fn report_user(
                     conversation_id: parsed.conversation_id.clone(),
                     message_id: parsed.message_id.clone(),
                     prior_reports_against,
+                    dev: state.otp_config.dev_otp.is_some(),
                 };
                 tokio::spawn(async move {
                     if let Err(e) = send_report_notice(&key, &notice).await {
@@ -161,31 +162,47 @@ struct ReportNotice {
     conversation_id: Option<String>,
     message_id: Option<String>,
     prior_reports_against: i64,
+    /// Dev and prod mail the same inbox; a DS that accepts `DEV_OTP` is never
+    /// prod (the prod deploy never syncs it), so that is what marks dev.
+    dev: bool,
+}
+
+/// Subject and body of the operator email.
+fn report_email(n: &ReportNotice) -> (String, String) {
+    let (tag, env, doppler) = if n.dev {
+        ("[dev] ", "Environment: dev (these accounts are in the dev database, not prod)\n\n", "DOPPLER_CONFIG=dev ")
+    } else {
+        ("", "", "")
+    };
+    let subject = format!("{tag}Pollis abuse report: {} ({})", n.reported_id, n.reason);
+    let text = format!(
+        "{env}Report {report}\n\n\
+         Reported account: {reported}\n\
+         Reason: {reason}\n\
+         Reported by: {reporter}\n\
+         Conversation: {conversation}\n\
+         Message: {message}\n\
+         Other accounts that reported this one before: {prior}\n\n\
+         No message content is included or available.\n\
+         To suspend the account: {doppler}scripts/suspend-account.sh {reported} \"<reason>\"",
+        report = n.report_id,
+        reported = n.reported_id,
+        reason = n.reason,
+        reporter = n.reporter_id,
+        conversation = n.conversation_id.as_deref().unwrap_or("none"),
+        message = n.message_id.as_deref().unwrap_or("none"),
+        prior = n.prior_reports_against,
+    );
+    (subject, text)
 }
 
 async fn send_report_notice(api_key: &str, n: &ReportNotice) -> anyhow::Result<()> {
+    let (subject, text) = report_email(n);
     let body = serde_json::json!({
         "from": "Pollis <noreply@mail.pollis.com>",
         "to": ["support@pollis.com"],
-        "subject": format!("Pollis abuse report: {} ({})", n.reported_id, n.reason),
-        "text": format!(
-            "Report {report}\n\n\
-             Reported account: {reported}\n\
-             Reason: {reason}\n\
-             Reported by: {reporter}\n\
-             Conversation: {conversation}\n\
-             Message: {message}\n\
-             Other accounts that reported this one before: {prior}\n\n\
-             No message content is included or available.\n\
-             To suspend the account: scripts/suspend-account.sh {reported} \"<reason>\"",
-            report = n.report_id,
-            reported = n.reported_id,
-            reason = n.reason,
-            reporter = n.reporter_id,
-            conversation = n.conversation_id.as_deref().unwrap_or("none"),
-            message = n.message_id.as_deref().unwrap_or("none"),
-            prior = n.prior_reports_against,
-        ),
+        "subject": subject,
+        "text": text,
     });
     let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
         .header("Authorization", format!("Bearer {api_key}"))
@@ -197,4 +214,38 @@ async fn send_report_notice(api_key: &str, n: &ReportNotice) -> anyhow::Result<(
         anyhow::bail!("Resend non-success: {txt}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn notice(dev: bool) -> ReportNotice {
+        ReportNotice {
+            report_id: "R".into(),
+            reporter_id: "A".into(),
+            reported_id: "B".into(),
+            reason: "spam",
+            conversation_id: None,
+            message_id: None,
+            prior_reports_against: 0,
+            dev,
+        }
+    }
+
+    #[test]
+    fn dev_report_email_is_labelled_and_points_the_script_at_dev() {
+        let (subject, text) = report_email(&notice(true));
+        assert!(subject.starts_with("[dev] "));
+        assert!(text.starts_with("Environment: dev"));
+        assert!(text.contains("DOPPLER_CONFIG=dev scripts/suspend-account.sh B \"<reason>\""));
+    }
+
+    #[test]
+    fn prod_report_email_is_unlabelled_and_targets_prod() {
+        let (subject, text) = report_email(&notice(false));
+        assert_eq!(subject, "Pollis abuse report: B (spam)");
+        assert!(!text.contains("dev"));
+        assert!(text.contains("\nTo suspend the account: scripts/suspend-account.sh B \"<reason>\""));
+    }
 }
