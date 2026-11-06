@@ -19,17 +19,29 @@ appId: ${MAESTRO_APP_ID}
     id: "btn-upload-emoji"
 - waitForAnimationToEnd:
     timeout: 5000
+# iPad: the picker takes only point taps (ipad-pick-photos.yaml).
 - runFlow:
     when:
-      platform: iOS
+      true: ${IPAD == "1"}
+    file: ipad-pick-photos.yaml
+    env:
+      CELLS: "1"
+      CONFIRM: "0"
+- runFlow:
+    when:
+      true: ${IPAD != "1"}
     commands:
-      - tapOn: "Sort and Filter"
-      - tapOn: "Added"
-      - waitForAnimationToEnd:
-          timeout: 3000
-- tapOn:
-    text: "(Photo|GIF|Animated)(,| taken on) .*"
-    index: 0
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - tapOn: "Sort and Filter"
+            - tapOn: "Added"
+            - waitForAnimationToEnd:
+                timeout: 3000
+      - tapOn:
+          text: "(Photo|GIF|Animated)(,| taken on) .*"
+          index: 0
 - extendedWaitUntil:
     visible:
       id: "row-emoji-${EMOJI_SHORTCODE}"

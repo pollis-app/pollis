@@ -3,7 +3,8 @@
 # account (so the reported account always exists on the dev DS), the script
 # reads its @handle off the screen, and the REPORTER device runs
 # flows/report.yaml against that handle, then flows/dm-safety.yaml (#1563: the
-# safety number in a DM with that peer) as another fresh account.
+# safety number in a DM with that peer) and flows/dms.yaml (start a DM with it),
+# each as another fresh account.
 #
 #   mobile/scripts/maestro-report.sh <reporter-device-id> <peer-device-id>
 #
@@ -29,8 +30,9 @@ STAMP="$(date +%Y%m%d%H%M%S)"
 PEER_EMAIL="${BASE%@*}-peer-$STAMP@${BASE#*@}"
 REPORTER_EMAIL="${BASE%@*}-rep-$STAMP@${BASE#*@}"
 SAFETY_EMAIL="${BASE%@*}-safety-$STAMP@${BASE#*@}"
+DM_EMAIL="${BASE%@*}-dm-$STAMP@${BASE#*@}"
 
-echo "==> 1/3 peer signs up ($PEER_EMAIL)"
+echo "==> 1/4 peer signs up ($PEER_EMAIL)"
 maestro --device "$PEER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PEER_EMAIL" "$HERE/.maestro/two-client/report/1-peer-signup.yaml"
 
 if [[ "$PEER" == emulator-* || "$PEER" == *:* ]]; then
@@ -43,12 +45,15 @@ HANDLE="$(printf '%s' "$TREE" | grep -oE '@[a-z0-9][a-z0-9_.-]{2,}' | head -1 | 
 [ -n "$HANDLE" ] || { echo "could not read the peer's handle" >&2; exit 1; }
 echo "    peer handle: $HANDLE"
 
-echo "==> 2/3 reporter reports the peer"
+echo "==> 2/4 reporter reports the peer"
 maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$REPORTER_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/report.yaml"
 echo "==> report passed"
 
 # A fresh account again: sign-in clears state, and an existing account on a
 # cleared device would land on new-device enrollment instead of the tabs.
-echo "==> 3/3 safety number in a DM with the peer"
+echo "==> 3/4 safety number in a DM with the peer"
 maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$SAFETY_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/dm-safety.yaml"
 echo "==> dm-safety passed"
+echo "==> 4/4 start a DM with the peer"
+maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$DM_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/dms.yaml"
+echo "==> dms passed"

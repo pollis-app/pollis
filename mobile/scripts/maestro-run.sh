@@ -48,6 +48,28 @@ else
   echo "WARN: $ENV_FILE missing — copy env.example and fill it in." >&2
 fi
 
+# profile-photo's iOS picker and crop run out of process, so they take point
+# taps (see the flow). The points differ per device; .env overrides them.
+if ! grep -q '^PICK_POINT=' "$ENV_FILE" 2>/dev/null; then
+  case "$PLATFORM" in
+    ios)  ENV_ARGS+=(-e "PICK_POINT=16%,24%" -e "USE_POINT=89%,92%") ;;
+    ipad) ENV_ARGS+=(-e "PICK_POINT=39%,35%" -e "USE_POINT=61%,35%") ;;
+  esac
+fi
+# keyboard-recovery taps the scan page's bottom toggle by point (that tap is
+# the check that nothing pads the screen); the iPad draws it lower.
+if [ "$PLATFORM" = "ipad" ] && ! grep -q '^SCAN_TOGGLE_POINT=' "$ENV_FILE" 2>/dev/null; then
+  ENV_ARGS+=(-e "SCAN_TOGGLE_POINT=50%,96%")
+fi
+# ...and the PIN step's "0" key, which the iPad draws centred, not at the bottom.
+if [ "$PLATFORM" = "ipad" ] && ! grep -q '^PIN_ZERO_POINT=' "$ENV_FILE" 2>/dev/null; then
+  ENV_ARGS+=(-e "PIN_ZERO_POINT=50%,68%")
+fi
+# The iPad's photo picker takes only point taps (subflows/ipad-pick-photos.yaml).
+if [ "$PLATFORM" = "ipad" ]; then
+  ENV_ARGS+=(-e "IPAD=1")
+fi
+
 # MAESTRO_EMAIL is deliberately NOT taken from .env as-is. Every flow opens with
 # `clearState` and then signs UP, so a fixed address only works on its very
 # first use ever: from the second flow onward the account already exists, auth
@@ -120,11 +142,18 @@ mkdir -p "$OUT"
 # and every flow needs its own signup address (see fresh_email above). Running
 # them separately also attributes a failure to one flow instead of one batch.
 FLOW_FILES=()
+SKIPPED_TWO_CLIENT=()
 if [ "$FLOW" = "all" ]; then
   for f in "$MAE"/flows/*.yaml; do
     [ -e "$f" ] || continue
     # ipad-* flows assert the regular-width two-pane; a phone renders compact.
     if [ "$PLATFORM" != "ipad" ] && [[ "$(basename "$f")" == ipad-* ]]; then
+      continue
+    fi
+    # Two-client flows need a second device or a dev-DS peer, so on one device
+    # they can only fail; their scripts run them (named after the run).
+    if sed -n '/^---/q;p' "$f" | grep -q -- '- two-client'; then
+      SKIPPED_TWO_CLIENT+=("$(basename "$f" .yaml)")
       continue
     fi
     FLOW_FILES+=("$f")
@@ -172,6 +201,12 @@ rm -rf "$DEBUG"
 
 echo "==> screenshots in: $OUT"
 ls -1 "$OUT"/*.png 2>/dev/null || echo "(no screenshots captured)"
+
+if [ ${#SKIPPED_TWO_CLIENT[@]} -gt 0 ]; then
+  echo "==> skipped two-client flows: ${SKIPPED_TWO_CLIENT[*]}"
+  echo "    run them with scripts/maestro-report.sh (report, dm-safety, dms) and"
+  echo "    scripts/maestro-approval-prompt.sh (device approval), see .maestro/README.md"
+fi
 
 if [ ${#FAILED[@]} -gt 0 ]; then
   echo "==> FAILED (${#FAILED[@]}/${#FLOW_FILES[@]}): ${FAILED[*]}" >&2

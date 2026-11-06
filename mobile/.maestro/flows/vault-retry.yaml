@@ -48,12 +48,25 @@ tags:
           when:
             platform: Android
           file: ../subflows/pick-six-photos-android.yaml
+      # iPad: the picker takes only point taps (ipad-pick-photos.yaml).
+      - runFlow:
+          when:
+            true: ${IPAD == "1"}
+          file: ../subflows/ipad-pick-photos.yaml
+          env:
+            CELLS: "6"
+            CONFIRM: "1"
       - runFlow:
           when:
             platform: iOS
+            true: ${IPAD != "1"}
           file: ../subflows/pick-six-photos-ios.yaml
-      - tapOn:
-          text: "(?i)(add|done).*"
+      - runFlow:
+          when:
+            true: ${IPAD != "1"}
+          commands:
+            - tapOn:
+                text: "(?i)(add|done).*"
       - waitForAnimationToEnd:
           timeout: 3000
 - extendedWaitUntil:

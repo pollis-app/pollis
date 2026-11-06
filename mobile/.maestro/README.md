@@ -119,7 +119,10 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 
 Two-client / special flows (`enrollment-approval`, `realtime`, `blocking`,
 `push-tap`, and the DM accept/reply side) are scaffolded in `_two-client.md` —
-they need the two-device setup below and a Mac shakedown.
+they need the two-device setup below and a Mac shakedown. `maestro-run.sh all`
+skips every flow tagged `two-client` (on one device they can only fail) and
+names them at the end: `report`, `dm-safety` and `dms` run in
+`scripts/maestro-report.sh`, device approval in `scripts/maestro-approval-prompt.sh`.
 
 ## Screen tour (visual audit)
 
@@ -200,7 +203,9 @@ not in the hierarchy Maestro reads.
 
 **Report (automated, #1213):** `mobile/scripts/maestro-report.sh <reporter-device> <peer-device>`
 — a fresh peer signs up, its handle is read off the screen, and the reporter
-reports it with "Report and block", then unblocks.
+reports it with "Report and block", then unblocks. Then, each as another fresh
+account, `dm-safety` (the safety number in a DM with the peer) and `dms`
+(starting a DM with it).
 
 **Composing (automated, #1507):** `mobile/scripts/maestro-composing.sh <device>`
 — one device plus `pollis-tui`'s `composing_peer` example. The device types a
@@ -436,6 +441,16 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   in the right pane (`screen-chat`, no `btn-back`) and the pages it opens
   (info, members, settings, thread, profile) push inside that pane. Flows that
   tap `btn-back` to leave a conversation mark it `optional: true`.
+- **iPad photo picker:** a popover drawn out of process, so its cells, Sort
+  and Filter menu and ✓ are not in the hierarchy and text taps find nothing.
+  `maestro-run.sh` passes `IPAD=1` on the iPad, and every flow that picks
+  photos runs `subflows/ipad-pick-photos.yaml` there (point taps: sort by
+  Added, the newest `CELLS`, ✓ when `CONFIRM` is "1") instead of its phone
+  steps. `profile-photo` (picker + crop, out of process on every iOS device)
+  and `keyboard-recovery`'s bottom toggle and PIN "0" key take per-device points
+  the runner also passes (`PICK_POINT` / `USE_POINT`, `SCAN_TOGGLE_POINT`,
+  `PIN_ZERO_POINT`); a line in
+  `.maestro/.env` overrides them.
 - **Direct tab:** DM requests are accepted on `dm/requests`, via
   `row-dm-requests`.
 - **Sign out** asks first, in a native Alert with no testID: after

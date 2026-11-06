@@ -1,6 +1,6 @@
 // Media renderers for message attachments (#346): every attachment renders through this seam.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
@@ -13,10 +13,13 @@ export function MediaImage({
   attachment,
   style,
   contentFit = "cover",
+  onRenderedChange,
 }: {
   attachment: MessageAttachment;
   style?: StyleProp<ImageStyle>;
   contentFit?: "cover" | "contain";
+  // For a parent whose accessible wrapper hides this image's testID from iOS.
+  onRenderedChange?: (rendered: boolean) => void;
 }) {
   const { t } = useTranslation("mobile");
   // No object key yet (uploading, or an outbox row, #1335): local preview or blurhash.
@@ -36,6 +39,9 @@ export function MediaImage({
   // Lets Maestro tell a rendered image from a blurhash that never resolved.
   const [renderedUri, setRenderedUri] = useState<string | null>(instantUri);
   const rendered = !!displayUri && renderedUri === displayUri;
+  useEffect(() => {
+    onRenderedChange?.(rendered);
+  }, [rendered, onRenderedChange]);
 
   if (error) {
     return (

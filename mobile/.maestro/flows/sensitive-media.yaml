@@ -61,23 +61,35 @@ tags:
     id: "btn-attach"
 - waitForAnimationToEnd:
     timeout: 5000
+# iPad: the picker takes only point taps (subflows/ipad-pick-photos.yaml).
 - runFlow:
     when:
-      platform: iOS
+      true: ${IPAD == "1"}
+    file: ../subflows/ipad-pick-photos.yaml
+    env:
+      CELLS: "2"
+      CONFIRM: "1"
+- runFlow:
+    when:
+      true: ${IPAD != "1"}
     commands:
-      - tapOn: "Sort and Filter"
-      - tapOn: "Added"
-      - waitForAnimationToEnd:
-          timeout: 3000
-- tapOn:
-    text: "Photo(,| taken on) .*"
-    index: 0
-- tapOn:
-    text: "Video(,| taken on) .*"
-    index: 0
-- tapOn:
-    text: "(?i)(add|done).*"
-    optional: true
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - tapOn: "Sort and Filter"
+            - tapOn: "Added"
+            - waitForAnimationToEnd:
+                timeout: 3000
+      - tapOn:
+          text: "Photo(,| taken on) .*"
+          index: 0
+      - tapOn:
+          text: "Video(,| taken on) .*"
+          index: 0
+      - tapOn:
+          text: "(?i)(add|done).*"
+          optional: true
 - extendedWaitUntil:
     visible:
       id: "strip-attachments"

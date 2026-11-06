@@ -115,27 +115,39 @@ tags:
     id: "btn-attach"
 - waitForAnimationToEnd:
     timeout: 5000
+# iPad: the picker takes only point taps (subflows/ipad-pick-photos.yaml).
 - runFlow:
     when:
-      platform: iOS
-    commands:
-      - tapOn:
-          text: "Photo, .*"
-          index: 0
-          optional: true
-# Android's photo picker labels each thumbnail "Photo taken on <date>"; the
-# seeded image is the first one in "Recent".
+      true: ${IPAD == "1"}
+    file: ../subflows/ipad-pick-photos.yaml
+    env:
+      CELLS: "1"
+      CONFIRM: "1"
 - runFlow:
     when:
-      platform: Android
+      true: ${IPAD != "1"}
     commands:
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - tapOn:
+                text: "Photo, .*"
+                index: 0
+                optional: true
+      # Android's photo picker labels each thumbnail "Photo taken on <date>"; the
+      # seeded image is the first one in "Recent".
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            - tapOn:
+                text: "Photo taken on.*"
+                index: 0
+                optional: true
       - tapOn:
-          text: "Photo taken on.*"
-          index: 0
+          text: "(?i)(add|done).*"
           optional: true
-- tapOn:
-    text: "(?i)(add|done).*"
-    optional: true
 # A picker that is still up (nothing could be picked) is cancelled, so the
 # rest of the flow runs against the Vault.
 - runFlow:

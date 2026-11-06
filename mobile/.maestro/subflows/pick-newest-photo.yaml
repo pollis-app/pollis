@@ -19,18 +19,29 @@ appId: ${MAESTRO_APP_ID}
     timeout: 5000
 - runFlow:
     when:
-      platform: iOS
+      true: ${IPAD == "1"}
+    file: ipad-pick-photos.yaml
+    env:
+      CELLS: "1"
+      CONFIRM: "1"
+- runFlow:
+    when:
+      true: ${IPAD != "1"}
     commands:
-      - tapOn: "Sort and Filter"
-      - tapOn: "Added"
-      - waitForAnimationToEnd:
-          timeout: 3000
-- tapOn:
-    text: "Photo(,| taken on) .*"
-    index: 0
-- tapOn:
-    text: "(?i)(add|done).*"
-    optional: true
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - tapOn: "Sort and Filter"
+            - tapOn: "Added"
+            - waitForAnimationToEnd:
+                timeout: 3000
+      - tapOn:
+          text: "Photo(,| taken on) .*"
+          index: 0
+      - tapOn:
+          text: "(?i)(add|done).*"
+          optional: true
 - extendedWaitUntil:
     visible:
       id: "strip-attachments"
