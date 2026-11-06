@@ -144,9 +144,8 @@ function GroupPanelImpl({
             </Text>
             <Icon.chevronDown size={18} color={semantic.dim} />
           </View>
-          {memberCountLabel ? (
-            <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel}</Text>
-          ) : null}
+          {/* Reserved while members load, so the header doesn't grow when the count lands (#1733). */}
+          <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel ?? "\u00a0"}</Text>
         </PressInPressable>
         <IconButton
           testID="row-group-invite"
@@ -200,7 +199,7 @@ function GroupPanelImpl({
             alignItems: "center",
             justifyContent: "space-between",
             paddingStart: space.sm,
-            minHeight: 32,
+            minHeight: layout.touchMin,
           }}
         >
           <Text accessibilityRole="header" style={ty.section}>

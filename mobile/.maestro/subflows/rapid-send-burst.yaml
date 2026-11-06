@@ -9,12 +9,21 @@ appId: ${MAESTRO_APP_ID}
 # fresh group's MLS setup, or a slowed network on Android
 # (scripts/maestro-rapid-send.sh).
 #
+# Before every Send the button must be on screen, not under the keyboard: each
+# send re-renders the chat, and on Android a Reanimated settled-props race used
+# to put the screen's keyboard padding back to 0 there, so "four" was typed
+# into a composer hidden behind the keyboard (see mobile/CLAUDE.md, "Lost
+# padding"). The second burst, in a fresh chat after leaving the first, is
+# where it showed.
+#
 # Rows are matched by their spoken label, "<name>: <text>, <status or time>",
 # in which a pending row says "sending" (MessageRow). The ": " keeps the
 # composer's own text, which has none, from ever matching a row.
 - tapOn:
     id: "input-composer"
 - inputText: "${TAG} one"
+- assertVisible:
+    id: "btn-send"
 - tapOn:
     id: "btn-send"
 - assertVisible: ".*: ${TAG} one, sending"
@@ -25,6 +34,8 @@ appId: ${MAESTRO_APP_ID}
 - inputText: "${TAG} two"
 # The precondition: message 1 is still in flight as Send is tapped again.
 - assertVisible: ".*: ${TAG} one, sending"
+- assertVisible:
+    id: "btn-send"
 - tapOn:
     id: "btn-send"
 # Before #1636 this tap did nothing (Send was disabled while message 1 was
@@ -35,10 +46,14 @@ appId: ${MAESTRO_APP_ID}
     text: ".*${TAG}.*"
 
 - inputText: "${TAG} three"
+- assertVisible:
+    id: "btn-send"
 - tapOn:
     id: "btn-send"
 - assertVisible: ".*: ${TAG} three, .*"
 - inputText: "${TAG} four"
+- assertVisible:
+    id: "btn-send"
 - tapOn:
     id: "btn-send"
 - assertVisible: ".*: ${TAG} four, .*"
