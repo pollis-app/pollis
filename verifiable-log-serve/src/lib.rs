@@ -4,6 +4,7 @@
 
 pub mod account;
 pub mod bundle;
+pub mod cli;
 pub mod error;
 pub mod group;
 pub mod layout;

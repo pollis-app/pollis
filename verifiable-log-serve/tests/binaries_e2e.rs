@@ -1,5 +1,5 @@
 //! End-to-end gate for the **binaries** tree (binary transparency, Phase 1 of
-//! #453) — the P1 acceptance criterion: `pollis-verify release <tag>` verifies a
+//! #453) — the P1 acceptance criterion: `pollis-verify release https://verify.pollis.com <tag>` verifies a
 //! fixture binaries tree against a synthetic STH.
 //!
 //! Fixtures come from the real builder and go through the shared verdict core.

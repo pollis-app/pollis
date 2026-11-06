@@ -1,6 +1,6 @@
 # Verifiable / Reproducible Builds + Binary Transparency
 
-**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned log key (ML-DSA-44; rotated to fresh material in #732). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P5 (full reproducibility + independent rebuilder) is SHIPPED for Linux (#484)** — see §1.5 / §6 Phase 5. **P3 (cosign/SLSA keyless provenance) is now SHIPPED (#484)** — every released installer + updater bundle carries a keyless SLSA build-provenance attestation *and* a cosign signature anchored in the **public Rekor** log via the GitHub Actions OIDC identity (no Pollis key on that verification path), a second independent anchor; see §3 / §6 Phase 3. The full design of record follows.
+**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release https://verify.pollis.com <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned log key (ML-DSA-44; rotated to fresh material in #732). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P5 (full reproducibility + independent rebuilder) is SHIPPED for Linux (#484)** — see §1.5 / §6 Phase 5. **P3 (cosign/SLSA keyless provenance) is now SHIPPED (#484)** — every released installer + updater bundle carries a keyless SLSA build-provenance attestation *and* a cosign signature anchored in the **public Rekor** log via the GitHub Actions OIDC identity (no Pollis key on that verification path), a second independent anchor; see §3 / §6 Phase 3. The full design of record follows.
 **Author lens:** performance, security, and *zero user burden* are first-class
 constraints, called out explicitly at each decision.
 **Audience:** maintainers deciding whether/how to build this, plus the security
@@ -482,7 +482,7 @@ parties + the across-run tripwire in CI. For binaries we add:
   and to check the across-run equivocation tripwire for the binaries STH (same
   `.sth-prev` cache mechanism, one more `check_tree "binaries"` call).
 - **Independent monitors (the real defense).** Publish a tiny
-  `pollis-verify monitor` mode (or document a cron one-liner) that fetches
+  monitor mode for `pollis-verify` (or document a cron one-liner) that fetches
   `/v1/binaries/sth/latest.json`, verifies signature + consistency against a
   locally-cached prior STH, and **shouts on divergence**. Encourage security
   researchers / the reproducible-builds community to run it. Because the tree is
@@ -757,10 +757,10 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
 ### Phase 1 — Binaries tree in the log (mostly in-box)
 - New `binaries` tenant + `BinaryInvariant` in `verifiable-log-builder`; the
   `BinaryRecord` schema (§2.2); `--binaries-in` builder mode; `serve` emits
-  `/v1/binaries/...` and `/verify/release/<tag>`; `pollis-verify release <tag>`.
+  `/v1/binaries/...` and `/verify/release/<tag>`; `pollis-verify release https://verify.pollis.com <tag>`.
 - Unit/gate tests for the invariant (fork / re-issue / payload-pairing rejected),
   mirroring the commit-log builder's test suite.
-- **Acceptance:** `pollis-verify release vX` verifies a fixture binaries tree
+- **Acceptance:** `pollis-verify release https://verify.pollis.com vX` verifies a fixture binaries tree
   end-to-end; injected fork/re-issue is rejected; tampered leaf fails. **Fully
   in-box** — pure `verifiable-log*` crate work, the box's strong suit.
 
@@ -771,7 +771,7 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
 - Teach `transparency-publish.yml` to build/publish/self-audit/tripwire the
   binaries tree (one more `check_tree "binaries"`).
 - **Acceptance:** cutting a real tag results in `/v1/binaries/...` populated and
-  `pollis-verify release <tag>` green against `verify.pollis.com`; the tripwire
+  `pollis-verify release https://verify.pollis.com <tag>` green against `verify.pollis.com`; the tripwire
   covers the binaries STH. **Needs release runners** for the real signed
   artifacts; the *builder/serve/verify* half is in-box-testable with fixtures.
 
@@ -918,7 +918,7 @@ the Security page, with **zero added user burden**.
 
 **Phased milestones.**
 - **P0 (CI builds, in-box analysis):** measure Linux payload reproducibility on release runners; publish a pinned build recipe.
-- **P1 (in-box):** `binaries` tenant + `BinaryRecord` schema + `BinaryInvariant` in `verifiable-log-builder`; `serve` emits `/v1/binaries/...` + `/verify/release/<tag>`; `pollis-verify release <tag>`.
+- **P1 (in-box):** `binaries` tenant + `BinaryRecord` schema + `BinaryInvariant` in `verifiable-log-builder`; `serve` emits `/v1/binaries/...` + `/verify/release/<tag>`; `pollis-verify release https://verify.pollis.com <tag>`.
 - **P2 (runners):** `attest-and-log` job in `desktop-release.yml` logs payload+artifact hashes; `transparency-publish.yml` publishes/self-audits/tripwires the binaries tree.
 - **P3 (CI):** SLSA provenance via `actions/attest-build-provenance` + keyless `cosign` (Fulcio/Rekor) — a build-provenance anchor Pollis doesn't control.
 - **P4 (in-box logic):** optional in-app "Verify this build" on the Security page (`verify_own_build`, reusing the account-key verify path) — automatic-or-one-click, never mandatory.
@@ -926,7 +926,7 @@ the Security page, with **zero added user burden**.
 
 **Acceptance (top-line).** A released tag `vX.Y.Z` results in `/v1/binaries/...`
 on `verify.pollis.com` with per-artifact `payload`/`signed` leaves;
-`pollis-verify release vX.Y.Z` verifies inclusion + invariants trusting only the
+`pollis-verify release https://verify.pollis.com vX.Y.Z` verifies inclusion + invariants trusting only the
 pinned log key; the CI tripwire covers the binaries STH; an independent
 rebuilder reproduces the Linux payload (bit-for-bit or modulo a documented list)
 and confirms its hash is logged; the app's optional "Verify this build" returns
