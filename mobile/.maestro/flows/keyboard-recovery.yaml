@@ -334,3 +334,90 @@ appId: ${MAESTRO_APP_ID}
 - extendedWaitUntil:
     visible: ".*eturn three,.*"
     timeout: 30000
+
+# 7. The app brought forward onto ANOTHER screen, as a notification tap does,
+#    after the keyboard went away in the background: no keyboard, nothing
+#    focused, and every screen laid out with no keyboard padding. On phones the
+#    composer sat mid-screen instead, a keyboard's height of empty space below
+#    it. Every KeyboardAvoidingView pads with a Reanimated style, and
+#    Reanimated 4.5's settled-props sync (FORCE_REACT_RENDER_FOR_SETTLED_
+#    ANIMATIONS) evicted the last padding 2 s after it settled whether or not a
+#    500 ms JS timer had copied it into React yet; a paused (background), late
+#    (busy resume) or stopped (view count drift) timer lost the hide, and the
+#    next React render put the stale "open" padding back. The flag is off in
+#    package.json (mobile/CLAUDE.md, "Lost padding"). The emulator applies the
+#    background hide only at resume, while the timer runs again, so this step
+#    passed before the fix too: rapid-send is the run that failed without it.
+#    It stays as the regression check for the path. The proof is a point tap as
+#    above: COMPOSER_POINT is where the composer sits when nothing pads the
+#    screen; stranded, that spot is empty and `keyboard-open` never shows.
+#    Android only: its IME goes away without an animation in the background.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      # Hide the keyboard on the chat itself: hideKeyboard with none up is a Back.
+      - runFlow:
+          when:
+            visible:
+              id: "keyboard-open"
+          commands:
+            - hideKeyboard
+      - tapOn:
+          id: "btn-back"
+      - tapOn:
+          text: "General"
+          optional: true
+      - assertVisible:
+          id: "screen-chat"
+      - tapOn:
+          id: "input-composer"
+      - inputText: "notify one"
+      - assertVisible:
+          id: "keyboard-open"
+      # Long enough for the padding to settle (the old sync's 1-2 s window).
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - pressKey: Home
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # A deep link resumes the app and pushes a screen, as a notification tap does.
+      - openLink: "pollis://vault"
+      - assertVisible:
+          id: "screen-vault"
+      - extendedWaitUntil:
+          visible:
+            id: "keyboard-closed"
+          timeout: 3000
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: keyboard-recovery-11-vault-after-resume
+      - tapOn:
+          point: ${COMPOSER_POINT || "50%,94%"}
+      - extendedWaitUntil:
+          visible:
+            id: "keyboard-open"
+          timeout: 3000
+      - hideKeyboard
+      - tapOn:
+          id: "btn-back"
+      - assertVisible:
+          id: "screen-chat"
+      - extendedWaitUntil:
+          visible:
+            id: "keyboard-closed"
+          timeout: 3000
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: keyboard-recovery-12-chat-after-resume
+      - tapOn:
+          point: ${COMPOSER_POINT || "50%,94%"}
+      - extendedWaitUntil:
+          visible:
+            id: "keyboard-open"
+          timeout: 3000
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          visible: ".*otify one,.*"
+          timeout: 30000

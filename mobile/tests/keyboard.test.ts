@@ -160,6 +160,42 @@ test("keyboard-controller is patched to keep JS in step with the real keyboard, 
   );
 });
 
+// Every KeyboardAvoidingView pads with a Reanimated animated style. With Reanimated 4.5's
+// FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS on, native evicts a view's last animated value 2 s after
+// it settles and relies on a 500 ms JS timer to have copied it into React state first. That timer
+// misses whenever it is paused (the app in the background) or late (a busy JS thread at resume), and
+// 4.5.1 also stops it whenever its view count drifts to zero with views still mounted (nested
+// animated components sharing one tag register it once but unregister it twice). The value is then lost, and the next
+// React render of the screen puts React's stale padding back: the composer under the keyboard after
+// a few sends (rapid-send), or mid-screen with no keyboard after a notification tap. With the flag
+// off, Reanimated keeps the value and re-applies it on every React commit. Static flags are compiled
+// into the native binary on both platforms, so this needs a store build.
+test("Reanimated keeps animated values across React renders (settled-props sync off)", () => {
+  const pkg = JSON.parse(read("package.json"));
+  assert.equal(
+    pkg.reanimated?.staticFeatureFlags?.FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS,
+    false,
+    "a settled keyboard padding must not depend on a JS timer catching it in time",
+  );
+  const flags = Object.keys(pkg.reanimated.staticFeatureFlags);
+  assert.deepEqual(flags, ["FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS"], "no other Reanimated flag moved with it");
+  // The installed Reanimated must still read the override from the app's package.json, on both
+  // platforms; a bump that drops or renames the flag must re-check this fix.
+  const reanimated = "node_modules/react-native-reanimated/";
+  assert.match(read(`${reanimated}src/featureFlags/staticFlags.json`), /"FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS"/);
+  assert.match(read(`${reanimated}android/build.gradle.kts`), /\?\.get\("staticFeatureFlags"\)/);
+  assert.match(read(`${reanimated}scripts/reanimated_utils.rb`), /\['reanimated'\]\['staticFeatureFlags'\]/);
+  // The device-tier proofs: rapid-send fails without it on Android; keyboard-recovery step 7 is
+  // the notification-tap path.
+  const burst = read(".maestro/subflows/rapid-send-burst.yaml");
+  const taps = burst.split('- tapOn:\n    id: "btn-send"').length - 1;
+  const guarded = burst.split('- assertVisible:\n    id: "btn-send"\n- tapOn:\n    id: "btn-send"').length - 1;
+  assert.ok(taps > 0 && guarded === taps, "every rapid-send tap on Send first asserts Send is on screen");
+  const recovery = read(".maestro/flows/keyboard-recovery.yaml");
+  assert.match(recovery, /openLink: "pollis:\/\/vault"/);
+  assert.match(recovery, /point: \$\{COMPOSER_POINT \|\| "50%,94%"\}/);
+});
+
 test("<Screen> draws the keyboard-state e2e probe", () => {
   assert.match(read("components/ui.tsx"), /<KeyboardProbe \/>/);
   assert.match(read("components/KeyboardProbe.tsx"), /"keyboard-open" : "keyboard-closed"/);
