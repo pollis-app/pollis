@@ -722,3 +722,68 @@ async fn a_key_change_seen_headless_shows_once_in_the_app() {
     assert_eq!(again.len(), 1, "one change, one notice: {again:?}");
     assert_eq!(again[0]["id"], found[0]["id"]);
 }
+
+/// #1734: a push for a pending DM request shows who is asking, by display name, and nothing
+/// they wrote: the fetch decrypts nothing for a request the user has not accepted, in either
+/// content mode, and "Nothing" still shows nothing.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_dm_request_shows_the_requester_and_never_a_preview() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    alice.send_channel_message(&dm, "hello stranger").await;
+
+    // No display name yet: the username, as the request list shows it.
+    let handle = handle_for(&bob_p.id, &dm, "dm_request").await;
+    let out = headless(&bob, Some(handle), Duration::from_secs(20)).await;
+    assert!(matches!(out, Outcome::Ok { mode: NotificationContent::Full, .. }), "{out:?}");
+    let shown = items(&out);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    let item = &shown[0];
+    assert_eq!(item.kind, fetch::KIND_DM_REQUEST);
+    assert_eq!(item.conversation_id, dm);
+    assert_eq!(item.sender_name, alice_p.username);
+    assert!(item.is_dm && !item.muted);
+    assert_eq!((item.body.as_str(), item.body_key, item.message_id.as_str()), ("", None, ""));
+    assert!(
+        !stored_contents(&bob).await.iter().any(|c| c == "hello stranger"),
+        "nothing in a request is decrypted by the extension"
+    );
+
+    // With a display name, that; and the same in "Name only".
+    writable_remote()
+        .await
+        .conn()
+        .await
+        .unwrap()
+        .execute(
+            "UPDATE users SET preferred_name = 'Alice L.' WHERE id = ?1",
+            libsql::params![alice_p.id.clone()],
+        )
+        .await
+        .unwrap();
+    set_content(&bob, "name").await;
+    let handle = handle_for(&bob_p.id, &dm, "dm_request").await;
+    let shown = items(&headless(&bob, Some(handle), Duration::from_secs(20)).await);
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].sender_name, "Alice L.");
+    assert_eq!(shown[0].body, "");
+
+    // "Nothing": no name either.
+    set_content(&bob, "none").await;
+    let handle = handle_for(&bob_p.id, &dm, "dm_request").await;
+    let out = headless(&bob, Some(handle), Duration::from_secs(5)).await;
+    assert_eq!(out, Outcome::Ok { mode: NotificationContent::None, items: vec![] });
+
+    // Accepted: the message reaches the app, as with any DM.
+    set_content(&bob, "full").await;
+    bob.accept_dm_request(&dm).await;
+    assert!(contents(&bob.fetch_dm_messages(&dm).await)
+        .iter()
+        .any(|(_, c)| c == "hello stranger"));
+}

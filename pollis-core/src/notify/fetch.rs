@@ -64,7 +64,17 @@ pub struct Item {
     pub muted: bool,
     /// A channel message that @mentions this user by name (additive to the #1599 contract).
     pub mention: bool,
+    /// What the item is (additive, #1734): [`KIND_MESSAGE`], or [`KIND_DM_REQUEST`] for a
+    /// pending DM request, where `sender_name` is the requester's display name, `body` is
+    /// empty and `message_id` is empty. Hosts show "Message request" and the name, never a
+    /// preview, and a tap opens the request list.
+    pub kind: &'static str,
 }
+
+/// [`Item::kind`] of a message.
+pub const KIND_MESSAGE: &str = "message";
+/// [`Item::kind`] of a pending DM request (#1734); also the push handle's kind.
+pub const KIND_DM_REQUEST: &str = pollis_api::devices::PUSH_KIND_DM_REQUEST;
 
 /// Why there is nothing to show; the host falls back to the generic text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -304,6 +314,8 @@ async fn run_locked(
 struct Target {
     conversation_id: String,
     is_dm: bool,
+    /// A pending DM request (#1734): nothing is ingested or previewed for it.
+    request: bool,
 }
 
 /// First pause before retrying a fetch that failed on the network, doubled up to [`RETRY_MAX`].
@@ -365,6 +377,15 @@ async fn ingest_once(
     let is_dm = match kind.as_str() {
         "dm" => true,
         "channel" => false,
+        // #1734: a request the user has not accepted. Nothing in it is fetched or
+        // decrypted here: no preview until accepted, and the app ingests it then.
+        KIND_DM_REQUEST => {
+            return Ok(Some(Target {
+                conversation_id,
+                is_dm: true,
+                request: true,
+            }))
+        }
         _ => return Ok(None),
     };
     let result = if is_dm {
@@ -377,6 +398,78 @@ async fn ingest_once(
     Ok(Some(Target {
         conversation_id,
         is_dm,
+        request: false,
+    }))
+}
+
+/// The one item a DM request shows (#1734): the requester's display name, no message.
+///
+/// The requester is whoever added this user to the DM (`added_by`), else its creator, read
+/// from the DS as a pending member may; the name is their `preferred_name`, else their
+/// username, which the request list already shows. `Ok(None)` when this user is no longer in
+/// the DM; the host then shows the generic text, as on any failure. A network failure is
+/// retried like the ingest's (#1672), inside the caller's deadline.
+async fn request_item(
+    state: &Arc<AppState>,
+    user_id: &str,
+    dm_channel_id: &str,
+    deadline: Instant,
+) -> Result<Option<Item>, Reason> {
+    let attempt = retry_on_network(|| request_item_once(state, user_id, dm_channel_id));
+    tokio::time::timeout_at(deadline.into(), attempt)
+        .await
+        .unwrap_or(Err(Reason::Timeout))
+}
+
+async fn request_item_once(
+    state: &Arc<AppState>,
+    user_id: &str,
+    dm_channel_id: &str,
+) -> Result<Option<Item>, Reason> {
+    let resp = crate::commands::ds_reads::catch_up(state, dm_channel_id, false, true)
+        .await
+        .map_err(classify)?;
+    let Some(dm) = resp.dm.filter(|_| resp.authorized) else {
+        return Ok(None);
+    };
+    let requester = dm
+        .members
+        .iter()
+        .find(|m| m.user_id == user_id)
+        .and_then(|m| m.added_by.clone())
+        .filter(|a| !a.is_empty() && a != user_id)
+        .unwrap_or_else(|| dm.created_by.clone());
+    if requester == user_id {
+        return Ok(None);
+    }
+    let username = dm
+        .members
+        .iter()
+        .find(|m| m.user_id == requester)
+        .and_then(|m| m.username.clone())
+        .filter(|n| !n.is_empty());
+    let users = crate::commands::ds_reads::users(state, vec![requester.clone()], None)
+        .await
+        .map_err(classify)?;
+    let preferred = users.into_iter().find(|u| u.id == requester).and_then(|u| {
+        u.preferred_name
+            .filter(|n| !n.trim().is_empty())
+            .or(Some(u.username).filter(|n| !n.is_empty()))
+    });
+    let Some(name) = preferred.or(username) else {
+        return Ok(None);
+    };
+    Ok(Some(Item {
+        conversation_id: dm_channel_id.to_string(),
+        message_id: String::new(),
+        sender_name: name,
+        conversation_title: None,
+        is_dm: true,
+        body: String::new(),
+        body_key: None,
+        muted: false,
+        mention: false,
+        kind: KIND_DM_REQUEST,
     }))
 }
 
@@ -415,6 +508,19 @@ async fn finish(
     deadline: Instant,
     failure: Option<Reason>,
 ) -> Outcome {
+    // #1734: a request shows who is asking and nothing they wrote, whatever is stored.
+    if let Some(t) = target.as_ref().filter(|t| t.request) {
+        return match request_item(state, user_id, &t.conversation_id, deadline).await {
+            Ok(item) => Outcome::Ok {
+                mode,
+                items: item.into_iter().collect(),
+            },
+            Err(reason) => {
+                crate::diag!("[notify] request lookup failed: {reason:?}");
+                Outcome::Failed(reason)
+            }
+        };
+    }
     let rows = match select_rows(state, user_id, floor, target.as_ref()).await {
         Ok(rows) => rows,
         Err(e) => {
@@ -472,6 +578,7 @@ async fn finish(
             body_key,
             muted,
             mention,
+            kind: KIND_MESSAGE,
         });
     }
     Outcome::Ok { mode, items }
@@ -749,12 +856,15 @@ mod tests {
                 body_key: None,
                 muted: false,
                 mention: false,
+                kind: KIND_MESSAGE,
             }],
         };
         let v: serde_json::Value = serde_json::from_str(&ok.to_json()).unwrap();
         assert_eq!(v["ok"], true);
         assert_eq!(v["mode"], "full");
         assert_eq!(v["items"][0]["sender_name"], "alice");
+        assert_eq!(v["items"][0]["kind"], "message");
+        assert_eq!(KIND_DM_REQUEST, "dm_request");
         assert!(v["items"][0]["conversation_title"].is_null());
         assert!(v["items"][0]["body_key"].is_null());
         for (reason, s) in [
