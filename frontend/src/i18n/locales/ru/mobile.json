@@ -346,7 +346,9 @@
     "bodyVoice": "Голосовое сообщение",
     "bodySensitive": "Деликатный контент",
     "nameOnlyBody": "Отправил(а) сообщение",
-    "groupTitle": "{{sender}} · {{conversation}}"
+    "groupTitle": "{{sender}} · {{conversation}}",
+    "requestTitle": "Запрос на переписку",
+    "requestBody": "{{sender}} хочет написать вам"
   },
   "search": {
     "channels": "Каналы",

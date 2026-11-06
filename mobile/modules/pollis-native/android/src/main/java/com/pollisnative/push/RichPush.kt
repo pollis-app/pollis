@@ -115,7 +115,17 @@ object RichPush {
     ) : Plan() {
       override val outcome = "rich"
     }
+    /**
+     * #1734: a pending DM request. "Message request" and the requester's display name, never a
+     * preview; the tap opens the request list (JS routes the handle's `dm_request` kind there).
+     */
+    data class Request(val conversationId: String, val requester: String) : Plan() {
+      override val outcome = "request"
+    }
   }
+
+  /** The `kind` of a fetched item that is a pending DM request (pollis_notify.h). */
+  const val KIND_DM_REQUEST = "dm_request"
 
   /**
    * True when the user is already looking at this push's conversation: the app is in the foreground
@@ -174,6 +184,10 @@ object RichPush {
     }
     // One notification per push, for the newest message's conversation.
     val latest = visible.last()
+    if (latest.obj.optString("kind", "message") == KIND_DM_REQUEST) {
+      val requester = latest.obj.str("sender_name") ?: return Plan.Generic
+      return Plan.Request(latest.conversationId, requester)
+    }
     val sameConversation = visible.filter { it.conversationId == latest.conversationId }
     val messages = sameConversation.mapNotNull { item ->
       val sender = item.obj.str("sender_name") ?: return@mapNotNull null

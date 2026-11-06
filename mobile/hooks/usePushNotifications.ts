@@ -10,7 +10,14 @@ import {
   takeLaunchNotificationData,
 } from "../lib/push";
 import { createTapGate, type TapGate } from "../lib/push/tapGate";
-import { tapNavigation } from "../lib/push/tapNavigation";
+import {
+  DM_REQUESTS_PATH,
+  requestsTapNavigation,
+  tapNavigation,
+  tapTarget,
+} from "../lib/push/tapNavigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { dmQueryKeys } from "./queries/useDMChannels";
 import { syncOpenConversationToNative } from "../lib/push/openConversation";
 import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
@@ -43,6 +50,9 @@ export function usePushNotifications() {
   openRef.current = openConversation;
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
+  const queryClient = useQueryClient();
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
 
   // Resolving the handle is a signed DS call, so it happens after unlock.
   const [gate] = useState<TapGate<unknown>>(() =>
@@ -50,6 +60,16 @@ export function usePushNotifications() {
       void (async () => {
         const conv = await resolveNotificationRouting(data);
         if (!conv) {
+          return;
+        }
+        // #1734: a request opens the request list, never a chat the user has not accepted.
+        if (tapTarget(conv.kind, conv.conversationId).to === "requests") {
+          const navToRequests = requestsTapNavigation(pathnameRef.current);
+          if (navToRequests === "replace") {
+            routerRef.current.replace(DM_REQUESTS_PATH);
+          } else if (navToRequests === "push") {
+            routerRef.current.push(DM_REQUESTS_PATH);
+          }
           return;
         }
         const nav = tapNavigation(pathnameRef.current, conv.conversationId);
@@ -88,6 +108,13 @@ export function usePushNotifications() {
         gate.tap(data);
       },
       onDataReceived: (conversationId, kind) => {
+        // #1734: a new request in the foreground refreshes the list and the Direct badge.
+        if (tapTarget(kind, conversationId).to === "requests") {
+          void queryClientRef.current.invalidateQueries({
+            queryKey: dmQueryKeys.requests(userId),
+          });
+          return;
+        }
         const ck = toConversationKind(kind);
         if (ck) {
           void ingestRef.current(conversationId, ck);

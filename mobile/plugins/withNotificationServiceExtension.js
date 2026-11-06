@@ -46,6 +46,8 @@ const STRING_KEYS = [
   "bodyVideo",
   "bodyVoice",
   "bodySensitive",
+  "requestTitle",
+  "requestBody",
 ];
 // i18next interpolation → positional format arguments, in the order NotificationService.swift passes them.
 const PLACEHOLDERS = { sender: "%1$@", conversation: "%2$@" };

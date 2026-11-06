@@ -206,6 +206,26 @@ class RichPushTest {
     assertEquals("silent", RichPush.Plan.Silent.outcome)
     assertEquals("generic", RichPush.Plan.Generic.outcome)
     assertEquals("rich", RichPush.Plan.Rich("c", true, null, emptyList()).outcome)
+    assertEquals("request", RichPush.Plan.Request("c", "Ana").outcome)
+  }
+
+  private fun request(name: String = "Ana L.") =
+    """{"conversation_id":"d9","message_id":"","sender_name":"$name","conversation_title":null,"is_dm":true,"body":"","body_key":null,"muted":false,"mention":false,"kind":"dm_request"}"""
+
+  /** #1734: a DM request names the requester, never a preview, in both content modes. */
+  @Test
+  fun aDmRequestIsARequestPlan() {
+    for (mode in listOf("full", "name")) {
+      assertEquals(RichPush.Plan.Request("d9", "Ana L."), RichPush.plan(reply(mode, request())))
+    }
+    // "Nothing" never names anyone.
+    assertEquals(RichPush.Plan.Generic, RichPush.plan(reply("none", request())))
+    // No name to show: the generic text.
+    assertEquals(RichPush.Plan.Generic, RichPush.plan(reply("full", request(name = ""))))
+    // An item without `kind` (an older core) is a message, as before.
+    assertTrue(RichPush.plan(reply("full", item())) is RichPush.Plan.Rich)
+    // Never suppressed as "the chat on screen": a request has no chat open yet.
+    assertTrue(!RichPush.suppressForOpenConversation(RichPush.Plan.Request("d9", "Ana"), true, "d9"))
   }
 
   private fun obj(s: String): JSONObject? = try {

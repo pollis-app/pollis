@@ -207,6 +207,7 @@
     ],
     "extra": {
       "router": {},
+      "dmRequestPush": true,
       "eas": {
         "projectId": "74bee5ea-4d9b-4a1b-9fb3-5e1775f35990"
       }

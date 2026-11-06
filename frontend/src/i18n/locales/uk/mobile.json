@@ -346,7 +346,9 @@
     "bodyVoice": "Голосове повідомлення",
     "bodySensitive": "Делікатний вміст",
     "nameOnlyBody": "Надіслав(ла) повідомлення",
-    "groupTitle": "{{sender}} · {{conversation}}"
+    "groupTitle": "{{sender}} · {{conversation}}",
+    "requestTitle": "Запит на листування",
+    "requestBody": "{{sender}} хоче написати вам"
   },
   "search": {
     "channels": "Канали",

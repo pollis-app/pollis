@@ -322,7 +322,9 @@
     "bodyVoice": "语音消息",
     "bodySensitive": "敏感内容",
     "nameOnlyBody": "发来一条消息",
-    "groupTitle": "{{sender}} · {{conversation}}"
+    "groupTitle": "{{sender}} · {{conversation}}",
+    "requestTitle": "消息请求",
+    "requestBody": "{{sender}} 想给你发消息"
   },
   "search": {
     "channels": "频道",

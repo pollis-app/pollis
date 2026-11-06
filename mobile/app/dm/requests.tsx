@@ -16,6 +16,7 @@ import {
   useBlockUser,
 } from "../../hooks/queries";
 import { useThemeRerender } from "../../components/theme";
+import { dismissConversationNotifications } from "../../lib/push";
 
 /** Message requests: Accept or Block (pollis-core has no decline). */
 export default function DMRequests() {
@@ -95,7 +96,13 @@ export default function DMRequests() {
                       disabled={blockUser.isPending}
                       onPress={() => {
                         if (d.user2_id) {
-                          blockUser.mutate(d.user2_id);
+                          blockUser.mutate(d.user2_id, {
+                            // #1734: the request's notification leaves this tray now; the DS
+                            // clears it from the other devices.
+                            onSuccess: () => {
+                              void dismissConversationNotifications(d.id);
+                            },
+                          });
                         }
                       }}
                     >

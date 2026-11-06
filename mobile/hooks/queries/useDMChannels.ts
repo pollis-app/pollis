@@ -7,6 +7,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
+import { dismissConversationNotifications } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { DMConversation } from "../../types";
@@ -123,7 +124,9 @@ export function useAcceptDMRequest() {
         queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
       });
     },
-    onSuccess: () => {
+    onSuccess: (_data, dmChannelId: string) => {
+      // #1734: the request's notification leaves this tray now; the DS clears the other devices.
+      void dismissConversationNotifications(dmChannelId);
       queryClient.invalidateQueries({
         queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
       });

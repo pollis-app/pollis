@@ -26,12 +26,15 @@ export const KEYS = {
   bodySensitive: "pollis_push_body_sensitive",
   nameOnlyBody: "pollis_push_name_only_body",
   groupTitle: "pollis_push_group_title",
+  requestTitle: "pollis_push_request_title",
+  requestBody: "pollis_push_request_body",
 };
 
 // i18next `{{name}}` placeholders -> positional Android format args, fixed per key so a
 // translation may reorder them (`%2$s … %1$s`). Kotlin passes them in this order.
 export const ARGS = {
   groupTitle: ["sender", "conversation"],
+  requestBody: ["sender"],
 };
 
 /** `{{sender}} · {{conversation}}` -> `%1$s · %2$s`; throws on a placeholder the key does not declare. */
