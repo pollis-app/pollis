@@ -1,0 +1,46 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DM REQUEST PUSH (#1734), part 4 of 4. A second stranger's request
+# (${MAESTRO_PEER_HANDLE}) is in the tray (the script checked). A tapped
+# notification cancels itself, so this one is left alone: open the app from the
+# LAUNCHER, go to Direct → Message requests and accept it there. Accepting must
+# clear its notification; the script checks the tray after this flow.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- runFlow:
+    when:
+      notVisible:
+        id: "screen-dm-requests"
+    commands:
+      - tapOn:
+          id: "tab-direct"
+      - extendedWaitUntil:
+          visible:
+            id: "row-dm-requests"
+          timeout: 30000
+      - tapOn:
+          id: "row-dm-requests"
+- extendedWaitUntil:
+    visible:
+      id: "screen-dm-requests"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    id: "btn-accept-request-.*"
+- extendedWaitUntil:
+    notVisible:
+      id: "row-request-.*"
+    timeout: 30000
+- takeScreenshot: dm-request-push-04-accepted
+- pressKey: Home
