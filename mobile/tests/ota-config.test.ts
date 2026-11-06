@@ -137,8 +137,12 @@ test("app.config.js evaluates the committed certificate when one exists", () => 
 
 test("no private key is anywhere in mobile/store", () => {
   const dir = join(mobile, "store");
-  for (const name of require("node:fs").readdirSync(dir) as string[]) {
-    assert.doesNotMatch(readFileSync(join(dir, name), "utf8"), /PRIVATE KEY/, name);
+  // Recursive: release notes live in store/release-notes/.
+  for (const name of require("node:fs").readdirSync(dir, { recursive: true }) as string[]) {
+    const path = join(dir, name);
+    if (require("node:fs").statSync(path).isFile()) {
+      assert.doesNotMatch(readFileSync(path, "utf8"), /PRIVATE KEY/, name);
+    }
   }
 });
 

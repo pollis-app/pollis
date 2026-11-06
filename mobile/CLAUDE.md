@@ -331,6 +331,13 @@ schema, so listing them fails doctor's schema check for no behavioural gain.
 
 ## Store builds (no EAS — local `expo prebuild` + native tooling)
 
+**A whole release is the `mobile-release` skill** (`.claude/skills/mobile-release/`): version, notes
+(`mobile-release-notes`: `scripts/release-changes.py` lists the PRs since the version the store last approved;
+the notes are kept in `store/release-notes/<version>.<platform>.txt`), the Maestro gate,
+`scripts/store-build.sh ios|android` (everything below, plus the binary checks, from `origin/main` in its own
+worktree), upload, the ledger, then `scripts/asc-submit.py` (App Store review) or
+`scripts/play-publish.py promote` (Play production). The commands below are what those scripts run.
+
 Published by Pollis Inc. (dan@pollis.com), Apple team `8JT3WH45NZ`, iOS bundle id `com.pollis.ios` (Android keeps `com.pollis.mobile`). The 2026-08 to 2026-10 builds below were made on the retired personal team `9JF7WWYMU2`, whose app record never passed review and now holds `com.pollis.mobile`.
 
 **Version bookkeeping is derived — edit `package.json` `version`, nothing else.**

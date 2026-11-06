@@ -1,0 +1,20 @@
+New
+• Profile photos: add yours and see everyone else's.
+• Links in messages are tappable. Pollis checks a link before it opens.
+• Long-press a reaction to see who reacted.
+• Typing indicators in conversations.
+• Notifications can show who wrote and a preview of the message. Choose what they show in Settings.
+• Mark a photo as sensitive so it stays blurred until tapped.
+• Attachments show a preview card before you send.
+• The safety number now lives in the conversation with that person.
+
+Fixes
+• The app no longer closes unexpectedly while it is in the background.
+• The message box stays above the keyboard after you switch apps.
+• Messages sent quickly in a row arrive in order.
+• Unread counts stay in step across your devices.
+• A message that couldn't be sent now says why.
+• Unlocking with your PIN goes straight to a loading screen.
+• Vault images show instantly when switching tabs.
+• A new direct message shows the other person's name right away.
+• Tapping a notification for the chat you're in no longer opens it twice.
