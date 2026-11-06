@@ -395,6 +395,97 @@ crashed on the first silent push to a killed app).
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.
 
+## DM requests (#1734)
+
+A phone is told when someone sends it a message request, the way Signal and
+Discord do, and a tap opens the request list (`dm/requests`), never a chat the
+user has not accepted. Before #1734 creating a request pushed nothing (the DS
+pushed only from `POST /v1/messages/send`), and every message in a pending
+request pushed the recipient as an ordinary `dm`: a rich phone showed its
+preview, and a tap opened the unaccepted chat.
+
+**When the DS pushes (`pollis_delivery::push`).**
+
+- **Created.** `POST /v1/dm/create` (a new DM, not one the 2-person dedupe
+  returned) and `POST /v1/dm/add` (a member not already there) spawn
+  `notify_dm_request` for each pending recipient. Only tokens with the
+  `dm_request` capability are pushed: before #1734 a request pushed nothing,
+  and an older build still gets nothing here.
+- **First message.** On a DM send, `dm_push_plan` splits the recipients: an
+  accepted member gets the ordinary `dm` push; a pending member is pushed only
+  by the send that claims `dm_channel_member.request_pushed_at` (migration
+  000044, an atomic `UPDATE … WHERE request_pushed_at IS NULL`). A capable token
+  gets a `dm_request` handle, any other the plain `dm` push it always got.
+  Every later message while pending pushes nobody, so a stranger cannot fill a
+  lock screen. Accepting clears the stamp (`reset_request_push`), so a request
+  that comes back later (a block resets the blocker's `accepted_at`; an unblock
+  resurfaces it as a request) is pushed once more.
+- **Blocks.** No push in either direction across a block, for the request or
+  any DM message (`dm_push_plan`, `notify_dm_request_at`). Before #1734 a blocked
+  user could still send into a shared DM and the blocker was pushed for each.
+- DMs cannot be muted, so a mute never applies.
+
+The wire is unchanged: `{h}` plus the generic "New message" text (rich tokens:
+iOS `mutableContent`, Android data-only), exactly as every push. Only the
+handle's stored kind differs — `push_handle.kind = "dm_request"`, returned by
+`/v1/push/resolve` — so the providers learn nothing new.
+
+**What the phone shows.** `pollis_notify_fetch` resolves a `dm_request` handle
+to ONE item with `kind: "dm_request"` (additive field; every other item says
+`"message"`): `sender_name` is the requester's display name (`preferred_name`,
+else username; the requester is the member's `added_by`, else the DM's
+creator, read through `catch_up` and `/v1/directory/users`, retried on the
+network like the ingest), with an empty body and `message_id`. It fetches and
+decrypts nothing for the request, in any mode. "Nothing" returns before the
+lookup, so no name either. Hosts show title "Message request", body
+"<name> wants to message you" (`mobile.push.requestTitle` / `requestBody`):
+
+- **iOS NSE:** a plain banner (no `INSendMessageIntent`: not a contact's
+  message yet), `threadIdentifier` = the DM.
+- **Android:** `RichPush.Plan.Request` → `RichPushNotifier.request`, the letter
+  avatar as large icon, same tag = `h` and tap intent (`PushTapActivity`) as
+  every post, and it replaces the request's earlier notification, so creation
+  then first message is one notification.
+- **Generic** (no rich support, a failure, "Nothing"): "New message"; the tap
+  still routes to the list.
+
+**Tap and foreground.** `usePushNotifications` routes by the resolved kind
+(`lib/push/tapNavigation.ts` → `tapTarget` / `requestsTapNavigation`): a
+`dm_request` pushes `/dm/requests` (replacing a chat on top, nothing if the
+list is already open), on iPhone, iPad and Android alike, including taps that
+cold-start the app and Android's `PushTapActivity` path. A `dm_request` push in
+the foreground refreshes the request list and the Direct badge instead of
+ingesting.
+
+**Clearing it (#1508's mechanism).** The DS dismisses server-side: accept
+(`/v1/dm/accept`), leaving the DM (`/v1/dm/leave`, i.e. declining), removal
+(`/v1/dm/remove`) and block (`/v1/blocks/add`, every DM shared with the
+blocked user) stamp the user's handles for the DM and send the coalesced
+silent `{d}` push to all their devices (`dismiss_conversations_now`). Leave
+and removal read the handles before the write, since a teardown deletes them,
+and stamp only after it landed. On the phone that acted, accept and block also
+clear the tray at once (`dismissConversationNotifications`). Desktop's accept
+and block reach the same DS paths, so acting on desktop clears the phone.
+
+**Compatibility.** Gated on the `dm_request` push capability (bit 1 of
+`push_token.caps`), which a binary claims only from its embedded
+`extra.dmRequestPush` (`mobile/app.json`, read by `lib/push/caps.ts`). A token
+without it — every build up to and including iOS 1.0.20 / Android 1.0.29 —
+gets no push at creation, and the request's first message as the same `dm`
+push it got before; it is no longer pushed for later messages while pending,
+or across a block, which only removes pushes. A DS without migration 000044
+cannot claim the stamp and pushes every pending message, as before. The DS
+half can ship first; the core, NSE, Android and routing halves need a store
+build (the fingerprint changes, so no OTA reaches older binaries).
+
+Tests: `pollis-delivery/src/push.rs` (`a_new_request_pushes_the_pending_member_on_capable_devices_only`,
+`a_pending_request_pushes_its_first_message_only`, `an_accepted_request_pushes_every_message_normally`,
+`a_blocked_pair_is_never_pushed`, `a_request_that_comes_back_is_pushed_once_again`,
+`exactly_one_send_claims_the_request_push`, `before_the_migration_…`,
+`settling_a_request_dismisses_its_notification_everywhere`);
+`src-tauri/tests/flows/rich_push.rs::a_dm_request_shows_the_requester_and_never_a_preview`;
+the NSE harness; `RichPushTest.aDmRequestIsARequestPlan`; `mobile/tests/dm-request-push.test.ts`.
+
 ## Android rich push (#1599)
 
 A capable Android build registers its token with `caps: ["rich"]`
@@ -638,7 +729,8 @@ dismissal still work by `data.h`. Build, signing and portal details:
 | `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
-| `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508) |
+| `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508); `dm_push_plan` / `notify_dm_request` / `dismiss_conversations_now` — DM requests (#1734) |
+| `mobile/lib/push/tapNavigation.ts` · `mobile/lib/push/caps.ts` | Tap routing by kind (`dm_request` → `/dm/requests`) and the `rich` / `dm_request` capabilities the binary claims (#1599, #1734) |
 | `pollis-core/src/commands/push.rs` | `schedule_push_dismiss` (debounced report from `mark_conversation_read`), `dismissed_push_handles` (#1508) |
 | `mobile/app/self/preferences.tsx` · `mobile/hooks/queries/useNotificationContent.ts` | The notification-content radio list (#1599); rows are `mobile/components/RadioRow.tsx` |
 | `mobile/lib/push/dismiss.ts` · `dismissTask.ts` · `index.ts` | Tray matching by handle, the background task for the silent push, same-device dismissal and the foreground catch-up (#1508) |
@@ -664,4 +756,5 @@ dismissal still work by `data.h`. Build, signing and portal details:
 - #1431 — channel messages push by default; per-channel, per-account mute.
 - #1508 — a read on any client clears that conversation's push notifications from every phone.
 - #1599 — rich push: the device decrypts and shows sender + preview (Android half above).
+- #1734 — a DM request pushes the phone once (created, then its first message), shows the requester's name, and a tap opens the request list.
 - #186 — original audit + dispatcher refactor (PR #202).
