@@ -110,7 +110,7 @@ function Members() {
                       <UserAvatar
                         testID={`avatar-member-${m.user_id}`}
                         userId={m.user_id}
-                        avatarKey={m.avatar_url ?? null}
+                        avatarKey={m.avatar_url}
                         label={m.username || m.user_id}
                         variant={isMe ? "self" : "default"}
                       />

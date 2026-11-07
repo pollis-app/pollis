@@ -155,6 +155,9 @@ export function useCreateGroup() {
         queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
       });
       // Seed the roster with the creator, so the landing panel shows "1 member".
+      // The seed has no avatar key (undefined = unknown), so read the real roster
+      // straight after: nothing else refreshes it for a minute once the inbox
+      // nudge is lost, and the creator's rows would keep the letter avatar.
       if (currentUser) {
         const creator: GroupMember = {
           user_id: currentUser.id,
@@ -166,6 +169,9 @@ export function useCreateGroup() {
           groupInviteQueryKeys.members(group.id),
           (cached) => (cached && cached.length > 0 ? cached : [creator]),
         );
+        queryClient.invalidateQueries({
+          queryKey: groupInviteQueryKeys.members(group.id),
+        });
       }
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.channels(group.id),

@@ -331,6 +331,20 @@ test("every surface that names a person draws their picture", () => {
   assert.match(src("app/chat/[id].tsx"), /senderAvatarKey=\{avatarKeyById\.get\(m\.sender_id\)\}/);
 });
 
+test("a new group's seeded roster never stands in for the creator's picture", () => {
+  // The seed has no avatar key. Read the real roster at once: before this, only the
+  // inbox nudge refreshed it, and with that lost the creator's rows kept the letter.
+  const create = src("hooks/queries/useUserGroups.ts");
+  assert.match(
+    create,
+    /setQueryData<GroupMember\[\]>\(\s*groupInviteQueryKeys\.members\(group\.id\)[\s\S]*?\);\s*queryClient\.invalidateQueries\(\{\s*queryKey: groupInviteQueryKeys\.members\(group\.id\),/,
+  );
+  // And a member row without the field is "not known", never "no picture".
+  assert.match(src("app/chat/[id].tsx"), /for \(const m of groupMembers \?\? \[\]\) \{\s*map\.set\(m\.user_id, m\.avatar_url\);/);
+  assert.match(src("app/group/members.tsx"), /avatarKey=\{m\.avatar_url\}/);
+  assert.doesNotMatch(src("app/group/members.tsx"), /avatarKey=\{m\.avatar_url \?\? null\}/);
+});
+
 test("a tagged photo reaches the screen probe until it unmounts", async () => {
   const { reportAvatarPhoto, avatarPhotosShowing } = await import("../lib/avatarRenderState.ts");
   const a = reportAvatarPhoto("row-message-1-avatar");

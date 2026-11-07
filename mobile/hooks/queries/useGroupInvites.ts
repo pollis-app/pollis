@@ -23,7 +23,8 @@ export interface PendingInvite {
 export interface GroupMember {
   user_id: string;
   username?: string;
-  avatar_url?: string;
+  /** null = no picture; absent = not known (the create-group seed). */
+  avatar_url?: string | null;
   role: string;
   joined_at: string;
 }

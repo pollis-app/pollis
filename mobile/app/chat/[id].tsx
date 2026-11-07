@@ -572,14 +572,15 @@ function TextChat(props: ChatViewProps = {}) {
     [groupMembers, group?.owner_id],
   );
 
-  // Senders' pictures: the roster already carries every member's key.
+  // Senders' pictures: the roster already carries every member's key. A member
+  // row without the field (the create-group seed) is "not known", never "none".
   const avatarKeyById = useMemo(() => {
-    const map = new Map<string, string | null>();
+    const map = new Map<string, string | null | undefined>();
     for (const m of dmChannel?.members ?? []) {
       map.set(m.user_id, m.avatar_url ?? null);
     }
     for (const m of groupMembers ?? []) {
-      map.set(m.user_id, m.avatar_url ?? null);
+      map.set(m.user_id, m.avatar_url);
     }
     return map;
   }, [dmChannel, groupMembers]);
