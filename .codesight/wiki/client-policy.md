@@ -134,6 +134,10 @@ builds carry the real `mobile/package.json` version.
   forces a re-check and, once allowed, resumes the launch where it stopped. The window `focus`
   event re-checks (throttled by the core); `onUpgradeRequired` in `bridge/invoke.ts` turns any
   command's `upgrade_required` into the page.
+- **Desktop, below the floor's job** (`UpdateScreen.tsx`): the launch-time auto-update (and
+  Settings → Update → Install) is not a gate. A failure offers **Try again**, **Download the latest
+  version** and **Continue without updating** (#1758). Continue calls `clear_update_required` to lift the
+  send block and resumes the launch. Refusing an unsupported build is this policy's job alone.
 - **Mobile**: the same page in place of the whole navigation stack, before the PIN/email screen;
   its button opens the install's update destination (`lib/installChannel.ts`: the App Store listing via
   `IOS_APP_STORE_ID` (TestFlight if it is null); Play for a Play build; pollis.com/android for
