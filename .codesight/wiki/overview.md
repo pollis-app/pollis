@@ -90,8 +90,9 @@ website/             # Static marketing site (Cloudflare Pages, not part of the 
                      #   separate property built from the `archon` repo
 ```
 
-**Mobile build (#706):** CI builds a real Android APK on every mobile-touching
-PR. The `android-build` job in `.github/workflows/mobile-core-check.yml` runs the
+**Mobile build (#706):** CI builds a real Android APK on every PR that changes a
+native input (what the native fingerprint hashes, or the Rust core) and on every
+push to main; a JS-only mobile PR gets a Metro bundle export instead. The `android-build` job in `.github/workflows/mobile-core-check.yml` runs the
 full chain on `ubuntu-latest` — uniffi binding gen + a 3-ABI `cargo-ndk`
 cross-compile of `pollis-core`, `expo prebuild`, then
 `gradlew :app:assembleRelease` for arm64-v8a — and uploads the APK artifact. It uses
