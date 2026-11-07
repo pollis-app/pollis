@@ -1,0 +1,11 @@
+// Dead-code scan for the desktop renderer (advisory, see .github/workflows/dead-code.yml).
+// Run: cd frontend && pnpm dlx knip@6.44.1
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "tests/*.test.ts",
+    // Swapped in for the real @tauri-apps modules by the Playwright alias in vite.config.ts.
+    "src/__mocks__/*.ts"
+  ],
+  "project": ["src/**/*.{ts,tsx,css}", "tests/**/*.ts"]
+}
