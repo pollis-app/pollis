@@ -101,13 +101,24 @@ if [ "$PLATFORM" = ios ]; then
   check "install channel" "$(jq -r .extra.installChannel "$A/EXConstants.bundle/app.config")" store
   RV="$(cat "$A/EXUpdates.bundle/fingerprint")"
 else
-  . ./android-env.sh
+  # android-env.sh is the Mac's SDK layout; on Linux the environment already points at the SDK.
+  if [ "$(uname -s)" = Darwin ]; then
+    . ./android-env.sh
+  fi
   echo "== Rust core (3 ABIs)"
   (cd modules/pollis-native && CARGO_TARGET_DIR="$W/target-android" uniffi-bindgen-react-native build android \
     --config ubrn.config.yaml --and-generate --release) > "$L/ubrn.log" 2>&1 || fail "ubrn build android"
   echo "== prebuild + bundleRelease (Play upload key)"
   ./node_modules/.bin/expo prebuild -p android --no-install > "$L/prebuild.log" 2>&1 || fail "expo prebuild"
   export POLLIS_UPLOAD_STORE_FILE="$HOME/.pollis/pollis-upload.jks"
+  if [ ! -f "$POLLIS_UPLOAD_STORE_FILE" ]; then
+    # Not on this machine: decode Doppler's copy to a private temp file, deleted on exit.
+    POLLIS_UPLOAD_STORE_FILE="$(mktemp)"
+    trap 'rm -f "$POLLIS_UPLOAD_STORE_FILE"' EXIT
+    chmod 600 "$POLLIS_UPLOAD_STORE_FILE"
+    doppler secrets get POLLIS_UPLOAD_KEYSTORE_B64 -p pollis -c prd_prod --plain | base64 -d > "$POLLIS_UPLOAD_STORE_FILE" \
+      || fail "decode POLLIS_UPLOAD_KEYSTORE_B64"
+  fi
   export POLLIS_UPLOAD_STORE_PASSWORD="$(doppler secrets get POLLIS_UPLOAD_STORE_PASSWORD -p pollis -c prd_prod --plain)"
   export POLLIS_UPLOAD_KEY_ALIAS="$(doppler secrets get POLLIS_UPLOAD_KEY_ALIAS -p pollis -c prd_prod --plain)"
   export POLLIS_UPLOAD_KEY_PASSWORD="$(doppler secrets get POLLIS_UPLOAD_KEY_PASSWORD -p pollis -c prd_prod --plain)"
@@ -115,7 +126,9 @@ else
   for v in POLLIS_UPLOAD_STORE_PASSWORD POLLIS_UPLOAD_KEY_ALIAS POLLIS_UPLOAD_KEY_PASSWORD; do
     [ -n "${!v}" ] || fail "missing $v in Doppler prd_prod"
   done
-  (cd android && ./gradlew :app:bundleRelease) > "$L/gradle.log" 2>&1 || fail "gradle bundleRelease"
+  # The template's 2 GB heap runs out of Metaspace on three ABIs.
+  (cd android && ./gradlew :app:bundleRelease "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=2g") > "$L/gradle.log" 2>&1 \
+    || fail "gradle bundleRelease"
   ART="$W/mobile/android/app/build/outputs/bundle/release/app-release.aab"
 
   echo "== checks"
