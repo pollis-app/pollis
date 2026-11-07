@@ -33,6 +33,14 @@ interface AttachmentDisplayProps {
   testId?: string;
 }
 
+
+// Image types some webviews can't draw (WebKitGTK and WebView2 have no HEIF or TIFF decoder; macOS does).
+const MAY_NOT_DECODE = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "image/tiff", "image/avif"]);
+
+function mayNotDecode(contentType: string): boolean {
+  return MAY_NOT_DECODE.has(contentType.toLowerCase().split(";")[0].trim());
+}
+
 export const AttachmentDisplay = observer(({
   attachment,
   tile = false,
@@ -160,7 +168,7 @@ export const AttachmentDisplay = observer(({
   // Caps render-failure retries: onError nulls downloadUrl, which re-fetches.
   const renderFailuresRef = useRef(0);
   const MAX_RENDER_RETRIES = 1;
-  // Fetched but the webview can't decode it (an iPhone HEIC on Linux/Windows): show it as a file.
+  // A format only some webviews decode (an iPhone HEIC on Linux/Windows) that failed here: show it as a file.
   const [undecodable, setUndecodable] = useState(false);
 
   // Auto-load images and audio once confirmed, via the loopback media server.
@@ -169,7 +177,11 @@ export const AttachmentDisplay = observer(({
       return;
     }
     if (renderFailuresRef.current > MAX_RENDER_RETRIES) {
-      setUndecodable(true);
+      if (mayNotDecode(attachment.content_type)) {
+        setUndecodable(true);
+      } else {
+        setError(t("attachment.failedToLoad"));
+      }
       return;
     }
 
