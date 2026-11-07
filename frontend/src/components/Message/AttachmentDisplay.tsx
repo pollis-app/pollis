@@ -160,6 +160,8 @@ export const AttachmentDisplay = observer(({
   // Caps render-failure retries: onError nulls downloadUrl, which re-fetches.
   const renderFailuresRef = useRef(0);
   const MAX_RENDER_RETRIES = 1;
+  // Fetched but the webview can't decode it (an iPhone HEIC on Linux/Windows): show it as a file.
+  const [undecodable, setUndecodable] = useState(false);
 
   // Auto-load images and audio once confirmed, via the loopback media server.
   useEffect(() => {
@@ -167,7 +169,7 @@ export const AttachmentDisplay = observer(({
       return;
     }
     if (renderFailuresRef.current > MAX_RENDER_RETRIES) {
-      setError(t("attachment.failedToLoad"));
+      setUndecodable(true);
       return;
     }
 
@@ -324,7 +326,7 @@ export const AttachmentDisplay = observer(({
     </div>
   );
 
-  if (isImage) {
+  if (isImage && !undecodable) {
     return (
       <>
         {withSensitiveChrome(sensitivity.hidden ? hiddenThumb() : (

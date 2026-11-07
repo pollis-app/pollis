@@ -84,6 +84,7 @@ import { haptic } from "../../lib/haptics";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
+import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
 
 // Props embed this screen in the iPad right pane; route usage passes none.
 type ChatViewProps = {
@@ -322,6 +323,7 @@ function TextChat(props: ChatViewProps = {}) {
       mediaTypes: ["images", "videos"],
       allowsMultipleSelection: true,
       quality: 1,
+      ...COMPATIBLE_PICK,
     });
     if (result.canceled) {
       return;

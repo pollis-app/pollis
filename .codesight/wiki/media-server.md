@@ -81,6 +81,13 @@ This fits the "media is Rust-first" architecture (see [overview.md](./overview.m
 the renderer's WebRTC is intentionally unused; IPC carries UI events only, never
 media bytes.
 
+## Images a webview can't decode
+
+iPhones store photos as HEIC, which WebKitGTK (Linux) and WebView2 (Windows) cannot draw. Two halves:
+
+- **Sender:** every mobile photo-library pick passes `COMPATIBLE_PICK` (`mobile/lib/pickerOptions.ts`), so iOS hands over JPEG (and H.264 for HEVC video) instead of copying the original. `mobile/tests/picker-compatible.test.ts` fails on a picker without it.
+- **Receiver:** `AttachmentDisplay` shows an image that fetched but failed to decode (after its one retry) as the ordinary file card, with name, size and Download, never an `err` tile, so photos already sent as HEIC can still be saved and opened in the OS viewer. `e2e/undecodable-image.spec.ts`.
+
 ## Every media response is `no-store` (#1000)
 
 The plaintext this server hands out must not end up in the WebView's own
