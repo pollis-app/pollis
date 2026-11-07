@@ -37,11 +37,16 @@
 #           mobile/fingerprint.config.js hashes; tests/ci-paths.test.ts fails if
 #           the two drift), the workspace manifests, the toolchain pin, the
 #           ubrn module, and this workflow. Runs everything.
+#   mobile_native  the files under mobile/ the native fingerprint hashes
+#           (fingerprint.config.js): dependencies, app config, config plugins,
+#           pnpm patches, native assets, the signing cert. Runs android-build +
+#           expo-doctor: only these (and `native`) can break the APK.
 #   app     the JS app and the catalogues Metro bundles from frontend/. Runs
-#           android-build + expo-doctor; the Rust cross-compiles (one of them on
-#           a 10x macOS runner) cannot see a JS change. mobile/'s tests, release
-#           scripts, Maestro flows, docs and release bookkeeping never reach a
-#           binary, so they are on `tests`, not here.
+#           expo-doctor plus a Metro bundle export (~1 min), never the ~23 min
+#           APK build: a JS change cannot break Gradle or the core. Pushes to
+#           main still run everything, and every release builds and checks its
+#           binaries. mobile/'s tests, release scripts, Maestro flows, docs and
+#           release bookkeeping never reach a binary, so they are on `tests`.
 #   tests   files outside mobile/ that mobile/tests or the OTA worker tests read
 #           (desktop mirrors in frontend/src, the DS Worker's update routes, the
 #           release workflows the OTA tests pin). Runs expo-doctor only.
@@ -114,6 +119,7 @@ jobs:
       run_native: ${{ steps.decide.outputs.run_native }}
       run_build: ${{ steps.decide.outputs.run_build }}
       run_doctor: ${{ steps.decide.outputs.run_doctor }}
+      run_bundle: ${{ steps.decide.outputs.run_bundle }}
     steps:
       - name: Detect mobile-relevant changes (PRs only)
         id: filter
@@ -143,6 +149,25 @@ jobs:
               # reads, and the module is what android-build generates into.
               - 'mobile/modules/pollis-native/**'
               - '.github/workflows/mobile-core-check.yml'
+            # What mobile/fingerprint.config.js hashes under mobile/ (besides the
+            # native module above). tests/ci-paths.test.ts fails on a top-level
+            # mobile/ entry that is neither here nor known JS / non-shipping.
+            mobile_native:
+              - 'mobile/package.json'
+              - 'mobile/pnpm-lock.yaml'
+              - 'mobile/.npmrc'
+              - 'mobile/.gitignore'
+              - 'mobile/app.json'
+              - 'mobile/app.config.js'
+              - 'mobile/eas.json'
+              - 'mobile/fingerprint.config.js'
+              - 'mobile/plugins/**'
+              - 'mobile/patches/**'
+              - 'mobile/assets/**'
+              - 'mobile/google-services.json'
+              - 'mobile/PrivacyInfo.xcprivacy'
+              - 'mobile/store/ota-code-signing.pem'
+              - 'mobile/store/ExportOptions.plist'
             # Metro bundles these straight from frontend/ (metro.config.js
             # watchFolders, #1074).
             app_catalogues:
@@ -195,32 +220,40 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           NATIVE: ${{ steps.filter.outputs.native }}
+          MOBILE_NATIVE: ${{ steps.filter.outputs.mobile_native }}
           APP: ${{ steps.app.outputs.app == 'true' || steps.filter.outputs.app_catalogues == 'true' }}
           TESTS: ${{ steps.filter.outputs.tests }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             NATIVE=true
+            MOBILE_NATIVE=true
             APP=true
             TESTS=true
           fi
           native=false
           build=false
           doctor=false
+          bundle=false
           if [ "$NATIVE" = "true" ]; then
             native=true
           fi
-          if [ "$NATIVE" = "true" ] || [ "$APP" = "true" ]; then
+          if [ "$NATIVE" = "true" ] || [ "$MOBILE_NATIVE" = "true" ]; then
             build=true
           fi
-          if [ "$build" = "true" ] || [ "$TESTS" = "true" ]; then
+          # A JS-only change gets the Metro export, not the APK; the APK build bundles anyway.
+          if [ "$APP" = "true" ] && [ "$build" != "true" ]; then
+            bundle=true
+          fi
+          if [ "$build" = "true" ] || [ "$APP" = "true" ] || [ "$TESTS" = "true" ]; then
             doctor=true
           fi
           {
             echo "run_native=$native"
             echo "run_build=$build"
             echo "run_doctor=$doctor"
+            echo "run_bundle=$bundle"
           } >> "$GITHUB_OUTPUT"
-          echo "event=$EVENT native=$NATIVE app=$APP tests=$TESTS -> cross-compiles=$native android-build=$build expo-doctor=$doctor"
+          echo "event=$EVENT native=$NATIVE mobile_native=$MOBILE_NATIVE app=$APP tests=$TESTS -> cross-compiles=$native android-build=$build expo-doctor=$doctor bundle=$bundle"
 
   android-check:
     needs: changes
@@ -382,6 +415,13 @@ jobs:
       # install needed.
       - name: OTA update-route tests (DS Worker)
         run: node --test pollis-delivery/worker-tests/*.test.ts
+
+      # The JS-only stand-in for android-build: Metro resolves every import and
+      # Hermes compiles the bundle, which is all a JS change can break.
+      - name: Metro bundle export (android)
+        if: ${{ needs.changes.outputs.run_bundle == 'true' }}
+        working-directory: mobile
+        run: pnpm expo export --platform android --output-dir "$RUNNER_TEMP/expo-export"
 
   # The first end-to-end mobile build in CI: uniffi bindings + a 3-ABI
   # cargo-ndk cross-compile of pollis-core, Expo prebuild, Gradle release

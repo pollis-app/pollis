@@ -52,6 +52,8 @@ const isApp = (file: string) =>
   appCatalogues.some((p) => matches(p, file)) ||
   appEvery.every((p) => (p.startsWith("!") ? !matches(p.slice(1), file) : matches(p, file)));
 const tests = filter("tests");
+const mobileNative = filter("mobile_native");
+const isMobileNative = (file: string) => mobileNative.some((p) => matches(p, file));
 
 test("the native filter covers every crate the mobile build compiles", () => {
   for (const crate of fingerprint.rustCrateClosure() as string[]) {
@@ -74,6 +76,44 @@ test("the app filter covers the JS app and the catalogues Metro bundles", () => 
     "frontend/src/i18n/locales/en/common.json",
   ]) {
     assert.ok(isApp(file), `${file} reaches the binary but is not an app change`);
+  }
+});
+
+test("the files the native fingerprint hashes run android-build; JS alone does not", () => {
+  for (const file of [
+    "mobile/package.json",
+    "mobile/pnpm-lock.yaml",
+    "mobile/app.json",
+    "mobile/app.config.js",
+    "mobile/plugins/withRichPush.js",
+    "mobile/patches/decode-uri-component@0.2.2.patch",
+    "mobile/assets/icon.png",
+    "mobile/google-services.json",
+    "mobile/store/ota-code-signing.pem",
+  ]) {
+    assert.ok(isMobileNative(file), `${file} is hashed by the native fingerprint but does not run android-build`);
+  }
+  for (const file of ["mobile/app/_layout.tsx", "mobile/components/chat/Composer.tsx", "mobile/lib/drafts.ts", "mobile/metro.config.js"]) {
+    assert.ok(!isMobileNative(file), `${file} is JS; it gets the Metro export, not the APK build`);
+  }
+});
+
+test("every top-level mobile/ entry is classified as native, JS or non-shipping", () => {
+  // JS the Metro export covers, or files no build reads.
+  const js = new Set(["app", "components", "hooks", "lib", "stores", "theme", "i18n", "types", "index.ts", "metro.config.js", "tsconfig.json"]);
+  const nonShipping = new Set(["tests", "scripts", ".maestro", "CLAUDE.md", "TEST-PLAN.md", ".env.example", "android-env.sh", "ios-sim.log", "store", "modules"]);
+  for (const entry of readdirSync(mobile)) {
+    if (["node_modules", "android", "ios", ".expo", "dist", "build", ".env", ".env.development"].includes(entry) || entry.startsWith(".env")) {
+      continue;
+    }
+    const path = `mobile/${entry}`;
+    const classified =
+      js.has(entry) ||
+      nonShipping.has(entry) ||
+      isMobileNative(path) ||
+      isMobileNative(`${path}/x`) ||
+      native.some((p) => matches(p, `${path}/x`));
+    assert.ok(classified, `${path} is new: add it to mobile_native in mobile-core-check.yml if the native fingerprint hashes it, else to this test's JS or non-shipping list`);
   }
 });
 
@@ -136,7 +176,7 @@ test("windows-link and kani run on every crate of pollis-core's closure", () => 
 
 test("main's push paths are the union of the filters", () => {
   const push = pushPaths();
-  for (const p of [...native, ...app, ...tests]) {
+  for (const p of [...native, ...mobileNative, ...app, ...tests]) {
     assert.ok(push.some((q) => q === p || matches(q, p)), `push paths are missing '${p}'`);
   }
 });

@@ -894,7 +894,8 @@ afterwards targets only the binaries built afterwards.
   `tests/ota-fingerprint.test.ts` pins (e) and fails if another installed
   package's `build.gradle` starts writing into its own sources. CI **fails**
   any APK whose baked value a Gradle-free recompute does not reproduce: every
-  PR's `android-build` job and every sideload release.
+  `android-build` run (native-changing PRs and every push to main) and every
+  sideload release.
   Consequence: **a pollis-core change blocks OTA for every binary built before
   it** — that is intended.
 - **Store-build ledger** (`store/runtime-versions.json`): every shipped binary
