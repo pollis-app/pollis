@@ -1,0 +1,6 @@
+account https://verify.pollis.com 01KP43R2QK8N0M5VHE3WXGN5H
+group https://verify.pollis.com 01KP443BSBXS3W1SZNTV5MXQ9C
+release https://verify.pollis.com v1.3.6
+release https://verify.pollis.com v1.3.6 --json
+release https://verify.pollis.com v1.5.3
+remote https://verify.pollis.com

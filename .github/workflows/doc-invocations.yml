@@ -1,0 +1,43 @@
+name: Published CLI commands
+
+# Every pollis-verify command the docs, website, /learn and workflows publish must parse
+# against the CLI we ship (#1721). Runs on doc-only changes too, which the Rust suites'
+# path filters skip. The live half is website-verify.yml.
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'website/**'
+      - 'learn/**'
+      - '**/*.md'
+      - '.github/workflows/**'
+      - 'verifiable-log-serve/**'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'website/**'
+      - 'learn/**'
+      - '**/*.md'
+      - '.github/workflows/**'
+      - 'verifiable-log-serve/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: doc-invocations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  doc-invocations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Published pollis-verify commands parse against the CLI
+        run: cargo test --locked -p verifiable-log-serve --test doc_invocations

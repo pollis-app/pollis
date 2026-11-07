@@ -3,8 +3,8 @@ Topic 11, "pollis-verify: verify it yourself" (#600).
 
 One continuous ~2:45 scene, five beats, NO audio (added later). This is the
 payoff topic, so it is mostly *screen*: the real static API, a real `curl`, and
-the REAL captured output of `pollis-verify release https://verify.pollis.com
-v1.5.3` run against the live log on 2026-07-23 (tree_size 60, root 37945cb2…),
+the REAL captured output of
+`pollis-verify release https://verify.pollis.com v1.5.3` run against the live log on 2026-07-23 (tree_size 60, root 37945cb2…),
 the same head Topics 7–9 show.
 
 Render (see learn/manim/render.sh):

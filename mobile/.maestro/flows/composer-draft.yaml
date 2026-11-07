@@ -1,0 +1,81 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# COMPOSER DRAFT: unsent text survives leaving the conversation for another
+# tab and coming back, as on desktop (mobile/lib/drafts.ts, desktop's store).
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Draft Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Draft Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+
+- tapOn:
+    id: "input-composer"
+- inputText: "draft kept across tabs"
+- hideKeyboard
+- takeScreenshot: composer-draft-01-typed
+
+# Leave: back out of the conversation (phones push it; iPad has it in the
+# pane, so the back is optional) and switch to another tab.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- assertVisible:
+    id: "input-composer"
+    text: "draft kept across tabs"
+- assertNotVisible:
+    id: "composer-placeholder"
+- takeScreenshot: composer-draft-02-restored
+
+# Sending clears it: the next visit starts empty.
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*draft kept across tabs.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "composer-placeholder"

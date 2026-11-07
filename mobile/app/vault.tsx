@@ -43,6 +43,7 @@ import { semantic, type as ty, space } from "../theme/tokens";
 import type { MessageAttachment } from "../types";
 import { useTheme } from "../components/theme";
 import { COMPATIBLE_PICK } from "../lib/pickerOptions";
+import { useDraft } from "../hooks/useDraft";
 
 type VaultView = "chat" | "media";
 
@@ -66,7 +67,7 @@ function VaultScreen() {
   const router = useRouter();
   const [view, setView] = useState<VaultView>("chat");
   const [query, setQuery] = useState("");
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useDraft("vault");
   const [pendingAttachments, setPendingAttachments] = useState<PickedAttachment[]>([]);
   const [actionTarget, setActionTarget] = useState<VaultMessage | null>(null);
   const [editTarget, setEditTarget] = useState<VaultMessage | null>(null);

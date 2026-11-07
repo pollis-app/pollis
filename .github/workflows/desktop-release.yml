@@ -1665,7 +1665,7 @@ jobs:
       #
       # The leaves above only become publicly verifiable once transparency-publish
       # rebuilds and signs the tree. Left to the 06:47 cron that is up to 24h, during
-      # which `pollis-verify release <tag>` finds nothing and the in-app build check
+      # which `pollis-verify release https://verify.pollis.com <tag>` finds nothing and the in-app build check
       # sits in Pending — and the independent rebuilder, which now runs automatically
       # after each release, reports "not the logged payload" for a release that is
       # simply not logged yet. verifiable-builds-design.md §2.4 recommends exactly

@@ -26,6 +26,7 @@ on:
       - "website/transparency.js"
       - "website/install.sh"
       - "website/cli-install.sh"
+      - "docs/deployments.md"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -66,6 +67,7 @@ on:
       - "website/transparency.js"
       - "website/install.sh"
       - "website/cli-install.sh"
+      - "docs/deployments.md"
       - "website/learn.html"
       - "website/assurance.html"
       - "key-set.json"
@@ -117,6 +119,10 @@ jobs:
       # to any link, not just to scripts/.
       - name: DS config chain (#760)
         run: python3 ./scripts/check-ds-config-chain.py
+
+      # #1721: the installers' POLLIS_* variables are documented, and no doc shows one they ignore.
+      - name: Installer environment variables match their docs
+        run: python3 ./scripts/check-install-env.py
 
       # The reproducibility counterpart to the DS config-chain gate above. A value
       # baked into the release but missing from the rebuilder's recipe makes

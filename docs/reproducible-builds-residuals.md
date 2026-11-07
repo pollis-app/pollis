@@ -495,7 +495,7 @@ promising more.
 
 ## What this means for a verifier
 
-1. **Log inclusion always verifies, for everyone.** `pollis-verify release <tag>`
+1. **Log inclusion always verifies, for everyone.** `pollis-verify release https://verify.pollis.com <tag>`
    (and `rebuild-verify.yml`'s inclusion step) needs no build inputs and no
    secrets — it proves every published artifact for a tag is in the append-only
    log, under the pinned key, with no fork or re-issue. Do this first; it is the
