@@ -220,6 +220,53 @@ no LiveKit or R2 secret:
   never going to close #917's residual, and it made every shipped binary a
   credential to be extracted.
 
+### The DS → LiveKit call path heals itself and reports outages (#1751)
+
+Every Twirp `RoomService` call (`SendData`, `RemoveParticipant`,
+`ListParticipants`) goes through `livekit::twirp` (`pollis-delivery/src/livekit.rs`).
+It uses its own client from `util::livekit_post`, kept apart from the shared one
+so it can be thrown away:
+
+- **Budgets.** Connecting (DNS + TCP + TLS) gets `LIVEKIT_CONNECT_TIMEOUT` = 2 s.
+  Each attempt gets `Upstream::LiveKit` = 6 s. LiveKit itself takes about 3.1 s
+  to answer `SendData` for a room nobody is in (its "no response from servers"
+  503), so the old single 5 s budget left under 2 s for everything else.
+- **Pool.** Idle connections close after 30 s, before nginx's 75 s keep-alive
+  timeout in front of LiveKit. TCP keepalive is 15 s.
+- **Self-heal.** If an attempt fails in transport (connect, timeout or a broken
+  connection), the client is rebuilt with an empty pool (`util::reset_livekit_client`,
+  at most once per generation however many calls fail together). The call is
+  then retried once on a fresh connection. `SendData` carries a 16-byte `nonce`
+  that stays the same on the retry, so LiveKit can drop a duplicate. The worst
+  case is 2 × 6 s, still under the client's 30 s read timeout.
+- **Logs.** Every failure logs one `warn!` "livekit call failed", with `method`,
+  `phase` (`connect` / `timeout` / `transport` / `status`), `attempts`,
+  `elapsed_ms` and the consecutive count. It also lands in that request's
+  `/v1/ops/errors` `detail`. The `error` text now names the phase, e.g.
+  `SendData: livekit timed out after 6s [2 attempts, 12004ms]`. A retry that
+  succeeds logs "first attempt failed, a fresh connection succeeded", which
+  means a dead pooled connection.
+- **Degraded.** `DEGRADED_AFTER` = 5 failures in a row with no success between
+  them counts as an outage: one `error!` "livekit degraded" when it starts, and
+  one `warn!` "livekit recovered" when it ends.
+- **`GET /health/livekit`** is open, like `/health` (on dev it is behind the dev
+  gate). It answers one word: `ok` or `idle` with 200, `degraded` with 503. It
+  only reads the record of real calls and never calls LiveKit itself. This is
+  the hook for `status.pollis.com` (archon).
+- **`GET /v1/ops/livekit`** needs the operator token. It shows the in-memory
+  counts since the process started: `ok`, `ok_on_retry`, `failures` by phase,
+  `failures_last_10m`, `consecutive_failures`, `degraded_since`, `retries`,
+  `client_resets` and latencies. With `?probe=1` it also times each leg from
+  inside the container: `dns` (address counts only), `tcp_connect`,
+  `https_fresh` (a no-pool client), `list_rooms`, and `send_data_empty_room`
+  (a random `pollis-ds-probe-*` room, so it reaches no one). The probe is not
+  recorded in the counts. No output names a room, user or address.
+
+`tests/livekit_dead_connection.rs` holds a pooled connection open but silent.
+The next nudge must be delivered on a fresh connection, and it fails with
+`MAX_ATTEMPTS = 1`. `tests/livekit_self_heal.rs` pins the degraded signal and
+the operator view.
+
 ## Why R2 presign has no per-object READ authz — and what it does gate
 
 Pollis media is sealed under a key the DS never holds (#1382; `pollis-core`'s

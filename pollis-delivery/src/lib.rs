@@ -25,6 +25,7 @@ pub mod error;
 pub mod error_log;
 pub mod groups;
 pub mod links;
+pub mod livekit;
 pub mod headers;
 pub mod invite_token;
 pub mod last_seen;
@@ -101,6 +102,8 @@ pub struct AppState {
     pub error_log: error_log::ErrorLog,
     /// The published minimum-client-version policy (#1611); disabled unless `main` configures it.
     pub client_policy: client_policy::PolicyMirror,
+    /// Outcomes of the DS -> LiveKit server-API calls (#1751), behind `GET /v1/ops/livekit`.
+    pub livekit_health: livekit::LiveKitHealth,
 }
 
 impl AppState {
@@ -132,6 +135,7 @@ impl AppState {
             ops_log: None,
             error_log: error_log::ErrorLog::default(),
             client_policy: client_policy::PolicyMirror::default(),
+            livekit_health: livekit::LiveKitHealth::default(),
         }
     }
 
@@ -280,6 +284,9 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
         .route("/v1/ops/errors", get(error_log::list))
         .route("/v1/ops/push", get(push::ops_push))
+        // #1751: the DS -> LiveKit path. Passive one-word verdict (open), and counts + live probe (operator).
+        .route("/health/livekit", get(livekit::health))
+        .route("/v1/ops/livekit", get(livekit::ops))
         // The client-policy mirror (#1611): open, like `/version`.
         .route(pollis_api::client_policy::CLIENT_POLICY_PATH, get(client_policy::get_policy))
         .route(<SubmitBody as DsRequest>::PATH, post(submit))

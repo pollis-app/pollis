@@ -33,7 +33,10 @@ impl Upstream {
     /// The whole-request deadline: DNS + connect + TLS + write + read.
     pub const fn timeout(self) -> std::time::Duration {
         std::time::Duration::from_secs(match self {
-            Upstream::LiveKit => 5,
+            // PER ATTEMPT (#1751): `livekit::twirp` may make two. LiveKit itself takes ~3.1s
+            // to answer SendData for a room nobody is in (its "no response from servers"
+            // 503), so 5s left under 2s for DNS + connect + TLS + the round trip.
+            Upstream::LiveKit => 6,
             Upstream::Resend => 10,
             Upstream::ExpoPush => 5,
             Upstream::ClientPolicy => 5,
@@ -79,6 +82,80 @@ fn http_client() -> reqwest::Client {
                 .expect("reqwest client builds")
         })
         .clone()
+}
+
+/// How long LiveKit's DNS + TCP + TLS phase may take (#1751). Well under the
+/// per-attempt [`Upstream::LiveKit`] deadline, so a stalled connect is told
+/// apart from a slow answer (`reqwest::Error::is_connect`) and leaves time for
+/// the retry on a fresh connection.
+pub const LIVEKIT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// An idle pooled LiveKit connection is dropped after this long: below nginx's
+/// 75s `keepalive_timeout` in front of LiveKit, so the DS closes first and never
+/// writes a request into a connection the far end already gave up on.
+const LIVEKIT_POOL_IDLE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The LiveKit client and its generation; [`reset_livekit_client`] swaps both.
+static LIVEKIT_CLIENT: std::sync::RwLock<Option<(u64, reqwest::Client)>> =
+    std::sync::RwLock::new(None);
+
+/// LiveKit's own outbound client (#1751): separate from [`http_client`] so it
+/// can be thrown away, with every pooled connection in it, without touching
+/// the other upstreams. Same mandatory deadline as [`http_post`].
+///
+/// Returns the client's generation, to hand back to [`reset_livekit_client`].
+pub fn livekit_post(url: &str) -> (u64, reqwest::RequestBuilder) {
+    let current = LIVEKIT_CLIENT
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let (generation, client) = match current {
+        Some(c) => c,
+        None => {
+            let mut slot = LIVEKIT_CLIENT.write().unwrap_or_else(|e| e.into_inner());
+            slot.get_or_insert_with(|| (1, build_livekit_client(true))).clone()
+        }
+    };
+    (
+        generation,
+        client.post(url).timeout(Upstream::LiveKit.timeout()),
+    )
+}
+
+/// Replace the LiveKit client, dropping its pool, unless someone already
+/// replaced generation `seen`: N concurrent failures cost one rebuild, not N.
+/// Returns whether this call did the rebuild.
+pub fn reset_livekit_client(seen: u64) -> bool {
+    let mut slot = LIVEKIT_CLIENT.write().unwrap_or_else(|e| e.into_inner());
+    match slot.as_ref() {
+        Some((generation, _)) if *generation != seen => false,
+        _ => {
+            *slot = Some((seen + 1, build_livekit_client(true)));
+            true
+        }
+    }
+}
+
+/// A single-use LiveKit client with no pool, for the operator probe: every
+/// request it makes pays a full DNS + TCP + TLS handshake, which is the point.
+pub fn livekit_probe_get(url: &str) -> reqwest::RequestBuilder {
+    build_livekit_client(false)
+        .get(url)
+        .timeout(Upstream::LiveKit.timeout())
+}
+
+fn build_livekit_client(pooled: bool) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
+        .connect_timeout(LIVEKIT_CONNECT_TIMEOUT)
+        // Probes a connection the network silently dropped, so it errors
+        // instead of absorbing a request until the deadline.
+        .tcp_keepalive(std::time::Duration::from_secs(15))
+        .pool_idle_timeout(LIVEKIT_POOL_IDLE)
+        .pool_max_idle_per_host(if pooled { 8 } else { 0 });
+    builder
+        .build()
+        // Only fails on a broken TLS backend; an un-timed fallback would defeat the point.
+        .expect("reqwest client builds")
 }
 
 // Bounded `IN (…)` lists (#916): the DS's copy of `pollis_core::db::chunk`. Keep them in step.
