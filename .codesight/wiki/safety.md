@@ -249,7 +249,7 @@ tree can never stand in for another:
   can never be presented as a commit-log or account-key head). Each leaf commits
   to an artifact's reproducible signature-normalized payload hash + its signed sha256
   (`BinaryRecord` / `BinaryInvariant` in `verifiable-log-builder`). The release
-  pipeline attests-and-logs every artifact; `pollis-verify release <tag>` verifies
+  pipeline attests-and-logs every artifact; `pollis-verify release https://verify.pollis.com <tag>` verifies
   that every published artifact for a tag is provably included in the signed
   binaries tree at verify.pollis.com (`/v1/binaries`).
 
@@ -445,7 +445,7 @@ Before #875 only the first did. Three of the others rebuilt a verification-side
 `Bundle` with `retired_keys: Vec::new()` and verified against `public_key` alone,
 so during a rotation overlap — `public_key.json` and `sth/latest.json` are
 separate artifacts on separate cache policies and legitimately move at different
-moments (custody doc §7 step 5) — `pollis-verify verify` passed while
+moments (custody doc §7 step 5) — every `pollis-verify` check passed while
 `self_audit_account_key`, `audit_peer_account_key` and `verify_own_build` all
 raised a hard `alarm` against an honest log. A client crying tampering at an
 honest server is worse than the bug it guards against.
@@ -509,7 +509,7 @@ over HTTP with a log signed by a key that only the key set names). Runbook:
 
 ### Auditing infrastructure
 
-`pollis-verify account <user_id>` (released CLI), precomputed
+`pollis-verify account https://verify.pollis.com <user_id>` (released CLI), precomputed
 `/verify/account/<id>` reports, a CI post-publish self-audit, and an equivocation
 tripwire comparing each new head against the previously-published one.
 

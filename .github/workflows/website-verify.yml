@@ -212,7 +212,38 @@ jobs:
           git fetch --tags --quiet --depth=1 origin '+refs/tags/*:refs/tags/*' || true
           ./scripts/rebuild-ledger.sh --check
 
-      # 6. Staleness. Not a claim being wrong, but the condition that produces it.
+      # 6. Every concrete pollis-verify command the docs publish (#1721) passes against
+      #    the live log, run with the released binary the way the docs say to get it.
+      #    Commands with placeholders are parse-checked on every PR instead, by
+      #    verifiable-log-serve/tests/doc_invocations.rs, which also keeps this list current.
+      - name: Published pollis-verify commands pass against the live log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName,publishedAt \
+            --jq '[.[] | select(.tagName | startswith("pollis-verify-v"))] | sort_by(.publishedAt) | last | .tagName')"
+          bin=pollis-verify-linux-x86_64
+          dir="$(mktemp -d)"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$dir" -p "$bin" -p "$bin.sha256"
+          (cd "$dir" && sha256sum -c "$bin.sha256")
+          chmod +x "$dir/$bin"
+          echo "using $tag: $("$dir/$bin" --version)"
+          failed=0
+          while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            # shellcheck disable=SC2086  # the line is an argument list
+            if "$dir/$bin" $line >"$dir/out" 2>&1; then
+              echo "✓ pollis-verify $line"
+            else
+              echo "::error::published command failed: pollis-verify $line"
+              tail -5 "$dir/out"
+              failed=1
+            fi
+          done < verifiable-log-serve/tests/doc_invocations.live.txt
+          exit "$failed"
+
+      # 7. Staleness. Not a claim being wrong, but the condition that produces it.
       #    Warn rather than fail: a deliberate hold on publishing is legitimate
       #    (#406), a *forgotten* one is what we are surfacing.
       - name: Warn if the deployed site lags main

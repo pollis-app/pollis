@@ -219,6 +219,10 @@ Failures are listed under `Violations:`, followed by
 `FAIL: account key chain is NOT valid` and a non-zero exit. `--json` prints the
 `AccountReport`. An unknown `user_id` reports `Found: no` and passes.
 
+```bash
+pollis-verify account <base-url> <user-id> --json
+```
+
 The desktop app runs the same verifier: `self_audit_account_key` for your own key
 and `audit_peer_account_key` for a contact you have verified.
 
@@ -263,6 +267,7 @@ To tie the log to the file you downloaded, hash it and compare with the logged
 artifacts, where both hashes are equal). Use `--json` to get full hashes:
 
 ```bash
+pollis-verify release https://verify.pollis.com v1.3.6 --json
 sha256sum pollis-v1.3.6-linux.AppImage
 ```
 

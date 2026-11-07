@@ -175,7 +175,7 @@ out" is not evidence of a hostile host.
 verification-side bundle with `retired_keys: Vec::new()` and verified heads against the
 single active key, so an honest log inside its own overlap window — including the two-pass
 window in §7 step 5, where `public_key.json` and `sth/latest.json` legitimately move at
-different moments — passed `pollis-verify verify` while making the shipped client raise a
+different moments — passed every `pollis-verify` check while making the shipped client raise a
 hard ALARM on all three of `self_audit_account_key`, `audit_peer_account_key` and
 `verify_own_build`. Fixed by routing all four through `Bundle::key_candidates` +
 `Sth::verify_any[_with_context]`; regression-covered by
