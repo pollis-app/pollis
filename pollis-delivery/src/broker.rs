@@ -73,7 +73,7 @@ impl BrokerConfig {
     }
 
     /// All three LiveKit fields present → the token endpoint can sign.
-    fn livekit_ready(&self) -> Option<(&str, &str, &str)> {
+    pub(crate) fn livekit_ready(&self) -> Option<(&str, &str, &str)> {
         Some((
             self.livekit_api_key.as_deref()?,
             self.livekit_api_secret.as_deref()?,
@@ -369,7 +369,7 @@ pub fn sign_livekit_admin_token(
 
 /// The Twirp server API is a separate HTTPS endpoint from the `wss://` SDK URL.
 /// Translate one to the other (`wss`→`https`, `ws`→`http`).
-fn twirp_base(livekit_url: &str) -> String {
+pub(crate) fn twirp_base(livekit_url: &str) -> String {
     if let Some(rest) = livekit_url.strip_prefix("wss://") {
         format!("https://{rest}")
     } else if let Some(rest) = livekit_url.strip_prefix("ws://") {
@@ -387,26 +387,22 @@ fn bad_gateway(what: impl std::fmt::Display) -> Response {
         .into_response()
 }
 
-/// Map a failed outbound call to a response (#913).
+/// Map a failed LiveKit call to a response (#913).
 ///
 /// A timeout is 504 (a retry may help); any other upstream failure is 502.
-fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Error) -> Response {
+/// `livekit::twirp` has already logged it.
+fn upstream_error(e: &crate::livekit::TwirpFailure) -> Response {
     if e.is_timeout() {
-        tracing::warn!(
-            upstream = upstream.name(),
-            timeout_secs = upstream.timeout().as_secs(),
-            "{what}: upstream timed out"
-        );
         return (
             StatusCode::GATEWAY_TIMEOUT,
             Json(serde_json::json!({
-                "error": format!("{what}: {} timed out", upstream.name()),
+                "error": e.to_string(),
                 "retryable": true,
             })),
         )
             .into_response();
     }
-    bad_gateway(format!("{what}: {e}"))
+    bad_gateway(e)
 }
 
 // POST /v1/livekit/send-data. Authz: `gate`, and the TARGET room must be reachable:
@@ -732,7 +728,7 @@ pub async fn room_send_data(
     room: &str,
     payload: &serde_json::Value,
 ) -> Result<SendOutcome, String> {
-    let (api_key, api_secret, url) = state
+    let (api_key, api_secret, _) = state
         .broker
         .livekit_ready()
         .ok_or_else(|| "livekit not configured".to_string())?;
@@ -746,40 +742,39 @@ pub async fn room_send_data(
     let wire_room = crate::room_id::room_pseudonym(api_secret, room);
     let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
         .map_err(|e| format!("sign admin token: {e}"))?;
-    let endpoint = format!("{}/twirp/livekit.RoomService/SendData", twirp_base(url));
+    // #1751: one nonce per nudge, the same on the retry, so LiveKit can drop a
+    // duplicate if the first attempt landed but its answer was lost.
+    let nonce = crate::util::b64(&rand::random::<[u8; 16]>());
+    let body = serde_json::json!({
+        "room": wire_room,
+        "data": data_b64,
+        "kind": "RELIABLE",
+        "nonce": nonce,
+    });
 
-    let sent = crate::util::http_post(crate::util::Upstream::LiveKit, &endpoint)
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "room": wire_room, "data": data_b64, "kind": "RELIABLE" }))
-        .send()
-        .await;
-
-    match sent {
-        Ok(r) if r.status().is_success() => Ok(SendOutcome::Delivered),
-        Ok(r) if r.status() == StatusCode::NOT_FOUND => Ok(SendOutcome::RoomEmpty),
-        Ok(r) => {
-            let status = r.status();
-            let text = r.text().await.unwrap_or_default();
-            // #1337: nobody is in the room, so there is nobody to nudge.
-            if send_data_room_is_empty(status, &text) {
-                // LiveKit gives this same answer when the node hosting a LIVE
-                // room is down, so keep it countable: one line per occurrence,
-                // naming the route only — no room, user, device or address.
-                tracing::info!(
-                    route = "livekit.RoomService/SendData",
-                    "livekit: no server for room (empty or unhosted); nudge treated as delivered"
-                );
-                return Ok(SendOutcome::RoomEmpty);
-            }
-            Err(format!("SendData {status}: {text}"))
-        }
+    let reply = crate::livekit::twirp(state, "SendData", &token, &body)
+        .await
         // Fire-and-forget callers just log; the point is to give up (#913).
-        Err(e) if e.is_timeout() => Err(format!(
-            "SendData: livekit timed out after {}s",
-            crate::util::Upstream::LiveKit.timeout().as_secs()
-        )),
-        Err(e) => Err(format!("SendData: {e}")),
+        .map_err(|e| e.to_string())?;
+    let status = reply.status;
+    if status.is_success() {
+        return Ok(SendOutcome::Delivered);
     }
+    if status == StatusCode::NOT_FOUND {
+        return Ok(SendOutcome::RoomEmpty);
+    }
+    // #1337: nobody is in the room, so there is nobody to nudge.
+    if send_data_room_is_empty(status, &reply.body) {
+        // LiveKit gives this same answer when the node hosting a LIVE
+        // room is down, so keep it countable: one line per occurrence,
+        // naming the route only — no room, user, device or address.
+        tracing::info!(
+            route = "livekit.RoomService/SendData",
+            "livekit: no server for room (empty or unhosted); nudge treated as delivered"
+        );
+        return Ok(SendOutcome::RoomEmpty);
+    }
+    Err(format!("SendData {status}: {}", reply.body))
 }
 
 /// Whether a non-2xx `RoomService/SendData` answer means "this room has no
@@ -816,7 +811,7 @@ pub async fn room_remove_participant(
     room: &str,
     identity: &str,
 ) -> Result<(), String> {
-    let (api_key, api_secret, url) = state
+    let (api_key, api_secret, _) = state
         .broker
         .livekit_ready()
         .ok_or_else(|| "livekit not configured".to_string())?;
@@ -825,30 +820,18 @@ pub async fn room_remove_participant(
     let wire_room = crate::room_id::room_pseudonym(api_secret, room);
     let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
         .map_err(|e| format!("sign admin token: {e}"))?;
-    let endpoint = format!(
-        "{}/twirp/livekit.RoomService/RemoveParticipant",
-        twirp_base(url)
-    );
-
-    let sent = crate::util::http_post(crate::util::Upstream::LiveKit, &endpoint)
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "room": wire_room, "identity": identity }))
-        .send()
-        .await;
-
-    match sent {
-        Ok(r) if r.status().is_success() || r.status() == StatusCode::NOT_FOUND => Ok(()),
-        Ok(r) => {
-            let status = r.status();
-            let text = r.text().await.unwrap_or_default();
-            Err(format!("RemoveParticipant {status}: {text}"))
-        }
-        Err(e) if e.is_timeout() => Err(format!(
-            "RemoveParticipant: livekit timed out after {}s",
-            crate::util::Upstream::LiveKit.timeout().as_secs()
-        )),
-        Err(e) => Err(format!("RemoveParticipant: {e}")),
+    let reply = crate::livekit::twirp(
+        state,
+        "RemoveParticipant",
+        &token,
+        &serde_json::json!({ "room": wire_room, "identity": identity }),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    if reply.status.is_success() || reply.status == StatusCode::NOT_FOUND {
+        return Ok(());
     }
+    Err(format!("RemoveParticipant {}: {}", reply.status, reply.body))
 }
 
 /// Every LiveKit identity `user_id` can be holding in `logical_room`.
@@ -1001,7 +984,7 @@ pub async fn evict_device_from_rooms(
 
 /// Fire-and-forget: failures are logged; the stale session dies when [`authorize_room`] refuses at reconnect.
 ///
-/// Concurrent, so a stalled SFU costs one 5s deadline, not one per call.
+/// Concurrent, so a stalled SFU costs one call's deadline (`livekit::worst_case`), not one per call.
 async fn evict_identities(
     state: &AppState,
     rooms: &[String],
@@ -1049,7 +1032,7 @@ pub async fn livekit_participants(
         return Ok(bad_request("room required"));
     }
 
-    let (api_key, api_secret, url) = match state.broker.livekit_ready() {
+    let (api_key, api_secret, _) = match state.broker.livekit_ready() {
         Some(t) => t,
         None => return Ok(not_configured("livekit")),
     };
@@ -1072,13 +1055,13 @@ pub async fn livekit_participants(
     // #828: authorize the logical room, address LiveKit by its pseudonym.
     let wire_room = crate::room_id::room_pseudonym(api_secret, &parsed.room);
     let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())?;
-    let endpoint = format!("{}/twirp/livekit.RoomService/ListParticipants", twirp_base(url));
-
-    let listed = crate::util::http_post(crate::util::Upstream::LiveKit, &endpoint)
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "room": wire_room }))
-        .send()
-        .await;
+    let listed = crate::livekit::twirp(
+        &state,
+        "ListParticipants",
+        &token,
+        &serde_json::json!({ "room": wire_room }),
+    )
+    .await;
 
     #[derive(Deserialize)]
     struct RsResp {
@@ -1092,13 +1075,13 @@ pub async fn livekit_participants(
     }
 
     match listed {
-        Ok(r) if r.status() == StatusCode::NOT_FOUND => Ok(ok_response::<
+        Ok(r) if r.status == StatusCode::NOT_FOUND => Ok(ok_response::<
             LivekitParticipantsBody,
         >(
             LivekitParticipantsResponse { participants: Vec::new() },
         )),
-        Ok(r) if r.status().is_success() => {
-            let parsed_resp: RsResp = match r.json().await {
+        Ok(r) if r.status.is_success() => {
+            let parsed_resp: RsResp = match serde_json::from_str(&r.body) {
                 Ok(p) => p,
                 Err(e) => return Ok(bad_gateway(format!("ListParticipants decode: {e}"))),
             };
@@ -1133,16 +1116,8 @@ pub async fn livekit_participants(
                 .collect();
             Ok(ok_response::<LivekitParticipantsBody>(LivekitParticipantsResponse { participants }))
         }
-        Ok(r) => {
-            let status = r.status();
-            let text = r.text().await.unwrap_or_default();
-            Ok(bad_gateway(format!("ListParticipants {status}: {text}")))
-        }
-        Err(e) => Ok(upstream_error(
-            crate::util::Upstream::LiveKit,
-            "ListParticipants",
-            &e,
-        )),
+        Ok(r) => Ok(bad_gateway(format!("ListParticipants {}: {}", r.status, r.body))),
+        Err(e) => Ok(upstream_error(&e)),
     }
 }
 
@@ -1236,10 +1211,9 @@ pub async fn livekit_room_counts(
     if parsed.rooms.len() > ROOM_COUNTS_MAX {
         return Ok(bad_request("too many rooms"));
     }
-    let (api_key, api_secret, url) = match state.broker.livekit_ready() {
-        Some(t) => t,
-        None => return Ok(not_configured("livekit")),
-    };
+    if state.broker.livekit_ready().is_none() {
+        return Ok(not_configured("livekit"));
+    }
     let user_id = match resolve_user(&authed, parsed.user_id.as_deref()) {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
@@ -1267,9 +1241,9 @@ pub async fn livekit_room_counts(
 
     let mut set = tokio::task::JoinSet::new();
     for room in authorized {
-        let (api_key, api_secret, url) = (api_key.to_string(), api_secret.to_string(), url.to_string());
+        let state = state.clone();
         set.spawn(async move {
-            let count = room_voice_count(&api_key, &api_secret, &url, &room).await;
+            let count = room_voice_count(&state, &room).await;
             (room, count)
         });
     }
@@ -1289,14 +1263,16 @@ pub async fn livekit_room_counts(
 /// Voice participants in `room` via `RoomService/ListParticipants`: `view`
 /// receivers and identities that don't resolve under this room's key are not
 /// counted. Any failure is 0.
-async fn room_voice_count(api_key: &str, api_secret: &str, url: &str, room: &str) -> u32 {
+async fn room_voice_count(state: &AppState, room: &str) -> u32 {
+    let Some((api_key, api_secret, _)) = state.broker.livekit_ready() else {
+        return 0;
+    };
     let wire_room = crate::room_id::room_pseudonym(api_secret, room);
     let Ok(token) =
         sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
     else {
         return 0;
     };
-    let endpoint = format!("{}/twirp/livekit.RoomService/ListParticipants", twirp_base(url));
     #[derive(Deserialize)]
     struct RsResp {
         #[serde(default)]
@@ -1307,16 +1283,18 @@ async fn room_voice_count(api_key: &str, api_secret: &str, url: &str, room: &str
         #[serde(default)]
         identity: String,
     }
-    let listed = crate::util::http_post(crate::util::Upstream::LiveKit, &endpoint)
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "room": wire_room }))
-        .send()
-        .await;
-    let Ok(resp) = listed else { return 0 };
-    if !resp.status().is_success() {
+    let listed = crate::livekit::twirp(
+        state,
+        "ListParticipants",
+        &token,
+        &serde_json::json!({ "room": wire_room }),
+    )
+    .await;
+    let Ok(reply) = listed else { return 0 };
+    if !reply.status.is_success() {
         return 0;
     }
-    let Ok(parsed) = resp.json::<RsResp>().await else { return 0 };
+    let Ok(parsed) = serde_json::from_str::<RsResp>(&reply.body) else { return 0 };
     parsed
         .participants
         .iter()

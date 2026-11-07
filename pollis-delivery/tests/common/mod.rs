@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod fake_livekit;
+
 use pollis_delivery::db::Db;
 use std::ops::Deref;
 use std::sync::Arc;
