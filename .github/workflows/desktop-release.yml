@@ -854,7 +854,9 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.tar.gz
             target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.sig
             target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            target/x86_64-unknown-linux-gnu/release/bundle/deb/*.sig
             target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.sig
             pollis-*-linux.toolchain.json
 
   # Software Bill of Materials, one per release (#877).
@@ -1047,7 +1049,8 @@ jobs:
           # Windows updater bundle (.exe + .sig) — Tauri v2 uses the exe directly
           find artifacts/pollis-windows -name "*.exe" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
           find artifacts/pollis-windows -name "*.sig" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
-          # Linux updater bundle (.AppImage + .sig) — Tauri v2 uses the AppImage directly
+          # Linux updater bundles: the AppImage directly, plus the .deb/.rpm `.sig`s (#1758) — the
+          # packages themselves are already up from "Upload installers to R2".
           find artifacts/pollis-linux -name "*.AppImage" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
           find artifacts/pollis-linux -name "*.sig" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
         env:
@@ -1074,18 +1077,35 @@ jobs:
           MAC_SIG=$(find artifacts/pollis-macos -name "*.tar.gz.sig" -exec cat {} \; | head -1)
           WIN_SIG=$(find artifacts/pollis-windows -name "*.exe.sig" -exec cat {} \; | head -1)
           LINUX_SIG=$(find artifacts/pollis-linux -name "*.AppImage.sig" -exec cat {} \; | head -1)
+          DEB_SIG=$(find artifacts/pollis-linux -name "*.deb.sig" -exec cat {} \; | head -1)
+          RPM_SIG=$(find artifacts/pollis-linux -name "*.rpm.sig" -exec cat {} \; | head -1)
+          # Fail rather than publish a deb/rpm manifest that cannot verify.
+          for v in MAC_SIG WIN_SIG LINUX_SIG DEB_SIG RPM_SIG; do
+            if [ -z "${!v}" ]; then
+              echo "::error::${v} is empty — the bundler did not sign that updater artifact"
+              exit 1
+            fi
+          done
 
           # Find the actual filenames for the updater bundles
           MAC_TAR=$(find artifacts/pollis-macos -name "*.tar.gz" -exec basename {} \; | head -1)
           WIN_EXE=$(find artifacts/pollis-windows -name "*.exe" -exec basename {} \; | head -1)
           LINUX_APPIMAGE=$(find artifacts/pollis-linux -name "*.AppImage" -exec basename {} \; | head -1)
 
+          # The .deb/.rpm were uploaded under these names by "Upload installers to R2";
+          # the minisign signature covers the bytes, not the file name.
+          LINUX_DEB="pollis-${VERSION}-linux.deb"
+          LINUX_RPM="pollis-${VERSION}-linux.rpm"
+
           # Helper: emit a single-platform manifest. Tauri only reads the
           # platform key matching the client's target/arch; the others are
           # ignored, but we keep them so the file can also be read by
-          # tooling that's looking for cross-platform info.
+          # tooling that's looking for cross-platform info. The Linux entry is
+          # the package the client's own bundle type installs: $2/$3.
           emit_manifest() {
             local out="$1"
+            local linux_file="${2:-$LINUX_APPIMAGE}"
+            local linux_sig="${3:-$LINUX_SIG}"
             jq -n \
               --arg version "$VERSION_NUM" \
               --arg pub_date "$PUB_DATE" \
@@ -1093,8 +1113,8 @@ jobs:
               --arg mac_sig "$MAC_SIG" \
               --arg win_url "${CDN}/${WIN_EXE}" \
               --arg win_sig "$WIN_SIG" \
-              --arg linux_url "${CDN}/${LINUX_APPIMAGE}" \
-              --arg linux_sig "$LINUX_SIG" \
+              --arg linux_url "${CDN}/${linux_file}" \
+              --arg linux_sig "$linux_sig" \
               '{
                 version: $version,
                 pub_date: $pub_date,
@@ -1106,16 +1126,15 @@ jobs:
               }' > "$out"
           }
 
-          # Per-bundle manifests. Today the Linux entry in every Linux
-          # variant points to the AppImage — we don't yet sign .deb/.rpm
-          # bundles, so deb/rpm clients get the same payload (which fails
-          # in the updater for non-AppImage bundles, but that's caught
-          # client-side by the install-kind guard for known package
-          # managers like AUR). Once we sign deb/rpm we can swap their
-          # URLs to the right artifact here.
+          # Per-bundle manifests. A .deb/.rpm client's updater refuses any
+          # payload that is not its own package type ("invalid updater binary
+          # format", #1758), so each gets the matching signed package and
+          # installs it with `pkexec dpkg -i` / `pkexec rpm -U`. AUR installs
+          # (a repacked .deb on Arch) never self-update: the install-kind
+          # guard routes them to their package manager.
           emit_manifest update-appimage.json
-          emit_manifest update-deb.json
-          emit_manifest update-rpm.json
+          emit_manifest update-deb.json "$LINUX_DEB" "$DEB_SIG"
+          emit_manifest update-rpm.json "$LINUX_RPM" "$RPM_SIG"
           emit_manifest update-app.json
           emit_manifest update-nsis.json
           # Legacy single-manifest endpoint, still hit by clients shipped

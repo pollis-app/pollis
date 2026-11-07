@@ -151,6 +151,8 @@
     "installing": "Installation de la mise à jour…",
     "relaunching": "Redémarrage…",
     "failed": "Échec de la mise à jour : {{error}}",
+    "tryAgain": "Réessayer",
+    "continueWithout": "Continuer sans mettre à jour",
     "readOnlyDiskImage": "Pollis s'exécute depuis l'image disque, qui est en lecture seule. Quittez Pollis, glissez-le dans Applications, éjectez l'image disque et ouvrez-le depuis Applications.",
     "readOnlyTranslocated": "macOS exécute Pollis depuis un emplacement temporaire en lecture seule. Quittez Pollis, sortez-le du dossier Applications puis remettez-le avec le Finder, et rouvrez-le.",
     "readOnlyTranslocatedHealed": "macOS exécute Pollis depuis un emplacement temporaire en lecture seule laissé par une mise à jour précédente. C'est corrigé. Quittez Pollis et rouvrez-le depuis le dossier Applications.",

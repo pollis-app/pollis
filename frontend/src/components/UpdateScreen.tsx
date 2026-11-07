@@ -1,7 +1,9 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { check, relaunch, invoke } from "../bridge";
+import { check, relaunch, invoke, shellOpen } from "../bridge";
+import { DOWNLOAD_URL } from "./ClientBlockedScreen";
+import { Button } from "./ui/Button";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 
 type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";
@@ -14,12 +16,23 @@ function isReadOnlyError(message: string): boolean {
   return /read-only file system|os error 30/i.test(message);
 }
 
-/** Checks, downloads, installs and relaunches with no interaction. */
-export const UpdateScreen: React.FC = () => {
+interface Props {
+  /** Leave this screen and keep running the installed build (nothing newer, or the user chose to). */
+  onContinue: () => void;
+}
+
+/**
+ * Checks, downloads, installs and relaunches with no interaction. A failure is never a dead end
+ * (#1758): retry, download the installer, or keep using this build. The published minimum
+ * version (#1611) is what refuses an unsupported build, not this screen.
+ */
+export const UpdateScreen: React.FC<Props> = ({ onContinue }) => {
   const { t } = useTranslation("nav");
   const [phase, setPhase] = useState<UpdatePhase>("preparing");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Try again to re-run the whole sequence.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +73,12 @@ export const UpdateScreen: React.FC = () => {
         setPhase("checking");
         const update = await check();
 
-        if (!update || cancelled) {
+        if (cancelled) {
+          return;
+        }
+        // Nothing newer after all: there is nothing to wait for here.
+        if (!update) {
+          onContinue();
           return;
         }
 
@@ -107,7 +125,20 @@ export const UpdateScreen: React.FC = () => {
 
     runUpdate();
     return () => { cancelled = true; };
-  }, [t]);
+    // onContinue is read once per attempt; a new identity must not restart a running install.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t, attempt]);
+
+  const retry = () => {
+    setError(null);
+    setProgress(null);
+    setPhase("preparing");
+    setAttempt((n) => n + 1);
+  };
+
+  const openDownload = () => {
+    shellOpen(DOWNLOAD_URL).catch((e) => console.warn("[update] open failed:", e));
+  };
 
   const label = (() => {
     switch (phase) {
@@ -156,11 +187,27 @@ export const UpdateScreen: React.FC = () => {
         <div className="flex items-center gap-2">
           {phase !== "error" && <LoadingSpinner size="sm" />}
           <span
-            className={`text-xs font-mono ${phase === "error" ? "text-danger" : "text-fg"}`}
+            data-testid="update-status"
+            role={phase === "error" ? "alert" : undefined}
+            className={`text-xs font-mono break-words ${phase === "error" ? "text-danger" : "text-fg"}`}
           >
             {label}
           </span>
         </div>
+
+        {phase === "error" && (
+          <div data-testid="update-failed-actions" className="flex flex-wrap justify-center gap-2">
+            <Button data-testid="update-retry" onClick={retry}>
+              {t("update.tryAgain")}
+            </Button>
+            <Button data-testid="update-download" variant="ghost" onClick={openDownload}>
+              {t("clientBlocked.download")}
+            </Button>
+            <Button data-testid="update-continue" variant="ghost" onClick={onContinue}>
+              {t("update.continueWithout")}
+            </Button>
+          </div>
+        )}
 
         {phase === "downloading" && progress !== null && (
           <div
