@@ -1291,7 +1291,14 @@ commit hook; nothing then depends on a JS timer). It is compiled into the binary
 with a store build. Upstream fixed the count (it uses the map size) and keeps a
 settled value until React confirms it (react-native-reanimated#10874), neither
 in a 4.5.x release; re-check the flag when Reanimated moves past both.
-`tests/keyboard.test.ts` pins it. `rapid-send` is the device proof (its burst
+`tests/keyboard.test.ts` pins it. The flag changes nothing else the suites can see:
+an A/B on one commit (the flag off vs Reanimated's default, Release builds) failed
+approval-prompt, outbox and profile-photo the same way under both, and only the
+default failed rapid-send's Send guard. Those failures were the dev DS's LiveKit
+`SendData` timing out (`GET /v1/ops/errors`: `SendData: livekit timed out after
+5s`), which drops every DS-sent nudge, the approval prompt's included. When the
+realtime-driven flows fail together, check that log before blaming the app.
+`rapid-send` is the device proof (its burst
 asserts Send is on screen before every tap; it failed there on every Android
 run without the flag); keyboard-recovery step 7 (Android: Home with the
 keyboard up, a deep link onto another screen, then back) covers the
@@ -1489,7 +1496,13 @@ Current state:
   no letter flash, keeps an old photo up until a changed one is on disk, drops a
   removed one at once, and looks up every user whose key no list carried in one
   `get_user_profiles` call. Rows pass the key their list already has (`avatarKey`;
-  `undefined` = unknown). Set / change / remove: Self → Account details
+  `undefined` = unknown). A group roster row without `avatar_url` is unknown too, never
+  "no picture": creating a group seeds its roster with the creator, with no key, so the
+  panel shows "1 member" at once, and `useCreateGroup` re-reads the real roster right
+  after. Nothing else refreshes it within the query's minute, and the realtime
+  `membership_changed` echo that once did is lost whenever the DS cannot reach
+  LiveKit, which left the creator's message rows on the letter avatar
+  (`tests/avatars.test.ts`). Set / change / remove: Self → Account details
   (`components/self/ProfilePhotoEditor.tsx`; library or front camera, system square
   crop, `upload_avatar` re-encodes and strips EXIF). `endSession()` wipes the
   directory. Maestro: `.maestro/flows/profile-photo.yaml`.
@@ -1534,7 +1547,14 @@ Current state:
   send the OS killed mid-flight is still there after relaunch and is delivered
   by the drain: core spawns it after `unlock`, and `useInboxRealtime` calls
   `flush_outbox` on sign-in, on resume and on a LiveKit `Reconnected` — never
-  on a timer. On iOS a send made just before leaving the app finishes in the
+  on a timer. A flush that finds a drain running (the one `unlock` spawns)
+  waits for it, and the drain's report keeps every pass, not only the rerun
+  the waiter asked for. That rerun usually finds nothing, and an older core
+  answered with it alone, so `flushOutbox` re-reads the rows after every flush
+  whatever the report says. Before that, rows a killed app left behind showed
+  "sending" after relaunch until the device's own `new_message` echo arrived,
+  which never came while the DS could not reach LiveKit (rapid-send's kill
+  part). On iOS a send made just before leaving the app finishes in the
   app's background time before the database closes, or is marked `failed` if
   the time runs out (#1678; `.codesight/wiki/notifications.md` → "Cross-process
   lock"). A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and

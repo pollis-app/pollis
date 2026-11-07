@@ -1071,7 +1071,10 @@ running drain goes round once more before letting go, and if that drain had
 already finished its last pass the waiting caller drains itself. So a reconnect
 that lands while the unlock drain is failing offline attempts still gets its
 pass. It delivers `pending` and `failed` rows oldest first and leaves `rejected`
-ones to the user. No timer.
+ones to the user. No timer. The waiting caller is answered with the whole
+drain, every pass folded together: the extra pass it asked for usually finds
+nothing, and when only that pass was returned the renderer saw an empty report
+and never re-read rows the drain had just delivered.
 
 **Idempotent.** A retry reuses the message id — the envelope id. One attempt
 per message runs at a time (`AppState::outbox_locks`), and an attempt re-reads

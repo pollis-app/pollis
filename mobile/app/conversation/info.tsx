@@ -64,7 +64,7 @@ function ConversationInfo() {
       return sortMembersByRole(groupMembers).map((m) => ({
         userId: m.user_id,
         handle: m.username ?? m.user_id.slice(0, 8),
-        avatarKey: m.avatar_url ?? null,
+        avatarKey: m.avatar_url,
         role: m.role,
       }));
     }

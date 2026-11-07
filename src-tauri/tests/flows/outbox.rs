@@ -434,7 +434,13 @@ async fn an_overlapping_drain_is_coalesced_into_a_rerun() {
 
     running.await.unwrap().expect("drain");
     let report = trigger.await.unwrap().expect("trigger");
-    assert_eq!(report.delivered, vec![second.clone()], "the rerun pass took the new message");
+    // The waiter is answered with the whole drain, not only the pass it asked for:
+    // a renderer that refreshes on what the report names must see both rows land.
+    assert_eq!(
+        report.delivered,
+        vec![first.clone(), second.clone()],
+        "the rerun pass took the new message, and the report keeps the first pass"
+    );
     assert_eq!(test_hooks::delivery_attempts(), before + 2, "one attempt each, no overlap");
     for id in [&first, &second] {
         assert!(own_row(&alice, &channel_id, id).await.expect("row").get("send_state").is_none());

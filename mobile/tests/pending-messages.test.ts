@@ -129,6 +129,11 @@ test("every send names its message and every surface drains the outbox", () => {
   const inbox = readFileSync(new URL("../hooks/useInboxRealtime.ts", import.meta.url), "utf8");
   assert.equal(inbox.match(/flushOutbox\(/g)?.length, 3);
   assert.doesNotMatch(inbox, /setInterval/);
+  // A flush re-reads the rows whatever its report says: one that waited on the
+  // unlock drain can be answered empty by an older core, after sending every row.
+  const flush = s.slice(s.indexOf("export async function flushOutbox"), s.indexOf("export function useThreadMessages"));
+  assert.match(flush, /await invoke<OutboxReport>\("flush_outbox"\);\s*await queryClient\.invalidateQueries\(\{ queryKey: messageQueryKeys\.all \}\);/);
+  assert.doesNotMatch(flush, /touched/);
 });
 
 test("an attachment the outbox has not uploaded yet is drawn pending, never fetched", async () => {

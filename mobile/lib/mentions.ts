@@ -92,7 +92,7 @@ export interface MentionCandidate {
   userId: string;
   username: string;
   displayName?: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
 }
 
 export const MENTION_SUGGESTION_LIMIT = 8;

@@ -591,16 +591,13 @@ export async function flushOutbox(
   queryClient: ReturnType<typeof useQueryClient>,
 ): Promise<void> {
   try {
-    const report = await invoke<OutboxReport>("flush_outbox");
-    const touched =
-      (report?.delivered?.length ?? 0) +
-      (report?.failed?.length ?? 0) +
-      (report?.edits_delivered?.length ?? 0) +
-      (report?.edits_failed?.length ?? 0);
-    if (touched > 0) {
-      await queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
-      await queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
-    }
+    // Re-read whatever the report says. A flush that found the unlock drain
+    // running waits for it, and an older core answers with only that drain's
+    // empty last pass, so an empty report does not mean nothing was sent.
+    // These are local reads, and every caller is already an event.
+    await invoke<OutboxReport>("flush_outbox");
+    await queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+    await queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
   } catch (e) {
     console.warn("[outbox] flush_outbox failed:", e);
   }
