@@ -11,6 +11,7 @@ import { Icon } from "../icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { useRemoveAvatar, useSetAvatar } from "../../hooks/queries";
 import { avatarHash } from "../../lib/avatarKey";
+import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
 
 const SIZE = 96;
 
@@ -28,6 +29,7 @@ const PICK: ImagePicker.ImagePickerOptions = {
   allowsEditing: true,
   aspect: [1, 1],
   quality: 0.9,
+  ...COMPATIBLE_PICK,
 };
 
 /** Set, change or remove your own profile photo (Self → Account details). */

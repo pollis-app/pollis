@@ -31,6 +31,7 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
+import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
 
 function uriToPath(uri: string): string {
   if (uri.startsWith("file://")) {
@@ -87,6 +88,7 @@ function GroupEmoji() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images",
       quality: 1,
+      ...COMPATIBLE_PICK,
     });
     if (result.canceled || result.assets.length === 0) {
       return;

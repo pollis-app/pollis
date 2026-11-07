@@ -42,6 +42,7 @@ import { appStore } from "../stores/appStore";
 import { semantic, type as ty, space } from "../theme/tokens";
 import type { MessageAttachment } from "../types";
 import { useTheme } from "../components/theme";
+import { COMPATIBLE_PICK } from "../lib/pickerOptions";
 import { useDraft } from "../hooks/useDraft";
 
 type VaultView = "chat" | "media";
@@ -134,6 +135,7 @@ function VaultScreen() {
       mediaTypes: ["images", "videos"],
       allowsMultipleSelection: true,
       quality: 1,
+      ...COMPATIBLE_PICK,
     });
     if (result.canceled) {
       return;
