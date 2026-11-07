@@ -35,7 +35,11 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "draft kept across tabs"
-- hideKeyboard
+# The iPad keyboard covers the tab bar, so hide it. Optional: on the iPhone
+# simulator Maestro's hideKeyboard sometimes fails although the keyboard goes,
+# and the phone's back button is reachable either way.
+- hideKeyboard:
+    optional: true
 - takeScreenshot: composer-draft-01-typed
 
 # Leave: back out of the conversation (phones push it; iPad has it in the
@@ -57,8 +61,6 @@ tags:
 - assertVisible:
     id: "input-composer"
     text: "draft kept across tabs"
-- assertNotVisible:
-    id: "composer-placeholder"
 - takeScreenshot: composer-draft-02-restored
 
 # Sending clears it: the next visit starts empty.
@@ -67,6 +69,8 @@ tags:
 - extendedWaitUntil:
     visible: ".*draft kept across tabs.*"
     timeout: 15000
+- hideKeyboard:
+    optional: true
 - tapOn:
     id: "btn-back"
     optional: true
@@ -77,5 +81,8 @@ tags:
 - tapOn:
     text: "General"
     optional: true
-- assertVisible:
-    id: "composer-placeholder"
+# The placeholder is an overlay outside the accessibility hierarchy, so check
+# the field itself: it no longer holds the sent draft.
+- assertNotVisible:
+    id: "input-composer"
+    text: "draft kept across tabs"
