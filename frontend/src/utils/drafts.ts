@@ -1,4 +1,5 @@
-// In-memory composer drafts by room; never persisted, synchronous, cleared on any active-user change (App.tsx).
+// In-memory composer drafts by room; never persisted, synchronous, cleared when the active user changes or the session ends.
+// mobile/lib/drafts.ts is a byte-for-byte copy (mobile/tests/drafts.test.ts).
 
 const drafts = new Map<string, string>();
 
