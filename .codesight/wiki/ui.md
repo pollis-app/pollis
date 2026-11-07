@@ -815,7 +815,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TerminalApp** — props: onLogout, onLock, onDeleteAccount — `frontend/src/components/TerminalApp.tsx`
 - **TerminalView** — props: visible — `frontend/src/components/TerminalView.tsx`
 - **TypingIndicator** — props: channelId, conversationId — `frontend/src/components/TypingIndicator.tsx`
-- **UpdateScreen** — `frontend/src/components/UpdateScreen.tsx`
+- **UpdateScreen** — props: onContinue — `frontend/src/components/UpdateScreen.tsx`. Runs the update with no interaction. A failure is never a dead end (#1758): it offers **Try again**, **Download the latest version** and **Continue without updating**. Continue calls `clear_update_required` to lift the send block and resumes the launch. The published minimum version (#1611, `ClientBlockedScreen`) is what refuses an unsupported build, not this screen.
 
 ### `components/Auth` (9)
 

@@ -153,6 +153,8 @@
     "installing": "Installing update…",
     "relaunching": "Relaunching…",
     "failed": "Update failed: {{error}}",
+    "tryAgain": "Try again",
+    "continueWithout": "Continue without updating",
     "readOnlyDiskImage": "Pollis is running from the disk image, which is read-only. Quit Pollis, drag it into Applications, eject the disk image, and open it from Applications.",
     "readOnlyTranslocated": "macOS is running Pollis from a temporary read-only location. Quit Pollis, move it out of Applications and back in using Finder, then open it again.",
     "readOnlyTranslocatedHealed": "macOS is running Pollis from a temporary read-only location left behind by an earlier update. That has been fixed. Quit Pollis and open it again from Applications.",

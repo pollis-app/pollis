@@ -559,6 +559,7 @@ pub fn run() {
             commands::r2::download_media,
             commands::r2::get_media_url,
             commands::update::mark_update_required,
+            commands::update::clear_update_required,
             commands::update::is_update_required,
             commands::update::get_update_check_plan,
             commands::client_policy::check_client_policy,

@@ -14,6 +14,11 @@ pub async fn mark_update_required(state: State<'_, Arc<AppState>>) -> Result<()>
 }
 
 #[tauri::command]
+pub async fn clear_update_required(state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::update::clear_update_required(&state).await
+}
+
+#[tauri::command]
 pub async fn is_update_required(state: State<'_, Arc<AppState>>) -> Result<bool> {
     pollis_core::commands::update::is_update_required(&state).await
 }
