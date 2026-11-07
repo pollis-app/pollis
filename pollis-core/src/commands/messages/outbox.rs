@@ -1196,6 +1196,28 @@ pub struct OutboxReport {
     pub edits_failed: Vec<String>,
 }
 
+impl OutboxReport {
+    /// Fold a later pass into this one: delivered from either pass, failed only if the later pass did not deliver it.
+    fn absorb(&mut self, next: OutboxReport) {
+        fold(&mut self.delivered, &mut self.failed, next.delivered, next.failed);
+        fold(&mut self.edits_delivered, &mut self.edits_failed, next.edits_delivered, next.edits_failed);
+    }
+}
+
+fn fold(delivered: &mut Vec<String>, failed: &mut Vec<String>, next_delivered: Vec<String>, next_failed: Vec<String>) {
+    failed.retain(|id| !next_delivered.contains(id));
+    for id in next_delivered {
+        if !delivered.contains(&id) {
+            delivered.push(id);
+        }
+    }
+    for id in next_failed {
+        if !failed.contains(&id) && !delivered.contains(&id) {
+            failed.push(id);
+        }
+    }
+}
+
 /// Deliver every unsent message, oldest first (#1335).
 ///
 /// Single-flight: a call during a drain sets `outbox_rerun` instead of overlapping. Nothing retries in a loop.
@@ -1216,10 +1238,12 @@ pub async fn flush_outbox(state: &Arc<AppState>) -> Result<OutboxReport> {
             guard
         }
     };
-    let mut report;
+    // Every pass, not just the last: a caller that waited is answered with this
+    // report, and the rerun it asked for usually finds nothing left to send.
+    let mut report = OutboxReport::default();
     loop {
         state.outbox_rerun.store(false, Ordering::SeqCst);
-        report = drain(state).await?;
+        report.absorb(drain(state).await?);
         if !state.outbox_rerun.load(Ordering::SeqCst) {
             break;
         }
@@ -1781,5 +1805,33 @@ mod tests {
         assert!(checked_message_id(new_message_id()).is_ok());
         assert!(checked_message_id("pending-123".to_string()).is_err());
         assert!(checked_message_id(String::new()).is_err());
+    }
+
+    /// A caller that waited on a running drain is answered with the whole drain (#1335):
+    /// the rerun it asked for finds nothing, and an empty report hid every delivery from
+    /// the renderer, which then showed the rows as sending until something else refreshed.
+    #[test]
+    fn a_rerun_that_finds_nothing_keeps_what_the_first_pass_delivered() {
+        let mut total = OutboxReport::default();
+        total.absorb(OutboxReport {
+            delivered: vec!["a".into(), "b".into()],
+            failed: vec!["c".into()],
+            edits_delivered: vec!["e".into()],
+            edits_failed: vec![],
+        });
+        total.absorb(OutboxReport::default());
+        assert_eq!(total.delivered, vec!["a", "b"]);
+        assert_eq!(total.failed, vec!["c"]);
+        assert_eq!(total.edits_delivered, vec!["e"]);
+
+        // Failed, then delivered on the rerun: delivered only.
+        total.absorb(OutboxReport { delivered: vec!["c".into()], ..Default::default() });
+        assert_eq!(total.delivered, vec!["a", "b", "c"]);
+        assert!(total.failed.is_empty());
+
+        // Delivered stays delivered; a repeat is not counted twice.
+        total.absorb(OutboxReport { delivered: vec!["a".into()], failed: vec!["b".into()], ..Default::default() });
+        assert_eq!(total.delivered, vec!["a", "b", "c"]);
+        assert!(total.failed.is_empty());
     }
 }

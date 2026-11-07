@@ -1540,7 +1540,14 @@ Current state:
   send the OS killed mid-flight is still there after relaunch and is delivered
   by the drain: core spawns it after `unlock`, and `useInboxRealtime` calls
   `flush_outbox` on sign-in, on resume and on a LiveKit `Reconnected` — never
-  on a timer. On iOS a send made just before leaving the app finishes in the
+  on a timer. A flush that finds a drain running (the one `unlock` spawns)
+  waits for it, and the drain's report keeps every pass, not only the rerun
+  the waiter asked for. That rerun usually finds nothing, and an older core
+  answered with it alone, so `flushOutbox` re-reads the rows after every flush
+  whatever the report says. Before that, rows a killed app left behind showed
+  "sending" after relaunch until the device's own `new_message` echo arrived,
+  which never came while the DS could not reach LiveKit (rapid-send's kill
+  part). On iOS a send made just before leaving the app finishes in the
   app's background time before the database closes, or is marked `failed` if
   the time runs out (#1678; `.codesight/wiki/notifications.md` → "Cross-process
   lock"). A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and
