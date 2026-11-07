@@ -330,15 +330,15 @@
       "platform": "ios",
       "channel": "app-store",
       "version": "1.0.31",
-      "commit": "962524a95336197866a585a8714057b9517e208f",
-      "runtimeVersion": "da8678f7511667f59bd3c66e3f4e15f32023f18f"
+      "commit": "b436366a9e475adfc3054c189065d81b27fcc264",
+      "runtimeVersion": "a396270a5311d52682e678b2ec22136d543d2f4d"
     },
     {
       "platform": "android",
       "channel": "play",
       "version": "1.0.31",
-      "commit": "962524a95336197866a585a8714057b9517e208f",
-      "runtimeVersion": "e2868beedca6794f86e3781676d3ec23a049b459"
+      "commit": "b436366a9e475adfc3054c189065d81b27fcc264",
+      "runtimeVersion": "3261dfef98f4a20c50db7f15a3620d5798fe30fc"
     }
   ]
 }
