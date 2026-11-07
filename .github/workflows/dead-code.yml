@@ -121,7 +121,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Exact dependency check. On demand only: it needs nightly and compiles the workspace
-  # (about 10 minutes cold). Headless crates and --no-default-features, because the CI
+  # (several minutes cold). Headless crates and --no-default-features, because the CI
   # runner has no media toolchain. That drops the `media` feature, so udeps reports
   # everything only media uses (nnnoiseless, livekit-protocol, prost) as unused. Those
   # are false positives; cross-check anything it names against cargo-machete.
