@@ -1,0 +1,11 @@
+New
+• Get a notification when someone sends you a message request. Tap it to see the request.
+• What you type in a conversation is kept when you leave it and come back.
+
+Fixes
+• Photos from your iPhone now send in a format everyone can open.
+• The message box stays above the keyboard after you open a notification or send several messages quickly.
+• A new group shows profile photos right away.
+• Messages sent just before closing the app no longer stay "sending".
+• Group headers line up the same for every member.
+• Someone you blocked can no longer trigger notifications.
