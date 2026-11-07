@@ -339,6 +339,13 @@
       "version": "1.0.31",
       "commit": "b436366a9e475adfc3054c189065d81b27fcc264",
       "runtimeVersion": "3261dfef98f4a20c50db7f15a3620d5798fe30fc"
+    },
+    {
+      "platform": "android",
+      "channel": "sideload",
+      "version": "1.0.31",
+      "commit": "1e43a93412426a576e6044dea3e94585366a0cf1",
+      "runtimeVersion": "3261dfef98f4a20c50db7f15a3620d5798fe30fc"
     }
   ]
 }
