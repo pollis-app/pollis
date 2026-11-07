@@ -48,6 +48,9 @@ function recordingDeps(calls: string[], failing: string[] = []): SessionTeardown
     clearExportArchives: step("clearExportArchives"),
     clearEmojiCache: step("clearEmojiCache"),
     clearAvatarCache: step("clearAvatarCache"),
+    clearDrafts: () => {
+      calls.push("clearDrafts");
+    },
   };
 }
 
@@ -65,8 +68,8 @@ test("the teardown resets the store, leaves the signed-in screens, then clears e
   const calls: string[] = [];
   await tearDownSession(recordingDeps(calls));
   // Screens go before the caches, so none refetches into them.
-  assert.deepEqual(calls.slice(0, 2), ["resetStore", "leaveSignedInScreens"]);
-  assert.deepEqual(new Set(calls.slice(2)), new Set([
+  assert.deepEqual(calls.slice(0, 3), ["resetStore", "leaveSignedInScreens", "clearDrafts"]);
+  assert.deepEqual(new Set(calls.slice(3)), new Set([
     "clearQueryCache",
     "clearMediaCache",
     "clearExportArchives",
@@ -92,6 +95,7 @@ test("endSession wires the real wipes", () => {
     "clearExportArchives,",
     "clearEmojiCache,",
     "clearAvatarCache,",
+    "clearDrafts: clearAllDrafts",
     "router.dismissAll()",
     'router.replace("/(auth)/email")',
   ]) {
