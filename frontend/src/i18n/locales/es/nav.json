@@ -151,6 +151,8 @@
     "installing": "Instalando la actualización…",
     "relaunching": "Reiniciando…",
     "failed": "Error al actualizar: {{error}}",
+    "tryAgain": "Intentar de nuevo",
+    "continueWithout": "Continuar sin actualizar",
     "readOnlyDiskImage": "Pollis se está ejecutando desde la imagen de disco, que es de solo lectura. Cierra Pollis, arrástralo a Aplicaciones, expulsa la imagen de disco y ábrelo desde Aplicaciones.",
     "readOnlyTranslocated": "macOS está ejecutando Pollis desde una ubicación temporal de solo lectura. Cierra Pollis, sácalo de Aplicaciones y vuelve a meterlo con el Finder, y ábrelo de nuevo.",
     "readOnlyTranslocatedHealed": "macOS está ejecutando Pollis desde una ubicación temporal de solo lectura dejada por una actualización anterior. Ya está corregido. Cierra Pollis y ábrelo de nuevo desde Aplicaciones.",

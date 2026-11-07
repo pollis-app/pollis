@@ -11,6 +11,12 @@ pub async fn mark_update_required(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+/// The user chose to keep running this build after an update failed: sends work again.
+pub async fn clear_update_required(state: &Arc<AppState>) -> Result<()> {
+    state.update_required.store(false, Ordering::Relaxed);
+    Ok(())
+}
+
 pub async fn is_update_required(state: &Arc<AppState>) -> Result<bool> {
     Ok(state.update_required.load(Ordering::Relaxed))
 }

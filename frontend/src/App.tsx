@@ -118,7 +118,8 @@ function MainApp() {
     setAppState("ready");
   }, [setCurrentUser]);
 
-  const checkStoredSession = useCallback(async () => {
+  // skipUpdate: the user already chose to keep this build after a failed update (#1758).
+  const checkStoredSession = useCallback(async (opts?: { skipUpdate?: boolean }) => {
     try {
       // #1611: the minimum-version check comes first — before the updater, unlock or any DS
       // traffic. A cache that already allows this build lets launch go on while a fresh check
@@ -147,7 +148,7 @@ function MainApp() {
       }
 
       // Launch-time auto-update, skipped for package-manager installs and dev builds.
-      if (!import.meta.env.DEV) {
+      if (!import.meta.env.DEV && !opts?.skipUpdate) {
         const managed = await invoke<ManagedInstallInfo | null>(
           "detect_managed_install",
         ).catch(() => null);
@@ -530,10 +531,21 @@ function MainApp() {
   }
 
   if (appState === "update-required" || updateRequired) {
+    const continueWithoutUpdating = async () => {
+      // Lift the core's send block that `mark_update_required` set for the install.
+      await invoke("clear_update_required").catch((e) => console.warn("clear_update_required failed", e));
+      appStore.setUpdateRequired(false);
+      // Stopped at launch: resume the sequence the update interrupted. From Settings → Update the
+      // app was already running and simply comes back.
+      if (appState === "update-required") {
+        setAppState("initializing");
+        void checkStoredSession({ skipUpdate: true });
+      }
+    };
     return (
       <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
         <TitleBar />
-        <UpdateScreen />
+        <UpdateScreen onContinue={continueWithoutUpdating} />
       </div>
     );
   }

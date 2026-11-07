@@ -1247,6 +1247,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'tray_set_voice_state':
     case 'set_revoke_media_on_exit':
     case 'mark_update_required':
+    case 'clear_update_required':
       return null;
 
     // Two-code email change (#1161), fail-closed like the DS.
