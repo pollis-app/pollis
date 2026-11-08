@@ -536,7 +536,15 @@ async fn run_source(
         let st = match ds(state, &pollis_api::history_transfer::TransferStatusBody { transfer_id: id.to_string() }).await? {
             Ds::Ok(s) => s,
             Ds::NotFound => {
-                end(state, id, State::Expired, Some("The other device stopped responding.")).await?;
+                // Gone from the DS after the final chunk was uploaded and every
+                // earlier one acknowledged: the receiver finished (its completed
+                // record outlived) — report it as done, not expired.
+                let done = row.final_index.is_some_and(|f| row.chunks_done >= f);
+                if done {
+                    end(state, id, State::Completed, None).await?;
+                } else {
+                    end(state, id, State::Expired, Some("The other device stopped responding.")).await?;
+                }
                 return emit(state, id, sink).await;
             }
             Ds::Conflict(_) | Ds::TooMany => {
@@ -568,11 +576,20 @@ async fn run_source(
                     acc: super::b64(&acc),
                     acc_sig: super::b64(&sig),
                 };
-                if let Ds::NotFound = ds(state, &body).await? {
-                    end(state, id, State::Expired, None).await?;
-                    return emit(state, id, sink).await;
+                match ds(state, &body).await? {
+                    Ds::Ok(_) => continue,
+                    Ds::NotFound => {
+                        end(state, id, State::Expired, None).await?;
+                        return emit(state, id, sink).await;
+                    }
+                    // Throttled or refused for now: back off, never hammer the DS.
+                    Ds::Conflict(_) | Ds::TooMany => {
+                        if waiter.wait(false).await {
+                            return pause(state, id, sink).await;
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
             Ts::Accepted => {}
         }
@@ -1007,7 +1024,10 @@ async fn run_receiver(
         }
         // An import whose ack was lost: ack it now, never import it twice.
         if row.next_index > 0 && st.acked_through < row.next_index as i64 - 1 {
-            ack(state, id, row.next_index - 1).await?;
+            // Anything but an accepted ack (a 429, a conflict) backs off first.
+            if !ack(state, id, row.next_index - 1).await? && waiter.wait(false).await {
+                return pause(state, id, sink).await;
+            }
             continue;
         }
         if row.final_index.is_some() {

@@ -450,19 +450,34 @@ pub async fn request_history_transfer(
         req: b64(&req_bytes),
         req_sig: b64(&sig),
     };
-    let outcome = ds(state, &body).await;
-    let failure = match outcome {
-        Ok(Ds::Ok(_)) => None,
-        Ok(Ds::NotFound) => Some((store::State::Expired, "That device is no longer available.".to_string())),
-        Ok(Ds::TooMany) => Some((store::State::Failed, "Too many requests — try again later.".to_string())),
-        Ok(Ds::Conflict(t)) => Some((store::State::Failed, format!("The request was refused: {t}"))),
-        Err(e) => Some((store::State::Failed, e.to_string())),
-    };
-    if let Some((ended, why)) = failure {
-        with_db(state, |c| store::end(c, &transfer_id, ended, Some(&why))).await?;
-        return Err(err(&why));
+    // Only a DS that ANSWERED with a refusal ends the request here. A lost
+    // answer (transport error, 5xx, 429) may hide a request that landed: the
+    // row stays open, the next run reads the DS's status and either carries on
+    // or learns it never landed (404 → expired), exactly as after a crash.
+    match ds(state, &body).await {
+        Ok(Ds::Ok(_)) => snapshot(state, &transfer_id).await,
+        Ok(Ds::NotFound) => {
+            end_and_tell_ds(state, &transfer_id, store::State::Expired, "That device is no longer available.").await?;
+            Err(err("That device is no longer available."))
+        }
+        Ok(Ds::Conflict(t)) => {
+            end_and_tell_ds(state, &transfer_id, store::State::Failed, &format!("The request was refused: {t}")).await?;
+            Err(err("The request was refused."))
+        }
+        Ok(Ds::TooMany) => Err(err("Too many requests — try again in a while.")),
+        Err(e) => Err(e),
     }
-    snapshot(state, &transfer_id).await
+}
+
+/// End a transfer locally that may exist on the DS, and ask the DS to drop it
+/// too (best effort: a 404 or a lost answer changes nothing here).
+async fn end_and_tell_ds(state: &Arc<AppState>, transfer_id: &str, to: store::State, why: &str) -> Result<()> {
+    with_db(state, |c| store::end(c, transfer_id, to, Some(why))).await?;
+    if let Err(e) = ds(state, &pollis_api::history_transfer::CancelTransferBody { transfer_id: transfer_id.to_string() }).await {
+        crate::diag!("[history-transfer] {transfer_id}: DS not told of the end ({e})");
+    }
+    engine::notify_progress();
+    Ok(())
 }
 
 /// A request read from the DS, fully verified.
@@ -632,15 +647,22 @@ pub async fn approve_history_transfer(
         acc: b64(&acc_bytes),
         acc_sig: b64(&acc_sig),
     };
-    let ended = match ds(state, &body).await {
-        Ok(Ds::Ok(_)) => None,
-        Ok(Ds::NotFound) => Some((store::State::Expired, "This request expired.".to_string())),
-        Ok(Ds::Conflict(_)) | Ok(Ds::TooMany) => Some((store::State::Failed, "The request can no longer be approved.".to_string())),
-        Err(e) => Some((store::State::Failed, e.to_string())),
-    };
-    if let Some((s, why)) = ended {
-        with_db(state, |c| store::end(c, &transfer_id, s, Some(&why))).await?;
-        return Err(err(&why));
+    // As for a request: only an answered refusal ends it. A lost answer keeps
+    // the row transferring; the source's run finds the DS still at `requested`
+    // and sends the (idempotent) acceptance again.
+    match ds(state, &body).await {
+        Ok(Ds::Ok(_)) => {}
+        Ok(Ds::NotFound) => {
+            end_and_tell_ds(state, &transfer_id, store::State::Expired, "This request expired.").await?;
+            return Err(err("This request expired."));
+        }
+        Ok(Ds::Conflict(_)) => {
+            let why = "The request can no longer be approved.";
+            end_and_tell_ds(state, &transfer_id, store::State::Failed, why).await?;
+            return Err(err(why));
+        }
+        Ok(Ds::TooMany) => return Err(err("Too many requests — the copy will start when Pollis can reach the server.")),
+        Err(e) => return Err(e),
     }
     let ev = pollis_api::account::SecurityEventBody {
         kind: "history_transfer_approved".to_string(),

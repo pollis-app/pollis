@@ -116,6 +116,10 @@ pub(crate) enum DsFault {
     WatermarkTimesOut,
     /// #1735: one device-list read fails with a 503 (a transient DS error).
     DevicesReadUnavailable,
+    /// #1735: a history-transfer request lands, then its answer is lost (504).
+    TransferRequestLandsThenTimesOut,
+    /// #1735: a history-transfer acceptance lands, then its answer is lost (504).
+    TransferAcceptLandsThenTimesOut,
 }
 
 impl DsFault {
@@ -467,6 +471,24 @@ async fn inject_message_fault(
         Some(DsFault::WatermarkTimesOut) if path == pollis_api::messages::WatermarkBody::PATH => {
             take_ds_fault();
             timeout()
+        }
+        Some(DsFault::TransferRequestLandsThenTimesOut)
+            if path == pollis_api::history_transfer::RequestTransferBody::PATH =>
+        {
+            let resp = next.run(req).await;
+            if resp.status().is_success() && take_ds_fault().is_some() {
+                return timeout();
+            }
+            resp
+        }
+        Some(DsFault::TransferAcceptLandsThenTimesOut)
+            if path == pollis_api::history_transfer::AcceptTransferBody::PATH =>
+        {
+            let resp = next.run(req).await;
+            if resp.status().is_success() && take_ds_fault().is_some() {
+                return timeout();
+            }
+            resp
         }
         Some(DsFault::DevicesReadUnavailable) if path == pollis_api::account_reads::DevicesBody::PATH => {
             take_ds_fault();

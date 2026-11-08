@@ -986,3 +986,57 @@ async fn a_conversation_not_joined_yet_is_reported_deferred() {
     assert_eq!(d.deferred_conversations, 0, "{d:?}");
     assert_eq!(rows(&phone, &[&late_ch]).await, rows(&desk, &[&late_ch]).await);
 }
+
+
+/// A request and an acceptance that LAND on the DS but whose answers are lost
+/// leave both rows open (never `failed` with the key wiped while the DS keeps
+/// the transfer): the next runs carry them to the end (review M-A).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn lost_answers_to_a_request_and_an_acceptance_still_complete() {
+    use crate::harness::{arm_ds_fault, DsFault};
+    let (desk, _bob, channel, dm, _) = desk_with_history().await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+
+    arm_ds_fault(DsFault::TransferRequestLandsThenTimesOut);
+    let src = device_id(&desk).await;
+    let r = phone.invoke_try("request_history_transfer", json!({ "sourceDeviceId": src, "via": "sibling" })).await;
+    assert!(r.is_err(), "the answer was lost: {r:?}");
+    let mine = ht::list_history_transfers(&phone.state).await.unwrap();
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].state, "awaiting_approval", "kept open, key intact");
+    let id = mine[0].transfer_id.clone();
+    assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM history_transfer_local WHERE kem_sk IS NOT NULL").await, 1);
+    // It did land: the source sees it.
+    assert_eq!(pending(&desk).await.len(), 1);
+
+    arm_ds_fault(DsFault::TransferAcceptLandsThenTimesOut);
+    assert!(approve(&desk, &id, Some(TEST_PIN)).await.is_err(), "the answer was lost");
+    let theirs = ht::list_history_transfers(&desk.state).await.unwrap();
+    assert_eq!(theirs[0].state, "transferring", "kept open, key intact");
+    assert_eq!(scalar(&desk, "SELECT COUNT(*) FROM history_transfer_local WHERE transfer_key IS NOT NULL").await, 1);
+
+    let (s, d) = run_both(&desk, &phone, &id).await;
+    assert_eq!(d.unwrap().state, "completed");
+    assert_eq!(s.unwrap().state, "completed");
+    assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
+}
+
+/// A request whose answer never came AND never landed: the row stays open, and
+/// the next request (or run) learns from the DS that it does not exist.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_request_that_never_landed_does_not_block_the_next() {
+    let (desk, _bob, channel, dm, _) = desk_with_history().await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    let t = request(&phone, &desk, "sibling").await.unwrap();
+    // The DS forgets it (as if it never landed).
+    writable_remote().await.conn().await.unwrap()
+        .execute("DELETE FROM history_transfer WHERE transfer_id = ?1", libsql::params![t.transfer_id.clone()])
+        .await
+        .unwrap();
+    let t2 = request(&phone, &desk, "sibling").await.expect("a new request is not refused");
+    assert_ne!(t2.transfer_id, t.transfer_id);
+    let old = ht::list_history_transfers(&phone.state).await.unwrap().into_iter().find(|x| x.transfer_id == t.transfer_id).unwrap();
+    assert_eq!(old.state, "expired");
+}
