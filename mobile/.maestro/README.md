@@ -290,7 +290,18 @@ phone approves its code), asks for the phone's history, and
 `3-source-approves.yaml` must see the approval page open on its own, take the
 PIN and show the send to its end; the peer reports every seeded row received.
 `4-security-shows-events.yaml` finds "Message history shared" in Security and
-opens the device picker. Every other new-device flow says "Not now" to the
+opens the device picker. `5-qr-link-inline.yaml`: a signed-out peer (`enroll_peer
+offer - --transfer-receiver --transfer-via link`) shows its code, the phone
+scans it (typed in) and confirms with its PIN, and the new device's request must
+appear INLINE on the "Linked" page as one tap with no keypad, then send to its
+end. `6-receiver-kill-resume.yaml`: a fresh account seeded with `BIG` (3000)
+messages padded to `BIG_PAD` (4000) bytes, so the copy spans ~25 chunks; the
+source peer runs through `scripts/slow-proxy.py`, switched on only once the copy
+starts, so the kill cannot miss. Once at least one chunk has landed the app is
+killed (`killApp`) and relaunched; after the PIN the copy must resume by itself
+to exactly "Copied 3000 messages." with the newest message shown once and
+nothing undecryptable. `ONLY_KILL=1` runs that step alone, `SKIP_KILL=1` skips
+it, `KEEP_WORK=1` keeps the peers' logs. Every other new-device flow says "Not now" to the
 offer (`subflows/skip-history-offer.yaml`). Until the dev DS carries the #1735 routes it
 answers 404 to them; run it against a local DS instead (a `sqld` stamped with
 `pollis-schema`'s scripts, `pollis-delivery` with Doppler `dev_personal` plus

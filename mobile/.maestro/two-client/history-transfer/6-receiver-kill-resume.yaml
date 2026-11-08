@@ -1,0 +1,88 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# HISTORY TRANSFER (#1735), part 6 — a kill mid-copy. A fresh account's first
+# device (the peer) holds ${SEEDED} padded messages, so the copy spans many
+# chunks. The phone, its new device, starts copying; once rows are arriving the
+# app is killed and relaunched. After the PIN the copy must resume by itself and
+# end at exactly ${SEEDED} messages (a re-applied chunk would count twice), the
+# newest message shown once, nothing undecryptable.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 60000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-history-offer"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "Copy your message history from .*"
+    timeout: 30000
+- tapOn:
+    id: "btn-history-offer-copy"
+# Rows arriving: kill now. If the copy is already over, this wait fails rather
+# than passing a kill that never happened mid-transfer.
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-transferring"
+    timeout: 120000
+# At least one chunk imported, so the kill lands between chunks, not before the first.
+- extendedWaitUntil:
+    visible: "[1-9][0-9]* messages? copied.*"
+    timeout: 120000
+- takeScreenshot: history-transfer-10-before-kill
+- killApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 30000
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-self"
+    timeout: 60000
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- extendedWaitUntil:
+    visible:
+      id: "row-copy-history"
+    timeout: 30000
+- tapOn:
+    id: "row-copy-history"
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-done"
+    timeout: 600000
+- assertVisible: "Copied ${SEEDED} messages\\."
+- takeScreenshot: history-transfer-11-resumed-done
+- tapOn:
+    id: "btn-history-done"
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: ".*history-seed-${SEEDED} .*"
+    timeout: 60000
+- assertNotVisible:
+    text: ".*history-seed-${SEEDED} .*"
+    index: 1
+- takeScreenshot: history-transfer-12-history-after-kill
+- runFlow: ../../subflows/assert-no-loss.yaml

@@ -5,8 +5,9 @@ tags:
 # HISTORY TRANSFER (#1735), part 4 — Security lists the approval among the events
 # and offers "Copy message history" with both of the account's other devices.
 # Back out of #General to the tabs first.
-- runFlow:
-    when:
+- repeat:
+    times: 4
+    while:
       notVisible:
         id: "tab-self"
     commands:
@@ -40,6 +41,10 @@ tags:
     visible:
       id: "screen-history-transfer"
     timeout: 15000
+# The page leads with the copy part 1 finished (its outcome stays until Done).
+- assertVisible: "Copied [0-9]+ messages\\."
+- tapOn:
+    id: "btn-history-done"
 - extendedWaitUntil:
     visible:
       id: "history-transfer-sources"

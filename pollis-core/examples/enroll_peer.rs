@@ -14,8 +14,11 @@
 //! - `--transfer-source` (approver) — after approving the phone, approve the first history
 //!   request that arrives (with the peer's PIN when it is required) and send it to the end
 //!   (`PEER_TRANSFER_APPROVED=<id>`, `PEER_TRANSFER_DONE=<state> rows=<n>`).
-//! - `--transfer-receiver` (new) — once enrolled, ask the device that approved this one for its
-//!   history and receive it to the end (`PEER_TRANSFER_REQUESTED=<id>`, `PEER_TRANSFER_DONE=…`).
+//! - `--transfer-receiver` (new, offer) — once enrolled, ask the device that approved this one for
+//!   its history and receive it to the end (`PEER_TRANSFER_REQUESTED=<id>`, `PEER_TRANSFER_DONE=…`).
+//! - `--transfer-via link|sibling` — the request's `via` (default `sibling`; `link` lets a device that
+//!   just linked this one by QR approve with one tap).
+//! - `--seed-pad BYTES` — pad each seeded message to about BYTES, so the copy spans many chunks.
 //!
 //! Built with `--no-default-features` so it never raises macOS Keychain prompts.
 //!
@@ -41,6 +44,8 @@ const PEER_PIN: &str = "0000";
 #[derive(Default)]
 struct Opts {
     seed: u32,
+    pad: usize,
+    via: Option<String>,
     transfer_source: bool,
     transfer_receiver: bool,
 }
@@ -58,6 +63,16 @@ async fn main() -> Result<()> {
             }
             "--transfer-source" => opts.transfer_source = true,
             "--transfer-receiver" => opts.transfer_receiver = true,
+            "--transfer-via" => {
+                let via = args.next().context("--transfer-via link|sibling")?;
+                if via != "link" && via != "sibling" {
+                    bail!("--transfer-via link|sibling");
+                }
+                opts.via = Some(via);
+            }
+            "--seed-pad" => {
+                opts.pad = args.next().context("--seed-pad BYTES")?.parse().context("--seed-pad BYTES")?;
+            }
             other => bail!("unknown flag {other:?}"),
         }
     }
@@ -71,7 +86,11 @@ async fn main() -> Result<()> {
 
     // A new desktop at "Sign in with another device": no email at all.
     if mode == "offer" {
-        return offering_device(&state).await;
+        offering_device(&state).await?;
+        if opts.transfer_receiver {
+            transfer_receiver(&state, &opts).await?;
+        }
+        return Ok(());
     }
     auth::request_otp(&state, email.clone()).await?;
     let me = auth::verify_otp(&state, email, otp).await?;
@@ -79,7 +98,7 @@ async fn main() -> Result<()> {
         "new" => {
             new_device(&state, &me.id, me.enrollment_required).await?;
             if opts.transfer_receiver {
-                transfer_receiver(&state).await?;
+                transfer_receiver(&state, &opts).await?;
             }
             Ok(())
         }
@@ -178,7 +197,7 @@ async fn approver(
     auth::initialize_identity(state, user_id.to_string()).await?;
     println!("PEER_SIGNED_UP");
     if opts.seed > 0 {
-        seed_history(state, user_id, username, opts.seed).await?;
+        seed_history(state, user_id, username, opts.seed, opts.pad).await?;
     }
 
     let code_file = std::env::var("POLLIS_PEER_CODE_FILE")
@@ -216,7 +235,9 @@ async fn approver(
 }
 
 /// `--seed-history N`: a group whose messages predate the phone, so only a transfer can bring them.
-async fn seed_history(state: &Arc<AppState>, user_id: &str, username: &str, n: u32) -> Result<()> {
+async fn seed_history(state: &Arc<AppState>, user_id: &str, username: &str, n: u32, pad: usize) -> Result<()> {
+    // Words, not one long token, so a padded row still wraps like a message.
+    let filler: String = "lorem ipsum dolor sit amet ".chars().cycle().take(pad).collect();
     let group = groups::create_group(
         "History Test Group".into(),
         None,
@@ -237,7 +258,7 @@ async fn seed_history(state: &Arc<AppState>, user_id: &str, username: &str, n: u
         messages::send_message(
             channel.id.clone(),
             user_id.to_string(),
-            format!("history-seed-{i:02}"),
+            if pad > 0 { format!("history-seed-{i:02} {filler}") } else { format!("history-seed-{i:02}") },
             None,
             None,
             Some(username.to_string()),
@@ -294,7 +315,7 @@ async fn transfer_source(state: &Arc<AppState>) -> Result<()> {
 }
 
 /// `--transfer-receiver`: ask the device that approved this one (else the first listed) and receive.
-async fn transfer_receiver(state: &Arc<AppState>) -> Result<()> {
+async fn transfer_receiver(state: &Arc<AppState>, opts: &Opts) -> Result<()> {
     let sources = history_transfer::list_history_transfer_sources(state).await?;
     let source = sources
         .iter()
@@ -302,7 +323,12 @@ async fn transfer_receiver(state: &Arc<AppState>) -> Result<()> {
         .or_else(|| sources.first())
         .context("no other device to copy history from")?;
     let transfer =
-        history_transfer::request_history_transfer(state, source.device_id.clone(), "sibling".into()).await?;
+        history_transfer::request_history_transfer(
+            state,
+            source.device_id.clone(),
+            opts.via.clone().unwrap_or_else(|| "sibling".into()),
+        )
+        .await?;
     println!("PEER_TRANSFER_REQUESTED={}", transfer.transfer_id);
     drive(state, transfer.transfer_id).await
 }
