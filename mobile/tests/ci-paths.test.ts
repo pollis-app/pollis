@@ -101,7 +101,7 @@ test("the files the native fingerprint hashes run android-build; JS alone does n
 test("every top-level mobile/ entry is classified as native, JS or non-shipping", () => {
   // JS the Metro export covers, or files no build reads.
   const js = new Set(["app", "components", "hooks", "lib", "stores", "theme", "i18n", "types", "index.ts", "metro.config.js", "tsconfig.json"]);
-  const nonShipping = new Set(["tests", "scripts", ".maestro", "CLAUDE.md", "TEST-PLAN.md", ".env.example", "android-env.sh", "ios-sim.log", "store", "modules"]);
+  const nonShipping = new Set(["tests", "scripts", ".maestro", "CLAUDE.md", "TEST-PLAN.md", ".env.example", "android-env.sh", "ios-sim.log", "store", "modules", "knip.jsonc"]);
   for (const entry of readdirSync(mobile)) {
     if (["node_modules", "android", "ios", ".expo", "dist", "build", ".env", ".env.development"].includes(entry) || entry.startsWith(".env")) {
       continue;
