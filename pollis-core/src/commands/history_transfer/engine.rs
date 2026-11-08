@@ -511,9 +511,13 @@ async fn put(state: &Arc<AppState>, id: &str, idx: u32, sealed: &[u8]) -> Result
     };
     Ok(match ds(state, &body).await? {
         Ds::Ok(r) => Put::Stored(r.acked_through),
-        Ds::Conflict(t) if t.contains("window_full") => Put::WindowFull,
-        Ds::Conflict(t) => Put::Refused(t),
-        Ds::TooMany => Put::WindowFull,
+        // The one answer that proves the stream is broken: the DS holds other
+        // bytes at this index. The source must not go on.
+        Ds::Conflict(t) if t.contains("different bytes") => Put::Refused(t),
+        // Anything else (window full, "not contiguous" after a race, "not
+        // transferring" while an end propagates, a 429) is a reason to back off
+        // and re-read the status, never to abort: the next status read settles it.
+        Ds::Conflict(_) | Ds::TooMany => Put::WindowFull,
         Ds::NotFound => Put::Gone,
     })
 }
@@ -605,9 +609,13 @@ async fn run_source(
         let have = st.stored_through.max(st.acked_through);
         let stored = with_db(state, |c| store::outgoing(c, id)).await?;
         let mut blocked = false;
+        // The freshest ack seen this round: a re-put answers with it, and it
+        // can be ahead of the status read (the receiver kept going meanwhile).
+        let mut seen_acked = st.acked_through;
         for (idx, sealed) in stored.iter().filter(|(i, _)| *i as i64 > have) {
             match put(state, id, *idx, sealed).await? {
                 Put::Stored(acked) => {
+                    seen_acked = seen_acked.max(acked);
                     with_db(state, |c| store::note_acked(c, id, acked)).await?;
                     progressed = true;
                 }
@@ -622,9 +630,20 @@ async fn run_source(
         // An index below next_index that is neither stored here nor held by
         // the DS can never be re-sealed (A3): the stream is broken.
         let stored_now = with_db(state, |c| store::outgoing(c, id)).await?;
-        let highest_known = stored_now.last().map(|(i, _)| *i as i64).unwrap_or(-1).max(have);
+        let highest_known = stored_now.last().map(|(i, _)| *i as i64).unwrap_or(-1).max(have).max(seen_acked);
         if !blocked && (row.next_index as i64) - 1 > highest_known {
-            return fail(state, id, "a sealed chunk was lost before upload", sink).await;
+            // Before calling the stream broken, look again: the status read
+            // above is a moment old. Only a gap that a fresh read confirms —
+            // not acknowledged, not on the DS, not stored here — is real.
+            let fresh = match ds(state, &pollis_api::history_transfer::TransferStatusBody { transfer_id: id.to_string() }).await? {
+                Ds::Ok(f) => f.acked_through.max(f.stored_through),
+                _ => i64::MAX,
+            };
+            let local = with_db(state, |c| store::outgoing(c, id)).await?.last().map(|(i, _)| *i as i64).unwrap_or(-1);
+            if (row.next_index as i64) - 1 > fresh.max(local) {
+                return fail(state, id, "a sealed chunk was lost before upload", sink).await;
+            }
+            continue;
         }
         let row = load(state, id).await?;
         if !blocked && row.final_index.is_none() && (row.next_index as i64) <= st.acked_through + WINDOW {
