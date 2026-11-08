@@ -1,0 +1,5 @@
+New
+• Copy your message history to a new device, or between any two of your devices. You approve it on the device you copy from.
+
+Fixes
+• An edit or deletion that arrives before its message is no longer lost.
