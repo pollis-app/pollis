@@ -1,5 +1,7 @@
 // Dead-code scan for the mobile app (advisory, see .github/workflows/dead-code.yml).
-// Run: cd mobile && pnpm dlx knip@6.44.1   (mobile is outside the root workspace)
+// Run: cd mobile && pnpm dlx knip@6.44.1 --config ../scripts/knip-mobile.jsonc
+// Lives in scripts/, not mobile/: any new file under mobile/ is classified by mobile-core-check.yml
+// and tests/ci-paths.test.ts, and would trigger the Android bundle job for a config file.
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [

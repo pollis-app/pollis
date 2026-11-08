@@ -90,7 +90,7 @@ jobs:
           {
             echo '### Knip: mobile'
             echo '```'
-            pnpm dlx knip@6.44.1 || true
+            pnpm dlx knip@6.44.1 --config ../scripts/knip-mobile.jsonc || true
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
