@@ -135,7 +135,7 @@ pub(crate) fn record(
     // runs only when its cap is actually exceeded.
     let (count, edit_bytes): (i64, i64) = conn
         .prepare_cached(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN kind = 'edit' THEN length(content) END), 0)
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN kind = 'edit' THEN length(CAST(content AS BLOB)) END), 0)
              FROM pending_message_change WHERE conversation_id = ?1",
         )
         .and_then(|mut st| st.query_row(rusqlite::params![conversation_id], |r| Ok((r.get(0)?, r.get(1)?))))
@@ -153,7 +153,7 @@ pub(crate) fn record(
             "DELETE FROM pending_message_change WHERE envelope_id IN (
                  SELECT envelope_id FROM (
                      SELECT envelope_id,
-                            SUM(length(content)) OVER (
+                            SUM(length(CAST(content AS BLOB))) OVER (
                                 ORDER BY recorded_at DESC, seq DESC, envelope_id DESC
                                 ROWS UNBOUNDED PRECEDING) AS kept
                      FROM pending_message_change WHERE conversation_id = ?1 AND kind = 'edit')
@@ -419,6 +419,21 @@ mod tests {
         assert!(bytes <= MAX_EDIT_BYTES_PER_CONVERSATION, "{bytes}");
         assert_eq!(tombs, 1, "the delete survives the byte cap");
         assert_eq!(n, 1 + MAX_EDIT_BYTES_PER_CONVERSATION / (200 * 1024));
+    }
+
+    #[test]
+    fn the_byte_cap_counts_bytes_not_characters() {
+        let conn = db();
+        // 4-byte characters: 64 K chars = 256 KiB.
+        let wide = "😀".repeat(64 * 1024);
+        for i in 0..40u64 {
+            record(&conn, &ulid_at(3_000 + i), &ulid_at(2_000 + i), "w", &Change::Edit { actor: format!("a{i}"), content: wide.clone() }, 10 + i as i64);
+        }
+        let bytes: i64 = conn
+            .query_row("SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) FROM pending_message_change WHERE conversation_id = 'w'", [], |r| r.get(0))
+            .unwrap();
+        assert!(bytes <= MAX_EDIT_BYTES_PER_CONVERSATION, "{bytes}");
+        assert!(bytes > 0);
     }
 
     #[test]
