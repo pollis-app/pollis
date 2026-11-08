@@ -81,6 +81,9 @@ pub const MAX_OPEN_PER_ACCOUNT: i64 = 4;
 #[derive(Debug)]
 pub enum Outcome<T> {
     Ok(T),
+    /// Success that changed nothing (a repeat of a call that already took
+    /// effect): answered like `Ok`, but nobody is nudged.
+    Unchanged(T),
     /// Unknown, expired, another account's, or this device is not the party
     /// the call needs. One answer for all of them.
     NotFound,
@@ -97,7 +100,7 @@ pub enum Outcome<T> {
 
 fn respond<B: pollis_api::DsRequest>(outcome: Outcome<B::Response>) -> Response {
     match outcome {
-        Outcome::Ok(body) => ok_response::<B>(body),
+        Outcome::Ok(body) | Outcome::Unchanged(body) => ok_response::<B>(body),
         Outcome::NotFound => {
             (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not found" }))).into_response()
         }
@@ -579,7 +582,7 @@ pub async fn apply_accept(
         // re-signed — ML-DSA signatures are randomized): a no-op, the stored
         // signature stands.
         TransferState::Accepted if row.acc.as_deref() == Some(acc.as_slice()) => {
-            Ok(Outcome::Ok(AcceptTransferResponse { expires_at: row.expires_at }))
+            Ok(Outcome::Unchanged(AcceptTransferResponse { expires_at: row.expires_at }))
         }
         _ => Ok(Outcome::Conflict("not awaiting approval")),
     }
@@ -620,7 +623,7 @@ pub async fn apply_decline(
             }
             Ok(Outcome::Conflict("not awaiting approval"))
         }
-        TransferState::Declined => Ok(Outcome::Ok(pollis_api::StatusOk::Ok)),
+        TransferState::Declined => Ok(Outcome::Unchanged(pollis_api::StatusOk::Ok)),
         _ => Ok(Outcome::Conflict("not awaiting approval")),
     }
 }
@@ -650,17 +653,19 @@ pub async fn apply_cancel(
     let Some(row) = load_for(conn, &body.transfer_id, user, device, now).await? else {
         return Ok(Outcome::NotFound);
     };
-    if row.state.is_open() {
-        end_transfer(
+    if row.state.is_open()
+        && end_transfer(
             conn,
             &row.transfer_id,
             &[TransferState::Requested, TransferState::Accepted],
             TransferState::Cancelled,
             now,
         )
-        .await?;
+        .await?
+    {
+        return Ok(Outcome::Ok(pollis_api::StatusOk::Ok));
     }
-    Ok(Outcome::Ok(pollis_api::StatusOk::Ok))
+    Ok(Outcome::Unchanged(pollis_api::StatusOk::Ok))
 }
 
 pub async fn complete(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
@@ -699,7 +704,7 @@ pub async fn apply_complete(
             }
             Ok(Outcome::Conflict("not transferring"))
         }
-        TransferState::Completed => Ok(Outcome::Ok(pollis_api::StatusOk::Ok)),
+        TransferState::Completed => Ok(Outcome::Unchanged(pollis_api::StatusOk::Ok)),
         _ => Ok(Outcome::Conflict("not transferring")),
     }
 }
@@ -732,6 +737,25 @@ pub async fn apply_put_chunk(
     body: &PutChunkBody,
     now: i64,
 ) -> anyhow::Result<Outcome<PutChunkResponse>> {
+    apply_put_chunk_interleaved(conn, user, device, body, now, || async {}).await
+}
+
+/// [`apply_put_chunk`] with `between` run after the transfer is read and before
+/// the chunk is inserted — the window a concurrent ack can land in. Tests use
+/// it to force that interleaving deterministically.
+#[doc(hidden)]
+pub async fn apply_put_chunk_interleaved<F, Fut>(
+    conn: &Connection,
+    user: &str,
+    device: &str,
+    body: &PutChunkBody,
+    now: i64,
+    between: F,
+) -> anyhow::Result<Outcome<PutChunkResponse>>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
     if body.idx < 0 || body.idx > u32::MAX as i64 {
         return Ok(Outcome::Invalid("idx out of range"));
     }
@@ -751,8 +775,9 @@ pub async fn apply_put_chunk(
         return Ok(Outcome::Conflict("not transferring"));
     }
     if body.idx <= row.acked_through {
-        return Ok(Outcome::Ok(PutChunkResponse { acked_through: row.acked_through }));
+        return Ok(Outcome::Unchanged(PutChunkResponse { acked_through: row.acked_through }));
     }
+    between().await;
     let existing: Option<Vec<u8>> = {
         let mut r = conn
             .query(
@@ -767,7 +792,7 @@ pub async fn apply_put_chunk(
     };
     if let Some(existing) = existing {
         if existing == sealed {
-            return Ok(Outcome::Ok(PutChunkResponse { acked_through: row.acked_through }));
+            return Ok(Outcome::Unchanged(PutChunkResponse { acked_through: row.acked_through }));
         }
         return Ok(Outcome::Conflict("chunk index holds different bytes"));
     }
@@ -797,7 +822,7 @@ pub async fn apply_put_chunk(
             return Ok(Outcome::NotFound);
         };
         if body.idx <= again.acked_through {
-            return Ok(Outcome::Ok(PutChunkResponse { acked_through: again.acked_through }));
+            return Ok(Outcome::Unchanged(PutChunkResponse { acked_through: again.acked_through }));
         }
         let mut r = conn
             .query(
@@ -807,7 +832,7 @@ pub async fn apply_put_chunk(
             .await?;
         if let Some(existing) = r.next().await? {
             if existing.get::<Vec<u8>>(0)? == sealed {
-                return Ok(Outcome::Ok(PutChunkResponse { acked_through: again.acked_through }));
+                return Ok(Outcome::Unchanged(PutChunkResponse { acked_through: again.acked_through }));
             }
             return Ok(Outcome::Conflict("chunk index holds different bytes"));
         }
@@ -898,7 +923,7 @@ pub async fn apply_ack_chunk(
         return Ok(Outcome::Conflict("not transferring"));
     }
     if body.idx <= row.acked_through {
-        return Ok(Outcome::Ok(AckChunkResponse { acked_through: row.acked_through }));
+        return Ok(Outcome::Unchanged(AckChunkResponse { acked_through: row.acked_through }));
     }
     if body.idx != row.acked_through + 1 {
         return Ok(Outcome::Conflict("ack out of order"));

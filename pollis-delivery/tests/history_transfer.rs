@@ -766,3 +766,61 @@ async fn concurrent_ends_settle_on_one_state() {
         }
     }
 }
+
+
+/// Deterministic: the receiver's ack of chunk k lands exactly between the DS
+/// reading the transfer for a re-put of k and inserting it. The re-put must be
+/// answered with the ack, not a conflict (a 409 would make the source abort a
+/// healthy transfer).
+#[tokio::test]
+async fn a_re_put_whose_ack_lands_mid_request_is_answered_with_the_ack() {
+    use pollis_api::history_transfer::{AckChunkBody, PutChunkBody};
+    let w = world().await;
+    let id = accepted(&w, "MID").await;
+    let conn = w.db.conn().await.unwrap();
+    let now = pollis_delivery::util::now_unix() as i64;
+    let put = PutChunkBody { transfer_id: id.clone(), idx: 0, sealed: b64(b"zero") };
+    assert!(matches!(ht::apply_put_chunk(&conn, "alice", "alice-src", &put, now).await.unwrap(), Outcome::Ok(_)));
+    let ack_conn = w.db.conn().await.unwrap();
+    let ack = AckChunkBody { transfer_id: id.clone(), idx: 0 };
+    let out = ht::apply_put_chunk_interleaved(&conn, "alice", "alice-src", &put, now, || async {
+        let acked = ht::apply_ack_chunk(&ack_conn, "alice", "alice-dst", &ack, now).await.unwrap();
+        assert!(matches!(acked, Outcome::Ok(_)), "{acked:?}");
+    })
+    .await
+    .unwrap();
+    assert!(matches!(out, Outcome::Unchanged(ref r) if r.acked_through == 0), "{out:?}");
+    assert_eq!(count(&w.db, "SELECT COUNT(*) FROM history_transfer_chunk", ()).await, 0);
+}
+
+
+/// A repeat of a call that already took effect succeeds but changes nothing,
+/// so the handler nudges nobody (`Outcome::Unchanged`).
+#[tokio::test]
+async fn repeated_calls_are_unchanged_and_nudge_nobody() {
+    use pollis_api::history_transfer::*;
+    let w = world().await;
+    let conn = w.db.conn().await.unwrap();
+    let now = pollis_delivery::util::now_unix() as i64;
+    assert!(matches!(ht::apply_request(&conn, "alice", "alice-dst", &body_for("U1", &w.src), now).await.unwrap(), Outcome::Ok(_)));
+    let acc = AcceptTransferBody { transfer_id: "U1".into(), acc: b64(b"a"), acc_sig: b64(b"s") };
+    assert!(matches!(ht::apply_accept(&conn, "alice", "alice-src", &acc, now).await.unwrap(), Outcome::Ok(_)));
+    let acc2 = AcceptTransferBody { acc_sig: b64(b"re-signed"), ..acc.clone() };
+    assert!(matches!(ht::apply_accept(&conn, "alice", "alice-src", &acc2, now).await.unwrap(), Outcome::Unchanged(_)));
+    let put = PutChunkBody { transfer_id: "U1".into(), idx: 0, sealed: b64(b"x") };
+    assert!(matches!(ht::apply_put_chunk(&conn, "alice", "alice-src", &put, now).await.unwrap(), Outcome::Ok(_)));
+    assert!(matches!(ht::apply_put_chunk(&conn, "alice", "alice-src", &put, now).await.unwrap(), Outcome::Unchanged(_)));
+    let ack = AckChunkBody { transfer_id: "U1".into(), idx: 0 };
+    assert!(matches!(ht::apply_ack_chunk(&conn, "alice", "alice-dst", &ack, now).await.unwrap(), Outcome::Ok(_)));
+    assert!(matches!(ht::apply_ack_chunk(&conn, "alice", "alice-dst", &ack, now).await.unwrap(), Outcome::Unchanged(_)));
+    let done = CompleteTransferBody { transfer_id: "U1".into() };
+    assert!(matches!(ht::apply_complete(&conn, "alice", "alice-dst", &done, now).await.unwrap(), Outcome::Ok(_)));
+    assert!(matches!(ht::apply_complete(&conn, "alice", "alice-dst", &done, now).await.unwrap(), Outcome::Unchanged(_)));
+    let cancel = CancelTransferBody { transfer_id: "U1".into() };
+    assert!(matches!(ht::apply_cancel(&conn, "alice", "alice-dst", &cancel, now).await.unwrap(), Outcome::Unchanged(_)));
+
+    assert!(matches!(ht::apply_request(&conn, "alice", "alice-dst", &body_for("U2", &w.src), now).await.unwrap(), Outcome::Ok(_)));
+    let dec = DeclineTransferBody { transfer_id: "U2".into() };
+    assert!(matches!(ht::apply_decline(&conn, "alice", "alice-src", &dec, now).await.unwrap(), Outcome::Ok(_)));
+    assert!(matches!(ht::apply_decline(&conn, "alice", "alice-src", &dec, now).await.unwrap(), Outcome::Unchanged(_)));
+}
