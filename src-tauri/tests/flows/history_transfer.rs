@@ -1131,3 +1131,40 @@ async fn ingest_heals_a_placeholder_and_applies_what_waited_for_it() {
     assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM pending_message_change").await, 0);
     assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM message WHERE content IS NOT NULL AND deleted_at IS NOT NULL").await, 0);
 }
+
+/// The source reports `completed` for a transfer the DS no longer knows only if
+/// it saw the receiver acknowledge the final chunk; otherwise `expired`.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_source_claims_completed_only_after_seeing_the_final_ack() {
+    let (desk, _bob, channel, dm, _) = desk_with_history().await;
+    // 0: saw nothing acked; 1: saw every chunk but the final acked; 2: saw the final ack.
+    for seen in [0, 1, 2] {
+        let saw_final_ack = seen == 2;
+        let phone = new_sibling(&desk, &channel, &dm).await;
+        let t = request(&phone, &desk, "sibling").await.unwrap();
+        approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
+        // The source seals and uploads everything, then pauses; the receiver
+        // then finishes on its own while the source is away.
+        assert_eq!(run(&desk, &t.transfer_id).await.unwrap().state, "paused");
+        assert_eq!(run(&phone, &t.transfer_id).await.unwrap().state, "completed");
+        let final_index = scalar(&desk, &format!("SELECT final_index FROM history_transfer_local WHERE transfer_id = '{}'", t.transfer_id)).await;
+        if seen > 0 {
+            // As if it had read those acks and was killed before recording the end.
+            exec(&desk, &format!(
+                "UPDATE history_transfer_local SET chunks_done = {} WHERE transfer_id = '{}'",
+                final_index + seen - 1,
+                t.transfer_id
+            ))
+            .await;
+        }
+        // The DS forgot it (its completed record aged out).
+        writable_remote().await.conn().await.unwrap()
+            .execute("DELETE FROM history_transfer WHERE transfer_id = ?1", libsql::params![t.transfer_id.clone()])
+            .await
+            .unwrap();
+        let s = run(&desk, &t.transfer_id).await.unwrap();
+        let want = if saw_final_ack { "completed" } else { "expired" };
+        assert_eq!(s.state, want, "seen={seen}: {s:?}");
+    }
+}

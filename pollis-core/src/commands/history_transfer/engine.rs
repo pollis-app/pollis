@@ -536,10 +536,11 @@ async fn run_source(
         let st = match ds(state, &pollis_api::history_transfer::TransferStatusBody { transfer_id: id.to_string() }).await? {
             Ds::Ok(s) => s,
             Ds::NotFound => {
-                // Gone from the DS after the final chunk was uploaded and every
-                // earlier one acknowledged: the receiver finished (its completed
-                // record outlived) — report it as done, not expired.
-                let done = row.final_index.is_some_and(|f| row.chunks_done >= f);
+                // Gone from the DS after this device saw the receiver acknowledge
+                // the FINAL chunk (it then stopped before recording the end): the
+                // copy is done. Anything less is reported as expired — the
+                // receiver may have cancelled or vanished.
+                let done = row.final_index.is_some_and(|f| row.chunks_done > f);
                 if done {
                     end(state, id, State::Completed, None).await?;
                 } else {
