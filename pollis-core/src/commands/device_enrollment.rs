@@ -912,7 +912,8 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     }
 
     // #1735: remember which device approved this one, for the history-copy offer.
-    if let Some(approver) = state.enrollment_approver.lock().await.take() {
+    let approver = state.enrollment_approver.lock().await.take();
+    if let Some(approver) = approver {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
             if let Err(e) = crate::commands::history_transfer::remember_enrollment_approver(db.conn(), &approver) {
