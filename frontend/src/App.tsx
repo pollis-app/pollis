@@ -381,7 +381,9 @@ function MainApp() {
           console.warn("[App] listHistoryTransferSources failed:", err);
           return [] as api.TransferSource[];
         });
-        if (sources.some(isSupported)) {
+        // Only after another device approved this sign-in (typed code or QR), as on mobile:
+        // a recovery-key sign-in has no approving device to copy from.
+        if (sources.some((s) => s.approved_this_device && isSupported(s))) {
           setHistoryOffer({ user, sources });
           setAppState("history-offer");
           return;

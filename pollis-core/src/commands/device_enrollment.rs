@@ -85,8 +85,13 @@ pub struct EnrollmentHandle {
 pub enum EnrollmentStatus {
     /// Still waiting for an existing device to approve.
     Pending,
-    /// The new device installed `account_id_key` and is enrolled.
-    Approved,
+    /// The new device installed `account_id_key` and is enrolled. `approved_by_device_id`
+    /// names the approving device (#1735: the new device offers to copy history from it);
+    /// absent for a DS that predates it.
+    Approved {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        approved_by_device_id: Option<String>,
+    },
     /// An existing device rejected the request.
     Rejected,
     /// TTL elapsed.
@@ -420,7 +425,7 @@ pub async fn poll_enrollment_status(
             )
             .await?;
 
-            Ok(EnrollmentStatus::Approved)
+            Ok(EnrollmentStatus::Approved { approved_by_device_id: row.approved_by_device_id.clone() })
         }
         other => Err(Error::Other(anyhow::anyhow!(
             "enrollment request {request_id} has unexpected status {other}"

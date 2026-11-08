@@ -652,7 +652,9 @@
       "rowSub": "From another of your devices",
       "rowActive": "Copying from {{device}}…",
       "rowSending": "Sending to {{device}}…",
-      "rowPaused": "Paused — open Pollis on {{device}}"
+      "rowPaused": "Paused — open Pollis on {{device}}",
+      "pendingRow": "{{device}} wants your message history",
+      "pendingRowSub": "Review the request"
     },
     "events": {
       "approvedHeading": "Message history shared",

@@ -147,7 +147,7 @@ async fn new_device(state: &Arc<AppState>, user_id: &str, enrollment_required: b
     println!("PEER_CODE={}", handle.verification_code);
     println!("PEER_REQUEST={}", handle.request_id);
     match device_enrollment::await_enrollment_approval(state, handle.request_id).await? {
-        device_enrollment::EnrollmentStatus::Approved => {}
+        device_enrollment::EnrollmentStatus::Approved { .. } => {}
         device_enrollment::EnrollmentStatus::Rejected => {
             println!("PEER_REJECTED");
             return Ok(());

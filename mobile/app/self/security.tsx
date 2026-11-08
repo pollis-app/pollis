@@ -29,6 +29,7 @@ import {
   useRejectEnrollment,
   useSecurityEventsPreview,
   useHistoryTransfers,
+  usePendingTransferRequests,
 } from "../../hooks/queries";
 import { currentTransfer, isTerminal } from "../../lib/historyTransfer";
 import { SecurityEventRow } from "../../components/self/SecurityEventRow";
@@ -66,6 +67,8 @@ export default function Security() {
   const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
   const { data: transfers = [] } = useHistoryTransfers();
+  // #1735: a request backed out of on its approval page stays answerable from here.
+  const { data: pendingTransfers = [] } = usePendingTransferRequests();
   // #1735: an unfinished copy shows on the row, either direction.
   const liveTransfer = [currentTransfer(transfers, "receiver"), currentTransfer(transfers, "source")].find(
     (tr) => tr && !isTerminal(tr.state),
@@ -207,6 +210,21 @@ export default function Security() {
                 onPress={() => router.push("/self/history-transfer")}
               />
             ) : null}
+            {pendingTransfers.map((req) => (
+              <ListRow
+                key={req.transfer_id}
+                testID={`row-history-request-${req.transfer_id}`}
+                glyph={<Icon.history size={22} color={semantic.accent} />}
+                name={t("mobile:historyTransfer.security.pendingRow", {
+                  device: req.requester_device_name?.trim() || t("mobile:historyTransfer.approve.unknownDevice"),
+                })}
+                sub={t("mobile:historyTransfer.security.pendingRowSub")}
+                chevron
+                onPress={() =>
+                  router.push({ pathname: "/approve-history-transfer", params: { transferId: req.transfer_id } })
+                }
+              />
+            ))}
             {devices.map((d) => {
               const name =
                 (d.device_name && d.device_name.trim()) ||

@@ -206,6 +206,10 @@ export function useApproveHistoryTransfer() {
       void queryClient.invalidateQueries({ queryKey: securityEventQueryKeys.all });
       void transferRunner.kick(transfer.transfer_id);
     },
+    // A refused approval (a lapsed one-tap shortcut, a request that ended) re-reads the list.
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: historyTransferQueryKeys.pending(currentUserId()) });
+    },
   });
 }
 

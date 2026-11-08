@@ -65,7 +65,8 @@ export function retryKind(transfer: HistoryTransfer, running: boolean): "resume"
   if (transfer.role !== "receiver") {
     return null;
   }
-  if (phase === "failed" || phase === "expired" || phase === "deferred" || phase === "cancelled" || phase === "declined") {
+  // As on mobile: a decline is the other device's answer, so asking again is a deliberate new pick.
+  if (phase === "failed" || phase === "expired" || phase === "deferred" || phase === "cancelled") {
     return "request";
   }
   return null;

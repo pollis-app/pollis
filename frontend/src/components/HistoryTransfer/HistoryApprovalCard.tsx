@@ -33,7 +33,10 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
   const [busy, setBusy] = useState<"approve" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const device = request.requester_device_name ?? deviceName ?? t("historyTransfer.unnamedDevice");
-  const pinReady = !request.pin_required || pin.length === 4;
+  // The one-tap link shortcut can lapse (10 min, a lock, one use) while this card is open:
+  // then the PIN is asked for in place, never a dead end.
+  const [needPin, setNeedPin] = useState(request.pin_required);
+  const pinReady = !needPin || pin.length === 4;
 
   const approve = async () => {
     if (busy || !pinReady) {
@@ -42,7 +45,7 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
     setBusy("approve");
     setError(null);
     try {
-      const transfer = await api.approveHistoryTransfer(request.transfer_id, request.pin_required ? pin : null);
+      const transfer = await api.approveHistoryTransfer(request.transfer_id, needPin ? pin : null);
       storeTransfer(queryClient, transfer);
       queryClient.setQueryData<api.PendingTransferRequest[]>(historyTransferKeys.pending, (list) =>
         (list ?? []).filter((r) => r.transfer_id !== request.transfer_id),
@@ -52,6 +55,10 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
     } catch (err) {
       setError(errorMessage(err, t("historyTransfer.approveFailed")));
       setPin("");
+      if (!needPin) {
+        setNeedPin(true);
+      }
+      void queryClient.invalidateQueries({ queryKey: historyTransferKeys.pending });
     } finally {
       setBusy(null);
     }
@@ -90,7 +97,7 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
         <p className="text-sm text-muted leading-relaxed">{t("historyTransfer.approveWarning")}</p>
       </div>
 
-      {request.pin_required && (
+      {needPin && (
         <div className="flex flex-col gap-3" data-testid="history-approval-pin">
           <p className="text-sm text-fg">{t("historyTransfer.approvePin")}</p>
           <InputOtp length={4} value={pin} onChange={setPin} disabled={busy !== null} mask autoFocus />

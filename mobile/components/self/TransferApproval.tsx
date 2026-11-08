@@ -37,6 +37,9 @@ export function TransferApproval({
   const approve = useApproveHistoryTransfer();
   const decline = useDeclineHistoryTransfer();
   const [pin, setPin] = useState("");
+  // The one-tap link shortcut can lapse (10 min, a lock, one use) while this page is open:
+  // then the PIN is asked for in place, never a dead end.
+  const [needPin, setNeedPin] = useState(request.pin_required);
   const [error, setError] = useState<string | null>(null);
   const busy = approve.isPending || decline.isPending;
   const device = request.requester_device_name?.trim() || t("historyTransfer.approve.unknownDevice");
@@ -54,6 +57,9 @@ export function TransferApproval({
         onError: (e) => {
           setPin("");
           setError((e as Error).message || t("historyTransfer.status.actionFailed"));
+          if (!needPin) {
+            setNeedPin(true);
+          }
         },
       },
     );
@@ -88,7 +94,7 @@ export function TransferApproval({
           ? t("historyTransfer.approve.body", { device, date })
           : t("historyTransfer.approve.bodyNoDate", { device })}
       </Text>
-      {request.pin_required ? (
+      {needPin ? (
         <View style={{ gap: space.lg }}>
           <Text style={[ty.body, { color: semantic.dim, textAlign: "center" }]}>
             {t("historyTransfer.approve.pinPrompt")}
