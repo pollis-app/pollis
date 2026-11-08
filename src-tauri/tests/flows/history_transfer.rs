@@ -16,13 +16,24 @@ use serial_test::serial;
 fn fast_idle() {
     ht::transfer_hooks::set_idle_limit(Duration::from_secs(4));
     ht::transfer_hooks::set_auto_resume(false);
+    ht::transfer_hooks::set_rows_per_chunk(0);
 }
 
+/// One run, on its own task: a kill point (`test_hooks::die`) is a real unwind
+/// that aborts the run wherever it stands, open transactions included, and
+/// comes back as `Err("killed: …")`.
 async fn run(c: &TestClient, id: &str) -> Result<HistoryTransfer, String> {
     c.activate();
-    ht::run_history_transfer(&c.state, id.to_string(), Arc::new(pollis_core::sink::NoopSink))
-        .await
-        .map_err(|e| e.to_string())
+    let state = c.state.clone();
+    let id = id.to_string();
+    let task = tokio::spawn(async move {
+        ht::run_history_transfer(&state, id, Arc::new(pollis_core::sink::NoopSink)).await
+    });
+    match task.await {
+        Ok(r) => r.map_err(|e| e.to_string()),
+        Err(e) if e.is_panic() => Err(format!("killed: {e}")),
+        Err(e) => Err(format!("run task failed: {e}")),
+    }
 }
 
 /// Run both sides together until both stop.
@@ -94,11 +105,17 @@ async fn scalar(c: &TestClient, sql: &str) -> i64 {
     guard.as_ref().expect("unlocked").conn().query_row(sql, [], |r| r.get(0)).unwrap()
 }
 
-async fn assert_no_duplicates(c: &TestClient) {
-    assert_eq!(
-        scalar(c, "SELECT COUNT(*) FROM (SELECT id FROM message GROUP BY id HAVING COUNT(*) > 1)").await,
-        0
-    );
+/// `message.id` is the primary key, so "no duplicate" is checked where it can
+/// fail: per conversation, the receiver holds exactly as many rows as the
+/// source (no extra copy under another id, none missing), and every id is the
+/// source's.
+async fn assert_same_rows_per_conversation(dst: &TestClient, src: &TestClient, conversations: &[&str]) {
+    for conv in conversations {
+        let (d, s) = (rows(dst, &[conv]).await, rows(src, &[conv]).await);
+        assert_eq!(d.len(), s.len(), "row count differs in {conv}");
+        let ids = |v: &[RowView]| v.iter().map(|r| r.0.clone()).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(ids(&d), ids(&s), "row ids differ in {conv}");
+    }
 }
 
 async fn exec(c: &TestClient, sql: &str) -> usize {
@@ -175,10 +192,10 @@ async fn a_sibling_copies_the_sources_history_exactly() {
     assert_eq!((s.state.as_str(), d.state.as_str()), ("completed", "completed"), "{s:?} {d:?}");
     assert_eq!(d.rows_skipped, 0, "{d:?}");
     assert_eq!(d.deferred_conversations, 0, "{d:?}");
-    assert!(d.rows_done >= 14, "{d:?}");
+    assert_eq!(d.rows_done as usize, rows(&desk, &[&channel, &dm]).await.len(), "{d:?}");
     assert_eq!(d.estimated_total, s.estimated_total);
     assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
-    assert_no_duplicates(&phone).await;
+    assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
     // The edit and the delete came across as they are.
     let r = rows(&phone, &[&channel]).await;
     let edited = r.iter().find(|x| x.0 == ids[1]).unwrap();
@@ -221,7 +238,7 @@ async fn a_sibling_copies_the_sources_history_exactly() {
     let (_, d2) = copy(&desk, &phone).await;
     assert_eq!(d2.state, "completed");
     assert_eq!(rows(&phone, &[&channel, &dm]).await, before);
-    assert_no_duplicates(&phone).await;
+    assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
     drop((desk, bob, phone));
 }
 
@@ -336,7 +353,7 @@ async fn backfill_heals_placeholders_and_never_overwrites_a_real_row() {
     assert_eq!(scalar(&phone, &format!("SELECT COUNT(*) FROM message WHERE id = '{a}' AND undecryptable IS NULL AND origin = 'transfer'")).await, 1);
     assert_eq!(r.iter().find(|x| x.0 == b).unwrap().3.as_deref(), Some("phone copy"), "a real row is never overwritten");
     assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM pending_message_change").await, 0);
-    assert_no_duplicates(&phone).await;
+    assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
     // Everything else equals the source.
     let mut mine = rows(&phone, &[&channel, &dm]).await;
     let mut theirs = rows(&desk, &[&channel, &dm]).await;
@@ -364,7 +381,7 @@ async fn changes_racing_the_copy_converge_and_never_resurrect() {
     approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
     hooks::crash_next_send(Crash::TransferSourceAfterStore);
     let err = run(&desk, &t.transfer_id).await.unwrap_err();
-    assert!(err.contains("simulated"), "{err}");
+    assert!(err.contains("killed"), "{err}");
     bob.edit_message(&channel, &ids[7], "during").await;
     bob.delete_message(&ids[9]).await;
     // Alice is the group's admin: she deletes bob's message for everyone.
@@ -394,7 +411,7 @@ async fn changes_racing_the_copy_converge_and_never_resurrect() {
     }
     assert_eq!(p, rows(&desk, &[&channel]).await);
     assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM pending_message_change").await, 0);
-    assert_no_duplicates(&phone).await;
+    assert_same_rows_per_conversation(&phone, &desk, &[&channel]).await;
     drop((dm, bob));
 }
 
@@ -471,7 +488,7 @@ async fn a_kill_at_any_point_resumes_to_exactly_the_same_result() {
         approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
         hooks::crash_next_send(point);
         let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
-        let crashed = [&s, &d].iter().filter(|r| r.as_ref().is_err_and(|e| e.contains("simulated"))).count();
+        let crashed = [&s, &d].iter().filter(|r| r.as_ref().is_err_and(|e| e.contains("killed"))).count();
         assert_eq!(crashed, 1, "{point:?}: {s:?} {d:?}");
         if point == Crash::TransferReceiverAfterOpen {
             // The chunk rolled back whole.
@@ -483,7 +500,7 @@ async fn a_kill_at_any_point_resumes_to_exactly_the_same_result() {
         assert_eq!(d.unwrap().state, "completed", "{point:?}");
         assert_eq!(s.unwrap().state, "completed", "{point:?}");
         assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await, "{point:?}");
-        assert_no_duplicates(&phone).await;
+        assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
         let _ = n;
     }
 }
@@ -592,7 +609,7 @@ async fn a_replayed_chunk_is_refused() {
     approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
     assert_eq!(run(&desk, &t.transfer_id).await.unwrap().state, "paused");
     hooks::crash_next_send(Crash::TransferReceiverAfterCommit);
-    assert!(run(&phone, &t.transfer_id).await.unwrap_err().contains("simulated"));
+    assert!(run(&phone, &t.transfer_id).await.unwrap_err().contains("killed"));
     let imported = rows(&phone, &[&channel, &dm]).await;
     assert!(!imported.is_empty());
     let conn = writable_remote().await.conn().await.unwrap();
@@ -615,7 +632,8 @@ async fn a_replayed_chunk_is_refused() {
     assert_eq!(d.state, "failed", "{d:?}");
     // Only the genuine chunk 0 is there, once.
     assert_eq!(rows(&phone, &[&channel, &dm]).await, imported);
-    assert_no_duplicates(&phone).await;
+    // Nothing beyond the genuine chunk 0 was written (its rows count exactly once).
+    assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM message WHERE origin = 'transfer'").await, imported.len() as i64);
     drop(bob);
 }
 
@@ -816,7 +834,7 @@ async fn soak_one(seed: u64, steps: usize) {
                     hooks::disarm_crash();
                     if s.is_err() || d.is_err() {
                         assert!(
-                            [&s, &d].iter().all(|r| r.as_ref().map_or_else(|e| e.contains("simulated"), |_| true)),
+                            [&s, &d].iter().all(|r| r.as_ref().map_or_else(|e| e.contains("killed"), |_| true)),
                             "seed {seed:#x} step {step}: {s:?} {d:?}"
                         );
                         lock_unlock(&desk).await;
@@ -870,7 +888,7 @@ async fn soak_one(seed: u64, steps: usize) {
     // ...and no message the source holds deleted is live here.
     let deleted_on_desk: Vec<String> = dsk.iter().filter(|r| r.8).map(|r| r.0.clone()).collect();
     assert!(p.iter().all(|r| !deleted_on_desk.contains(&r.0) || r.8), "seed {seed:#x}: a deleted message is live");
-    assert_no_duplicates(&phone).await;
+    assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
     // A change may still wait for a target nobody holds (a message deleted before
     // any device fetched it); none may wait for a row this device HAS.
     assert_eq!(
@@ -880,4 +898,91 @@ async fn soak_one(seed: u64, steps: usize) {
     );
     assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM message WHERE deleted_at IS NOT NULL AND content IS NOT NULL").await, 0);
     drop((desk, bob, phone));
+}
+
+
+/// More than a window of chunks (8): the source fills the window and waits;
+/// a receiver killed in the middle of a chunk, and a source killed between
+/// storing and uploading one, both resume to the exact result.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn many_chunks_through_the_window_with_kills_in_the_middle() {
+    let (desk, bob, channel, dm, _) = desk_with_history().await;
+    for i in 0..12 {
+        bob.send_channel_message(&channel, &format!("more {i}")).await;
+    }
+    ingest(&desk, &channel).await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    ht::transfer_hooks::set_rows_per_chunk(2);
+    let t = request(&phone, &desk, "sibling").await.unwrap();
+    approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
+
+    // Alone, the source seals exactly a window and waits.
+    assert_eq!(run(&desk, &t.transfer_id).await.unwrap().state, "paused");
+    assert_eq!(scalar(&desk, "SELECT COUNT(*) FROM history_transfer_outgoing").await, 8);
+    // The receiver imports those 8 and waits for more.
+    let d = run(&phone, &t.transfer_id).await.unwrap();
+    assert_eq!((d.state.as_str(), d.chunks_done), ("paused", 8), "{d:?}");
+    // The source is killed after storing chunk 8, before uploading it.
+    hooks::crash_next_send(Crash::TransferSourceAfterStore);
+    assert!(run(&desk, &t.transfer_id).await.unwrap_err().contains("killed"));
+    lock_unlock(&desk).await;
+    // The receiver is killed in the middle of importing chunk 8.
+    hooks::crash_next_send(Crash::TransferReceiverAfterOpen);
+    let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+    assert!(d.as_ref().unwrap_err().contains("killed"), "{s:?} {d:?}");
+    assert_eq!(scalar(&phone, "SELECT next_index FROM history_transfer_local").await, 8, "chunk 8 rolled back whole");
+    lock_unlock(&phone).await;
+    let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+    let (s, d) = (s.unwrap(), d.unwrap());
+    assert_eq!((s.state.as_str(), d.state.as_str()), ("completed", "completed"), "{s:?} {d:?}");
+    assert!(d.chunks_done > 10, "{d:?}");
+    assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
+    assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
+    assert_eq!(scalar(&desk, "SELECT COUNT(*) FROM history_transfer_outgoing").await, 0);
+    ht::transfer_hooks::set_rows_per_chunk(0);
+}
+
+/// A transient DS error while verifying the acceptance is not a verdict: the
+/// run stops, the transfer stays open, and the next run completes (M1).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_transient_error_at_acceptance_resumes() {
+    let (desk, _bob, channel, dm, _) = desk_with_history().await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    let t = request(&phone, &desk, "sibling").await.unwrap();
+    approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
+    crate::harness::arm_ds_fault(crate::harness::DsFault::DevicesReadUnavailable);
+    let first = run(&phone, &t.transfer_id).await;
+    assert!(first.is_err(), "{first:?}");
+    let listed = ht::list_history_transfers(&phone.state).await.unwrap();
+    assert_eq!(listed[0].state, "awaiting_approval", "a transient error never fails the transfer");
+    let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+    assert_eq!(d.unwrap().state, "completed");
+    assert_eq!(s.unwrap().state, "completed");
+    assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
+}
+
+/// A conversation the receiver belongs to but holds no group for yet (its
+/// Welcome not processed) is reported as deferred, not silently dropped (M4).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_conversation_not_joined_yet_is_reported_deferred() {
+    let (desk, bob, channel, dm, _) = desk_with_history().await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    let late = desk.create_group("Later").await;
+    let late_ch = desk.general_channel_id(&late).await;
+    desk.invite(&late, &bob.profile.as_ref().unwrap().username).await;
+    desk.send_channel_message(&late_ch, "phone has no group for this yet").await;
+    // The phone has not processed the new group's Welcome.
+    let (_, d) = copy(&desk, &phone).await;
+    assert_eq!(d.state, "completed");
+    assert!(d.deferred_conversations >= 1, "{d:?}");
+    assert!(rows(&phone, &[&late_ch]).await.is_empty());
+    // Once it joins, copying again brings it.
+    phone.poll().await;
+    ingest(&phone, &late_ch).await;
+    let (_, d) = copy(&desk, &phone).await;
+    assert_eq!(d.deferred_conversations, 0, "{d:?}");
+    assert_eq!(rows(&phone, &[&late_ch]).await, rows(&desk, &[&late_ch]).await);
 }

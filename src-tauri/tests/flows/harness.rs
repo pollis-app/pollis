@@ -114,6 +114,8 @@ pub(crate) enum DsFault {
     CatchUpTimesOutMidway,
     /// Everything decrypts, then the cursor report times out.
     WatermarkTimesOut,
+    /// #1735: one device-list read fails with a 503 (a transient DS error).
+    DevicesReadUnavailable,
 }
 
 impl DsFault {
@@ -465,6 +467,10 @@ async fn inject_message_fault(
         Some(DsFault::WatermarkTimesOut) if path == pollis_api::messages::WatermarkBody::PATH => {
             take_ds_fault();
             timeout()
+        }
+        Some(DsFault::DevicesReadUnavailable) if path == pollis_api::account_reads::DevicesBody::PATH => {
+            take_ds_fault();
+            (axum::http::StatusCode::SERVICE_UNAVAILABLE, "simulated outage (test fault injection)").into_response()
         }
         _ => next.run(req).await,
     }
