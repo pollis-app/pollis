@@ -286,9 +286,10 @@ copies it — the peer approves with its PIN and sends — reaches
 each exactly once, with no undecryptable row (`assert-no-loss`). Then the other
 direction: `enroll_peer new --transfer-receiver` joins as a second device (the
 phone approves its code), asks for the phone's history, and
-`2-source-approves.yaml` must see the approval page open on its own, take the
+`2-phone-approves-device.yaml` approves it, and
+`3-source-approves.yaml` must see the approval page open on its own, take the
 PIN and show the send to its end; the peer reports every seeded row received.
-`3-security-shows-events.yaml` finds "Message history shared" in Security and
+`4-security-shows-events.yaml` finds "Message history shared" in Security and
 opens the device picker. Every other new-device flow says "Not now" to the
 offer (`subflows/skip-history-offer.yaml`).
 

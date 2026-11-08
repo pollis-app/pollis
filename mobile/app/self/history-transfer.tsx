@@ -22,7 +22,9 @@ import {
 import { useThemeRerender } from "../../components/theme";
 
 export function sourceGlyph(source: TransferSource, color: string) {
-  const desktop = source.platform && !/ios|android|iphone|ipad/i.test(source.platform);
+  // The core derives `platform` from a "(macOS)"-style name suffix; else read the name itself.
+  const hint = `${source.platform ?? ""} ${source.device_name ?? ""}`;
+  const desktop = /mac|windows|linux|desktop/i.test(hint) && !/ios|android|iphone|ipad/i.test(source.platform ?? "");
   return desktop ? <Icon.laptop size={22} color={color} /> : <Icon.device size={22} color={color} />;
 }
 

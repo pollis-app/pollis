@@ -84,7 +84,9 @@ export default function HistoryOffer() {
       <Screen testID="screen-history-offer">
         <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 24 }}>
           <HistoryTransferStatus transfer={following} />
-          <Text style={[ty.meta, { color: semantic.dim }]}>{t("historyTransfer.offer.continueHint")}</Text>
+          {isTerminal(following.state) ? null : (
+            <Text style={[ty.meta, { color: semantic.dim }]}>{t("historyTransfer.offer.continueHint")}</Text>
+          )}
         </Body>
         <BottomAction>
           <Button

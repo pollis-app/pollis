@@ -2,8 +2,20 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# HISTORY TRANSFER (#1735), part 3 — Security lists the approval among the events
+# HISTORY TRANSFER (#1735), part 4 — Security lists the approval among the events
 # and offers "Copy message history" with both of the account's other devices.
+# Back out of #General to the tabs first.
+- runFlow:
+    when:
+      notVisible:
+        id: "tab-self"
+    commands:
+      - tapOn:
+          id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "tab-self"
+    timeout: 15000
 - tapOn:
     id: "tab-self"
 - tapOn:
@@ -14,7 +26,7 @@ tags:
     timeout: 15000
 - scrollUntilVisible:
     element:
-      text: "Message history shared"
+      text: ".*Message history shared.*"
     direction: DOWN
     timeout: 30000
 - scrollUntilVisible:

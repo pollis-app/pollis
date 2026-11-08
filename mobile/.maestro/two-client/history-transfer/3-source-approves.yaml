@@ -2,7 +2,7 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# HISTORY TRANSFER (#1735), part 2 — the other direction. A second peer device
+# HISTORY TRANSFER (#1735), part 3 — the other direction. A second peer device
 # (approved by this phone's typed code just before) asks for THIS phone's message
 # history. The phone's approval page opens by itself (the DS nudge), shows the
 # warning, takes the PIN (a typed-code link earns no PIN-less shortcut), and then
@@ -25,6 +25,6 @@ tags:
 - tapOn:
     id: "btn-history-done"
 - extendedWaitUntil:
-    visible:
-      id: "tab-groups"
+    notVisible:
+      id: "screen-approve-history-transfer"
     timeout: 30000

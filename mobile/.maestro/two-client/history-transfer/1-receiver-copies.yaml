@@ -54,21 +54,22 @@ tags:
     visible:
       id: "input-composer"
     timeout: 30000
-# The newest seeded message is on screen, exactly once.
+# The newest seeded message is on screen, exactly once. A row is one accessible
+# element whose label leads with the text then ", <time>" (as long-history matches it).
 - extendedWaitUntil:
-    visible: "history-seed-${SEEDED}"
+    visible: ".*history-seed-${SEEDED},.*"
     timeout: 30000
 - assertNotVisible:
-    text: "history-seed-${SEEDED}"
+    text: ".*history-seed-${SEEDED},.*"
     index: 1
 # The oldest is reachable by scrolling back, exactly once.
 - scrollUntilVisible:
     element:
-      text: "history-seed-01"
+      text: ".*history-seed-01,.*"
     direction: UP
     timeout: 60000
 - assertNotVisible:
-    text: "history-seed-01"
+    text: ".*history-seed-01,.*"
     index: 1
 - takeScreenshot: history-transfer-04-history-visible
 - runFlow: ../../subflows/assert-no-loss.yaml

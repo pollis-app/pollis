@@ -31,7 +31,6 @@ REPO="$(cd "$HERE/.." && pwd)"
 ENV_FILE="$HERE/.maestro/.env"
 FLOWS="$HERE/.maestro/two-client/history-transfer"
 LINK="$HERE/.maestro/two-client/device-link"
-PROMPT="$HERE/.maestro/two-client/approval-prompt"
 
 ENV_ARGS=()
 while IFS= read -r line; do
@@ -133,15 +132,15 @@ expect_rows owner
 echo "==> 4/6 a second peer device asks to join; the phone approves its code"
 start_peer second new "$EMAIL" --transfer-receiver
 await_peer second PEER_CODE= 90
-maestro --device "$DEVICE" test -e CODE="$(peer_line second PEER_CODE)" "$PROMPT/2-phone-approves-live.yaml"
+maestro --device "$DEVICE" test -e CODE="$(peer_line second PEER_CODE)" "$FLOWS/2-phone-approves-device.yaml"
 await_peer second PEER_ENROLLED 120
 
 echo "==> 5/6 phone = source: the peer asks for the phone's history; the phone approves with its PIN"
 await_peer second PEER_TRANSFER_REQUESTED= 60
-maestro --device "$DEVICE" test "$FLOWS/2-source-approves.yaml"
+maestro --device "$DEVICE" test "$FLOWS/3-source-approves.yaml"
 await_peer second PEER_TRANSFER_DONE= 240
 expect_rows second
 
 echo "==> 6/6 Security shows the approval and the picker"
-maestro --device "$DEVICE" test "$FLOWS/3-security-shows-events.yaml"
+maestro --device "$DEVICE" test "$FLOWS/4-security-shows-events.yaml"
 echo "==> history transfer passed"
