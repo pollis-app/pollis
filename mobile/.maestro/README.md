@@ -275,6 +275,23 @@ the group and read the post (the create admitted its device). The peer then
 creates a group, and `3-peer-group-live.yaml`, which never touches the phone,
 must see its pill appear: only `create_group`'s inbox wake-up can do that.
 
+**Copy message history between own devices (automated, #1735):**
+`mobile/scripts/maestro-history-transfer.sh <device>` — `enroll_peer`
+`approver --seed-history N --transfer-source` signs up an account, posts N
+messages (`history-seed-01`…) in "History Test Group" #General and approves the
+phone's sign-in code. `two-client/history-transfer/1-receiver-copies.yaml`: the
+phone sets its PIN, is offered the owner's history (`screen-history-offer`),
+copies it — the peer approves with its PIN and sends — reaches
+`history-transfer-done`, and must show the oldest and newest seeded message,
+each exactly once, with no undecryptable row (`assert-no-loss`). Then the other
+direction: `enroll_peer new --transfer-receiver` joins as a second device (the
+phone approves its code), asks for the phone's history, and
+`2-source-approves.yaml` must see the approval page open on its own, take the
+PIN and show the send to its end; the peer reports every seeded row received.
+`3-security-shows-events.yaml` finds "Message history shared" in Security and
+opens the device picker. Every other new-device flow says "Not now" to the
+offer (`subflows/skip-history-offer.yaml`).
+
 **A new device's approval request comes to the phone (automated, #1360):**
 `mobile/scripts/maestro-approval-prompt.sh <device>` — `pollis-core`'s
 `enroll_peer` example plays the desktop on the desktop's own core commands

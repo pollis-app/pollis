@@ -1,0 +1,30 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# HISTORY TRANSFER (#1735), part 2 — the other direction. A second peer device
+# (approved by this phone's typed code just before) asks for THIS phone's message
+# history. The phone's approval page opens by itself (the DS nudge), shows the
+# warning, takes the PIN (a typed-code link earns no PIN-less shortcut), and then
+# shows the send through to the end.
+- extendedWaitUntil:
+    visible:
+      id: "screen-approve-history-transfer"
+    timeout: 60000
+- assertVisible:
+    id: "history-transfer-approval-body"
+- assertVisible: ".*wants to copy your message history\\. It will be able to read all your past messages\\."
+- takeScreenshot: history-transfer-05-approve-with-pin
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-done"
+    timeout: 240000
+- assertVisible: "Message history sent"
+- takeScreenshot: history-transfer-06-sent
+- tapOn:
+    id: "btn-history-done"
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
