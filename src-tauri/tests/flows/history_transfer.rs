@@ -1004,9 +1004,23 @@ async fn a_conversation_not_joined_yet_is_reported_deferred() {
 }
 
 
+/// Wait (bounded) until `c`'s transfer `id` has ended; its final state.
+async fn ended(c: &TestClient, id: &str) -> HistoryTransfer {
+    let mut since: Option<String> = None;
+    for _ in 0..12 {
+        let t = ht::await_history_transfer(&c.state, id.to_string(), since.clone()).await.expect("await");
+        if t.is_ended() {
+            return t;
+        }
+        since = Some(t.updated_at.clone());
+    }
+    panic!("transfer {id} never ended");
+}
+
 /// A request and an acceptance that LAND on the DS but whose answers are lost
 /// leave both rows open (never `failed` with the key wiped while the DS keeps
-/// the transfer): the next runs carry them to the end (review M-A).
+/// the transfer), and the source is driven in the background with nobody
+/// starting a run on it: the copy still completes (review M-A, round 3).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn lost_answers_to_a_request_and_an_acceptance_still_complete() {
@@ -1017,7 +1031,7 @@ async fn lost_answers_to_a_request_and_an_acceptance_still_complete() {
     arm_ds_fault(DsFault::TransferRequestLandsThenTimesOut);
     let src = device_id(&desk).await;
     let r = phone.invoke_try("request_history_transfer", json!({ "sourceDeviceId": src, "via": "sibling" })).await;
-    assert!(r.is_err(), "the answer was lost: {r:?}");
+    assert!(r.as_ref().is_err_and(|e| e.contains("keeps trying")), "the answer was lost: {r:?}");
     let mine = ht::list_history_transfers(&phone.state).await.unwrap();
     assert_eq!(mine.len(), 1);
     assert_eq!(mine[0].state, "awaiting_approval", "kept open, key intact");
@@ -1027,34 +1041,37 @@ async fn lost_answers_to_a_request_and_an_acceptance_still_complete() {
     assert_eq!(pending(&desk).await.len(), 1);
 
     arm_ds_fault(DsFault::TransferAcceptLandsThenTimesOut);
-    assert!(approve(&desk, &id, Some(TEST_PIN)).await.is_err(), "the answer was lost");
-    let theirs = ht::list_history_transfers(&desk.state).await.unwrap();
-    assert_eq!(theirs[0].state, "transferring", "kept open, key intact");
-    assert_eq!(scalar(&desk, "SELECT COUNT(*) FROM history_transfer_local WHERE transfer_key IS NOT NULL").await, 1);
-
-    let (s, d) = run_both(&desk, &phone, &id).await;
-    assert_eq!(d.unwrap().state, "completed");
-    assert_eq!(s.unwrap().state, "completed");
+    let a = approve(&desk, &id, Some(TEST_PIN)).await;
+    assert!(a.as_ref().is_err_and(|e| e.contains("keeps trying")), "the answer was lost: {a:?}");
+    // Nobody runs the source: only the receiver is driven, as its screen would.
+    let d = run(&phone, &id).await.unwrap();
+    let d = if d.is_ended() { d } else { run(&phone, &id).await.unwrap() };
+    assert_eq!(d.state, "completed", "{d:?}");
+    assert_eq!(ended(&desk, &id).await.state, "completed");
     assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
+    assert_eq!(scalar(&desk, "SELECT COUNT(*) FROM history_transfer_local WHERE transfer_key IS NOT NULL").await, 0);
 }
 
-/// A request whose answer never came AND never landed: the row stays open, and
-/// the next request (or run) learns from the DS that it does not exist.
+/// A request that never reached the DS (its answer lost too) is kept open, the
+/// background run learns from the DS that it does not exist and ends it as
+/// expired — never `failed` — and the next request is not blocked.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_request_that_never_landed_does_not_block_the_next() {
+    use crate::harness::{arm_ds_fault, DsFault};
     let (desk, _bob, channel, dm, _) = desk_with_history().await;
     let phone = new_sibling(&desk, &channel, &dm).await;
-    let t = request(&phone, &desk, "sibling").await.unwrap();
-    // The DS forgets it (as if it never landed).
-    writable_remote().await.conn().await.unwrap()
-        .execute("DELETE FROM history_transfer WHERE transfer_id = ?1", libsql::params![t.transfer_id.clone()])
-        .await
-        .unwrap();
+    arm_ds_fault(DsFault::TransferRequestTimesOutUnlanded);
+    assert!(request(&phone, &desk, "sibling").await.is_err());
+    let old = ht::list_history_transfers(&phone.state).await.unwrap().remove(0);
+    assert!(pending(&desk).await.is_empty(), "it never landed");
+    assert_eq!(ended(&phone, &old.transfer_id).await.state, "expired");
+    assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM history_transfer_local WHERE kem_sk IS NOT NULL").await, 0);
     let t2 = request(&phone, &desk, "sibling").await.expect("a new request is not refused");
-    assert_ne!(t2.transfer_id, t.transfer_id);
-    let old = ht::list_history_transfers(&phone.state).await.unwrap().into_iter().find(|x| x.transfer_id == t.transfer_id).unwrap();
-    assert_eq!(old.state, "expired");
+    assert_ne!(t2.transfer_id, old.transfer_id);
+    approve(&desk, &t2.transfer_id, Some(TEST_PIN)).await.unwrap();
+    let (_, d) = run_both(&desk, &phone, &t2.transfer_id).await;
+    assert_eq!(d.unwrap().state, "completed");
 }
 
 /// Ingest's own heal of a placeholder (#1312) applies the changes that waited
