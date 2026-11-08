@@ -351,9 +351,10 @@ function MainApp() {
     }
   }, [pendingEnrollmentUser]);
 
-  const handleEnrolled = useCallback(async () => {
+  const handleEnrolled = useCallback(async (approvedByDevice: boolean) => {
     if (pendingEnrollmentUser) {
-      enrolledThisSessionRef.current = true;
+      // #1735: the link-time history offer follows a device approval only (as on mobile).
+      enrolledThisSessionRef.current = approvedByDevice;
       const user = pendingEnrollmentUser;
       setPendingEnrollmentUser(null);
       setPendingPinUser(user);
@@ -381,9 +382,7 @@ function MainApp() {
           console.warn("[App] listHistoryTransferSources failed:", err);
           return [] as api.TransferSource[];
         });
-        // Only after another device approved this sign-in (typed code or QR), as on mobile:
-        // a recovery-key sign-in has no approving device to copy from.
-        if (sources.some((s) => s.approved_this_device && isSupported(s))) {
+        if (sources.some(isSupported)) {
           setHistoryOffer({ user, sources });
           setAppState("history-offer");
           return;

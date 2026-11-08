@@ -234,16 +234,17 @@ test("the device list puts online first and disables a device that can't send", 
   expect((await mock(page)).historyRequests).toEqual([{ sourceDeviceId: "dev_ipad", via: "sibling" }]);
 });
 
-test("a declined request says so and offers to ask again", async ({ page }) => {
+test("a declined request says so; asking again is a new pick (as on mobile)", async ({ page }) => {
   await boot(page, signedIn());
   await requestFromMac(page);
   await step(page, "ht_1", { state: "declined" });
   await expect(page.getByTestId("history-transfer-title")).toHaveText("Declined on MacBook");
   await expect(page.getByTestId("history-transfer-body")).toHaveText("Nothing was copied.");
   await expect(page.getByTestId("history-transfer-cancel")).toHaveCount(0);
-  await expect(page.getByTestId("history-transfer-retry")).toBeVisible();
+  // A decline is the other device's answer: no one-click "ask again".
+  await expect(page.getByTestId("history-transfer-retry")).toHaveCount(0);
 
-  // Done returns to the picker.
+  // Done returns to the picker, where asking again is a deliberate new pick.
   await page.getByTestId("history-transfer-done").click();
   await expect(page.getByTestId("history-source-list")).toBeVisible();
 });
