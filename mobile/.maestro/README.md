@@ -291,7 +291,12 @@ phone approves its code), asks for the phone's history, and
 PIN and show the send to its end; the peer reports every seeded row received.
 `4-security-shows-events.yaml` finds "Message history shared" in Security and
 opens the device picker. Every other new-device flow says "Not now" to the
-offer (`subflows/skip-history-offer.yaml`).
+offer (`subflows/skip-history-offer.yaml`). Until the dev DS carries the #1735 routes it
+answers 404 to them; run it against a local DS instead (a `sqld` stamped with
+`pollis-schema`'s scripts, `pollis-delivery` with Doppler `dev_personal` plus
+`TURSO_URL` pointing at it), a build whose `EXPO_PUBLIC_POLLIS_DELIVERY_URL` is
+`http://localhost:<port>` (Android: `adb reverse tcp:<port> tcp:<port>`), and
+`POLLIS_DELIVERY_URL=http://localhost:<port>` for the peers.
 
 **A new device's approval request comes to the phone (automated, #1360):**
 `mobile/scripts/maestro-approval-prompt.sh <device>` — `pollis-core`'s
