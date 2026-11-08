@@ -213,5 +213,6 @@ Code: `pollis-core/src/commands/history_transfer/` (`crypto.rs`, `wire.rs`, `sto
 - **The desktop remembers a nudge that lands mid-run** (`utils/transferRunCoalescer.ts`, mobile's rule): a run that ends unfinished goes once more.
 - **Pending changes are bounded in bytes too** (4 MiB of edit text per conversation, edits evicted oldest first; deletes never by this cap), and eviction runs only past a cap. The 400-day horizon stays, because a backfill can come at any time and a change pruned before its target arrives would let an edited or deleted message come back.
 - **Repeated DS calls nudge nobody** (`Outcome::Unchanged`).
-- **A finished copy reads completed on the source** even when the DS record is gone before it looked.
+- **A finished copy reads completed on the source** when the DS record is gone only if the source saw the final chunk's ack (else expired: the receiver may have cancelled or vanished).
+- **Round 3:** a request or approval whose answer was lost is driven by a background run straight away (the in-flight claim dedups), so the transfer neither waits for the next unlock nor silently expires; the error says so. The pending-edit byte cap counts bytes (`length(CAST(content AS BLOB))`).
 
