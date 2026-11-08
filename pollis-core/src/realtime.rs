@@ -129,6 +129,13 @@ pub enum RealtimeEvent {
         peer_user_id: String,
         peer_identity_version: i64,
     },
+    /// A history transfer this device takes part in moved (#1735): `event` is
+    /// `requested` / `accepted` / `chunk` / `acked` / `declined` / `cancelled` /
+    /// `completed`. DS-originated, content-free: re-read over the signed API.
+    HistoryTransfer {
+        transfer_id: String,
+        event: String,
+    },
     /// After a non-empty reconcile commit: refetch hint only; names no one (#1506).
     RosterChanged {
         conversation_id: String,

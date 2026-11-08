@@ -566,6 +566,49 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let request_id: String = arg(&args, "requestId")?;
             ok(device_enrollment::poll_enrollment_status(&state()?, request_id).await?)
         }
+        // History transfer (#1735). Args camelCase, as desktop's.
+        "list_history_transfer_sources" => {
+            ok(crate::commands::history_transfer::list_history_transfer_sources(&state()?).await?)
+        }
+        "request_history_transfer" => {
+            let source_device_id: String = arg(&args, "sourceDeviceId")?;
+            let via: String = arg(&args, "via")?;
+            ok(crate::commands::history_transfer::request_history_transfer(&state()?, source_device_id, via).await?)
+        }
+        "list_pending_history_transfer_requests" => {
+            ok(crate::commands::history_transfer::list_pending_history_transfer_requests(&state()?).await?)
+        }
+        "approve_history_transfer" => {
+            let transfer_id: String = arg(&args, "transferId")?;
+            let pin: Option<String> = arg_opt(&args, "pin")?;
+            ok(crate::commands::history_transfer::approve_history_transfer(&state()?, transfer_id, pin).await?)
+        }
+        "decline_history_transfer" => {
+            let transfer_id: String = arg(&args, "transferId")?;
+            crate::commands::history_transfer::decline_history_transfer(&state()?, transfer_id).await?;
+            ok(())
+        }
+        "list_history_transfers" => {
+            ok(crate::commands::history_transfer::list_history_transfers(&state()?).await?)
+        }
+        // uniffi has no event channel: the host awaits this to the end (or a
+        // pause) and, alongside, loops `await_history_transfer` for progress.
+        "run_history_transfer" => {
+            let transfer_id: String = arg(&args, "transferId")?;
+            let sink: std::sync::Arc<dyn crate::sink::EventSink<crate::commands::history_transfer::HistoryTransfer>> =
+                std::sync::Arc::new(crate::sink::NoopSink);
+            ok(crate::commands::history_transfer::run_history_transfer(&state()?, transfer_id, sink).await?)
+        }
+        "await_history_transfer" => {
+            let transfer_id: String = arg(&args, "transferId")?;
+            let since: Option<String> = arg_opt(&args, "since")?;
+            ok(crate::commands::history_transfer::await_history_transfer(&state()?, transfer_id, since).await?)
+        }
+        "cancel_history_transfer" => {
+            let transfer_id: String = arg(&args, "transferId")?;
+            crate::commands::history_transfer::cancel_history_transfer(&state()?, transfer_id).await?;
+            ok(())
+        }
         // QR device link (#1207).
         "create_device_link" => {
             let user_id: String = arg(&args, "userId")?;
@@ -1630,6 +1673,16 @@ mod tests {
             "fetch_export_attachments",
             "bundle_export",
             "dismissed_push_handles",
+            // #1735
+            "list_history_transfer_sources",
+            "request_history_transfer",
+            "list_pending_history_transfer_requests",
+            "approve_history_transfer",
+            "decline_history_transfer",
+            "list_history_transfers",
+            "run_history_transfer",
+            "await_history_transfer",
+            "cancel_history_transfer",
             // #1635
             "resolve_livekit_identities",
             "get_user_profiles",

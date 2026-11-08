@@ -12,6 +12,8 @@ pub mod dm;
 // Custom per-group emoji (#848).
 pub mod emoji;
 pub mod groups;
+// Copy message history between two of one account's devices (#1735).
+pub mod history_transfer;
 pub mod install_kind;
 // OS media permissions: shell-runtime only, never touches pollis-core.
 #[cfg(feature = "native-shell")]
