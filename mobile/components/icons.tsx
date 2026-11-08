@@ -75,6 +75,8 @@ import {
   Images,
   Camera,
   MessageSquare,
+  History,
+  Laptop,
   type LucideIcon,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
@@ -178,6 +180,8 @@ export const Icon = {
   headphones: wrap(Headphones, 14),
   key: wrap(Key, 14),
   device: wrap(Smartphone, 14),
+  laptop: wrap(Laptop, 14),
+  history: wrap(History, 14),
   thread: wrap(MessagesSquare, 14),
   flag: wrap(Flag, 14),
   info: wrap(Info, 16),

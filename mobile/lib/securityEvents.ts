@@ -4,7 +4,13 @@ export type SecurityEventFilter = "all" | "devices" | "identity" | "account";
 
 export const SECURITY_EVENT_FILTERS: Record<SecurityEventFilter, string[] | null> = {
   all: null,
-  devices: ["device_enrolled", "device_rejected", "device_revoked"],
+  devices: [
+    "device_enrolled",
+    "device_rejected",
+    "device_revoked",
+    "history_transfer_approved",
+    "history_transfer_completed",
+  ],
   identity: [
     "identity_reset",
     "identity_rotated",

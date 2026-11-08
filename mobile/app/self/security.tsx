@@ -28,7 +28,9 @@ import {
   useApproveEnrollment,
   useRejectEnrollment,
   useSecurityEventsPreview,
+  useHistoryTransfers,
 } from "../../hooks/queries";
+import { currentTransfer, isTerminal } from "../../lib/historyTransfer";
 import { SecurityEventRow } from "../../components/self/SecurityEventRow";
 import { formatRelative } from "../../lib/relativeTime";
 import {
@@ -63,6 +65,20 @@ export default function Security() {
   const { fontScale } = useWindowDimensions();
   const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
+  const { data: transfers = [] } = useHistoryTransfers();
+  // #1735: an unfinished copy shows on the row, either direction.
+  const liveTransfer = [currentTransfer(transfers, "receiver"), currentTransfer(transfers, "source")].find(
+    (tr) => tr && !isTerminal(tr.state),
+  );
+  const transferDevice = liveTransfer?.peer_device_name?.trim() || t("mobile:historyTransfer.approve.unknownDevice");
+  const transferSub = !liveTransfer
+    ? t("mobile:historyTransfer.security.rowSub")
+    : liveTransfer.state === "paused"
+      ? t("mobile:historyTransfer.security.rowPaused", { device: transferDevice })
+      : liveTransfer.role === "receiver"
+        ? t("mobile:historyTransfer.security.rowActive", { device: transferDevice })
+        : t("mobile:historyTransfer.security.rowSending", { device: transferDevice });
+  const hasOtherDevices = devices.some((d) => !d.is_current);
   const {
     data: events = [],
     isError: eventsError,
@@ -181,6 +197,16 @@ export default function Security() {
               chevron
               onPress={() => router.push("/self/link-device")}
             />
+            {hasOtherDevices || liveTransfer ? (
+              <ListRow
+                testID="row-copy-history"
+                glyph={<Icon.history size={22} color={semantic.text} />}
+                name={t("mobile:historyTransfer.security.row")}
+                sub={transferSub}
+                chevron
+                onPress={() => router.push("/self/history-transfer")}
+              />
+            ) : null}
             {devices.map((d) => {
               const name =
                 (d.device_name && d.device_name.trim()) ||

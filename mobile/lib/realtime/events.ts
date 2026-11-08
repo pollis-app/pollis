@@ -1,5 +1,7 @@
 // Realtime data-channel wire format, the message-relevant subset of desktop's `RealtimeEvent`.
 
+import type { HistoryTransferEventKind } from "../historyTransferPrompt.ts";
+
 export type RealtimeEvent =
   | {
       type: "new_message";
@@ -87,6 +89,12 @@ export type RealtimeEvent =
       username: string | null;
     }
   | {
+      // DS-only (#1735), content-free: re-read pending requests / transfers on receipt.
+      type: "history_transfer";
+      transfer_id: string;
+      event: HistoryTransferEventKind;
+    }
+  | {
       // LOCAL, never on the wire: the room reconnected and wake-ups were lost.
       type: "realtime_reconnected";
       room: string;
@@ -107,7 +115,30 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "channel_mutes_changed",
   "read_cursors_changed",
   "typing",
+  "history_transfer",
 ]);
+
+const HISTORY_TRANSFER_EVENTS = new Set<HistoryTransferEventKind>([
+  "requested",
+  "accepted",
+  "chunk",
+  "acked",
+  "done",
+  "cancelled",
+]);
+
+// The DS may spell the id either way; anything else about the packet must be exact.
+function decodeHistoryTransfer(raw: Record<string, unknown>): RealtimeEvent | null {
+  const id = raw.transfer_id ?? raw.transferId;
+  const event = raw.event;
+  if (typeof id !== "string" || id.length === 0) {
+    return null;
+  }
+  if (typeof event !== "string" || !HISTORY_TRANSFER_EVENTS.has(event as HistoryTransferEventKind)) {
+    return null;
+  }
+  return { type: "history_transfer", transfer_id: id, event: event as HistoryTransferEventKind };
+}
 
 /** Decode a data-channel payload; `null` for anything malformed or unknown. */
 export function decodeRealtimeEvent(
@@ -138,6 +169,9 @@ export function decodeRealtimeEvent(
   if (typeof type !== "string" || !KNOWN_TYPES.has(type as RealtimeEvent["type"])) {
     return null;
   }
+  if (type === "history_transfer") {
+    return decodeHistoryTransfer(parsed as Record<string, unknown>);
+  }
   return parsed as RealtimeEvent;
 }
 
@@ -149,7 +183,8 @@ export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean):
   if (
     event.type === "enrollment_requested" ||
     event.type === "channel_mutes_changed" ||
-    event.type === "read_cursors_changed"
+    event.type === "read_cursors_changed" ||
+    event.type === "history_transfer"
   ) {
     return !fromParticipant;
   }

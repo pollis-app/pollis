@@ -23,6 +23,7 @@ import { refreshReadCursors } from "./queries/useUnread";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 import { catchUpThenBackstop } from "../lib/mlsBackstop";
+import { noticeHistoryTransfer } from "../lib/historyTransferPrompt";
 
 export function useInboxRealtime() {
   const signedInId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -159,6 +160,10 @@ export function useInboxRealtime() {
         case "enrollment_requested":
           // #1360; `useEnrollmentApprovals` opens the approval screen.
           noticeEnrollmentRequested(event);
+          break;
+        case "history_transfer":
+          // #1735, content-free; `useHistoryTransferService` re-reads and runs.
+          noticeHistoryTransfer({ transfer_id: event.transfer_id, event: event.event });
           break;
         default:
           break;

@@ -14,6 +14,8 @@ export interface EnrollmentHandle {
 export type EnrollmentStatusKind = "pending" | "approved" | "rejected" | "expired";
 export interface EnrollmentStatus {
   status: EnrollmentStatusKind;
+  // The device that approved this one (#1735), when the core reports it; the history offer's default source.
+  approved_by_device_id?: string | null;
 }
 
 /// No verification code on purpose (#1096): the approver types the one shown on the new device.

@@ -210,7 +210,8 @@ test("every PIN-keypad screen, and only those, opts out of keyboard avoidance", 
     }
   }
   const optedOut = blocks.filter((b) => /<Screen\b[^>]*avoidKeyboard=\{false\}/.test(b.block));
-  const keypad = blocks.filter((b) => /<PinKeypad\b|\{keypad\}/.test(b.block));
+  // TransferApproval (#1735) draws the keypad when the request needs the PIN.
+  const keypad = blocks.filter((b) => /<PinKeypad\b|\{keypad\}|<TransferApproval\b/.test(b.block));
   assert.deepEqual(
     optedOut.map((b) => b.file).sort(),
     keypad.map((b) => b.file).sort(),
@@ -218,6 +219,7 @@ test("every PIN-keypad screen, and only those, opts out of keyboard avoidance", 
   );
   assert.deepEqual([...new Set(optedOut.map((b) => b.file))].sort(), [
     "app/(auth)/pin.tsx",
+    "app/approve-history-transfer.tsx",
     "app/self/link-device.tsx",
   ]);
   for (const { file, block } of optedOut) {
