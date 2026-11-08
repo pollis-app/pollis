@@ -824,3 +824,32 @@ async fn repeated_calls_are_unchanged_and_nudge_nobody() {
     assert!(matches!(ht::apply_decline(&conn, "alice", "alice-src", &dec, now).await.unwrap(), Outcome::Ok(_)));
     assert!(matches!(ht::apply_decline(&conn, "alice", "alice-src", &dec, now).await.unwrap(), Outcome::Unchanged(_)));
 }
+
+/// The race behind the Maestro "Copy cancelled" (transfer 01M6X1YP…): the
+/// source uploads chunk k while the receiver acknowledges chunk k-1 — which
+/// deletes it — between the DS reading the transfer and checking contiguity.
+/// A stale ack plus a fresh "nothing stored" read made a perfectly contiguous
+/// chunk look like a gap: 409 "not contiguous", and the source aborted and
+/// cancelled a healthy transfer. Deterministic via the interleave hook.
+#[tokio::test]
+async fn a_put_whose_predecessor_is_acked_mid_request_is_stored() {
+    use pollis_api::history_transfer::{AckChunkBody, PutChunkBody};
+    let w = world().await;
+    let id = accepted(&w, "PRED").await;
+    let conn = w.db.conn().await.unwrap();
+    let now = pollis_delivery::util::now_unix() as i64;
+    let p0 = PutChunkBody { transfer_id: id.clone(), idx: 0, sealed: b64(b"zero") };
+    assert!(matches!(ht::apply_put_chunk(&conn, "alice", "alice-src", &p0, now).await.unwrap(), Outcome::Ok(_)));
+    let ack_conn = w.db.conn().await.unwrap();
+    let ack0 = AckChunkBody { transfer_id: id.clone(), idx: 0 };
+    let p1 = PutChunkBody { transfer_id: id.clone(), idx: 1, sealed: b64(b"one") };
+    let out = ht::apply_put_chunk_interleaved(&conn, "alice", "alice-src", &p1, now, || async {
+        let acked = ht::apply_ack_chunk(&ack_conn, "alice", "alice-dst", &ack0, now).await.unwrap();
+        assert!(matches!(acked, Outcome::Ok(_)), "{acked:?}");
+    })
+    .await
+    .unwrap();
+    assert!(matches!(out, Outcome::Ok(_)), "a contiguous chunk was refused: {out:?}");
+    let (_, st) = call(&w.db, &w.dst, P_STATUS, serde_json::json!({ "transfer_id": id })).await;
+    assert_eq!((st["acked_through"].as_i64(), st["stored_through"].as_i64()), (Some(0), Some(1)));
+}

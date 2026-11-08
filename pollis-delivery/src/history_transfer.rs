@@ -214,18 +214,6 @@ async fn load_for(
     }))
 }
 
-async fn stored_through(conn: &Connection, transfer_id: &str) -> anyhow::Result<i64> {
-    let mut rows = conn
-        .query(
-            "SELECT COALESCE(MAX(idx), -1) FROM history_transfer_chunk WHERE transfer_id = ?1",
-            libsql::params![transfer_id],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(r) => r.get(0)?,
-        None => -1,
-    })
-}
 
 /// Delete one transfer's chunks and row.
 async fn delete_transfer(conn: &Connection, transfer_id: &str) -> anyhow::Result<()> {
@@ -503,10 +491,31 @@ pub async fn apply_status(
     body: &TransferStatusBody,
     now: i64,
 ) -> anyhow::Result<Outcome<TransferStatusResponse>> {
-    let Some(row) = load_for(conn, &body.transfer_id, user, device, now).await? else {
+    // One statement, so the ack and the highest stored chunk come from the same
+    // moment: read apart, a concurrent ack (which deletes the chunk it acks)
+    // could show a chunk as neither stored nor acknowledged.
+    let snapshot = {
+        let mut r = conn
+            .query(
+                "SELECT acked_through, \
+                        (SELECT COALESCE(MAX(idx), -1) FROM history_transfer_chunk c WHERE c.transfer_id = t.transfer_id) \
+                 FROM history_transfer t WHERE t.transfer_id = ?1",
+                libsql::params![body.transfer_id.clone()],
+            )
+            .await?;
+        match r.next().await? {
+            Some(x) => Some((x.get::<i64>(0)?, x.get::<i64>(1)?)),
+            None => None,
+        }
+    };
+    let Some(mut row) = load_for(conn, &body.transfer_id, user, device, now).await? else {
         return Ok(Outcome::NotFound);
     };
-    let stored = stored_through(conn, &row.transfer_id).await?;
+    let Some((acked_through, stored)) = snapshot else {
+        return Ok(Outcome::NotFound);
+    };
+    // The ack only moves forward, so the earlier snapshot is never ahead of the row.
+    row.acked_through = acked_through;
     Ok(Outcome::Ok(TransferStatusResponse {
         transfer_id: row.transfer_id,
         src_device_id: row.src,
@@ -796,17 +805,16 @@ where
         }
         return Ok(Outcome::Conflict("chunk index holds different bytes"));
     }
+    // A stale ack can only make this stricter (the source backs off and retries).
     if body.idx > row.acked_through + WINDOW {
         return Ok(Outcome::WindowFull);
     }
-    let stored = stored_through(conn, &row.transfer_id).await?;
-    if body.idx != row.acked_through + 1 && body.idx != stored + 1 {
-        return Ok(Outcome::Conflict("chunk index not contiguous"));
-    }
-    // The trigger re-checks state, window and contiguity against the row as
-    // it is NOW. The one race that is not the source's fault: the receiver
-    // acknowledged this very index (a re-put after a lost answer) between our
-    // read and the insert. Re-read: an index at or below the ack is done.
+    // No contiguity pre-check here: the ack can move (and delete the previous
+    // chunk) at any moment, so a check pieced together from separate reads can
+    // refuse a perfectly contiguous chunk — which once made a source abort and
+    // cancel a healthy transfer under load. The insert trigger checks state,
+    // window and contiguity atomically, against the row as it is NOW; a refusal
+    // is classified below from one consistent re-read.
     let inserted = conn
         .execute(
             "INSERT INTO history_transfer_chunk (transfer_id, idx, sealed, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -839,7 +847,12 @@ where
         if again.state != TransferState::Accepted {
             return Ok(Outcome::Conflict("not transferring"));
         }
-        return Ok(Outcome::Conflict("chunk refused"));
+        if body.idx > again.acked_through + WINDOW {
+            return Ok(Outcome::WindowFull);
+        }
+        // A real gap: the source skipped an index (its own earlier upload is
+        // missing). Retryable for the source: it re-uploads what the DS lacks.
+        return Ok(Outcome::Conflict("chunk index not contiguous"));
     }
     conn.execute(
         "UPDATE history_transfer SET updated_at = ?2, expires_at = ?3 WHERE transfer_id = ?1 AND state = 'accepted'",
