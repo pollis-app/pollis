@@ -1,0 +1,75 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# HISTORY TRANSFER (#1735), part 1 — driven by scripts/maestro-history-transfer.sh.
+# The phone is the NEW device of an account whose first device (the peer) has
+# ${SEEDED} messages in "History Test Group" #General. The peer approved this
+# phone's code; now the phone sets its PIN, is offered the peer's history, copies
+# it (the peer approves with its PIN) and must then show those messages — which
+# it could never decrypt itself, since they predate its joining the group.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 60000
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-history-offer"
+    timeout: 60000
+# The approving device is named, and Copy is ready once it loads.
+- extendedWaitUntil:
+    visible: "Copy your message history from .*"
+    timeout: 30000
+- takeScreenshot: history-transfer-01-offer
+- tapOn:
+    id: "btn-history-offer-copy"
+# Waiting on the peer, then copying, then done. Each phase shows on the same page.
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-status"
+    timeout: 30000
+- takeScreenshot: history-transfer-02-waiting-or-progress
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-done"
+    timeout: 240000
+- assertVisible: "Copied [0-9]+ messages\\."
+- takeScreenshot: history-transfer-03-done
+- tapOn:
+    id: "btn-history-offer-continue"
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 60000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+# The newest seeded message is on screen, exactly once. A row is one accessible
+# element whose label leads with the text then ", <time>" (as long-history matches it).
+- extendedWaitUntil:
+    visible: ".*history-seed-${SEEDED},.*"
+    timeout: 30000
+- assertNotVisible:
+    text: ".*history-seed-${SEEDED},.*"
+    index: 1
+# The oldest is reachable by scrolling back, exactly once.
+- scrollUntilVisible:
+    element:
+      text: ".*history-seed-01,.*"
+    direction: UP
+    timeout: 60000
+- assertNotVisible:
+    text: ".*history-seed-01,.*"
+    index: 1
+- takeScreenshot: history-transfer-04-history-visible
+- runFlow: ../../subflows/assert-no-loss.yaml

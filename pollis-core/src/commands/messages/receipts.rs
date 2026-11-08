@@ -77,6 +77,24 @@ pub(crate) fn record_receipt(
     );
 }
 
+/// Store a receipt copied from a sibling device (#1735), through the same gate
+/// as a received one: DMs only, and only while this device has receipts on.
+pub(crate) fn record_transferred_receipt(
+    conn: &rusqlite::Connection,
+    message_id: &str,
+    reader_id: &str,
+    kind: &str,
+    at: &str,
+    is_dm: bool,
+) {
+    let kind = match kind {
+        "delivered" => ReceiptKind::Delivered,
+        "read" => ReceiptKind::Read,
+        _ => return,
+    };
+    record_receipt(conn, message_id, reader_id, kind, at, is_dm);
+}
+
 /// True when `conversation_id` is a DM.
 async fn is_dm(state: &Arc<AppState>, conversation_id: &str) -> Result<bool> {
     let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;

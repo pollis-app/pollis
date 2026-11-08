@@ -11,6 +11,7 @@ import { StepRow, type StepState } from "../../components/auth/StepRow";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
 import { useInitializeIdentity } from "../../hooks/queries/useAuth";
+import { afterSetupRoute } from "../../hooks/queries/useHistoryTransfer";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -52,7 +53,7 @@ function Initializing() {
       onSuccess: () => {
         const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt));
         navTimer.current = setTimeout(
-          () => router.replace("/(tabs)/groups"),
+          () => router.replace(afterSetupRoute()),
           wait,
         );
       },
@@ -159,7 +160,7 @@ function Initializing() {
         <Button
           testID="btn-continue"
           variant="subtle"
-          onPress={() => router.replace("/(tabs)/groups")}
+          onPress={() => router.replace(afterSetupRoute())}
           iconRight={<Icon.arrowRight size={16} color={semantic.text} />}
         >
           {t("auth.initializing.skip")}

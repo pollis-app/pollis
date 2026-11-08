@@ -130,6 +130,14 @@ function useBreadcrumbTrail(): Segment[] {
       out.push({ label: t("breadcrumb.account"), to: "/settings" });
       out.push({ label: t("breadcrumb.security"), to: "/security" });
       out.push({ label: t("breadcrumb.securityEvents"), to: "/security/events" });
+    } else if (pathname === "/security/copy-history") {
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.security"), to: "/security" });
+      out.push({ label: t("breadcrumb.copyHistory"), to: "/security/copy-history" });
+    } else if (pathname.startsWith("/security/history-transfer/")) {
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.security"), to: "/security" });
+      out.push({ label: t("breadcrumb.historyRequest"), to: pathname });
     } else if (pathname === "/voice-settings") {
       out.push({ label: t("breadcrumb.account"), to: "/settings" });
       out.push({ label: t("breadcrumb.voiceSettings"), to: "/voice-settings" });

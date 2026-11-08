@@ -376,7 +376,8 @@ pub async fn enrollment(
     let mut rows = conn
         .query(
             "SELECT id, user_id, new_device_id, status, expires_at, created_at, \
-                    wrapped_account_key, new_device_ephemeral_pub, verification_code \
+                    wrapped_account_key, new_device_ephemeral_pub, verification_code, \
+                    approved_by_device_id \
              FROM device_enrollment_request WHERE id = ?1",
             libsql::params![parsed.request_id.clone()],
         )
@@ -397,7 +398,12 @@ pub async fn enrollment(
         wrapped_account_key: row.get::<Option<Vec<u8>>>(6)?.as_deref().map(b64),
         new_device_ephemeral_pub: None,
         verification_code: None,
+        approved_by_device_id: None,
     };
+    // #1735: only an approval names its approver (a rejection's column is the rejecter).
+    if request.status == "approved" {
+        request.approved_by_device_id = row.get::<Option<String>>(9)?;
+    }
     let ephemeral: Option<Vec<u8>> = row.get(7)?;
     let code: Option<String> = row.get(8)?;
     drop(rows);
@@ -468,6 +474,7 @@ pub async fn pending_enrollments(
             // Served here because this endpoint IS the approving device's list
             // and the code is what it displays for the human to compare.
             verification_code: row.get(6)?,
+            approved_by_device_id: None,
         });
     }
     Ok(ok_response::<PendingEnrollmentsBody>(

@@ -587,7 +587,7 @@ impl TestClient {
         use pollis_tui::enroll::EnrollmentStatus;
         for attempt in 0..20 {
             match self.enrollment_status(request_id).await {
-                EnrollmentStatus::Approved => break,
+                EnrollmentStatus::Approved { .. } => break,
                 EnrollmentStatus::Pending if attempt < 19 => continue,
                 other => panic!("enrollment did not reach Approved; last status = {other:?}"),
             }

@@ -16,7 +16,8 @@ interface EnrollmentGateScreenProps {
   userId: string;
   /// Confirmation for soft recovery.
   userEmail: string;
-  onEnrolled: () => void;
+  /// `approvedByDevice`: another device approved it (typed code or QR) — false for a Secret Key recovery.
+  onEnrolled: (approvedByDevice: boolean) => void;
   onCancel: () => void;
   /// After a soft-recovery reset; show the new Secret Key once.
   onResetComplete: (newSecretKey: string) => void;
@@ -67,7 +68,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           return;
         }
         if (status.status === "approved") {
-          onEnrolled();
+          onEnrolled(true);
         } else if (status.status === "rejected") {
           setState({ phase: "rejected" });
         } else if (status.status === "expired") {
@@ -184,7 +185,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
             {state.phase === "secret-key-fallback" && (
               <SecretKeyFallbackPane
                 userId={userId}
-                onRecovered={onEnrolled}
+                onRecovered={() => onEnrolled(false)}
                 onBack={restart}
                 onWantReset={() => setState({ phase: "reset-confirm" })}
               />

@@ -34,7 +34,13 @@ The only history that is ever lost (the *bounded-history* caveats):
 - **(a)** Messages sent **before you joined** the MLS tree (a cryptographic
   property of MLS).
 - **(b)** A **brand-new device** for an existing user starts empty (no key
-  backup / Megolm).
+  backup / Megolm) — unless the user copies history from another of their
+  enrolled devices (#1735, `docs/history-transfer-design.md`). That copy moves
+  decrypted rows device to device, sealed end to end and approved on the source;
+  no key moves and the server holds nothing it can decrypt, so it is not a key
+  backup. Its own invariants (a transferred row never overwrites a real one, a
+  chunk applies whole or not at all, a deleted message never comes back) are in
+  that document's table, each with the test that tries to break it.
 - **(c)** *(new in #720)* A device whose **every** copy has been silent for longer
   than `POLLIS_DS_WATERMARK_STALE_MONTHS` (**12 months**, configured) stops pinning
   envelope retention, so mail that was waiting only for that device may be

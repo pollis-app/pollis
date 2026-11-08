@@ -85,8 +85,13 @@ pub struct EnrollmentHandle {
 pub enum EnrollmentStatus {
     /// Still waiting for an existing device to approve.
     Pending,
-    /// The new device installed `account_id_key` and is enrolled.
-    Approved,
+    /// The new device installed `account_id_key` and is enrolled. `approved_by_device_id`
+    /// names the approving device (#1735: the new device offers to copy history from it);
+    /// absent for a DS that predates it.
+    Approved {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        approved_by_device_id: Option<String>,
+    },
     /// An existing device rejected the request.
     Rejected,
     /// TTL elapsed.
@@ -347,6 +352,12 @@ pub async fn poll_enrollment_status(
         })?;
     let user_id = row.user_id;
     let status = row.status;
+    // #1735: remembered until finalize persists it (the local DB is not open yet).
+    if status == "approved" {
+        if let Some(approver) = row.approved_by_device_id.clone() {
+            *state.enrollment_approver.lock().await = Some(approver);
+        }
+    }
     let expires_at_str = row.expires_at;
     let wrapped = match row.wrapped_account_key.as_deref() {
         Some(b64) => Some(crate::commands::ds_reads::decode_b64(
@@ -414,7 +425,7 @@ pub async fn poll_enrollment_status(
             )
             .await?;
 
-            Ok(EnrollmentStatus::Approved)
+            Ok(EnrollmentStatus::Approved { approved_by_device_id: row.approved_by_device_id.clone() })
         }
         other => Err(Error::Other(anyhow::anyhow!(
             "enrollment request {request_id} has unexpected status {other}"
@@ -903,6 +914,17 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
         crate::commands::mls::ensure_mls_key_package(state, user_id, &device_id).await
     {
         crate::diag!("[enrollment] finalize: ensure_mls_key_package failed: {e}");
+    }
+
+    // #1735: remember which device approved this one, for the history-copy offer.
+    let approver = state.enrollment_approver.lock().await.take();
+    if let Some(approver) = approver {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            if let Err(e) = crate::commands::history_transfer::remember_enrollment_approver(db.conn(), &approver) {
+                crate::diag!("[enrollment] finalize: could not record the approver: {e}");
+            }
+        }
     }
 
     // Device-signed read (#987): works only because the cert was published above.

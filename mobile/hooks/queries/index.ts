@@ -25,3 +25,4 @@ export * from "./useExport";
 export * from "./useVault";
 export * from "./useUnread";
 export * from "./useNotificationContent";
+export * from "./useHistoryTransfer";

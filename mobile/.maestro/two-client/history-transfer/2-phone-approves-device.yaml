@@ -1,0 +1,19 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# HISTORY TRANSFER (#1735), between parts 1 and 3: a second peer device asks to
+# join; the phone (still in #General) approves its typed code from the nudge.
+- extendedWaitUntil:
+    visible:
+      id: "screen-approve-device"
+    timeout: 30000
+- tapOn:
+    id: "input-approve-device-code"
+- inputText: "${CODE}"
+- tapOn:
+    id: "btn-approve-device"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-approve-device"
+    timeout: 30000

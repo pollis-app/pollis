@@ -1458,6 +1458,24 @@ Current state:
   (`vaultSaveFailure`), puts the draft back and offers "Try again"
   (`btn-vault-retry`); a retry uploads only the files that failed (#1497).
   Maestro: `.maestro/flows/vault.yaml`, `.maestro/flows/vault-retry.yaml`.
+- **Copy message history between own devices (#1735):** `hooks/queries/useHistoryTransfer.ts`
+  wraps the nine `*_history_transfer*` commands; rules live in `lib/historyTransfer.ts`
+  (phases, retry, source order), `lib/historyTransferPrompt.ts` (when the source's
+  approval page may open; link-device's inline claim) and `lib/historyTransferRunner.ts`
+  (one `run_history_transfer` per transfer; a wake-up during a run that ends paused runs
+  once more, a finished one never again), all in `tests/history-transfer.test.ts`.
+  `run_history_transfer` is one awaited call (uniffi has no event channel), so while it is
+  in flight the runner loops `await_history_transfer(transferId, since)` — a ~25 s long poll
+  answering on the next `updated_at` — for the progress on screen; content-free
+  `history_transfer` inbox packets re-read the lists and (re)start runs. `hooks/useHistoryTransferService.ts` (in the signed-in
+  services) opens `approve-history-transfer` like `useEnrollmentApprovals` opens
+  approve-device (nudge, landing/unlock, every foreground return) and resumes every
+  unfinished transfer on landing/unlock and foreground. New device: a sign-in approved
+  by another device (typed code or QR, not the recovery key) lands on
+  `history-offer` (a root route, so realtime and the runner are live) after initializing; the old device answers the request inline on
+  link-device's "Linked" step (`InlineTransferApproval`, PIN-less shortcut). Later:
+  Security → "Copy message history" (`self/history-transfer`). Copy says "message
+  history", never "plaintext"/E2EE.
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
   key held in the platform secure store — same on-disk blob (`iv(12)||gcm-ct`,

@@ -64,7 +64,7 @@ pub enum PollOutcome {
 pub fn poll_outcome(status: &EnrollmentStatus) -> PollOutcome {
     match status {
         EnrollmentStatus::Pending => PollOutcome::KeepWaiting,
-        EnrollmentStatus::Approved => PollOutcome::Approved,
+        EnrollmentStatus::Approved { .. } => PollOutcome::Approved,
         EnrollmentStatus::Rejected => PollOutcome::Rejected,
         EnrollmentStatus::Expired => PollOutcome::Expired,
     }
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn poll_outcome_projects_every_status() {
         assert_eq!(poll_outcome(&EnrollmentStatus::Pending), PollOutcome::KeepWaiting);
-        assert_eq!(poll_outcome(&EnrollmentStatus::Approved), PollOutcome::Approved);
+        assert_eq!(poll_outcome(&EnrollmentStatus::Approved { approved_by_device_id: None }), PollOutcome::Approved);
         assert_eq!(poll_outcome(&EnrollmentStatus::Rejected), PollOutcome::Rejected);
         assert_eq!(poll_outcome(&EnrollmentStatus::Expired), PollOutcome::Expired);
     }

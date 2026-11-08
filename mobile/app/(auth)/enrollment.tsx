@@ -12,6 +12,7 @@ import {
   useEnrollmentStatus,
   useRecoverWithSecretKey,
   type EnrollmentHandle,
+  noteEnrollmentApprover,
 } from "../../hooks/queries";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { useThemeRerender } from "../../components/theme";
@@ -43,6 +44,7 @@ export default function Enrollment() {
   // On approval go to PIN-create; finalize needs the local DB, which only `set_pin` opens.
   useEffect(() => {
     if (status.data?.status === "approved") {
+      noteEnrollmentApprover(status.data.approved_by_device_id);
       router.replace("/(auth)/pin");
     }
     if (status.data?.status === "rejected") {

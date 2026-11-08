@@ -167,6 +167,43 @@ interface MockPendingEnrollment {
   correctCode: string;
 }
 
+/** #1735: mirrors `HistoryTransfer` in `services/api.ts`. */
+interface MockHistoryTransfer {
+  transfer_id: string;
+  role: 'source' | 'receiver';
+  peer_device_id: string;
+  peer_device_name: string | null;
+  via: 'link' | 'sibling';
+  state: string;
+  chunks_done: number;
+  rows_done: number;
+  rows_skipped: number;
+  deferred_conversations: number;
+  estimated_total?: number | null;
+  error?: string | null;
+  updated_at: string;
+}
+
+interface MockTransferSource {
+  device_id: string;
+  device_name: string | null;
+  platform?: string | null;
+  last_active_at?: string | null;
+  online: boolean;
+  supports_transfer?: boolean | null;
+  approved_this_device?: boolean | null;
+}
+
+interface MockPendingTransferRequest {
+  transfer_id: string;
+  requester_device_id: string;
+  requester_device_name: string | null;
+  requester_added_at: string | null;
+  via: 'link' | 'sibling';
+  pin_required: boolean;
+  created_at: string;
+}
+
 interface MockStore {
   /** #1338: the DS has called this device revoked; every command refuses. */
   deviceRevoked: boolean;
@@ -202,7 +239,7 @@ interface MockStore {
   deviceOfferCancels: number;
   /** Abuse reports filed through `report_user` (#1213), args verbatim. */
   reports: Record<string, unknown>[];
-  enrollmentWait: 'none' | 'pending';
+  enrollmentWait: 'none' | 'pending' | 'approved';
   voiceGate: MockVoiceGate;
   // Receipts (#857), keyed by conversation id; DM-only, so a channel id must render nothing.
   receipts: Record<string, MockReceipt[]>;
@@ -237,6 +274,19 @@ interface MockStore {
   notificationPermission: boolean;
   /** The minimum-version check (#1611): what `check_client_policy` answers, and what a 426 left. */
   clientPolicy: MockClientPolicyStatus;
+  /** #1735: other devices that could send history, open requests from siblings, and transfers. */
+  historySources: MockTransferSource[];
+  historyPending: MockPendingTransferRequest[];
+  historyTransfers: MockHistoryTransfer[];
+  /** The PIN `approve_history_transfer` accepts when a request needs one. */
+  historyPin: string;
+  /** One list of progress frames per `run_history_transfer` call; none left = the run waits for `__historyTransferStep`. */
+  historyRunScript: Partial<MockHistoryTransfer>[][];
+  historyRequests: Array<{ sourceDeviceId: string; via: string }>;
+  historyApprovals: Array<{ transferId: string; pin: string | null }>;
+  historyDeclines: string[];
+  historyCancels: string[];
+  historyRuns: string[];
 }
 
 /** Mirrors `ClientPolicyStatus` in `pollis-core/src/client_policy.rs`. */
@@ -286,6 +336,7 @@ const PRIMARY_HOOKS = [
   '__tauriHold',
   '__tauriRelease',
   '__emitRealtimeEvent',
+  '__historyTransferStep',
 ] as const;
 const primaryInvoke = (window as any).__tauriMockInvoke as
   | ((command: string, args?: Record<string, unknown>) => Promise<unknown>)
@@ -338,7 +389,7 @@ const store: MockStore = {
   deviceOfferScript: (preload.deviceOfferScript as unknown[] | undefined) ?? [],
   deviceOfferCancels: 0,
   reports: [],
-  enrollmentWait: (preload.enrollmentWait as 'none' | 'pending' | undefined) ?? 'none',
+  enrollmentWait: (preload.enrollmentWait as 'none' | 'pending' | 'approved' | undefined) ?? 'none',
   voiceGate: {
     mode: 'voice_activity',
     self_muted: false,
@@ -376,6 +427,16 @@ const store: MockStore = {
     (preload.keyChangeNotices as MockStore['keyChangeNotices'] | undefined) ?? [],
   notificationPermission: preload.notificationPermission === true,
   clientPolicy: { ...ALLOWED_POLICY, ...(preload.clientPolicy ?? {}) },
+  historySources: (preload.historySources as MockTransferSource[] | undefined) ?? [],
+  historyPending: (preload.historyPending as MockPendingTransferRequest[] | undefined) ?? [],
+  historyTransfers: (preload.historyTransfers as MockHistoryTransfer[] | undefined) ?? [],
+  historyPin: (preload.historyPin as string | undefined) ?? '1234',
+  historyRunScript: (preload.historyRunScript as Partial<MockHistoryTransfer>[][] | undefined) ?? [],
+  historyRequests: [],
+  historyApprovals: [],
+  historyDeclines: [],
+  historyCancels: [],
+  historyRuns: [],
 };
 
 (window as any).__tauriMock = store;
@@ -1014,9 +1075,84 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       return { id: 'u_linked', email: 'me@pollis.test', username: 'mia', enrollment_required: true };
     }
-    // `enrollmentWait: 'pending'` holds the wait open (#1207).
+    // `enrollmentWait: 'pending'` holds the wait open (#1207); `'approved'` lets the device in (#1735).
     case 'await_enrollment_approval':
+      if (store.enrollmentWait === 'approved') {
+        return { status: 'approved' };
+      }
       return store.enrollmentWait === 'pending' ? new Promise(() => {}) : null;
+
+    // #1735: copy message history between the account's own devices.
+    case 'list_history_transfer_sources':
+      return store.historySources.map((source) => ({ ...source }));
+    case 'list_pending_history_transfer_requests':
+      return store.historyPending.map((request) => ({ ...request }));
+    case 'list_history_transfers':
+      return store.historyTransfers.map((transfer) => ({ ...transfer }));
+    case 'request_history_transfer': {
+      const { sourceDeviceId, via } = args as { sourceDeviceId: string; via: 'link' | 'sibling' };
+      store.historyRequests.push({ sourceDeviceId, via });
+      const source = store.historySources.find((s) => s.device_id === sourceDeviceId);
+      if (!source) {
+        throw new Error('That device is not one of yours.');
+      }
+      const transfer: MockHistoryTransfer = {
+        transfer_id: `ht_${store.historyRequests.length}`,
+        role: 'receiver',
+        peer_device_id: sourceDeviceId,
+        peer_device_name: source.device_name,
+        via,
+        state: 'awaiting_approval',
+        chunks_done: 0,
+        rows_done: 0,
+        rows_skipped: 0,
+        deferred_conversations: 0,
+        updated_at: nowIso(),
+      };
+      store.historyTransfers.unshift(transfer);
+      return { ...transfer };
+    }
+    case 'approve_history_transfer': {
+      const { transferId, pin } = args as { transferId: string; pin: string | null };
+      store.historyApprovals.push({ transferId, pin });
+      const request = store.historyPending.find((r) => r.transfer_id === transferId);
+      if (!request) {
+        throw new Error('This request is no longer open.');
+      }
+      if (request.pin_required && pin !== store.historyPin) {
+        throw new Error("That PIN isn't right.");
+      }
+      store.historyPending = store.historyPending.filter((r) => r.transfer_id !== transferId);
+      const transfer: MockHistoryTransfer = {
+        transfer_id: transferId,
+        role: 'source',
+        peer_device_id: request.requester_device_id,
+        peer_device_name: request.requester_device_name,
+        via: request.via,
+        state: 'transferring',
+        chunks_done: 0,
+        rows_done: 0,
+        rows_skipped: 0,
+        deferred_conversations: 0,
+        updated_at: nowIso(),
+      };
+      store.historyTransfers.unshift(transfer);
+      return { ...transfer };
+    }
+    case 'decline_history_transfer': {
+      const { transferId } = args as { transferId: string };
+      store.historyDeclines.push(transferId);
+      store.historyPending = store.historyPending.filter((r) => r.transfer_id !== transferId);
+      return null;
+    }
+    case 'cancel_history_transfer': {
+      const { transferId } = args as { transferId: string };
+      store.historyCancels.push(transferId);
+      historyStep(transferId, { state: 'cancelled' });
+      return null;
+    }
+    case 'run_history_transfer':
+      return runHistoryTransferMock(args.transferId as string, args.onProgress as Channel<unknown> | undefined);
     case 'start_device_enrollment':
       return { request_id: 'req_linked_1', verification_code: 'H7K2PQ3M', expires_at: '2099-01-01T00:00:00Z' };
 
@@ -2223,6 +2359,50 @@ const openChannels: Channel<unknown>[] = [];
   }
   live.onmessage?.(event);
   return 1;
+};
+
+/** #1735: the open `run_history_transfer` calls, by transfer. */
+const historyRuns = new Map<string, { channel: Channel<unknown> | null; settle: (t: MockHistoryTransfer) => void }>();
+
+/** Merge one progress frame into a transfer, stream it to its run, and end the run at a terminal state or a pause. */
+function historyStep(transferId: string, frame: Partial<MockHistoryTransfer>): void {
+  const at = store.historyTransfers.findIndex((t) => t.transfer_id === transferId);
+  if (at === -1) {
+    return;
+  }
+  const next = { ...store.historyTransfers[at], ...frame, updated_at: nowIso() };
+  store.historyTransfers[at] = next;
+  const run = historyRuns.get(transferId);
+  if (!run) {
+    return;
+  }
+  run.channel?.onmessage?.({ ...next });
+  if (['completed', 'declined', 'cancelled', 'expired', 'failed', 'paused'].includes(next.state)) {
+    historyRuns.delete(transferId);
+    run.settle({ ...next });
+  }
+}
+
+function runHistoryTransferMock(transferId: string, channel: Channel<unknown> | undefined): Promise<MockHistoryTransfer> {
+  store.historyRuns.push(transferId);
+  // A progress channel is not a realtime one: keep `__emitRealtimeEvent` aimed at the inbox.
+  if (channel) {
+    const at = openChannels.indexOf(channel);
+    if (at !== -1) {
+      openChannels.splice(at, 1);
+    }
+  }
+  return new Promise((resolve) => {
+    historyRuns.set(transferId, { channel: channel ?? null, settle: resolve });
+    const frames = store.historyRunScript.shift() ?? [];
+    frames.forEach((frame, i) => {
+      setTimeout(() => historyStep(transferId, frame), 150 * (i + 1));
+    });
+  });
+}
+
+(window as any).__historyTransferStep = (transferId: string, frame: Partial<MockHistoryTransfer>) => {
+  historyStep(transferId, frame);
 };
 
 export function convertFileSrc(filePath: string, _protocol = "asset"): string {

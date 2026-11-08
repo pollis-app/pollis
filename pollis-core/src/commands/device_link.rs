@@ -374,6 +374,8 @@ pub async fn approve_device_link(state: &Arc<AppState>, user_id: String, link_id
         via,
     )
     .await?;
+    // #1735: this PIN-verified link may be followed by a one-tap history approval.
+    crate::commands::history_transfer::note_link_approved(state, &new_device_id).await;
     state.device_link_tokens.lock().await.remove(&link_id);
     state.device_offer_accepts.lock().await.remove(&link_id);
     Ok(())

@@ -194,6 +194,7 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-voice-settings", nameKey: "pages.voiceName", keywordsKey: "pages.voiceKeywords", breadcrumb: "/settings/voice", path: "/voice-settings" },
   { id: "page-security", nameKey: "pages.securityName", keywordsKey: "pages.securityKeywords", breadcrumb: "/security", path: "/security" },
   { id: "page-security-events", nameKey: "pages.securityEventsName", keywordsKey: "pages.securityEventsKeywords", breadcrumb: "/security/events", path: "/security/events" },
+  { id: "page-copy-history", nameKey: "pages.copyHistoryName", keywordsKey: "pages.copyHistoryKeywords", breadcrumb: "/security/copy-history", path: "/security/copy-history" },
   { id: "page-shortcuts", nameKey: "pages.shortcutsName", keywordsKey: "pages.shortcutsKeywords", breadcrumb: "/shortcuts", path: "/shortcuts" },
   { id: "page-diagnostics", nameKey: "pages.diagnosticsName", keywordsKey: "pages.diagnosticsKeywords", breadcrumb: "/diagnostics", path: "/diagnostics" },
   { id: "page-update", nameKey: "pages.updateName", keywordsKey: "pages.updateKeywords", breadcrumb: "/update", path: "/update" },

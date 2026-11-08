@@ -6,6 +6,7 @@ appId: ${MAESTRO_APP_ID}
     timeout: 60000
 - runFlow: ../../subflows/enter-pin.yaml
 - runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/skip-history-offer.yaml
 - extendedWaitUntil:
     visible:
       id: "tab-groups"

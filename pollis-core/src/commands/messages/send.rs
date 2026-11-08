@@ -633,6 +633,17 @@ pub mod test_hooks {
         /// The DS holds the edit envelope; this device has not recorded that
         /// (#1555).
         EditAfterPost,
+        /// History transfer source (#1735): the sealed chunk is stored locally
+        /// and `next_index` advanced; nothing uploaded.
+        TransferSourceAfterStore,
+        /// History transfer source: the DS holds the chunk; this device has not
+        /// heard back.
+        TransferSourceAfterPut,
+        /// History transfer receiver: the chunk opened and validated; its import
+        /// transaction has not committed (it rolls back).
+        TransferReceiverAfterOpen,
+        /// History transfer receiver: the import committed; the DS has no ack.
+        TransferReceiverAfterCommit,
     }
 
     #[cfg(feature = "test-harness")]

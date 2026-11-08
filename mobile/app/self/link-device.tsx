@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -15,6 +15,7 @@ import { acceptDeviceOffer, cancelDeviceLink, finishDeviceOffer } from "../../ho
 import { isNewDeviceCode, isSignInCode } from "../../lib/linkCodes";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
+import { InlineTransferApproval } from "../../components/self/InlineTransferApproval";
 
 /** Scan to sign in a device (#1361). The code carries no secret; Rust wraps the account key ONLY to the key scanned here. */
 
@@ -22,7 +23,7 @@ type Step =
   | { kind: "scan" }
   | { kind: "pin"; payload: string }
   | { kind: "linking"; name: string | null }
-  | { kind: "linked"; name: string | null }
+  | { kind: "linked"; name: string | null; deviceId: string | null }
   | { kind: "failed"; title: string; message: string };
 
 export default function ScanToSignIn() {
@@ -74,7 +75,7 @@ export default function ScanToSignIn() {
     setStep({ kind: "pin", payload: text });
   };
 
-  const finish = (id: string, name: string | null) => {
+  const finish = (id: string, name: string | null, deviceId: string | null) => {
     if (!userId) {
       return;
     }
@@ -90,7 +91,7 @@ export default function ScanToSignIn() {
         linkId.current = null;
         if (outcome.state === "linked") {
           haptic("success");
-          setStep({ kind: "linked", name: outcome.device_name ?? name });
+          setStep({ kind: "linked", name: outcome.device_name ?? name, deviceId });
         } else if (outcome.state === "tampered") {
           setStep({ kind: "failed", title: t("linkDevice.tamperedTitle"), message: t("linkDevice.tampered") });
         } else {
@@ -118,7 +119,7 @@ export default function ScanToSignIn() {
     try {
       const accepted = await acceptDeviceOffer(userId, value, payload);
       linkId.current = accepted.link_id;
-      finish(accepted.link_id, accepted.device_name);
+      finish(accepted.link_id, accepted.device_name, accepted.new_device_id);
     } catch (e) {
       const message = (e as Error).message || t("linkDevice.pinFailed");
       // A wrong PIN stays on the keypad; anything else means scanning again.
@@ -205,14 +206,16 @@ export default function ScanToSignIn() {
     return (
       <Screen testID="screen-link-device">
         {crumb}
-        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 32, gap: 32 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 24, gap: 32 }}>
           <Heading
             testID={done ? "link-device-done" : "link-device-linking"}
             title={done ? t("linkDevice.linked", { name }) : t("mobile:self.scanDevice.linking", { name })}
             subtitle={done ? undefined : t("mobile:self.scanDevice.linkingBody")}
           />
           {done ? null : <ActivityIndicator color={semantic.accent} />}
-        </View>
+          {/* #1735: the new device's history request, answered here with one tap. */}
+          {step.kind === "linked" && step.deviceId ? <InlineTransferApproval deviceId={step.deviceId} /> : null}
+        </ScrollView>
         {done ? (
           <BottomAction>
             <Button testID="btn-link-device-done" variant="primary" full onPress={() => router.back()}>

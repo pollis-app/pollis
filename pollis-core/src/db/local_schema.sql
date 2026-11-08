@@ -56,7 +56,13 @@ CREATE TABLE IF NOT EXISTS message (
     send_state TEXT CHECK (
         send_state IS NULL
         OR (send_state IN ('pending', 'failed', 'rejected') AND undecryptable IS NULL AND content IS NOT NULL)
-    )
+    ),
+    -- 'transfer' on a row copied from another of this account's devices
+    -- (#1735), NULL on every row this device received or sent itself. A
+    -- notification never previews a transferred row (`notify::fetch`). Also
+    -- added to existing DBs by `add_missing_columns`; must stay identical to
+    -- its `ADDITIVE_COLUMNS` entry.
+    origin TEXT CHECK (origin IS NULL OR origin = 'transfer')
 );
 
 -- Envelopes this device has already accounted for, that leave no `message`
@@ -310,7 +316,8 @@ END;
 -- the conversations and moments a user cares most about, which is strictly more
 -- than it learns from envelope delivery alone. The cost is that bookmarks do not
 -- follow you to a new device, which is consistent with accepted loss (2) in
--- CLAUDE.md: a new device starts empty and has no history to bookmark anyway.
+-- CLAUDE.md: a new device starts empty (unless the user copies history from another
+-- of their enrolled devices, #1735 — which copies messages, never bookmarks).
 --
 -- No foreign key to `message`: a bookmark is allowed to outlive local retention
 -- eviction. The saved-items list resolves each row against `message` at read
@@ -539,3 +546,112 @@ CREATE TABLE IF NOT EXISTS vault_entry_cache (
 );
 
 CREATE INDEX IF NOT EXISTS idx_vault_entry_cache_created ON vault_entry_cache(created_at DESC);
+
+-- An edit, self-redaction or admin tombstone that reached this device before
+-- the message it targets (#1735) — the target is absent (sent before this
+-- device joined, so only a history transfer can bring it) or a loss
+-- placeholder (#1312, whose author is unknown, so the author check cannot run
+-- yet). Applied by `messages::pending_change::apply` the moment a real row for
+-- the target is created or healed — by a transfer import or by ingest — and
+-- deleted then. Without it, a deleted or edited message copied in later from
+-- a sibling device would come back in its old state.
+--   * `actor_id` is the MLS-authenticated author of the change (NULL only for
+--     a tombstone, which the DS authorised);
+--   * an edit carries its new text, nothing else does;
+--   * `seq` is the change's DS position, so the latest edit wins.
+-- Bounded: at most 5000 per conversation (oldest dropped), pruned at 400
+-- days and by the retention window.
+CREATE TABLE IF NOT EXISTS pending_message_change (
+    envelope_id     TEXT PRIMARY KEY,
+    target_id       TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('edit', 'redact', 'tombstone')),
+    actor_id        TEXT,
+    content         TEXT,
+    seq             INTEGER NOT NULL DEFAULT 0,
+    recorded_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK ((kind = 'edit') = (content IS NOT NULL)),
+    CHECK ((kind = 'tombstone') = (actor_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_pending_message_change_target
+    ON pending_message_change(target_id);
+CREATE INDEX IF NOT EXISTS idx_pending_message_change_conversation
+    ON pending_message_change(conversation_id, recorded_at);
+
+-- A history transfer this device takes part in (#1735), as the source ('src')
+-- or the receiver ('dst'). Its key material lives only here, inside the
+-- encrypted local DB, and is gone once the transfer ends:
+--   * `kem_sk` (receiver only) — the key-agreement secret, until the source's
+--     acceptance is verified and the transfer key derived;
+--   * `transfer_key` — the 32-byte chunk key, while transferring.
+-- `next_index` only moves forward (trigger), and an ended transfer never
+-- reopens (trigger). One open transfer as receiver at a time (index). Ended
+-- rows double as the record of handled requests, so a replayed request is
+-- refused.
+CREATE TABLE IF NOT EXISTS history_transfer_local (
+    transfer_id      TEXT PRIMARY KEY,
+    role             TEXT NOT NULL CHECK (role IN ('src', 'dst')),
+    peer_device_id   TEXT NOT NULL,
+    peer_device_name TEXT,
+    via              TEXT NOT NULL CHECK (via IN ('link', 'sibling')),
+    state            TEXT NOT NULL CHECK (state IN (
+                         'awaiting_approval', 'transferring', 'paused',
+                         'completed', 'declined', 'cancelled', 'expired', 'failed')),
+    kem_sk           BLOB,
+    transfer_key     BLOB CHECK (transfer_key IS NULL OR length(transfer_key) = 32),
+    req              BLOB NOT NULL,
+    acc              BLOB,
+    -- Source: the plan fixed at the start (eligible + deferred conversations), JSON.
+    plan             TEXT,
+    -- Source: the last (conversation_id, sent_at, id) sent, JSON.
+    cursor           TEXT,
+    next_index       INTEGER NOT NULL DEFAULT 0 CHECK (next_index >= 0),
+    prev_hash        BLOB NOT NULL DEFAULT (zeroblob(32)) CHECK (length(prev_hash) = 32),
+    -- Source: the index of the final chunk once it is sealed.
+    final_index      INTEGER,
+    chunks_done      INTEGER NOT NULL DEFAULT 0 CHECK (chunks_done >= 0),
+    rows_done        INTEGER NOT NULL DEFAULT 0 CHECK (rows_done >= 0),
+    rows_skipped     INTEGER NOT NULL DEFAULT 0 CHECK (rows_skipped >= 0),
+    deferred_count   INTEGER NOT NULL DEFAULT 0 CHECK (deferred_count >= 0),
+    -- Receiver: conversations it belongs to but held no MLS group for when it
+    -- asked (a Welcome not processed yet) — not requested, so not copied.
+    local_deferred   INTEGER NOT NULL DEFAULT 0 CHECK (local_deferred >= 0),
+    -- Rows the source expects to send (counted when it plans; the receiver
+    -- learns it from chunk 0). A progress hint, never checked against.
+    estimated_total  INTEGER CHECK (estimated_total IS NULL OR estimated_total >= 0),
+    error            TEXT,
+    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (role = 'dst' OR kem_sk IS NULL),
+    CHECK (state IN ('awaiting_approval', 'transferring', 'paused')
+           OR (kem_sk IS NULL AND transfer_key IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_history_transfer_local_one_receiving
+    ON history_transfer_local(role)
+    WHERE role = 'dst' AND state IN ('awaiting_approval', 'transferring', 'paused');
+
+CREATE TRIGGER IF NOT EXISTS history_transfer_local_index_forward
+BEFORE UPDATE OF next_index ON history_transfer_local
+WHEN NEW.next_index < OLD.next_index
+BEGIN
+    SELECT RAISE(ABORT, 'history_transfer_local: next_index only moves forward');
+END;
+
+CREATE TRIGGER IF NOT EXISTS history_transfer_local_ended_stays_ended
+BEFORE UPDATE OF state ON history_transfer_local
+WHEN OLD.state IN ('completed', 'declined', 'cancelled', 'expired', 'failed')
+ AND NEW.state != OLD.state
+BEGIN
+    SELECT RAISE(ABORT, 'history_transfer_local: an ended transfer never reopens');
+END;
+
+-- The source's sealed chunks between sealing and the receiver's ack (#1735).
+-- Written in the same transaction that advances `next_index`, BEFORE the
+-- upload, so a restart re-sends the very same bytes (the DS refuses
+-- different bytes at an index) and never re-seals an index.
+CREATE TABLE IF NOT EXISTS history_transfer_outgoing (
+    transfer_id TEXT NOT NULL,
+    idx         INTEGER NOT NULL CHECK (idx >= 0),
+    sealed      BLOB NOT NULL,
+    PRIMARY KEY (transfer_id, idx)
+);

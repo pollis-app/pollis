@@ -337,3 +337,50 @@ async fn the_wrong_device_for_a_code_says_so() {
     let e = claim(&other_phone, &v2, "Phone").await.unwrap_err();
     assert!(e.contains("signed-in phone"), "{e}");
 }
+
+/// A device linked to `primary`'s account by a v1 QR, enrolled and finalized
+/// (#1735 builds the link-time history copy on it).
+pub(crate) async fn link_by_qr(primary: &TestClient, _email: &str) -> TestClient {
+    let (link_id, payload) = create_link(primary).await;
+    let mut phone = TestClient::new().await;
+    let profile = claim(&phone, &payload, "Linked Phone (ios)").await.expect("claim");
+    phone.profile = Some(profile.clone());
+    let handle = phone.invoke_json("start_device_enrollment", json!({ "userId": profile.id })).await;
+    let request_id = handle["request_id"].as_str().expect("request_id").to_string();
+    assert_eq!(link_state(primary, &link_id).await["state"], "ready_to_approve");
+    primary
+        .invoke_json("approve_device_link", json!({ "userId": primary.user_id(), "linkId": link_id }))
+        .await;
+    let status = phone.invoke_json("poll_enrollment_status", json!({ "requestId": request_id })).await;
+    assert_eq!(status["status"], "approved");
+    phone.invoke_try("set_pin", json!({ "newPin": TEST_PIN, "oldPin": null })).await.expect("set_pin");
+    phone
+        .invoke_try("finalize_device_enrollment", json!({ "userId": profile.id }))
+        .await
+        .expect("finalize");
+    phone
+}
+
+/// A device linked by a v2 code it shows and `primary` scans.
+pub(crate) async fn link_by_offer(primary: &TestClient) -> TestClient {
+    let mut desktop = TestClient::new().await;
+    let (link_id, payload) = offer(&desktop).await;
+    accept(primary, &payload, TEST_PIN).await.expect("accept");
+    let wait = desktop.invoke_json("await_device_offer", json!({ "linkId": link_id })).await;
+    let profile: UserProfile = serde_json::from_value(wait["profile"].clone()).expect("UserProfile");
+    desktop.profile = Some(profile.clone());
+    let handle = desktop.invoke_json("start_device_enrollment", json!({ "userId": profile.id })).await;
+    let request_id = handle["request_id"].as_str().expect("request_id").to_string();
+    let done = primary
+        .invoke_json("finish_device_offer", json!({ "userId": primary.user_id(), "linkId": link_id }))
+        .await;
+    assert_eq!(done["state"], "linked", "{done}");
+    let status = desktop.invoke_json("poll_enrollment_status", json!({ "requestId": request_id })).await;
+    assert_eq!(status["status"], "approved");
+    desktop.invoke_try("set_pin", json!({ "newPin": TEST_PIN, "oldPin": null })).await.expect("set_pin");
+    desktop
+        .invoke_try("finalize_device_enrollment", json!({ "userId": profile.id }))
+        .await
+        .expect("finalize");
+    desktop
+}

@@ -111,6 +111,21 @@ export function describeEvent(event: SecurityEvent): {
         heading: i18n.t("settings:security.eventRecoveryBlobFetchedHeading"),
         detail: i18n.t("settings:security.eventRecoveryBlobFetchedDetail"),
       };
+    case "history_transfer_approved":
+      // #1735, written by the source; device_id is the device that received the history.
+      return {
+        heading: i18n.t("mobile:historyTransfer.events.approvedHeading"),
+        detail: event.device_id
+          ? i18n.t("mobile:historyTransfer.events.approvedDetail", { device: shortId(event.device_id) })
+          : i18n.t("mobile:historyTransfer.events.approvedDetailUnknown"),
+      };
+    case "history_transfer_completed":
+      return {
+        heading: i18n.t("mobile:historyTransfer.events.completedHeading"),
+        detail: event.device_id
+          ? i18n.t("mobile:historyTransfer.events.completedDetail", { device: shortId(event.device_id) })
+          : i18n.t("mobile:historyTransfer.events.completedDetailUnknown"),
+      };
     default:
       return {
         heading: event.kind,

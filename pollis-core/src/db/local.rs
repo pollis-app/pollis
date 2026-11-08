@@ -534,6 +534,12 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
             OR (send_state IN ('pending', 'failed', 'rejected') AND undecryptable IS NULL AND content IS NOT NULL)
         )",
     ),
+    // History transfer (#1735). Must match `local_schema.sql`.
+    (
+        "message",
+        "origin",
+        "ALTER TABLE message ADD COLUMN origin TEXT CHECK (origin IS NULL OR origin = 'transfer')",
+    ),
     // Sensitive media (#1568). Must match `local_schema.sql`.
     (
         "outbox_attachment",
@@ -623,6 +629,12 @@ pub fn evict_old_messages(conn: &Connection) -> Result<usize> {
     // An unsent message (#1335) is the only copy; never evicted.
     let deleted = conn.execute(
         "DELETE FROM message WHERE received_at < datetime('now', ?1) AND send_state IS NULL",
+        rusqlite::params![modifier],
+    )?;
+    // #1735: a change waiting for a target past the window would only ever
+    // apply to a row this device no longer keeps.
+    conn.execute(
+        "DELETE FROM pending_message_change WHERE recorded_at < datetime('now', ?1)",
         rusqlite::params![modifier],
     )?;
     if deleted > 0 {

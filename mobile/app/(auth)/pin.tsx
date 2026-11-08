@@ -14,6 +14,7 @@ import {
   useUnlockState,
 } from "../../hooks/queries/useAuth";
 import { useFinalizeEnrollment } from "../../hooks/queries/useEnrollment";
+import { markLinkOffer } from "../../hooks/queries/useHistoryTransfer";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -118,14 +119,20 @@ function AuthPIN() {
           onSuccess: async () => {
             appStore.setLocked(false);
             // Finalize this device unconditionally (a no-op for a fresh signup). Best-effort: never strand the user here.
+            let finalized = false;
             try {
               await finalize.mutateAsync();
+              finalized = true;
             } catch (e) {
               console.error("[pin] finalize_device_enrollment failed:", e);
             }
             // First-device signup: show the one-time recovery key before initializing.
             const pendingSecretKey =
               appStore.pendingSecretKey;
+            // #1735: a device added to an existing account is offered its history after setup.
+            if (finalized && !pendingSecretKey) {
+              markLinkOffer();
+            }
             if (pendingSecretKey) {
               router.replace("/(auth)/emergency-kit");
             } else {

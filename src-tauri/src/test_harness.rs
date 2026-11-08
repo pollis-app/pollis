@@ -40,6 +40,17 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::device_enrollment::recover_with_secret_key,
             crate::commands::device_enrollment::reset_identity_and_recover,
             crate::commands::device_enrollment::finalize_device_enrollment,
+            crate::commands::history_transfer::list_history_transfer_sources,
+            crate::commands::history_transfer::request_history_transfer,
+            crate::commands::history_transfer::list_pending_history_transfer_requests,
+            crate::commands::history_transfer::approve_history_transfer,
+            crate::commands::history_transfer::decline_history_transfer,
+            crate::commands::history_transfer::list_history_transfers,
+            crate::commands::history_transfer::run_history_transfer,
+            crate::commands::history_transfer::await_history_transfer,
+            crate::commands::history_transfer::cancel_history_transfer,
+            crate::commands::messages::get_message_retention,
+            crate::commands::messages::set_message_retention,
             crate::commands::device_link::create_device_link,
             crate::commands::device_link::poll_device_link,
             crate::commands::device_link::await_device_link,
@@ -393,6 +404,9 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) -> Result<()> {
     // Children before parents; the MLS control-plane tables are wiped on `log` below.
     let main_tables = [
+        "history_transfer_chunk",
+        "history_transfer",
+        "history_transfer_budget",
         "message_reaction",
         "group_invite",
         "group_join_request",

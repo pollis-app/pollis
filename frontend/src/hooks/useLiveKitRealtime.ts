@@ -24,6 +24,7 @@ import { typingStore, typingRoomKey } from '../stores/typingStore';
 import { presenceStore } from '../stores/presenceStore';
 import { keyChangeNoticeKeys, peerVerificationKeys } from './queries/useUserProfile';
 import { listPendingEnrollmentRequests } from '../services/api';
+import { onHistoryTransferHint, type HistoryTransferHint } from './queries/useHistoryTransfers';
 import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
 import i18n from '../i18n';
 import { warmVoiceChannel } from '../utils/voiceWarmup';
@@ -114,6 +115,12 @@ type RealtimeEvent =
     new_device_id: string;
     /// QR device link id (#1207 / #1361); carries no code (#1096).
     link_id: string | null;
+  }
+  | {
+    // #1735: another of our devices moved a history transfer on (DS-originated, content-free).
+    type: 'history_transfer';
+    transfer_id: string;
+    event: HistoryTransferHint;
   }
   | {
     // #1431: mutes changed on another device; re-read them.
@@ -530,6 +537,11 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.mutedChannels(currentUserIdRef.current),
         });
+        return;
+      }
+
+      if (event.type === 'history_transfer') {
+        onHistoryTransferHint(queryClientRef.current, event.transfer_id, event.event);
         return;
       }
 

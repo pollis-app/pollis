@@ -77,6 +77,12 @@ pub struct AppState {
     pub device_offer: Arc<Mutex<Option<crate::commands::device_link::DeviceOfferInProgress>>>,
     /// Codes this device scanned and accepted (#1361): link_id → the QR's ephemeral public key.
     pub device_offer_accepts: Arc<Mutex<HashMap<String, [u8; 32]>>>,
+    /// #1735: devices whose QR link this device approved with the PIN, and when;
+    /// their history request within minutes may be approved with one tap. Cleared on lock.
+    pub history_link_approvals: Arc<Mutex<HashMap<String, std::time::Instant>>>,
+    /// #1735: the device that approved this one's enrollment, held from the
+    /// approved poll until finalize writes it to the local DB.
+    pub enrollment_approver: Arc<Mutex<Option<String>>>,
     /// PIN unlock state. `Some` once a valid PIN was entered or set; dropped by `lock`.
     pub unlock: Arc<Mutex<Option<UnlockState>>>,
     /// OTP-session bearer from first-device signup, held until the first cert publish spends it.
@@ -164,6 +170,8 @@ impl AppState {
             device_link_pending: Arc::new(Mutex::new(None)),
             device_offer: Arc::new(Mutex::new(None)),
             device_offer_accepts: Arc::new(Mutex::new(HashMap::new())),
+            history_link_approvals: Arc::new(Mutex::new(HashMap::new())),
+            enrollment_approver: Arc::new(Mutex::new(None)),
             unlock: Arc::new(Mutex::new(None)),
             bootstrap_session: Arc::new(Mutex::new(None)),
             enrollment_session: Arc::new(Mutex::new(None)),
@@ -294,6 +302,7 @@ impl AppState {
             crate::diag!("[state] startup message eviction failed (non-fatal): {e}");
         }
         crate::commands::messages::loss::prune_known_envelopes(db.conn());
+        crate::commands::messages::pending_change::prune(db.conn());
 
         *self.local_db.lock().await = Some(db);
         // Spawned (#850): indexing scales with the corpus and must not delay sign-in.

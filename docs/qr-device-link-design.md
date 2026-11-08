@@ -285,3 +285,16 @@ SAS all remain.
   to a live offer is left out of `pending_enrollments`, like a v1 one.
 - Each side refuses the other direction's code with a message naming the right
   device (`parse_payload` / `parse_offer_payload`).
+
+## Follow-on: copying history at link time (#1735)
+
+Right after a link, the new device may offer to copy message history from the
+device that approved it (`TransferSource.approved_this_device`, recorded at
+`finalize_device_enrollment` from the enrollment read's `approved_by_device_id`).
+Because both link directions (`approve_device_link`, and `finish_device_offer`
+which calls it) verified the approver's PIN moments earlier, that device may
+approve the follow-on history request (`via = link`) with a single explicit tap
+for ten minutes, in the same unlocked session. The typed-code enrollment
+(`approve_device_enrollment`) does not earn the shortcut, and a lock clears it.
+The transfer itself is specified in `docs/history-transfer-design.md`.
+

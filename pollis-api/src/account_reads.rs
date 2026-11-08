@@ -187,6 +187,11 @@ pub struct EnrollmentRequestRow {
     /// Approval-side only.
     #[serde(default)]
     pub verification_code: Option<String>,
+    /// The device that approved it, once approved (#1735: the new device offers
+    /// to copy history from it). Display hint only — the transfer verifies the
+    /// device itself. Absent from a DS that predates it.
+    #[serde(default)]
+    pub approved_by_device_id: Option<String>,
 }
 
 /// List the authenticated user's open enrollment requests (device-signed; it enumerates).

@@ -399,6 +399,10 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         // `/v1/link/status` (#1207) is a QR poll, so a read.
         // `/v1/link/poll-offer` (#1361): a 32-byte secret, so the bound is volume.
         "/v1/link/status" | "/v1/link/poll-offer" => Some(("read", cfg.read_max, cfg.read_window_secs)),
+        // #1735: the transfer polls are reads; the durable per-ACCOUNT request budget is in the handler.
+        "/v1/history-transfer/status" | "/v1/history-transfer/pending" | "/v1/history-transfer/chunk/get" => {
+            Some(("read", cfg.read_max, cfg.read_window_secs))
+        }
         p if is_read_path(p) => Some(("read", cfg.read_max, cfg.read_window_secs)),
         _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
     }

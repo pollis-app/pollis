@@ -275,6 +275,40 @@ the group and read the post (the create admitted its device). The peer then
 creates a group, and `3-peer-group-live.yaml`, which never touches the phone,
 must see its pill appear: only `create_group`'s inbox wake-up can do that.
 
+**Copy message history between own devices (automated, #1735):**
+`mobile/scripts/maestro-history-transfer.sh <device>` — `enroll_peer`
+`approver --seed-history N --transfer-source` signs up an account, posts N
+messages (`history-seed-01`…) in "History Test Group" #General and approves the
+phone's sign-in code. `two-client/history-transfer/1-receiver-copies.yaml`: the
+phone sets its PIN, is offered the owner's history (`screen-history-offer`),
+copies it — the peer approves with its PIN and sends — reaches
+`history-transfer-done`, and must show the oldest and newest seeded message,
+each exactly once, with no undecryptable row (`assert-no-loss`). Then the other
+direction: `enroll_peer new --transfer-receiver` joins as a second device (the
+phone approves its code), asks for the phone's history, and
+`2-phone-approves-device.yaml` approves it, and
+`3-source-approves.yaml` must see the approval page open on its own, take the
+PIN and show the send to its end; the peer reports every seeded row received.
+`4-security-shows-events.yaml` finds "Message history shared" in Security and
+opens the device picker. `5-qr-link-inline.yaml`: a signed-out peer (`enroll_peer
+offer - --transfer-receiver --transfer-via link`) shows its code, the phone
+scans it (typed in) and confirms with its PIN, and the new device's request must
+appear INLINE on the "Linked" page as one tap with no keypad, then send to its
+end. `6-receiver-kill-resume.yaml`: a fresh account seeded with `BIG` (3000)
+messages padded to `BIG_PAD` (4000) bytes, so the copy spans ~25 chunks; the
+source peer runs through `scripts/slow-proxy.py`, switched on only once the copy
+starts, so the kill cannot miss. Once at least one chunk has landed the app is
+killed (`killApp`) and relaunched; after the PIN the copy must resume by itself
+to exactly "Copied 3000 messages." with the newest message shown once and
+nothing undecryptable. `ONLY_KILL=1` runs that step alone, `SKIP_KILL=1` skips
+it, `KEEP_WORK=1` keeps the peers' logs. Every other new-device flow says "Not now" to the
+offer (`subflows/skip-history-offer.yaml`). Until the dev DS carries the #1735 routes it
+answers 404 to them; run it against a local DS instead (a `sqld` stamped with
+`pollis-schema`'s scripts, `pollis-delivery` with Doppler `dev_personal` plus
+`TURSO_URL` pointing at it), a build whose `EXPO_PUBLIC_POLLIS_DELIVERY_URL` is
+`http://localhost:<port>` (Android: `adb reverse tcp:<port> tcp:<port>`), and
+`POLLIS_DELIVERY_URL=http://localhost:<port>` for the peers.
+
 **A new device's approval request comes to the phone (automated, #1360):**
 `mobile/scripts/maestro-approval-prompt.sh <device>` — `pollis-core`'s
 `enroll_peer` example plays the desktop on the desktop's own core commands

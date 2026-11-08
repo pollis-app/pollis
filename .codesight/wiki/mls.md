@@ -868,6 +868,9 @@ wrap at an epoch from before this device joined, whose holders are all offline â
 is a wait, not a failure: the outbox keeps the send `pending`
 (`file_keys::FileKeyUnavailable`) and the next drain sends it.
 
+## History transfer between own devices (#1735)
+A new or lagging device can copy decrypted history from a sibling (`docs/history-transfer-design.md`). MLS-relevant rules: no MLS state moves; the receiver's request lists, per conversation it holds a group for, its join position (`mls::join_position`: the lineage's `first_join`, else the current epoch). The source sends a conversation only after a successful catch-up of that group leaves its local group (`mls::local_position`) at or past that position â€” otherwise the conversation is deferred, since edits/deletes sealed before the receiver joined are visible only to the source. Changes the receiver decrypts after joining but before it holds their target are kept in `pending_message_change` and applied on arrival.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:

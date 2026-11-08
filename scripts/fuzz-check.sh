@@ -19,7 +19,7 @@ set -euo pipefail
 
 # Nightly toolchain to use. Overridable; defaults to the rustup `nightly` channel.
 NIGHTLY="${NIGHTLY:-nightly}"
-TARGETS=(next_watermark classify resolve may_rejoin prune_floor framing sealing_order ds_bodies outbox decrypt_untrusted mls_delivery)
+TARGETS=(next_watermark classify resolve may_rejoin prune_floor framing sealing_order ds_bodies outbox decrypt_untrusted mls_delivery history_transfer_chunk)
 if [[ -n "${FUZZ_TARGETS:-}" ]]; then
   read -ra TARGETS <<< "$FUZZ_TARGETS"
 fi

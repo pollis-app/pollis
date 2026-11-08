@@ -24,6 +24,7 @@ pub mod emoji;
 pub mod error;
 pub mod error_log;
 pub mod groups;
+pub mod history_transfer;
 pub mod links;
 pub mod livekit;
 pub mod headers;
@@ -400,6 +401,22 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<links::OfferLinkBody as DsRequest>::PATH, post(links::offer_link))
         .route(<links::AcceptOfferBody as DsRequest>::PATH, post(links::accept_offer))
         .route(<links::PollOfferBody as DsRequest>::PATH, post(links::poll_offer))
+        // History transfer (#1735) — DEVICE-SIGNED, party-bound; see `history_transfer`.
+        .route(<history_transfer::RequestTransferBody as DsRequest>::PATH, post(history_transfer::request))
+        .route(<history_transfer::PendingTransfersBody as DsRequest>::PATH, post(history_transfer::pending))
+        .route(<history_transfer::TransferStatusBody as DsRequest>::PATH, post(history_transfer::status))
+        .route(<history_transfer::AcceptTransferBody as DsRequest>::PATH, post(history_transfer::accept))
+        .route(<history_transfer::DeclineTransferBody as DsRequest>::PATH, post(history_transfer::decline))
+        .route(<history_transfer::CancelTransferBody as DsRequest>::PATH, post(history_transfer::cancel))
+        .route(<history_transfer::CompleteTransferBody as DsRequest>::PATH, post(history_transfer::complete))
+        // The one route whose body may exceed axum's 2 MB default in principle: an explicit limit.
+        .route(
+            <history_transfer::PutChunkBody as DsRequest>::PATH,
+            post(history_transfer::put_chunk)
+                .layer(axum::extract::DefaultBodyLimit::max(history_transfer::PUT_BODY_LIMIT)),
+        )
+        .route(<history_transfer::GetChunkBody as DsRequest>::PATH, post(history_transfer::get_chunk))
+        .route(<history_transfer::AckChunkBody as DsRequest>::PATH, post(history_transfer::ack_chunk))
         // Email change (#419) — DEVICE-SIGNED; see `email_change`.
         .route(
             <email_change::RequestEmailChangeBody as DsRequest>::PATH,

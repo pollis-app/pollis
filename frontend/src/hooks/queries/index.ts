@@ -11,3 +11,4 @@ export * from "./useReceipts";
 export * from "./useBlocks";
 export * from "./useTransparency";
 export * from "./useMessageRetention";
+export * from "./useHistoryTransfers";

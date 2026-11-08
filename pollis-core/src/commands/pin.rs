@@ -551,6 +551,9 @@ pub async fn unlock(
     // Flush the outbox (#1335) in the background.
     crate::commands::messages::spawn_outbox_flush(state);
 
+    // Resume open history transfers (#1735) in the background.
+    crate::commands::history_transfer::spawn_resume_all(state);
+
     Ok(UnlockOutcome {
         user_id: unlocked.user_id,
         attempts_remaining: None,
@@ -640,6 +643,8 @@ async fn unlock_inner(
 /// Screen lock (not log out): drop unlock state and close the local DB.
 pub async fn lock(state: &Arc<AppState>) -> Result<()> {
     *state.unlock.lock().await = None;
+    // #1735: the link-time single-tap approval does not survive a lock.
+    state.history_link_approvals.lock().await.clear();
     // Kill locked-session URLs; cache files stay encrypted and readable on re-unlock.
     *state.media_server_token.lock().await = None;
     // Staged attachments are in-memory plaintext; drop them with the session.

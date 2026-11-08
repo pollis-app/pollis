@@ -253,6 +253,23 @@ pub(super) fn dispatch_data(
             }
             let _ = channel.send(RealtimeEvent::ChannelMutesChanged);
         }
+        Some("history_transfer") => {
+            // DS-originated only (#1735), like `read_cursors_changed`.
+            if sender.is_some() {
+                return None;
+            }
+            if let (Some(transfer_id), Some(event)) = (
+                data.get("transfer_id").and_then(|v| v.as_str()),
+                data.get("event").and_then(|v| v.as_str()),
+            ) {
+                // Wake a waiting run now rather than at its next backoff step.
+                crate::commands::history_transfer::wake();
+                let _ = channel.send(RealtimeEvent::HistoryTransfer {
+                    transfer_id: transfer_id.to_owned(),
+                    event: event.to_owned(),
+                });
+            }
+        }
         Some("read_cursors_changed") => {
             // DS-originated only (#1628), like `channel_mutes_changed`.
             if sender.is_some() {
@@ -540,6 +557,21 @@ mod tests {
         let payload = serde_json::json!({ "type": "read_cursors_changed" });
         let events = run(payload.clone(), None);
         assert!(matches!(events[..], [RealtimeEvent::ReadCursorsChanged]));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #1735: the transfer nudge is forwarded from the DS, dropped from a participant.
+    #[test]
+    fn history_transfer_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "history_transfer", "transfer_id": "T", "event": "chunk" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::HistoryTransfer { transfer_id, event }] if transfer_id == "T" && event == "chunk"));
+        let json = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(json, serde_json::json!({ "type": "history_transfer", "transfer_id": "T", "event": "chunk" }));
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

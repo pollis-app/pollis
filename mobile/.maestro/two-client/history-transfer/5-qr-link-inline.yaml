@@ -1,0 +1,69 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# HISTORY TRANSFER (#1735), part 5 — the OLD device's side at link time. The
+# phone scans a signed-out desktop's sign-in code (entered by hand: a simulator
+# camera cannot see another screen) and confirms with its PIN; that new device
+# then asks for the phone's history with via=link. The request must show INLINE
+# on the "Linked" page, as one tap with no PIN keypad (the link-time shortcut),
+# and the send must run to its end there.
+- repeat:
+    times: 4
+    while:
+      notVisible:
+        id: "tab-self"
+    commands:
+      - tapOn:
+          id: "btn-back"
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "row-link-device"
+    direction: DOWN
+- tapOn:
+    id: "row-link-device"
+- extendedWaitUntil:
+    visible:
+      id: "screen-link-device"
+    timeout: 10000
+- tapOn:
+    id: "btn-scan-toggle-manual"
+- tapOn:
+    id: "input-scan-code"
+- inputText: ${PAYLOAD}
+- tapOn:
+    id: "btn-scan-code-continue"
+- extendedWaitUntil:
+    visible:
+      id: "scan-device-confirm"
+    timeout: 10000
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "link-device-done"
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-approval"
+    timeout: 120000
+# One tap: no keypad, and no approval page opened on top.
+- assertNotVisible:
+    id: "btn-pin-1"
+- assertNotVisible:
+    id: "screen-approve-history-transfer"
+- assertVisible: ".*wants to copy your message history\\. It will be able to read all your past messages\\."
+- takeScreenshot: history-transfer-08-inline-one-tap
+- tapOn:
+    id: "btn-history-approve"
+- extendedWaitUntil:
+    visible:
+      id: "history-transfer-done"
+    timeout: 240000
+- assertVisible: "Message history sent"
+- takeScreenshot: history-transfer-09-inline-sent
+- tapOn:
+    id: "btn-link-device-done"

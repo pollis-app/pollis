@@ -130,6 +130,10 @@ ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 curve25519-dalek = "4"
 hkdf = "0.12"
+# History transfer's hybrid key agreement (#1735): ML-KEM-768 + X25519 combined
+# through HKDF. Already in the lock (openmls's HPKE backend); no RNG needed from
+# it (keys come from seeds, encapsulation from our OsRng bytes).
+ml-kem = { version = "0.3", default-features = false, features = ["alloc"] }
 sha2 = "0.10"
 hmac = "0.12"
 aes-gcm = "0.10"
