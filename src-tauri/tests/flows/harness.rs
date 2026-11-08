@@ -120,6 +120,8 @@ pub(crate) enum DsFault {
     TransferRequestLandsThenTimesOut,
     /// #1735: a history-transfer acceptance lands, then its answer is lost (504).
     TransferAcceptLandsThenTimesOut,
+    /// #1735: a history-transfer request times out before the DS stores it (504).
+    TransferRequestTimesOutUnlanded,
 }
 
 impl DsFault {
@@ -480,6 +482,12 @@ async fn inject_message_fault(
                 return timeout();
             }
             resp
+        }
+        Some(DsFault::TransferRequestTimesOutUnlanded)
+            if path == pollis_api::history_transfer::RequestTransferBody::PATH =>
+        {
+            take_ds_fault();
+            timeout()
         }
         Some(DsFault::TransferAcceptLandsThenTimesOut)
             if path == pollis_api::history_transfer::AcceptTransferBody::PATH =>

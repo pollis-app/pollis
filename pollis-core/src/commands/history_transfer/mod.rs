@@ -464,9 +464,33 @@ pub async fn request_history_transfer(
             end_and_tell_ds(state, &transfer_id, store::State::Failed, &format!("The request was refused: {t}")).await?;
             Err(err("The request was refused."))
         }
-        Ok(Ds::TooMany) => Err(err("Too many requests — try again in a while.")),
-        Err(e) => Err(e),
+        // The answer was lost: the request may or may not be on the DS. Keep
+        // driving it in the background (its run reads the DS's status and either
+        // carries on or ends it as expired), so nothing waits for the next unlock.
+        Ok(Ds::TooMany) | Err(_) => {
+            spawn_run(state, &transfer_id);
+            Err(err(LOST_ANSWER))
+        }
     }
+}
+
+/// What a call whose answer was lost tells the user: it is not refused, and it
+/// is not waiting on them.
+pub(crate) const LOST_ANSWER: &str =
+    "Couldn't confirm this with the server. Pollis keeps trying in the background — you can leave this screen.";
+
+/// Drive one transfer on its own task (the in-flight claim makes a second run of
+/// the same transfer follow the first instead of racing it). Used where a call's
+/// answer was lost and no UI will start the run.
+fn spawn_run(state: &Arc<AppState>, transfer_id: &str) {
+    let state = state.clone();
+    let id = transfer_id.to_string();
+    tokio::spawn(async move {
+        let sink: Arc<dyn EventSink<HistoryTransfer>> = Arc::new(crate::sink::NoopSink);
+        if let Err(e) = run_history_transfer(&state, id.clone(), sink).await {
+            crate::diag!("[history-transfer] background run {id}: {e}");
+        }
+    });
 }
 
 /// End a transfer locally that may exist on the DS, and ask the DS to drop it
@@ -661,8 +685,12 @@ pub async fn approve_history_transfer(
             end_and_tell_ds(state, &transfer_id, store::State::Failed, why).await?;
             return Err(err(why));
         }
-        Ok(Ds::TooMany) => return Err(err("Too many requests — the copy will start when Pollis can reach the server.")),
-        Err(e) => return Err(e),
+        // The answer was lost: the acceptance may or may not be on the DS. A
+        // background run re-sends it (idempotent) and carries the copy on.
+        Ok(Ds::TooMany) | Err(_) => {
+            spawn_run(state, &transfer_id);
+            return Err(err(LOST_ANSWER));
+        }
     }
     let ev = pollis_api::account::SecurityEventBody {
         kind: "history_transfer_approved".to_string(),
@@ -758,13 +786,7 @@ pub fn spawn_resume_all(state: &Arc<AppState>) {
             Err(_) => return,
         };
         for id in ids {
-            let state = state.clone();
-            tokio::spawn(async move {
-                let sink: Arc<dyn EventSink<HistoryTransfer>> = Arc::new(crate::sink::NoopSink);
-                if let Err(e) = run_history_transfer(&state, id.clone(), sink).await {
-                    crate::diag!("[history-transfer] resume {id}: {e}");
-                }
-            });
+            spawn_run(&state, &id);
         }
     });
 }
