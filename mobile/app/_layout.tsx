@@ -339,6 +339,8 @@ export default function RootLayout() {
               <Stack.Screen name="dev/client-policy" options={{ animation: "none" }} />
               <Stack.Screen name="approve-device" options={settingsPage} />
               <Stack.Screen name="approve-history-transfer" options={settingsPage} />
+              {/* After setup, like an auth step: no swipe back into initializing. */}
+              <Stack.Screen name="history-offer" options={{ animation: "fade", gestureEnabled: false }} />
               <Stack.Screen
                 name="self/history-transfer"
                 options={settingsPage}

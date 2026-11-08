@@ -2,27 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Body, Button, BottomAction, Group } from "../../components/ui";
-import { Heading } from "../../components/auth/Heading";
-import { AuthError } from "../../components/auth/AuthError";
-import { RadioRow } from "../../components/RadioRow";
-import { HistoryTransferStatus } from "../../components/self/HistoryTransferStatus";
-import { semantic, type as ty, space } from "../../theme/tokens";
-import { formatRelative } from "../../lib/relativeTime";
+import { Screen, Body, Button, BottomAction, Group } from "../components/ui";
+import { Heading } from "../components/auth/Heading";
+import { AuthError } from "../components/auth/AuthError";
+import { RadioRow } from "../components/RadioRow";
+import { HistoryTransferStatus } from "../components/self/HistoryTransferStatus";
+import { semantic, type as ty, space } from "../theme/tokens";
+import { formatRelative } from "../lib/relativeTime";
 import {
   currentTransfer,
   isSupported,
   isTerminal,
   preferredSource,
   sortSources,
-} from "../../lib/historyTransfer";
+} from "../lib/historyTransfer";
 import {
   takeLinkOffer,
   useHistoryTransfers,
   useRequestHistoryTransfer,
   useTransferSources,
-} from "../../hooks/queries/useHistoryTransfer";
-import { useThemeRerender } from "../../components/theme";
+} from "../hooks/queries/useHistoryTransfer";
+import { useThemeRerender } from "../components/theme";
 
 /**
  * New device, right after it was linked (#1735): "Copy your message history from <device>?". Copy asks that

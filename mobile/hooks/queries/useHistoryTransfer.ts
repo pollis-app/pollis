@@ -137,8 +137,9 @@ export function takeLinkOffer(): { approverDeviceId: string | null } | null {
 }
 
 /** Where setup lands: the history offer when one is due, else the app. */
-export function afterSetupRoute(): "/(auth)/history-offer" | "/(tabs)/groups" {
-  return linkOfferPending() ? "/(auth)/history-offer" : "/(tabs)/groups";
+// A root route, not an (auth) step: the inbox subscription and the runner work there, so the copy can start.
+export function afterSetupRoute(): "/history-offer" | "/(tabs)/groups" {
+  return linkOfferPending() ? "/history-offer" : "/(tabs)/groups";
 }
 
 // ── Hooks ──

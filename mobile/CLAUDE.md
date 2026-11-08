@@ -1471,7 +1471,7 @@ Current state:
   approve-device (nudge, landing/unlock, every foreground return) and resumes every
   unfinished transfer on landing/unlock and foreground. New device: a sign-in approved
   by another device (typed code or QR, not the recovery key) lands on
-  `(auth)/history-offer` after initializing; the old device answers the request inline on
+  `history-offer` (a root route, so realtime and the runner are live) after initializing; the old device answers the request inline on
   link-device's "Linked" step (`InlineTransferApproval`, PIN-less shortcut). Later:
   Security → "Copy message history" (`self/history-transfer`). Copy says "message
   history", never "plaintext"/E2EE.
