@@ -347,6 +347,12 @@ pub async fn poll_enrollment_status(
         })?;
     let user_id = row.user_id;
     let status = row.status;
+    // #1735: remembered until finalize persists it (the local DB is not open yet).
+    if status == "approved" {
+        if let Some(approver) = row.approved_by_device_id.clone() {
+            *state.enrollment_approver.lock().await = Some(approver);
+        }
+    }
     let expires_at_str = row.expires_at;
     let wrapped = match row.wrapped_account_key.as_deref() {
         Some(b64) => Some(crate::commands::ds_reads::decode_b64(
@@ -903,6 +909,16 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
         crate::commands::mls::ensure_mls_key_package(state, user_id, &device_id).await
     {
         crate::diag!("[enrollment] finalize: ensure_mls_key_package failed: {e}");
+    }
+
+    // #1735: remember which device approved this one, for the history-copy offer.
+    if let Some(approver) = state.enrollment_approver.lock().await.take() {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            if let Err(e) = crate::commands::history_transfer::remember_enrollment_approver(db.conn(), &approver) {
+                crate::diag!("[enrollment] finalize: could not record the approver: {e}");
+            }
+        }
     }
 
     // Device-signed read (#987): works only because the cert was published above.

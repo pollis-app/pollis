@@ -282,3 +282,21 @@ mod merge_site_tests {
         }
     }
 }
+
+/// Where this device's local group for `conversation_id` stands: `(generation,
+/// epoch)` of the lineage it holds, or `None` without a local group. History
+/// transfer (#1735) compares it with the receiver's join (A2).
+pub(crate) fn local_position(conn: &rusqlite::Connection, conversation_id: &str) -> Option<(i64, u64)> {
+    let generation = generation::local_generation(conn, conversation_id);
+    let group = provider::load_stored_group_at(conn, conversation_id, generation)?;
+    Some((generation, group.epoch().as_u64()))
+}
+
+/// Where this device joined the lineage it holds for `conversation_id`
+/// (#1735): the recorded first join, else (a lineage held since before #1312)
+/// its current epoch — later than the true join, so a source compared against
+/// it is held to a stricter bar, never a looser one.
+pub(crate) fn join_position(conn: &rusqlite::Connection, conversation_id: &str) -> Option<(i64, u64)> {
+    let (generation, epoch) = local_position(conn, conversation_id)?;
+    Some((generation, first_join(conn, conversation_id, generation).unwrap_or(epoch)))
+}

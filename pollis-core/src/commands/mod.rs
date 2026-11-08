@@ -19,6 +19,8 @@ pub(crate) mod ds_reads;
 pub mod emoji;
 pub mod user;
 pub mod groups;
+// Copy message history between two of one account's devices (#1735).
+pub mod history_transfer;
 pub mod messages;
 pub mod dm;
 // LiveKit: real impl with `media` (desktop), no-op stub otherwise (#185).

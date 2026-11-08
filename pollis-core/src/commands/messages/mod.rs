@@ -141,6 +141,9 @@ pub use ingest::{
 // The channel → MLS group memo (#1610), shared with the voice join so it skips the resolve POST.
 #[cfg(feature = "media")]
 pub(crate) use ingest::{cached_channel_group, remember_channel_group};
+// History transfer (#1735) runs the same convergence and receipt gate after an import.
+pub(crate) use read_state::converge_read_cursors;
+pub(crate) use receipts::record_transferred_receipt;
 // What ingest tried to open, and what it reported (#1629).
 #[cfg(feature = "test-harness")]
 pub use ingest::logged_decrypt_failures;

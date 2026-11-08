@@ -4694,6 +4694,7 @@ dependencies = [
  "hybrid-array",
  "kem",
  "module-lattice",
+ "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "sha3 0.11.0",
 ]
@@ -6227,6 +6228,7 @@ dependencies = [
  "livekit-protocol",
  "livekit-signaling",
  "ml-dsa",
+ "ml-kem",
  "nix 0.30.1",
  "nnnoiseless",
  "openmls",
