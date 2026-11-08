@@ -199,3 +199,24 @@ export function progressPercent(transfer: HistoryTransfer): number | null {
   const done = transfer.rows_done + transfer.rows_skipped;
   return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
 }
+
+/** How long a finished copy's outcome stays on the picker page until "Done" (e.g. after a relaunch). */
+export const OUTCOME_SHOWN_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the picker page leads with this receiver transfer: always while it runs; once finished, until the
+ * user dismisses it, so a copy that ended while the app was closed or killed still reports how it ended.
+ */
+export function showsOutcome(
+  transfer: HistoryTransfer | null,
+  dismissed: ReadonlySet<string>,
+  now: number,
+): boolean {
+  if (!transfer || dismissed.has(transfer.transfer_id)) {
+    return false;
+  }
+  if (!isTerminal(transfer.state)) {
+    return true;
+  }
+  return now - time(transfer.updated_at) <= OUTCOME_SHOWN_MS;
+}

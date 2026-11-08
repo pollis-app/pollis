@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Group, ListRow, Dot } from "../../components/ui";
@@ -11,6 +11,7 @@ import {
   currentTransfer,
   isSupported,
   isTerminal,
+  showsOutcome,
   sortSources,
   type TransferSource,
 } from "../../lib/historyTransfer";
@@ -20,6 +21,9 @@ import {
   useTransferSources,
 } from "../../hooks/queries";
 import { useThemeRerender } from "../../components/theme";
+
+// Outcomes the user has already acknowledged with "Done" in this process.
+const dismissedOutcomes = new Set<string>();
 
 export function sourceGlyph(source: TransferSource, color: string) {
   // The core derives `platform` from a "(macOS)"-style name suffix; else read the name itself.
@@ -37,17 +41,11 @@ export default function CopyMessageHistory() {
   const request = useRequestHistoryTransfer();
   const [asking, setAsking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The receiver transfer this visit follows; a finished one stays until "Done".
-  const [dismissed, setDismissed] = useState<string | null>(null);
-  // Transfers this visit started or watched running finish on screen instead of vanishing.
-  const seen = useRef(new Set<string>()).current;
+  // The receiver transfer the page leads with; a finished one stays until "Done" (for this process).
+  const [, setDismissTick] = useState(0);
 
   const receiving = currentTransfer(transfers, "receiver");
-  if (receiving && !isTerminal(receiving.state)) {
-    seen.add(receiving.transfer_id);
-  }
-  const followed =
-    receiving && receiving.transfer_id !== dismissed && seen.has(receiving.transfer_id) ? receiving : null;
+  const followed = receiving && showsOutcome(receiving, dismissedOutcomes, Date.now()) ? receiving : null;
   const sending = currentTransfer(transfers, "source");
   const sendingActive = sending && !isTerminal(sending.state) ? sending : null;
 
@@ -61,8 +59,7 @@ export default function CopyMessageHistory() {
       { sourceDeviceId: source.device_id, via: "sibling" },
       {
         onSuccess: (transfer) => {
-          seen.add(transfer.transfer_id);
-          setDismissed(null);
+          dismissedOutcomes.delete(transfer.transfer_id);
           setAsking(null);
         },
         onError: (e) => {
@@ -91,7 +88,10 @@ export default function CopyMessageHistory() {
         {followed ? (
           <HistoryTransferStatus
             transfer={followed}
-            onDone={() => setDismissed(followed.transfer_id)}
+            onDone={() => {
+              dismissedOutcomes.add(followed.transfer_id);
+              setDismissTick((n) => n + 1);
+            }}
           />
         ) : (
           <View style={{ gap: space.xl }}>

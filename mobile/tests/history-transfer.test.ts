@@ -12,6 +12,7 @@ import {
   preferredSource,
   progressPercent,
   retryKind,
+  showsOutcome,
   sortSources,
   transferPhase,
   type HistoryTransfer,
@@ -418,4 +419,16 @@ test("a terminal snapshot from the long poll ends the stream", async () => {
   assert.equal(polls, 1);
   gate.resolve(transfer({ state: "cancelled" }));
   await done;
+});
+
+test("the picker leads with a running copy, and with a finished one until Done (a relaunch still shows it)", () => {
+  const now = Date.parse("2026-11-08T12:00:00Z");
+  const running = transfer({ state: "transferring" });
+  const done = transfer({ state: "completed", updated_at: "2026-11-08 11:00:00" });
+  const old = transfer({ state: "completed", updated_at: "2026-11-01 11:00:00" });
+  assert.ok(showsOutcome(running, new Set(), now));
+  assert.ok(showsOutcome(done, new Set(), now));
+  assert.ok(!showsOutcome(done, new Set(["T1"]), now), "Done dismisses it");
+  assert.ok(!showsOutcome(old, new Set(), now), "a week-old outcome is not news");
+  assert.ok(!showsOutcome(null, new Set(), now));
 });
