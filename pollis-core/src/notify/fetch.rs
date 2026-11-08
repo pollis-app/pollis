@@ -28,8 +28,9 @@ const FALLBACK_SECS: i64 = 600;
 const FALLBACK_SHOWN_KEY: &str = "notify_fallback_shown";
 
 /// A message a notification may preview: someone else's, real, decrypted, not deleted.
+/// Never a row copied from a sibling device (#1735): history, not news.
 const LIVE_INBOUND: &str = "sender_id != ?1 AND content IS NOT NULL AND undecryptable IS NULL \
-    AND deleted_at IS NULL AND send_state IS NULL";
+    AND deleted_at IS NULL AND send_state IS NULL AND origin IS NULL";
 
 /// Most previews one fetch returns.
 const MAX_ITEMS: i64 = 5;

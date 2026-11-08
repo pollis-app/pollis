@@ -675,8 +675,8 @@ async fn ingest_group_envelopes_interleaved(
         let db = guard
             .as_ref()
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
-            for (ei, (_, _, _, _, target_id, _, env_type, _)) in envs.iter().enumerate() {
+        for (ci, (cid, envs)) in per_conv.iter().enumerate() {
+            for (ei, (env_id, _, _, _, target_id, _, env_type, env_seq)) in envs.iter().enumerate() {
                 if env_type != "delete" {
                     continue;
                 }
@@ -706,6 +706,18 @@ async fn ingest_group_envelopes_interleaved(
                 } else {
                     true
                 };
+                // #1735: no row at all — remember the tombstone, so a copy of the
+                // target that arrives later (a history transfer) arrives deleted.
+                if applied_rows == Some(0) && !target_present {
+                    super::pending_change::record(
+                        db.conn(),
+                        env_id,
+                        tid,
+                        cid,
+                        &super::pending_change::Change::Tombstone,
+                        *env_seq,
+                    );
+                }
                 // Is the target still awaiting ingest here (retry) rather than pre-join (terminal)?
                 let target_awaiting = envs.iter().enumerate().any(|(ej, e)| {
                     &e.0 == tid
@@ -993,7 +1005,7 @@ fn open_and_persist(
     is_dm: bool,
 ) -> Ingested {
     // `sender_id` is not used for attribution; the MLS credential is (sealed sender).
-    let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type, _seq) = env;
+    let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type, seq) = env;
     match env_type.as_str() {
         "message" => {
             // A placeholder (#1312) does not count: if this ever opens after
@@ -1027,6 +1039,21 @@ fn open_and_persist(
             match super::framing::classify(&plain) {
                 // Redaction: honored only when its MLS author matches the target's author; never stored as a row.
                 super::framing::Frame::Redaction(target_message_id) => {
+                    // #1735: an absent or placeholder target is recorded, to apply
+                    // when a real row for it is created; a real row is unchanged.
+                    if super::pending_change::target(conn, &target_message_id)
+                        != super::pending_change::Target::Real
+                    {
+                        super::pending_change::record(
+                            conn,
+                            id,
+                            &target_message_id,
+                            conversation_id,
+                            &super::pending_change::Change::Redact { actor: cred_sender.clone() },
+                            *seq,
+                        );
+                        return Ingested::Opened(None);
+                    }
                     let author: Option<String> = conn
                         .query_row(
                             "SELECT sender_id FROM message WHERE id = ?1",
@@ -1049,13 +1076,16 @@ fn open_and_persist(
                     if let Ok(text) = String::from_utf8(text) {
                         // Replaces a placeholder for the same id (#1312), never
                         // a real row.
+                        // A placeholder's tombstone (an admin delete that reached it) is
+                        // kept: the healed row stays deleted (#1735).
                         let inserted = conn.execute(
                             "INSERT INTO message
                              (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                              ON CONFLICT(id) DO UPDATE SET
                                sender_id = excluded.sender_id, ciphertext = excluded.ciphertext,
-                               content = excluded.content, reply_to_id = excluded.reply_to_id,
+                               content = CASE WHEN message.deleted_at IS NULL THEN excluded.content ELSE NULL END,
+                               reply_to_id = excluded.reply_to_id,
                                thread_id = excluded.thread_id, sent_at = excluded.sent_at,
                                undecryptable = NULL
                              WHERE message.undecryptable IS NOT NULL",
@@ -1073,6 +1103,13 @@ fn open_and_persist(
                                 });
                             }
                         };
+                        // #1735: a change that arrived before this row (or while it was a
+                        // placeholder) applies now, in the same savepoint.
+                        if inserted > 0 {
+                            if let Err(e) = super::pending_change::apply(conn, id, conversation_id) {
+                                crate::diag!("[ingest] {conversation_id}: pending changes for {id} not applied: {e}");
+                            }
+                        }
                         // New inbound: stored for the first time and someone else's. Only a DM
                         // acknowledges it (#857); any conversation's wake may announce it (#1628).
                         if inserted > 0 && cred_sender != user_id {
@@ -1112,6 +1149,20 @@ fn open_and_persist(
                 };
                 // An edit leaves no row under its own id.
                 super::loss::record_opened_envelope(conn, id);
+                // #1735: an absent or placeholder target is recorded, as for a redaction.
+                if super::pending_change::target(conn, tid) != super::pending_change::Target::Real {
+                    if let Ok(text) = String::from_utf8(super::framing::strip(&plain)) {
+                        super::pending_change::record(
+                            conn,
+                            id,
+                            tid,
+                            conversation_id,
+                            &super::pending_change::Change::Edit { actor: cred_sender.clone(), content: text },
+                            *seq,
+                        );
+                    }
+                    return Ingested::Opened(None);
+                }
                 let author: Option<String> = conn
                     .query_row(
                         "SELECT sender_id FROM message WHERE id = ?1",

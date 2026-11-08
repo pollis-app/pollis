@@ -294,6 +294,7 @@ impl AppState {
             crate::diag!("[state] startup message eviction failed (non-fatal): {e}");
         }
         crate::commands::messages::loss::prune_known_envelopes(db.conn());
+        crate::commands::messages::pending_change::prune(db.conn());
 
         *self.local_db.lock().await = Some(db);
         // Spawned (#850): indexing scales with the corpus and must not delay sign-in.

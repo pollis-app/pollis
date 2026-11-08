@@ -11,6 +11,7 @@ pub(crate) mod ingest_guard;
 pub mod news;
 pub(crate) mod loss;
 mod outbox;
+pub(crate) mod pending_change;
 pub mod persisted;
 mod reactions;
 mod read;
