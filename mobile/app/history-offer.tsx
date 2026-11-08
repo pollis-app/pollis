@@ -81,7 +81,7 @@ export default function HistoryOffer() {
 
   if (following) {
     return (
-      <Screen testID="screen-history-offer" centered>
+      <Screen testID="screen-history-offer">
         <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 24 }}>
           <HistoryTransferStatus transfer={following} />
           <Text style={[ty.meta, { color: semantic.dim }]}>{t("historyTransfer.offer.continueHint")}</Text>
@@ -104,7 +104,7 @@ export default function HistoryOffer() {
     s.device_name?.trim() || s.device_id.slice(0, 8);
 
   return (
-    <Screen testID="screen-history-offer" centered>
+    <Screen testID="screen-history-offer">
       <Body contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 52, gap: 24 }}>
         <Heading
           testID="history-offer-heading"
