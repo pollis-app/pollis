@@ -398,8 +398,9 @@ async fn a_new_request_replaces_the_receivers_own_old_one() {
     assert_eq!(call(&w.db, &w.dst, P_REQUEST, request_body("T12", &w.other)).await.0, StatusCode::OK);
     assert_eq!(count(&w.db, "SELECT COUNT(*) FROM history_transfer WHERE transfer_id = 'T11'", ()).await, 0);
     assert_eq!(count(&w.db, "SELECT COUNT(*) FROM history_transfer_chunk", ()).await, 0);
-    // A transfer id is never reused across receivers.
-    assert_eq!(call(&w.db, &w.other, P_REQUEST, request_body("T12", &w.src)).await.0, StatusCode::CONFLICT);
+    // A transfer id is never reused across receivers, and the refusal is the
+    // uniform 404 (it confirms nothing about whose the id is).
+    assert_eq!(call(&w.db, &w.other, P_REQUEST, request_body("T12", &w.src)).await.0, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -650,4 +651,118 @@ fn nudges_are_content_free() {
     keys.sort();
     assert_eq!(keys, ["event", "transfer_id", "type"]);
     assert_eq!(p["type"], "history_transfer");
+}
+
+/// A source re-sending a chunk whose answer it lost, while the receiver acks
+/// that very chunk, must never be told "conflict" (the source would abort a
+/// healthy transfer). Hammer the interleaving.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_re_put_racing_its_own_ack_is_never_a_conflict() {
+    let w = world().await;
+    let id = accepted(&w, "RACE").await;
+    for i in 0..40i64 {
+        let bytes = vec![i as u8 + 1; 64];
+        assert_eq!(call(&w.db, &w.src, P_PUT, put_body(&id, i, &bytes)).await.0, StatusCode::OK);
+        let put = call(&w.db, &w.src, P_PUT, put_body(&id, i, &bytes));
+        let ack = call(&w.db, &w.dst, P_ACK, serde_json::json!({ "transfer_id": id, "idx": i }));
+        let ((ps, pb), (as_, ab)) = tokio::join!(put, ack);
+        assert_eq!(ps, StatusCode::OK, "re-put {i}: {pb}");
+        // The ack either landed or lost to nothing it should retry against.
+        if as_ != StatusCode::OK {
+            let (s2, b2) = call(&w.db, &w.dst, P_ACK, serde_json::json!({ "transfer_id": id, "idx": i })).await;
+            assert_eq!(s2, StatusCode::OK, "ack {i} retry: {ab} / {b2}");
+        }
+    }
+    let (_, st) = call(&w.db, &w.dst, P_STATUS, serde_json::json!({ "transfer_id": id })).await;
+    assert_eq!(st["acked_through"], 39);
+    assert_eq!(count(&w.db, "SELECT COUNT(*) FROM history_transfer_chunk", ()).await, 0);
+}
+
+/// Re-accepting with the same acceptance is a no-op even when re-signed
+/// (ML-DSA signatures differ each time); a different acceptance is refused.
+#[tokio::test]
+async fn a_re_signed_identical_acceptance_is_idempotent() {
+    let w = world().await;
+    let id = accepted(&w, "ACC").await;
+    let mut again = accept_body(&id);
+    again["acc_sig"] = serde_json::json!(b64(&[3u8; 2420]));
+    assert_eq!(call(&w.db, &w.src, P_ACCEPT, again).await.0, StatusCode::OK);
+    let mut other = accept_body(&id);
+    other["acc"] = serde_json::json!(b64(b"another acceptance"));
+    assert_eq!(call(&w.db, &w.src, P_ACCEPT, other).await.0, StatusCode::CONFLICT);
+    let (_, st) = call(&w.db, &w.dst, P_STATUS, serde_json::json!({ "transfer_id": id })).await;
+    assert_eq!(st["acc_sig"], b64(&[9u8; 2420]), "the first signature stands");
+}
+
+/// A half-registered device (no signing key yet) cannot be named as a source.
+#[tokio::test]
+async fn a_request_needs_an_enrolled_source() {
+    let w = world().await;
+    w.db.conn()
+        .await
+        .unwrap()
+        .execute("INSERT INTO user_device (device_id, user_id) VALUES ('alice-half', 'alice')", ())
+        .await
+        .unwrap();
+    let half = Dev { user_id: "alice".into(), device_id: "alice-half".into(), key: SigningKey::<MlDsa44>::from_seed(&[1u8; 32].into()) };
+    assert_eq!(call(&w.db, &w.dst, P_REQUEST, request_body("H1", &half)).await.0, StatusCode::NOT_FOUND);
+}
+
+/// Every call on an expired transfer is the uniform 404, and nothing moves.
+#[tokio::test]
+async fn every_call_on_an_expired_transfer_is_not_found() {
+    use pollis_api::history_transfer::*;
+    let w = world().await;
+    let conn = w.db.conn().await.unwrap();
+    let now = 3_000_000;
+    assert!(matches!(ht::apply_request(&conn, "alice", "alice-dst", &body_for("X", &w.src), now).await.unwrap(), Outcome::Ok(_)));
+    let acc = AcceptTransferBody { transfer_id: "X".into(), acc: b64(b"a"), acc_sig: b64(b"s") };
+    assert!(matches!(ht::apply_accept(&conn, "alice", "alice-src", &acc, now).await.unwrap(), Outcome::Ok(_)));
+    let put = PutChunkBody { transfer_id: "X".into(), idx: 0, sealed: b64(b"x") };
+    assert!(matches!(ht::apply_put_chunk(&conn, "alice", "alice-src", &put, now).await.unwrap(), Outcome::Ok(_)));
+    let late = now + ht::ACCEPTED_TTL_SECS + 1;
+    let id = || "X".to_string();
+    assert!(matches!(ht::apply_put_chunk(&conn, "alice", "alice-src", &PutChunkBody { idx: 1, ..put.clone() }, late).await.unwrap(), Outcome::NotFound));
+    assert!(matches!(ht::apply_get_chunk(&conn, "alice", "alice-dst", &GetChunkBody { transfer_id: id(), idx: 0 }, late).await.unwrap(), Outcome::NotFound));
+    assert!(matches!(ht::apply_ack_chunk(&conn, "alice", "alice-dst", &AckChunkBody { transfer_id: id(), idx: 0 }, late).await.unwrap(), Outcome::NotFound));
+    assert!(matches!(ht::apply_cancel(&conn, "alice", "alice-dst", &CancelTransferBody { transfer_id: id() }, late).await.unwrap(), Outcome::NotFound));
+    assert!(matches!(ht::apply_complete(&conn, "alice", "alice-dst", &CompleteTransferBody { transfer_id: id() }, late).await.unwrap(), Outcome::NotFound));
+    assert!(matches!(ht::apply_decline(&conn, "alice", "alice-src", &DeclineTransferBody { transfer_id: id() }, late).await.unwrap(), Outcome::NotFound));
+    // Nothing moved.
+    let mut r = conn.query("SELECT state, acked_through FROM history_transfer WHERE transfer_id = 'X'", ()).await.unwrap();
+    let row = r.next().await.unwrap().unwrap();
+    assert_eq!(row.get::<String>(0).unwrap(), "accepted");
+    assert_eq!(row.get::<i64>(1).unwrap(), -1);
+}
+
+/// Decline, accept, cancel and complete racing each other end in exactly one
+/// consistent state: never `declined` after an accept, never chunks after an end.
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_ends_settle_on_one_state() {
+    for round in 0..15 {
+        let w = world().await;
+        let id = format!("C{round}");
+        assert_eq!(call(&w.db, &w.dst, P_REQUEST, request_body(&id, &w.src)).await.0, StatusCode::OK);
+        let (a, d, c) = tokio::join!(
+            call(&w.db, &w.src, P_ACCEPT, accept_body(&id)),
+            call(&w.db, &w.src, P_DECLINE, serde_json::json!({ "transfer_id": id })),
+            call(&w.db, &w.dst, P_CANCEL, serde_json::json!({ "transfer_id": id })),
+        );
+        let (_, st) = call(&w.db, &w.dst, P_STATUS, serde_json::json!({ "transfer_id": id })).await;
+        let state = st["state"].as_str().unwrap().to_string();
+        if d.0 == StatusCode::OK {
+            assert_eq!(state, "declined", "{a:?} {d:?} {c:?}");
+            assert_ne!(a.0, StatusCode::OK, "accepted AND declined: {a:?} {d:?}");
+        }
+        if state == "accepted" {
+            assert_ne!(d.0, StatusCode::OK);
+        }
+        assert!(["accepted", "declined", "cancelled"].contains(&state.as_str()), "{state}");
+        // An ended transfer stores nothing.
+        let put = call(&w.db, &w.src, P_PUT, put_body(&id, 0, b"x")).await;
+        if state != "accepted" {
+            assert_ne!(put.0, StatusCode::OK);
+            assert_eq!(count(&w.db, "SELECT COUNT(*) FROM history_transfer_chunk", ()).await, 0);
+        }
+    }
 }

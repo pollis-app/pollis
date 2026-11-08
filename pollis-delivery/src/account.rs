@@ -305,10 +305,18 @@ pub async fn approve_enrollment(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let (authed, parsed) = match gate_and_parse::<ApproveEnrollmentBody>(&state, &req).await? {
+    let (identity, parsed) = match crate::writes::gate_identity_and_parse::<ApproveEnrollmentBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
+    // #1735: the new device reads `approved_by_device_id` (a display hint for
+    // the history-copy offer); it must name the device that signed the approval.
+    if let Some((_, signer)) = &identity {
+        if *signer != parsed.approved_by_device_id {
+            return Ok(AuthRejection::Forbidden.into_response());
+        }
+    }
+    let authed = identity.map(|(user, _)| user);
     let conn = state.db.conn().await?;
     outcome_response::<ApproveEnrollmentBody>(apply_approve_enrollment(&conn, authed.as_deref(), &parsed).await?)
 }

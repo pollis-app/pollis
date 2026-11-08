@@ -239,25 +239,39 @@ async fn delete_transfer(conn: &Connection, transfer_id: &str) -> anyhow::Result
     Ok(())
 }
 
-/// Move an open transfer to an ended state: chunks go now, the row stays an hour.
+/// Move a transfer from one of `from` to an ended state, atomically: the row
+/// flips and its chunks go in one transaction, or nothing happens. Returns
+/// whether it moved (`false` = it was not in any `from` state any more — a
+/// concurrent call got there first).
 async fn end_transfer(
     conn: &Connection,
     transfer_id: &str,
+    from: &[TransferState],
     ended: TransferState,
     now: i64,
-) -> anyhow::Result<()> {
-    conn.execute(
+) -> anyhow::Result<bool> {
+    let tx = conn.transaction().await?;
+    let mut moved = 0;
+    for f in from {
+        moved += tx
+            .execute(
+                "UPDATE history_transfer SET state = ?2, updated_at = ?3, expires_at = ?4 \
+                 WHERE transfer_id = ?1 AND state = ?5",
+                libsql::params![transfer_id, ended.as_str(), now, now + ENDED_TTL_SECS, f.as_str()],
+            )
+            .await?;
+    }
+    if moved == 0 {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    tx.execute(
         "DELETE FROM history_transfer_chunk WHERE transfer_id = ?1",
         libsql::params![transfer_id],
     )
     .await?;
-    conn.execute(
-        "UPDATE history_transfer SET state = ?2, updated_at = ?3, expires_at = ?4 \
-         WHERE transfer_id = ?1 AND state IN ('requested', 'accepted')",
-        libsql::params![transfer_id, ended.as_str(), now, now + ENDED_TTL_SECS],
-    )
-    .await?;
-    Ok(())
+    tx.commit().await?;
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -305,20 +319,25 @@ pub async fn apply_request(
     if body.src_device_id == device {
         return Ok(Outcome::Invalid("a device cannot copy history from itself"));
     }
-    // The source must be a live device of the SAME account. Another account's
-    // device, a revoked one and an unknown id are one answer.
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM user_device WHERE user_id = ?1 AND device_id = ?2 AND revoked_at IS NULL",
-            libsql::params![user, body.src_device_id.clone()],
-        )
-        .await?;
-    if rows.next().await?.is_none() {
-        return Ok(Outcome::NotFound);
-    }
-    drop(rows);
-
     let tx = conn.transaction().await?;
+    // The source must be a live, ENROLLED device (it has a signing key) of the
+    // SAME account — read inside the transaction that files the request.
+    // Another account's device, a revoked one, a half-registered one and an
+    // unknown id are one answer.
+    {
+        let mut rows = tx
+            .query(
+                "SELECT 1 FROM user_device WHERE user_id = ?1 AND device_id = ?2 \
+                 AND revoked_at IS NULL AND mls_signature_pub_pq IS NOT NULL",
+                libsql::params![user, body.src_device_id.clone()],
+            )
+            .await?;
+        if rows.next().await?.is_none() {
+            drop(rows);
+            tx.rollback().await?;
+            return Ok(Outcome::NotFound);
+        }
+    }
     // Durable per-account budget.
     let used: Option<(i64, i64)> = {
         let mut r = tx
@@ -409,9 +428,11 @@ pub async fn apply_request(
             ],
         )
         .await?;
+    // An id another transfer (perhaps another account's) holds: the same answer
+    // as an unknown source, so the refusal confirms nothing about it.
     if inserted == 0 {
         tx.rollback().await?;
-        return Ok(Outcome::Conflict("transfer id taken"));
+        return Ok(Outcome::NotFound);
     }
     tx.commit().await?;
     Ok(Outcome::Ok(RequestTransferResponse { expires_at }))
@@ -554,7 +575,10 @@ pub async fn apply_accept(
             }
             Ok(Outcome::Ok(AcceptTransferResponse { expires_at }))
         }
-        TransferState::Accepted if row.acc.as_deref() == Some(acc.as_slice()) && row.acc_sig.as_deref() == Some(acc_sig.as_slice()) => {
+        // The same acceptance again (a resend after a lost answer, possibly
+        // re-signed — ML-DSA signatures are randomized): a no-op, the stored
+        // signature stands.
+        TransferState::Accepted if row.acc.as_deref() == Some(acc.as_slice()) => {
             Ok(Outcome::Ok(AcceptTransferResponse { expires_at: row.expires_at }))
         }
         _ => Ok(Outcome::Conflict("not awaiting approval")),
@@ -590,8 +614,11 @@ pub async fn apply_decline(
     }
     match row.state {
         TransferState::Requested => {
-            end_transfer(conn, &row.transfer_id, TransferState::Declined, now).await?;
-            Ok(Outcome::Ok(pollis_api::StatusOk::Ok))
+            // Guarded on `requested`: an accept that landed since the read wins.
+            if end_transfer(conn, &row.transfer_id, &[TransferState::Requested], TransferState::Declined, now).await? {
+                return Ok(Outcome::Ok(pollis_api::StatusOk::Ok));
+            }
+            Ok(Outcome::Conflict("not awaiting approval"))
         }
         TransferState::Declined => Ok(Outcome::Ok(pollis_api::StatusOk::Ok)),
         _ => Ok(Outcome::Conflict("not awaiting approval")),
@@ -624,7 +651,14 @@ pub async fn apply_cancel(
         return Ok(Outcome::NotFound);
     };
     if row.state.is_open() {
-        end_transfer(conn, &row.transfer_id, TransferState::Cancelled, now).await?;
+        end_transfer(
+            conn,
+            &row.transfer_id,
+            &[TransferState::Requested, TransferState::Accepted],
+            TransferState::Cancelled,
+            now,
+        )
+        .await?;
     }
     Ok(Outcome::Ok(pollis_api::StatusOk::Ok))
 }
@@ -660,8 +694,10 @@ pub async fn apply_complete(
     }
     match row.state {
         TransferState::Accepted => {
-            end_transfer(conn, &row.transfer_id, TransferState::Completed, now).await?;
-            Ok(Outcome::Ok(pollis_api::StatusOk::Ok))
+            if end_transfer(conn, &row.transfer_id, &[TransferState::Accepted], TransferState::Completed, now).await? {
+                return Ok(Outcome::Ok(pollis_api::StatusOk::Ok));
+            }
+            Ok(Outcome::Conflict("not transferring"))
         }
         TransferState::Completed => Ok(Outcome::Ok(pollis_api::StatusOk::Ok)),
         _ => Ok(Outcome::Conflict("not transferring")),
@@ -743,22 +779,45 @@ pub async fn apply_put_chunk(
         return Ok(Outcome::Conflict("chunk index not contiguous"));
     }
     // The trigger re-checks state, window and contiguity against the row as
-    // it is now; a race it catches is answered like the pre-check would.
+    // it is NOW. The one race that is not the source's fault: the receiver
+    // acknowledged this very index (a re-put after a lost answer) between our
+    // read and the insert. Re-read: an index at or below the ack is done.
     let inserted = conn
         .execute(
             "INSERT INTO history_transfer_chunk (transfer_id, idx, sealed, created_at) VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![body.transfer_id.clone(), body.idx, sealed, now],
+            libsql::params![body.transfer_id.clone(), body.idx, sealed.clone(), now],
         )
         .await;
     if let Err(e) = inserted {
         let msg = e.to_string();
-        if msg.contains("history_transfer_chunk:") || msg.contains("UNIQUE") || msg.contains("constraint") {
-            return Ok(Outcome::Conflict("chunk refused"));
+        if !(msg.contains("history_transfer_chunk:") || msg.contains("UNIQUE") || msg.contains("constraint")) {
+            return Err(e.into());
         }
-        return Err(e.into());
+        let Some(again) = load_for(conn, &body.transfer_id, user, device, now).await? else {
+            return Ok(Outcome::NotFound);
+        };
+        if body.idx <= again.acked_through {
+            return Ok(Outcome::Ok(PutChunkResponse { acked_through: again.acked_through }));
+        }
+        let mut r = conn
+            .query(
+                "SELECT sealed FROM history_transfer_chunk WHERE transfer_id = ?1 AND idx = ?2",
+                libsql::params![body.transfer_id.clone(), body.idx],
+            )
+            .await?;
+        if let Some(existing) = r.next().await? {
+            if existing.get::<Vec<u8>>(0)? == sealed {
+                return Ok(Outcome::Ok(PutChunkResponse { acked_through: again.acked_through }));
+            }
+            return Ok(Outcome::Conflict("chunk index holds different bytes"));
+        }
+        if again.state != TransferState::Accepted {
+            return Ok(Outcome::Conflict("not transferring"));
+        }
+        return Ok(Outcome::Conflict("chunk refused"));
     }
     conn.execute(
-        "UPDATE history_transfer SET updated_at = ?2, expires_at = ?3 WHERE transfer_id = ?1",
+        "UPDATE history_transfer SET updated_at = ?2, expires_at = ?3 WHERE transfer_id = ?1 AND state = 'accepted'",
         libsql::params![body.transfer_id.clone(), now, now + ACCEPTED_TTL_SECS],
     )
     .await?;
@@ -855,12 +914,18 @@ pub async fn apply_ack_chunk(
         tx.rollback().await?;
         return Ok(Outcome::Conflict("chunk not stored"));
     }
-    tx.execute(
-        "UPDATE history_transfer SET acked_through = ?2, updated_at = ?3, expires_at = ?4 \
-         WHERE transfer_id = ?1 AND acked_through = ?2 - 1",
-        libsql::params![body.transfer_id.clone(), body.idx, now, now + ACCEPTED_TTL_SECS],
-    )
-    .await?;
+    let moved = tx
+        .execute(
+            "UPDATE history_transfer SET acked_through = ?2, updated_at = ?3, expires_at = ?4 \
+             WHERE transfer_id = ?1 AND acked_through = ?2 - 1 AND state = 'accepted'",
+            libsql::params![body.transfer_id.clone(), body.idx, now, now + ACCEPTED_TTL_SECS],
+        )
+        .await?;
+    // A concurrent ack or an end got there first: nothing changes here.
+    if moved != 1 {
+        tx.rollback().await?;
+        return Ok(Outcome::Conflict("ack raced another change"));
+    }
     tx.commit().await?;
     Ok(Outcome::Ok(AckChunkResponse { acked_through: body.idx }))
 }
