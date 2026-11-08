@@ -27,6 +27,7 @@ import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useIncomingCallTakeover } from "../../hooks/useIncomingCallTakeover";
+import { useHistoryTransferRuntime } from "../../hooks/useHistoryTransferRuntime";
 import { acceptIncomingCall, declineIncomingCall } from "../../voice/incomingCall";
 import { flushOutbox } from "../../hooks/queries/useMessages";
 import { useBadge } from "../../hooks/useBadge";
@@ -282,6 +283,7 @@ export const AppShell: React.FC = observer(() => {
 
   useLiveKitRealtime();
   useIncomingCallTakeover(incomingCall);
+  useHistoryTransferRuntime();
 
   // Warm the lazy call chunks when idle (#874): answering a call navigates programmatically, so no spinner there.
   useEffect(() => {

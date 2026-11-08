@@ -1,4 +1,4 @@
-import { invoke } from '../bridge';
+import { invoke, type Channel as ChannelOf } from '../bridge';
 import type { User, Group, Channel, Message, AccountsIndex } from '../types';
 
 export async function requestOTP(email: string): Promise<void> {
@@ -337,6 +337,98 @@ export interface DeviceInfo {
 
 export async function listUserDevices(userId: string): Promise<DeviceInfo[]> {
   return invoke('list_user_devices', { userId });
+}
+
+// Copy message history between this account's own devices (#1735). Mirrors pollis-core's history_transfer types.
+
+export type HistoryTransferVia = 'link' | 'sibling';
+export type HistoryTransferRole = 'source' | 'receiver';
+export type HistoryTransferState =
+  | 'awaiting_approval'
+  | 'transferring'
+  | 'paused'
+  | 'completed'
+  | 'declined'
+  | 'cancelled'
+  | 'expired'
+  | 'failed';
+
+export interface HistoryTransfer {
+  transfer_id: string;
+  role: HistoryTransferRole;
+  peer_device_id: string;
+  peer_device_name: string | null;
+  via: HistoryTransferVia;
+  state: HistoryTransferState;
+  chunks_done: number;
+  rows_done: number;
+  rows_skipped: number;
+  deferred_conversations: number;
+  /** Rows the source expects to send, when it knows; drives a percentage bar. */
+  estimated_total?: number | null;
+  error?: string | null;
+  updated_at: string;
+}
+
+/** One of this account's other devices that could send its history here. */
+export interface TransferSource {
+  device_id: string;
+  device_name: string | null;
+  platform?: string | null;
+  last_active_at?: string | null;
+  online: boolean;
+  /** Absent on an older core; only `false` disables the row. */
+  supports_transfer?: boolean | null;
+  /** The device that approved this one's enrollment, when the core knows it. */
+  approved_this_device?: boolean | null;
+}
+
+/** A sibling asking this device for its history. */
+export interface PendingTransferRequest {
+  transfer_id: string;
+  requester_device_id: string;
+  requester_device_name: string | null;
+  requester_added_at: string | null;
+  via: HistoryTransferVia;
+  pin_required: boolean;
+  created_at: string;
+}
+
+export async function listHistoryTransferSources(): Promise<TransferSource[]> {
+  return (await invoke<TransferSource[] | null>('list_history_transfer_sources')) ?? [];
+}
+
+export async function requestHistoryTransfer(sourceDeviceId: string, via: HistoryTransferVia): Promise<HistoryTransfer> {
+  return invoke<HistoryTransfer>('request_history_transfer', { sourceDeviceId, via });
+}
+
+export async function listPendingHistoryTransferRequests(): Promise<PendingTransferRequest[]> {
+  return (await invoke<PendingTransferRequest[] | null>('list_pending_history_transfer_requests')) ?? [];
+}
+
+/** A wrong PIN rejects like every other PIN screen, on the same attempt counter. */
+export async function approveHistoryTransfer(transferId: string, pin: string | null): Promise<HistoryTransfer> {
+  return invoke<HistoryTransfer>('approve_history_transfer', { transferId, pin });
+}
+
+export async function declineHistoryTransfer(transferId: string): Promise<void> {
+  await invoke('decline_history_transfer', { transferId });
+}
+
+export async function listHistoryTransfers(): Promise<HistoryTransfer[]> {
+  return (await invoke<HistoryTransfer[] | null>('list_history_transfers')) ?? [];
+}
+
+/** One awaited call: drives either role until a terminal state or `paused`, streaming progress. */
+export async function runHistoryTransfer(
+  transferId: string,
+  onProgress: ChannelOf<HistoryTransfer>,
+): Promise<HistoryTransfer> {
+  return invoke<HistoryTransfer>('run_history_transfer', { transferId, onProgress });
+}
+
+export async function cancelHistoryTransfer(transferId: string): Promise<void> {
+  await invoke('cancel_history_transfer', { transferId });
 }
 
 export async function revokeDevice(userId: string, deviceId: string): Promise<void> {

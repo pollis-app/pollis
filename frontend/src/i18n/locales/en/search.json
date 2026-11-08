@@ -55,7 +55,9 @@
     "vaultName": "Vault",
     "vaultKeywords": "vault note to self notes personal storage private encrypted files drive locker safe",
     "diagnosticsName": "Diagnostics",
-    "diagnosticsKeywords": "diagnostics log logs debug support troubleshoot report problem error"
+    "diagnosticsKeywords": "diagnostics log logs debug support troubleshoot report problem error",
+    "copyHistoryName": "Copy Message History",
+    "copyHistoryKeywords": "copy message history transfer backfill old messages devices sync move phone computer"
   },
   "page": {
     "title": "Search"

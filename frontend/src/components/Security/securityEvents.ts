@@ -7,7 +7,13 @@ export const SECURITY_EVENT_FILTERS: Record<
   string[] | null
 > = {
   all: null,
-  devices: ["device_enrolled", "device_rejected", "device_revoked"],
+  devices: [
+    "device_enrolled",
+    "device_rejected",
+    "device_revoked",
+    "history_transfer_approved",
+    "history_transfer_completed",
+  ],
   identity: [
     "identity_reset",
     "identity_rotated",
@@ -90,6 +96,21 @@ export function describeSecurityEvent(
             }),
       };
     }
+    case "history_transfer_approved":
+      // #1735: written by the source when the user approves; `device_id` is the receiving device.
+      return {
+        heading: t("settings:security.eventHistoryTransferApprovedHeading"),
+        detail: event.device_id
+          ? t("settings:security.eventHistoryTransferApprovedDetail", { device: shortId(event.device_id) })
+          : t("settings:security.eventHistoryTransferApprovedDetailUnknown"),
+      };
+    case "history_transfer_completed":
+      return {
+        heading: t("settings:security.eventHistoryTransferCompletedHeading"),
+        detail: event.device_id
+          ? t("settings:security.eventHistoryTransferCompletedDetail", { device: shortId(event.device_id) })
+          : t("settings:security.eventHistoryTransferCompletedDetailUnknown"),
+      };
     case "identity_reset":
       return {
         heading: t("settings:security.eventIdentityResetHeading"),

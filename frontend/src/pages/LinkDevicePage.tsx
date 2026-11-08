@@ -7,6 +7,7 @@ import { Button } from "../components/ui/Button";
 import { InputOtp } from "../components/ui/InputOtp";
 import { LoadingSpinner } from "../components/ui/LoaderSpinner";
 import { ThemedQr } from "../components/ui/ThemedQr";
+import { LinkedHistoryRequest } from "../components/HistoryTransfer/LinkedHistoryRequest";
 import { writeClipboardText } from "../bridge";
 import { appStore } from "../stores/appStore";
 import * as api from "../services/api";
@@ -17,7 +18,7 @@ import { errorMessage } from "../utils/errorMessage";
 type Step =
   | { kind: "pin" }
   | { kind: "code"; handle: api.DeviceLinkHandle; status: api.DeviceLinkStatus }
-  | { kind: "linked"; name: string }
+  | { kind: "linked"; name: string; deviceId: string | null }
   | { kind: "error"; message: string };
 
 const Heading: React.FC<{ title: string; subtitle?: string; testId?: string }> = ({ title, subtitle, testId }) => (
@@ -100,7 +101,7 @@ export const LinkDevicePage: React.FC = observer(() => {
     setStep({ kind: "pin" });
   };
 
-  const approve = async (handle: api.DeviceLinkHandle, name: string) => {
+  const approve = async (handle: api.DeviceLinkHandle, name: string, deviceId: string | null) => {
     if (!userId) {
       return;
     }
@@ -108,7 +109,7 @@ export const LinkDevicePage: React.FC = observer(() => {
     try {
       await api.approveDeviceLink(userId, handle.link_id);
       generation.current += 1;
-      setStep({ kind: "linked", name });
+      setStep({ kind: "linked", name, deviceId });
     } catch (err) {
       setStep({ kind: "error", message: errorMessage(err) || t("linkDevice.failed") });
     } finally {
@@ -148,6 +149,8 @@ export const LinkDevicePage: React.FC = observer(() => {
     body = (
       <>
         <Heading testId="link-device-done" title={t("linkDevice.linked", { name: step.name })} />
+        {/* #1735: the new device may ask for this one's message history right away. */}
+        <LinkedHistoryRequest deviceId={step.deviceId} deviceName={step.name} />
         <div>
           <Button onClick={() => navigate({ to: "/security" })}>{t("linkDevice.done")}</Button>
         </div>
@@ -192,7 +195,7 @@ export const LinkDevicePage: React.FC = observer(() => {
             subtitle={t("linkDevice.approveHint")}
           />
           <div className="flex gap-2">
-            <Button data-testid="link-device-approve" isLoading={busy} onClick={() => approve(handle, name)}>
+            <Button data-testid="link-device-approve" isLoading={busy} onClick={() => approve(handle, name, status.new_device_id)}>
               {t("linkDevice.approve")}
             </Button>
             <Button

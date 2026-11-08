@@ -15,6 +15,7 @@ import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
+import { HistoryTransferSection } from "../components/HistoryTransfer/HistoryTransferSection";
 import { SecurityEventRow } from "../components/Security/SecurityEventRow";
 import { shortId } from "../components/Security/securityEvents";
 import { useSelfAuditAccountKey, useVerifyOwnBuild } from "../hooks/queries";
@@ -440,6 +441,9 @@ export const SecurityPage: React.FC = observer(() => {
               </div>
             </section>
           )}
+
+          {/* Copy message history between this account's devices (#1735) */}
+          {currentUser && <HistoryTransferSection />}
 
           {/* Devices */}
           <section className="flex flex-col gap-4 mb-12">

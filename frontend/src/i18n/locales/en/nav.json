@@ -19,7 +19,8 @@
     "resize": "Resize sidebar (drag; double-click to reset)",
     "searchMessages": "Search Messages",
     "vault": "Vault",
-    "securityEvents": "Security Events"
+    "securityEvents": "Security Events",
+    "copyHistory": "Copy History"
   },
   "profile": {
     "you": "You",
@@ -59,7 +60,9 @@
     "search": "Search",
     "searchButton": "Search ({{shortcut}})",
     "settings": "Settings",
-    "securityEvents": "Security Events"
+    "securityEvents": "Security Events",
+    "copyHistory": "Copy Message History",
+    "historyRequest": "History Request"
   },
   "statusBar": {
     "groupsUnread_one": "Unread group messages: {{count}}",

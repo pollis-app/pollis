@@ -14,6 +14,7 @@ import {
   User as UserIcon,
   ShieldCheck,
   ScrollText,
+  History,
   ShieldAlert,
   Keyboard,
   Download,
@@ -148,8 +149,9 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
     { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
     { id: "voice-settings", label: t("sidebar.voiceAndVideo"), icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
-    { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || (pathname.startsWith("/security/") && pathname !== "/security/events") },
+    { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || (pathname.startsWith("/security/") && pathname !== "/security/events" && pathname !== "/security/copy-history") },
     { id: "security-events", label: t("sidebar.securityEvents"), icon: <ScrollText {...iconProps} />, to: "/security/events" as const, isActive: pathname === "/security/events" },
+    { id: "copy-history", label: t("sidebar.copyHistory"), icon: <History {...iconProps} />, to: "/security/copy-history" as const, isActive: pathname === "/security/copy-history" },
     { id: "shortcuts", label: t("sidebar.keyBindings"), icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
     { id: "update", label: t("sidebar.softwareUpdate"), icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];

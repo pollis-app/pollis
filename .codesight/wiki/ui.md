@@ -798,7 +798,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**186 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**195 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -845,6 +845,15 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **EmojiSection** — props: id, title, items, toneIndex, annotations, baseIndex, onSelect, onPreview, scrollRoot — `frontend/src/components/Emoji/EmojiSection.tsx`
 - **EmojiText** — props: text, renderText, jumbo — `frontend/src/components/Emoji/EmojiText.tsx`
 - **SkinTonePicker** — props: toneIndex, onChange — `frontend/src/components/Emoji/SkinTonePicker.tsx`
+
+### `components/HistoryTransfer` (6)
+
+- **HistoryApprovalCard** — props: request, deviceName, onApproved, onDeclined — `frontend/src/components/HistoryTransfer/HistoryApprovalCard.tsx`
+- **HistoryOfferScreen** — props: sources, onContinue — `frontend/src/components/HistoryTransfer/HistoryOfferScreen.tsx`
+- **HistoryTransferSection** — `frontend/src/components/HistoryTransfer/HistoryTransferSection.tsx`
+- **LinkedHistoryRequest** — props: deviceId, deviceName — `frontend/src/components/HistoryTransfer/LinkedHistoryRequest.tsx`
+- **SourcePicker** — props: sources, value, onChange — `frontend/src/components/HistoryTransfer/SourcePicker.tsx`
+- **TransferStatus** — props: transfer, onDone, onRetried — `frontend/src/components/HistoryTransfer/TransferStatus.tsx`
 
 ### `components/Invites` (3)
 
@@ -928,7 +937,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ExportArchiveButton** — `frontend/src/components/Security/ExportArchiveButton.tsx`
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 
-### `components/ui` (32)
+### `components/ui` (33)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -954,6 +963,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
 - **PresenceDot** — props: userId, testId — `frontend/src/components/ui/PresenceDot.tsx`. Bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members).
 - **PressButton** — props: activateOn — `frontend/src/components/ui/PressButton.tsx`. An unstyled `<button>` that acts on a plain mouse pointer-down and keeps `onClick` for the keyboard and assistive tech (#1529; see [Act on press](#act-on-press-where-an-accidental-press-is-free-to-undo-1529)). Only for chrome whose accidental press is free to undo.
+- **RadioList** — props: options, value, onChange, optionTestId — `frontend/src/components/ui/RadioList.tsx`
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
@@ -984,7 +994,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (54)
+### `pages` (56)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -992,6 +1002,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **CallPage** — `frontend/src/pages/Call.tsx`
 - **ChangePinPage** — `frontend/src/pages/ChangePinPage.tsx`
 - **ChannelPage** — `frontend/src/pages/Channel.tsx`
+- **CopyHistoryPage** — `frontend/src/pages/CopyHistoryPage.tsx`
 - **CreateChannel** — props: onSuccess — `frontend/src/pages/CreateChannel.tsx`
 - **CreateChannelPage** — `frontend/src/pages/CreateChannelPage.tsx`
 - **CreateGroup** — props: onSuccess — `frontend/src/pages/CreateGroup.tsx`
@@ -1004,6 +1015,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **GroupEmojiPage** — `frontend/src/pages/GroupEmojiPage.tsx`
 - **GroupPage** — `frontend/src/pages/Group.tsx`
 - **GroupsPage** — `frontend/src/pages/Groups.tsx`
+- **HistoryTransferApprovalPage** — `frontend/src/pages/HistoryTransferApprovalPage.tsx`
 - **IncomingCallPage** — `frontend/src/pages/IncomingCallPage.tsx`
 - **InviteLinkLandingPage** — `frontend/src/pages/InviteLinkLandingPage.tsx`
 - **InviteMember** — props: groupId, groupName — `frontend/src/pages/InviteMember.tsx`

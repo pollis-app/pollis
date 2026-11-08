@@ -250,6 +250,18 @@ const linkDeviceRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/LinkDevicePage"), "LinkDevicePage"),
 });
 
+// #1735: copy message history here from another of the user's devices.
+const copyHistoryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security/copy-history",
+  component: lazyRouteComponent(() => import("./pages/CopyHistoryPage"), "CopyHistoryPage"),
+});
+// #1735: the source device's approval page for one request; parameterized, so not a nav/search page.
+const historyTransferApprovalRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security/history-transfer/$transferId",
+  component: lazyRouteComponent(() => import("./pages/HistoryTransferApprovalPage"), "HistoryTransferApprovalPage"),
+});
 const invitesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/invites",
@@ -369,6 +381,8 @@ const routeTree = rootRoute.addChildren([
   securityEventsRoute,
   changePinRoute,
   linkDeviceRoute,
+  copyHistoryRoute,
+  historyTransferApprovalRoute,
   reportUserRoute,
   reportMessageRoute,
   invitesRoute,

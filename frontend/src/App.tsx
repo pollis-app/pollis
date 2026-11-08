@@ -19,6 +19,8 @@ import { TitleBar } from "./components/Layout/TitleBar";
 import { DotMatrix } from "./components/ui/DotMatrix";
 import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
+import { HistoryOfferScreen } from "./components/HistoryTransfer/HistoryOfferScreen";
+import { isSupported } from "./utils/historyTransfer";
 import { ClientBlockedScreen } from "./components/ClientBlockedScreen";
 import type { ManagedInstallInfo, ClientPolicyStatus } from "./types";
 import * as api from "./services/api";
@@ -44,6 +46,7 @@ type AppState =
   | "enrollment-required"
   | "logout-confirm"
   | "identity-setup"
+  | "history-offer"
   | "update-required"
   | "ready";
 
@@ -83,6 +86,9 @@ function MainApp() {
   const [pendingPinUser, setPendingPinUser] = useState<User | null>(null);
   // Why the last session ended when the user did not end it (#1338).
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  // #1735: this sign-in enrolled the device through another one, so offer that device's history.
+  const enrolledThisSessionRef = useRef(false);
+  const [historyOffer, setHistoryOffer] = useState<{ user: User; sources: api.TransferSource[] } | null>(null);
 
 
   /// Final phase of any sign-in; call only after signup or enrollment completes.
@@ -347,6 +353,7 @@ function MainApp() {
 
   const handleEnrolled = useCallback(async () => {
     if (pendingEnrollmentUser) {
+      enrolledThisSessionRef.current = true;
       const user = pendingEnrollmentUser;
       setPendingEnrollmentUser(null);
       setPendingPinUser(user);
@@ -366,6 +373,19 @@ function MainApp() {
         await api.finalizeDeviceEnrollment(user.id);
       } catch (err) {
         console.error("[App] finalizeDeviceEnrollment failed:", err);
+      }
+      // #1735: after the joins, before the app: offer to copy history from another of the user's devices.
+      if (enrolledThisSessionRef.current) {
+        enrolledThisSessionRef.current = false;
+        const sources = await api.listHistoryTransferSources().catch((err) => {
+          console.warn("[App] listHistoryTransferSources failed:", err);
+          return [] as api.TransferSource[];
+        });
+        if (sources.some(isSupported)) {
+          setHistoryOffer({ user, sources });
+          setAppState("history-offer");
+          return;
+        }
       }
       await completeSignIn(user);
     } else {
@@ -667,6 +687,20 @@ function MainApp() {
           </Card>
         </div>
       </div>
+    );
+  }
+
+  if (appState === "history-offer" && historyOffer) {
+    const offerUser = historyOffer.user;
+    return (
+      <HistoryOfferScreen
+        sources={historyOffer.sources}
+        onContinue={() => {
+          setHistoryOffer(null);
+          setAppState("identity-setup");
+          void completeSignIn(offerUser);
+        }}
+      />
     );
   }
 
