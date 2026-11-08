@@ -195,3 +195,15 @@ Code: `pollis-core/src/commands/history_transfer/` (`crypto.rs`, `wire.rs`, `sto
 - Whether a deleted message's row has `edited_at` set depends on whether an edit reached that device before the delete; the text is gone either way.
 - A pending change may wait forever for a target nobody holds (a message deleted before any device fetched it); bounded as in (2).
 - Attachments copy as `_att` references; a receiver that lacks the conversation's file-key generation for an old attachment cannot open it (same as any device that joined later).
+
+## Review round 1 (fixed)
+- **Transient errors are never verdicts.** A network or DB error while verifying the acceptance propagates (the run stops, the transfer stays open, the next run resumes); only a signature, binding or decapsulation failure ends it as `failed`.
+- **Re-put racing its own ack.** The DS answers a re-upload of an index the receiver acknowledged in the meantime with the ack, never a 409 (re-read after the insert refusal).
+- **Ends are atomic and from an expected state.** Decline / cancel / complete flip the row and drop its chunks in one transaction, guarded on the state they end from, so a stale read cannot turn an accepted transfer into a declined one; an identical re-accept (re-signed) is a no-op; a taken transfer id is the uniform 404; the source must be an enrolled device, checked inside the request's transaction.
+- **Local writes are guarded on an open state.** Sealing and importing update `history_transfer_local` only `WHERE state IN ('transferring','paused')` and require exactly one changed row, else roll back; a cancel wakes a waiting run; orphan outgoing chunks are pruned.
+- **Conversations not joined yet are deferred, not dropped.** The receiver counts member conversations it holds no group for (`local_deferred`) and reports them in `deferred_conversations`.
+- **Pending-change bounds.** The cap evicts edits first (a flood of edits never pushes out a delete), one edit is kept per (target, author), oversize edits are not stored, and an applied edit carries the time it was received.
+- **Approver binding.** `/v1/enrollment/approve` now refuses an `approved_by_device_id` other than the signing device; the enrollment status returns it, and both apps offer the link-time copy only after a device approval.
+- **Kills are real.** The `Crash::Transfer*` points unwind (`test_hooks::die`), with the import transaction open where it matters.
+- Not changed, with reason: nudges on idempotent no-ops (content-free hints; one extra re-read), `PRAGMA secure_delete` (the local DB is SQLCipher: freed pages hold ciphertext).
+
