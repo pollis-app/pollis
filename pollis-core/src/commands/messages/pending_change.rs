@@ -88,6 +88,12 @@ pub(crate) fn record(
     if !plausible_target(target_id, envelope_id) {
         return;
     }
+    // An edit no real message could carry is not kept (bounds the table's bytes).
+    if let Change::Edit { content, .. } = change {
+        if content.len() > crate::commands::history_transfer::wire::MAX_CONTENT_BYTES {
+            return;
+        }
+    }
     let (kind, actor, content) = match change {
         Change::Edit { actor, content } => ("edit", Some(actor.as_str()), Some(content.as_str())),
         Change::Redact { actor } => ("redact", Some(actor.as_str()), None),
@@ -102,10 +108,25 @@ pub(crate) fn record(
         crate::diag!("[pending-change] could not record {kind} {envelope_id}: {e}");
         return;
     }
+    // Only the latest edit by an author can ever apply: keep one per
+    // (target, author), so edits cannot pile up.
+    if let Change::Edit { actor, .. } = change {
+        let _ = conn.execute(
+            "DELETE FROM pending_message_change
+             WHERE target_id = ?1 AND conversation_id = ?2 AND kind = 'edit' AND actor_id = ?3
+               AND envelope_id != (
+                   SELECT envelope_id FROM pending_message_change
+                   WHERE target_id = ?1 AND conversation_id = ?2 AND kind = 'edit' AND actor_id = ?3
+                   ORDER BY seq DESC, envelope_id DESC LIMIT 1)",
+            rusqlite::params![target_id, conversation_id, actor],
+        );
+    }
+    // The cap evicts EDITS first, oldest first: flooding edits can never push
+    // out a delete (which would let a deleted message come back).
     let _ = conn.execute(
         "DELETE FROM pending_message_change WHERE conversation_id = ?1 AND envelope_id NOT IN (
              SELECT envelope_id FROM pending_message_change WHERE conversation_id = ?1
-             ORDER BY recorded_at DESC, seq DESC, envelope_id DESC LIMIT ?2)",
+             ORDER BY (kind = 'edit'), recorded_at DESC, seq DESC, envelope_id DESC LIMIT ?2)",
         rusqlite::params![conversation_id, MAX_PER_CONVERSATION],
     );
 }
@@ -142,13 +163,13 @@ pub(crate) fn apply(
         return Ok(Applied::Nothing);
     }
     let mut stmt = conn.prepare(
-        "SELECT kind, actor_id, content FROM pending_message_change
+        "SELECT kind, actor_id, content, recorded_at FROM pending_message_change
          WHERE target_id = ?1 AND conversation_id = ?2
          ORDER BY seq DESC, envelope_id DESC",
     )?;
-    let changes: Vec<(String, Option<String>, Option<String>)> = stmt
+    let changes: Vec<(String, Option<String>, Option<String>, String)> = stmt
         .query_map(rusqlite::params![message_id, conversation_id], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
         })?
         .collect::<rusqlite::Result<_>>()?;
     drop(stmt);
@@ -158,11 +179,11 @@ pub(crate) fn apply(
     let by_author = |actor: &Option<String>| actor.as_deref() == Some(author.as_str());
     let delete = changes
         .iter()
-        .any(|(kind, actor, _)| kind == "tombstone" || (kind == "redact" && by_author(actor)));
+        .any(|(kind, actor, _, _)| kind == "tombstone" || (kind == "redact" && by_author(actor)));
     let latest_edit = changes
         .iter()
-        .find(|(kind, actor, _)| kind == "edit" && by_author(actor))
-        .and_then(|(_, _, content)| content.clone());
+        .find(|(kind, actor, _, _)| kind == "edit" && by_author(actor))
+        .and_then(|(_, _, content, at)| content.clone().map(|c| (c, at.clone())));
     let now = chrono::Utc::now().to_rfc3339();
     let mut applied = Applied::Nothing;
     if delete {
@@ -170,10 +191,15 @@ pub(crate) fn apply(
             conn.execute(super::outbox::SOFT_DELETE_SQL, rusqlite::params![now, message_id])?;
         }
         applied = Applied::Deleted;
-    } else if let Some(text) = latest_edit {
+    } else if let Some((text, recorded_at)) = latest_edit {
+        // The edit's own time — when this device received it — as ingest would
+        // have stamped it then, not the moment its target finally arrived.
+        let edited_at = chrono::NaiveDateTime::parse_from_str(&recorded_at, "%Y-%m-%d %H:%M:%S")
+            .map(|t| t.and_utc().to_rfc3339())
+            .unwrap_or_else(|_| now.clone());
         let n = conn.execute(
             "UPDATE message SET content = ?1, edited_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
-            rusqlite::params![text, now, message_id],
+            rusqlite::params![text, edited_at, message_id],
         )?;
         if n > 0 {
             applied = Applied::Edited;
@@ -309,6 +335,50 @@ mod tests {
             record(&conn, &ulid_at(5_000 + i as u64), &ulid_at(1_000), "c", &Change::Tombstone, i);
         }
         assert_eq!(pending(&conn), MAX_PER_CONVERSATION);
+    }
+
+    #[test]
+    fn a_flood_of_edits_never_evicts_a_delete_and_keeps_one_edit_per_author() {
+        let conn = db();
+        let target = ulid_at(1_000);
+        record(&conn, &ulid_at(2_000), &target, "c", &Change::Tombstone, 1);
+        let other = ulid_at(1_500);
+        record(&conn, &ulid_at(2_500), &other, "c", &Change::Redact { actor: "bob".into() }, 2);
+        // Thousands of edits from many authors on many targets.
+        for i in 0..(MAX_PER_CONVERSATION + 50) {
+            let t = ulid_at(3_000 + i as u64);
+            record(&conn, &ulid_at(4_000 + i as u64), &t, "c", &Change::Edit { actor: format!("eve{i}"), content: "x".into() }, 10 + i);
+        }
+        assert_eq!(pending(&conn), MAX_PER_CONVERSATION);
+        let deletes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pending_message_change WHERE kind != 'edit'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(deletes, 2, "the tombstone and the redaction survive the flood");
+        // Many edits by one author on one target collapse to the latest.
+        let t = ulid_at(9_000);
+        for i in 0..20 {
+            record(&conn, &ulid_at(9_100 + i), &t, "d", &Change::Edit { actor: "bob".into(), content: format!("v{i}") }, 100 + i as i64);
+        }
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pending_message_change WHERE target_id = ?1", [&t], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        // An oversize edit is not kept.
+        record(&conn, &ulid_at(9_500), &ulid_at(9_400), "e", &Change::Edit { actor: "bob".into(), content: "x".repeat(300 * 1024) }, 1);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM pending_message_change WHERE conversation_id = 'e'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn an_applied_edit_carries_the_time_it_was_received() {
+        let conn = db();
+        let target = ulid_at(1_000);
+        record(&conn, &ulid_at(2_000), &target, "c", &Change::Edit { actor: "bob".into(), content: "v2".into() }, 2);
+        conn.execute("UPDATE pending_message_change SET recorded_at = '2020-01-02 03:04:05'", []).unwrap();
+        insert_real(&conn, &target, "c", "bob", "v1");
+        apply(&conn, &target, "c").unwrap();
+        let at: String = conn.query_row("SELECT edited_at FROM message WHERE id = ?1", [&target], |r| r.get(0)).unwrap();
+        assert!(at.starts_with("2020-01-02T03:04:05"), "{at}");
     }
 
     #[test]
