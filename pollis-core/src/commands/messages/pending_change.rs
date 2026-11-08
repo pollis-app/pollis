@@ -20,8 +20,17 @@
 
 use rusqlite::OptionalExtension;
 
-/// Most pending changes kept per conversation; the oldest go first.
+/// Most pending changes kept per conversation; edits go first, oldest first.
 pub(crate) const MAX_PER_CONVERSATION: i64 = 5000;
+
+/// Most bytes of pending edit text kept per conversation; the oldest edits go first.
+///
+/// Every device accumulates these (tombstones for messages it never fetched, edits of messages
+/// sent before it joined), so the table is bounded in rows AND bytes. Deletes are tiny and never
+/// evicted by this cap. The 400-day horizon stays (see [`prune`]): a backfill can come at any time
+/// while a sibling still holds the target, and a change pruned before it arrives would let an
+/// edited or deleted message come back as it was.
+pub(crate) const MAX_EDIT_BYTES_PER_CONVERSATION: i64 = 4 * 1024 * 1024;
 
 /// What a pending change does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,14 +130,37 @@ pub(crate) fn record(
             rusqlite::params![target_id, conversation_id, actor],
         );
     }
-    // The cap evicts EDITS first, oldest first: flooding edits can never push
-    // out a delete (which would let a deleted message come back).
-    let _ = conn.execute(
-        "DELETE FROM pending_message_change WHERE conversation_id = ?1 AND envelope_id NOT IN (
-             SELECT envelope_id FROM pending_message_change WHERE conversation_id = ?1
-             ORDER BY (kind = 'edit'), recorded_at DESC, seq DESC, envelope_id DESC LIMIT ?2)",
-        rusqlite::params![conversation_id, MAX_PER_CONVERSATION],
-    );
+    // The caps evict EDITS first, oldest first: flooding edits can never push
+    // out a delete (which would let a deleted message come back). Each eviction
+    // runs only when its cap is actually exceeded.
+    let (count, edit_bytes): (i64, i64) = conn
+        .prepare_cached(
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN kind = 'edit' THEN length(content) END), 0)
+             FROM pending_message_change WHERE conversation_id = ?1",
+        )
+        .and_then(|mut st| st.query_row(rusqlite::params![conversation_id], |r| Ok((r.get(0)?, r.get(1)?))))
+        .unwrap_or((0, 0));
+    if count > MAX_PER_CONVERSATION {
+        let _ = conn.execute(
+            "DELETE FROM pending_message_change WHERE conversation_id = ?1 AND envelope_id NOT IN (
+                 SELECT envelope_id FROM pending_message_change WHERE conversation_id = ?1
+                 ORDER BY (kind = 'edit'), recorded_at DESC, seq DESC, envelope_id DESC LIMIT ?2)",
+            rusqlite::params![conversation_id, MAX_PER_CONVERSATION],
+        );
+    }
+    if edit_bytes > MAX_EDIT_BYTES_PER_CONVERSATION {
+        let _ = conn.execute(
+            "DELETE FROM pending_message_change WHERE envelope_id IN (
+                 SELECT envelope_id FROM (
+                     SELECT envelope_id,
+                            SUM(length(content)) OVER (
+                                ORDER BY recorded_at DESC, seq DESC, envelope_id DESC
+                                ROWS UNBOUNDED PRECEDING) AS kept
+                     FROM pending_message_change WHERE conversation_id = ?1 AND kind = 'edit')
+                 WHERE kept > ?2)",
+            rusqlite::params![conversation_id, MAX_EDIT_BYTES_PER_CONVERSATION],
+        );
+    }
 }
 
 /// What [`apply`] did to the row.
@@ -162,7 +194,7 @@ pub(crate) fn apply(
     if undecryptable.is_some() {
         return Ok(Applied::Nothing);
     }
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT kind, actor_id, content, recorded_at FROM pending_message_change
          WHERE target_id = ?1 AND conversation_id = ?2
          ORDER BY seq DESC, envelope_id DESC",
@@ -367,6 +399,26 @@ mod tests {
         record(&conn, &ulid_at(9_500), &ulid_at(9_400), "e", &Change::Edit { actor: "bob".into(), content: "x".repeat(300 * 1024) }, 1);
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM pending_message_change WHERE conversation_id = 'e'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn edit_bytes_are_capped_per_conversation_and_deletes_survive() {
+        let conn = db();
+        record(&conn, &ulid_at(1_100), &ulid_at(1_000), "c", &Change::Tombstone, 1);
+        let big = "x".repeat(200 * 1024);
+        for i in 0..40u64 {
+            record(&conn, &ulid_at(3_000 + i), &ulid_at(2_000 + i), "c", &Change::Edit { actor: format!("a{i}"), content: big.clone() }, 10 + i as i64);
+        }
+        let (n, bytes, tombs): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(length(content)), 0), SUM(kind = 'tombstone') FROM pending_message_change WHERE conversation_id = 'c'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(bytes <= MAX_EDIT_BYTES_PER_CONVERSATION, "{bytes}");
+        assert_eq!(tombs, 1, "the delete survives the byte cap");
+        assert_eq!(n, 1 + MAX_EDIT_BYTES_PER_CONVERSATION / (200 * 1024));
     }
 
     #[test]
