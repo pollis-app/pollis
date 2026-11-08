@@ -1,6 +1,6 @@
 // Realtime data-channel wire format, the message-relevant subset of desktop's `RealtimeEvent`.
 
-import type { HistoryTransferEventKind } from "../historyTransferPrompt.ts";
+import { HISTORY_TRANSFER_EVENT_KINDS, type HistoryTransferEventKind } from "../historyTransferPrompt.ts";
 
 export type RealtimeEvent =
   | {
@@ -118,14 +118,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "history_transfer",
 ]);
 
-const HISTORY_TRANSFER_EVENTS = new Set<HistoryTransferEventKind>([
-  "requested",
-  "accepted",
-  "chunk",
-  "acked",
-  "done",
-  "cancelled",
-]);
+const HISTORY_TRANSFER_EVENTS = new Set<HistoryTransferEventKind>(HISTORY_TRANSFER_EVENT_KINDS);
 
 // The DS may spell the id either way; anything else about the packet must be exact.
 function decodeHistoryTransfer(raw: Record<string, unknown>): RealtimeEvent | null {

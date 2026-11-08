@@ -3,13 +3,25 @@
 import { isInSignedInApp } from "./enrollmentPrompt.ts";
 import type { PendingTransferRequest } from "./historyTransfer.ts";
 
+/** Exactly the DS's `history_transfer` nudge events (pollis-delivery `history_transfer::nudge`). */
 export type HistoryTransferEventKind =
   | "requested"
   | "accepted"
   | "chunk"
   | "acked"
-  | "done"
-  | "cancelled";
+  | "declined"
+  | "cancelled"
+  | "completed";
+
+export const HISTORY_TRANSFER_EVENT_KINDS: readonly HistoryTransferEventKind[] = [
+  "requested",
+  "accepted",
+  "chunk",
+  "acked",
+  "declined",
+  "cancelled",
+  "completed",
+];
 
 export interface HistoryTransferNudge {
   transfer_id: string;
@@ -56,14 +68,14 @@ export function nextTransferApproval(
   return null;
 }
 
-// `requested` means "look at pending"; `accepted` and the end states mean "re-read and (re)run";
-// `chunk`/`acked` only move the counters.
+// `requested` means "look at pending"; every other event means "(re)run it": a step forward
+// restarts a paused run, and an end state lets the local row learn how it ended.
 export function nudgeWantsPendingCheck(event: HistoryTransferEventKind): boolean {
-  return event === "requested" || event === "cancelled";
+  return event === "requested" || event === "cancelled" || event === "declined";
 }
 
 export function nudgeWantsRun(event: HistoryTransferEventKind): boolean {
-  return event === "accepted" || event === "requested";
+  return event !== "requested";
 }
 
 type Listener = (nudge: HistoryTransferNudge) => void;

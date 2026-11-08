@@ -92,7 +92,8 @@ test("a malformed history_transfer packet is dropped, not passed on half-read", 
   for (const wire of bad) {
     assert.equal(decodeRealtimeEvent(JSON.stringify(wire)), null, JSON.stringify(wire));
   }
-  for (const kind of ["requested", "accepted", "chunk", "acked", "done", "cancelled"]) {
+  // Exactly the DS's list (pollis-delivery `history_transfer::nudge` callers).
+  for (const kind of ["requested", "accepted", "chunk", "acked", "declined", "cancelled", "completed"]) {
     assert.ok(decodeRealtimeEvent(JSON.stringify({ type: "history_transfer", transfer_id: "T", event: kind })));
   }
 });
@@ -223,13 +224,17 @@ test("the newest unseen request opens once; one answered inline never opens as a
   assert.ok(nudgeWantsPendingCheck(seen[0].event));
 });
 
-test("nudges: requested re-checks pending; accepted (re)runs; counters only refresh", () => {
+test("nudges: requested re-checks pending; every other event (re)runs, so a paused transfer restarts", () => {
   assert.ok(nudgeWantsPendingCheck("requested"));
   assert.ok(nudgeWantsPendingCheck("cancelled"), "a request cancelled before approval leaves the list");
-  assert.ok(nudgeWantsRun("accepted"));
-  assert.ok(!nudgeWantsRun("chunk"));
-  assert.ok(!nudgeWantsRun("acked"));
+  assert.ok(nudgeWantsPendingCheck("declined"));
+  assert.ok(!nudgeWantsRun("requested"));
+  for (const kind of ["accepted", "chunk", "acked", "declined", "cancelled", "completed"] as const) {
+    assert.ok(nudgeWantsRun(kind), kind);
+  }
   assert.ok(!nudgeWantsPendingCheck("chunk"));
+  // A name the DS never sends does not decode.
+  assert.equal(decodeRealtimeEvent(JSON.stringify({ type: "history_transfer", transfer_id: "T", event: "done" })), null);
 });
 
 test("every listener hears a nudge, and a removed one does not", () => {
@@ -238,9 +243,9 @@ test("every listener hears a nudge, and a removed one does not", () => {
   const offB = onHistoryTransferNudge((n) => heard.push(`b:${n.event}`));
   noticeHistoryTransfer({ transfer_id: "T", event: "accepted" });
   offB();
-  noticeHistoryTransfer({ transfer_id: "T", event: "done" });
+  noticeHistoryTransfer({ transfer_id: "T", event: "completed" });
   offA();
-  assert.deepEqual(heard, ["a:accepted", "b:accepted", "a:done"]);
+  assert.deepEqual(heard, ["a:accepted", "b:accepted", "a:completed"]);
 });
 
 // ── runner ──

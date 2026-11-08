@@ -121,21 +121,32 @@ export async function requestTransfer(
   return transfer;
 }
 
-export type HistoryTransferHint = "requested" | "accepted" | "chunk" | "acked" | "done" | "cancelled";
+/** Exactly the DS's `history_transfer` nudge events (pollis-delivery `history_transfer::nudge`). */
+export type HistoryTransferHint =
+  | "requested"
+  | "accepted"
+  | "chunk"
+  | "acked"
+  | "declined"
+  | "cancelled"
+  | "completed";
+
+/** The nudges after which the transfer is over (the local run learns it on its next status read). */
+export function isTerminalHint(event: HistoryTransferHint): boolean {
+  return event === "declined" || event === "cancelled" || event === "completed";
+}
 
 /**
  * The DS's content-free `history_transfer` nudge: re-read what changed, and pick up a transfer the other
- * device just moved forward if nothing here is driving it (a paused one resumes on its own).
+ * device just moved forward if nothing here is driving it (a paused one resumes on its own). Every
+ * non-terminal step re-runs it; a terminal one re-runs it too so the local row learns how it ended.
  */
 export function onHistoryTransferHint(queryClient: QueryClient, transferId: string, event: HistoryTransferHint): void {
-  if (event === "requested" || event === "cancelled") {
+  if (event === "requested" || isTerminalHint(event)) {
     void queryClient.invalidateQueries({ queryKey: historyTransferKeys.pending });
-  }
-  if (inFlight.has(transferId)) {
-    return;
-  }
-  if (event === "cancelled" || event === "requested") {
     void queryClient.invalidateQueries({ queryKey: historyTransferKeys.transfers });
+  }
+  if (event === "requested" || inFlight.has(transferId)) {
     return;
   }
   void resumeTransfers(queryClient, transferId);
