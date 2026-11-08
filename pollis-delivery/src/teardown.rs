@@ -21,6 +21,8 @@ use libsql::Connection;
 
 /// Every table [`purge_user_rows`] clears (plus `users`); with [`EXEMPT_FROM_USER_PURGE`], the whole schema.
 pub const USER_PURGED_TABLES: &[&str] = &[
+    "history_transfer",
+    "history_transfer_budget",
     "account_recovery",
     "directory_lookup_budget",
     "attachment_ref",
@@ -290,6 +292,8 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // Pins this user placed (#99); the row names the pinner in the clear.
     conn.execute("DELETE FROM pinned_message WHERE pinned_by = ?1", uid()).await?;
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;
+    // #1735: transfers (and their sealed chunks) and the request budget.
+    crate::history_transfer::purge_user(conn, user_id).await?;
 
     // Rows that SURVIVE but still point at this user by id.
     hand_over_dangling_pointers(conn, user_id).await?;

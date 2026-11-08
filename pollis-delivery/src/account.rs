@@ -480,6 +480,8 @@ pub async fn apply_revoke_device(
         libsql::params![actor.clone(), body.device_id.clone()],
     )
     .await?;
+    // #1735: a revoked device is party to no history transfer, in either role.
+    crate::history_transfer::purge_device(&tx, &actor, &body.device_id).await?;
     tx.execute(
         "UPDATE user_device SET revoked_at = datetime('now') \
          WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
@@ -543,6 +545,8 @@ pub async fn apply_logout_device(
         libsql::params![actor.clone(), body.device_id.clone()],
     )
     .await?;
+    // #1735: as for a revocation.
+    crate::history_transfer::purge_device(&tx, &actor, &body.device_id).await?;
     tx.execute(
         "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
         libsql::params![body.device_id.clone(), actor],
@@ -644,6 +648,9 @@ async fn reset_recover_in_tx(
         libsql::params![actor.clone()],
     )
     .await?;
+
+    // #1735: the account's other devices are going, so no transfer survives.
+    crate::history_transfer::purge_transfers_of_user(tx, &actor).await?;
 
     // Orphan the actor's OTHER devices.
     match current_device_id {

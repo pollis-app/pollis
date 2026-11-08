@@ -146,6 +146,19 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                             Ok(_) => {}
                             Err(e) => tracing::warn!("push-handle sweep failed: {e}"),
                         }
+                        // #1735: expired history transfers and their sealed chunks.
+                        match pollis_delivery::history_transfer::sweep_expired(
+                            &conn,
+                            pollis_delivery::util::now_unix() as i64,
+                        )
+                        .await
+                        {
+                            Ok(n) if n > 0 => {
+                                tracing::info!("retention sweep: expired {n} history transfer(s)")
+                            }
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("history-transfer sweep failed: {e}"),
+                        }
                         // #1423: fetch Expo receipts, prune dead tokens, drop answered tickets.
                         match pollis_delivery::push::check_push_receipts(&conn).await {
                             Ok(r) if r.checked > 0 || r.expired > 0 => tracing::info!(

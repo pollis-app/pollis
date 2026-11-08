@@ -47,6 +47,7 @@ pub mod email_change;
 pub mod emoji;
 pub mod file_keys;
 pub mod groups;
+pub mod history_transfer;
 pub mod links;
 pub mod messages;
 pub mod otp;
@@ -257,6 +258,17 @@ endpoints! {
     Client   links::OfferLinkBody               => "/v1/link/offer",                     links::OfferLinkResponse;
     Client   links::AcceptOfferBody             => "/v1/link/accept-offer",              links::AcceptOfferResponse;
     Client   links::PollOfferBody               => "/v1/link/poll-offer",                links::PollOfferResponse;
+    // #1735: history transfer between two of one account's devices.
+    Client   history_transfer::RequestTransferBody  => "/v1/history-transfer/request",      history_transfer::RequestTransferResponse;
+    Client   history_transfer::PendingTransfersBody => "/v1/history-transfer/pending",      history_transfer::PendingTransfersResponse;
+    Client   history_transfer::TransferStatusBody   => "/v1/history-transfer/status",       history_transfer::TransferStatusResponse;
+    Client   history_transfer::AcceptTransferBody   => "/v1/history-transfer/accept",       history_transfer::AcceptTransferResponse, idempotent;
+    Client   history_transfer::DeclineTransferBody  => "/v1/history-transfer/decline",      StatusOk, idempotent;
+    Client   history_transfer::CancelTransferBody   => "/v1/history-transfer/cancel",       StatusOk, idempotent;
+    Client   history_transfer::CompleteTransferBody => "/v1/history-transfer/complete",     StatusOk, idempotent;
+    Client   history_transfer::PutChunkBody         => "/v1/history-transfer/chunk/put",    history_transfer::PutChunkResponse, idempotent;
+    Client   history_transfer::GetChunkBody         => "/v1/history-transfer/chunk/get",    history_transfer::GetChunkResponse, idempotent;
+    Client   history_transfer::AckChunkBody         => "/v1/history-transfer/chunk/ack",    history_transfer::AckChunkResponse, idempotent;
     Client   email_change::RequestEmailChangeBody => "/v1/auth/request-email-change-otp", StatusOk;
     Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      email_change::EmailChanged;
 
