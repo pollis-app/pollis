@@ -1559,6 +1559,11 @@ impl TestClient {
 
 /// Enroll a second device for `primary`'s user through the real enrollment commands.
 pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> TestClient {
+    enroll_another_device(primary, email, 2).await
+}
+
+/// [`enroll_second_device`] for an account that will then hold `expected_devices`.
+pub(crate) async fn enroll_another_device(primary: &TestClient, email: &str, expected_devices: usize) -> TestClient {
     // 1. Sign in as an existing user, so enrollment is required.
     let mut new_client = TestClient::new().await;
 
@@ -1697,7 +1702,7 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
         .await;
     assert_eq!(
         devices.as_array().map(|a| a.len()).unwrap_or(0),
-        2,
+        expected_devices,
         "user should have exactly two registered devices after enrollment, got {devices:?}"
     );
 

@@ -404,6 +404,9 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) -> Result<()> {
     // Children before parents; the MLS control-plane tables are wiped on `log` below.
     let main_tables = [
+        "history_transfer_chunk",
+        "history_transfer",
+        "history_transfer_budget",
         "message_reaction",
         "group_invite",
         "group_join_request",

@@ -800,6 +800,36 @@ async fn conversation_meta(
 mod tests {
     use super::*;
 
+    /// #1735: a row copied from a sibling is history, not news — neither the
+    /// rowid-floor query nor the recent-message fallback may preview it, even
+    /// when it lands (an import) after the floor was read and inside the window.
+    #[test]
+    fn a_transferred_row_is_never_previewed() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        let floor: i64 = conn.query_row("SELECT COALESCE(MAX(rowid), 0) FROM message", [], |r| r.get(0)).unwrap();
+        for (id, origin) in [("native", None), ("copied", Some("transfer"))] {
+            conn.execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at, origin)
+                 VALUES (?1, 'c', 'bob', X'', 'hi', '2026-01-01T00:00:00Z', ?2)",
+                rusqlite::params![id, origin],
+            )
+            .unwrap();
+        }
+        let ids = |sql: String| -> Vec<String> {
+            let mut st = conn.prepare(&sql).unwrap();
+            st.query_map(rusqlite::params!["me", "c", floor], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        assert_eq!(ids(format!("SELECT id FROM message WHERE {LIVE_INBOUND} AND conversation_id = ?2 AND rowid > ?3")), ["native"]);
+        assert_eq!(
+            ids(format!(
+                "SELECT id FROM message WHERE {LIVE_INBOUND} AND conversation_id = ?2 AND ?3 >= 0
+                 AND received_at >= datetime('now', '-600 seconds')"
+            )),
+            ["native"]
+        );
+    }
+
     #[tokio::test]
     async fn a_network_failure_is_retried_until_it_clears() {
         let mut calls = 0;

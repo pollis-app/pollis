@@ -15,6 +15,8 @@
 
 pub(crate) mod crypto;
 mod engine;
+#[cfg(feature = "fuzzing")]
+pub mod fuzz_surface;
 pub(crate) mod store;
 pub mod wire;
 

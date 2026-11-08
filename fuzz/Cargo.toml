@@ -149,3 +149,10 @@ path = "fuzz_targets/outbox.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "history_transfer_chunk"
+path = "fuzz_targets/history_transfer_chunk.rs"
+test = false
+doc = false
+bench = false

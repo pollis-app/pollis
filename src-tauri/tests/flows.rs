@@ -31,6 +31,8 @@ mod groups;
 mod heavy_churn;
 #[path = "flows/key_package_exhaustion.rs"]
 mod key_package_exhaustion;
+#[path = "flows/history_transfer.rs"]
+mod history_transfer;
 // Tests the harness's own sqlite3, not the product.
 #[path = "flows/linked_sqlite.rs"]
 mod linked_sqlite;
