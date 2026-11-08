@@ -34,8 +34,9 @@ const WINDOW: i64 = 8;
 /// Rows the source reads per query (a chunk may hold fewer, by size).
 const ROWS_PER_QUERY: i64 = 2000;
 
-/// Receipts' share of a chunk, at most.
-const RECEIPT_BYTES: usize = 256 * 1024;
+/// Receipts one message may carry (a DM has two readers × two kinds; a row
+/// with more is malformed and counted as skipped, never truncated).
+const RECEIPTS_PER_ROW: usize = 64;
 
 /// Woken by the DS's `history_transfer` nudge (and by local cancels).
 static WAKE: Notify = Notify::const_new();
@@ -48,6 +49,8 @@ static RUNNING: std::sync::Mutex<Option<HashSet<(String, String)>>> = std::sync:
 #[cfg(feature = "test-harness")]
 static IDLE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 #[cfg(feature = "test-harness")]
+static ROWS_PER_CHUNK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-harness")]
 static AUTO_RESUME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Test-harness controls for the transfer loops.
@@ -56,6 +59,11 @@ pub mod transfer_hooks {
     /// Override how long a run waits without progress before it pauses (0 = default).
     pub fn set_idle_limit(limit: std::time::Duration) {
         super::IDLE_MS.store(limit.as_millis() as u64, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Cap the rows per chunk (0 = default), so a test gets many small chunks.
+    pub fn set_rows_per_chunk(n: usize) {
+        super::ROWS_PER_CHUNK.store(n, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Whether unlock resumes open transfers in the background (off by default in tests).
@@ -73,6 +81,17 @@ pub(crate) fn auto_resume_enabled() -> bool {
     {
         true
     }
+}
+
+fn rows_per_chunk() -> usize {
+    #[cfg(feature = "test-harness")]
+    {
+        let n = ROWS_PER_CHUNK.load(std::sync::atomic::Ordering::SeqCst);
+        if n > 0 {
+            return n.min(wire::MAX_ROWS);
+        }
+    }
+    wire::MAX_ROWS
 }
 
 fn idle_limit(awaiting: bool) -> Duration {
@@ -331,7 +350,8 @@ type Cursor = (String, String, String);
 
 /// Seal the next chunk and store it with the advanced position, in one
 /// transaction. Returns `(index, sealed)`.
-fn seal_next_chunk(conn: &rusqlite::Connection, row: &LocalRow, req: &wire::Req, plan: &Plan) -> Result<(u32, Vec<u8>)> {
+/// `None` when the transfer ended (or moved) since `row` was read: nothing is stored.
+fn seal_next_chunk(conn: &rusqlite::Connection, row: &LocalRow, req: &wire::Req, plan: &Plan) -> Result<Option<(u32, Vec<u8>)>> {
     let key = row.transfer_key.as_ref().ok_or_else(|| err("transfer key missing"))?;
     let cursor: Cursor = match &row.cursor {
         Some(s) => serde_json::from_str(s).map_err(|_| err("stored cursor is corrupt"))?,
@@ -370,31 +390,11 @@ fn seal_next_chunk(conn: &rusqlite::Connection, row: &LocalRow, req: &wire::Req,
         .collect::<rusqlite::Result<_>>()?;
     drop(stmt);
 
-    let mut rows = Vec::new();
-    let mut size = 0usize;
-    let mut skipped = 0u64;
-    let mut last: Option<Cursor> = None;
-    for r in candidates {
-        let len = serde_json::to_vec(&r)?.len() + 1;
-        if len > wire::PLAIN_TARGET_BYTES || r.content.as_deref().is_some_and(|c| c.len() > wire::MAX_CONTENT_BYTES) {
-            // Unsendable on its own: counted, passed.
-            skipped += 1;
-            last = Some((r.conversation_id.clone(), r.sent_at.clone(), r.id.clone()));
-            continue;
-        }
-        if size + len > wire::PLAIN_TARGET_BYTES || rows.len() >= wire::MAX_ROWS {
-            break;
-        }
-        size += len;
-        last = Some((r.conversation_id.clone(), r.sent_at.clone(), r.id.clone()));
-        rows.push(r);
-    }
-    let index = row.next_index;
-    let is_final = last.is_none();
-
-    let mut receipts = Vec::new();
-    if !rows.is_empty() {
-        let ids = serde_json::to_string(&rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>())?;
+    // Every candidate's receipts, so a row and its receipts travel together
+    // and count against the same size budget (none is silently dropped).
+    let mut by_message: HashMap<String, Vec<wire::WireReceipt>> = HashMap::new();
+    if !candidates.is_empty() {
+        let ids = serde_json::to_string(&candidates.iter().map(|r| r.id.as_str()).collect::<Vec<_>>())?;
         let mut stmt = conn.prepare(
             "SELECT message_id, reader_id, kind, at FROM message_receipt
              WHERE message_id IN (SELECT value FROM json_each(?1)) ORDER BY message_id, reader_id, kind",
@@ -404,16 +404,42 @@ fn seal_next_chunk(conn: &rusqlite::Connection, row: &LocalRow, req: &wire::Req,
                 Ok(wire::WireReceipt { message_id: r.get(0)?, reader_id: r.get(1)?, kind: r.get(2)?, at: r.get(3)? })
             })?
             .collect::<rusqlite::Result<_>>()?;
-        let mut rsize = 0usize;
         for rc in all {
-            let len = serde_json::to_vec(&rc)?.len() + 1;
-            if rsize + len > RECEIPT_BYTES || receipts.len() >= wire::MAX_RECEIPTS {
-                break;
-            }
-            rsize += len;
-            receipts.push(rc);
+            by_message.entry(rc.message_id.clone()).or_default().push(rc);
         }
     }
+
+    let max_rows = rows_per_chunk();
+    let mut rows = Vec::new();
+    let mut receipts = Vec::new();
+    let mut size = 0usize;
+    let mut skipped = 0u64;
+    let mut last: Option<Cursor> = None;
+    for r in candidates {
+        let own = by_message.remove(&r.id).unwrap_or_default();
+        let mut len = serde_json::to_vec(&r)?.len() + 1;
+        for rc in &own {
+            len += serde_json::to_vec(rc)?.len() + 1;
+        }
+        if len > wire::PLAIN_TARGET_BYTES
+            || own.len() > RECEIPTS_PER_ROW
+            || r.content.as_deref().is_some_and(|c| c.len() > wire::MAX_CONTENT_BYTES)
+        {
+            // Unsendable on its own: counted, passed.
+            skipped += 1;
+            last = Some((r.conversation_id.clone(), r.sent_at.clone(), r.id.clone()));
+            continue;
+        }
+        if size + len > wire::PLAIN_TARGET_BYTES || rows.len() >= max_rows || receipts.len() + own.len() > wire::MAX_RECEIPTS {
+            break;
+        }
+        size += len;
+        last = Some((r.conversation_id.clone(), r.sent_at.clone(), r.id.clone()));
+        rows.push(r);
+        receipts.extend(own);
+    }
+    let index = row.next_index;
+    let is_final = last.is_none();
 
     let rows_after = row.rows_done + rows.len() as u64;
     let skipped_after = row.rows_skipped + skipped;
@@ -440,15 +466,13 @@ fn seal_next_chunk(conn: &rusqlite::Connection, row: &LocalRow, req: &wire::Req,
     };
 
     let tx = conn.unchecked_transaction()?;
-    tx.execute(
-        "INSERT INTO history_transfer_outgoing (transfer_id, idx, sealed) VALUES (?1, ?2, ?3)",
-        rusqlite::params![row.transfer_id, index, sealed],
-    )?;
-    tx.execute(
+    // Guarded on the position AND an open state: a cancel (or another run)
+    // since the read leaves this transaction with nothing to do, and it rolls back.
+    let moved = tx.execute(
         "UPDATE history_transfer_local
          SET next_index = ?2, cursor = ?3, prev_hash = ?4, rows_done = ?5, rows_skipped = ?6,
              final_index = ?7
-         WHERE transfer_id = ?1 AND next_index = ?8",
+         WHERE transfer_id = ?1 AND next_index = ?8 AND state IN ('transferring', 'paused')",
         rusqlite::params![
             row.transfer_id,
             index + 1,
@@ -460,9 +484,16 @@ fn seal_next_chunk(conn: &rusqlite::Connection, row: &LocalRow, req: &wire::Req,
             index
         ],
     )?;
+    if moved != 1 {
+        return Ok(None);
+    }
+    tx.execute(
+        "INSERT INTO history_transfer_outgoing (transfer_id, idx, sealed) VALUES (?1, ?2, ?3)",
+        rusqlite::params![row.transfer_id, index, sealed],
+    )?;
     store::touch(&tx, &row.transfer_id)?;
     tx.commit()?;
-    Ok((index, sealed))
+    Ok(Some((index, sealed)))
 }
 
 enum Put {
@@ -599,15 +630,21 @@ async fn run_source(
                     continue;
                 }
             };
-            let (idx, sealed) = with_db(state, |c| seal_next_chunk(c, &row, &req, &plan)).await?;
+            let sealed_now = {
+                let _cross = state.cross_process_lock().await?;
+                with_db(state, |c| seal_next_chunk(c, &row, &req, &plan)).await?
+            };
+            let Some((idx, sealed)) = sealed_now else {
+                continue;
+            };
             emit(state, id, sink).await?;
             if hooks::take(Crash::TransferSourceAfterStore) {
-                return Err(hooks::simulated_crash());
+                hooks::die();
             }
             match put(state, id, idx, &sealed).await? {
                 Put::Stored(acked) => {
                     if hooks::take(Crash::TransferSourceAfterPut) {
-                        return Err(hooks::simulated_crash());
+                        hooks::die();
                     }
                     with_db(state, |c| store::note_acked(c, id, acked)).await?;
                 }
@@ -639,39 +676,57 @@ async fn verify_acceptance(
     device: &str,
     row: &LocalRow,
     st: &pollis_api::history_transfer::TransferStatusResponse,
-) -> std::result::Result<(zeroize::Zeroizing<[u8; 32]>, Vec<u8>), String> {
+) -> Result<std::result::Result<(zeroize::Zeroizing<[u8; 32]>, Vec<u8>), String>> {
+    let refused = |why: String| Ok(Err(why));
     let (Some(acc_b64), Some(sig_b64)) = (st.acc.as_deref(), st.acc_sig.as_deref()) else {
-        return Err("accepted without an acceptance".into());
+        return refused("accepted without an acceptance".into());
     };
-    let acc_bytes = super::unb64("acc", acc_b64).map_err(|e| e.to_string())?;
-    let sig = super::unb64("acc_sig", sig_b64).map_err(|e| e.to_string())?;
+    let (Ok(acc_bytes), Ok(sig)) = (super::unb64("acc", acc_b64), super::unb64("acc_sig", sig_b64)) else {
+        return refused("acceptance is not base64".into());
+    };
     if acc_bytes.len() > 64 * 1024 {
-        return Err("acceptance too large".into());
+        return refused("acceptance too large".into());
     }
-    let acc: wire::Acc = serde_json::from_slice(&acc_bytes).map_err(|_| "acceptance does not parse".to_string())?;
+    let Ok(acc) = serde_json::from_slice::<wire::Acc>(&acc_bytes) else {
+        return refused("acceptance does not parse".into());
+    };
     if acc.v != wire::VERSION
         || acc.transfer_id != row.transfer_id
         || acc.src_device_id != row.peer_device_id
         || acc.dst_device_id != device
         || acc.req_hash != hex::encode(crypto::sha256(&row.req))
     {
-        return Err("acceptance names another transfer, request or device".into());
+        return refused("acceptance names another transfer, request or device".into());
     }
-    let sibling = super::verified_sibling(state, user, &row.peer_device_id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("the source device is not a verified sibling")?;
-    crypto::verify(&sibling.pq_pub, crypto::ACC_DOMAIN, &acc_bytes, &sig).map_err(|e| e.to_string())?;
-    let secret = row.kem_sk.as_ref().ok_or("key-agreement secret missing")?;
-    let ct_x = super::unb64("kem_ct_x25519", &acc.kem_ct_x25519).map_err(|e| e.to_string())?;
-    let ct_k = super::unb64("kem_ct_mlkem", &acc.kem_ct_mlkem).map_err(|e| e.to_string())?;
-    let shared = crypto::decapsulate(secret, &ct_x, &ct_k).map_err(|e| e.to_string())?;
-    Ok((crypto::derive_key(&shared, &row.transfer_id, &row.req, &acc_bytes), acc_bytes))
+    // A network or database error here is transient: it propagates and the
+    // run resumes later. Only a sibling that does not verify is a refusal.
+    let Some(sibling) = super::verified_sibling(state, user, &row.peer_device_id).await? else {
+        return refused("the source device is not a verified sibling".into());
+    };
+    if let Err(e) = crypto::verify(&sibling.pq_pub, crypto::ACC_DOMAIN, &acc_bytes, &sig) {
+        return refused(e.to_string());
+    }
+    let Some(secret) = row.kem_sk.as_ref() else {
+        return refused("key-agreement secret missing".into());
+    };
+    let (Ok(ct_x), Ok(ct_k)) = (
+        super::unb64("kem_ct_x25519", &acc.kem_ct_x25519),
+        super::unb64("kem_ct_mlkem", &acc.kem_ct_mlkem),
+    ) else {
+        return refused("key-agreement ciphertext is not base64".into());
+    };
+    let shared = match crypto::decapsulate(secret, &ct_x, &ct_k) {
+        Ok(s) => s,
+        Err(e) => return refused(e.to_string()),
+    };
+    Ok(Ok((crypto::derive_key(&shared, &row.transfer_id, &row.req, &acc_bytes), acc_bytes)))
 }
 
 #[derive(Debug)]
 enum ImportError {
     Frame(wire::FrameError),
+    /// The transfer ended (or another run moved it) since it was read: nothing written.
+    Moved,
     Other(Error),
 }
 
@@ -802,12 +857,12 @@ fn import_chunk(
         }
         None => (0, None),
     };
-    tx.execute(
+    let moved = tx.execute(
         "UPDATE history_transfer_local
          SET next_index = ?2, prev_hash = ?3, chunks_done = ?2, rows_done = rows_done + ?4,
              rows_skipped = rows_skipped + ?5, deferred_count = COALESCE(?6, deferred_count),
              final_index = ?7, estimated_total = COALESCE(?9, estimated_total)
-         WHERE transfer_id = ?1 AND next_index = ?8",
+         WHERE transfer_id = ?1 AND next_index = ?8 AND state IN ('transferring', 'paused')",
         rusqlite::params![
             row.transfer_id,
             chunk.index + 1,
@@ -820,10 +875,15 @@ fn import_chunk(
             chunk.estimated_total.filter(|_| chunk.index == 0).and_then(|n| i64::try_from(n).ok())
         ],
     )?;
+    // Ended (a cancel) or moved by another run since the read: dropping `tx`
+    // rolls every row of this chunk back.
+    if moved != 1 {
+        return Err(ImportError::Moved);
+    }
     store::touch(&tx, &row.transfer_id)?;
     if hooks::take(Crash::TransferReceiverAfterOpen) {
-        // Dropping `tx` rolls the whole chunk back.
-        return Err(ImportError::Other(hooks::simulated_crash()));
+        // A real unwind with the transaction open: SQLite rolls it back.
+        hooks::die();
     }
     tx.commit()?;
     Ok(touched.into_iter().collect())
@@ -907,14 +967,14 @@ async fn run_receiver(
                 continue;
             }
             (State::AwaitingApproval, Ts::Accepted) => {
-                match verify_acceptance(state, user, device, &row, &st).await {
+                match verify_acceptance(state, user, device, &row, &st).await? {
                     Ok((key, acc)) => {
                         with_db(state, |c| {
                             c.execute(
                                 "UPDATE history_transfer_local
                                  SET transfer_key = ?2, acc = ?3, kem_sk = NULL, state = 'transferring', error = NULL
                                  WHERE transfer_id = ?1 AND state = 'awaiting_approval'",
-                                rusqlite::params![id, key.to_vec(), acc],
+                                rusqlite::params![id, zeroize::Zeroizing::new(key.to_vec()).as_slice(), acc],
                             )?;
                             store::touch(c, id)
                         })
@@ -994,21 +1054,125 @@ async fn run_receiver(
             let _cross = state.cross_process_lock().await?;
             with_db(state, |c| match import_chunk(c, &row, &req, &chunk, plain_hash, &members_now) {
                 Ok(t) => Ok(Ok(t)),
-                Err(ImportError::Frame(f)) => Ok(Err(f)),
+                Err(ImportError::Frame(f)) => Ok(Err(Some(f))),
+                Err(ImportError::Moved) => Ok(Err(None)),
                 Err(ImportError::Other(e)) => Err(e),
             })
             .await?
         };
         let touched = match imported {
             Ok(t) => t,
-            Err(f) => return fail(state, id, &format!("chunk {idx} rejected: {f}"), sink).await,
+            Err(Some(f)) => return fail(state, id, &format!("chunk {idx} rejected: {f}"), sink).await,
+            // Re-read: the loop sees the end (or the other run's progress).
+            Err(None) => continue,
         };
         crate::commands::messages::persisted::note(touched);
         emit(state, id, sink).await?;
         if hooks::take(Crash::TransferReceiverAfterCommit) {
-            return Err(hooks::simulated_crash());
+            hooks::die();
         }
         ack(state, id, idx).await?;
         waiter.progressed();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        conn
+    }
+
+    fn req() -> wire::Req {
+        wire::Req {
+            v: wire::VERSION,
+            transfer_id: "T".into(),
+            user_id: "u".into(),
+            dst_device_id: "d".into(),
+            src_device_id: "s".into(),
+            kem_pub_x25519: String::new(),
+            kem_pub_mlkem: String::new(),
+            retention_days: 0,
+            via: "sibling".into(),
+            created_at: 0,
+            conversations: vec![wire::ReqConversation {
+                conversation_id: "c".into(),
+                mls_group_id: "g".into(),
+                join_generation: 0,
+                join_epoch: 0,
+                is_dm: false,
+            }],
+        }
+    }
+
+    /// M3: a cancel that lands between a run's read and its seal leaves no
+    /// stored chunk and no moved position behind.
+    #[test]
+    fn a_seal_after_a_cancel_stores_nothing() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+             VALUES ('01J0000000000000000000ROW1', 'c', 'bob', X'', 'hi', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let r = req();
+        let req_bytes = serde_json::to_vec(&r).unwrap();
+        store::insert(&conn, "T", Role::Src, "d", None, "sibling", State::Transferring, None, Some(&[7u8; 32]), &req_bytes, Some(b"acc")).unwrap();
+        let row = store::load(&conn, "T").unwrap().unwrap();
+        let plan = Plan { eligible: vec!["c".into()], deferred: vec![] };
+        store::end(&conn, "T", State::Cancelled, None).unwrap();
+        assert!(seal_next_chunk(&conn, &row, &r, &plan).unwrap().is_none());
+        let stored: i64 = conn.query_row("SELECT COUNT(*) FROM history_transfer_outgoing", [], |x| x.get(0)).unwrap();
+        assert_eq!(stored, 0);
+        assert_eq!(store::load(&conn, "T").unwrap().unwrap().next_index, 0);
+        // An orphan left by an older build is pruned.
+        conn.execute("INSERT INTO history_transfer_outgoing (transfer_id, idx, sealed) VALUES ('T', 0, X'01')", []).unwrap();
+        store::prune(&conn);
+        let stored: i64 = conn.query_row("SELECT COUNT(*) FROM history_transfer_outgoing", [], |x| x.get(0)).unwrap();
+        assert_eq!(stored, 0);
+    }
+
+    /// M3: an import racing a cancel writes no row of the chunk.
+    #[test]
+    fn an_import_after_a_cancel_writes_nothing() {
+        let conn = db();
+        let r = req();
+        let req_bytes = serde_json::to_vec(&r).unwrap();
+        store::insert(&conn, "T", Role::Dst, "s", None, "sibling", State::Transferring, None, Some(&[7u8; 32]), &req_bytes, Some(b"acc")).unwrap();
+        let row = store::load(&conn, "T").unwrap().unwrap();
+        store::end(&conn, "T", State::Cancelled, None).unwrap();
+        let chunk = wire::ChunkPlain {
+            v: wire::VERSION,
+            transfer_id: "T".into(),
+            index: 0,
+            prev_hash: hex::encode([0u8; 32]),
+            rows: vec![wire::WireRow {
+                id: "01J0000000000000000000ROW1".into(),
+                conversation_id: "c".into(),
+                sender_id: "bob".into(),
+                content: Some("hi".into()),
+                reply_to_id: None,
+                thread_id: None,
+                sent_at: "2026-01-01T00:00:00Z".into(),
+                received_at: "2026-01-01 00:00:00".into(),
+                edited_at: None,
+                deleted_at: None,
+            }],
+            receipts: vec![],
+            fin: None,
+            estimated_total: None,
+        };
+        let members: HashMap<String, (String, bool)> = [("c".to_string(), ("g".to_string(), false))].into();
+        // No local group for "g" here, so mark it held by skipping that check:
+        // the row would be skipped anyway; what matters is that NOTHING commits.
+        let out = import_chunk(&conn, &row, &r, &chunk, [1u8; 32], &members);
+        assert!(matches!(out, Err(ImportError::Moved)), "{out:?}");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM message", [], |x| x.get(0)).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(store::load(&conn, "T").unwrap().unwrap().next_index, 0);
     }
 }

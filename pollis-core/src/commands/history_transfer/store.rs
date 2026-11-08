@@ -88,13 +88,14 @@ pub(crate) struct LocalRow {
     pub rows_skipped: u64,
     pub deferred_count: u32,
     pub estimated_total: Option<u64>,
+    pub local_deferred: u32,
     pub error: Option<String>,
     pub updated_at: String,
 }
 
 const COLUMNS: &str = "transfer_id, role, peer_device_id, peer_device_name, via, state, kem_sk, transfer_key, \
      req, acc, plan, cursor, next_index, prev_hash, final_index, chunks_done, rows_done, rows_skipped, \
-     deferred_count, error, updated_at, estimated_total";
+     deferred_count, error, updated_at, estimated_total, local_deferred";
 
 fn corrupt(what: &str) -> Error {
     Error::Other(anyhow::anyhow!("history transfer row is corrupt: {what}"))
@@ -124,6 +125,7 @@ fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(LocalRowRaw,)> {
         error: r.get(19)?,
         updated_at: r.get(20)?,
         estimated_total: r.get(21)?,
+        local_deferred: r.get(22)?,
     },))
 }
 
@@ -150,6 +152,7 @@ struct LocalRowRaw {
     error: Option<String>,
     updated_at: String,
     estimated_total: Option<i64>,
+    local_deferred: i64,
 }
 
 impl LocalRowRaw {
@@ -187,6 +190,7 @@ impl LocalRowRaw {
             rows_skipped: u64::try_from(self.rows_skipped).unwrap_or(0),
             deferred_count: u32::try_from(self.deferred_count).unwrap_or(0),
             estimated_total: self.estimated_total.and_then(|n| u64::try_from(n).ok()),
+            local_deferred: u32::try_from(self.local_deferred).unwrap_or(0),
             error: self.error,
             updated_at: self.updated_at,
         })
@@ -286,7 +290,7 @@ pub(crate) fn insert(
             via,
             state.as_str(),
             kem_sk,
-            transfer_key.map(|k| k.to_vec()),
+            transfer_key.map(|k| zeroize::Zeroizing::new(k.to_vec())).as_deref().map(Vec::as_slice),
             req,
             acc
         ],
@@ -326,6 +330,13 @@ pub(crate) fn end(conn: &Connection, transfer_id: &str, state: State, error: Opt
 /// Ended transfers older than this are forgotten (their ids stay refused by
 /// the request's freshness bound long before).
 pub(crate) fn prune(conn: &Connection) {
+    // Stored chunks of a transfer that ended (or is gone): never uploaded again.
+    let _ = conn.execute(
+        "DELETE FROM history_transfer_outgoing WHERE transfer_id NOT IN (
+             SELECT transfer_id FROM history_transfer_local
+             WHERE state IN ('awaiting_approval', 'transferring', 'paused'))",
+        [],
+    );
     let _ = conn.execute(
         "DELETE FROM history_transfer_local
          WHERE state IN ('completed', 'declined', 'cancelled', 'expired', 'failed')

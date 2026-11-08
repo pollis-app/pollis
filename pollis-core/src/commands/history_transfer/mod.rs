@@ -86,7 +86,7 @@ impl HistoryTransfer {
             chunks_done: row.chunks_done,
             rows_done: row.rows_done,
             rows_skipped: row.rows_skipped,
-            deferred_conversations: row.deferred_count,
+            deferred_conversations: row.deferred_count + row.local_deferred,
             estimated_total: row.estimated_total,
             error: row.error.clone(),
             updated_at: row.updated_at.clone(),
@@ -378,7 +378,14 @@ pub async fn request_history_transfer(
     }
 
     let members = membership(state, &user).await?;
-    let (conversations, retention_days) = with_db(state, |conn| {
+    let (conversations, retention_days, unjoined) = with_db(state, |conn| {
+        // A conversation this device belongs to but holds no group for yet (its
+        // Welcome not processed — typical right after a link) cannot be asked
+        // for; it is reported as deferred, never silently dropped.
+        let unjoined = members
+            .values()
+            .filter(|(group, _)| crate::commands::mls::join_position(conn, group).is_none())
+            .count();
         let mut list: Vec<wire::ReqConversation> = members
             .iter()
             .filter_map(|(cid, (group, is_dm))| {
@@ -393,7 +400,7 @@ pub async fn request_history_transfer(
             })
             .collect();
         list.sort_by(|a, b| a.conversation_id.cmp(&b.conversation_id));
-        Ok((list, crate::db::local::get_message_retention_days(conn)?))
+        Ok((list, crate::db::local::get_message_retention_days(conn)?, unjoined))
     })
     .await?;
 
@@ -428,7 +435,12 @@ pub async fn request_history_transfer(
             None,
             &req_bytes,
             None,
-        )
+        )?;
+        c.execute(
+            "UPDATE history_transfer_local SET local_deferred = ?2 WHERE transfer_id = ?1",
+            rusqlite::params![transfer_id, unjoined as i64],
+        )?;
+        Ok(())
     })
     .await?;
     let body = pollis_api::history_transfer::RequestTransferBody {
@@ -581,6 +593,8 @@ pub async fn approve_history_transfer(
         (true, None) => {}
         (false, None) => return Err(err("Enter your PIN to approve.")),
     }
+    // The link-time shortcut is good for ONE approval.
+    state.history_link_approvals.lock().await.remove(&v.req.dst_device_id);
     let x_pub = unb64("kem_pub_x25519", &v.req.kem_pub_x25519)?;
     let k_pub = unb64("kem_pub_mlkem", &v.req.kem_pub_mlkem)?;
     let enc = crypto::encapsulate(&x_pub, &k_pub).map_err(|e| err(&format!("request keys unusable: {e}")))?;
@@ -684,6 +698,8 @@ pub async fn cancel_history_transfer(state: &Arc<AppState>, transfer_id: String)
     }
     with_db(state, |c| store::end(c, &transfer_id, store::State::Cancelled, None)).await?;
     engine::notify_progress();
+    // A run waiting on this transfer re-reads it now and stops.
+    engine::wake();
     Ok(())
 }
 
@@ -699,8 +715,11 @@ pub(crate) async fn snapshot(state: &Arc<AppState>, transfer_id: &str) -> Result
     .await
 }
 
-/// After unlock: resume every open transfer in the background (desktop; the
-/// mobile host calls `run_history_transfer` on unlock/foreground itself).
+/// After unlock: resume every open transfer in the background, each on its own
+/// task (a receiver still awaiting approval must not hold up the others). Runs
+/// on desktop and mobile alike (the unlock is pollis-core's); the mobile host's
+/// own runner calling `run_history_transfer` too is harmless — a second run of
+/// a transfer follows the first.
 pub fn spawn_resume_all(state: &Arc<AppState>) {
     if !engine::auto_resume_enabled() {
         return;
@@ -717,10 +736,13 @@ pub fn spawn_resume_all(state: &Arc<AppState>) {
             Err(_) => return,
         };
         for id in ids {
-            let sink: Arc<dyn EventSink<HistoryTransfer>> = Arc::new(crate::sink::NoopSink);
-            if let Err(e) = run_history_transfer(&state, id.clone(), sink).await {
-                crate::diag!("[history-transfer] resume {id}: {e}");
-            }
+            let state = state.clone();
+            tokio::spawn(async move {
+                let sink: Arc<dyn EventSink<HistoryTransfer>> = Arc::new(crate::sink::NoopSink);
+                if let Err(e) = run_history_transfer(&state, id.clone(), sink).await {
+                    crate::diag!("[history-transfer] resume {id}: {e}");
+                }
+            });
         }
     });
 }

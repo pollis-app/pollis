@@ -613,6 +613,9 @@ CREATE TABLE IF NOT EXISTS history_transfer_local (
     rows_done        INTEGER NOT NULL DEFAULT 0 CHECK (rows_done >= 0),
     rows_skipped     INTEGER NOT NULL DEFAULT 0 CHECK (rows_skipped >= 0),
     deferred_count   INTEGER NOT NULL DEFAULT 0 CHECK (deferred_count >= 0),
+    -- Receiver: conversations it belongs to but held no MLS group for when it
+    -- asked (a Welcome not processed yet) — not requested, so not copied.
+    local_deferred   INTEGER NOT NULL DEFAULT 0 CHECK (local_deferred >= 0),
     -- Rows the source expects to send (counted when it plans; the receiver
     -- learns it from chunk 0). A progress hint, never checked against.
     estimated_total  INTEGER CHECK (estimated_total IS NULL OR estimated_total >= 0),

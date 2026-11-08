@@ -100,7 +100,7 @@ pub(crate) fn encapsulate(x25519_pub: &[u8], mlkem_pub: &[u8]) -> Result<Encapsu
     let mut m = Zeroizing::new([0u8; 32]);
     OsRng.fill_bytes(m.as_mut());
     let m_arr = ml_kem::B32::try_from(&m[..]).map_err(|_| CryptoError::Length)?;
-    let (ct, ss_kem) = ek.encapsulate_deterministic(&m_arr);
+    let (ct, mut ss_kem) = ek.encapsulate_deterministic(&m_arr);
 
     let eph = x25519_dalek::StaticSecret::random_from_rng(OsRng);
     let eph_pub = x25519_dalek::PublicKey::from(&eph).to_bytes();
@@ -111,6 +111,7 @@ pub(crate) fn encapsulate(x25519_pub: &[u8], mlkem_pub: &[u8]) -> Result<Encapsu
     let mut shared = Zeroizing::new(Vec::with_capacity(64));
     shared.extend_from_slice(ss_kem.as_slice());
     shared.extend_from_slice(ss_x.as_bytes());
+    zeroize::Zeroize::zeroize(ss_kem.as_mut_slice());
     Ok(Encapsulated { shared, x25519_ct: eph_pub, mlkem_ct: ct.as_slice().to_vec() })
 }
 
@@ -126,7 +127,7 @@ pub(crate) fn decapsulate(
     let eph: [u8; X25519_LEN] = x25519_ct.try_into().map_err(|_| CryptoError::Length)?;
     let seed = ml_kem::Seed::try_from(&secret[X25519_LEN..]).map_err(|_| CryptoError::Length)?;
     let dk = ml_kem::ml_kem_768::DecapsulationKey::from_seed(seed);
-    let ss_kem = dk.decapsulate_slice(mlkem_ct).map_err(|_| CryptoError::Length)?;
+    let mut ss_kem = dk.decapsulate_slice(mlkem_ct).map_err(|_| CryptoError::Length)?;
     let x: [u8; X25519_LEN] = secret[..X25519_LEN].try_into().map_err(|_| CryptoError::Length)?;
     let ss_x = x25519_dalek::StaticSecret::from(x).diffie_hellman(&x25519_dalek::PublicKey::from(eph));
     if !ss_x.was_contributory() {
@@ -135,6 +136,7 @@ pub(crate) fn decapsulate(
     let mut shared = Zeroizing::new(Vec::with_capacity(64));
     shared.extend_from_slice(ss_kem.as_slice());
     shared.extend_from_slice(ss_x.as_bytes());
+    zeroize::Zeroize::zeroize(ss_kem.as_mut_slice());
     Ok(shared)
 }
 
