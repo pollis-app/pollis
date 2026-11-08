@@ -1168,3 +1168,123 @@ async fn the_source_claims_completed_only_after_seeing_the_final_ack() {
         assert_eq!(s.state, want, "seen={seen}: {s:?}");
     }
 }
+
+
+/// The Maestro "Copy cancelled" (transfer 01M6X1YP…, source side, ~16 of 25
+/// chunks, a DS under load answering 503s): every history-transfer data call
+/// fails at random — before the DS acts, or after it acted with the answer
+/// lost — over 50 seeds of a transfer of more than 25 chunks. Every transfer
+/// must complete with identical rows; a transient error must never end one as
+/// cancelled or failed.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn transient_ds_failures_never_end_a_transfer() {
+    let (desk, bob, channel, dm, _) = desk_with_history().await;
+    for i in 0..16 {
+        bob.send_channel_message(&channel, &format!("bulk {i}")).await;
+    }
+    ingest(&desk, &channel).await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    ht::transfer_hooks::set_rows_per_chunk(1);
+    ht::transfer_hooks::set_idle_limit(Duration::from_secs(2));
+    let mut total_runs = 0;
+    // 50 seeds take ~15 min; the default keeps the suite fast. Set
+    // POLLIS_TRANSFER_CHAOS_SEEDS=50 for the full run (done for #1735's sign-off).
+    let seeds: u64 = std::env::var("POLLIS_TRANSFER_CHAOS_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(6);
+    for seed in 1..=seeds {
+        // The per-account request budget (12/hour) is not what this test is about.
+        writable_remote().await.conn().await.unwrap()
+            .execute("DELETE FROM history_transfer_budget", ())
+            .await
+            .unwrap();
+        let t = request(&phone, &desk, "sibling").await.expect("request");
+        approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.expect("approve");
+        crate::harness::set_transfer_chaos(Some((seed * 0x9E37_79B9, 25)));
+        let mut done = (None, None);
+        for _ in 0..200 {
+            total_runs += 1;
+            let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+            for (slot, r) in [(&mut done.0, s), (&mut done.1, d)] {
+                if let Ok(t) = r {
+                    assert!(
+                        !matches!(t.state.as_str(), "cancelled" | "failed" | "declined" | "expired"),
+                        "seed {seed}: a transient DS error ended the transfer: {t:?}"
+                    );
+                    if t.is_ended() {
+                        *slot = Some(t);
+                    }
+                }
+            }
+            if done.0.is_some() && done.1.is_some() {
+                break;
+            }
+        }
+        crate::harness::set_transfer_chaos(None);
+        let (s, d) = (done.0.unwrap_or_else(|| panic!("seed {seed}: source never finished")), done.1.unwrap_or_else(|| panic!("seed {seed}: receiver never finished")));
+        assert_eq!((s.state.as_str(), d.state.as_str()), ("completed", "completed"), "seed {seed}");
+        assert!(d.chunks_done > 25, "seed {seed}: {d:?}");
+        assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await, "seed {seed}");
+        assert_same_rows_per_conversation(&phone, &desk, &[&channel, &dm]).await;
+        assert_eq!(scalar(&desk, "SELECT COUNT(*) FROM history_transfer_outgoing").await, 0, "seed {seed}");
+    }
+    eprintln!("chaos: {seeds} seeds, {total_runs} run pairs");
+    ht::transfer_hooks::set_rows_per_chunk(0);
+}
+
+
+/// A status answer a moment old (the receiver acked one more chunk since) must
+/// not make the source call the stream broken: before failing on "a sealed
+/// chunk was lost", it re-reads. The second race found investigating the
+/// Maestro "Copy cancelled".
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_stale_status_never_makes_the_source_abort() {
+    let (desk, bob, channel, dm, _) = desk_with_history().await;
+    for i in 0..6 {
+        bob.send_channel_message(&channel, &format!("more {i}")).await;
+    }
+    ingest(&desk, &channel).await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    ht::transfer_hooks::set_rows_per_chunk(1);
+    let t = request(&phone, &desk, "sibling").await.unwrap();
+    approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
+    // The source fills the window (0..7); the receiver imports and acks all 8.
+    assert_eq!(run(&desk, &t.transfer_id).await.unwrap().state, "paused");
+    assert_eq!(run(&phone, &t.transfer_id).await.unwrap().chunks_done, 8);
+    // The source had seen those acks (and dropped its copies) before it stopped.
+    exec(&desk, &format!("DELETE FROM history_transfer_outgoing WHERE transfer_id = '{}'", t.transfer_id)).await;
+    exec(&desk, &format!("UPDATE history_transfer_local SET chunks_done = 8 WHERE transfer_id = '{}'", t.transfer_id)).await;
+    // Its next status read is one ack behind.
+    crate::harness::arm_ds_fault(crate::harness::DsFault::TransferStatusStaleByOne);
+    let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+    let s = s.unwrap();
+    assert_ne!(s.state, "failed", "{s:?}");
+    let s = if s.is_ended() { s } else { run_both(&desk, &phone, &t.transfer_id).await.0.unwrap() };
+    assert_eq!(s.state, "completed");
+    let _ = d;
+    assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
+    ht::transfer_hooks::set_rows_per_chunk(0);
+}
+
+
+/// A 409 on a chunk upload that is not "different bytes" (a race, an end in
+/// flight) makes the source back off and re-read, never abort: the transfer
+/// completes. Only different bytes at an index end it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_racy_conflict_on_upload_is_retried_not_fatal() {
+    let (desk, _bob, channel, dm, _) = desk_with_history().await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    let t = request(&phone, &desk, "sibling").await.unwrap();
+    approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.unwrap();
+    crate::harness::arm_ds_fault(crate::harness::DsFault::TransferPutNotContiguous);
+    let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+    let s = s.unwrap();
+    assert_ne!(s.state, "failed", "{s:?}");
+    let (s, d) = if s.is_ended() { (s, d.unwrap()) } else {
+        let (s2, d2) = run_both(&desk, &phone, &t.transfer_id).await;
+        (s2.unwrap(), d2.unwrap())
+    };
+    assert_eq!((s.state.as_str(), d.state.as_str()), ("completed", "completed"));
+    assert_eq!(rows(&phone, &[&channel, &dm]).await, rows(&desk, &[&channel, &dm]).await);
+}

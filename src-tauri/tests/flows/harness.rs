@@ -122,6 +122,10 @@ pub(crate) enum DsFault {
     TransferAcceptLandsThenTimesOut,
     /// #1735: a history-transfer request times out before the DS stores it (504).
     TransferRequestTimesOutUnlanded,
+    /// #1735: one transfer status answer is a moment old (ack and stored one behind).
+    TransferStatusStaleByOne,
+    /// #1735: one chunk upload is answered 409 "not contiguous" (the old pre-check race).
+    TransferPutNotContiguous,
 }
 
 impl DsFault {
@@ -435,6 +439,49 @@ async fn record_send_data(
     resp
 }
 
+/// #1735 chaos: while set, each history-transfer data-path call (status,
+/// chunk put/get/ack, accept, complete) fails at `rate_pct` percent with a 503,
+/// half of them BEFORE the DS acts (never landed) and half AFTER (landed, answer
+/// lost) — the shape of a locked libsql under load. Seeded xorshift, so a seed
+/// replays.
+static TRANSFER_CHAOS: std::sync::Mutex<Option<(u64, u64)>> = std::sync::Mutex::new(None);
+
+pub(crate) fn set_transfer_chaos(seed_and_rate: Option<(u64, u64)>) {
+    *TRANSFER_CHAOS.lock().expect("chaos") = seed_and_rate.map(|(seed, rate)| (seed.max(1), rate));
+}
+
+/// `None` = pass; `Some(true)` = fail before; `Some(false)` = fail after.
+fn transfer_chaos_draw(path: &str) -> Option<bool> {
+    use pollis_api::DsRequest;
+    use pollis_api::history_transfer as h;
+    let chaotic = [
+        h::TransferStatusBody::PATH,
+        h::PutChunkBody::PATH,
+        h::GetChunkBody::PATH,
+        h::AckChunkBody::PATH,
+        h::AcceptTransferBody::PATH,
+        h::CompleteTransferBody::PATH,
+    ];
+    if !chaotic.contains(&path) {
+        return None;
+    }
+    let mut guard = TRANSFER_CHAOS.lock().expect("chaos");
+    let (state, rate) = guard.as_mut()?;
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    let roll = x % 100;
+    if roll < *rate / 2 {
+        Some(true)
+    } else if roll < *rate {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Apply an armed message-path fault (#1524), consumed only when it applies.
 async fn inject_message_fault(
     req: axum::extract::Request,
@@ -443,6 +490,17 @@ async fn inject_message_fault(
     use axum::response::IntoResponse;
     use pollis_api::DsRequest;
     let path = req.uri().path();
+    let busy = || {
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, "simulated busy database (test chaos)").into_response()
+    };
+    match transfer_chaos_draw(path) {
+        Some(true) => return busy(),
+        Some(false) => {
+            let _ = next.run(req).await;
+            return busy();
+        }
+        None => {}
+    }
     let is_post = path == pollis_api::messages::SendMessageBody::PATH
         || path == pollis_api::messages::EditMessageBody::PATH;
     let timeout = || {
@@ -488,6 +546,36 @@ async fn inject_message_fault(
         {
             take_ds_fault();
             timeout()
+        }
+        Some(DsFault::TransferPutNotContiguous)
+            if path == pollis_api::history_transfer::PutChunkBody::PATH =>
+        {
+            take_ds_fault();
+            (
+                axum::http::StatusCode::CONFLICT,
+                axum::Json(serde_json::json!({ "error": "chunk index not contiguous" })),
+            )
+                .into_response()
+        }
+        Some(DsFault::TransferStatusStaleByOne)
+            if path == pollis_api::history_transfer::TransferStatusBody::PATH =>
+        {
+            let resp = next.run(req).await;
+            if !resp.status().is_success() || take_ds_fault().is_none() {
+                return resp;
+            }
+            let (parts, body) = resp.into_parts();
+            let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+            let mut v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+            for k in ["acked_through", "stored_through"] {
+                if let Some(n) = v.get(k).and_then(|x| x.as_i64()) {
+                    v[k] = serde_json::json!((n - 1).max(-1));
+                }
+            }
+            let out = serde_json::to_vec(&v).unwrap_or_default();
+            let mut parts = parts;
+            parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+            axum::response::Response::from_parts(parts, axum::body::Body::from(out))
         }
         Some(DsFault::TransferAcceptLandsThenTimesOut)
             if path == pollis_api::history_transfer::AcceptTransferBody::PATH =>
@@ -651,6 +739,7 @@ fn assert_no_unexpected_loss(client: &TestClient) {
 }
 
 pub(crate) async fn wipe() {
+    set_transfer_chaos(None);
     LOSSES_EXPECTED.store(false, std::sync::atomic::Ordering::SeqCst);
     pollis_core::diag::loss_tap::take();
     pollis_core::commands::messages::test_hooks::disarm_crash();
