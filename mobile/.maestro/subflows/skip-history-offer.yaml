@@ -1,0 +1,18 @@
+appId: ${MAESTRO_APP_ID}
+---
+# #1735: a device approved by another one is offered that device's message history
+# after setup. Flows that are not about history transfer say "Not now". It mounts
+# after initializing's minimum dwell, so wait for it before the conditional check.
+- extendedWaitUntil:
+    visible:
+      id: "screen-history-offer"
+    timeout: 30000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "btn-history-offer-skip"
+    commands:
+      - tapOn:
+          id: "btn-history-offer-skip"
+          optional: true

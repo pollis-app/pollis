@@ -110,18 +110,20 @@ export async function resumeHistoryTransfers(): Promise<HistoryTransfer[]> {
 // Set when this device has just been enrolled and finalized; the offer page reads and clears it.
 
 let linkOffer: { approverDeviceId: string | null } | null = null;
-let approverSeen: string | null = null;
+// Set only when another device approved this one (typed code or QR link); recovery-key sign-ins get no offer.
+let approvedByDevice: { deviceId: string | null } | null = null;
 
-/** The enrollment poll saw who approved this device. */
+/** The enrollment poll saw this device approved by another one (its id when the core reports it). */
 export function noteEnrollmentApprover(deviceId: string | null | undefined): void {
-  if (deviceId) {
-    approverSeen = deviceId;
-  }
+  approvedByDevice = { deviceId: deviceId ?? null };
 }
 
-/** Finalize ran for a newly linked device: offer its history before entering the app. */
+/** Finalize ran: if another device approved this one, offer its history before entering the app. */
 export function markLinkOffer(): void {
-  linkOffer = { approverDeviceId: approverSeen };
+  if (approvedByDevice) {
+    linkOffer = { approverDeviceId: approvedByDevice.deviceId };
+  }
+  approvedByDevice = null;
 }
 
 export function linkOfferPending(): boolean {
@@ -131,7 +133,6 @@ export function linkOfferPending(): boolean {
 export function takeLinkOffer(): { approverDeviceId: string | null } | null {
   const offer = linkOffer;
   linkOffer = null;
-  approverSeen = null;
   return offer;
 }
 
