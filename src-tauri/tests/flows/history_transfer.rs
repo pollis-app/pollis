@@ -388,7 +388,23 @@ async fn changes_racing_the_copy_converge_and_never_resurrect() {
     desk.delete_message(&ids[11]).await;
     desk.delete_message(&ids[4]).await;
     ingest(&phone, &channel).await;
-    assert!(scalar(&phone, "SELECT COUNT(*) FROM pending_message_change").await >= 4);
+    {
+        let guard = phone.state.local_db.lock().await;
+        let conn = guard.as_ref().unwrap().conn();
+        let mut st = conn.prepare("SELECT target_id, kind, COALESCE(actor_id, '-') FROM pending_message_change ORDER BY target_id, kind").unwrap();
+        let got: Vec<(String, String, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect();
+        let (alice, bobid) = (desk.user_id().to_string(), bob.user_id().to_string());
+        let mut want = vec![
+            // The "before" edit too: its target predates the phone, so only a copy can bring it.
+            (ids[5].clone(), "edit".to_string(), bobid.clone()),
+            (ids[7].clone(), "edit".to_string(), bobid.clone()),
+            (ids[9].clone(), "redact".to_string(), bobid.clone()),
+            (ids[11].clone(), "tombstone".to_string(), "-".to_string()),
+            (ids[4].clone(), "redact".to_string(), alice),
+        ];
+        want.sort();
+        assert_eq!(got, want, "exactly the changes that reached the phone before their targets");
+    }
     let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
     assert_eq!(s.unwrap().state, "completed");
     assert_eq!(d.unwrap().state, "completed");
@@ -1039,4 +1055,62 @@ async fn a_request_that_never_landed_does_not_block_the_next() {
     assert_ne!(t2.transfer_id, t.transfer_id);
     let old = ht::list_history_transfers(&phone.state).await.unwrap().into_iter().find(|x| x.transfer_id == t.transfer_id).unwrap();
     assert_eq!(old.state, "expired");
+}
+
+/// Ingest's own heal of a placeholder (#1312) applies the changes that waited
+/// for it, through the real decrypt path: a tombstone and the author's
+/// redaction delete, the author's latest edit applies, another member's
+/// redaction does not; and a placeholder that was tombstoned heals with no text.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ingest_heals_a_placeholder_and_applies_what_waited_for_it() {
+    let (desk, bob, channel, dm, _) = desk_with_history().await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    let alice = desk.user_id().to_string();
+    let bobid = bob.user_id().to_string();
+    // Five messages the phone has not fetched yet.
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        ids.push(bob.send_channel_message_id(&channel, &format!("heal {i}")).await);
+    }
+    let env = || ulid::Ulid::new().to_string();
+    // Each stands on the phone as a placeholder (a pass that could not open it),
+    // with a change that reached the phone first.
+    for (i, id) in ids.iter().enumerate() {
+        let deleted = if i == 4 { "'2026-01-01T00:00:00Z'" } else { "NULL" };
+        exec(&phone, &format!(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at, undecryptable, deleted_at)
+             VALUES ('{id}', '{channel}', 'sealed', X'', NULL, '2026-01-01T00:00:00Z', 'failed', {deleted})"
+        ))
+        .await;
+    }
+    let pending = |envelope: String, target: &str, kind: &str, actor: Option<&str>, content: Option<&str>| {
+        format!(
+            "INSERT INTO pending_message_change (envelope_id, target_id, conversation_id, kind, actor_id, content, seq)
+             VALUES ('{envelope}', '{target}', '{channel}', '{kind}', {}, {}, 1)",
+            actor.map(|a| format!("'{a}'")).unwrap_or("NULL".into()),
+            content.map(|c| format!("'{c}'")).unwrap_or("NULL".into()),
+        )
+    };
+    exec(&phone, &pending(env(), &ids[0], "tombstone", None, None)).await;
+    exec(&phone, &pending(env(), &ids[1], "edit", Some(&bobid), Some("edited while lost"))).await;
+    exec(&phone, &pending(env(), &ids[2], "redact", Some(&bobid), None)).await;
+    exec(&phone, &pending(env(), &ids[3], "redact", Some(&alice), None)).await;
+
+    ingest(&phone, &channel).await;
+
+    let r = rows(&phone, &[&channel]).await;
+    let get = |id: &str| r.iter().find(|x| x.0 == id).cloned().unwrap_or_else(|| panic!("{id} not healed"));
+    assert!(get(&ids[0]).3.is_none() && get(&ids[0]).8, "tombstone applied");
+    assert_eq!(get(&ids[1]).3.as_deref(), Some("edited while lost"));
+    assert!(get(&ids[1]).7);
+    assert!(get(&ids[2]).3.is_none() && get(&ids[2]).8, "the author's redaction applied");
+    assert_eq!(get(&ids[3]).3.as_deref(), Some("heal 3"), "another member's redaction never applies");
+    assert!(get(&ids[4]).3.is_none() && get(&ids[4]).8, "a tombstoned placeholder heals with no text");
+    for (i, id) in ids.iter().enumerate() {
+        assert_eq!(get(id).2, bobid, "{i}: the real author replaces the sealed sentinel");
+    }
+    assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM message WHERE undecryptable IS NOT NULL").await, 0);
+    assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM pending_message_change").await, 0);
+    assert_eq!(scalar(&phone, "SELECT COUNT(*) FROM message WHERE content IS NOT NULL AND deleted_at IS NOT NULL").await, 0);
 }
