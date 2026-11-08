@@ -207,3 +207,11 @@ Code: `pollis-core/src/commands/history_transfer/` (`crypto.rs`, `wire.rs`, `sto
 - **Kills are real.** The `Crash::Transfer*` points unwind (`test_hooks::die`), with the import transaction open where it matters.
 - Not changed, with reason: nudges on idempotent no-ops (content-free hints; one extra re-read), `PRAGMA secure_delete` (the local DB is SQLCipher: freed pages hold ciphertext).
 
+## Review round 2 (fixed)
+- **A lost answer is not a refusal.** If the answer to a request or an acceptance is lost (transport error, 5xx — a DS `SQLITE_BUSY` is already a retryable 503 — or a 429), the local row stays open with its key: `awaiting_approval` after a request, `transferring` after an approval. The next run reads the DS: it continues, re-sends the (idempotent) acceptance, or learns the request never landed (404 → expired, and a new request is not blocked). Only a DS that answered with a refusal ends the row, and then the DS is told to cancel.
+- **Back-off on every non-Ok answer.** A throttled re-accept or ack goes through the waiter like every other wait; a run never hammers the DS.
+- **The desktop remembers a nudge that lands mid-run** (`utils/transferRunCoalescer.ts`, mobile's rule): a run that ends unfinished goes once more.
+- **Pending changes are bounded in bytes too** (4 MiB of edit text per conversation, edits evicted oldest first; deletes never by this cap), and eviction runs only past a cap. The 400-day horizon stays, because a backfill can come at any time and a change pruned before its target arrives would let an edited or deleted message come back.
+- **Repeated DS calls nudge nobody** (`Outcome::Unchanged`).
+- **A finished copy reads completed on the source** even when the DS record is gone before it looked.
+
