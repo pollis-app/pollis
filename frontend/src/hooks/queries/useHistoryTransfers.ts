@@ -4,6 +4,8 @@ import * as api from "../../services/api";
 import { historyTransferStore } from "../../stores/historyTransferStore";
 import { needsRun, upsertTransfer } from "../../utils/historyTransfer";
 import { errorMessage } from "../../utils/errorMessage";
+import { createRunCoalescer } from "../../utils/transferRunCoalescer";
+import { isTerminal } from "../../utils/historyTransfer";
 
 /** #1735: copy message history between this account's own devices. The cache is cleared on lock and sign-out, so keys need no user. */
 export const historyTransferKeys = {
@@ -44,23 +46,13 @@ export function storeTransfer(queryClient: QueryClient, transfer: api.HistoryTra
   );
 }
 
-const inFlight = new Map<string, Promise<api.HistoryTransfer | null>>();
-
-/**
- * Drive one transfer with `run_history_transfer` until it finishes or pauses. One run per transfer per
- * window: a second call joins the first. Progress lands in the transfers query as it streams.
- */
-export function runTransfer(queryClient: QueryClient, transferId: string): Promise<api.HistoryTransfer | null> {
-  const existing = inFlight.get(transferId);
-  if (existing) {
-    return existing;
-  }
+/** One pass of `run_history_transfer`; the coalescer below decides whether it runs again. */
+function runOnce(queryClient: QueryClient, transferId: string): Promise<api.HistoryTransfer | null> {
   const channel = new Channel<api.HistoryTransfer>();
   channel.onmessage = (progress) => {
     storeTransfer(queryClient, progress);
   };
-  historyTransferStore.setRunning(transferId, true);
-  const run = api
+  return api
     .runHistoryTransfer(transferId, channel)
     .then((result) => {
       storeTransfer(queryClient, result);
@@ -77,13 +69,41 @@ export function runTransfer(queryClient: QueryClient, transferId: string): Promi
       }
       void queryClient.invalidateQueries({ queryKey: historyTransferKeys.transfers });
       return null;
-    })
-    .finally(() => {
-      inFlight.delete(transferId);
-      historyTransferStore.setRunning(transferId, false);
     });
-  inFlight.set(transferId, run);
-  return run;
+}
+
+let coalescer: ReturnType<typeof createRunCoalescer<api.HistoryTransfer>> | null = null;
+let coalescerClient: QueryClient | null = null;
+
+function runner(queryClient: QueryClient) {
+  if (!coalescer || coalescerClient !== queryClient) {
+    coalescerClient = queryClient;
+    coalescer = createRunCoalescer<api.HistoryTransfer>(
+      (id) => runOnce(queryClient, id),
+      (t) => isTerminal(t.state),
+    );
+  }
+  return coalescer;
+}
+
+/**
+ * Drive one transfer with `run_history_transfer` until it finishes or pauses. One run per transfer per
+ * window: a second call joins the first, and asks it to run once more if it ends unfinished, so a nudge
+ * landing just as the core pauses is never lost. Progress lands in the transfers query as it streams.
+ */
+export function runTransfer(queryClient: QueryClient, transferId: string): Promise<api.HistoryTransfer | null> {
+  const r = runner(queryClient);
+  const wasRunning = r.isRunning(transferId);
+  const done = r.run(transferId);
+  if (!wasRunning) {
+    historyTransferStore.setRunning(transferId, true);
+    void done.finally(() => historyTransferStore.setRunning(transferId, false));
+  }
+  return done;
+}
+
+function inFlightHas(queryClient: QueryClient, transferId: string): boolean {
+  return runner(queryClient).isRunning(transferId);
 }
 
 /** After unlock, or on a hint from the other device: run every transfer that is not finished and not already running. */
@@ -103,7 +123,7 @@ export async function resumeTransfers(queryClient: QueryClient, onlyId?: string)
     if (onlyId && transfer.transfer_id !== onlyId) {
       continue;
     }
-    if (needsRun(transfer) && !inFlight.has(transfer.transfer_id)) {
+    if (needsRun(transfer) && !inFlightHas(queryClient, transfer.transfer_id)) {
       void runTransfer(queryClient, transfer.transfer_id);
     }
   }
@@ -146,7 +166,12 @@ export function onHistoryTransferHint(queryClient: QueryClient, transferId: stri
     void queryClient.invalidateQueries({ queryKey: historyTransferKeys.pending });
     void queryClient.invalidateQueries({ queryKey: historyTransferKeys.transfers });
   }
-  if (event === "requested" || inFlight.has(transferId)) {
+  if (event === "requested") {
+    return;
+  }
+  // In flight: remember the wake-up (the run goes once more if it ends unfinished).
+  if (inFlightHas(queryClient, transferId)) {
+    void runTransfer(queryClient, transferId);
     return;
   }
   void resumeTransfers(queryClient, transferId);
