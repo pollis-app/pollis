@@ -57,9 +57,14 @@ export async function listHistoryTransfers(): Promise<HistoryTransfer[]> {
   return (await invoke<HistoryTransfer[]>("list_history_transfers")) ?? [];
 }
 
-/** One awaited call that returns at a terminal state or "paused". Progress shows through re-reads. */
+/** One awaited call that returns at a terminal state or "paused" (a bounded idle in Rust). */
 export async function runHistoryTransfer(transferId: string): Promise<HistoryTransfer> {
   return await invoke<HistoryTransfer>("run_history_transfer", { transferId });
+}
+
+/** Progress for a run in flight: answers once `updated_at` moves past `since`, or after ~25 s. */
+export async function awaitHistoryTransfer(transferId: string, since: string | null): Promise<HistoryTransfer> {
+  return await invoke<HistoryTransfer>("await_history_transfer", since ? { transferId, since } : { transferId });
 }
 
 export async function cancelHistoryTransfer(transferId: string): Promise<void> {
@@ -86,6 +91,8 @@ export function refreshHistoryTransfers(): Promise<void> {
 // One runner per process: both roles, every screen and the background service share it.
 export const transferRunner = createTransferRunner({
   run: runHistoryTransfer,
+  watch: awaitHistoryTransfer,
+  onProgress: putTransfer,
   onResult: (transfer) => {
     putTransfer(transfer);
     if (transfer.state === "completed") {

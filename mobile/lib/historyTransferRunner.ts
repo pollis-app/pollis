@@ -9,6 +9,10 @@ import { isTerminal, type HistoryTransfer } from "./historyTransfer.ts";
 
 export interface TransferRunnerDeps {
   run(transferId: string): Promise<HistoryTransfer>;
+  // Mobile's progress stream (uniffi has no event channel): a long poll that answers once the
+  // transfer's `updated_at` differs from `since`, or after a bounded wait. Looped while a run is in flight.
+  watch?(transferId: string, since: string | null): Promise<HistoryTransfer>;
+  onProgress?(transfer: HistoryTransfer): void;
   onResult?(transfer: HistoryTransfer): void;
   onError?(transferId: string, error: unknown): void;
 }
@@ -35,12 +39,19 @@ export function createTransferRunner(deps: TransferRunnerDeps): TransferRunner {
       for (;;) {
         entry.again = false;
         let result: HistoryTransfer | null = null;
+        let settled = false;
+        const running = deps.run(transferId).finally(() => {
+          settled = true;
+        });
+        const watching = deps.watch ? follow(transferId, () => settled) : Promise.resolve();
         try {
-          result = await deps.run(transferId);
+          result = await running;
           deps.onResult?.(result);
         } catch (e) {
           deps.onError?.(transferId, e);
         }
+        // The last long poll ends by its own bound; never start another after the run.
+        void watching;
         const finished = result !== null && isTerminal(result.state);
         if (finished || !entry.again) {
           break;
@@ -49,6 +60,27 @@ export function createTransferRunner(deps: TransferRunnerDeps): TransferRunner {
       entries.delete(transferId);
     })();
     return entry.done;
+  }
+
+  async function follow(transferId: string, done: () => boolean): Promise<void> {
+    let since: string | null = null;
+    while (!done()) {
+      let snap: HistoryTransfer;
+      try {
+        snap = await deps.watch!(transferId, since);
+      } catch {
+        // No retry loop on errors: the run's own result still lands.
+        return;
+      }
+      if (done()) {
+        return;
+      }
+      deps.onProgress?.(snap);
+      if (isTerminal(snap.state)) {
+        return;
+      }
+      since = snap.updated_at;
+    }
   }
 
   function kick(transferId: string): Promise<void> {

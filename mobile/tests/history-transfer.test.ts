@@ -369,3 +369,48 @@ test("mobile copy never says plaintext, E2EE or passcode", () => {
   assert.doesNotMatch(text, /plaintext|end-to-end|e2ee|encrypt|passcode/i);
   assert.match(text, /message history/);
 });
+
+test("while a run is in flight the progress long poll streams snapshots, and stops when it ends", async () => {
+  const gate = deferred<HistoryTransfer>();
+  const seen: number[] = [];
+  const sinces: (string | null)[] = [];
+  let polls = 0;
+  const runner = createTransferRunner({
+    run: () => gate.promise,
+    watch: async (_id, since) => {
+      sinces.push(since);
+      polls += 1;
+      await new Promise((r) => setTimeout(r, 1));
+      return transfer({ rows_done: polls * 10, updated_at: `t${polls}` });
+    },
+    onProgress: (t) => seen.push(t.rows_done),
+  });
+  const done = runner.kick("T1");
+  await new Promise((r) => setTimeout(r, 20));
+  gate.resolve(transfer({ state: "completed", rows_done: 999 }));
+  await done;
+  const after = polls;
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(seen.length >= 2, "progress arrived while running");
+  assert.deepEqual(seen, [...seen].sort((a, b) => a - b), "in order");
+  assert.equal(sinces[0], null);
+  assert.equal(sinces[1], "t1", "each poll passes the last updated_at");
+  assert.ok(polls <= after + 1, "no polling after the run ended");
+});
+
+test("a terminal snapshot from the long poll ends the stream", async () => {
+  const gate = deferred<HistoryTransfer>();
+  let polls = 0;
+  const runner = createTransferRunner({
+    run: () => gate.promise,
+    watch: async () => {
+      polls += 1;
+      return transfer({ state: "cancelled", updated_at: "x" });
+    },
+  });
+  const done = runner.kick("T1");
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(polls, 1);
+  gate.resolve(transfer({ state: "cancelled" }));
+  await done;
+});
