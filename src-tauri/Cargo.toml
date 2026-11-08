@@ -238,3 +238,8 @@ rusqlite = { version = "0.37", features = ["sqlcipher", "modern_sqlite"] }
 # this link through pollis-core anyway; naming it here keeps the pair visible
 # together, so nobody removes one and leaves the other dangling.
 pollis-sqlcipher = { path = "../pollis-sqlcipher" }
+
+# cargo-machete matches crate names in source text. `reqwest` is declared above only
+# to switch on a feature in tauri-plugin-updater's own copy, so no source line names it.
+[package.metadata.cargo-machete]
+ignored = ["reqwest"]

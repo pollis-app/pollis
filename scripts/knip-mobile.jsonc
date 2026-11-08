@@ -1,0 +1,26 @@
+// Dead-code scan for the mobile app (advisory, see .github/workflows/dead-code.yml).
+// Run: cd mobile && pnpm dlx knip@6.44.1 --config ../scripts/knip-mobile.jsonc
+// Lives in scripts/, not mobile/: any new file under mobile/ is classified by mobile-core-check.yml
+// and tests/ci-paths.test.ts, and would trigger the Android bundle job for a config file.
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "app/**/*.{ts,tsx}",
+    "tests/*.test.ts",
+    "scripts/*.{js,mjs,ts}",
+    "*.config.js",
+    "plugins/**/*.js"
+  ],
+  "project": [
+    "{app,components,hooks,i18n,lib,stores,theme,types,modules}/**/*.{ts,tsx}",
+    "tests/**/*.ts"
+  ],
+  "ignoreDependencies": [
+    // Named in app.json "plugins", not imported.
+    "@livekit/react-native-expo-plugin",
+    // Runtime of the uniffi-generated bindings in modules/pollis-native.
+    "@ubjs/core",
+    // CLI that generates those bindings (scripts and the native build call it).
+    "uniffi-bindgen-react-native"
+  ]
+}

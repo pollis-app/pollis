@@ -1,0 +1,1 @@
+{ "_comment": ["Exemptions for scripts/dead-commands.mjs: commands that look uncalled but are not."], "exempt": {} }
