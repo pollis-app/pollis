@@ -410,7 +410,7 @@ Both come from MLS (RFC 9420 §15.4–§15.6).
 
 ### 6.8 Bounded history (deliberate)
 
-Messages sent before a member joined are not visible to that member. That is a property of MLS. New devices start empty; there is no Megolm-style key backup. `account_recovery` restores account identity only, never message history. Anyone expecting a backup blob that also seals historical message keys should note that none exists, by design.
+Messages sent before a member joined are not visible to that member. That is a property of MLS. New devices start empty unless the user copies history from another of their own enrolled devices (§6.11); there is no Megolm-style key backup. `account_recovery` restores account identity only, never message history. Anyone expecting a backup blob that also seals historical message keys should note that none exists, by design.
 
 Attachments differ: a file's bytes live in R2 under the conversation's file key ring (§9.1), which every current member can unwrap, so a member who joins later (or a new device) can open a file posted earlier — but only if they can read a message that references it, which the rule above usually prevents for pre-join messages.
 
@@ -456,6 +456,18 @@ A group's suite is fixed at creation and changes only by explicit migration. It 
 **Scope.** Traffic sealed before a group migrated stays under X25519. Migration is forward-only and cannot retract a recording an adversary already holds.
 
 ---
+
+### 6.11 History transfer between a user's own devices (#1735)
+
+Source: `pollis-core/src/commands/history_transfer/`, `pollis-delivery/src/history_transfer.rs`; full design and invariant table in `docs/history-transfer-design.md`.
+
+A device (the receiver) may ask a sibling device of the same account (the source) for its decrypted message history. Nothing moves until the source's user approves on the source with the **PIN** (same attempt counter and lockout as unlock). The one exception is the link-time shortcut: if the source itself approved the receiver's QR link with the PIN in this unlocked session less than ten minutes ago, the approval is a single explicit tap; the typed-code enrollment never earns it, and a lock clears it.
+
+- **Authentication.** The receiver's request and the source's acceptance are signed with each device's ML-DSA-44 device key under distinct domain strings. Each side checks the other's signature against the key the peer's **device cert** certifies, and the cert against this account's own `account_id_pub` taken from the local key, never the DS's copy. Revoked devices are refused. The request names both devices, the account, a fresh time (±25 min) and the receiver's conversation list with its join position per MLS group; the acceptance names the request by hash and both devices, so neither can be reflected, redirected or replayed into another transfer. The "added" date shown on the approval comes from the verified cert's `issued_at`; revocation status itself is DS-reported, which is why the PIN is the real gate.
+- **Key agreement.** Hybrid ML-KEM-768 + X25519: the receiver generates both key pairs, the source encapsulates and does an ephemeral DH, and the transfer key is HKDF-SHA256 over both shared secrets, salted with the transfer id, with both transcript hashes (which carry both public keys and both ciphertexts) in `info`. A low-order X25519 share is refused. Secrets live only inside the encrypted local database and are cleared when the transfer ends.
+- **Chunks.** XChaCha20-Poly1305 with a random 192-bit nonce per seal; the AAD binds the domain, transfer id, chunk index and final flag; each plaintext carries the hash of the previous one, and the final chunk the totals. The receiver accepts only the next index, on the chain, and completes only on a final chunk whose totals match. A chunk that fails any of that ends the transfer with nothing from it written. The source stores each sealed chunk before uploading it and re-uploads the stored bytes verbatim after a crash, so an index is never sealed twice.
+- **What moves.** Message rows (text and `_att` references, edits and deletions in their current state) and DM receipts, for conversations the receiver still belongs to and holds a group for, within the receiver's retention window. Never MLS state, keys, the outbox or ingest bookkeeping. A copied row never overwrites a row the receiver already holds (it only fills a loss placeholder); a deletion copied in deletes; an edit or delete that reached the receiver before the row it targets is applied on arrival, so nothing deleted comes back. Copied rows are never previewed in notifications.
+- **What the DS learns.** That two of an account's devices are transferring, when, and roughly how much history (chunk count and sizes, up to 1 MiB each). It holds at most eight unacknowledged sealed chunks per transfer, keeps an accepted transfer 24 h after its last activity, and purges everything on cancel, completion (after an hour), expiry, revocation or logout of either device, identity reset and account deletion. Every endpoint is bound to the signing device and its role; any other caller, including a sibling device, gets the same 404 as for an unknown transfer.
 
 ## 7. Local Encrypted Storage (SQLCipher)
 

@@ -316,7 +316,8 @@ END;
 -- the conversations and moments a user cares most about, which is strictly more
 -- than it learns from envelope delivery alone. The cost is that bookmarks do not
 -- follow you to a new device, which is consistent with accepted loss (2) in
--- CLAUDE.md: a new device starts empty and has no history to bookmark anyway.
+-- CLAUDE.md: a new device starts empty (unless the user copies history from another
+-- of their enrolled devices, #1735 — which copies messages, never bookmarks).
 --
 -- No foreign key to `message`: a bookmark is allowed to outlive local retention
 -- eviction. The saved-items list resolves each row against `message` at read

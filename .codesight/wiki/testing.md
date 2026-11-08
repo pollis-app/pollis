@@ -268,14 +268,11 @@ One simulated device for one user. Owns:
 - `Arc<AppState>` — wired with an `InMemoryKeystore`. No database handle: `pollis-core` does not link `libsql` (#987), so every read this client performs is a signed POST to the in-process DS.
 - `profile: Option<UserProfile>` — populated after `sign_up`.
 
-**Two devices of the same user SHARE local state.** `LocalDb::open_for_user` derives
-the path as `pollis_{user_id}.db`, keyed on user_id only, so a `TestClient` built by
-`enroll_second_device` opens the *same* local SQLite file — and therefore the same MLS
-state — as the primary. It never gets its own leaf in the tree, and `contents()` on it
-just reads plaintext the primary already decrypted. Any assertion of the form "this
-user's *other* device cannot decrypt X" is therefore **vacuous** here and will pass or
-fail for reasons unrelated to MLS. Use a second *user* when you need genuinely separate
-local state and a real second leaf. (Found while writing the #679 regression test.)
+**Each device has its own local state (#1524).** Every `TestClient` gets its own
+local directory (`device-<n>`), so a second device built by `enroll_second_device`
+(or `enroll_another_device` for a third, fourth…) holds its own SQLCipher file, its
+own MLS state and its own leaf. Only `accounts.json` is shared. (An earlier note here
+said siblings shared one file; that has not been true since #1524.)
 
 ### `invoke<T>`
 
@@ -1328,3 +1325,10 @@ Not tests, but the same kind of guard, and advisory only:
 - `scripts/release-impact.sh`: per deploy target, the live version (DS `/version`, release manifests on cdn.pollis.com, tags, last green run, deployment records) diffed against main over the paths that feed it. Rows read `current`, `STALE` (commits listed), `DEPS?` (only `Cargo.lock` moved) or `UNKNOWN`. It also reports pending prod migrations and the last `website-verify.yml` result. `--pr <N>` gives one PR's blast radius.
 - `scripts/feature-parity.mjs`: the core commands each client calls. Desktop is registered handlers referenced in `frontend/src`; mobile is `bridge.rs` arms referenced in mobile JS; the CLI is `pollis_core::commands` calls in `pollis-tui/src`. It reports differences that aren't exempt (`scripts/feature-parity.json`: reasons, regex families, `known_debt` baseline from 2026-10-16). `--since <ref>` shows only gaps new since that ref, which is the "shipped on one client only" detector.
 - `/release-check` skill and `.claude/hooks/release-check.sh` (PostToolUse after `gh pr merge`, PreToolUse before deploy dispatches and release-tag pushes) put both in front of Claude Code. See `docs/deployments.md` → "Post-merge release checklist".
+
+## History transfer (#1735)
+- **DS:** `pollis-delivery/tests/history_transfer.rs` — party binding and the uniform 404 (stranger, uninvolved sibling, wrong role), window, idempotent re-put / 409 rewrite, ack ordering, size caps and the route body limit, budget, expiry with injected `now`, purges on revocation/logout/reset/teardown, and raw-SQL attempts against every DB constraint and trigger.
+- **Core unit:** `history_transfer::{crypto,wire,store}::tests`, `messages::pending_change::tests`, `notify::fetch::tests::a_transferred_row_is_never_previewed`, `livekit::tests::history_transfer_is_honoured_only_from_the_ds`.
+- **Flows:** `src-tauri/tests/flows/history_transfer.rs` — exact copy (field by field, no duplicates, receipts), PIN/decline/one-tap link (v1 and v2), backfill healing placeholders without touching real rows, edits/deletes racing the copy, retention, left conversations, every kill point (`Crash::Transfer*`) on both sides with lock/unlock resume, a tampering DS (bit-flip, truncate, swapped order, substituted acceptance/request, redirected receiver, replay), expiry, unread convergence, and a seeded soak with traffic and kills. Run with `ht::transfer_hooks::set_idle_limit` short; tests that impersonate a malicious operator drop `history_transfer_chunk_immutable` and must restore it (the world DB outlives the test).
+- **Fuzz:** `fuzz/fuzz_targets/history_transfer_chunk.rs` (mutant: believes the chunk's own chain hash).
+
