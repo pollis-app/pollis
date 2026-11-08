@@ -41,6 +41,9 @@ tags:
     id: "btn-group-menu"
 - tapOn:
     id: "btn-menu-group-settings"
+# Let the settings push settle: iOS drops a tap made during the transition.
+- waitForAnimationToEnd:
+    timeout: 3000
 - tapOn:
     id: "row-group-emoji"
 - assertVisible:
