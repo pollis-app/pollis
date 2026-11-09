@@ -213,6 +213,12 @@ enforced rather than remembered: `frontend/tests/composer-bar-alignment.test.ts`
 fails on a `min-h-composer` next to a `border-t`, on a `min-h-composer-flush`
 without one, and on the token drifting from `--composer-h`.
 
+The voice stage's tray (`.vs-foot` in `voice-stage.css`) is the same kind of bar
+in plain CSS: `--vs-foot-h: var(--composer-flush-h)`, used as its `height`. It
+had been `calc(var(--bar-h) - 1px)`, 2px shorter than the right panel's Details
+row beside it at every font size (#1790). The same test pins the token, and
+`e2e/voice-bar-alignment.spec.ts` checks the two top borders in the pixels.
+
 **If a utility is missing, add it to the theme** — that is what the bottom seven rows
 above are: tokens that had no utility, so every call site spelled them inline.
 

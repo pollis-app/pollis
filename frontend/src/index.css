@@ -33,8 +33,8 @@
        the composer's total footprint is this plus 1px. */
     --composer-flush-h: calc(var(--composer-h) + 1px);
     /* what a bottom bar must be to sit flush with the composer WHEN IT DRAWS
-       ITS OWN top hairline — the sidebar / right-panel Close bars and refined's
-       sidebar voice strip. They put `border-t` on the same element as the
+       ITS OWN top hairline — the sidebar / right-panel Close bars, refined's
+       sidebar voice strip and the voice stage's tray (`--vs-foot-h`). They put `border-t` on the same element as the
        height, and `box-sizing: border-box` then eats the hairline out of the
        height instead of adding to it, which is how all three ended up exactly
        1px shorter than the composer they are supposed to line up with. Use

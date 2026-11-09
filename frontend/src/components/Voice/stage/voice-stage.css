@@ -28,8 +28,10 @@
    --vs-red-dim: color-mix(in srgb, var(--c-danger) 50%, transparent);
 
    /* Fixed footer height — keeps the tray row from shifting layout as it
-     swaps between the not-joined Join button and the in-call tray. */
-   --vs-foot-h: var(--bar-h);
+     swaps between the not-joined Join button and the in-call tray. It is
+     the shared bordered-bottom-bar height, so its top border is one line
+     with the right panel's Details row and the sidebar's Close row (#1790). */
+   --vs-foot-h: var(--composer-flush-h);
 
    flex: 1;
    min-width: 0;
@@ -501,7 +503,7 @@
    Compact 2.5rem bar — controls are sized to fit it (no 44px tiles). */
 .vs-foot {
    flex: 0 0 auto;
-   height: calc(var(--vs-foot-h) - 1px);
+   height: var(--vs-foot-h);
    display: flex;
    align-items: center;
    gap: 0.75rem;

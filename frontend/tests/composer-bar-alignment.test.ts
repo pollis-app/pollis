@@ -90,3 +90,18 @@ test("the flush token is defined as the composer height plus its hairline", () =
     "the theme no longer exposes composer-flush, so min-h-composer-flush is inert",
   );
 });
+
+test("the voice stage's tray is the shared bordered-bar height, not an offset of its own (#1790)", () => {
+  const css = readFileSync(resolve(SRC, "components/Voice/stage/voice-stage.css"), "utf8");
+  const token = css.match(/--vs-foot-h:\s*([^;]+);/);
+  assert.ok(token, "--vs-foot-h is gone from voice-stage.css");
+  assert.equal(
+    token[1].trim(),
+    "var(--composer-flush-h)",
+    "the tray draws its own border-top, so it is --composer-flush-h like the Details and Close rows beside it",
+  );
+  const foot = css.match(/\.vs-foot\s*\{([^}]*)\}/);
+  assert.ok(foot, ".vs-foot is gone from voice-stage.css");
+  assert.match(foot[1], /(?:^|[\s;])height:\s*var\(--vs-foot-h\);/, ".vs-foot must be exactly --vs-foot-h");
+  assert.match(foot[1], /border-top:/, ".vs-foot no longer draws its own hairline; revisit the token");
+});
