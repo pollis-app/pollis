@@ -85,6 +85,9 @@ pub struct AppState {
     pub enrollment_approver: Arc<Mutex<Option<String>>>,
     /// PIN unlock state. `Some` once a valid PIN was entered or set; dropped by `lock`.
     pub unlock: Arc<Mutex<Option<UnlockState>>>,
+    /// #1685: who last typed the right PIN to unlock or set it, and when. Spent by turning on
+    /// biometric unlock without typing it again; a biometric unlock never sets it. Cleared on lock.
+    pub pin_proof: Arc<Mutex<Option<(String, std::time::Instant)>>>,
     /// OTP-session bearer from first-device signup, held until the first cert publish spends it.
     pub bootstrap_session: Arc<Mutex<Option<String>>>,
     /// OTP-session bearer for a subsequent-device sign-in, for pre-credential writes. Separate from [`bootstrap_session`] (§5).
@@ -173,6 +176,7 @@ impl AppState {
             history_link_approvals: Arc::new(Mutex::new(HashMap::new())),
             enrollment_approver: Arc::new(Mutex::new(None)),
             unlock: Arc::new(Mutex::new(None)),
+            pin_proof: Arc::new(Mutex::new(None)),
             bootstrap_session: Arc::new(Mutex::new(None)),
             enrollment_session: Arc::new(Mutex::new(None)),
             media_server_port: Arc::new(Mutex::new(None)),

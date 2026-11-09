@@ -21,6 +21,8 @@ mod cross_signing;
 mod device_link;
 #[path = "flows/device_outside_tree.rs"]
 mod device_outside_tree;
+#[path = "flows/device_unlock.rs"]
+mod device_unlock;
 #[path = "flows/dms.rs"]
 mod dms;
 #[path = "flows/ds_surface.rs"]

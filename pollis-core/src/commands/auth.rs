@@ -902,6 +902,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     *state.device_id.lock().await = None;
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
+    *state.pin_proof.lock().await = None;
 
     // Every logout drops the notification key escrow (#1599); the next unlock re-creates it.
     if let Some(ref uid) = user_id {
@@ -924,13 +925,9 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
 
     if delete_data {
         if let Some(ref uid) = user_id {
-            let _ = state.keystore.delete_for_user("db_key", uid).await;
-            let _ = state.keystore.delete_for_user("db_key_wrapped", uid).await;
-            let _ = state.keystore.delete_for_user("account_id_key", uid).await;
-            let _ = state.keystore.delete_for_user("account_id_key_wrapped", uid).await;
-            let _ = state.keystore.delete_for_user("pin_meta", uid).await;
-            let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
-            let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, uid).await;
+            for key in WIPED_USER_SLOTS {
+                let _ = state.keystore.delete_for_user(key, uid).await;
+            }
             let data_dir = state.local_data_dir();
             if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, uid) {
                 let _ = std::fs::remove_file(&db_path);
@@ -1001,14 +998,9 @@ pub async fn delete_account(
         }
     }
 
-    let _ = state.keystore.delete_for_user("db_key", &user_id).await;
-    let _ = state.keystore.delete_for_user("db_key_wrapped", &user_id).await;
-    let _ = state.keystore.delete_for_user("account_id_key", &user_id).await;
-    let _ = state.keystore.delete_for_user("account_id_key_wrapped", &user_id).await;
-    let _ = state.keystore.delete_for_user("pin_meta", &user_id).await;
-    let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, &user_id).await;
-    let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, &user_id).await;
-    let _ = crate::notify::escrow::delete_escrow(state.keystore.as_ref(), &user_id).await;
+    for key in WIPED_USER_SLOTS {
+        let _ = state.keystore.delete_for_user(key, &user_id).await;
+    }
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
@@ -1050,7 +1042,8 @@ pub async fn list_known_accounts(state: &Arc<AppState>) -> Result<crate::account
 /// entries (device_id, wrapped keys, pin_meta, legacy unwrapped keys),
 /// and the accounts index. Does NOT touch the remote Turso database —
 /// users can re-authenticate on this device later.
-/// Every per-user keystore slot `wipe_local_data` deletes.
+/// Every per-user keystore slot `wipe_local_data`, `logout(delete_data)` and `delete_account`
+/// delete: one list, so a new slot cannot be missed by one of them.
 pub(crate) const WIPED_USER_SLOTS: &[&str] = &[
     DEVICE_ID_KEY,
     "db_key",
@@ -1061,6 +1054,10 @@ pub(crate) const WIPED_USER_SLOTS: &[&str] = &[
     LOGIN_EMAIL_KEY,
     // The notification key escrow (#1599).
     crate::notify::escrow::ESCROW_SLOT,
+    // Biometric unlock (#1685): `device_unlock::SLOTS`, which a test holds this list to.
+    "duk_meta",
+    "db_key_duk",
+    "account_id_key_duk",
 ];
 
 pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {

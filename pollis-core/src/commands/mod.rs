@@ -1,6 +1,8 @@
 pub mod account_identity;
 pub mod auth;
 pub mod pin;
+// Biometric unlock on mobile, on top of the PIN (#1685).
+pub mod device_unlock;
 pub mod autolock;
 // Profile pictures as local renditions, for mobile (no loopback server).
 pub mod avatar;

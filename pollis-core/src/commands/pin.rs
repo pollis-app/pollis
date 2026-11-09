@@ -32,7 +32,7 @@ const SESSION_SLOT_LEGACY: &str = "session";
 const ARGON2_M_COST_KIB: u32 = 64 * 1024; // 64 MiB
 const ARGON2_T_COST: u32 = 3;
 const ARGON2_P_COST: u32 = 1;
-const KEK_LEN: usize = 32;
+pub(crate) const KEK_LEN: usize = 32;
 const SALT_LEN: usize = 16;
 const VERIFIER_PLAINTEXT: &[u8; 16] = b"pollis-pin-ok\0\0\0";
 
@@ -140,7 +140,7 @@ impl PinMeta {
 
 const WRAPPED_VERSION: u8 = 1;
 
-fn wrap_bytes(kek: &[u8; KEK_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn wrap_bytes(kek: &[u8; KEK_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
     let cipher = XChaCha20Poly1305::new(kek.into());
     let nonce = XChaCha20Poly1305::generate_nonce(&mut AeadOsRng);
     let ct = cipher
@@ -155,7 +155,7 @@ fn wrap_bytes(kek: &[u8; KEK_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn unwrap_bytes(kek: &[u8; KEK_LEN], blob: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+pub(crate) fn unwrap_bytes(kek: &[u8; KEK_LEN], blob: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
     if blob.len() < 1 + 24 + 2 {
         return Err(Error::Crypto("wrapped: short blob".into()));
     }
@@ -235,7 +235,44 @@ async fn nuke_wrapped(
         .await;
     // The notification escrow is the same key unwrapped (#1599); a lockout must take it too.
     let _ = crate::notify::escrow::delete_escrow(keystore, user_id).await;
+    // So must the biometric slots (#1685): they wrap the same keys.
+    crate::commands::device_unlock::delete_slots(keystore, user_id).await;
     Ok(())
+}
+
+/// The PIN gate every other unlock path passes first (#1685): the user has a PIN, and it is not
+/// locked out. At the lockout threshold this nukes, exactly as a wrong PIN would. Never writes
+/// `pin_meta` otherwise, so the attempt counter is the PIN's alone.
+pub(crate) async fn require_pin_not_locked_out(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+) -> Result<()> {
+    let meta = load_pin_meta(keystore, user_id)
+        .await?
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("PIN not set for user {user_id}")))?;
+    if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
+        nuke_wrapped(keystore, user_id).await?;
+        return Err(Error::Other(anyhow::anyhow!(
+            "pin locked out; use Secret Key recovery"
+        )));
+    }
+    Ok(())
+}
+
+/// How long a PIN typed at unlock also counts as the PIN for turning on biometric unlock
+/// (#1685), so the one-time offer right after a PIN unlock asks for nothing more.
+pub(crate) const PIN_PROOF_WINDOW: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// Record that `user_id` just typed the right PIN. Only the PIN paths call this; a biometric
+/// unlock never does.
+async fn record_pin_proof(state: &Arc<AppState>, user_id: &str) {
+    *state.pin_proof.lock().await = Some((user_id.to_string(), std::time::Instant::now()));
+}
+
+/// Spend the PIN proof [`record_pin_proof`] left, if it is `user_id`'s and fresh. One use.
+pub(crate) async fn take_pin_proof(state: &Arc<AppState>, user_id: &str) -> bool {
+    let taken = state.pin_proof.lock().await.take();
+    matches!(taken, Some((uid, at)) if uid == user_id && at.elapsed() <= PIN_PROOF_WINDOW)
 }
 
 /// Per-user in-memory unlock snapshot. Zeroized on drop.
@@ -251,6 +288,9 @@ pub struct UnlockStateSnapshot {
     pub is_unlocked: bool,
     /// Whether `last_active_user` has a PIN (enter vs. set PIN).
     pub pin_set: bool,
+    /// Whether biometric unlock is on for `last_active_user` (#1685): confirmed slots exist.
+    /// Never true without `pin_set`.
+    pub device_unlock: bool,
 }
 
 /// Set the PIN for the currently-active user.
@@ -320,11 +360,18 @@ pub async fn set_pin(
     )
     .await?;
 
+    // First set (or a re-set after recovery) may install different keys: biometric slots wrapping
+    // the old ones must go (#1685). A PIN change wraps the same keys, so they stay.
+    if old_pin.is_none() {
+        crate::commands::device_unlock::delete_slots(keystore, &user_id).await;
+    }
+
     *state.unlock.lock().await = Some(UnlockState {
         user_id: user_id.clone(),
         db_key: db_key.clone(),
         account_id_key,
     });
+    record_pin_proof(state, &user_id).await;
 
     // Purge another user's unreadable media. Name `user_id`: the cache scope isn't set yet.
     crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(&user_id));
@@ -490,9 +537,21 @@ pub async fn unlock(
     pin: String,
 ) -> Result<UnlockOutcome> {
     validate_pin(&pin)?;
-    let keystore = state.keystore.as_ref();
-    let unlocked = unlock_inner(keystore, &user_id, &pin).await?;
+    let unlocked = unlock_inner(state.keystore.as_ref(), &user_id, &pin).await?;
+    let outcome = finish_unlock(state, unlocked).await?;
+    record_pin_proof(state, &outcome.user_id).await;
+    Ok(outcome)
+}
 
+/// Everything an unlock does once the keys are unwrapped, whichever factor unwrapped them: the
+/// PIN ([`unlock`]) or biometrics (`device_unlock::unlock_with_device_key`, #1685). One path, so
+/// both open the DB, refresh the notification escrow and start the same background work.
+pub(crate) async fn finish_unlock(
+    state: &Arc<AppState>,
+    unlocked: UnlockState,
+) -> Result<UnlockOutcome> {
+    let keystore = state.keystore.as_ref();
+    let user_id = unlocked.user_id.clone();
     let db_key = unlocked.db_key.clone();
     *state.unlock.lock().await = Some(UnlockState {
         user_id: unlocked.user_id.clone(),
@@ -643,6 +702,8 @@ async fn unlock_inner(
 /// Screen lock (not log out): drop unlock state and close the local DB.
 pub async fn lock(state: &Arc<AppState>) -> Result<()> {
     *state.unlock.lock().await = None;
+    // A PIN typed before the lock proves nothing after it (#1685).
+    *state.pin_proof.lock().await = None;
     // #1735: the link-time single-tap approval does not survive a lock.
     state.history_link_approvals.lock().await.clear();
     // Kill locked-session URLs; cache files stay encrypted and readable on re-unlock.
@@ -668,10 +729,17 @@ pub async fn get_unlock_state(
             .is_some(),
         None => false,
     };
+    let device_unlock = match &last_active_user {
+        Some(uid) if pin_set => {
+            crate::commands::device_unlock::is_enabled(state.keystore.as_ref(), uid).await
+        }
+        _ => false,
+    };
     Ok(UnlockStateSnapshot {
         last_active_user,
         is_unlocked,
         pin_set,
+        device_unlock,
     })
 }
 
@@ -873,6 +941,53 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// #1685: the 10th wrong PIN takes the biometric slots with the PIN's, so a lockout cannot be
+    /// stepped around with Face ID; and the gate the biometric path uses refuses from then on.
+    #[tokio::test]
+    async fn the_lockout_nuke_takes_the_biometric_slots() {
+        let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
+        let uid = "user_duk";
+        let (kek, meta) = cheap_kek_and_meta("1357");
+        install_wrapped_slots(&*ks, uid, &kek, &meta, &[1u8; 32], &[2u8; 32], true)
+            .await
+            .unwrap();
+        for slot in crate::commands::device_unlock::SLOTS {
+            ks.store_for_user(slot, uid, b"x").await.unwrap();
+        }
+        require_pin_not_locked_out(&*ks, uid).await.expect("not locked out yet");
+        for _ in 0..MAX_FAILED_ATTEMPTS {
+            let _ = unlock_inner(&*ks, uid, "2468").await;
+        }
+        for slot in crate::commands::device_unlock::SLOTS {
+            assert!(
+                ks.load_for_user(slot, uid).await.unwrap().is_none(),
+                "{slot} must not survive the lockout"
+            );
+        }
+        assert!(require_pin_not_locked_out(&*ks, uid).await.is_err());
+    }
+
+    /// The gate itself never moves the counter, whatever it answers.
+    #[tokio::test]
+    async fn the_pin_gate_never_writes_the_counter() {
+        let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
+        let uid = "user_gate";
+        let (kek, mut meta) = cheap_kek_and_meta("1357");
+        meta.failed_attempts = 4;
+        install_wrapped_slots(&*ks, uid, &kek, &meta, &[1u8; 32], &[2u8; 32], true)
+            .await
+            .unwrap();
+        let before = ks.load_for_user(PIN_META_SLOT, uid).await.unwrap();
+        for _ in 0..3 {
+            require_pin_not_locked_out(&*ks, uid).await.unwrap();
+        }
+        assert_eq!(ks.load_for_user(PIN_META_SLOT, uid).await.unwrap(), before);
+        assert!(
+            require_pin_not_locked_out(&*ks, "no_pin_user").await.is_err(),
+            "no PIN, no other way in"
+        );
     }
 
     #[tokio::test]

@@ -7,6 +7,9 @@ pub mod bookmarks;
 pub mod export;
 pub mod device_enrollment;
 pub mod device_link;
+// Biometric unlock (#1685): test harness only, desktop is exempt (see the file).
+#[cfg(feature = "test-harness")]
+pub mod device_unlock;
 pub mod diagnostics;
 pub mod dm;
 // Custom per-group emoji (#848).

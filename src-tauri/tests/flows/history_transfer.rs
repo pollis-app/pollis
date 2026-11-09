@@ -273,6 +273,24 @@ async fn approval_needs_the_pin_and_a_wrong_pin_counts() {
     assert!(rows(&phone, &[&channel, &dm]).await.is_empty());
 }
 
+/// #1685: unlocked by biometrics, approving a history copy still needs the typed PIN.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn biometric_unlock_never_approves_a_history_copy() {
+    let (desk, _bob, channel, dm, _) = desk_with_history().await;
+    let key = desk.enable_biometric_unlock().await;
+    desk.lock_then_biometric_unlock(&key).await;
+    let phone = new_sibling(&desk, &channel, &dm).await;
+    let t = request(&phone, &desk, "sibling").await.expect("request");
+    assert_eq!(pending(&desk).await[0]["pin_required"], true);
+    assert!(approve(&desk, &t.transfer_id, None).await.unwrap_err().contains("PIN"));
+    assert!(approve(&desk, &t.transfer_id, Some(&key)).await.is_err(), "the device key is not the PIN");
+    approve(&desk, &t.transfer_id, Some(TEST_PIN)).await.expect("approve with the PIN");
+    let (s, d) = run_both(&desk, &phone, &t.transfer_id).await;
+    let (s, d) = (s.expect("source run"), d.expect("receiver run"));
+    assert_eq!((s.state.as_str(), d.state.as_str()), ("completed", "completed"), "{s:?} {d:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_qr_linked_device_copies_with_one_tap_and_a_typed_code_link_does_not() {
