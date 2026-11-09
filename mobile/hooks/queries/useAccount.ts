@@ -2,6 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
+import { forgetDeviceKey } from "../../lib/deviceUnlock";
 
 export function useDeleteAccount() {
   return useMutation({
@@ -9,6 +10,8 @@ export function useDeleteAccount() {
     meta: { haptic: { success: "destructive" } },
     mutationFn: async (userId: string) => {
       await invoke("delete_account", { userId });
+      // Core dropped the biometric slots; drop the key that unwrapped them too (#1685).
+      await forgetDeviceKey(userId);
       try {
         await invoke("wipe_local_data");
       } catch (e) {

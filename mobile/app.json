@@ -93,8 +93,6 @@
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.USE_FINGERPRINT",
-        "android.permission.USE_BIOMETRIC",
         "android.permission.DUMP",
         "android.permission.READ_APP_BADGE",
         "com.anddoes.launcher.permission.UPDATE_COUNT",
@@ -121,7 +119,12 @@
       "./plugins/withReleaseSigning",
       "./plugins/withAbiSplits",
       "./plugins/withRichPush",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Pollis uses Face ID to unlock the app instead of your PIN, only if you turn it on."
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",
@@ -167,6 +170,12 @@
       ],
       [
         "./plugins/withNotificationServiceExtension",
+        {
+          "teamId": "8JT3WH45NZ"
+        }
+      ],
+      [
+        "./plugins/withDeviceUnlock",
         {
           "teamId": "8JT3WH45NZ"
         }

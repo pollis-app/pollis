@@ -522,7 +522,8 @@
       "rejectA11y": "رفض التسجيل",
       "safetyHeading": "السلامة",
       "thisDevice": "{{name}} · هذا الجهاز",
-      "blockedUsers": "المستخدمون المحظورون"
+      "blockedUsers": "المستخدمون المحظورون",
+      "changePinSub": "رقم PIN المكوّن من 4 أرقام يفتح قفل Pollis على هذا الجهاز."
     },
     "title": "أنا",
     "userSettings": {
@@ -613,5 +614,24 @@
   },
   "reactions": {
     "pillHint": "اضغط مطولًا لترى من تفاعل"
+  },
+  "biometric": {
+    "methodIos": "Face ID أو Touch ID",
+    "methodAndroid": "البصمة أو فتح القفل بالوجه",
+    "prompt": "فتح قفل Pollis",
+    "offerTitle": "هل تريد فتح القفل باستخدام {{method}}؟",
+    "offerBody": "استخدم {{method}} بدلًا من كتابة رقم PIN عند فتح Pollis. يظل رقم PIN صالحًا، وستحتاج إليه لربط جهاز أو الموافقة على نسخ السجل أو تغيير رقم PIN.",
+    "offerAccept": "تشغيل",
+    "offerDecline": "ليس الآن",
+    "turningOn": "جارٍ التشغيل…",
+    "failed": "تعذّر تشغيل فتح القفل بالقياسات الحيوية. حاول مجددًا من الأمان.",
+    "switchLabel": "فتح القفل باستخدام {{method}}",
+    "switchSub": "بدلًا من كتابة رقم PIN لفتح القفل. يظل ربط جهاز وتغيير رقم PIN يتطلبانه.",
+    "unavailableSub": "لم يتم إعداد {{method}} على هذا الجهاز. أوقف هذا الخيار أو أعدّه من إعدادات النظام.",
+    "setupTitle": "فتح القفل بالقياسات الحيوية",
+    "confirmTitle": "أدخل رقم PIN",
+    "confirmBody": "أدخل رقم PIN لتشغيل فتح القفل باستخدام {{method}}.",
+    "useBiometric": "استخدام {{method}}",
+    "changed": "تغيّرت إعدادات {{method}}. أدخل رقم PIN، وبعدها يعود فتح القفل بالقياسات الحيوية."
   }
 }

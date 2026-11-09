@@ -3,6 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { endSession } from "../../lib/session";
+import { forgetDeviceKey } from "../../lib/deviceUnlock";
 import { appStore } from "../../stores/appStore";
 import type { User } from "../../types";
 
@@ -23,6 +24,8 @@ export interface UnlockStateSnapshot {
   pin_set: boolean;
   is_unlocked: boolean;
   last_active_user: string | null;
+  // Biometric unlock is on (#1685). Absent from a core older than it: treat as off.
+  device_unlock?: boolean;
 }
 
 export function profileToUser(p: RawUserProfile): User {
@@ -121,7 +124,12 @@ export function useInitializeIdentity() {
 export function useLogout() {
   return useMutation({
     mutationFn: async (vars: { deleteData?: boolean } | void) => {
+      const userId = appStore.currentUser?.id ?? null;
       await invoke("logout", { deleteData: vars?.deleteData ?? false });
+      // A plain sign-out keeps biometric unlock, like the PIN; deleting the data drops its key (#1685).
+      if (vars?.deleteData && userId) {
+        await forgetDeviceKey(userId);
+      }
     },
     // Settled, not just success: a failed `logout` still ends the session.
     onSettled: () => endSession(),

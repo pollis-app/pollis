@@ -16,8 +16,6 @@ const MUST_BLOCK = [
   "android.permission.BLUETOOTH",
   "android.permission.BLUETOOTH_ADMIN",
   "android.permission.MODIFY_AUDIO_SETTINGS",
-  "android.permission.USE_FINGERPRINT",
-  "android.permission.USE_BIOMETRIC",
   "android.permission.DUMP",
   "android.permission.READ_APP_BADGE",
   "com.sec.android.provider.badge.permission.READ",
@@ -37,6 +35,9 @@ const MUST_KEEP = [
   "android.permission.VIBRATE",
   "android.permission.WRITE_EXTERNAL_STORAGE",
   "android.permission.READ_EXTERNAL_STORAGE",
+  // Biometric unlock (#1685): androidx.biometric declares both; USE_FINGERPRINT for API 23-27.
+  "android.permission.USE_BIOMETRIC",
+  "android.permission.USE_FINGERPRINT",
 ];
 
 test("permissions the app never uses are blocked", () => {

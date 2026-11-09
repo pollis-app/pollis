@@ -30,7 +30,11 @@ import {
   useSecurityEventsPreview,
   useHistoryTransfers,
   usePendingTransferRequests,
+  useDeviceUnlock,
 } from "../../hooks/queries";
+import { ToggleRow } from "../../components/self/ToggleRow";
+import { biometricMethod, deviceUnlockSupported } from "../../lib/deviceUnlock";
+import { showSwitch } from "../../lib/deviceUnlockRules";
 import { currentTransfer, isTerminal } from "../../lib/historyTransfer";
 import { SecurityEventRow } from "../../components/self/SecurityEventRow";
 import { formatRelative } from "../../lib/relativeTime";
@@ -66,6 +70,8 @@ export default function Security() {
   const { fontScale } = useWindowDimensions();
   const autoLockColumns = fontScale >= 1.6 ? 1 : fontScale >= 1.25 ? 2 : 3;
   const lockNow = useLockNow();
+  const deviceUnlock = useDeviceUnlock();
+  const biometricSupported = deviceUnlockSupported();
   const { data: transfers = [] } = useHistoryTransfers();
   // #1735: a request backed out of on its approval page stays answerable from here.
   const { data: pendingTransfers = [] } = usePendingTransferRequests();
@@ -313,6 +319,45 @@ export default function Security() {
               onPress={() => router.push("/self/blocked")}
             />
           </Group>
+        </View>
+
+        {/* The PIN, and biometrics as a stand-in for typing it at unlock (#1685). */}
+        <View style={sectionGap} onLayout={sectionLayout("pin")}>
+          <Group title={t("security.pinHeading")}>
+            <ListRow
+              testID="row-change-pin"
+              glyph={<Icon.key size={22} color={semantic.text} />}
+              name={t("security.changePinButton")}
+              sub={t("mobile:self.security.changePinSub")}
+              chevron
+              onPress={() => router.push("/self/change-pin")}
+            />
+            {showSwitch(biometricSupported, deviceUnlock.enabled) ? (
+              <ToggleRow
+                testID="toggle-biometric-unlock"
+                label={t("mobile:biometric.switchLabel", { method: biometricMethod() })}
+                sub={
+                  biometricSupported
+                    ? t("mobile:biometric.switchSub")
+                    : t("mobile:biometric.unavailableSub", { method: biometricMethod() })
+                }
+                on={deviceUnlock.enabled}
+                disabled={deviceUnlock.isLoading || deviceUnlock.disable.isPending}
+                onToggle={() => {
+                  if (deviceUnlock.enabled) {
+                    deviceUnlock.disable.mutate();
+                  } else {
+                    router.push("/self/biometric-unlock");
+                  }
+                }}
+              />
+            ) : null}
+          </Group>
+          {deviceUnlock.disable.isError ? (
+            <ErrorText>
+              {(deviceUnlock.disable.error as Error).message || t("mobile:biometric.failed")}
+            </ErrorText>
+          ) : null}
         </View>
 
         <View style={sectionGap} onLayout={sectionLayout("autolock")}>

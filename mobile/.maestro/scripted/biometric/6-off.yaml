@@ -1,0 +1,40 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 6 of 6: back on Security with the switch on.
+# Turn it off again; a cold start is the keypad, the PIN unlocks, and the
+# one-time offer does not come back.
+- extendedWaitUntil:
+    visible:
+      id: "screen-self-security"
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: "toggle-biometric-unlock"
+    direction: DOWN
+- assertVisible:
+    id: "toggle-biometric-unlock"
+    checked: true
+- takeScreenshot: biometric-11-switch-on-again
+- tapOn:
+    id: "toggle-biometric-unlock"
+- extendedWaitUntil:
+    visible:
+      id: "toggle-biometric-unlock"
+      checked: false
+    timeout: 10000
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin-1"
+    timeout: 20000
+- assertNotVisible:
+    id: "btn-pin-biometric"
+- runFlow: ../../subflows/enter-pin-5678.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- assertNotVisible:
+    id: "screen-biometric-offer"
+- takeScreenshot: biometric-12-pin-only-again

@@ -335,6 +335,14 @@ export default function RootLayout() {
                 name="self/diagnostics"
                 options={settingsPage}
               />
+              <Stack.Screen
+                name="self/change-pin"
+                options={settingsPage}
+              />
+              <Stack.Screen
+                name="self/biometric-unlock"
+                options={settingsPage}
+              />
               <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen name="dev/client-policy" options={{ animation: "none" }} />
               <Stack.Screen name="approve-device" options={settingsPage} />

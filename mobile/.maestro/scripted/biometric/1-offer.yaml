@@ -1,0 +1,38 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 1 of 6. Driven by scripts/maestro-biometric.sh,
+# which enrolls the simulator's / emulator's biometrics first and answers every
+# system prompt between parts (match / no match). Maestro cannot touch a sensor.
+#
+# Off by default: a fresh sign-up sets the PIN and is never offered anything.
+# The offer comes once, after a PIN UNLOCK.
+- runFlow: ../../subflows/sign-in.yaml
+- assertNotVisible:
+    id: "screen-biometric-offer"
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin-1"
+    timeout: 20000
+# Not on yet: no biometric button on the pad.
+- assertNotVisible:
+    id: "btn-pin-biometric"
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-biometric-offer"
+    timeout: 30000
+- takeScreenshot: biometric-01-offer
+- tapOn:
+    id: "btn-biometric-offer-accept"
+# iOS asks once whether Pollis may use Face ID (NSFaceIDUsageDescription).
+- extendedWaitUntil:
+    visible: "OK"
+    timeout: 5000
+    optional: true
+- tapOn:
+    text: "OK"
+    optional: true
+# The system biometric prompt is up now (iOS: the read-back; Android: storing the key).
+# The script answers it with a match.

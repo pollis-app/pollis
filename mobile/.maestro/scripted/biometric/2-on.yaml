@@ -1,0 +1,32 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 2 of 6: accepted, so the app goes on in, and
+# Security shows the switch on. Then a cold start tries biometrics first: the
+# launch loader stays up under the system prompt, no keypad.
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "toggle-biometric-unlock"
+    direction: DOWN
+- assertVisible:
+    id: "toggle-biometric-unlock"
+    checked: true
+- assertVisible:
+    id: "row-change-pin"
+- takeScreenshot: biometric-02-security-on
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "pin-biometric"
+    timeout: 20000
+- assertNotVisible:
+    id: "btn-pin-1"
+# The script now answers the prompt with NO match.

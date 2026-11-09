@@ -146,7 +146,7 @@ Three slots sit under the PIN-derived KEK:
 
 ### 3.3 Lockout
 
-`MAX_FAILED_ATTEMPTS = 10`. The 10th wrong PIN deletes all three slots (`pin.rs::nuke_wrapped`). The SQLCipher file and its WAL/SHM are left on disk but are unreadable, because their key is gone. The server-side account is untouched. The device is now equivalent to a new one and must re-enrol by Secret Key (§5.2) or by another device's approval (§5.1).
+`MAX_FAILED_ATTEMPTS = 10`. The 10th wrong PIN deletes all three slots (`pin.rs::nuke_wrapped`), and with them the biometric-unlock slots (§3.9) and the notification escrow (§3.8). The SQLCipher file and its WAL/SHM are left on disk but are unreadable, because their key is gone. The server-side account is untouched. The device is now equivalent to a new one and must re-enrol by Secret Key (§5.2) or by another device's approval (§5.1).
 
 There is no time-based backoff. Against offline brute force the defence is ~250 ms of Argon2id per guess plus the 10-attempt ceiling; for attempts through the UI, the ceiling is the rate limit.
 
@@ -205,6 +205,16 @@ A rich notification ("Alice: are we shipping today?") is built on the phone. A N
 **Lifecycle.** The escrow is written at unlock and set-PIN when the setting allows it, and by the setting itself. It is deleted by the setting *Nothing*, every logout, account deletion, "wipe this device", and the PIN-lockout nuke (§3.3). Each trigger is tested (`src-tauri/tests/flows/rich_push.rs`, `notify::escrow` unit tests). An install upgraded to this build gets no escrow until its first unlock, so until then its notifications stay generic.
 
 **The extension cannot hurt the database.** It opens the existing file read-write but never creates, migrates or wipes it (`LocalDb::open_existing_for_user_in`). A stale escrow is reported as `decrypt` and the file is left alone. The extension also never mints a keystore KEK, and no process mints one while a sealed keystore exists. The KEK is copied into the shared access group, and the app-only item is kept so a build without the entitlement still opens the keystore. Every MLS-mutating step in either process holds an exclusive `flock` on `<data_dir>/state.lock` (§6.6), so the app and the extension cannot roll each other's group state back.
+
+### 3.9 Biometric unlock (mobile only, #1685)
+
+Source: `pollis-core/src/commands/device_unlock.rs`, `mobile/lib/deviceUnlock.ts`.
+
+An opt-in convenience, off by default: Face ID, Touch ID or a Class 3 fingerprint stands in for *typing the PIN at unlock*. Every user still has a PIN, and it stays the only factor for linking a device, approving a history copy and changing the PIN. Unlocking the phone never unlocks Pollis; the phone passcode is not accepted anywhere.
+
+**Construction.** Turning it on needs the PIN (typed for it, or typed to unlock within the last five minutes, once). Core then draws a random 32-byte device unlock key and writes the same `db_key` and `account_id_key` wrapped under it (XChaCha20-Poly1305, as §3.2), next to a verifier. The PIN slots are untouched and a PIN change re-wraps nothing. The app stores the device key behind biometrics: on iOS a Keychain item with `.biometryCurrentSet` and `WhenPasscodeSetThisDeviceOnly`, in an app-only access group the Notification Service Extension is not entitled to (never the shared group of §3.8); on Android an Android Keystore key that needs a strong (Class 3) biometric for every use, through a `CryptoObject`. Both are invalidated when biometrics are re-enrolled, so someone who knows only the phone passcode cannot enrol their own face and get in; the user types the PIN once and it re-arms.
+
+**What it does not change.** A biometric read that fails or is cancelled costs no PIN attempt and is not counted; a successful one forgives none. The 10th wrong PIN deletes these slots with the PIN's (§3.3). A biometric unlock ends in the same unlock path as the PIN, so it refreshes the notification escrow (§3.8) exactly as a PIN unlock would, no more. The slots are deleted with the PIN slots by "delete data" sign-out, account deletion, "wipe this device" and recovery. Desktop does not offer it: the OS keychain backend it uses cannot attach biometric access control to an item, and Linux and Windows have no equivalent.
 
 ---
 

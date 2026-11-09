@@ -117,6 +117,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | switch language (copy re-renders), persists across relaunch, Arabic mirrors the layout after relaunch (#1074) | no |
 | `enrollment-approval` | #1096 the approver TYPES the code off the new device — the card shows none, approve is gated on eight characters | yes |
+| `scripted/biometric/` (`scripts/maestro-biometric.sh <ios\|ipad\|android>`) | #1685 biometric unlock: off by default, offered once after a PIN unlock, Security shows it on, a cold start tries biometrics first, a failed match falls back to the keypad with no PIN error, linking still checks the PIN, a PIN change keeps it working, the switch asks for the PIN to turn on, off is PIN-only again. Maestro cannot touch a sensor, so the script enrolls the simulator's Face ID (`notifyutil … BiometricKit`) or the emulator's fingerprint (`locksettings set-pin` + `emu finger touch`) and answers each prompt between six parts; it unenrolls on exit so no other flow meets the offer | no |
 
 Two-client / special flows (`enrollment-approval`, `realtime`, `blocking`,
 `push-tap`, and the DM accept/reply side) are scaffolded in `_two-client.md` —
