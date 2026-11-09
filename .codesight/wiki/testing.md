@@ -512,6 +512,18 @@ uses the same hook against the dev DS for the Maestro flow
 (`mobile/scripts/maestro-lost-message.sh`). Desktop rendering in both skins is
 `e2e/lost-messages.spec.ts`.
 
+The removal boundary (#1772) has its own four: a member that falls behind,
+gets a message sealed one epoch above where it stopped, is removed and then
+re-added by Welcome, into the same lineage or into a successor after a suite
+migration. With the log kept for it, the message opens and the time out is
+silent (`a_lagging_member_re_added_reads_…`,
+`a_lagging_member_re_added_into_a_successor_reads_…`). With the log pruned or
+the old lineage retired past it (`harness::prune_commits_below`,
+`harness::retire_generations_below`), both unread messages show
+(`a_re_add_over_a_pruned_log_shows_…`,
+`a_re_add_into_a_successor_over_a_retired_lineage_shows_…`). The DS side is
+`pollis-delivery/tests/retention.rs` (`a_removed_device_*`).
+
 ## Zero message loss (#1524)
 
 A placeholder proves a loss is *visible*; the suites also prove there is none.
@@ -521,7 +533,7 @@ A placeholder proves a loss is *visible*; the suites also prove there is none.
   process logged any `[loss]` line since `wipe()` — the line catches a lost edit,
   which leaves no row. The pre-join pass (accepted loss 1) is not counted
   (`pollis_core::diag::loss_tap`, `test-harness` only). A test that loses a
-  message on purpose calls `harness::expect_losses()` (the two forced losses in
+  message on purpose calls `harness::expect_losses()` (the forced losses in
   `lost_messages.rs`, and the Tier-2 prune in `adversarial.rs`);
   `zero_loss::an_unexpected_loss_fails_the_test` proves the check bites.
 - **One local DB per device.** Each `TestClient` gets its own data directory

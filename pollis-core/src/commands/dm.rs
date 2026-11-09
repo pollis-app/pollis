@@ -338,7 +338,7 @@ pub async fn leave_dm_channel(
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Wipe local MLS state so the leaver can't decrypt future messages.
-    match crate::commands::mls::forget_local_mls_group(state, &dm_channel_id).await {
+    match crate::commands::mls::leave_local_mls_group(state, &dm_channel_id).await {
         Ok(()) => {}
         Err(e) => crate::diag!("[mls] leave_dm_channel: forget local group {dm_channel_id}: {e}"),
     }

@@ -537,10 +537,11 @@ fn an_external_rejoin_after_eviction_passes_the_gap_silently() {
 }
 
 /// #1765 (local marathon soak): actor 1 falls behind, is removed without
-/// noticing, the log is retention-pruned past it (a removed device pins
-/// nothing), and its re-add Welcome is dropped. It rebuilds over the prune gap
-/// by external join; the log batch names the commit that re-added it, so the
-/// gap up to that re-add passes silently instead of as `stranded`.
+/// noticing, and its re-add Welcome is dropped. Before #1772 the log was
+/// retention-pruned past it (a removed device pinned nothing), so it rebuilt by
+/// external join. Now it still pins the log, replays to its own removal, and
+/// rejoins after the eviction: the gap from that removal up to the re-add
+/// passes silently instead of as `stranded`.
 #[test]
 #[serial]
 fn a_rebuild_over_a_prune_after_a_re_add_passes_the_gap_silently() {

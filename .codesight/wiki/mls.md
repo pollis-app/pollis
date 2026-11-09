@@ -153,6 +153,9 @@ commit-append and on a device's catch-up report, never on a timer. **Tier 1** ke
 the floor at/below the MIN applied epoch across all CURRENT member devices (guarded
 by the SLOWEST member — zero loss; `NoLossForCurrentMember`, `specs/tla/Delivery.tla`
 Spec B), applied only once the whole roster has reported (`mls_commit_since`).
+A removed (unrevoked, recently reporting) device keeps pinning it at its last
+report, so a re-add can replay to its own removal (#1772, see "Lost messages are
+visible" below).
 **Tier 2** is a hard cap (`head − PRUNE_MAX_BEHIND_HEAD`) that bounds storage even
 against a never-returning device; a member pruned past its epoch hits an epoch gap
 on return (`invariants::classify` → `GapRecover`) and external-joins at head,
@@ -427,29 +430,50 @@ asks `messages::loss::classify`:
 
 - **Not a loss** — sealed below the epoch this device was added to the tree at
   (`mls::first_join`), or in a lineage it never held. A Welcome sets that floor
-  (`record_added`, replacing it — so the gap while a removed member was out
-  counts too); creating the group or an external join only sets it if none
-  exists (`record_first_join`), because a recovery rebuild's gap was sent while
-  the device was a member and IS a loss.
+  (`record_welcome_join`, replacing an earlier one); creating the group or an external join only
+  sets it if none exists (`record_first_join`), because a recovery rebuild's gap
+  was sent while the device was a member and IS a loss. A Welcome that re-adds a
+  device which held the lineage before keeps the old floor instead (#1772): when it
+  replaced a group the device still held, when the device dropped its group
+  without seeing its removal (`note_unwitnessed_exit`: a rebuild over a pruned
+  log, a fork recovery), or when a gap is recorded. Only that gap then passes.
   That is the accepted pre-join loss; one summary log line counts them.
 - **Not a loss either** — refused with `evicted`: sealed at an epoch this device
-  had been removed from, reached before any re-add moves the floor (#1524). Logged
-  as one `[ingest] … sealed after this device was removed` count.
+  had been removed from (#1524). Logged as one `[ingest] … sealed after this
+  device was removed` count.
 - **Not a loss either** — never reached, and sealed inside a recorded
-  out-of-tree gap `[from, until)` (`join_branch::left_gap`, #1765), counted
-  with `evicted`. Only three proven events record one, so a re-entry by
-  external join or into a later lineage passes the time out like a Welcome
-  re-add does, without hiding what was sealed while the device was in:
-  - a commit refused with `UseAfterEviction`: `from` is the epoch the
-    removing commit produced;
-  - a retention rebuild whose external join lands on a head tree, verified
-    against the GroupInfo signature and tree hash, that no longer holds the
-    device's last own leaf (gone, or replaced from a KeyPackage — only the
-    device can update its own leaf): `from` is its last held epoch + 1;
-  - a Welcome into a successor past `SUCCESSOR_OPENING_EPOCH` (1). Migration
-    moves every roster device in at that epoch or aborts, so a later Welcome is
-    an Add of a device that was off the roster. Every older lineage whose group
-    it still holds gets `from` = that group's epoch + 1, open-ended.
+  out-of-tree gap `[from, until)` (`join_branch::left_gap`, #1765, #1772),
+  counted with `evicted`. `from` comes only from the device's own view of the
+  lineage, never from the DS:
+  - the replay reached the commit that removed it: openmls staged it as removing
+    our leaf (`StagedCommit::self_removed`), or refused the next commit with
+    `UseAfterEviction`. `from` is the epoch the removing commit produced.
+  - the user left (`leave_local_mls_group`): `from` is the epoch it held.
+
+  For the replay to reach the removal, the DS keeps a removed device's commits
+  from its last report on (see "Commit-log retention" above), and the client
+  replays what it holds before a re-add can replace it:
+  - a Welcome into a lineage whose group the device still holds:
+    `poll_mls_welcomes` peeks at the Welcome's target inside a rolled-back
+    savepoint (opening one consumes its KeyPackage) and runs the interleaved
+    catch-up on that group first. What was sealed to the device before its
+    removal opens; the eviction records the gap. A catch-up whose group is gone
+    while a Welcome for the device is pending waits for that Welcome instead of
+    external-joining (the I6 gate's own rule), so the Welcome, not a rejoin,
+    brings it back;
+  - a Welcome into a successor lineage: the post-join catch-up drains the old
+    lineage before adopting the successor, as before.
+
+  If the log was pruned past the device anyway (Tier 2, staleness, or a DS that
+  collected it), it cannot tell where it was removed. It then errs toward
+  showing: no gap, so everything it never reached from its last held epoch on
+  shows, including what was sealed while it was out. #1771 used to start the
+  gap one above the held epoch on two of these paths (a rebuild whose signed
+  head tree lacked the device's leaf, and a Welcome into a successor), which
+  passed real losses silently; both are gone. A signed GroupInfo from the
+  removal is not used as a substitute: it is not chained to the device's own
+  state, so a DS that refused a removing commit and kept its GroupInfo could
+  present an earlier removal than the canonical one.
 
   `until` is the device's own join (external join or Welcome). The DS's
   `added_device_ids` hint is ciphertext-unverifiable, so it may only end a gap

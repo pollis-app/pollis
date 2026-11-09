@@ -90,6 +90,9 @@ where
         }
     }
 
+    // A confirmed group of this lineage replaced here: the device never saw
+    // its removal from it (#1772).
+    let mut replaced_held = false;
     if let Ok(Some(mut old_group)) = MlsGroup::load(provider.storage(), &new_group_id) {
         let local_epoch = old_group.epoch().as_u64();
         // An unconfirmed branch at the Welcome's epoch is doomed, so the Welcome replaces it (#1220).
@@ -98,7 +101,11 @@ where
             &conversation_id,
             generation,
         );
-        if !super::join_branch::welcome_may_replace(local_epoch, welcome_epoch, unconfirmed) {
+        // So is a group a commit removed us from (#1772): it can never advance
+        // again, and a commit that removed and re-added us in one go Welcomes
+        // us at the very epoch it left the group at.
+        let doomed = unconfirmed || !old_group.is_active();
+        if !super::join_branch::welcome_may_replace(local_epoch, welcome_epoch, doomed) {
             return Err(crate::error::Error::Other(anyhow::anyhow!(
                 "welcome for {raw_group_id} is at epoch {welcome_epoch} but this device already \
                  holds that group at epoch {local_epoch} — refusing to replace a group the commit \
@@ -109,6 +116,7 @@ where
             "[mls] apply_welcome: replacing group {raw_group_id} at epoch {local_epoch} with the \
              Welcome's epoch {welcome_epoch}"
         );
+        replaced_held = !unconfirmed;
         let _ = old_group.delete(provider.storage());
         super::join_branch::clear(provider.raw_conn(), &conversation_id, generation);
     }
@@ -119,31 +127,56 @@ where
     staged.into_group(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
     // Added to the tree here: nothing sealed before this epoch was sent to
-    // this device (#1312).
+    // this device (#1312), unless it held the lineage before. Then only a
+    // proven gap passes (#1772).
     super::join_branch::mark_fresh_if_first(provider.raw_conn(), &conversation_id, generation);
-    super::join_branch::record_added(
+    super::join_branch::record_welcome_join(
         provider.raw_conn(),
         &conversation_id,
         generation,
         welcome_epoch,
-    );
-    // The floor now covers any gap in this lineage; close what was open (#1765)…
-    super::join_branch::close_left(provider.raw_conn(), &conversation_id, generation, welcome_epoch);
-    super::join_branch::settle_rebuild(provider.raw_conn(), &conversation_id, generation, welcome_epoch);
-    // …and, past the opening epoch, every lineage held before this one was left
-    // above the epoch the device still holds there.
-    super::join_branch::mark_predecessors_left(
-        provider.raw_conn(),
-        &conversation_id,
-        generation,
-        welcome_epoch,
-        |older| {
-            super::provider::load_stored_group_at(provider.raw_conn(), &conversation_id, older)
-                .map(|g| g.epoch().as_u64())
-        },
+        replaced_held,
     );
 
     Ok(raw_group_id)
+}
+
+/// The conversation whose CONFIRMED group this Welcome would replace, if any:
+/// a re-add into a lineage this device still holds below the Welcome's epoch
+/// (#1772).
+///
+/// Opening a Welcome consumes its KeyPackage, so the peek runs inside a
+/// savepoint that is always rolled back. Nothing it reads is trusted: an
+/// answer only decides whether to replay a group this device already holds.
+fn welcome_replaces_held_group(conn: &rusqlite::Connection, welcome_bytes: &[u8]) -> Option<String> {
+    let mut reader: &[u8] = welcome_bytes;
+    let MlsMessageBodyIn::Welcome(welcome) = MlsMessageIn::tls_deserialize(&mut reader).ok()?.extract()
+    else {
+        return None;
+    };
+    welcome_ciphersuite(&welcome)?;
+    conn.execute_batch("SAVEPOINT welcome_peek").ok()?;
+    let target = {
+        let provider = PollisProvider::new(conn);
+        ProcessedWelcome::new_from_welcome(&provider, &super::provider::join_config(), welcome)
+            .ok()
+            .and_then(|processed| {
+                let group_id = processed.unverified_group_info().group_id().clone();
+                let welcome_epoch = processed.unverified_group_info().epoch().as_u64();
+                let local_epoch = MlsGroup::load(provider.storage(), &group_id)
+                    .ok()
+                    .flatten()?
+                    .epoch()
+                    .as_u64();
+                let raw = String::from_utf8(group_id.as_slice().to_vec()).ok()?;
+                let (conversation_id, generation) = super::generation::split_mls_group_id(&raw);
+                let confirmed =
+                    !super::join_branch::is_unconfirmed(conn, &conversation_id, generation);
+                (confirmed && local_epoch < welcome_epoch).then_some(conversation_id)
+            })
+    };
+    let _ = conn.execute_batch("ROLLBACK TO welcome_peek; RELEASE welcome_peek");
+    target
 }
 
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
@@ -161,6 +194,44 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     } = super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
 
     let had_welcomes = !items.is_empty();
+
+    // A re-add Welcome replaces the group this device still holds for that
+    // lineage. Replay that group first, as far as the log goes (#1772): what
+    // was sealed to it before its removal opens now instead of being lost, and
+    // the replay reaches the commit that removed it, which proves exactly
+    // where the time out of the tree began.
+    let held_below: Vec<String> = {
+        let guard = state.local_db.lock().await;
+        let mut out: Vec<String> = Vec::new();
+        if let Some(db) = guard.as_ref() {
+            for item in &items {
+                if let Some(conversation_id) = welcome_replaces_held_group(db.conn(), &item.bytes) {
+                    if !out.contains(&conversation_id) {
+                        out.push(conversation_id);
+                    }
+                }
+            }
+        }
+        out
+    };
+    for conversation_id in &held_below {
+        crate::diag!(
+            "[mls] poll_mls_welcomes: a Welcome re-adds this device to {conversation_id}, whose \
+             group it still holds — replaying that group to its removal first"
+        );
+        // Boxed: the catch-up can poll Welcomes again (its no-GroupInfo branch).
+        if let Err(e) = Box::pin(crate::commands::messages::catch_up_mls_group_interleaved(
+            state,
+            conversation_id,
+            user_id,
+        ))
+        .await
+        {
+            crate::diag!(
+                "[mls] poll_mls_welcomes: replay of {conversation_id} before its Welcome failed: {e}"
+            );
+        }
+    }
     // Ack even apply failures (they would loop forever), but re-join those conversations after the ack (#1571).
     let mut processed_ids: Vec<String> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
