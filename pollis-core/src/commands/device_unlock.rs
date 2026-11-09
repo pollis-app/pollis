@@ -96,7 +96,7 @@ fn decode_duk(device_key: &str) -> Result<Duk> {
 }
 
 fn encode_duk(duk: &Duk) -> String {
-    base64::engine::general_purpose::STANDARD.encode(&**duk)
+    base64::engine::general_purpose::STANDARD.encode(**duk)
 }
 
 async fn load_meta(
