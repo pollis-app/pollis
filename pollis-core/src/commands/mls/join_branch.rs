@@ -313,7 +313,8 @@ pub(crate) const SUCCESSOR_OPENING_EPOCH: u64 = 1;
 
 /// `mls_kv` scope recording the gap during which this device was out of a
 /// lineage's tree (#1765, #1772). Key: as [`UNCONFIRMED_JOIN_SCOPE`]. Value:
-/// `from` (8 bytes LE), then `until` (8 bytes LE) once the device is back in.
+/// one `from`, `until` pair (8 bytes LE each, `until` [`OPEN`] until the device
+/// is back in) per stint out of the tree, oldest first.
 ///
 /// Nothing sealed in `[from, until)` was sent to this device, so an envelope
 /// there that it never reached is not its loss (#1524). `from` comes only from
@@ -350,10 +351,21 @@ impl LeftGap {
     }
 }
 
-fn write_gap(conn: &rusqlite::Connection, conversation_id: &str, generation: i64, gap: LeftGap) {
-    let mut value = gap.from.to_le_bytes().to_vec();
-    if let Some(until) = gap.until {
-        value.extend_from_slice(&until.to_le_bytes());
+/// The most gaps kept per lineage; the oldest goes first. Dropping one only
+/// makes an envelope from that stint that is still unread show as lost.
+const MAX_GAPS: usize = 32;
+
+/// `until` of an open gap in the stored form. #1765's single-gap layout stored
+/// an open gap as `from` alone and a closed one as `from, until`, so its
+/// records read back unchanged, and an open gap stored here reads as open there.
+const OPEN: u64 = u64::MAX;
+
+fn write_gaps(conn: &rusqlite::Connection, conversation_id: &str, generation: i64, gaps: &[LeftGap]) {
+    let start = gaps.len().saturating_sub(MAX_GAPS);
+    let mut value = Vec::with_capacity(16 * (gaps.len() - start));
+    for gap in &gaps[start..] {
+        value.extend_from_slice(&gap.from.to_le_bytes());
+        value.extend_from_slice(&gap.until.unwrap_or(OPEN).to_le_bytes());
     }
     if let Err(e) = conn.execute(
         "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
@@ -365,14 +377,16 @@ fn write_gap(conn: &rusqlite::Connection, conversation_id: &str, generation: i64
     }
 }
 
-/// The gap recorded for `(conversation_id, generation)`, if any.
-pub(crate) fn left_gap(
+/// Every gap recorded for `(conversation_id, generation)`, oldest first. A
+/// device removed, re-added and removed again has one per stint (#1772): it
+/// may not have read past the first when the second is recorded.
+pub(crate) fn left_gaps(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     generation: i64,
-) -> Option<LeftGap> {
+) -> Vec<LeftGap> {
     use rusqlite::OptionalExtension;
-    let raw: Vec<u8> = conn
+    let Some(raw): Option<Vec<u8>> = conn
         .query_row(
             "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
             rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
@@ -380,17 +394,48 @@ pub(crate) fn left_gap(
         )
         .optional()
         .ok()
-        .flatten()?;
-    let from = u64::from_le_bytes(raw.get(..8)?.try_into().ok()?);
-    let until = raw
-        .get(8..16)
-        .and_then(|b| b.try_into().ok())
-        .map(u64::from_le_bytes);
-    Some(LeftGap { from, until })
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let word = |b: &[u8]| u64::from_le_bytes(b.try_into().unwrap_or([0; 8]));
+    if raw.len() == 8 {
+        return vec![LeftGap { from: word(&raw), until: None }];
+    }
+    raw.chunks_exact(16)
+        .map(|r| {
+            let until = word(&r[8..]);
+            LeftGap { from: word(&r[..8]), until: (until != OPEN).then_some(until) }
+        })
+        .collect()
+}
+
+/// The most recent gap recorded for `(conversation_id, generation)`, if any.
+pub(crate) fn left_gap(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Option<LeftGap> {
+    left_gaps(conn, conversation_id, generation).pop()
+}
+
+/// Was an envelope sealed at `epoch` of `generation` sent while this device
+/// was out of that lineage's tree, by any recorded gap?
+pub(crate) fn in_left_gap(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    epoch: u64,
+) -> bool {
+    left_gaps(conn, conversation_id, generation)
+        .iter()
+        .any(|gap| gap.covers(epoch))
 }
 
 /// Record that this device left `(conversation_id, generation)`'s tree at
-/// `from`, with `readded_at` (the DS hint) as a provisional end. Best-effort.
+/// `from`, with `readded_at` (the DS hint) as a provisional end. A second
+/// record of the same removal (every replay that reaches it records it) only
+/// narrows that gap. Best-effort.
 pub(crate) fn mark_left(
     conn: &rusqlite::Connection,
     conversation_id: &str,
@@ -398,23 +443,37 @@ pub(crate) fn mark_left(
     from: u64,
     readded_at: Option<u64>,
 ) {
-    let until = readded_at.map(|r| r.max(from));
-    write_gap(conn, conversation_id, generation, LeftGap { from, until });
+    let hinted = readded_at.map(|r| r.max(from));
+    let mut gaps = left_gaps(conn, conversation_id, generation);
+    match gaps.iter_mut().find(|gap| gap.from == from) {
+        Some(gap) => {
+            gap.until = match (gap.until, hinted) {
+                (Some(until), Some(hint)) => Some(until.min(hint)),
+                (until, None) => until,
+                (None, hint) => hint,
+            };
+        }
+        None => gaps.push(LeftGap { from, until: hinted }),
+    }
+    write_gaps(conn, conversation_id, generation, &gaps);
 }
 
 /// The device is back in the lineage at `join_epoch`: close an open gap there,
-/// or narrow one the hint left wider. Never widens it.
+/// or narrow one the hint left wider. Never widens one.
 pub(crate) fn close_left(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     generation: i64,
     join_epoch: u64,
 ) {
-    let Some(gap) = left_gap(conn, conversation_id, generation) else {
+    let mut gaps = left_gaps(conn, conversation_id, generation);
+    if gaps.is_empty() {
         return;
-    };
-    let until = gap.until.map_or(join_epoch, |u| u.min(join_epoch)).max(gap.from);
-    write_gap(conn, conversation_id, generation, LeftGap { from: gap.from, until: Some(until) });
+    }
+    for gap in gaps.iter_mut().filter(|gap| gap.from <= join_epoch) {
+        gap.until = Some(gap.until.map_or(join_epoch, |u| u.min(join_epoch)).max(gap.from));
+    }
+    write_gaps(conn, conversation_id, generation, &gaps);
 }
 
 /// `mls_kv` scope marking that this device dropped its group of a lineage
@@ -488,7 +547,7 @@ pub(crate) fn record_welcome_join(
     replaced_held: bool,
 ) {
     let unwitnessed = take_unwitnessed_exit(conn, conversation_id, generation).is_some();
-    let proven = left_gap(conn, conversation_id, generation).is_some();
+    let proven = !left_gaps(conn, conversation_id, generation).is_empty();
     if replaced_held || unwitnessed || proven {
         record_first_join(conn, conversation_id, generation, welcome_epoch);
     } else {
@@ -594,9 +653,72 @@ mod tests {
         assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(25), "narrowed by the hint");
         mark_left(&conn, "c", 1, 20, Some(90));
         close_left(&conn, "c", 1, 28);
-        assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(28), "a lying hint cannot widen it");
+        assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(25), "a lying hint cannot widen it");
         mark_left(&conn, "c", 1, 20, Some(3));
         assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(20), "nor reach below the removal");
+        assert_eq!(left_gaps(&conn, "c", 1).len(), 1, "the same removal, recorded again");
+
+        mark_left(&conn, "d", 1, 30, Some(90));
+        close_left(&conn, "d", 1, 34);
+        assert_eq!(left_gap(&conn, "d", 1).unwrap().until, Some(34), "the join ends it first");
+    }
+
+    /// #1772: a device removed, re-added and removed again keeps both gaps, so
+    /// what it had not yet read from the first stays silent.
+    #[test]
+    fn every_stint_keeps_its_own_gap() {
+        let conn = kv();
+        mark_left(&conn, "c", 1, 65, Some(79));
+        close_left(&conn, "c", 1, 80);
+        mark_left(&conn, "c", 1, 81, None);
+        close_left(&conn, "c", 1, 82);
+        assert_eq!(
+            left_gaps(&conn, "c", 1),
+            vec![LeftGap { from: 65, until: Some(79) }, LeftGap { from: 81, until: Some(82) }]
+        );
+        assert!(in_left_gap(&conn, "c", 1, 67), "the first stint's gap still passes");
+        assert!(!in_left_gap(&conn, "c", 1, 79) && !in_left_gap(&conn, "c", 1, 80));
+        assert!(in_left_gap(&conn, "c", 1, 81));
+        assert!(!in_left_gap(&conn, "c", 1, 64) && !in_left_gap(&conn, "c", 1, 82));
+
+        for stint in 0..(MAX_GAPS as u64 + 4) {
+            mark_left(&conn, "d", 0, 10 * stint, None);
+            close_left(&conn, "d", 0, 10 * stint + 5);
+        }
+        let kept = left_gaps(&conn, "d", 0);
+        assert_eq!(kept.len(), MAX_GAPS, "bounded");
+        assert_eq!(kept[0].from, 40, "the oldest go first");
+    }
+
+    /// #1772: #1765's single-gap records read back unchanged, and an open gap
+    /// written now reads as open in that layout too.
+    #[test]
+    fn a_single_gap_record_from_1765_still_reads() {
+        let conn = kv();
+        let put = |value: Vec<u8>| {
+            conn.execute(
+                "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+                rusqlite::params![LEFT_TREE_SCOPE, key("c", 0), value],
+            )
+            .unwrap();
+        };
+        put(7u64.to_le_bytes().to_vec());
+        assert_eq!(left_gaps(&conn, "c", 0), vec![LeftGap { from: 7, until: None }]);
+        let mut closed = 7u64.to_le_bytes().to_vec();
+        closed.extend_from_slice(&12u64.to_le_bytes());
+        put(closed);
+        assert_eq!(left_gaps(&conn, "c", 0), vec![LeftGap { from: 7, until: Some(12) }]);
+
+        mark_left(&conn, "e", 0, 9, None);
+        let raw: Vec<u8> = conn
+            .query_row(
+                "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
+                rusqlite::params![LEFT_TREE_SCOPE, key("e", 0)],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let until = u64::from_le_bytes(raw[8..16].try_into().unwrap());
+        assert!(LeftGap { from: 9, until: Some(until) }.covers(u64::MAX - 1), "open, as #1765 reads it");
     }
 
     /// #1772: a first Welcome sets the floor; a re-add after a stint keeps the

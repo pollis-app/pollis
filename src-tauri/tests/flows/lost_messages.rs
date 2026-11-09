@@ -434,6 +434,58 @@ async fn a_re_add_into_a_successor_over_a_retired_lineage_shows_what_was_sealed_
     );
 }
 
+/// #1772 (marathon soak): Bob is removed, comes back by external join without
+/// reading what was sealed while he was out, and is removed and re-added again
+/// before he reads it. Each stint keeps its own gap, so the first one still
+/// passes silently once the second is recorded.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_second_removal_keeps_the_first_gap_silent() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Twice").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.send_channel_message(&channel_id, "read in time").await;
+    bob.fetch_channel_messages(&channel_id).await;
+
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "first time out").await;
+
+    // Back by external join (Welcome lost), through a bare replay that reads nothing.
+    arm_ds_fault(DsFault::DropWelcome);
+    alice.invite(&group_id, &bob_p.username).await;
+    clear_ds_fault();
+    let invite_id = bob.first_pending_invite().await.expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    pollis_core::commands::mls::process_pending_commits_inner(&bob.state, &group_id, bob.user_id())
+        .await
+        .expect("bare replay");
+    alice.process_commits_for(&channel_id).await;
+
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "second time out").await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"first time out") && !got.contains(&"second time out"), "{msgs:#?}");
+    assert!(placeholders(&msgs).is_empty(), "both stints out are silent: {msgs:#?}");
+}
+
 /// #1772: a user who leaves and is invited back passes the time away silently,
 /// although the leave records no removal: the leave itself is the device's
 /// own act.

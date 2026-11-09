@@ -475,6 +475,10 @@ asks `messages::loss::classify`:
   state, so a DS that refused a removing commit and kept its GroupInfo could
   present an earlier removal than the canonical one.
 
+  Each stint out of the tree keeps its own gap (up to 32 per lineage): a device
+  removed, re-added and removed again before it read past the first stint
+  still passes that stint silently.
+
   `until` is the device's own join (external join or Welcome). The DS's
   `added_device_ids` hint is ciphertext-unverifiable, so it may only end a gap
   sooner (`readded_epoch`), never open one: a lying DS can only show more
