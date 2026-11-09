@@ -41,13 +41,33 @@ tags:
     id: "btn-group-menu"
 - tapOn:
     id: "btn-menu-group-settings"
-# Let the settings push settle: iOS drops a tap made during the transition.
+# iOS drops a tap made while the settings push is still settling, and
+# waitForAnimationToEnd can return before it has (the 1.0.32 and 1.0.33
+# gates). Tap once more only if the page did not open.
+- extendedWaitUntil:
+    visible:
+      id: "row-group-emoji"
+    timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
 - tapOn:
     id: "row-group-emoji"
-- assertVisible:
-    id: "screen-group-emoji"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-emoji"
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "screen-group-emoji"
+    commands:
+      - tapOn:
+          id: "row-group-emoji"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-emoji"
+    timeout: 10000
 - addMedia:
     - "../fixtures/media-viewer.png"
 - runFlow:
