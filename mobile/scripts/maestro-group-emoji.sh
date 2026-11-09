@@ -34,6 +34,12 @@ GROUP_NAME="Emoji Test $STAMP"
 GROUP_SLUG="emoji-test-$STAMP"
 G=(-e GROUP_NAME="$GROUP_NAME" -e GROUP_SLUG="$GROUP_SLUG")
 
+# The peer seeds photos with `addMedia`. The `maestro` wrapper clears
+# earlier copies on Android; an iOS simulator needs a reboot for it (#1769).
+if [[ "$PEER" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+  "$(dirname "$0")/maestro-media.sh" reset "$PEER"
+fi
+
 echo "==> 1/6 admin creates \"$GROUP_NAME\""
 maestro --device "$ADMIN" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$ADMIN_EMAIL" "$JOIN/1-admin-create.yaml"
 echo "==> 2/6 peer asks to join $GROUP_SLUG"

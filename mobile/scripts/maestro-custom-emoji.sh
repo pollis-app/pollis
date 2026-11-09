@@ -37,6 +37,12 @@ GROUP_NAME="Custom Emoji $STAMP"
 GROUP_SLUG="custom-emoji-$STAMP"
 G=(-e GROUP_NAME="$GROUP_NAME" -e GROUP_SLUG="$GROUP_SLUG")
 
+# The sender seeds photos with `addMedia`. The `maestro` wrapper clears
+# earlier copies on Android; an iOS simulator needs a reboot for it (#1769).
+if [[ "$SENDER" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+  "$(dirname "$0")/maestro-media.sh" reset "$SENDER"
+fi
+
 echo "==> 1/6 sender creates \"$GROUP_NAME\" and adds a static + an animated emoji"
 maestro --device "$SENDER" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$SENDER_EMAIL" "$FLOWS/1-sender-create.yaml"
 echo "==> 2/6 recipient asks to join $GROUP_SLUG"
