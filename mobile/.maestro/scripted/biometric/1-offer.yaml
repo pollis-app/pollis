@@ -26,13 +26,6 @@ appId: ${MAESTRO_APP_ID}
 - takeScreenshot: biometric-01-offer
 - tapOn:
     id: "btn-biometric-offer-accept"
-# iOS asks once whether Pollis may use Face ID (NSFaceIDUsageDescription).
-- extendedWaitUntil:
-    visible: "OK"
-    timeout: 5000
-    optional: true
-- tapOn:
-    text: "OK"
-    optional: true
-# The system biometric prompt is up now (iOS: the read-back; Android: storing the key).
-# The script answers it with a match.
+# Android: the system prompt is up now (storing the key); the script answers it with a match.
+# The iOS simulator's keychain does not evaluate an item's access control (no Secure
+# Enclave), so there it turns on and goes in without a prompt.

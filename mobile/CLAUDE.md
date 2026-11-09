@@ -555,8 +555,14 @@ Core: `pollis-core/src/commands/device_unlock.rs`; rules and slot lifecycle:
   A read that comes back empty (biometrics re-enrolled, key invalidated) shows a
   note; the next PIN unlock re-arms it (silent on iOS, one prompt on Android).
 - **e2e.** `scripts/maestro-biometric.sh <ios|ipad|android>` (README flow table).
-  Manual only: Class 2 vs Class 3 sensors on real Android hardware, a real
-  re-enrolment, and that the extension cannot read the item on a signed device.
+  The iOS simulator's keychain never evaluates an item's access control, so the
+  `.biometryCurrentSet` item reads with no Face ID sheet there (`notifyutil …
+  pearl.match` only answers LAContext evaluations); the iOS run covers on/off,
+  the offer, the PIN-only paths and Face ID unenrolled, and Android covers the
+  prompt, a failed match and the keypad fallback. Manual only: the Face ID sheet
+  and a failed match on a real iPhone, Class 2 vs Class 3 sensors on real
+  Android hardware, a real re-enrolment, and that the extension cannot read the
+  item on a signed device.
 
 #### Notification Service Extension (#1599)
 

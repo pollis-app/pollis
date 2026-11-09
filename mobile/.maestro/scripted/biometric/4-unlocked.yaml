@@ -70,6 +70,8 @@ appId: ${MAESTRO_APP_ID}
 - launchApp
 - extendedWaitUntil:
     visible:
-      id: "pin-biometric"
+      id: "pin-biometric|tab-groups"
     timeout: 20000
-# The script answers with a match.
+- assertNotVisible:
+    id: "btn-pin-1"
+# Android: the script answers with a match.

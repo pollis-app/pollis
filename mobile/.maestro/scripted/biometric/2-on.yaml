@@ -2,7 +2,8 @@ appId: ${MAESTRO_APP_ID}
 ---
 # BIOMETRIC UNLOCK (#1685), part 2 of 6: accepted, so the app goes on in, and
 # Security shows the switch on. Then a cold start tries biometrics first: the
-# launch loader stays up under the system prompt, no keypad.
+# launch loader stays up under the system prompt, no keypad (Android). The iOS
+# simulator reads the key without a prompt, so it goes straight in.
 - extendedWaitUntil:
     visible:
       id: "tab-groups"
@@ -25,8 +26,8 @@ appId: ${MAESTRO_APP_ID}
 - launchApp
 - extendedWaitUntil:
     visible:
-      id: "pin-biometric"
+      id: "pin-biometric|tab-groups"
     timeout: 20000
 - assertNotVisible:
     id: "btn-pin-1"
-# The script now answers the prompt with NO match.
+# Android: the script now answers the prompt with NO match.

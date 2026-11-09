@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { Screen, Header } from "../ui";
 import { Heading } from "../auth/Heading";
 import { PinBusy, PinCells, PinKeypad } from "../auth/PinPad";
-import { ErrorText } from "./SettingsField";
+import { AuthError } from "../auth/AuthError";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 
 /**
@@ -66,11 +66,8 @@ export function PinEntryPage({
           {busy ? null : (
             <View style={{ gap: 14 }}>
               <PinCells length={pin.length} />
-              {error ? (
-                <View style={{ alignSelf: "center" }}>
-                  <ErrorText testID={errorTestID}>{error}</ErrorText>
-                </View>
-              ) : null}
+              {/* AuthError, not ErrorText: ErrorText's flex:1 line collapses to nothing when centred. */}
+              {error ? <AuthError center testID={errorTestID} message={error} /> : null}
             </View>
           )}
         </View>

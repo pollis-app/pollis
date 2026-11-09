@@ -8,14 +8,18 @@
 #
 #   1-offer        sign up, cold start, PIN unlock -> the one-time offer -> Turn on   [match]
 #   2-on           Security shows it on; cold start shows the loader, no keypad       [no match]
-#   3-fallback     Cancel -> the keypad, no PIN error; "Use Face ID" again            [match]
+#   3-fallback     Cancel -> the keypad, no PIN error; "Use fingerprint" again        [match]
 #   4-unlocked     linking still checks the PIN; change PIN 1234 -> 5678; cold start  [match]
 #   5-switch       off; on asks for the PIN (the old one is refused)                  [match]
 #   6-off          on again; off; cold start is the keypad; no second offer
 #
-# iOS:     enrolment and matches through the simulator's BiometricKit notifications
-#          (`notifyutil -p com.apple.BiometricKit_Sim.pearl.match` / `.nomatch`; both target
-#          simulators have Face ID).
+# iOS:     enrolment through the simulator's BiometricKit notifications (`notifyutil`). The
+#          SIMULATOR KEYCHAIN NEVER EVALUATES AN ITEM'S ACCESS CONTROL (no Secure Enclave): the
+#          `.biometryCurrentSet` item is read with no Face ID sheet, so there is no prompt to
+#          match or fail (`pearl.match` / `.nomatch` only drive LAContext evaluations). iOS
+#          therefore runs 2-on, 4-unlocked, then 3-unavailable (Face ID unenrolled: keypad only,
+#          the switch says why) instead of 3-fallback. The prompt itself, a failed match and a
+#          re-enrolment are verified on a real iPhone.
 # Android: a screen-lock PIN (`adb shell locksettings set-pin`), then a fingerprint enrolled
 #          through Settings with `adb emu finger touch 1`; a match is that finger, a no-match
 #          an unenrolled one. The emulator's fingerprint is Class 3 (BIOMETRIC_STRONG).
@@ -76,18 +80,42 @@ case "$PLATFORM" in
     [ -n "$DEVICE" ] || { echo "no running emulator (boot pollis_e2e first)" >&2; exit 1; }
     match() { adb -s "$DEVICE" emu finger touch 1 >/dev/null; }
     nomatch() { adb -s "$DEVICE" emu finger touch 2 >/dev/null; }
+    ui() {
+      adb -s "$DEVICE" shell uiautomator dump /sdcard/biometric-ui.xml >/dev/null 2>&1
+      adb -s "$DEVICE" shell cat /sdcard/biometric-ui.xml
+    }
+    # Tap the centre of the first node whose text is exactly $1; fails when there is none.
+    tap_text() {
+      local b
+      b="$(ui | tr '>' '\n' | grep -F "text=\"$1\"" | head -1 | grep -o 'bounds="[^"]*"' | grep -oE '[0-9]+' | tr '\n' ' ')"
+      # shellcheck disable=SC2086
+      set -- $b
+      [ -n "${4:-}" ] || return 1
+      adb -s "$DEVICE" shell input tap $((($1 + $3) / 2)) $((($2 + $4) / 2))
+      sleep 2
+    }
+    prints() { adb -s "$DEVICE" shell dumpsys fingerprint | grep -o '"count":[0-9]*' | head -1 | grep -oE '[0-9]+$'; }
     setup() {
-      if ! adb -s "$DEVICE" shell locksettings verify --old "$ANDROID_LOCK_PIN" >/dev/null 2>&1 \
-        || adb -s "$DEVICE" shell locksettings get-disabled 2>/dev/null | grep -q true; then
-        adb -s "$DEVICE" shell locksettings set-pin "$ANDROID_LOCK_PIN" >/dev/null
+      adb -s "$DEVICE" shell locksettings set-pin "$ANDROID_LOCK_PIN" >/dev/null 2>&1 \
+        || adb -s "$DEVICE" shell locksettings set-pin --old "$ANDROID_LOCK_PIN" "$ANDROID_LOCK_PIN" >/dev/null
+      if [ "$(prints)" -ge 1 ] 2>/dev/null; then
+        return 0
       fi
-      # Touch the sensor while the Settings enrolment flow asks for it.
-      ( for _ in $(seq 1 90); do adb -s "$DEVICE" emu finger touch 1 >/dev/null 2>&1 || true; sleep 1; done ) &
-      local toucher=$!
-      MAESTRO_APP_ID=com.android.settings command maestro --device "$DEVICE" test \
-        -e LOCK_PIN="$ANDROID_LOCK_PIN" "$FLOWS/android-enroll-fingerprint.yaml" || { kill "$toucher" 2>/dev/null; return 1; }
-      kill "$toucher" 2>/dev/null || true
-      wait "$toucher" 2>/dev/null || true
+      # Settings' own enrolment (Pixel Imprint on the google_apis image): confirm the screen
+      # lock, page through the intro to "I AGREE", touch the sensor until it is added.
+      adb -s "$DEVICE" shell am start -a android.settings.FINGERPRINT_ENROLL >/dev/null
+      sleep 3
+      adb -s "$DEVICE" shell input text "$ANDROID_LOCK_PIN"
+      adb -s "$DEVICE" shell input keyevent 66
+      sleep 3
+      for _ in 1 2 3 4; do tap_text "I AGREE" && break; tap_text "MORE" || true; done
+      for _ in $(seq 1 20); do
+        adb -s "$DEVICE" emu finger touch 1 >/dev/null
+        sleep 1.5
+        ui | grep -q 'text="DONE"' && break
+      done
+      tap_text "DONE" || true
+      [ "$(prints)" -ge 1 ] || { echo "fingerprint enrolment failed" >&2; return 1; }
     }
     # Clearing the screen lock removes every enrolled fingerprint with it.
     teardown() { adb -s "$DEVICE" shell locksettings clear --old "$ANDROID_LOCK_PIN" >/dev/null 2>&1 || true; }
@@ -110,9 +138,19 @@ answer() {
 }
 
 part 1-offer;     answer match
-part 2-on;        answer nomatch
-part 3-fallback;  answer match
-part 4-unlocked;  answer match
+if [ "$PLATFORM" = android ]; then
+  part 2-on;        answer nomatch
+  part 3-fallback;  answer match
+  part 4-unlocked;  answer match
+else
+  # The simulator keychain never evaluates the item's access control: the read succeeds
+  # with no prompt, so there is no match to fail. Cover biometrics going away instead.
+  part 2-on
+  part 4-unlocked
+  enrolled 0
+  part 3-unavailable
+  enrolled 1
+fi
 part 5-switch;    answer match
 part 6-off
 

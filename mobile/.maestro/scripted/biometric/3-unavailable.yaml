@@ -1,0 +1,43 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), iOS only, after 4-unlocked (the PIN is 5678 by now;
+# Android runs 3-fallback instead).
+# The simulator's keychain cannot fail a match, so this covers the other way
+# biometrics go away: the script has UNENROLLED Face ID. A cold start is the
+# keypad with no biometric button; the PIN unlocks, nothing is offered, and
+# Security still lists the switch (on) with why it cannot work, so it can be
+# turned off. The script re-enrolls after this part.
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin-1"
+    timeout: 20000
+- assertNotVisible:
+    id: "btn-pin-biometric"
+- takeScreenshot: biometric-03-keypad-no-biometrics
+- runFlow: ../../subflows/enter-pin-5678.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- assertNotVisible:
+    id: "screen-biometric-offer"
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "toggle-biometric-unlock"
+    direction: DOWN
+- assertVisible: ".*isn't set up on this device.*"
+- takeScreenshot: biometric-03b-security-unavailable
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
