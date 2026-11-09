@@ -859,12 +859,11 @@ fn record_losses(
             }
             // Never reached, and sealed inside a recorded gap while this device
             // was out of that lineage's tree: never sent to it (#1765). The gap
-            // starts no lower than the device's last held epoch + 1, so what was
-            // sealed while it held the lineage, or that it reached and failed to
-            // open, stays a loss.
+            // starts where its own replay saw the removal, or where it left
+            // (#1772), so what was sealed while it was in, or that it reached and
+            // failed to open, stays a loss.
             if !attempted
-                && crate::commands::mls::left_gap(conn, mls_group_id, sealed_at.0)
-                    .is_some_and(|gap| gap.covers(sealed_at.1))
+                && crate::commands::mls::in_left_gap(conn, mls_group_id, sealed_at.0, sealed_at.1)
             {
                 removed += 1;
                 continue;

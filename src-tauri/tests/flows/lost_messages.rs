@@ -3,7 +3,10 @@
 //! Not a loss: messages sent before joining, and this device's own control frames.
 
 use crate::harness::{
-    arm_ds_fault, clear_ds_fault, enroll_second_device, expect_losses, wipe, DsFault, TestClient,
+    arm_ds_fault, clear_ds_fault, ds_head_epoch, ds_head_generation, ds_prune_commit_log,
+    enroll_second_device, expect_losses, local_generation_of, prune_commits_below,
+    republish_key_packages, retire_generations_below, set_current_suite, wipe, DsFault, TestClient,
+    SUITE_LEGACY,
 };
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
@@ -218,6 +221,307 @@ async fn a_message_sealed_before_the_removal_stays_a_loss() {
         1,
         "only \"will be lost\", sealed before the removal, shows; the gap is silent: {msgs:#?}"
     );
+}
+
+/// Rotate alice's leaf `n` times, each reported, so her catch-up reports lift
+/// the commit-log floor (`PRUNE_SLACK_EPOCHS` = 8).
+async fn rotate(alice: &TestClient, group_id: &str, channel_id: &str, n: usize) {
+    for _ in 0..n {
+        assert!(alice.self_update(group_id).await, "alice's rotation must land");
+        alice.process_commits_for(channel_id).await;
+    }
+}
+
+/// The #1772 world: Bob reads up to his held epoch, falls behind while still a
+/// member (alice rotates, then seals "sealed before the removal" one epoch
+/// above where Bob is), is removed, and misses "while bob is out". Alice then
+/// rotates far enough that, before #1772, her reports pruned the log past Bob.
+/// Returns the epoch Bob still holds.
+async fn lag_then_remove(
+    alice: &TestClient,
+    bob: &TestClient,
+    bob_p: &UserProfile,
+    group_id: &str,
+    channel_id: &str,
+) -> i64 {
+    add_member(alice, group_id, channel_id, bob, bob_p).await;
+    alice.send_channel_message(channel_id, "read in time").await;
+    let seen = bob.fetch_channel_messages(channel_id).await;
+    assert!(contents(&seen).contains(&"read in time"), "{seen:#?}");
+    let held = ds_head_epoch(group_id).await;
+
+    rotate(alice, group_id, channel_id, 1).await;
+    alice.send_channel_message(channel_id, "sealed before the removal").await;
+    rotate(alice, group_id, channel_id, 10).await;
+    alice.remove_member(group_id, &bob_p.id).await;
+    alice.process_commits_for(channel_id).await;
+    alice.send_channel_message(channel_id, "while bob is out").await;
+    rotate(alice, group_id, channel_id, 4).await;
+    held
+}
+
+/// #1772: a lagging member removed and re-added by Welcome replays the log to
+/// its own removal before the Welcome replaces its group. What was sealed to it
+/// before the removal opens; what was sealed while it was out stays silent.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_lagging_member_re_added_reads_what_was_sealed_before_its_removal() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Lag").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    let held = lag_then_remove(&alice, &bob, &bob_p, &group_id, &channel_id).await;
+
+    // The removed device still pins the log at its last report.
+    let report = ds_prune_commit_log(&group_id).await;
+    assert!(report.floor <= held, "the DS kept bob's commits: {report:?}, held {held}");
+
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"sealed before the removal"), "sealed to bob, so it opens: {msgs:#?}");
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
+    assert!(placeholders(&msgs).is_empty(), "the time out is silent: {msgs:#?}");
+}
+
+/// #1772, rebuild path: the log is pruned past the removed device anyway (Tier
+/// 2, or a DS that collected it), so it cannot learn where it was removed.
+/// Nothing tells it which of what it never reached was sealed while it was
+/// out, so it errs toward showing: the message sealed before the removal is
+/// one placeholder, and the one sealed while it was out shows too.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_re_add_over_a_pruned_log_shows_what_was_sealed_before_the_removal() {
+    wipe().await;
+    expect_losses();
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Pruned").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    let held = lag_then_remove(&alice, &bob, &bob_p, &group_id, &channel_id).await;
+    prune_commits_below(&group_id, ds_head_epoch(&group_id).await - 1).await;
+    assert!(ds_head_epoch(&group_id).await - 1 > held);
+
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"sealed before the removal"), "{msgs:#?}");
+    assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
+    assert_eq!(
+        placeholders(&msgs).len(),
+        2,
+        "no proven removal epoch: both unread messages show, neither passes: {msgs:#?}"
+    );
+}
+
+/// [`lag_then_remove`] on the retired suite, then alice ships the new one and
+/// migrates the group on her own while Bob is out.
+async fn lag_remove_then_migrate(
+    alice: &TestClient,
+    bob: &TestClient,
+    bob_p: &UserProfile,
+    group_id: &str,
+    channel_id: &str,
+) {
+    lag_then_remove(alice, bob, bob_p, group_id, channel_id).await;
+    set_current_suite(None);
+    republish_key_packages(alice).await;
+    republish_key_packages(bob).await;
+    for _ in 0..2 {
+        alice.poll().await;
+        alice.sweep().await;
+    }
+    assert_eq!(ds_head_generation(group_id).await, 1, "the group migrated");
+    alice.send_channel_message(channel_id, "in the successor before bob").await;
+    rotate(alice, group_id, channel_id, 2).await;
+}
+
+/// Re-add Bob into the successor by Welcome and read his view of the channel.
+async fn re_add_into_the_successor(
+    alice: &TestClient,
+    bob: &TestClient,
+    bob_p: &UserProfile,
+    group_id: &str,
+    channel_id: &str,
+) -> Vec<serde_json::Value> {
+    add_member(alice, group_id, channel_id, bob, bob_p).await;
+    alice.process_commits_for(channel_id).await;
+    alice.send_channel_message(channel_id, "bob is back").await;
+    bob.sweep().await;
+    let msgs = bob.fetch_channel_messages(channel_id).await;
+    assert_eq!(local_generation_of(bob, group_id).await, 1);
+    msgs
+}
+
+/// #1772, successor path: the removed device's lineage is retired by a suite
+/// migration and it is re-added into the successor by Welcome. It replays the
+/// retired lineage to its removal before adopting the successor, so what was
+/// sealed to it there opens, and nothing it was out for shows.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_lagging_member_re_added_into_a_successor_reads_what_was_sealed_before_its_removal() {
+    wipe().await;
+    set_current_suite(Some(SUITE_LEGACY));
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Successor").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    lag_remove_then_migrate(&alice, &bob, &bob_p, &group_id, &channel_id).await;
+    let report = ds_prune_commit_log(&group_id).await;
+    assert_eq!(report.generation_floor, 0, "bob still pins the retired lineage: {report:?}");
+
+    let msgs = re_add_into_the_successor(&alice, &bob, &bob_p, &group_id, &channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"sealed before the removal"), "sealed to bob, so it opens: {msgs:#?}");
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
+    assert!(!got.contains(&"in the successor before bob"), "{msgs:#?}");
+    assert!(placeholders(&msgs).is_empty(), "the time out is silent: {msgs:#?}");
+}
+
+/// #1772, successor path over a retired log: the old lineage is gone (Tier 2,
+/// or a DS that collected it), so the device cannot reach its removal there.
+/// It errs toward showing: both messages of the old lineage it never reached
+/// show, and only what the successor sealed before its Welcome passes.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_re_add_into_a_successor_over_a_retired_lineage_shows_what_was_sealed_before_the_removal() {
+    wipe().await;
+    expect_losses();
+    set_current_suite(Some(SUITE_LEGACY));
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Retired").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    lag_remove_then_migrate(&alice, &bob, &bob_p, &group_id, &channel_id).await;
+    retire_generations_below(&group_id, 1).await;
+
+    let msgs = re_add_into_the_successor(&alice, &bob, &bob_p, &group_id, &channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"sealed before the removal"), "{msgs:#?}");
+    assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
+    assert!(!got.contains(&"in the successor before bob"), "{msgs:#?}");
+    assert_eq!(
+        placeholders(&msgs).len(),
+        2,
+        "no proven removal epoch in the old lineage: both unread messages there show: {msgs:#?}"
+    );
+}
+
+/// #1772 (marathon soak): Bob is removed, comes back by external join without
+/// reading what was sealed while he was out, and is removed and re-added again
+/// before he reads it. Each stint keeps its own gap, so the first one still
+/// passes silently once the second is recorded.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_second_removal_keeps_the_first_gap_silent() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Twice").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.send_channel_message(&channel_id, "read in time").await;
+    bob.fetch_channel_messages(&channel_id).await;
+
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "first time out").await;
+
+    // Back by external join (Welcome lost), through a bare replay that reads nothing.
+    arm_ds_fault(DsFault::DropWelcome);
+    alice.invite(&group_id, &bob_p.username).await;
+    clear_ds_fault();
+    let invite_id = bob.first_pending_invite().await.expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    pollis_core::commands::mls::process_pending_commits_inner(&bob.state, &group_id, bob.user_id())
+        .await
+        .expect("bare replay");
+    alice.process_commits_for(&channel_id).await;
+
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "second time out").await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"first time out") && !got.contains(&"second time out"), "{msgs:#?}");
+    assert!(placeholders(&msgs).is_empty(), "both stints out are silent: {msgs:#?}");
+}
+
+/// #1772: a user who leaves and is invited back passes the time away silently,
+/// although the leave records no removal: the leave itself is the device's
+/// own act.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn messages_sent_after_a_leave_are_not_losses() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Leave").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.send_channel_message(&channel_id, "before the leave").await;
+    bob.fetch_channel_messages(&channel_id).await;
+    bob.leave_group(&group_id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "while bob is away").await;
+    rotate(&alice, &group_id, &channel_id, 2).await;
+
+    // No member is online to commit the leaver's removal here, so the re-add
+    // finds its leaf still in the tree and sends no Welcome: Bob rejoins by
+    // external join.
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    bob.process_commits_for(&channel_id).await;
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"while bob is away"), "{msgs:#?}");
+    assert!(placeholders(&msgs).is_empty(), "time away after a leave is silent: {msgs:#?}");
 }
 
 /// False positives: a device's own receipts, deletes and edits can't be decrypted on fetch.

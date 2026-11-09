@@ -923,6 +923,21 @@ pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u6
     pruned
 }
 
+/// Retire every lineage below `floor` via the real retention DELETE (#539). Asserts it deleted something.
+pub(crate) async fn retire_generations_below(conversation_id: &str, floor: i64) -> u64 {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for retire_generations_below");
+    let deleted = pollis_delivery::commit::delete_generations_below(&conn, conversation_id, floor)
+        .await
+        .expect("delete_generations_below");
+    assert!(
+        deleted > 0,
+        "retire_generations_below: nothing below generation {floor} for {conversation_id} — the \
+         scenario's setup is wrong"
+    );
+    deleted
+}
+
 /// Record a forged high-water for every current member device (#681's effect).
 pub(crate) async fn force_high_water_for_all_members(conversation_id: &str, since: i64) {
     let w = world().await;

@@ -573,7 +573,12 @@ async fn external_join_attempt(
                 join_epoch,
             );
             // Back in after time out of the tree: the join closes that gap (#1765).
-            super::join_branch::settle_rebuild(db.conn(), conversation_id, stored_generation, join_epoch);
+            // The floor above already kept what an unwitnessed exit left unread (#1772).
+            let _ = super::join_branch::take_unwitnessed_exit(
+                db.conn(),
+                conversation_id,
+                stored_generation,
+            );
             super::join_branch::close_left(db.conn(), conversation_id, stored_generation, join_epoch);
             // #1571: a device registered before its user joined, joining late, records that gap as a loss.
             let fresh =
@@ -815,37 +820,6 @@ where
         super::join_branch::clear(provider.raw_conn(), conversation_id, generation);
     }
 
-    // A pending retention rebuild (#1765): does the head tree we join on still
-    // hold our last leaf? Recorded now, trusted only once the join below has
-    // verified this tree against the GroupInfo signature and its tree hash.
-    if let Some(mut rebuild) =
-        super::join_branch::pending_rebuild(provider.raw_conn(), conversation_id, generation)
-    {
-        let leaves: Vec<(Vec<u8>, Vec<u8>)> = verifiable_group_info
-            .extensions()
-            .ratchet_tree()
-            .map(|ext| {
-                ext.ratchet_tree()
-                    .leaves()
-                    .map(|leaf| {
-                        (
-                            leaf.signature_key().as_slice().to_vec(),
-                            leaf.encryption_key().tls_serialize_detached().unwrap_or_default(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        // No tree to read proves nothing.
-        rebuild.removed = !leaves.is_empty()
-            && super::join_branch::leaf_was_replaced(
-                leaves.iter().map(|(s, e)| (s.as_slice(), e.as_slice())),
-                cred_with_key.signature_key.as_slice(),
-                &rebuild.own_encryption_key,
-            );
-        super::join_branch::note_rebuild(provider.raw_conn(), conversation_id, generation, &rebuild);
-    }
-
     let join_config = super::provider::join_config();
 
     let (joined_group, commit_bundle) = MlsGroup::external_commit_builder()
@@ -1037,6 +1011,30 @@ pub async fn forget_local_mls_group(
         local_generation(db.conn(), group_id)
     };
     forget_local_mls_group_at(state, group_id, generation).await
+}
+
+/// [`forget_local_mls_group`] for a user who LEAVES the conversation.
+///
+/// The leave is this device's own act, so it records the time out of the tree
+/// from the epoch it holds (#1772). A later re-add then passes that time out
+/// silently and keeps the floor for anything before it.
+pub async fn leave_local_mls_group(state: &Arc<AppState>, group_id: &str) -> crate::error::Result<()> {
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            let generation = local_generation(db.conn(), group_id);
+            if let Some(group) = load_stored_group_at(db.conn(), group_id, generation) {
+                super::join_branch::mark_left(
+                    db.conn(),
+                    group_id,
+                    generation,
+                    group.epoch().as_u64(),
+                    None,
+                );
+            }
+        }
+    }
+    forget_local_mls_group(state, group_id).await
 }
 
 /// [`forget_local_mls_group`] scoped to one suite generation (#454 P4).
@@ -1438,6 +1436,8 @@ async fn process_one_generation<'h>(
     let mut any_applied = false;
     // Explicit recovery reason (#680): a group that exists but cannot advance must still recover.
     let mut recover: Option<RecoverReason> = None;
+    // The epoch a commit that removed our own leaf produced (#1772).
+    let mut removed_at: Option<u64> = None;
     for commit in pending {
         // #1041: leave commits at or beyond the bound to the next pass.
         if let Some(b) = bound {
@@ -1472,11 +1472,6 @@ async fn process_one_generation<'h>(
                          — dropping local group to recover via external join",
                         commit.epoch
                     );
-                    // A rebuild's gap stays a loss unless the signed head tree the
-                    // join lands on proves a member removed us (#1765): keep what
-                    // that check needs before the group goes.
-                    let readded_at = readded_after(current_epoch);
-                    note_rebuild(state, mls_group_id, generation, current_epoch, readded_at).await;
                     let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
                 }
                 super::invariants::GapRecovery::HoldPosition => {
@@ -1505,7 +1500,10 @@ async fn process_one_generation<'h>(
             let outcome =
                 apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
-                CommitApply::Applied { adds, epoch_after } => {
+                CommitApply::Applied { adds, epoch_after, removed_us } => {
+                    if removed_us && epoch_after == commit.epoch as u64 + 1 {
+                        removed_at.get_or_insert(epoch_after);
+                    }
                     // A canonical commit on top proves a stored branch is confirmed (#1220).
                     super::join_branch::clear(db.conn(), mls_group_id, generation);
                     // Verify after the merge, off the tree (#1161 H4): a StagedCommit cannot be re-processed.
@@ -1580,19 +1578,16 @@ async fn process_one_generation<'h>(
         report_uncertified_leaves(state, mls_group_id, user_id, flagged).await;
     }
 
-    // openmls refused the commit at `current_epoch` because the one producing it
-    // removed us: from there on nothing was sealed to us until we are back (#1765).
-    if recover == Some(RecoverReason::Evicted) {
-        let readded_at = readded_after(current_epoch);
+    // A commit removed our leaf (staged as such, or proven by openmls refusing
+    // the next commit with `UseAfterEviction`): from the epoch it produced on,
+    // nothing was sealed to us until we are back (#1765, #1772).
+    let left_at = removed_at
+        .or_else(|| (recover == Some(RecoverReason::Evicted)).then_some(current_epoch));
+    if let Some(from) = left_at {
+        let readded_at = readded_after(from);
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
-            super::join_branch::mark_left(
-                db.conn(),
-                mls_group_id,
-                generation,
-                current_epoch,
-                readded_at,
-            );
+            super::join_branch::mark_left(db.conn(), mls_group_id, generation, from, readded_at);
         }
     }
 
@@ -1661,7 +1656,28 @@ async fn process_one_generation<'h>(
         .await
         .ok();
         let gates = gates.as_ref().filter(|s| s.authorized);
-        if may_rejoin_via_external_join(gates, mls_group_id, user_id) {
+        // Lost without seeing our removal (a prune, a fork, a bad row): where
+        // we were removed, if we were, is unknown, so the Welcome that brings
+        // us back must not pass what we never reached as time out (#1772).
+        if left_at.is_none() {
+            let guard = state.local_db.lock().await;
+            if let Some(db) = guard.as_ref() {
+                super::join_branch::note_unwitnessed_exit(
+                    db.conn(),
+                    mls_group_id,
+                    generation,
+                    current_epoch,
+                );
+            }
+        }
+        if !group_exists && has_pending_welcome(gates) {
+            // The Welcome is the canonical way back in; the no-group path
+            // defers to it the same way (I6, `invariants::join_recovery`).
+            crate::diag!(
+                "[mls] process_pending_commits: group {mls_group_id} is gone and a Welcome for \
+                 this device is pending — awaiting it rather than external-joining"
+            );
+        } else if may_rejoin_via_external_join(gates, mls_group_id, user_id) {
             // An explicit rebuild drops the group by name; an external join never replaces a confirmed group (#1220).
             if group_exists {
                 let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
@@ -1822,6 +1838,8 @@ pub(super) enum CommitApply {
     Applied {
         adds: Vec<AddedLeaf>,
         epoch_after: u64,
+        /// The commit removed our own leaf (#1772): the group is now inactive.
+        removed_us: bool,
     },
     /// Must rebuild; `apply_one_commit` already deleted the local group.
     Recover(RecoverReason),
@@ -1868,38 +1886,6 @@ fn readded_epoch(
         .filter(|&epoch| epoch >= from)
         .min()
         .map(|epoch| epoch + 1)
-}
-
-/// Keep what the external join needs to prove this device was removed from
-/// `generation` before the rebuild drops its group at `held` (#1765).
-async fn note_rebuild(
-    state: &Arc<AppState>,
-    mls_group_id: &str,
-    generation: i64,
-    held: u64,
-    readded_at: Option<u64>,
-) {
-    let guard = state.local_db.lock().await;
-    let Some(db) = guard.as_ref() else {
-        return;
-    };
-    let Some(group) = load_stored_group_at(db.conn(), mls_group_id, generation) else {
-        return;
-    };
-    let Some(own_leaf) = group.own_leaf_node() else {
-        return;
-    };
-    super::join_branch::note_rebuild(
-        db.conn(),
-        mls_group_id,
-        generation,
-        &super::join_branch::PendingRebuild {
-            held,
-            readded_at,
-            own_encryption_key: own_leaf.encryption_key().tls_serialize_detached().unwrap_or_default(),
-            removed: false,
-        },
-    );
 }
 
 /// Apply a single commit from the log to the local group.
@@ -1974,10 +1960,12 @@ where
     // The tree BEFORE the merge, for [`grafted_leaves`].
     let scheme = signature_scheme(group.ciphersuite());
     let before = leaf_fingerprints(&group);
+    let mut removed_us = false;
 
     match group.process_message(provider, protocol_msg) {
         Ok(processed) => match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
+                removed_us = staged.self_removed();
                 crate::commands::file_keys::keep_epoch_kek(provider, &group);
                 if let Err(e) = group.merge_staged_commit(provider, *staged) {
                     crate::diag!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
@@ -2033,6 +2021,7 @@ where
     CommitApply::Applied {
         adds: grafted_leaves(&before, &group, scheme),
         epoch_after: group.epoch().as_u64(),
+        removed_us,
     }
 }
 

@@ -391,7 +391,8 @@ pub const PRUNE_MAX_BEHIND_HEAD: i64 = 512;
 /// The retention floor (EXCLUSIVE): the prune deletes commits with `epoch < floor`.
 ///
 /// Pure, audited against `specs/tla/Delivery.tla`. Inputs:
-///   * `min_since` — MIN reported applied epoch over current member devices, or
+///   * `min_since` — MIN reported applied epoch over current member devices
+///     (and removed devices that may still come back, see `departed_devices`), or
 ///     `None` when no member has reported.
 ///   * `all_reported` — whether EVERY current member device has a reported
 ///     high-water. Tier 1 only prunes when the whole roster is accounted for; a
@@ -515,21 +516,75 @@ pub(crate) async fn current_member_devices(
     Ok(out)
 }
 
-/// Every reported `(device_id -> (generation, since_epoch))` high-water for a
-/// conversation, read from the LOG DB.
+/// One device's reported high-water, as [`recorded_since`] reads it.
+#[derive(Clone, Copy, Debug)]
+struct Reported {
+    generation: i64,
+    since: i64,
+    /// Advanced within the staleness window (`POLLIS_DS_WATERMARK_STALE_MONTHS`, #720).
+    fresh: bool,
+}
+
+/// Every reported high-water for a conversation, read from the LOG DB.
 async fn recorded_since(
     log: &Connection,
     conversation_id: &str,
-) -> Result<HashMap<String, (i64, i64)>> {
+) -> Result<HashMap<String, Reported>> {
     let mut rows = log
         .query(
-            "SELECT device_id, generation, since_epoch FROM mls_commit_since WHERE conversation_id = ?1",
-            libsql::params![conversation_id.to_string()],
+            "SELECT device_id, generation, since_epoch, updated_at >= datetime('now', ?2) \
+             FROM mls_commit_since WHERE conversation_id = ?1",
+            libsql::params![
+                conversation_id.to_string(),
+                crate::messages::watermark_stale_modifier()
+            ],
         )
         .await?;
     let mut out = HashMap::new();
     while let Some(r) = rows.next().await? {
-        out.insert(r.get::<String>(0)?, (r.get::<i64>(1)?, r.get::<i64>(2)?));
+        out.insert(
+            r.get::<String>(0)?,
+            Reported {
+                generation: r.get::<i64>(1)?,
+                since: r.get::<i64>(2)?,
+                fresh: r.get::<Option<i64>>(3)?.unwrap_or(0) != 0,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// The devices that still pin the log although their user is no longer a
+/// member (#1772): each one that reported here, is not a current member
+/// device, is still registered and unrevoked, and advanced within the
+/// staleness window.
+///
+/// A removed device's group stays at the epoch it last held. When it is
+/// re-added it replays the log up to its own removal, where openmls refuses
+/// the next commit (`UseAfterEviction`). That proves the exact removal epoch,
+/// and no DS-supplied value is involved. The replay needs the commits from the
+/// device's last report on, so it keeps them the way a lagging member does.
+/// Tier 2 and the staleness window still bound this. Past either, the device
+/// errs toward showing the gap as lost.
+async fn departed_devices(
+    main: &Connection,
+    members: &[String],
+    recorded: &HashMap<String, Reported>,
+) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for (device_id, reported) in recorded {
+        if !reported.fresh || members.contains(device_id) {
+            continue;
+        }
+        let mut rows = main
+            .query(
+                "SELECT 1 FROM user_device WHERE device_id = ?1 AND revoked_at IS NULL",
+                libsql::params![device_id.clone()],
+            )
+            .await?;
+        if rows.next().await?.is_some() {
+            out.push(device_id.clone());
+        }
     }
     Ok(out)
 }
@@ -599,6 +654,7 @@ pub async fn prune_commit_log(
     let head = head_epoch_in(log, conversation_id, generation).await?;
     let members = current_member_devices(main, conversation_id).await?;
     let recorded = recorded_since(log, conversation_id).await?;
+    let departed = departed_devices(main, &members, &recorded).await?;
 
     // Epoch-wise over devices in the head generation (others count as unreported); generation-wise over all.
     let (min_since, all_reported_in_head_gen, min_generation, all_reported) = if members.is_empty() {
@@ -612,7 +668,7 @@ pub async fn prune_commit_log(
         let mut all_gen = true;
         for d in &members {
             match recorded.get(d) {
-                Some(&(g, s)) => {
+                Some(&Reported { generation: g, since: s, .. }) => {
                     min_gen = Some(min_gen.map_or(g, |m: i64| m.min(g)));
                     if g == generation {
                         min_epoch = Some(min_epoch.map_or(s, |m: i64| m.min(s)));
@@ -626,6 +682,17 @@ pub async fn prune_commit_log(
                     all_epoch = false;
                     all_gen = false;
                 }
+            }
+        }
+        // A removed device only lowers the minimum (#1772). It never disables
+        // Tier 1: it needs its own lineage up to its removal, nothing newer.
+        for d in &departed {
+            let Some(&Reported { generation: g, since: s, .. }) = recorded.get(d) else {
+                continue;
+            };
+            min_gen = Some(min_gen.map_or(g, |m: i64| m.min(g)));
+            if g == generation {
+                min_epoch = Some(min_epoch.map_or(s, |m: i64| m.min(s)));
             }
         }
         (min_epoch, all_epoch, min_gen, all_gen)

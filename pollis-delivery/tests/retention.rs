@@ -503,3 +503,111 @@ async fn a_device_cannot_report_two_high_waters_for_one_conversation() {
         "expected a uniqueness failure, got: {err}"
     );
 }
+
+/// Remove `user_id` from `group_id`'s roster, keeping its devices registered.
+async fn remove_member(main: &Db, group_id: &str, user_id: &str) {
+    main.conn()
+        .await
+        .unwrap()
+        .execute(
+            "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            libsql::params![group_id, user_id],
+        )
+        .await
+        .unwrap();
+}
+
+/// #1772: a removed (not revoked) device keeps pinning the log at its last
+/// report, so when it is re-added it can replay to its own removal and learn
+/// the exact epoch from openmls instead of from the DS.
+#[tokio::test]
+async fn a_removed_device_pins_the_floor_until_it_returns() {
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+    seed_commits(&log, conv, 30).await;
+    let log_conn = log.conn().await.unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 0, 30).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 12).await.unwrap();
+    remove_member(&main, conv, "bob").await;
+
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
+    assert_eq!(report.floor, 12 - PRUNE_SLACK_EPOCHS, "bob's last report still pins it");
+    assert!(epochs(&log, conv).await.contains(&12));
+
+    // Bob is back and caught up: the pin lifts with his report.
+    add_member_row(&main, conv, "bob").await;
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 30).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
+    assert_eq!(report.floor, 30 - PRUNE_SLACK_EPOCHS);
+}
+
+/// #1772: a removed device that is revoked, or silent past the staleness
+/// window, stops pinning; it never blocks Tier 1 by being absent.
+#[tokio::test]
+async fn a_removed_device_stops_pinning_when_revoked_or_stale() {
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+    add_member(&main, conv, "carol", "c-dev").await;
+    seed_commits(&log, conv, 30).await;
+    let log_conn = log.conn().await.unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 0, 30).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 12).await.unwrap();
+    record_commit_since(&log_conn, conv, "carol", "c-dev", 0, 14).await.unwrap();
+    remove_member(&main, conv, "bob").await;
+    remove_member(&main, conv, "carol").await;
+    revoke_device(&main, "b-dev").await;
+    log_conn
+        .execute(
+            "UPDATE mls_commit_since SET updated_at = datetime('now', '-13 months') \
+             WHERE device_id = 'c-dev'",
+            (),
+        )
+        .await
+        .unwrap();
+
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
+    assert_eq!(report.floor, 30 - PRUNE_SLACK_EPOCHS, "neither revoked nor stale devices pin");
+}
+
+/// #1772: a device removed on a retired lineage keeps that lineage, without
+/// holding back pruning of the live one.
+#[tokio::test]
+async fn a_removed_device_keeps_its_retired_lineage() {
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+    seed_commits_in(&log, conv, 0, 10).await;
+    seed_commits_in(&log, conv, 1, 24).await;
+    let log_conn = log.conn().await.unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 1, 20).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 3).await.unwrap();
+    remove_member(&main, conv, "bob").await;
+
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
+    assert_eq!(report.generation_floor, 0, "bob's lineage stays");
+    assert_eq!(epochs_in(&log, conv, 0).await.len(), 11);
+    assert_eq!(report.floor, 20 - PRUNE_SLACK_EPOCHS, "the live lineage still prunes");
+}
+
+async fn add_member_row(main: &Db, group_id: &str, user_id: &str) {
+    main.conn()
+        .await
+        .unwrap()
+        .execute(
+            "INSERT INTO group_member (group_id, user_id) VALUES (?1, ?2)",
+            libsql::params![group_id, user_id],
+        )
+        .await
+        .unwrap();
+}

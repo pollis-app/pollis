@@ -92,7 +92,7 @@ pub async fn leave_group(
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // MLS forbids committing your own removal, so wipe local state; the next epoch locks the leaver out.
-    match crate::commands::mls::forget_local_mls_group(state, &group_id).await {
+    match crate::commands::mls::leave_local_mls_group(state, &group_id).await {
         Ok(()) => {}
         Err(e) => crate::diag!("[mls] leave_group: forget local group {group_id}: {e}"),
     }

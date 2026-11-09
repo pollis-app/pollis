@@ -1104,6 +1104,15 @@ Two tiers (`pollis_delivery::commit::prune_floor`, modelled in
   the SLOWEST member, never the fastest). Only applied when the WHOLE roster has
   reported; an unreported/legacy member pins the floor at 0. A revoked device is
   excluded (it can't rejoin — I5).
+  A device whose user was REMOVED keeps pinning the floor at its last report
+  (#1772, `departed_devices`), and in the generation floor keeps its own lineage,
+  as long as it is still registered, unrevoked, and advanced within
+  `POLLIS_DS_WATERMARK_STALE_MONTHS`. When it is re-added it replays the log to
+  its own removal, which is how it learns the exact removal epoch without
+  trusting the DS. It only lowers the minimum: being absent from the head
+  lineage never disables Tier 1 the way an unreported current member does. Tier
+  2 still caps it, and past the cap the device shows everything it never reached
+  as lost.
 - **Tier 2 (hard cap):** floor = `head − PRUNE_MAX_BEHIND_HEAD`, bounding storage +
   catch-up even against a perpetually-offline device. A member pruned past its epoch
   reads an earliest-available epoch above its own, trips the client gap detector
