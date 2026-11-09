@@ -24,10 +24,14 @@ appId: ${MAESTRO_APP_ID}
 - takeScreenshot: biometric-02-security-on
 - stopApp
 - launchApp
+# Android's BiometricPrompt is a secure window: while it is up, the app's own
+# views are not in the hierarchy Maestro reads (and screenshots are black). So
+# this wait may time out there; the keypad never showing is what is asserted.
 - extendedWaitUntil:
     visible:
       id: "pin-biometric|tab-groups"
-    timeout: 20000
+    timeout: 8000
+    optional: true
 - assertNotVisible:
     id: "btn-pin-1"
 # Android: the script now answers the prompt with NO match.

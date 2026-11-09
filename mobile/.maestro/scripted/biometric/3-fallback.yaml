@@ -1,12 +1,12 @@
 appId: ${MAESTRO_APP_ID}
 ---
 # BIOMETRIC UNLOCK (#1685), part 3 of 6: a failed match. The system prompt
-# offers to try again; Cancel it, and the PIN keypad takes over with no error
+# stays up ("Not recognized"); dismiss it, and the PIN keypad takes over with no error
 # (a biometric failure is never a wrong PIN), plus a button to try biometrics
 # again.
-- tapOn:
-    text: "Cancel"
-    optional: true
+# Dismiss it with Back (BiometricPrompt reports a user cancel). Its window is
+# secure, so Maestro cannot reliably hit its Cancel button.
+- pressKey: Back
 - extendedWaitUntil:
     visible:
       id: "btn-pin-1"
