@@ -2,12 +2,13 @@ import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { dialogSave, invoke } from "../../bridge";
 import { Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
-import { getMediaUrl, mediaArgs, peekMediaUrl } from "../../services/r2-upload";
+import { spotlightRoll } from "../../utils/mediaRoll";
+import { getMediaUrl, peekMediaUrl, saveAttachmentAs } from "../../services/r2-upload";
+import { MediaSpotlight } from "./MediaSpotlight";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
@@ -31,6 +32,8 @@ interface AttachmentDisplayProps {
   tile?: boolean;
   /** Overrides the default `attachment-<id>` test id. */
   testId?: string;
+  /** The message's attachments: its spotlight steps through their images and videos (#1788). */
+  roll?: readonly MessageAttachment[];
 }
 
 
@@ -45,6 +48,7 @@ export const AttachmentDisplay = observer(({
   attachment,
   tile = false,
   testId,
+  roll,
 }: AttachmentDisplayProps) => {
   const { t } = useTranslation("chat");
   // Sensitive media (#1568): the reveal is shared across surfaces.
@@ -216,28 +220,11 @@ export const AttachmentDisplay = observer(({
     };
   }, [downloadUrl, attachment.localPreviewUrl]);
 
-  // Rust writes the file (`save_media_to_path`) so it gets the platform quarantine marker; see pollis-core/src/downloads.rs.
-  const triggerSave = async (): Promise<boolean> => {
-    const target = await dialogSave({ defaultPath: attachment.filename });
-    if (!target) {
-      return false;
-    }
-    const marking = await invoke<string>("save_media_to_path", {
-      ...mediaArgs(attachment),
-      targetPath: target,
-    });
-    // A failed marker (FAT32, network share) doesn't fail the save, but is reported.
-    if (marking.startsWith("failed")) {
-      console.warn("[attachment] saved without a download marker:", marking);
-    }
-    return true;
-  };
-
   const handleDownload = async () => {
     if (downloadStatus !== "idle") { return; }
     setDownloadStatus("downloading");
     try {
-      const saved = await triggerSave();
+      const saved = await saveAttachmentAs(attachment);
       setDownloadStatus(saved ? "done" : "idle");
       if (saved) {
         setTimeout(() => setDownloadStatus("idle"), 2000);
@@ -302,6 +289,18 @@ export const AttachmentDisplay = observer(({
       </button>
     </div>
   );
+
+  const renderSpotlight = (openedUrl: string) => {
+    const { items, index } = spotlightRoll(roll, attachment);
+    return (
+      <MediaSpotlight
+        items={items}
+        startIndex={index}
+        openedUrl={openedUrl}
+        onClose={() => setViewerOpen(false)}
+      />
+    );
+  };
 
   const renderCaptionBar = (extra?: React.ReactNode) => (
     <div
@@ -390,38 +389,7 @@ export const AttachmentDisplay = observer(({
         </PressButton>
         ))}
 
-        {viewerOpen && downloadUrl && !sensitivity.hidden && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 9999,
-              background: "rgba(0,0,0,0.92)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "zoom-out",
-            }}
-            onClick={() => setViewerOpen(false)}
-          >
-            <img
-              src={downloadUrl}
-              alt={attachment.filename}
-              style={{
-                maxWidth: "90vw",
-                maxHeight: "85vh",
-                objectFit: "contain",
-                cursor: "default",
-                borderRadius: "1rem",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-            <div onClick={(e) => e.stopPropagation()}>
-              {renderLightboxBar()}
-            </div>
-          </div>
-        )}
+        {viewerOpen && downloadUrl && !sensitivity.hidden && renderSpotlight(downloadUrl)}
       </>
     );
   }
@@ -573,38 +541,7 @@ export const AttachmentDisplay = observer(({
         </PressButton>
         ))}
 
-        {viewerOpen && downloadUrl && !sensitivity.hidden && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 9999,
-              background: "rgba(0,0,0,0.92)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "zoom-out",
-            }}
-            onClick={() => setViewerOpen(false)}
-          >
-            <video
-              autoFocus
-              src={downloadUrl}
-              controls
-              style={{
-                maxWidth: "90vw",
-                maxHeight: "85vh",
-                cursor: "default",
-                borderRadius: "1rem",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-            <div onClick={(e) => e.stopPropagation()}>
-              {renderLightboxBar()}
-            </div>
-          </div>
-        )}
+        {viewerOpen && downloadUrl && !sensitivity.hidden && renderSpotlight(downloadUrl)}
       </>
     );
   }

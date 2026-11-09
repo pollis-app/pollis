@@ -49,7 +49,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         )}
         {(message.attachments ?? []).map((attachment) => (
           <div key={attachment.id} className="mt-1">
-            <AttachmentDisplay attachment={attachment} />
+            <AttachmentDisplay attachment={attachment} roll={message.attachments} />
           </div>
         ))}
       </>

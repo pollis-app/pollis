@@ -134,7 +134,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       {mediaThumbs.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {mediaThumbs.map((a) => (
-            <AttachmentDisplay key={a.id} attachment={a} />
+            <AttachmentDisplay key={a.id} attachment={a} roll={message.attachments} />
           ))}
         </div>
       )}
@@ -142,7 +142,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       {otherAttachments.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {otherAttachments.map((a) => (
-            <AttachmentDisplay key={a.id} attachment={a} />
+            <AttachmentDisplay key={a.id} attachment={a} roll={message.attachments} />
           ))}
         </div>
       )}

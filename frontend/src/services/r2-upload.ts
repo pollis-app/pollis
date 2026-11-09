@@ -1,4 +1,4 @@
-import { invoke } from '../bridge';
+import { dialogSave, invoke } from '../bridge';
 import type { MessageAttachment, PresignedUploadResponse } from '../types';
 import { IMAGE_EXT_MIME } from '../utils/fileIcon';
 
@@ -85,6 +85,24 @@ export function mediaArgs(attachment: MessageAttachment) {
     sha256: attachment.sha256,
     keyScope: attachment.key_scope,
   };
+}
+
+// Rust writes the file (`save_media_to_path`) so it gets the platform quarantine marker; see pollis-core/src/downloads.rs.
+/** Save an attachment to a path the user picks; false when the picker was cancelled. */
+export async function saveAttachmentAs(attachment: MessageAttachment): Promise<boolean> {
+  const target = await dialogSave({ defaultPath: attachment.filename });
+  if (!target) {
+    return false;
+  }
+  const marking = await invoke<string>('save_media_to_path', {
+    ...mediaArgs(attachment),
+    targetPath: target,
+  });
+  // A failed marker (FAT32, network share) doesn't fail the save, but is reported.
+  if (marking.startsWith('failed')) {
+    console.warn('[attachment] saved without a download marker:', marking);
+  }
+  return true;
 }
 
 /// Download + decrypt an attachment into a blob URL.

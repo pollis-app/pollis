@@ -96,7 +96,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                 {parsed.attachments && parsed.attachments.length > 0 ? (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {parsed.attachments.map((attachment) => (
-                      <AttachmentDisplay key={attachment.id} attachment={attachment} />
+                      <AttachmentDisplay key={attachment.id} attachment={attachment} roll={parsed.attachments} />
                     ))}
                   </div>
                 ) : null}
