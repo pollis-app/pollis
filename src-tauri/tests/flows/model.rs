@@ -506,3 +506,51 @@ fn model_marathon_convergence() {
         panic!("marathon soak found a failing case: {err}");
     }
 }
+
+/// #1765 (nightly marathon, run 42487852150): actor 1 is removed while offline
+/// at legacy-lineage epoch 2, two messages are sealed at epoch 3 without it, the
+/// group migrates, and it is re-added into the successor by Welcome. Those two
+/// messages were never sent to it; they must pass silently, not as `lineage`
+/// placeholders. The zero-loss check on drop is the assertion.
+#[test]
+#[serial]
+fn a_re_add_into_a_successor_lineage_passes_the_gap_silently() {
+    use Op::*;
+    let ops = [Add(1), Remove(1), Send(0), Send(0), Upgrade, Add(1)];
+    runtime()
+        .block_on(run_case(&ops, 3, true))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+}
+
+/// #1765 (runs 41314038789, 41484965441): actor 1 processes its own removal, a
+/// message is sealed an epoch later, and its re-add Welcome is dropped, so it
+/// comes back by external join after the eviction. The message sealed while it
+/// was out must pass silently, not as a `stranded` placeholder.
+#[test]
+#[serial]
+fn an_external_rejoin_after_eviction_passes_the_gap_silently() {
+    use Op::*;
+    let ops = [Add(1), Remove(1), Sync(1), Add(2), Send(0), Fault(2), Add(1)];
+    runtime()
+        .block_on(run_case(&ops, 4, false))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+}
+
+/// #1765 (local marathon soak): actor 1 falls behind, is removed without
+/// noticing, the log is retention-pruned past it (a removed device pins
+/// nothing), and its re-add Welcome is dropped. It rebuilds over the prune gap
+/// by external join; the log batch names the commit that re-added it, so the
+/// gap up to that re-add passes silently instead of as `stranded`.
+#[test]
+#[serial]
+fn a_rebuild_over_a_prune_after_a_re_add_passes_the_gap_silently() {
+    use Op::*;
+    // Enough rotations that alice's reports lift the prune floor
+    // (`PRUNE_SLACK_EPOCHS` = 8) above actor 1's stale epoch.
+    let mut ops = vec![Add(1), Remove(1), Send(0)];
+    ops.extend(std::iter::repeat_n(Rotate(0), 12));
+    ops.extend([Fault(2), Add(1)]);
+    runtime()
+        .block_on(run_case(&ops, 3, false))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+}

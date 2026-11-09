@@ -2,7 +2,9 @@
 //!
 //! Not a loss: messages sent before joining, and this device's own control frames.
 
-use crate::harness::{enroll_second_device, expect_losses, wipe, TestClient};
+use crate::harness::{
+    arm_ds_fault, clear_ds_fault, enroll_second_device, expect_losses, wipe, DsFault, TestClient,
+};
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
 
@@ -155,6 +157,67 @@ async fn messages_sent_while_removed_are_not_losses() {
     assert!(got.contains(&"bob is back"), "{msgs:#?}");
     assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
     assert!(placeholders(&msgs).is_empty(), "a removal gap is not a loss: {msgs:#?}");
+}
+
+/// #1765: a removal gap passes silently only from the epoch the removal
+/// produced. A message sealed while Bob was still in, that he never reached, is
+/// a real loss even though he was later removed and came back by external join.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_message_sealed_before_the_removal_stays_a_loss() {
+    wipe().await;
+    expect_losses();
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let mut carol = TestClient::new().await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Gap").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member(&alice, &group_id, &channel_id, &bob, &bob_p).await;
+    alice.send_channel_message(&channel_id, "read in time").await;
+    bob.fetch_channel_messages(&channel_id).await;
+
+    // Sealed to Bob, who never reads it before he is removed.
+    alice.send_channel_message(&channel_id, "will be lost").await;
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    add_member(&alice, &group_id, &channel_id, &carol, &carol_p).await;
+    alice.send_channel_message(&channel_id, "while bob is out").await;
+
+    // Re-add Bob with his Welcome lost, so he comes back by external join.
+    arm_ds_fault(DsFault::DropWelcome);
+    alice.invite(&group_id, &bob_p.username).await;
+    clear_ds_fault();
+    let invite_id = bob.first_pending_invite().await.expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    // A bare replay first, so the epoch "will be lost" was sealed at is passed
+    // unread: it applies the removal, is refused the next commit, and rejoins.
+    pollis_core::commands::mls::process_pending_commits_inner(
+        &bob.state,
+        &group_id,
+        bob.user_id(),
+    )
+    .await
+    .expect("bare replay");
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "bob is back").await;
+
+    let msgs = bob.fetch_channel_messages(&channel_id).await;
+    let got = contents(&msgs);
+    assert!(got.contains(&"bob is back"), "{msgs:#?}");
+    assert!(!got.contains(&"while bob is out"), "{msgs:#?}");
+    assert_eq!(
+        placeholders(&msgs).len(),
+        1,
+        "only \"will be lost\", sealed before the removal, shows; the gap is silent: {msgs:#?}"
+    );
 }
 
 /// False positives: a device's own receipts, deletes and edits can't be decrypted on fetch.

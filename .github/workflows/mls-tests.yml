@@ -443,8 +443,12 @@ jobs:
             echo "# paste the Op vector below into a fixed-sequence regression in"
             echo "# src-tauri/tests/flows/model.rs (or adversarial.rs)."
             echo
+            # A failure raised outside `run_case` (the zero-loss check on client
+            # drop, #1524) carries no `op sequence` line; proptest's own
+            # `minimal failing input` block is the same Op vector (#1765).
             grep -F 'op sequence' marathon-soak.log || \
-              echo "(no 'op sequence' line found — see marathon-soak.log for the raw failure)"
+              sed -n '/^minimal failing input/,/^]/p' marathon-soak.log | grep . || \
+              echo "(no op sequence found — see marathon-soak.log for the raw failure)"
           } > marathon-failing-op-sequence.txt
           cat marathon-failing-op-sequence.txt
 
@@ -695,6 +699,9 @@ jobs:
     needs: [changes, tests, flows, macos-at-rest]
     if: ${{ always() }}
     runs-on: ubuntu-latest
+    # Only for the nightly-failure issue below.
+    permissions:
+      issues: write
     steps:
       - name: Evaluate gate
         env:
@@ -746,3 +753,31 @@ jobs:
           fi
           echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT flows=$FLOWS_RESULT macos=$MACOS_RESULT) — failing closed."
           exit 1
+
+      # A red nightly reaches nobody on its own: no PR is waiting on it, and the
+      # marathon runs only here (#1765). Open one tracking issue, or comment on
+      # it if it is still open, so the owner is notified every failing night.
+      - name: File the nightly failure
+        if: ${{ failure() && github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # The repo belongs to an org, which cannot be assigned; a person can.
+          NIGHTLY_OWNER: actuallydan
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+          FLOWS_RESULT: ${{ needs.flows.result }}
+          MACOS_RESULT: ${{ needs.macos-at-rest.result }}
+        run: |
+          title="Nightly MLS tests failing"
+          body="The scheduled \`mls-tests\` run failed on ${GITHUB_SHA::8}: $RUN_URL
+
+          tests (incl. the marathon soak) = $TESTS_RESULT, flows = $FLOWS_RESULT, macos-at-rest = $MACOS_RESULT.
+          A marathon failure uploads \`marathon-failing-op-sequence\`; promote it per docs/machine-checked-correctness-design.md §5.4."
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --assignee "$NIGHTLY_OWNER"
+          fi

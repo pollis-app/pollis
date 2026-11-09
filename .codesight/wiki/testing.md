@@ -885,7 +885,12 @@ sequence** is the repro of record, not a proptest seed.
 meaningful size (`MARATHON_OPS=500`, `MARATHON_ACTORS=8`) on a schedule. On
 failure it distils the failing op sequence out of the teed log into
 `marathon-failing-op-sequence.txt` and uploads it as an artifact — the op sequence
-being the only repro of record for a non-seedable run.
+being the only repro of record for a non-seedable run. A failure raised outside
+`run_case` (the zero-loss check on client drop) prints no `op sequence` line, so
+the step falls back to proptest's `minimal failing input` block, the same Op
+vector. A red scheduled run also opens a `Nightly MLS tests failing` issue
+assigned to the owner, or comments on it while it is open (`gate` job, #1765):
+the nightly was red for a week before anyone noticed.
 
 ## Vault media soak (#1491)
 

@@ -857,6 +857,18 @@ fn record_losses(
                 removed += 1;
                 continue;
             }
+            // Never reached, and sealed inside a recorded gap while this device
+            // was out of that lineage's tree: never sent to it (#1765). The gap
+            // starts no lower than the device's last held epoch + 1, so what was
+            // sealed while it held the lineage, or that it reached and failed to
+            // open, stays a loss.
+            if !attempted
+                && crate::commands::mls::left_gap(conn, mls_group_id, sealed_at.0)
+                    .is_some_and(|gap| gap.covers(sealed_at.1))
+            {
+                removed += 1;
+                continue;
+            }
             let floor = crate::commands::mls::first_join(conn, mls_group_id, sealed_at.0);
             let reason = match super::loss::classify(sealed_at, lineage, floor, attempted) {
                 Some(reason) => reason,

@@ -26,7 +26,7 @@ pub use provider::{
 #[cfg(feature = "media")]
 pub(crate) use provider::MlsProvider;
 pub(crate) use join_branch::{
-    entitled_since, first_join, parse_ds_instant, record_first_join, Entitlement,
+    entitled_since, first_join, left_gap, parse_ds_instant, record_first_join, Entitlement,
 };
 // Suite-migration seam for the flows harness (#669).
 #[cfg(feature = "test-harness")]
