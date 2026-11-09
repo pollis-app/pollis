@@ -506,3 +506,32 @@ fn model_marathon_convergence() {
         panic!("marathon soak found a failing case: {err}");
     }
 }
+
+/// #1765 (nightly marathon, run 42487852150): actor 1 is removed while offline
+/// at legacy-lineage epoch 2, two messages are sealed at epoch 3 without it, the
+/// group migrates, and it is re-added into the successor by Welcome. Those two
+/// messages were never sent to it; they must pass silently, not as `lineage`
+/// placeholders. The zero-loss check on drop is the assertion.
+#[test]
+#[serial]
+fn a_re_add_into_a_successor_lineage_passes_the_gap_silently() {
+    use Op::*;
+    let ops = [Add(1), Remove(1), Send(0), Send(0), Upgrade, Add(1)];
+    runtime()
+        .block_on(run_case(&ops, 3, true))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+}
+
+/// #1765 (runs 41314038789, 41484965441): actor 1 processes its own removal, a
+/// message is sealed an epoch later, and its re-add Welcome is dropped, so it
+/// comes back by external join after the eviction. The message sealed while it
+/// was out must pass silently, not as a `stranded` placeholder.
+#[test]
+#[serial]
+fn an_external_rejoin_after_eviction_passes_the_gap_silently() {
+    use Op::*;
+    let ops = [Add(1), Remove(1), Sync(1), Add(2), Send(0), Fault(2), Add(1)];
+    runtime()
+        .block_on(run_case(&ops, 4, false))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+}

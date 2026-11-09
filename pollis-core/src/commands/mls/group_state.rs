@@ -565,12 +565,23 @@ async fn external_join_attempt(
             super::join_branch::clear(db.conn(), conversation_id, stored_generation);
             super::join_branch::mark_fresh_if_first(db.conn(), conversation_id, stored_generation);
             // Only now: a losing branch never held the lineage (#1312).
-            super::join_branch::record_first_join(
-                db.conn(),
-                conversation_id,
-                stored_generation,
-                stored_epoch as u64 + 1,
-            );
+            // Back in after an eviction, the join is a re-add: the gap since is
+            // not this device's loss, as for a Welcome (#1765).
+            if super::join_branch::take_left(db.conn(), conversation_id, stored_generation) {
+                super::join_branch::record_added(
+                    db.conn(),
+                    conversation_id,
+                    stored_generation,
+                    stored_epoch as u64 + 1,
+                );
+            } else {
+                super::join_branch::record_first_join(
+                    db.conn(),
+                    conversation_id,
+                    stored_generation,
+                    stored_epoch as u64 + 1,
+                );
+            }
             // #1571: a device registered before its user joined, joining late, records that gap as a loss.
             let fresh =
                 super::join_branch::take_fresh(db.conn(), conversation_id, stored_generation);
@@ -1907,6 +1918,10 @@ where
                 "[mls] process_pending_commits: commit at epoch {commit_epoch} for {mls_group_id} failed to apply ({e}) — classified {reason:?}, deleting local group to re-join"
             );
             let _ = group.delete(provider.storage());
+            // A canonical commit removed us, so whatever lets us back in is a re-add (#1765).
+            if reason == RecoverReason::Evicted {
+                super::join_branch::mark_left(provider.raw_conn(), mls_group_id, generation);
+            }
             return CommitApply::Recover(reason);
         }
     }

@@ -430,11 +430,22 @@ asks `messages::loss::classify`:
   (`record_added`, replacing it — so the gap while a removed member was out
   counts too); creating the group or an external join only sets it if none
   exists (`record_first_join`), because a recovery rebuild's gap was sent while
-  the device was a member and IS a loss. That is the accepted pre-join loss;
-  one summary log line counts them.
+  the device was a member and IS a loss. The exception is an external join
+  after an eviction (#1765): applying a commit that fails `UseAfterEviction`
+  marks the lineage left (`join_branch::mark_left`), and the join that next
+  lets the device back in consumes the mark and moves the floor like a Welcome.
+  That is the accepted pre-join loss; one summary log line counts them.
 - **Not a loss either** — refused with `evicted`: sealed at an epoch this device
   had been removed from, reached before any re-add moves the floor (#1524). Logged
   as one `[ingest] … sealed after this device was removed` count.
+- **Not a loss either** — never reached, in an OLDER lineage the device left
+  before it closed (#1765). A suite migration moves every roster device into the
+  successor by its own Welcome at `SUCCESSOR_OPENING_EPOCH` (1), so a Welcome
+  into a successor at a later epoch is an Add of a device that was off the
+  roster when the lineage opened: `mark_predecessors_left` marks each older
+  lineage it held, and their unreached envelopes pass with the `evicted` count.
+  This is the cross-lineage form of a re-add's silent gap; an envelope it did
+  reach and fail to open there is still a loss.
 - **`stranded`** — the replay started above its epoch, so it was never attempted.
 - **`failed`** — attempted at its own epoch and would not open.
 - **`lineage`** — sealed in a generation this device held but no longer does.

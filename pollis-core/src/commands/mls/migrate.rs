@@ -216,7 +216,11 @@ pub(super) async fn migrate_to_current_suite_if_due(
         if let Some(db) = guard.as_ref() {
             super::generation::set_local_generation(db.conn(), conversation_id, successor);
             // The founder's leaf is merged by construction (#666).
-            super::self_update::record_self_update(db.conn(), conversation_id, 1);
+            super::self_update::record_self_update(
+                db.conn(),
+                conversation_id,
+                super::join_branch::SUCCESSOR_OPENING_EPOCH,
+            );
         }
     }
     let _ = forget_local_mls_group_at(state, conversation_id, generation).await;

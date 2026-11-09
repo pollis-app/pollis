@@ -857,6 +857,17 @@ fn record_losses(
                 removed += 1;
                 continue;
             }
+            // Never reached, in an older lineage this device left before it
+            // closed: sealed after it was out, or in a stint a re-add has since
+            // closed — the gap a re-add within one lineage passes too (#1765).
+            // An envelope it reached and failed to open stays a loss.
+            if !attempted
+                && sealed_at.0 < lineage
+                && crate::commands::mls::has_left(conn, mls_group_id, sealed_at.0)
+            {
+                removed += 1;
+                continue;
+            }
             let floor = crate::commands::mls::first_join(conn, mls_group_id, sealed_at.0);
             let reason = match super::loss::classify(sealed_at, lineage, floor, attempted) {
                 Some(reason) => reason,

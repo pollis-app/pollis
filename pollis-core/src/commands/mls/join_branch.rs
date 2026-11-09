@@ -306,6 +306,83 @@ pub(crate) fn entitled_since(
     })
 }
 
+/// The epoch a successor lineage opens at: the migration's one commit moves
+/// every roster device in by a Welcome at this epoch (#454 P4, "move everyone
+/// or nobody"). A Welcome into a successor at any later epoch is an Add, so the
+/// device it adds was not on the roster when the lineage opened.
+pub(crate) const SUCCESSOR_OPENING_EPOCH: u64 = 1;
+
+/// `mls_kv` scope marking a lineage whose tree this device left (#1765). Key:
+/// as [`UNCONFIRMED_JOIN_SCOPE`]. Value: empty.
+///
+/// A removal and re-add leaves a gap that is never this device's loss (#1524):
+/// nothing sealed in it was sent to the device. A Welcome re-add moves the floor
+/// ([`record_added`]) and so passes the gap. Two re-entries did not:
+///
+/// * an EXTERNAL JOIN after an eviction only kept the first floor
+///   ([`record_first_join`]); [`take_left`] makes it move the floor;
+/// * a re-add into a LATER lineage never moves the floor of the lineage the
+///   device left, so what was sealed there after it left read as lost.
+///   [`mark_predecessors_left`] marks those lineages for `record_losses`.
+const LEFT_TREE_SCOPE: &str = "pollis_left_tree";
+
+/// Record that this device is out of `(conversation_id, generation)`'s tree. Best-effort.
+pub(crate) fn mark_left(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) {
+    if let Err(e) = conn.execute(
+        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, X'')",
+        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
+    ) {
+        crate::diag!(
+            "[mls] could not record leaving {conversation_id} generation {generation}: {e}"
+        );
+    }
+}
+
+/// Has this device left `(conversation_id, generation)`'s tree?
+pub(crate) fn has_left(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) -> bool {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT 1 FROM mls_kv WHERE scope = ?1 AND key = ?2",
+        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
+        |_| Ok(()),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .is_some()
+}
+
+/// Consume the [`mark_left`] marker: is the join being recorded a RE-entry of
+/// a tree this device was evicted from?
+pub(crate) fn take_left(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) -> bool {
+    conn.execute(
+        "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
+        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+/// A Welcome ADDED this device to `generation` at `welcome_epoch`. Past the
+/// opening epoch that is not the migration carrying it over, so it was off the
+/// roster when the lineage opened: every older lineage it held, it had left
+/// before that lineage closed. Mark each one.
+pub(crate) fn mark_predecessors_left(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    welcome_epoch: u64,
+) {
+    if welcome_epoch <= SUCCESSOR_OPENING_EPOCH {
+        return;
+    }
+    for older in 0..generation {
+        if first_join(conn, conversation_id, older).is_some() {
+            mark_left(conn, conversation_id, older);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +463,23 @@ mod tests {
         assert_eq!(first_join(&conn, "c", 1), Some(0));
         record_added(&conn, "c", 0, 7);
         assert_eq!(first_join(&conn, "c", 0), Some(7));
+    }
+
+    /// #1765: only an Add past the opening epoch marks the lineages below it.
+    #[test]
+    fn an_add_into_a_successor_marks_the_held_predecessors_left() {
+        let conn = kv();
+        record_first_join(&conn, "c", 0, 1);
+        mark_predecessors_left(&conn, "c", 1, SUCCESSOR_OPENING_EPOCH);
+        assert!(!has_left(&conn, "c", 0), "the migration's own Welcome carries the device over");
+        mark_predecessors_left(&conn, "c", 2, 5);
+        assert!(has_left(&conn, "c", 0));
+        assert!(!has_left(&conn, "c", 1), "a lineage never held is not marked");
+        assert!(take_left(&conn, "c", 0));
+        assert!(!take_left(&conn, "c", 0), "consumed");
+        mark_left(&conn, "c", 3);
+        assert!(has_left(&conn, "c", 3));
+        assert!(!has_left(&conn, "d", 3), "per conversation");
     }
 
     fn kv() -> rusqlite::Connection {
