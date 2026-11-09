@@ -175,6 +175,30 @@ is): its bundle runs a unit-test class before the HTTP-server test, and Xcode
 `.orig`, `--revert` restores it). `maestro-run.sh` applies it on every iOS run,
 so a Maestro reinstall heals itself; drop both once Maestro ships the fix.
 
+## Seeded photos (`addMedia`, #1769)
+
+`addMedia` adds its fixture to the device library and never removes it, and
+on Android the system photo picker does not see what it adds.
+`mobile/scripts/maestro-media.sh` handles both, and nothing calls it by hand:
+
+- **Android:** the `maestro` wrapper in `scripts/maestro-app-id.sh`, which every
+  script sources, runs `maestro-media.sh reset` before each flow file holding
+  `- addMedia:`, then `maestro-media.sh watch` until the flow ends. `reset`
+  deletes the fixtures, their numbered copies (`media-viewer (7).png`) and the
+  app's "Save to photos" files in `DCIM/` through MediaStore. Android stops
+  numbering at 32 copies of one name, and every later `addMedia` of it then
+  failed with a bare gRPC `UNKNOWN` (the 1.0.32 gate). It then checks the
+  picker's own database against MediaStore (root adbd, which the userdebug
+  emulator has) and forces a full picker resync if they differ, so no reboot
+  is needed. `watch` asks MediaProvider to sync the picker each time MediaStore
+  changes: the row `addMedia` writes is completed without the notice that
+  would do it, so the picker never listed a freshly seeded photo, and the
+  flows used to pass only by picking an older copy left by an earlier run.
+- **iOS:** the library cannot be edited from outside, so `maestro-run.sh` (and
+  the custom-emoji and group-emoji scripts, for an iOS seeder) reset it once
+  per run: shut the simulator down, delete `data/Media/DCIM` and
+  `data/Media/PhotoData`, boot. Photos makes an empty library.
+
 ## Two-client flows
 
 **Join requests (automated):** `mobile/scripts/maestro-join-request.sh <admin-device> <peer-device>`

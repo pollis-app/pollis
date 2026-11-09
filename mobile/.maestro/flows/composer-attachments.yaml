@@ -232,8 +232,8 @@ tags:
     id: "btn-attach"
 - waitForAnimationToEnd:
     timeout: 5000
-# Android indexes `addMedia` files a moment after the push; wait for the
-# sixth photo to reach the picker before selecting.
+# Android's picker lists `addMedia` files only once `maestro-media.sh watch`
+# has synced it (#1769), a second or two; wait for the sixth photo first.
 - runFlow:
     when:
       platform: Android

@@ -103,6 +103,12 @@ case "$PLATFORM" in
       xcrun simctl list devices available | grep -E "iPhone|iPad" >&2
       exit 1
     fi
+    # Reset the photo library the flows seed with `addMedia` (#1769): it only
+    # ever grows otherwise. A reset reboots the simulator, so once per run;
+    # on Android the `maestro` wrapper resets before each such flow.
+    if grep -rqs -- '- addMedia:' "$TARGET"; then
+      "$HERE/scripts/maestro-media.sh" reset "$UDID"
+    fi
     xcrun simctl boot "$UDID" 2>/dev/null || true
     # Xcode 27: without this the XCTest driver never starts ("iOS driver not
     # ready in time"). Idempotent; see the script's header.
