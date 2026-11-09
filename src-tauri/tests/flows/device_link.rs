@@ -384,3 +384,36 @@ pub(crate) async fn link_by_offer(primary: &TestClient) -> TestClient {
         .expect("finalize");
     desktop
 }
+
+/// #1685: biometric unlock stands in for typing the PIN at unlock only. Unlocked by biometrics,
+/// linking a device still needs the PIN, and the biometric key is no substitute for it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn biometric_unlock_never_stands_in_for_the_pin_when_linking() {
+    wipe().await;
+    let (phone, _) = primary_with_group("duk-link@test.local").await;
+    let key = phone.enable_biometric_unlock().await;
+    phone.lock_then_biometric_unlock(&key).await;
+
+    for pin in [key.as_str(), ""] {
+        assert!(
+            phone
+                .invoke_try("create_device_link", json!({ "userId": phone.user_id(), "pin": pin }))
+                .await
+                .is_err(),
+            "create_device_link with {pin:?} must be refused"
+        );
+    }
+    assert!(
+        phone
+            .invoke_try("create_device_link", json!({ "userId": phone.user_id() }))
+            .await
+            .is_err(),
+        "create_device_link without a PIN must be refused"
+    );
+    let desktop = TestClient::new().await;
+    let (_, payload) = offer(&desktop).await;
+    assert!(accept(&phone, &payload, &key).await.is_err(), "the device key is not the PIN");
+    accept(&phone, &payload, TEST_PIN).await.unwrap_or_else(|e| panic!("accept with the PIN: {e}"));
+    create_link(&phone).await;
+}

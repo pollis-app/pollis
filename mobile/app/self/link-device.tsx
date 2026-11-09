@@ -7,6 +7,7 @@ import { useObserver } from "mobx-react-lite";
 import { Screen, Header, Button, BottomAction, Field, Body } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Heading } from "../../components/auth/Heading";
+import { AuthError } from "../../components/auth/AuthError";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { PinBusy, PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
@@ -179,11 +180,9 @@ export default function ScanToSignIn() {
             {busy ? null : (
               <View style={{ gap: 14 }}>
                 <PinCells length={pin.length} />
-                {pinError ? (
-                  <View style={{ alignSelf: "center" }}>
-                    <ErrorText testID="link-device-pin-error">{pinError}</ErrorText>
-                  </View>
-                ) : null}
+                {/* ErrorText's flex:1 line collapsed to nothing inside a centred box: the
+                    wrong-PIN message showed as a bare icon (found in #1685). */}
+                {pinError ? <AuthError center testID="link-device-pin-error" message={pinError} /> : null}
               </View>
             )}
           </View>

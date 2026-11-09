@@ -1,0 +1,37 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 2 of 6: accepted, so the app goes on in, and
+# Security shows the switch on. Then a cold start tries biometrics first: the
+# launch loader stays up under the system prompt, no keypad (Android). The iOS
+# simulator reads the key without a prompt, so it goes straight in.
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "toggle-biometric-unlock"
+    direction: DOWN
+- assertVisible:
+    id: "toggle-biometric-unlock"
+    checked: true
+- assertVisible:
+    id: "row-change-pin"
+- takeScreenshot: biometric-02-security-on
+- stopApp
+- launchApp
+# Android's BiometricPrompt is a secure window: while it is up, the app's own
+# views are not in the hierarchy Maestro reads (and screenshots are black). So
+# this wait may time out there; the keypad never showing is what is asserted.
+- extendedWaitUntil:
+    visible:
+      id: "pin-biometric|tab-groups"
+    timeout: 8000
+    optional: true
+- assertNotVisible:
+    id: "btn-pin-1"
+# Android: the script now answers the prompt with NO match.

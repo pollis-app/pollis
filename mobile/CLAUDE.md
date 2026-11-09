@@ -522,6 +522,48 @@ xcrun altool --upload-app -f build/export/Pollis.ipa -t ios \
   --apiIssuer "$(doppler secrets get ASC_ISSUER_ID -p pollis -c prd_prod --plain)"
 ```
 
+#### Biometric unlock (#1685)
+
+Face ID / Touch ID / a Class 3 fingerprint may stand in for *typing the PIN at
+unlock*, nothing else; every user keeps the PIN, and linking a device, approving
+a history copy and changing the PIN still ask for it. Off by default: offered
+once after a PIN unlock (`app/(auth)/biometric-offer.tsx`, recorded as it opens)
+and a switch in Security (on asks for the PIN, `app/self/biometric-unlock.tsx`;
+off needs nothing). Security also has Change PIN (`app/self/change-pin.tsx`).
+Core: `pollis-core/src/commands/device_unlock.rs`; rules and slot lifecycle:
+`.codesight/wiki/pin-design.md` → "Biometric unlock".
+
+- **Store.** `lib/deviceUnlock.ts`, expo-secure-store `requireAuthentication`
+  (iOS hard-codes `.biometryCurrentSet`; Android a per-use Keystore key through a
+  BiometricPrompt `CryptoObject`, BIOMETRIC_STRONG), `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`.
+- **iOS access group — never the default.** The app's default keychain group is
+  the first `keychain-access-groups` entry, the shared `8JT3WH45NZ.com.pollis.shared`
+  the Notification Service Extension reads. `plugins/withDeviceUnlock.js` appends
+  `8JT3WH45NZ.com.pollis.app` to the APP's entitlements only and names it in the
+  embedded `extra.deviceUnlock.iosAccessGroup`; the store call always passes it.
+  No group in the binary (an OTA bundle on an older binary) means no biometric
+  unlock, never a write to the default group. No capability or profile change is
+  needed (`<team>.<suffix>` groups are allowed for every App ID of the team).
+- **Gate.** `SecureStore.canUseBiometricAuthentication()` at runtime (Android:
+  BIOMETRIC_STRONG, so Class 2 face unlock does not count; it also hides the
+  option on API ≤ 29 while expo/expo#49330 breaks detection there — don't pin
+  `androidx.core`). `NSFaceIDUsageDescription` comes from the expo-secure-store
+  plugin's `faceIDPermission` in `app.json` (the module refuses
+  `requireAuthentication` without it); USE_BIOMETRIC / USE_FINGERPRINT are
+  no longer blocked.
+- **Fallback.** A cancel or failed match shows the keypad, no PIN attempt spent.
+  A read that comes back empty (biometrics re-enrolled, key invalidated) shows a
+  note; the next PIN unlock re-arms it (silent on iOS, one prompt on Android).
+- **e2e.** `scripts/maestro-biometric.sh <ios|ipad|android>` (README flow table).
+  The iOS simulator's keychain never evaluates an item's access control, so the
+  `.biometryCurrentSet` item reads with no Face ID sheet there (`notifyutil …
+  pearl.match` only answers LAContext evaluations); the iOS run covers on/off,
+  the offer, the PIN-only paths and Face ID unenrolled, and Android covers the
+  prompt, a failed match and the keypad fallback. Manual only: the Face ID sheet
+  and a failed match on a real iPhone, Class 2 vs Class 3 sensors on real
+  Android hardware, a real re-enrolment, and that the extension cannot read the
+  item on a signed device.
+
 #### Notification Service Extension (#1599)
 
 `plugins/withNotificationServiceExtension.js` adds the `PollisNotificationService`
@@ -686,10 +728,10 @@ shrinking (`expo-build-properties` `enableMinifyInReleaseBuilds` /
 `enableShrinkResourcesInReleaseBuilds`; Play had rated 1.0.11's 65.5 MB of DEX
 "Low"). `android.blockedPermissions` strips what libraries add but the app never
 uses: the LiveKit/WebRTC set (SYSTEM_ALERT_WINDOW, FOREGROUND_SERVICE, Bluetooth,
-MODIFY_AUDIO_SETTINGS — voice is not wired on mobile, #343), expo-secure-store's
-biometric pair (no biometric auth is requested), DUMP, and sixteen vendor
+MODIFY_AUDIO_SETTINGS — voice is not wired on mobile, #343), DUMP, and sixteen vendor
 launcher-badge permissions (no badge count is ever set). Storage stays: saving
-to the library on Android 7–9 needs WRITE_EXTERNAL_STORAGE. When voice is built,
+to the library on Android 7–9 needs WRITE_EXTERNAL_STORAGE, and USE_BIOMETRIC /
+USE_FINGERPRINT (androidx.biometric's pair) carry biometric unlock (#1685). When voice is built,
 unblock its permissions in the same PR. `tests/android-permissions.test.ts`
 pins both lists and the R8 flags. Check the merged manifest after a dependency
 bump — Play's bundle explorer lists every permission a build carries.

@@ -1,0 +1,37 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 5 of 6: still unlocks after the PIN change.
+# Off needs nothing; on asks for the PIN (now 5678), then the system prompt.
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- scrollUntilVisible:
+    element:
+      id: "toggle-biometric-unlock"
+    direction: DOWN
+- tapOn:
+    id: "toggle-biometric-unlock"
+- extendedWaitUntil:
+    visible:
+      id: "toggle-biometric-unlock"
+      checked: false
+    timeout: 10000
+- takeScreenshot: biometric-09-switch-off
+- tapOn:
+    id: "toggle-biometric-unlock"
+- assertVisible:
+    id: "screen-biometric-unlock"
+- takeScreenshot: biometric-10-switch-asks-pin
+# The old PIN is refused.
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "biometric-unlock-error"
+    timeout: 20000
+- runFlow: ../../subflows/enter-pin-5678.yaml
+# The system prompt is up (iOS: the read-back; Android: storing). The script matches.

@@ -435,6 +435,8 @@ pub async fn wipe_local_account_identity(state: &AppState, user_id: &str) -> Res
         .keystore
         .delete_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, user_id)
         .await;
+    // The biometric slots wrap the same key (#1685).
+    crate::commands::device_unlock::delete_slots(state.keystore.as_ref(), user_id).await;
     state
         .keystore
         .delete_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)

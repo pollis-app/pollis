@@ -1,0 +1,31 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 1 of 6. Driven by scripts/maestro-biometric.sh,
+# which enrolls the simulator's / emulator's biometrics first and answers every
+# system prompt between parts (match / no match). Maestro cannot touch a sensor.
+#
+# Off by default: a fresh sign-up sets the PIN and is never offered anything.
+# The offer comes once, after a PIN UNLOCK.
+- runFlow: ../../subflows/sign-in.yaml
+- assertNotVisible:
+    id: "screen-biometric-offer"
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin-1"
+    timeout: 20000
+# Not on yet: no biometric button on the pad.
+- assertNotVisible:
+    id: "btn-pin-biometric"
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-biometric-offer"
+    timeout: 30000
+- takeScreenshot: biometric-01-offer
+- tapOn:
+    id: "btn-biometric-offer-accept"
+# Android: the system prompt is up now (storing the key); the script answers it with a match.
+# The iOS simulator's keychain does not evaluate an item's access control (no Secure
+# Enclave), so there it turns on and goes in without a prompt.

@@ -481,7 +481,8 @@
       "rejectA11y": "Reject enrollment",
       "safetyHeading": "Safety",
       "thisDevice": "{{name}} · this device",
-      "blockedUsers": "Blocked users"
+      "blockedUsers": "Blocked users",
+      "changePinSub": "Your 4-digit PIN unlocks Pollis on this device."
     },
     "title": "Self",
     "userSettings": {
@@ -664,5 +665,24 @@
       "completedDetail": "Copied between this account and {{device}}",
       "completedDetailUnknown": "Copied between two of your devices"
     }
+  },
+  "biometric": {
+    "methodIos": "Face ID or Touch ID",
+    "methodAndroid": "fingerprint or face unlock",
+    "prompt": "Unlock Pollis",
+    "offerTitle": "Unlock with {{method}}?",
+    "offerBody": "Use {{method}} instead of typing your PIN when you open Pollis. Your PIN still works, and you'll still need it to link a device, approve a history copy or change your PIN.",
+    "offerAccept": "Turn on",
+    "offerDecline": "Not now",
+    "turningOn": "Turning on…",
+    "failed": "Couldn't turn on biometric unlock. Try again from Security.",
+    "switchLabel": "Unlock with {{method}}",
+    "switchSub": "Instead of typing your PIN to unlock. Linking a device and changing your PIN still need it.",
+    "unavailableSub": "{{method}} isn't set up on this device. Turn this off, or set it up in the system settings.",
+    "setupTitle": "Biometric unlock",
+    "confirmTitle": "Enter your PIN",
+    "confirmBody": "Enter your PIN to turn on unlocking with {{method}}.",
+    "useBiometric": "Use {{method}}",
+    "changed": "Your {{method}} settings changed. Enter your PIN; biometric unlock turns back on after."
   }
 }

@@ -470,7 +470,8 @@
       "rejectA11y": "Rechazar el registro",
       "safetyHeading": "Seguridad",
       "thisDevice": "{{name}} · este dispositivo",
-      "blockedUsers": "Usuarios bloqueados"
+      "blockedUsers": "Usuarios bloqueados",
+      "changePinSub": "Tu PIN de 4 dígitos desbloquea Pollis en este dispositivo."
     },
     "title": "Tú",
     "userSettings": {
@@ -549,5 +550,24 @@
   },
   "reactions": {
     "pillHint": "Mantén pulsado para ver quién reaccionó"
+  },
+  "biometric": {
+    "methodIos": "Face ID o Touch ID",
+    "methodAndroid": "la huella o el desbloqueo facial",
+    "prompt": "Desbloquear Pollis",
+    "offerTitle": "¿Desbloquear con {{method}}?",
+    "offerBody": "Usa {{method}} en lugar de escribir tu PIN al abrir Pollis. Tu PIN sigue funcionando y lo seguirás necesitando para vincular un dispositivo, aprobar una copia del historial o cambiar el PIN.",
+    "offerAccept": "Activar",
+    "offerDecline": "Ahora no",
+    "turningOn": "Activando…",
+    "failed": "No se pudo activar el desbloqueo biométrico. Vuelve a intentarlo desde Seguridad.",
+    "switchLabel": "Desbloquear con {{method}}",
+    "switchSub": "En lugar de escribir el PIN para desbloquear. Vincular un dispositivo y cambiar el PIN lo siguen pidiendo.",
+    "unavailableSub": "{{method}} no está configurado en este dispositivo. Desactiva esta opción o configúralo en los ajustes del sistema.",
+    "setupTitle": "Desbloqueo biométrico",
+    "confirmTitle": "Introduce tu PIN",
+    "confirmBody": "Introduce tu PIN para activar el desbloqueo con {{method}}.",
+    "useBiometric": "Usar {{method}}",
+    "changed": "Los ajustes de {{method}} cambiaron. Introduce tu PIN; el desbloqueo biométrico se reactiva después."
   }
 }

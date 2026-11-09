@@ -457,7 +457,8 @@
       "rejectA11y": "拒绝设备注册",
       "safetyHeading": "安全",
       "thisDevice": "{{name}} · 此设备",
-      "blockedUsers": "已屏蔽的用户"
+      "blockedUsers": "已屏蔽的用户",
+      "changePinSub": "4 位 PIN 用于在此设备上解锁 Pollis。"
     },
     "title": "我的",
     "userSettings": {
@@ -533,5 +534,24 @@
   },
   "reactions": {
     "pillHint": "长按查看谁回应了"
+  },
+  "biometric": {
+    "methodIos": "面容 ID 或触控 ID",
+    "methodAndroid": "指纹或人脸解锁",
+    "prompt": "解锁 Pollis",
+    "offerTitle": "使用{{method}}解锁？",
+    "offerBody": "打开 Pollis 时使用{{method}}，无需输入 PIN。PIN 仍然有效，关联设备、批准历史记录复制或更改 PIN 时仍需输入。",
+    "offerAccept": "开启",
+    "offerDecline": "以后再说",
+    "turningOn": "正在开启…",
+    "failed": "无法开启生物识别解锁。请在“安全”中重试。",
+    "switchLabel": "使用{{method}}解锁",
+    "switchSub": "代替输入 PIN 解锁。关联设备和更改 PIN 仍需输入 PIN。",
+    "unavailableSub": "此设备尚未设置{{method}}。请关闭此选项，或在系统设置中进行设置。",
+    "setupTitle": "生物识别解锁",
+    "confirmTitle": "输入 PIN",
+    "confirmBody": "输入 PIN 以开启{{method}}解锁。",
+    "useBiometric": "使用{{method}}",
+    "changed": "{{method}}设置已更改。请输入 PIN，之后生物识别解锁会重新开启。"
   }
 }

@@ -1216,6 +1216,31 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("poll_mls_welcomes: {e}"));
     }
 
+    /// Turn biometric unlock on (#1685) the way the app does: begin with the PIN, "store" the key,
+    /// confirm it. Returns the device key the app would keep behind Face ID / fingerprint.
+    #[allow(dead_code)]
+    pub(crate) async fn enable_biometric_unlock(&self) -> String {
+        let key = self
+            .invoke_json("device_unlock_begin", json!({ "pin": TEST_PIN }))
+            .await
+            .as_str()
+            .expect("device key")
+            .to_string();
+        self.invoke_json("device_unlock_confirm", json!({ "deviceKey": key })).await;
+        key
+    }
+
+    /// Lock, then unlock with the device key instead of the PIN.
+    #[allow(dead_code)]
+    pub(crate) async fn lock_then_biometric_unlock(&self, device_key: &str) {
+        self.invoke_json("lock", json!({})).await;
+        self.invoke_json(
+            "unlock_with_device_key",
+            json!({ "userId": self.user_id(), "deviceKey": device_key }),
+        )
+        .await;
+    }
+
     /// The cold-launch / reconnect MLS sweep, including the reconcile backstop (#430 P1).
     #[allow(dead_code)]
     pub(crate) async fn sweep(&self) {

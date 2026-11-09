@@ -1,0 +1,81 @@
+appId: ${MAESTRO_APP_ID}
+---
+# BIOMETRIC UNLOCK (#1685), part 4 of 6: unlocked by biometrics. Linking a
+# device still asks for the PIN and checks it (a wrong one is refused as a wrong
+# PIN), and changing the PIN asks for the current one. Then a cold start.
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- takeScreenshot: biometric-04-unlocked
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- tapOn:
+    id: "row-link-device"
+- assertVisible:
+    id: "screen-link-device"
+- tapOn:
+    id: "btn-scan-toggle-manual"
+- tapOn:
+    id: "input-scan-code"
+# A well-formed v2 code: the PIN is checked before the DS is asked about it.
+- inputText: "pollis-link:v2:e2ebiometric:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+- tapOn:
+    id: "btn-scan-code-continue"
+- assertVisible:
+    id: "scan-device-confirm"
+- assertNotVisible:
+    id: "btn-pin-biometric"
+- takeScreenshot: biometric-05-link-asks-pin
+- tapOn:
+    id: "btn-pin-9"
+- tapOn:
+    id: "btn-pin-9"
+- tapOn:
+    id: "btn-pin-9"
+- tapOn:
+    id: "btn-pin-9"
+- extendedWaitUntil:
+    visible:
+      id: "link-device-pin-error"
+    timeout: 20000
+- assertVisible: ".*attempts remaining.*"
+- takeScreenshot: biometric-06-link-wrong-pin
+- tapOn:
+    id: "btn-back"
+
+# Change PIN: 1234 -> 5678. Biometric unlock keeps working (it wraps the keys, not the PIN).
+- scrollUntilVisible:
+    element:
+      id: "row-change-pin"
+    direction: DOWN
+- tapOn:
+    id: "row-change-pin"
+- assertVisible:
+    id: "screen-change-pin"
+- takeScreenshot: biometric-07-change-pin
+- runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/enter-pin-5678.yaml
+- runFlow: ../../subflows/enter-pin-5678.yaml
+- extendedWaitUntil:
+    visible:
+      id: "change-pin-done"
+    timeout: 20000
+- takeScreenshot: biometric-08-pin-changed
+- tapOn:
+    id: "btn-change-pin-done"
+- stopApp
+- launchApp
+# Android's BiometricPrompt is a secure window: while it is up, the app's own
+# views are not in the hierarchy Maestro reads (and screenshots are black). So
+# this wait may time out there; the keypad never showing is what is asserted.
+- extendedWaitUntil:
+    visible:
+      id: "pin-biometric|tab-groups"
+    timeout: 8000
+    optional: true
+- assertNotVisible:
+    id: "btn-pin-1"
+# Android: the script answers with a match.

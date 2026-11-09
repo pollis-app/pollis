@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View } from "react-native";
+import { Platform, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Button } from "../../components/ui";
@@ -7,6 +7,8 @@ import { useIsRegular } from "../../hooks/useLayoutClass";
 import { PinCells, PinKeypad } from "../../components/auth/PinPad";
 import { LaunchScreen } from "../../components/LaunchScreen";
 import { Heading } from "../../components/auth/Heading";
+import { Icon } from "../../components/icons";
+import { semantic, type as ty } from "../../theme/tokens";
 import { AuthError } from "../../components/auth/AuthError";
 import {
   useSetPin,
@@ -19,7 +21,23 @@ import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useThemeRerender } from "../../components/theme";
-import { pinScreenView, pinSubmitIsSlow, type PinStage as Stage } from "../../lib/pinStage";
+import {
+  afterPinUnlock,
+  pinScreenView,
+  pinSubmitIsSlow,
+  type PinStage as Stage,
+} from "../../lib/pinStage";
+import {
+  biometricMethod,
+  deviceUnlockSupported,
+  enableDeviceUnlock,
+  markNeedsRearm,
+  readDeviceKey,
+  takeNeedsRearm,
+  unlockWithDeviceKey,
+  wasOffered,
+} from "../../lib/deviceUnlock";
+import { haptic } from "../../lib/haptics";
 
 function AuthPIN() {
   useThemeRerender();
@@ -30,6 +48,10 @@ function AuthPIN() {
   const [firstPin, setFirstPin] = useState("");
   const [stage, setStage] = useState<Stage>("checking");
   const [error, setError] = useState<string | null>(null);
+  // Biometric unlock (#1685) is on for this user, per core.
+  const [biometricOn, setBiometricOn] = useState(false);
+  // Shown over the keypad when the biometric key was invalidated (biometrics re-enrolled).
+  const [notice, setNotice] = useState<string | null>(null);
 
   const setPinMutation = useSetPin();
   const unlockMutation = useUnlock();
@@ -45,7 +67,18 @@ function AuthPIN() {
         if (snapshot.pin_set && !snapshot.is_unlocked) {
           appStore.setLocked(true);
         }
-        setStage(snapshot.pin_set ? "unlock" : "create-first");
+        if (!snapshot.pin_set) {
+          setStage("create-first");
+          return;
+        }
+        const on = snapshot.device_unlock === true;
+        setBiometricOn(on);
+        // Biometrics first when on; the keypad is the fallback for everything else.
+        if (on && !snapshot.is_unlocked && deviceUnlockSupported()) {
+          void tryBiometric();
+          return;
+        }
+        setStage("unlock");
       },
       onError: () => {
         // Treat a read error as first-time setup; set_pin re-fails loudly if wrong.
@@ -73,6 +106,62 @@ function AuthPIN() {
       ? t("mobile:auth.pin.unlockIntro")
       : t("mobile:auth.pin.createIntro");
 
+  // One system prompt; a key unlocks through core's own unlock path. Anything else is the keypad:
+  // a cancel or failure as it was, a missing key (re-enrolled) with a note, re-armed after the PIN.
+  const tryBiometric = async () => {
+    const user = appStore.currentUser;
+    if (!user) {
+      setStage("unlock");
+      return;
+    }
+    setError(null);
+    setStage("biometric");
+    const read = await readDeviceKey(user.id);
+    if (read.kind === "key") {
+      try {
+        await unlockWithDeviceKey(user.id, read.key);
+        haptic("success");
+        appStore.setLocked(false);
+        router.replace("/(auth)/initializing");
+        return;
+      } catch (e) {
+        const message = (e as Error).message ?? "";
+        if (/locked out/i.test(message)) {
+          setError(message);
+        } else {
+          // The key no longer matches what core holds: the PIN re-arms it.
+          markNeedsRearm(user.id);
+        }
+      }
+    } else if (read.kind === "invalidated") {
+      markNeedsRearm(user.id);
+      setNotice(t("mobile:biometric.changed", { method: biometricMethod() }));
+    }
+    setStage("unlock");
+  };
+
+  // After a PIN unlock: re-arm biometrics if their key was lost, or show the one-time offer.
+  const continueAfterPin = async (userId: string) => {
+    const next = afterPinUnlock({
+      needsRearm: takeNeedsRearm(userId),
+      supported: deviceUnlockSupported(),
+      enabled: biometricOn,
+      offered: await wasOffered(userId),
+    });
+    if (next === "rearm") {
+      try {
+        await enableDeviceUnlock(userId, { readBack: false });
+      } catch (e) {
+        console.warn("[pin] re-arming biometric unlock failed:", e);
+      }
+    }
+    if (next === "offer") {
+      router.replace("/(auth)/biometric-offer");
+      return;
+    }
+    router.replace("/(auth)/initializing");
+  };
+
   const onComplete = (entered: string) => {
     setError(null);
     if (stage === "unlock") {
@@ -87,7 +176,7 @@ function AuthPIN() {
         {
           onSuccess: () => {
             appStore.setLocked(false);
-            router.replace("/(auth)/initializing");
+            void continueAfterPin(currentUser.id);
           },
           onError: (e) => {
             setError((e as Error).message || t("mobile:auth.pin.invalidPin"));
@@ -180,11 +269,11 @@ function AuthPIN() {
     return (
       <View testID="screen-auth-pin" collapsable={false} style={{ flex: 1 }}>
         <LaunchScreen
-          testID={view === "submitting" ? "pin-busy" : "pin-checking"}
+          testID={view === "submitting" ? "pin-busy" : view === "biometric" ? "pin-biometric" : "pin-checking"}
           label={
             view === "checking"
               ? t("settings:security.permissionChecking")
-              : stage === "unlock"
+              : stage === "unlock" || stage === "biometric"
                 ? t("pinEntry.unlocking")
                 : t("pinCreate.saving")
           }
@@ -208,7 +297,32 @@ function AuthPIN() {
       <View style={{ gap: 16 }}>
         <PinCells length={pin.length} />
         {error ? <AuthError center testID="pin-error" message={error} /> : null}
+        {notice && !error ? (
+          <Text testID="pin-biometric-notice" style={[ty.secondary, { textAlign: "center" }]}>
+            {notice}
+          </Text>
+        ) : null}
       </View>
+
+      {stage === "unlock" && biometricOn && deviceUnlockSupported() ? (
+        <View style={{ alignItems: "center" }}>
+          <Button
+            testID="btn-pin-biometric"
+            variant="subtle"
+            disabled={working}
+            icon={
+              Platform.OS === "ios" ? (
+                <Icon.faceId size={18} color={semantic.text} />
+              ) : (
+                <Icon.fingerprint size={18} color={semantic.text} />
+              )
+            }
+            onPress={() => void tryBiometric()}
+          >
+            {t("mobile:biometric.useBiometric", { method: biometricMethod() })}
+          </Button>
+        </View>
+      ) : null}
 
       {/* Always offer a way out, or an error strands the user on the keypad. */}
       <View style={{ alignItems: "center" }}>

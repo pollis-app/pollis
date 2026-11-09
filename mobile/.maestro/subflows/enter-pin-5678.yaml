@@ -1,0 +1,11 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Enter "5678" on the keypad: the second PIN the biometric flow changes to (#1685).
+- tapOn:
+    id: "btn-pin-5"
+- tapOn:
+    id: "btn-pin-6"
+- tapOn:
+    id: "btn-pin-7"
+- tapOn:
+    id: "btn-pin-8"

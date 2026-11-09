@@ -750,6 +750,27 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
         "get_unlock_state" => ok(pin::get_unlock_state(&state()?).await?),
+        // Biometric unlock (#1685). Mobile only: desktop's keyring backend cannot bind an item
+        // to biometrics, so desktop never calls these (scripts/feature-parity.json).
+        "device_unlock_begin" => {
+            let p: Option<String> = arg_opt(&args, "pin")?;
+            ok(crate::commands::device_unlock::device_unlock_begin(&state()?, p).await?)
+        }
+        "device_unlock_confirm" => {
+            let device_key: String = arg(&args, "deviceKey")?;
+            crate::commands::device_unlock::device_unlock_confirm(&state()?, device_key).await?;
+            ok(())
+        }
+        "unlock_with_device_key" => {
+            let user_id: String = arg(&args, "userId")?;
+            let device_key: String = arg(&args, "deviceKey")?;
+            ok(crate::commands::device_unlock::unlock_with_device_key(&state()?, user_id, device_key)
+                .await?)
+        }
+        "disable_device_unlock" => {
+            crate::commands::device_unlock::disable_device_unlock(&state()?).await?;
+            ok(())
+        }
 
         "get_user_profile" => {
             let user_id: String = arg(&args, "userId")?;

@@ -470,7 +470,8 @@
       "rejectA11y": "Refuser l'enrôlement",
       "safetyHeading": "Sécurité",
       "thisDevice": "{{name}} · cet appareil",
-      "blockedUsers": "Utilisateurs bloqués"
+      "blockedUsers": "Utilisateurs bloqués",
+      "changePinSub": "Votre PIN à 4 chiffres déverrouille Pollis sur cet appareil."
     },
     "title": "Moi",
     "userSettings": {
@@ -549,5 +550,24 @@
   },
   "reactions": {
     "pillHint": "Appui long pour voir qui a réagi"
+  },
+  "biometric": {
+    "methodIos": "Face ID ou Touch ID",
+    "methodAndroid": "l'empreinte ou le déverrouillage facial",
+    "prompt": "Déverrouiller Pollis",
+    "offerTitle": "Déverrouiller avec {{method}} ?",
+    "offerBody": "Utilisez {{method}} au lieu de saisir votre PIN à l'ouverture de Pollis. Votre PIN fonctionne toujours, et il reste nécessaire pour associer un appareil, approuver une copie de l'historique ou changer de PIN.",
+    "offerAccept": "Activer",
+    "offerDecline": "Plus tard",
+    "turningOn": "Activation…",
+    "failed": "Impossible d'activer le déverrouillage biométrique. Réessayez depuis Sécurité.",
+    "switchLabel": "Déverrouiller avec {{method}}",
+    "switchSub": "Au lieu de saisir votre PIN pour déverrouiller. Associer un appareil ou changer de PIN le demande toujours.",
+    "unavailableSub": "{{method}} n'est pas configuré sur cet appareil. Désactivez cette option ou configurez-le dans les réglages du système.",
+    "setupTitle": "Déverrouillage biométrique",
+    "confirmTitle": "Saisissez votre PIN",
+    "confirmBody": "Saisissez votre PIN pour activer le déverrouillage avec {{method}}.",
+    "useBiometric": "Utiliser {{method}}",
+    "changed": "Les réglages de {{method}} ont changé. Saisissez votre PIN ; le déverrouillage biométrique se réactive ensuite."
   }
 }

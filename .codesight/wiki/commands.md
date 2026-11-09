@@ -171,7 +171,18 @@ PIN is cryptographically load-bearing — see `pin-design.md`.
 - `set_pin(old_pin?, new_pin)` — initial-set sources from `AppState.unlock` (canonical) or the legacy plaintext keystore slots (upgrade fallback). Wraps both keys, deletes the legacy slots, opens the local DB via `load_user_db_with_key`, publishes the device cert.
 - `unlock(user_id, pin)` → `UnlockOutcome` — verify PIN, populate `AppState.unlock`, open the local DB, migrate away any #195-vintage legacy slots, publish the device cert.
 - `lock()` — drop `AppState.unlock` and close the local DB. Until the next `unlock`, every DB-touching command fails with "Not signed in".
-- `get_unlock_state()` → `{ last_active_user, is_unlocked, pin_set }` — frontend uses this to route between pin-entry, pin-create, and the main app.
+- `get_unlock_state()` → `{ last_active_user, is_unlocked, pin_set, device_unlock }` — frontend uses this to route between pin-entry, pin-create, and the main app. `device_unlock` (#1685) is true only with `pin_set` and confirmed biometric slots.
+
+Every unlock, whichever factor unwrapped the keys, ends in `pin::finish_unlock`: it sets `AppState.unlock`, opens the DB, refreshes the notification escrow (#1599) and starts the same background work. Only the PIN paths (`unlock`, `set_pin`) record the short-lived PIN proof (`AppState.pin_proof`, 5 minutes, one use, cleared on lock/logout).
+
+## device_unlock (`commands/device_unlock.rs`) — mobile only (#1685)
+Face ID / Touch ID / a Class 3 fingerprint stands in for **typing the PIN at unlock**, nothing else. Bridge arms only; desktop has a parity exemption (`scripts/feature-parity.json`: the `keyring` apple-native backend cannot attach biometric access control, Linux/Windows have no equivalent), and the Tauri shims exist only in the test harness. Design and rules: `pin-design.md` → "Biometric unlock".
+- `device_unlock_begin(pin?)` → device key (base64) — unlocked user only. `pin` is verified (a wrong one counts); without it the PIN proof from a PIN unlock is spent. New random 32-byte key, `duk_meta` (unconfirmed) written first, then `db_key_duk` / `account_id_key_duk`, then read back.
+- `device_unlock_confirm(device_key)` — the app stored the key (iOS also read it back): check it against the slots and the unlocked keys, mark `duk_meta` confirmed, read the flag back.
+- `unlock_with_device_key(user_id, device_key)` → `UnlockOutcome` — PIN gate first (no PIN or locked out: refused, lockout nukes), confirmed slots only, then `finish_unlock`. Never reads or writes the PIN attempt counter, and leaves no PIN proof.
+- `disable_device_unlock()` — delete the three slots. No PIN needed.
+
+`create_device_link`, `accept_device_offer`, `approve_history_transfer` and `set_pin(old, new)` keep calling `verify_pin`; the device key is never accepted for them (flows: `device_link::biometric_unlock_never_stands_in_for_the_pin_when_linking`, `history_transfer::biometric_unlock_never_approves_a_history_copy`).
 
 ## autolock (`commands/autolock.rs`)
 Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns the deadline **and** the timer; the renderer only reports activity and reacts to the resulting event.

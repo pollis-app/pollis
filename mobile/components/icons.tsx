@@ -27,6 +27,8 @@ import {
   Check,
   Mail,
   Key,
+  ScanFace,
+  FingerprintPattern,
   Smartphone,
   Bookmark,
   Pin,
@@ -179,6 +181,9 @@ export const Icon = {
   micOff: wrap(MicOff, 14),
   headphones: wrap(Headphones, 14),
   key: wrap(Key, 14),
+  // Biometric unlock (#1685): Face ID on iOS, fingerprint on Android.
+  faceId: wrap(ScanFace),
+  fingerprint: wrap(FingerprintPattern),
   device: wrap(Smartphone, 14),
   laptop: wrap(Laptop, 14),
   history: wrap(History, 14),
