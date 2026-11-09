@@ -411,7 +411,8 @@ pub(crate) fn left_gaps(
 }
 
 /// The most recent gap recorded for `(conversation_id, generation)`, if any.
-pub(crate) fn left_gap(
+#[cfg(test)]
+fn left_gap(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     generation: i64,
