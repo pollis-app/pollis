@@ -565,24 +565,16 @@ async fn external_join_attempt(
             super::join_branch::clear(db.conn(), conversation_id, stored_generation);
             super::join_branch::mark_fresh_if_first(db.conn(), conversation_id, stored_generation);
             // Only now: a losing branch never held the lineage (#1312).
-            // Back in after an eviction, the join is a re-add: the gap since is
-            // not this device's loss, as for a Welcome (#1765).
             let join_epoch = stored_epoch as u64 + 1;
-            if let Some(floor) = super::join_branch::take_left(
+            super::join_branch::record_first_join(
                 db.conn(),
                 conversation_id,
                 stored_generation,
                 join_epoch,
-            ) {
-                super::join_branch::record_added(db.conn(), conversation_id, stored_generation, floor);
-            } else {
-                super::join_branch::record_first_join(
-                    db.conn(),
-                    conversation_id,
-                    stored_generation,
-                    stored_epoch as u64 + 1,
-                );
-            }
+            );
+            // Back in after time out of the tree: the join closes that gap (#1765).
+            super::join_branch::settle_rebuild(db.conn(), conversation_id, stored_generation, join_epoch);
+            super::join_branch::close_left(db.conn(), conversation_id, stored_generation, join_epoch);
             // #1571: a device registered before its user joined, joining late, records that gap as a loss.
             let fresh =
                 super::join_branch::take_fresh(db.conn(), conversation_id, stored_generation);
@@ -821,6 +813,37 @@ where
         }
         let _ = old.delete(provider.storage());
         super::join_branch::clear(provider.raw_conn(), conversation_id, generation);
+    }
+
+    // A pending retention rebuild (#1765): does the head tree we join on still
+    // hold our last leaf? Recorded now, trusted only once the join below has
+    // verified this tree against the GroupInfo signature and its tree hash.
+    if let Some(mut rebuild) =
+        super::join_branch::pending_rebuild(provider.raw_conn(), conversation_id, generation)
+    {
+        let leaves: Vec<(Vec<u8>, Vec<u8>)> = verifiable_group_info
+            .extensions()
+            .ratchet_tree()
+            .map(|ext| {
+                ext.ratchet_tree()
+                    .leaves()
+                    .map(|leaf| {
+                        (
+                            leaf.signature_key().as_slice().to_vec(),
+                            leaf.encryption_key().tls_serialize_detached().unwrap_or_default(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // No tree to read proves nothing.
+        rebuild.removed = !leaves.is_empty()
+            && super::join_branch::leaf_was_replaced(
+                leaves.iter().map(|(s, e)| (s.as_slice(), e.as_slice())),
+                cred_with_key.signature_key.as_slice(),
+                &rebuild.own_encryption_key,
+            );
+        super::join_branch::note_rebuild(provider.raw_conn(), conversation_id, generation, &rebuild);
     }
 
     let join_config = super::provider::join_config();
@@ -1384,12 +1407,11 @@ async fn process_one_generation<'h>(
         });
     }
 
-    // A commit at or above our epoch that ADDED this device means we were out of
-    // the tree before it: a re-add (#1765). Its epoch bounds the gap a rejoin may pass.
-    let readded_at = {
-        let device_id = state.device_id.lock().await.clone().unwrap_or_default();
-        readded_epoch(&snapshot.commits, &device_id)
-    };
+    // The DS's claim of which commits re-added this device (#1765): unverifiable
+    // (the commits are ciphertext to us), so used only to END a gap sooner.
+    let own_device_id = state.device_id.lock().await.clone().unwrap_or_default();
+    let readded_after =
+        |from: u64| readded_epoch(&snapshot.commits, &own_device_id, from);
 
     // Cross-signing INPUTS only; a DS lie can only make a leaf look `Unverifiable`.
     // …and PINNED like the committing side (#1161 M3); an unpinnable directory degrades to empty.
@@ -1450,10 +1472,11 @@ async fn process_one_generation<'h>(
                          — dropping local group to recover via external join",
                         commit.epoch
                     );
-                    // A rebuild's gap stays a loss, unless the log shows we were re-added in it.
-                    if readded_at.is_some() {
-                        note_left(state, mls_group_id, generation, readded_at).await;
-                    }
+                    // A rebuild's gap stays a loss unless the signed head tree the
+                    // join lands on proves a member removed us (#1765): keep what
+                    // that check needs before the group goes.
+                    let readded_at = readded_after(current_epoch);
+                    note_rebuild(state, mls_group_id, generation, current_epoch, readded_at).await;
                     let _ = forget_local_mls_group_at(state, mls_group_id, generation).await;
                 }
                 super::invariants::GapRecovery::HoldPosition => {
@@ -1557,9 +1580,20 @@ async fn process_one_generation<'h>(
         report_uncertified_leaves(state, mls_group_id, user_id, flagged).await;
     }
 
-    // A canonical commit removed us, so whatever lets us back in is a re-add (#1765).
+    // openmls refused the commit at `current_epoch` because the one producing it
+    // removed us: from there on nothing was sealed to us until we are back (#1765).
     if recover == Some(RecoverReason::Evicted) {
-        note_left(state, mls_group_id, generation, readded_at).await;
+        let readded_at = readded_after(current_epoch);
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            super::join_branch::mark_left(
+                db.conn(),
+                mls_group_id,
+                generation,
+                current_epoch,
+                readded_at,
+            );
+        }
     }
 
     // Clear a commit left dangling by an interrupted submit: had it landed, the replay would have adopted it (#411).
@@ -1811,15 +1845,15 @@ pub(super) fn classify_process_message_error<S>(
     }
 }
 
-/// Apply a single commit from the log to the local group.
-///
-/// Errors are handled in place, each with its own recovery; see [`CommitApply`].
-///
-/// Sync: the caller owns the local-DB guard.
-/// The epoch a commit in `commits` re-added `device_id` at (the epoch it
-/// produced), the latest if several. The DS's `added_device_ids` column is a
-/// hint, never a verdict: believed, it only lets a rejoin pass a gap silently.
-fn readded_epoch(commits: &[pollis_api::commit::CommitWire], device_id: &str) -> Option<u64> {
+/// The epoch the first commit at or after `from` claims to have re-added
+/// `device_id` at (the epoch it produced). Read from the DS's
+/// `added_device_ids` column, which this device cannot check against the
+/// ciphertext commit, so it may only END a gap sooner, never open one (#1765).
+fn readded_epoch(
+    commits: &[pollis_api::commit::CommitWire],
+    device_id: &str,
+    from: u64,
+) -> Option<u64> {
     if device_id.is_empty() {
         return None;
     }
@@ -1831,23 +1865,48 @@ fn readded_epoch(commits: &[pollis_api::commit::CommitWire], device_id: &str) ->
                 .is_some_and(|ids| ids.split(',').any(|d| d.trim() == device_id))
         })
         .filter_map(|c| u64::try_from(c.epoch).ok())
-        .max()
+        .filter(|&epoch| epoch >= from)
+        .min()
         .map(|epoch| epoch + 1)
 }
 
-/// Mark `(mls_group_id, generation)` left (#1765); `readded_at` from [`readded_epoch`].
-async fn note_left(
+/// Keep what the external join needs to prove this device was removed from
+/// `generation` before the rebuild drops its group at `held` (#1765).
+async fn note_rebuild(
     state: &Arc<AppState>,
     mls_group_id: &str,
     generation: i64,
+    held: u64,
     readded_at: Option<u64>,
 ) {
     let guard = state.local_db.lock().await;
-    if let Some(db) = guard.as_ref() {
-        super::join_branch::mark_left(db.conn(), mls_group_id, generation, readded_at);
-    }
+    let Some(db) = guard.as_ref() else {
+        return;
+    };
+    let Some(group) = load_stored_group_at(db.conn(), mls_group_id, generation) else {
+        return;
+    };
+    let Some(own_leaf) = group.own_leaf_node() else {
+        return;
+    };
+    super::join_branch::note_rebuild(
+        db.conn(),
+        mls_group_id,
+        generation,
+        &super::join_branch::PendingRebuild {
+            held,
+            readded_at,
+            own_encryption_key: own_leaf.encryption_key().tls_serialize_detached().unwrap_or_default(),
+            removed: false,
+        },
+    );
 }
 
+/// Apply a single commit from the log to the local group.
+///
+/// Errors are handled in place, each with its own recovery; see [`CommitApply`].
+///
+/// Sync: the caller owns the local-DB guard.
 pub(super) fn apply_one_commit<C>(
     provider: &MlsProvider<'_, C>,
     mls_group_id: &str,
@@ -2546,16 +2605,18 @@ mod readded_epoch_tests {
         }
     }
 
-    /// #1765: only a commit naming THIS device is a re-add; the latest one bounds the gap.
+    /// #1765: only a commit naming THIS device, at or after the gap's start,
+    /// ends it; the first such commit does.
     #[test]
     fn only_a_commit_adding_this_device_is_a_re_add() {
         let batch = [commit(5, Some("d2")), commit(6, None), commit(8, Some("d9, d1"))];
-        assert_eq!(readded_epoch(&batch, "d1"), Some(9), "the epoch the add produced");
-        assert_eq!(readded_epoch(&batch[..2], "d1"), None, "a rebuild with no re-add stays a loss");
-        assert_eq!(readded_epoch(&batch, "d"), None, "whole ids only");
-        assert_eq!(readded_epoch(&batch, ""), None);
+        assert_eq!(readded_epoch(&batch, "d1", 0), Some(9), "the epoch the add produced");
+        assert_eq!(readded_epoch(&batch[..2], "d1", 0), None);
+        assert_eq!(readded_epoch(&batch, "d", 0), None, "whole ids only");
+        assert_eq!(readded_epoch(&batch, "", 0), None);
         let twice = [commit(3, Some("d1")), commit(7, Some("d1"))];
-        assert_eq!(readded_epoch(&twice, "d1"), Some(8));
+        assert_eq!(readded_epoch(&twice, "d1", 0), Some(4), "the first re-add ends the gap");
+        assert_eq!(readded_epoch(&twice, "d1", 5), Some(8), "an add before the gap is not its end");
     }
 }
 

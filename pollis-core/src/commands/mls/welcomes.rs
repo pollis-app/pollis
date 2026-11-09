@@ -127,14 +127,20 @@ where
         generation,
         welcome_epoch,
     );
-    // The re-add supersedes an eviction from this lineage (#1765)…
-    let _ = super::join_branch::take_left(provider.raw_conn(), &conversation_id, generation, welcome_epoch);
-    // …and, past the opening epoch, closes every lineage held before it.
+    // The floor now covers any gap in this lineage; close what was open (#1765)…
+    super::join_branch::close_left(provider.raw_conn(), &conversation_id, generation, welcome_epoch);
+    super::join_branch::settle_rebuild(provider.raw_conn(), &conversation_id, generation, welcome_epoch);
+    // …and, past the opening epoch, every lineage held before this one was left
+    // above the epoch the device still holds there.
     super::join_branch::mark_predecessors_left(
         provider.raw_conn(),
         &conversation_id,
         generation,
         welcome_epoch,
+        |older| {
+            super::provider::load_stored_group_at(provider.raw_conn(), &conversation_id, older)
+                .map(|g| g.epoch().as_u64())
+        },
     );
 
     Ok(raw_group_id)

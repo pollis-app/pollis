@@ -430,27 +430,32 @@ asks `messages::loss::classify`:
   (`record_added`, replacing it — so the gap while a removed member was out
   counts too); creating the group or an external join only sets it if none
   exists (`record_first_join`), because a recovery rebuild's gap was sent while
-  the device was a member and IS a loss. The exception is an external join
-  that re-enters a tree the device was out of (#1765): a commit that fails
-  `UseAfterEviction`, or a retention rebuild whose commit batch has a commit
-  naming this device in `added_device_ids` (it was re-added while out), marks
-  the lineage left (`join_branch::mark_left`). The join that next lets the
-  device back in consumes the mark and moves the floor like a Welcome: to the
-  logged re-add's epoch if there is one (what was sealed after the re-add and
-  missed stays a loss), else to the join. A rebuild with no logged re-add is
-  unchanged.
+  the device was a member and IS a loss.
   That is the accepted pre-join loss; one summary log line counts them.
 - **Not a loss either** — refused with `evicted`: sealed at an epoch this device
   had been removed from, reached before any re-add moves the floor (#1524). Logged
   as one `[ingest] … sealed after this device was removed` count.
-- **Not a loss either** — never reached, in an OLDER lineage the device left
-  before it closed (#1765). A suite migration moves every roster device into the
-  successor by its own Welcome at `SUCCESSOR_OPENING_EPOCH` (1), so a Welcome
-  into a successor at a later epoch is an Add of a device that was off the
-  roster when the lineage opened: `mark_predecessors_left` marks each older
-  lineage it held, and their unreached envelopes pass with the `evicted` count.
-  This is the cross-lineage form of a re-add's silent gap; an envelope it did
-  reach and fail to open there is still a loss.
+- **Not a loss either** — never reached, and sealed inside a recorded
+  out-of-tree gap `[from, until)` (`join_branch::left_gap`, #1765), counted
+  with `evicted`. Only three proven events record one, so a re-entry by
+  external join or into a later lineage passes the time out like a Welcome
+  re-add does, without hiding what was sealed while the device was in:
+  - a commit refused with `UseAfterEviction`: `from` is the epoch the
+    removing commit produced;
+  - a retention rebuild whose external join lands on a head tree, verified
+    against the GroupInfo signature and tree hash, that no longer holds the
+    device's last own leaf (gone, or replaced from a KeyPackage — only the
+    device can update its own leaf): `from` is its last held epoch + 1;
+  - a Welcome into a successor past `SUCCESSOR_OPENING_EPOCH` (1). Migration
+    moves every roster device in at that epoch or aborts, so a later Welcome is
+    an Add of a device that was off the roster. Every older lineage whose group
+    it still holds gets `from` = that group's epoch + 1, open-ended.
+
+  `until` is the device's own join (external join or Welcome). The DS's
+  `added_device_ids` hint is ciphertext-unverifiable, so it may only end a gap
+  sooner (`readded_epoch`), never open one: a lying DS can only show more
+  placeholders. A message sealed before `from` that the device never reached
+  still shows.
 - **`stranded`** — the replay started above its epoch, so it was never attempted.
 - **`failed`** — attempted at its own epoch and would not open.
 - **`lineage`** — sealed in a generation this device held but no longer does.

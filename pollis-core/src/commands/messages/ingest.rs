@@ -857,13 +857,14 @@ fn record_losses(
                 removed += 1;
                 continue;
             }
-            // Never reached, in an older lineage this device left before it
-            // closed: sealed after it was out, or in a stint a re-add has since
-            // closed — the gap a re-add within one lineage passes too (#1765).
-            // An envelope it reached and failed to open stays a loss.
+            // Never reached, and sealed inside a recorded gap while this device
+            // was out of that lineage's tree: never sent to it (#1765). The gap
+            // starts no lower than the device's last held epoch + 1, so what was
+            // sealed while it held the lineage, or that it reached and failed to
+            // open, stays a loss.
             if !attempted
-                && sealed_at.0 < lineage
-                && crate::commands::mls::has_left(conn, mls_group_id, sealed_at.0)
+                && crate::commands::mls::left_gap(conn, mls_group_id, sealed_at.0)
+                    .is_some_and(|gap| gap.covers(sealed_at.1))
             {
                 removed += 1;
                 continue;

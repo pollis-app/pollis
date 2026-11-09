@@ -312,33 +312,46 @@ pub(crate) fn entitled_since(
 /// device it adds was not on the roster when the lineage opened.
 pub(crate) const SUCCESSOR_OPENING_EPOCH: u64 = 1;
 
-/// `mls_kv` scope marking a lineage whose tree this device left (#1765). Key:
-/// as [`UNCONFIRMED_JOIN_SCOPE`]. Value: empty, or the epoch the log shows the
-/// device was re-added at, little-endian.
+/// `mls_kv` scope recording the gap during which this device was out of a
+/// lineage's tree (#1765). Key: as [`UNCONFIRMED_JOIN_SCOPE`]. Value: `from`
+/// (8 bytes LE), then `until` (8 bytes LE) once the device is back in.
 ///
-/// A removal and re-add leaves a gap that is never this device's loss (#1524):
-/// nothing sealed in it was sent to the device. A Welcome re-add moves the floor
-/// ([`record_added`]) and so passes the gap. Two re-entries did not:
+/// Nothing sealed in `[from, until)` was sent to this device, so an envelope
+/// there that it never reached is not its loss (#1524). A Welcome re-add moves
+/// the floor ([`record_added`]) and passes such a gap itself. Three re-entries
+/// did not, and record the gap here instead:
 ///
-/// * an EXTERNAL JOIN after the device was out — an eviction, or a retention
-///   rebuild whose batch shows a commit re-adding it — only kept the first
-///   floor ([`record_first_join`]); [`take_left`] makes it move the floor, to
-///   the re-add when the log names it, so what was sealed after the re-add and
-///   missed is still a loss;
-/// * a re-add into a LATER lineage never moves the floor of the lineage the
-///   device left, so what was sealed there after it left read as lost.
-///   [`mark_predecessors_left`] marks those lineages for `record_losses`.
+/// * an EXTERNAL JOIN after an eviction: `from` is the epoch the removing
+///   commit produced, which openmls proved by refusing the next commit;
+/// * an external join after a retention rebuild whose signed head tree shows
+///   this device's leaf removed (gone, or replaced by a re-add): `from` is one
+///   above the last epoch the device held, the removal itself being unknown;
+/// * a re-add into a LATER lineage: the lineage it left has no re-entry, so
+///   `from` is one above its last held epoch and the gap stays open.
+///
+/// `until` is the device's own join, narrowed (never widened) by the DS's
+/// `added_device_ids` hint, so a lying hint can only show more.
 const LEFT_TREE_SCOPE: &str = "pollis_left_tree";
 
-/// Record that this device is out of `(conversation_id, generation)`'s tree,
-/// and where the log shows it re-added, if it does. Best-effort.
-pub(crate) fn mark_left(
-    conn: &rusqlite::Connection,
-    conversation_id: &str,
-    generation: i64,
-    readded_at: Option<u64>,
-) {
-    let value = readded_at.map_or_else(Vec::new, |e| e.to_le_bytes().to_vec());
+/// A recorded gap: `[from, until)`, open-ended while `until` is `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LeftGap {
+    pub from: u64,
+    pub until: Option<u64>,
+}
+
+impl LeftGap {
+    /// Was an envelope sealed at `epoch` sent while this device was out?
+    pub(crate) fn covers(self, epoch: u64) -> bool {
+        epoch >= self.from && self.until.is_none_or(|u| epoch < u)
+    }
+}
+
+fn write_gap(conn: &rusqlite::Connection, conversation_id: &str, generation: i64, gap: LeftGap) {
+    let mut value = gap.from.to_le_bytes().to_vec();
+    if let Some(until) = gap.until {
+        value.extend_from_slice(&until.to_le_bytes());
+    }
     if let Err(e) = conn.execute(
         "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
         rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation), value],
@@ -349,66 +362,175 @@ pub(crate) fn mark_left(
     }
 }
 
-/// Has this device left `(conversation_id, generation)`'s tree?
-pub(crate) fn has_left(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) -> bool {
-    use rusqlite::OptionalExtension;
-    conn.query_row(
-        "SELECT 1 FROM mls_kv WHERE scope = ?1 AND key = ?2",
-        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
-        |_| Ok(()),
-    )
-    .optional()
-    .ok()
-    .flatten()
-    .is_some()
-}
-
-/// Consume the [`mark_left`] marker. `None`: the join is not a re-entry.
-/// `Some(floor)`: it is, and `floor` is where the device's new stint began —
-/// the logged re-add, else `join_epoch`.
-pub(crate) fn take_left(
+/// The gap recorded for `(conversation_id, generation)`, if any.
+pub(crate) fn left_gap(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     generation: i64,
-    join_epoch: u64,
-) -> Option<u64> {
+) -> Option<LeftGap> {
     use rusqlite::OptionalExtension;
-    let k = key(conversation_id, generation);
     let raw: Vec<u8> = conn
         .query_row(
             "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
-            rusqlite::params![LEFT_TREE_SCOPE, k],
+            rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
             |row| row.get(0),
         )
         .optional()
         .ok()
         .flatten()?;
-    let _ = conn.execute(
-        "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
-        rusqlite::params![LEFT_TREE_SCOPE, k],
-    );
-    let readded = <[u8; 8]>::try_from(raw.as_slice()).ok().map(u64::from_le_bytes);
-    Some(readded.map_or(join_epoch, |r| r.min(join_epoch)))
+    let from = u64::from_le_bytes(raw.get(..8)?.try_into().ok()?);
+    let until = raw
+        .get(8..16)
+        .and_then(|b| b.try_into().ok())
+        .map(u64::from_le_bytes);
+    Some(LeftGap { from, until })
+}
+
+/// Record that this device left `(conversation_id, generation)`'s tree at
+/// `from`, with `readded_at` (the DS hint) as a provisional end. Best-effort.
+pub(crate) fn mark_left(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    from: u64,
+    readded_at: Option<u64>,
+) {
+    let until = readded_at.map(|r| r.max(from));
+    write_gap(conn, conversation_id, generation, LeftGap { from, until });
+}
+
+/// The device is back in the lineage at `join_epoch`: close an open gap there,
+/// or narrow one the hint left wider. Never widens it.
+pub(crate) fn close_left(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    join_epoch: u64,
+) {
+    let Some(gap) = left_gap(conn, conversation_id, generation) else {
+        return;
+    };
+    let until = gap.until.map_or(join_epoch, |u| u.min(join_epoch)).max(gap.from);
+    write_gap(conn, conversation_id, generation, LeftGap { from: gap.from, until: Some(until) });
 }
 
 /// A Welcome ADDED this device to `generation` at `welcome_epoch`. Past the
 /// opening epoch that is not the migration carrying it over, so it was off the
-/// roster when the lineage opened: every older lineage it held, it had left
-/// before that lineage closed. Mark each one.
+/// roster when the lineage opened: every older lineage it still holds, it left
+/// at some epoch above the one it holds. `held(g)` is that epoch; a lineage
+/// with none stays unmarked, so its losses show.
 pub(crate) fn mark_predecessors_left(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     generation: i64,
     welcome_epoch: u64,
+    held: impl Fn(i64) -> Option<u64>,
 ) {
     if welcome_epoch <= SUCCESSOR_OPENING_EPOCH {
         return;
     }
     for older in 0..generation {
-        if first_join(conn, conversation_id, older).is_some() {
-            mark_left(conn, conversation_id, older, None);
+        if left_gap(conn, conversation_id, older).is_some() {
+            continue;
+        }
+        if let Some(epoch) = held(older) {
+            mark_left(conn, conversation_id, older, epoch + 1, None);
         }
     }
+}
+
+/// `mls_kv` scope for a retention rebuild awaiting proof that the device had
+/// been removed (#1765). Key: as [`UNCONFIRMED_JOIN_SCOPE`]. Value: the held
+/// epoch (8 bytes LE), a hint flag byte, the hinted re-add epoch (8 bytes LE),
+/// then the encryption key of the device's last own leaf.
+const REBUILD_SCOPE: &str = "pollis_rebuild_pending";
+
+/// A rebuild about to drop this device's group of `generation` at `held`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PendingRebuild {
+    pub held: u64,
+    pub readded_at: Option<u64>,
+    pub own_encryption_key: Vec<u8>,
+    /// Set by the external join from the signed head tree it joined on.
+    pub removed: bool,
+}
+
+pub(crate) fn note_rebuild(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    rebuild: &PendingRebuild,
+) {
+    let mut value = rebuild.held.to_le_bytes().to_vec();
+    value.push(u8::from(rebuild.readded_at.is_some()) | (u8::from(rebuild.removed) << 1));
+    value.extend_from_slice(&rebuild.readded_at.unwrap_or(0).to_le_bytes());
+    value.extend_from_slice(&rebuild.own_encryption_key);
+    if let Err(e) = conn.execute(
+        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+        rusqlite::params![REBUILD_SCOPE, key(conversation_id, generation), value],
+    ) {
+        crate::diag!("[mls] could not record the rebuild of {conversation_id}: {e}");
+    }
+}
+
+pub(crate) fn pending_rebuild(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Option<PendingRebuild> {
+    use rusqlite::OptionalExtension;
+    let raw: Vec<u8> = conn
+        .query_row(
+            "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
+            rusqlite::params![REBUILD_SCOPE, key(conversation_id, generation)],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    let held = u64::from_le_bytes(raw.get(..8)?.try_into().ok()?);
+    let flags = *raw.get(8)?;
+    let hinted = u64::from_le_bytes(raw.get(9..17)?.try_into().ok()?);
+    Some(PendingRebuild {
+        held,
+        readded_at: (flags & 1 == 1).then_some(hinted),
+        own_encryption_key: raw.get(17..)?.to_vec(),
+        removed: flags & 2 == 2,
+    })
+}
+
+/// Consume the rebuild record once its join landed: a proven removal becomes a
+/// gap `[held + 1, join)` (narrowed by the hint); anything else stays a loss.
+pub(crate) fn settle_rebuild(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    join_epoch: u64,
+) {
+    let Some(rebuild) = pending_rebuild(conn, conversation_id, generation) else {
+        return;
+    };
+    let _ = conn.execute(
+        "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
+        rusqlite::params![REBUILD_SCOPE, key(conversation_id, generation)],
+    );
+    if rebuild.removed {
+        mark_left(conn, conversation_id, generation, rebuild.held + 1, rebuild.readded_at);
+        close_left(conn, conversation_id, generation, join_epoch);
+    }
+}
+
+/// Did the head tree remove this device's leaf? `leaves` are the
+/// `(signature key, encryption key)` pairs of the tree it joins on. The leaf is
+/// gone, or one with its signature key carries a different encryption key:
+/// only the device can update its own leaf, and it did not, so a member
+/// removed it (and maybe re-added it from a KeyPackage).
+pub(crate) fn leaf_was_replaced<'a>(
+    mut leaves: impl Iterator<Item = (&'a [u8], &'a [u8])>,
+    own_signature_key: &[u8],
+    own_encryption_key: &[u8],
+) -> bool {
+    !leaves.any(|(sig, enc)| sig == own_signature_key && enc == own_encryption_key)
 }
 
 #[cfg(test)]
@@ -493,31 +615,67 @@ mod tests {
         assert_eq!(first_join(&conn, "c", 0), Some(7));
     }
 
-    /// #1765: only an Add past the opening epoch marks the lineages below it.
+    /// #1765: only an Add past the opening epoch marks the lineages below it,
+    /// and only from one above the epoch the device held there.
     #[test]
     fn an_add_into_a_successor_marks_the_held_predecessors_left() {
         let conn = kv();
-        record_first_join(&conn, "c", 0, 1);
-        mark_predecessors_left(&conn, "c", 1, SUCCESSOR_OPENING_EPOCH);
-        assert!(!has_left(&conn, "c", 0), "the migration's own Welcome carries the device over");
-        mark_predecessors_left(&conn, "c", 2, 5);
-        assert!(has_left(&conn, "c", 0));
-        assert!(!has_left(&conn, "c", 1), "a lineage never held is not marked");
-        assert_eq!(take_left(&conn, "c", 0, 9), Some(9), "no logged re-add: the join");
-        assert_eq!(take_left(&conn, "c", 0, 9), None, "consumed");
-        mark_left(&conn, "c", 3, None);
-        assert!(has_left(&conn, "c", 3));
-        assert!(!has_left(&conn, "d", 3), "per conversation");
+        let held = |g: i64| (g == 0).then_some(1);
+        mark_predecessors_left(&conn, "c", 1, SUCCESSOR_OPENING_EPOCH, held);
+        assert_eq!(left_gap(&conn, "c", 0), None, "the migration's own Welcome carries it over");
+        mark_predecessors_left(&conn, "c", 2, 5, held);
+        let gap = left_gap(&conn, "c", 0).unwrap();
+        assert_eq!(gap, LeftGap { from: 2, until: None });
+        assert!(!gap.covers(1), "sealed while it held the lineage: still a loss");
+        assert!(gap.covers(2) && gap.covers(40));
+        assert_eq!(left_gap(&conn, "c", 1), None, "a lineage it holds no group of is not marked");
+        assert_eq!(left_gap(&conn, "d", 0), None, "per conversation");
     }
 
-    /// #1765: a logged re-add bounds the gap, so what was missed after it stays a loss.
+    /// #1765: a rejoin closes the gap at the join; the DS hint may only narrow it.
     #[test]
-    fn a_logged_re_add_is_the_floor_of_a_rejoin() {
+    fn a_rejoin_closes_the_gap_and_the_hint_only_narrows_it() {
         let conn = kv();
-        mark_left(&conn, "c", 1, Some(27));
-        assert_eq!(take_left(&conn, "c", 1, 28), Some(27));
-        mark_left(&conn, "c", 1, Some(30));
-        assert_eq!(take_left(&conn, "c", 1, 28), Some(28), "never above the join itself");
+        mark_left(&conn, "c", 1, 20, None);
+        close_left(&conn, "c", 1, 28);
+        let gap = left_gap(&conn, "c", 1).unwrap();
+        assert!(!gap.covers(19), "before the removal: a loss");
+        assert!(gap.covers(20) && gap.covers(27));
+        assert!(!gap.covers(28), "after the rejoin: a loss");
+        mark_left(&conn, "c", 1, 20, Some(25));
+        close_left(&conn, "c", 1, 28);
+        assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(25), "narrowed by the hint");
+        mark_left(&conn, "c", 1, 20, Some(90));
+        close_left(&conn, "c", 1, 28);
+        assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(28), "a lying hint cannot widen it");
+        mark_left(&conn, "c", 1, 20, Some(3));
+        assert_eq!(left_gap(&conn, "c", 1).unwrap().until, Some(20), "nor reach below the removal");
+    }
+
+    /// #1765: a retention rebuild becomes a gap only once the head tree proves the removal.
+    #[test]
+    fn a_rebuild_is_a_gap_only_when_the_leaf_was_replaced() {
+        let conn = kv();
+        let mut rebuild = PendingRebuild {
+            held: 13,
+            readded_at: Some(27),
+            own_encryption_key: vec![7; 4],
+            removed: false,
+        };
+        note_rebuild(&conn, "c", 1, &rebuild);
+        assert_eq!(pending_rebuild(&conn, "c", 1), Some(rebuild.clone()));
+        settle_rebuild(&conn, "c", 1, 28);
+        assert_eq!(left_gap(&conn, "c", 1), None, "unproven: the gap stays a loss");
+        assert_eq!(pending_rebuild(&conn, "c", 1), None, "consumed");
+        rebuild.removed = true;
+        note_rebuild(&conn, "c", 1, &rebuild);
+        settle_rebuild(&conn, "c", 1, 28);
+        assert_eq!(left_gap(&conn, "c", 1), Some(LeftGap { from: 14, until: Some(27) }));
+
+        let own: (&[u8], &[u8]) = (b"sig", b"enc");
+        assert!(!leaf_was_replaced([own].into_iter(), b"sig", b"enc"), "still its own leaf");
+        assert!(leaf_was_replaced([(&b"sig"[..], &b"new"[..])].into_iter(), b"sig", b"enc"));
+        assert!(leaf_was_replaced([(&b"other"[..], &b"enc"[..])].into_iter(), b"sig", b"enc"));
     }
 
     fn kv() -> rusqlite::Connection {
