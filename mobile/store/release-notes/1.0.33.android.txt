@@ -1,0 +1,6 @@
+New
+• Unlock with your fingerprint instead of typing your PIN. It stays off until you turn it on, and your PIN still works.
+• Change your PIN from Security.
+
+Fixes
+• Messages are recovered more reliably after you are removed from a group and added back.
