@@ -128,7 +128,7 @@ where
         welcome_epoch,
     );
     // The re-add supersedes an eviction from this lineage (#1765)…
-    super::join_branch::take_left(provider.raw_conn(), &conversation_id, generation);
+    let _ = super::join_branch::take_left(provider.raw_conn(), &conversation_id, generation, welcome_epoch);
     // …and, past the opening epoch, closes every lineage held before it.
     super::join_branch::mark_predecessors_left(
         provider.raw_conn(),

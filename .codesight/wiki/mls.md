@@ -431,9 +431,14 @@ asks `messages::loss::classify`:
   counts too); creating the group or an external join only sets it if none
   exists (`record_first_join`), because a recovery rebuild's gap was sent while
   the device was a member and IS a loss. The exception is an external join
-  after an eviction (#1765): applying a commit that fails `UseAfterEviction`
-  marks the lineage left (`join_branch::mark_left`), and the join that next
-  lets the device back in consumes the mark and moves the floor like a Welcome.
+  that re-enters a tree the device was out of (#1765): a commit that fails
+  `UseAfterEviction`, or a retention rebuild whose commit batch has a commit
+  naming this device in `added_device_ids` (it was re-added while out), marks
+  the lineage left (`join_branch::mark_left`). The join that next lets the
+  device back in consumes the mark and moves the floor like a Welcome: to the
+  logged re-add's epoch if there is one (what was sealed after the re-add and
+  missed stays a loss), else to the join. A rebuild with no logged re-add is
+  unchanged.
   That is the accepted pre-join loss; one summary log line counts them.
 - **Not a loss either** — refused with `evicted`: sealed at an epoch this device
   had been removed from, reached before any re-add moves the floor (#1524). Logged

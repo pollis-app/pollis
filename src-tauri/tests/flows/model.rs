@@ -535,3 +535,22 @@ fn an_external_rejoin_after_eviction_passes_the_gap_silently() {
         .block_on(run_case(&ops, 4, false))
         .unwrap_or_else(|detail| panic!("{detail}"));
 }
+
+/// #1765 (local marathon soak): actor 1 falls behind, is removed without
+/// noticing, the log is retention-pruned past it (a removed device pins
+/// nothing), and its re-add Welcome is dropped. It rebuilds over the prune gap
+/// by external join; the log batch names the commit that re-added it, so the
+/// gap up to that re-add passes silently instead of as `stranded`.
+#[test]
+#[serial]
+fn a_rebuild_over_a_prune_after_a_re_add_passes_the_gap_silently() {
+    use Op::*;
+    // Enough rotations that alice's reports lift the prune floor
+    // (`PRUNE_SLACK_EPOCHS` = 8) above actor 1's stale epoch.
+    let mut ops = vec![Add(1), Remove(1), Send(0)];
+    ops.extend(std::iter::repeat_n(Rotate(0), 12));
+    ops.extend([Fault(2), Add(1)]);
+    runtime()
+        .block_on(run_case(&ops, 3, false))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+}

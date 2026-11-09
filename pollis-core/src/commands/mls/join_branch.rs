@@ -313,24 +313,35 @@ pub(crate) fn entitled_since(
 pub(crate) const SUCCESSOR_OPENING_EPOCH: u64 = 1;
 
 /// `mls_kv` scope marking a lineage whose tree this device left (#1765). Key:
-/// as [`UNCONFIRMED_JOIN_SCOPE`]. Value: empty.
+/// as [`UNCONFIRMED_JOIN_SCOPE`]. Value: empty, or the epoch the log shows the
+/// device was re-added at, little-endian.
 ///
 /// A removal and re-add leaves a gap that is never this device's loss (#1524):
 /// nothing sealed in it was sent to the device. A Welcome re-add moves the floor
 /// ([`record_added`]) and so passes the gap. Two re-entries did not:
 ///
-/// * an EXTERNAL JOIN after an eviction only kept the first floor
-///   ([`record_first_join`]); [`take_left`] makes it move the floor;
+/// * an EXTERNAL JOIN after the device was out — an eviction, or a retention
+///   rebuild whose batch shows a commit re-adding it — only kept the first
+///   floor ([`record_first_join`]); [`take_left`] makes it move the floor, to
+///   the re-add when the log names it, so what was sealed after the re-add and
+///   missed is still a loss;
 /// * a re-add into a LATER lineage never moves the floor of the lineage the
 ///   device left, so what was sealed there after it left read as lost.
 ///   [`mark_predecessors_left`] marks those lineages for `record_losses`.
 const LEFT_TREE_SCOPE: &str = "pollis_left_tree";
 
-/// Record that this device is out of `(conversation_id, generation)`'s tree. Best-effort.
-pub(crate) fn mark_left(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) {
+/// Record that this device is out of `(conversation_id, generation)`'s tree,
+/// and where the log shows it re-added, if it does. Best-effort.
+pub(crate) fn mark_left(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    readded_at: Option<u64>,
+) {
+    let value = readded_at.map_or_else(Vec::new, |e| e.to_le_bytes().to_vec());
     if let Err(e) = conn.execute(
-        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, X'')",
-        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
+        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation), value],
     ) {
         crate::diag!(
             "[mls] could not record leaving {conversation_id} generation {generation}: {e}"
@@ -352,15 +363,32 @@ pub(crate) fn has_left(conn: &rusqlite::Connection, conversation_id: &str, gener
     .is_some()
 }
 
-/// Consume the [`mark_left`] marker: is the join being recorded a RE-entry of
-/// a tree this device was evicted from?
-pub(crate) fn take_left(conn: &rusqlite::Connection, conversation_id: &str, generation: i64) -> bool {
-    conn.execute(
+/// Consume the [`mark_left`] marker. `None`: the join is not a re-entry.
+/// `Some(floor)`: it is, and `floor` is where the device's new stint began —
+/// the logged re-add, else `join_epoch`.
+pub(crate) fn take_left(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+    join_epoch: u64,
+) -> Option<u64> {
+    use rusqlite::OptionalExtension;
+    let k = key(conversation_id, generation);
+    let raw: Vec<u8> = conn
+        .query_row(
+            "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
+            rusqlite::params![LEFT_TREE_SCOPE, k],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    let _ = conn.execute(
         "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
-        rusqlite::params![LEFT_TREE_SCOPE, key(conversation_id, generation)],
-    )
-    .map(|n| n > 0)
-    .unwrap_or(false)
+        rusqlite::params![LEFT_TREE_SCOPE, k],
+    );
+    let readded = <[u8; 8]>::try_from(raw.as_slice()).ok().map(u64::from_le_bytes);
+    Some(readded.map_or(join_epoch, |r| r.min(join_epoch)))
 }
 
 /// A Welcome ADDED this device to `generation` at `welcome_epoch`. Past the
@@ -378,7 +406,7 @@ pub(crate) fn mark_predecessors_left(
     }
     for older in 0..generation {
         if first_join(conn, conversation_id, older).is_some() {
-            mark_left(conn, conversation_id, older);
+            mark_left(conn, conversation_id, older, None);
         }
     }
 }
@@ -475,11 +503,21 @@ mod tests {
         mark_predecessors_left(&conn, "c", 2, 5);
         assert!(has_left(&conn, "c", 0));
         assert!(!has_left(&conn, "c", 1), "a lineage never held is not marked");
-        assert!(take_left(&conn, "c", 0));
-        assert!(!take_left(&conn, "c", 0), "consumed");
-        mark_left(&conn, "c", 3);
+        assert_eq!(take_left(&conn, "c", 0, 9), Some(9), "no logged re-add: the join");
+        assert_eq!(take_left(&conn, "c", 0, 9), None, "consumed");
+        mark_left(&conn, "c", 3, None);
         assert!(has_left(&conn, "c", 3));
         assert!(!has_left(&conn, "d", 3), "per conversation");
+    }
+
+    /// #1765: a logged re-add bounds the gap, so what was missed after it stays a loss.
+    #[test]
+    fn a_logged_re_add_is_the_floor_of_a_rejoin() {
+        let conn = kv();
+        mark_left(&conn, "c", 1, Some(27));
+        assert_eq!(take_left(&conn, "c", 1, 28), Some(27));
+        mark_left(&conn, "c", 1, Some(30));
+        assert_eq!(take_left(&conn, "c", 1, 28), Some(28), "never above the join itself");
     }
 
     fn kv() -> rusqlite::Connection {
