@@ -17,3 +17,8 @@ tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# src/lib.rs compiles src-tauri/src/clipboard.rs through `#[path]`, and that file is
+# what uses these. cargo-machete reads only this crate's own sources, so it misses them.
+[package.metadata.cargo-machete]
+ignored = ["tauri", "tokio", "url"]

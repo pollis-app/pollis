@@ -60,7 +60,7 @@ const EXTENSIONS: Record<string, string> = {
   "text/plain": "txt",
 };
 
-export function extensionFor(contentType: string): string | null {
+function extensionFor(contentType: string): string | null {
   const base = contentType.split(";")[0].trim().toLowerCase();
   return EXTENSIONS[base] ?? null;
 }
@@ -170,8 +170,8 @@ export function currentAttachmentId(id: string): string {
 }
 
 // Swipe down to dismiss (#1492): past a fifth of the page, or a fling. A worklet (inert under node).
-export const DISMISS_FRACTION = 0.2;
-export const DISMISS_VELOCITY = 900;
+const DISMISS_FRACTION = 0.2;
+const DISMISS_VELOCITY = 900;
 
 export function shouldDismiss(dy: number, vy: number, pageHeight: number): boolean {
   "worklet";

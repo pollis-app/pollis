@@ -1,5 +1,3 @@
-// `parseURL`/`updateURL` are a legacy scheme; routing is TanStack Router (`router.tsx`).
-
 export const deriveSlug = (name: string): string => {
   return name
     .toLowerCase()
@@ -8,60 +6,6 @@ export const deriveSlug = (name: string): string => {
     .replace(/-+/g, "-") // Replace multiple hyphens with single
     .replace(/^-|-$/g, ""); // Remove leading/trailing hyphens
 };
-
-export const updateURL = (path: string) => {
-  window.history.pushState({ path }, "", path);
-};
-
-export const parseURL = (): {
-  type: "group" | "channel" | "dm" | "settings" | "create-group" | "create-channel" | "search-group" | "start-dm" | null;
-  groupSlug?: string;
-  channelSlug?: string;
-  conversationId?: string;
-} => {
-  const path = window.location.pathname;
-
-  if (path === "/settings") {
-    return { type: "settings" };
-  }
-
-  if (path === "/create-group") {
-    return { type: "create-group" };
-  }
-
-  if (path === "/create-channel") {
-    return { type: "create-channel" };
-  }
-
-  if (path === "/search-group") {
-    return { type: "search-group" };
-  }
-
-  if (path === "/start-dm") {
-    return { type: "start-dm" };
-  }
-
-  // /g/<group-slug>/<channel-slug>
-  const channelMatch = path.match(/^\/g\/([^/]+)\/([^/]+)$/);
-  if (channelMatch) {
-    return { type: "channel", groupSlug: channelMatch[1], channelSlug: channelMatch[2] };
-  }
-  
-  // /g/<group-slug>
-  const groupMatch = path.match(/^\/g\/([^/]+)$/);
-  if (groupMatch) {
-    return { type: "group", groupSlug: groupMatch[1] };
-  }
-  
-  // /c/<conversation-id>
-  const dmMatch = path.match(/^\/c\/([^/]+)$/);
-  if (dmMatch) {
-    return { type: "dm", conversationId: dmMatch[1] };
-  }
-  
-  return { type: null };
-};
-
 
 // Permalinks (#854) are pointers, not capabilities: `pollis://m/<conversation_id>/<message_id>`, resolved only against the local DB.
 

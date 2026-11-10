@@ -42,7 +42,7 @@ function installTestLocale(): TestLocale | null {
 
 const testLocale = installTestLocale();
 
-export function resolveInitialLanguage(): string {
+function resolveInitialLanguage(): string {
   const stored = loadDeviceLanguage(null);
   if (stored) {
     return stored;

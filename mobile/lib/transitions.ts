@@ -12,6 +12,7 @@ type StackOptions = Exclude<
 
 const DURATION_MS = 200;
 
+// Every push uses it, personal settings pages included, so the edge swipe pops them.
 export const drillIn: StackOptions = Platform.select({
   ios: {
     animation: "simple_push",
@@ -20,6 +21,3 @@ export const drillIn: StackOptions = Platform.select({
   },
   default: { animation: "ios_from_right" },
 });
-
-/** Personal settings pages drill in like everything else, so the edge swipe pops them. */
-export const settingsPage: StackOptions = drillIn;

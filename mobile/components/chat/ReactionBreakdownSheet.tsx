@@ -30,7 +30,7 @@ const CHROME = 96;
 const DRAG_STEP = 48;
 
 /** What a screen reader says for a reaction: a custom `<:name:hash>` token as `:name:`. */
-export function spokenEmoji(emoji: string): string {
+function spokenEmoji(emoji: string): string {
   const segments = splitEmojiSegments(emoji);
   if (segments.length === 1 && segments[0].kind === "emoji") {
     return `:${segments[0].shortcode}:`;

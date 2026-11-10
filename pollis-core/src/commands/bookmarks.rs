@@ -182,10 +182,6 @@ where
     f(db.conn())
 }
 
-pub async fn save_message(message_id: String, state: &Arc<AppState>) -> Result<()> {
-    with_local(state, |conn| add_bookmark(conn, &message_id)).await
-}
-
 pub async fn unsave_message(message_id: String, state: &Arc<AppState>) -> Result<bool> {
     with_local(state, |conn| remove_bookmark(conn, &message_id)).await
 }

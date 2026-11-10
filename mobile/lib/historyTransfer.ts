@@ -201,7 +201,7 @@ export function progressPercent(transfer: HistoryTransfer): number | null {
 }
 
 /** How long a finished copy's outcome stays on the picker page until "Done" (e.g. after a relaunch). */
-export const OUTCOME_SHOWN_MS = 24 * 60 * 60 * 1000;
+const OUTCOME_SHOWN_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Whether the picker page leads with this receiver transfer: always while it runs; once finished, until the

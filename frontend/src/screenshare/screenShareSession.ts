@@ -50,10 +50,10 @@ export type Selection =
   | { kind: "window"; id: number };
 
 /** macOS shares the source's audio; Linux/Windows the system mix. Pollis's own output is always excluded. */
-export type SharedAudioScope = "source" | "system";
+type SharedAudioScope = "source" | "system";
 
 /** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`; no "paused" state by design. */
-export type ScreenShareEvent =
+type ScreenShareEvent =
   | { type: "local_started"; width: number; height: number }
   | { type: "local_stopped" }
   | { type: "local_error"; message: string }

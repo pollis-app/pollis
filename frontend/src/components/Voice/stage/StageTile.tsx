@@ -75,10 +75,10 @@ const LiveWaveform: React.FC<{ identity: string; mutedLocal?: boolean }> = ({ id
   );
 };
 
-export type TileMode = "grid" | "film" | "big" | "preview";
+type TileMode = "grid" | "film" | "big" | "preview";
 
 /** Exactly one media surface per tile; camera + screenshare are two tiles (#394). */
-export type TileMedia =
+type TileMedia =
   | { kind: "audio" }
   | { kind: "camera"; trackKey: string; width?: number; height?: number }
   | { kind: "screenshare"; trackKey: string; width?: number; height?: number };

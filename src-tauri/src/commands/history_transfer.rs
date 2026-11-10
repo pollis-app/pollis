@@ -64,15 +64,6 @@ pub async fn run_history_transfer(
 }
 
 #[tauri::command]
-pub async fn await_history_transfer(
-    state: State<'_, Arc<AppState>>,
-    transfer_id: String,
-    since: Option<String>,
-) -> Result<HistoryTransfer> {
-    pollis_core::commands::history_transfer::await_history_transfer(&state, transfer_id, since).await
-}
-
-#[tauri::command]
 pub async fn cancel_history_transfer(state: State<'_, Arc<AppState>>, transfer_id: String) -> Result<()> {
     pollis_core::commands::history_transfer::cancel_history_transfer(&state, transfer_id).await
 }

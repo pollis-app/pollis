@@ -511,9 +511,6 @@
     "withUnread_other": "{{label}}，{{count}} 条未读"
   },
   "thread": {},
-  "timeAgo": {
-    "now": "刚刚"
-  },
   "ui": {
     "backTo": "返回{{name}}",
     "imageUnavailable": "图片不可用",

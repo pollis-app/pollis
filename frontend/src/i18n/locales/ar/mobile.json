@@ -591,9 +591,6 @@
     "withUnread_zero": "{{label}}، {{count}} غير مقروءة"
   },
   "thread": {},
-  "timeAgo": {
-    "now": "الآن"
-  },
   "ui": {
     "backTo": "العودة إلى {{name}}",
     "imageUnavailable": "الصورة غير متوفرة",

@@ -4,9 +4,9 @@
  * `voice_join:<kind>` or `voice_join:<kind>: <detail>`; only the kind is matched.
  */
 
-export const VOICE_JOIN_WIRE_PREFIX = "voice_join:";
+const VOICE_JOIN_WIRE_PREFIX = "voice_join:";
 
-export type VoiceJoinErrorKind =
+type VoiceJoinErrorKind =
   | "already_joined"
   | "join_in_progress"
   | "not_configured"

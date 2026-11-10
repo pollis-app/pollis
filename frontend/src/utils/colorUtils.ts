@@ -58,8 +58,6 @@ export function applyFontSize(px: number): void {
 /** UI skin; `refined` overrides the `--c-*` tokens in `index.css`. Synced, unlike font size. */
 export type Skin = "terminal" | "refined";
 
-export const SKINS: readonly Skin[] = ["terminal", "refined"] as const;
-
 /** Coerce an arbitrary stored value to a valid Skin, defaulting to terminal. */
 export function normalizeSkin(v: unknown): Skin {
   return v === "refined" ? "refined" : "terminal";
@@ -68,31 +66,6 @@ export function normalizeSkin(v: unknown): Skin {
 /** Apply the UI skin by setting the `data-skin` attribute on <html>. */
 export function applySkin(skin: Skin): void {
   document.documentElement.dataset.skin = skin;
-}
-
-/** Read the current skin from the `data-skin` attribute (default terminal). */
-export function readSkin(): Skin {
-  return normalizeSkin(document.documentElement.dataset.skin);
-}
-
-/** Read the current accent color CSS vars as a hex string */
-export function readAccentHex(): string {
-  const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--accent-h").trim() || "150", 10);
-  const s = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--accent-s").trim() || "62");
-  return hslToHex(h, s, 62);
-}
-
-/** Read the current background color CSS vars as a hex string */
-export function readBackgroundHex(): string {
-  const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--bg-h").trim() || "38", 10);
-  const s = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bg-s").trim() || "20");
-  return hslToHex(h, s, 20);
-}
-
-/** Read the current --font-size-base as a number (px) */
-export function readFontSizePx(): number {
-  const v = getComputedStyle(document.documentElement).getPropertyValue("--font-size-base").trim();
-  return v ? parseInt(v, 10) : 15;
 }
 
 /** Device-local font size, keyed by user id. */

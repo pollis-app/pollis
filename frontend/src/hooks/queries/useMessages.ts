@@ -19,7 +19,7 @@ import {
 const lastIngestAt = new Map<string, number>();
 const INGEST_DEBOUNCE_MS = 5_000;
 
-export function shouldIngest(conversationId: string): boolean {
+function shouldIngest(conversationId: string): boolean {
   const last = lastIngestAt.get(conversationId) ?? 0;
   return performance.now() - last >= INGEST_DEBOUNCE_MS;
 }
@@ -298,20 +298,6 @@ export function useMessages(channelId: string | null, conversationId: string | n
     nextCursor: query.data?.nextCursor ?? null,
     isLoading: query.isLoading,
   };
-}
-
-/**
- * @deprecated Use useMessages(channelId, null) instead
- */
-export function useChannelMessages(channelId: string | null) {
-  return useMessages(channelId, null);
-}
-
-/**
- * @deprecated Use useMessages(null, conversationId) instead
- */
-export function useConversationMessages(conversationId: string | null) {
-  return useMessages(null, conversationId);
 }
 
 export function useSendMessage() {

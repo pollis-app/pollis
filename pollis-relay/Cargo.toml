@@ -20,7 +20,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 # client's own TLS to the real service, which the relay never terminates.
 quinn = { version = "0.11", default-features = false, features = ["ring", "runtime-tokio", "rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
-rustls-pki-types = "1"
 # Self-signed relay QUIC identity (v0). Test certs are also generated in-test.
 # ring backend to avoid dragging in aws-lc-rs' C toolchain requirement.
 rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }

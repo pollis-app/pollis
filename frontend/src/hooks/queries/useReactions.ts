@@ -4,7 +4,7 @@ import { invoke } from "../../bridge";
 import type { Reaction } from "../../types";
 import { appStore } from "../../stores/appStore";
 
-export const reactionQueryKeys = {
+const reactionQueryKeys = {
   message: (messageId: string) => ["reactions", messageId] as const,
 };
 
@@ -87,11 +87,11 @@ function useOptimisticReactionMutation(
   });
 }
 
-export function useAddReaction() {
+function useAddReaction() {
   return useOptimisticReactionMutation("add_reaction", withReaction);
 }
 
-export function useRemoveReaction() {
+function useRemoveReaction() {
   return useOptimisticReactionMutation("remove_reaction", withoutReaction);
 }
 

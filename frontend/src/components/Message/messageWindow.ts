@@ -9,7 +9,7 @@ const REFINED_ROW_REM = 3.25;
 /** Rows kept mounted beyond each edge, so one-step moves stay synchronous. */
 export const ROW_OVERSCAN = 10;
 
-export type MessageRowVirtualizer = Virtualizer<HTMLDivElement, Element>;
+type MessageRowVirtualizer = Virtualizer<HTMLDivElement, Element>;
 
 function rootFontSizePx(): number {
   const raw = parseFloat(

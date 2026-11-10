@@ -493,28 +493,6 @@ async fn release_vault_file(
     super::r2::evict_cached_file_for_user(user_id, &att.content_hash);
 }
 
-/// Case-insensitive substring search over the local cache (the server can't search).
-pub async fn search_vault_messages(
-    query: String,
-    user_id: String,
-    state: &Arc<AppState>,
-) -> Result<Vec<VaultMessage>> {
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return Ok(Vec::new());
-    }
-    let _ = user_id;
-    let guard = state.local_db.lock().await;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    let all = list_local(db.conn())?;
-    Ok(all
-        .into_iter()
-        .filter(|m| m.content.to_lowercase().contains(&needle))
-        .collect())
-}
-
 /// Test harness only: a Vault file's secrets, for the soak suite (#1491).
 #[cfg(feature = "test-harness")]
 pub mod test_hooks {

@@ -34,9 +34,13 @@ async fn create_link(primary: &TestClient) -> (String, String) {
     )
 }
 
+/// The link's current status. `since` matches no state, so `await_device_link` returns at once.
 async fn link_state(primary: &TestClient, link_id: &str) -> serde_json::Value {
     primary
-        .invoke_json("poll_device_link", json!({ "userId": primary.user_id(), "linkId": link_id }))
+        .invoke_json(
+            "await_device_link",
+            json!({ "userId": primary.user_id(), "linkId": link_id, "since": "" }),
+        )
         .await
 }
 

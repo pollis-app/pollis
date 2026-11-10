@@ -719,7 +719,7 @@ async fn a_forged_or_redirected_request_is_never_shown() {
 async fn copied_history_is_not_unread_news() {
     let (desk, _bob, channel, dm, _) = desk_with_history().await;
     desk.invoke_json("mark_conversation_read", json!({ "conversationId": channel, "userId": desk.user_id() })).await;
-    desk.invoke_json("sync_read_cursors", json!({ "userId": desk.user_id() })).await;
+    desk.invoke_json("refresh_read_cursors", json!({ "userId": desk.user_id() })).await;
     let phone = new_sibling(&desk, &channel, &dm).await;
     let (_, d) = copy(&desk, &phone).await;
     assert_eq!(d.state, "completed");

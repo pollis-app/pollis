@@ -146,21 +146,6 @@ async fn edits_and_deletes_are_authoritative_on_the_server() {
     assert_eq!(listed.len(), 1, "the deleted entry must be gone from the remote");
     assert_eq!(listed[0]["content"].as_str().unwrap(), "draft two");
 
-    let hits = alice
-        .invoke_json(
-            "search_vault_messages",
-            serde_json::json!({ "query": "DRAFT", "userId": alice_p.id }),
-        )
-        .await;
-    assert_eq!(hits.as_array().unwrap().len(), 1);
-    let misses = alice
-        .invoke_json(
-            "search_vault_messages",
-            serde_json::json!({ "query": "doomed", "userId": alice_p.id }),
-        )
-        .await;
-    assert!(misses.as_array().unwrap().is_empty());
-
     drop(alice);
 }
 

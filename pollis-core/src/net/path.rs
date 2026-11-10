@@ -67,8 +67,9 @@ pub(crate) struct RelayEndpoint {
 }
 
 impl RelayEndpoint {
-    /// A peer reachable from any first-party relay (v1). Middle hop only.
-    #[allow(dead_code)]
+    /// A peer reachable from any first-party relay (v1). Middle hop only. Tests build these;
+    /// production peers come from the signed directory with their parking (`peer_parked_at`).
+    #[cfg(test)]
     pub(crate) fn peer(
         addr: String,
         region: String,
@@ -233,7 +234,7 @@ impl RelayPath {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn exit(&self) -> &FirstPartyEndpoint {
         match self {
             RelayPath::Single(exit) => exit,

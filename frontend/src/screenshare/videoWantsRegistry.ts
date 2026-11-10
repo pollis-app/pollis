@@ -3,7 +3,7 @@
 // it is unit-tested; `videoWants.ts` wires one instance to `set_video_wants`.
 
 /** Mirrors `VideoWants` in `pollis-core/src/commands/screenshare/wants.rs`. */
-export interface VideoWants {
+interface VideoWants {
   width: number;
   height: number;
   fps: number;

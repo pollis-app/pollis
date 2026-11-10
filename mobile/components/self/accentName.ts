@@ -22,7 +22,7 @@ export function accentPresetLabel(t: TFunction, n: AccentPreset["n"]): string {
 }
 
 /** Null for a custom accent. */
-export function accentPresetFor(hex: string): AccentPreset | null {
+function accentPresetFor(hex: string): AccentPreset | null {
   const wanted = hex.toLowerCase();
   return ACCENT_PRESETS.find((p) => p.c.toLowerCase() === wanted) ?? null;
 }

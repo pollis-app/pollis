@@ -55,6 +55,8 @@ test("the creator, strangers and unparseable rows are never tagged", () => {
 test("mobile carries the same rule", () => {
   const desktop = readFileSync(new URL("../src/utils/newMember.ts", import.meta.url), "utf8");
   const mobile = readFileSync(new URL("../../mobile/lib/newMember.ts", import.meta.url), "utf8");
-  const body = (src: string) => src.slice(src.indexOf("export const NEW_MEMBER_WINDOW_MS"));
+  // Whether each side exports a name is its own business (Knip drops unused exports); the rule is the text.
+  const body = (src: string) =>
+    src.slice(src.search(/^(?:export )?const NEW_MEMBER_WINDOW_MS/m)).replace(/^export /gm, "");
   assert.equal(body(mobile), body(desktop), "mobile/lib/newMember.ts drifted from the desktop rule");
 });

@@ -609,29 +609,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::history_transfer::cancel_history_transfer(&state()?, transfer_id).await?;
             ok(())
         }
-        // QR device link (#1207).
-        "create_device_link" => {
-            let user_id: String = arg(&args, "userId")?;
-            let pin: String = arg(&args, "pin")?;
-            ok(crate::commands::device_link::create_device_link(&state()?, user_id, pin).await?)
-        }
-        "poll_device_link" => {
-            let user_id: String = arg(&args, "userId")?;
-            let link_id: String = arg(&args, "linkId")?;
-            ok(crate::commands::device_link::poll_device_link(&state()?, user_id, link_id).await?)
-        }
-        "await_device_link" => {
-            let user_id: String = arg(&args, "userId")?;
-            let link_id: String = arg(&args, "linkId")?;
-            let since: String = arg(&args, "since")?;
-            ok(crate::commands::device_link::await_device_link(&state()?, user_id, link_id, since).await?)
-        }
-        "approve_device_link" => {
-            let user_id: String = arg(&args, "userId")?;
-            let link_id: String = arg(&args, "linkId")?;
-            crate::commands::device_link::approve_device_link(&state()?, user_id, link_id).await?;
-            ok(())
-        }
+        // QR device link (#1207). Only a signed-in desktop shows a v1 code (create, await,
+        // approve); a phone claims one, and approves a new device by scanning its v2 code.
         "cancel_device_link" => {
             let link_id: String = arg(&args, "linkId")?;
             crate::commands::device_link::cancel_device_link(&state()?, link_id).await?;
@@ -1066,18 +1045,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(groups::redeem_group_invite_link(token, user_id, &state()?).await?)
         }
 
-        "list_messages" => {
-            let conversation_id: String = arg(&args, "conversationId")?;
-            let limit: Option<i64> = arg_opt(&args, "limit")?;
-            let before_id: Option<String> = arg_opt(&args, "beforeId")?;
-            ok(messages::list_messages(
-                conversation_id,
-                limit,
-                before_id,
-                &state()?,
-            )
-            .await?)
-        }
         "send_message" => {
             let conversation_id: String = arg(&args, "conversationId")?;
             let sender_id: String = arg(&args, "senderId")?;
@@ -1122,26 +1089,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(messages::discard_unsent_message(message_id, &state()?).await?)
         }
         "flush_outbox" => ok(messages::flush_outbox(&state()?).await?),
-        "get_channel_messages" => {
-            let user_id: String = arg(&args, "userId")?;
-            let channel_id: String = arg(&args, "channelId")?;
-            let limit: Option<i64> = arg_opt(&args, "limit")?;
-            let cursor: Option<messages::MessageCursor> = arg_opt(&args, "cursor")?;
-            ok(messages::get_channel_messages(
-                user_id, channel_id, limit, cursor, &state()?,
-            )
-            .await?)
-        }
-        "get_dm_messages" => {
-            let user_id: String = arg(&args, "userId")?;
-            let dm_channel_id: String = arg(&args, "dmChannelId")?;
-            let limit: Option<i64> = arg_opt(&args, "limit")?;
-            let cursor: Option<messages::MessageCursor> = arg_opt(&args, "cursor")?;
-            ok(messages::get_dm_messages(
-                user_id, dm_channel_id, limit, cursor, &state()?,
-            )
-            .await?)
-        }
         // Local-first batched reads (#936): pages come straight from the local
         // DB; the caller fires ingest separately, exactly as desktop does.
         "read_channel_messages" => {
@@ -1170,10 +1117,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let conversation_id: String = arg(&args, "conversationId")?;
             let user_id: String = arg(&args, "userId")?;
             ok(messages::mark_conversation_read(conversation_id, user_id, &state()?).await?)
-        }
-        "sync_read_cursors" => {
-            let user_id: String = arg(&args, "userId")?;
-            ok(messages::sync_read_cursors(user_id, &state()?).await?)
         }
         "refresh_read_cursors" => {
             let user_id: String = arg(&args, "userId")?;
@@ -1251,11 +1194,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
 
         // Device-local (#854); no DS endpoint backs these.
         "list_saved_messages" => ok(bookmarks::list_saved_messages(&state()?).await?),
-        "save_message" => {
-            let message_id: String = arg(&args, "messageId")?;
-            bookmarks::save_message(message_id, &state()?).await?;
-            ok(())
-        }
         "toggle_saved_message" => {
             let message_id: String = arg(&args, "messageId")?;
             ok(bookmarks::toggle_saved_message(message_id, &state()?).await?)
@@ -1345,11 +1283,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             vault::delete_vault_message(id, user_id, &state()?).await?;
             ok(())
         }
-        "search_vault_messages" => {
-            let query: String = arg(&args, "query")?;
-            let user_id: String = arg(&args, "userId")?;
-            ok(vault::search_vault_messages(query, user_id, &state()?).await?)
-        }
 
         "list_dm_channels" => {
             let user_id: String = arg(&args, "userId")?;
@@ -1435,26 +1368,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let dm_channel_id: String = arg(&args, "dmChannelId")?;
             let user_id: String = arg(&args, "userId")?;
             dm::leave_dm_channel(dm_channel_id, user_id, &state()?).await?;
-            ok(())
-        }
-        "add_user_to_dm_channel" => {
-            let dm_channel_id: String = arg(&args, "dmChannelId")?;
-            let user_id: String = arg(&args, "userId")?;
-            let added_by: String = arg(&args, "addedBy")?;
-            dm::add_user_to_dm_channel(dm_channel_id, user_id, added_by, &state()?).await?;
-            ok(())
-        }
-        "remove_user_from_dm_channel" => {
-            let dm_channel_id: String = arg(&args, "dmChannelId")?;
-            let user_id: String = arg(&args, "userId")?;
-            let requester_id: String = arg(&args, "requesterId")?;
-            dm::remove_user_from_dm_channel(
-                dm_channel_id,
-                user_id,
-                requester_id,
-                &state()?,
-            )
-            .await?;
             ok(())
         }
         "accept_dm_request" => {
@@ -1652,7 +1565,6 @@ mod tests {
             "revoke_group_invite_link",
             "redeem_group_invite_link",
             "list_saved_messages",
-            "save_message",
             "toggle_saved_message",
             "unsave_message",
             "resolve_message_permalink",
@@ -1671,7 +1583,6 @@ mod tests {
             "read_last_messages",
             "get_unread_counts",
             "mark_conversation_read",
-            "sync_read_cursors",
             "refresh_read_cursors",
             "list_security_events",
             "delete_account",
@@ -1689,7 +1600,6 @@ mod tests {
             "edit_vault_message",
             "set_vault_message_pinned",
             "delete_vault_message",
-            "search_vault_messages",
             "export_archive",
             "fetch_export_attachments",
             "bundle_export",
@@ -1727,7 +1637,7 @@ mod tests {
             }
         }
         assert_eq!(missing("get_unread_counts", "{}").await, "missing arg: userId");
-        assert_eq!(missing("sync_read_cursors", "{}").await, "missing arg: userId");
+        assert_eq!(missing("refresh_read_cursors", "{}").await, "missing arg: userId");
         assert_eq!(
             missing("mark_conversation_read", "{}").await,
             "missing arg: conversationId"

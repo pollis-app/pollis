@@ -15,7 +15,7 @@ export interface VaultMessage {
   updated_at: string;
 }
 
-export const vaultQueryKeys = {
+const vaultQueryKeys = {
   all: ["vault"] as const,
 };
 

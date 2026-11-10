@@ -4,7 +4,7 @@ import type { SecurityEvent } from "../../lib/securityEvents";
 import { formatRelative } from "../../lib/relativeTime";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 
-export function shortId(id: string): string {
+function shortId(id: string): string {
   if (id.length <= 10) {
     return id;
   }
@@ -32,7 +32,7 @@ function parseEmailChangeMetadata(
 }
 
 // Mirrors desktop's `describe()`; unknown kinds fall through to the raw string.
-export function describeEvent(event: SecurityEvent): {
+function describeEvent(event: SecurityEvent): {
   heading: string;
   detail: string;
 } {

@@ -366,21 +366,6 @@ pub struct UploadResult {
     pub url: String,
 }
 
-pub async fn upload_file(
-    key: String,
-    data: Vec<u8>,
-    content_type: String,
-    state: &Arc<AppState>,
-) -> Result<UploadResult> {
-    // The DS signs `content-length` into the URL, so R2 refuses any other size.
-    let put_url =
-        presign_r2_with_length(state, "put", &key, Some(data.len() as u64)).await?;
-    let overlay = state.overlay_handle();
-    r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
-    let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
-    Ok(UploadResult { key, url })
-}
-
 pub async fn download_file(
     key: String,
     state: &Arc<AppState>,

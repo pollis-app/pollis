@@ -21,16 +21,16 @@ function walk(dir: string): string[] {
   return out;
 }
 
-/** Exported hooks whose result is a `useMutation` result, directly or by return. */
+/** Hooks whose result is a `useMutation` result, directly or by return. */
 function mutationHooks(files: string[]): Set<string> {
   const hooks = new Set<string>();
   const sources = files.map((f) => readFileSync(f, "utf8"));
   // Two passes so a hook that returns another mutation hook is caught after it.
   for (let pass = 0; pass < 2; pass++) {
     for (const source of sources) {
-      const parts = source.split(/\n(?=export function )/);
+      const parts = source.split(/\n(?=(?:export )?function )/);
       for (const part of parts) {
-        const name = /^export function (use[A-Za-z]+)/.exec(part)?.[1];
+        const name = /^(?:export )?function (use[A-Za-z]+)/.exec(part)?.[1];
         if (!name) {
           continue;
         }

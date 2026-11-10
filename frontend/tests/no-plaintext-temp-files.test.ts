@@ -65,7 +65,7 @@ test("a queued attachment's bytes are either a user file or staged, never both a
 
   assert.match(
     chatInput.text,
-    /export type AttachmentSource =\s*\|\s*\{ kind: "path"; path: string \}\s*\|\s*\{ kind: "staged"; id: string \};/,
+    /type AttachmentSource =\s*\|\s*\{ kind: "path"; path: string \}\s*\|\s*\{ kind: "staged"; id: string \};/,
     "AttachmentSource must stay a two-case discriminated union",
   );
   assert.doesNotMatch(

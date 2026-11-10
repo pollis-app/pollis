@@ -8,11 +8,11 @@ export type DotMatrixAlgorithm =
   | { kind: "gameOfLife" }
   | { kind: "flowingWave" };
 
-export const pulsingWaveAlgorithm: DotMatrixAlgorithm = { kind: "pulsingWave" };
+const pulsingWaveAlgorithm: DotMatrixAlgorithm = { kind: "pulsingWave" };
 export const gameOfLifeAlgorithm: DotMatrixAlgorithm = { kind: "gameOfLife" };
-export const flowingWaveAlgorithm: DotMatrixAlgorithm = { kind: "flowingWave" };
+const flowingWaveAlgorithm: DotMatrixAlgorithm = { kind: "flowingWave" };
 
-export const ALL_ALGORITHMS: DotMatrixAlgorithm[] = [
+const ALL_ALGORITHMS: DotMatrixAlgorithm[] = [
   pulsingWaveAlgorithm,
   gameOfLifeAlgorithm,
   flowingWaveAlgorithm,

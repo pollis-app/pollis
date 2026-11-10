@@ -97,11 +97,6 @@ export function addPushTokenRotationListener(onRotation: () => void): () => void
   };
 }
 
-export async function isPushAuthorized(): Promise<boolean> {
-  const status = await Notifications.getPermissionsAsync();
-  return status.granted;
-}
-
 export async function getPushPermissionInfo(): Promise<{
   granted: boolean;
   canAskAgain: boolean;
@@ -231,6 +226,3 @@ export async function reconcileReadNotifications(userId: string): Promise<void> 
     // Offline, an older DS (404), or no tray access: try again next time.
   }
 }
-
-export { readPayloadRouting } from "./routing";
-export type { PayloadRouting } from "./routing";

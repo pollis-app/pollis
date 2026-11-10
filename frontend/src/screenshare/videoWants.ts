@@ -3,8 +3,6 @@
 import { invoke } from "../bridge";
 import { VideoWantsRegistry } from "./videoWantsRegistry";
 
-export type { VideoWants, WantsReport } from "./videoWantsRegistry";
-
 export const videoWants = new VideoWantsRegistry((trackKey, wants) =>
   invoke("set_video_wants", { trackKey, wants }),
 );

@@ -1104,7 +1104,6 @@ pub(crate) struct TestClient {
     /// Must outlive the webview.
     pub(crate) _app: App<MockRuntime>,
     pub(crate) webview: WebviewWindow<MockRuntime>,
-    #[allow(dead_code)]
     pub(crate) state: Arc<AppState>,
     pub(crate) profile: Option<UserProfile>,
 }
@@ -1218,7 +1217,6 @@ impl TestClient {
 
     /// Turn biometric unlock on (#1685) the way the app does: begin with the PIN, "store" the key,
     /// confirm it. Returns the device key the app would keep behind Face ID / fingerprint.
-    #[allow(dead_code)]
     pub(crate) async fn enable_biometric_unlock(&self) -> String {
         let key = self
             .invoke_json("device_unlock_begin", json!({ "pin": TEST_PIN }))
@@ -1231,7 +1229,6 @@ impl TestClient {
     }
 
     /// Lock, then unlock with the device key instead of the PIN.
-    #[allow(dead_code)]
     pub(crate) async fn lock_then_biometric_unlock(&self, device_key: &str) {
         self.invoke_json("lock", json!({})).await;
         self.invoke_json(
@@ -1242,7 +1239,6 @@ impl TestClient {
     }
 
     /// The cold-launch / reconnect MLS sweep, including the reconcile backstop (#430 P1).
-    #[allow(dead_code)]
     pub(crate) async fn sweep(&self) {
         self.activate();
         let _: serde_json::Value = invoke(
@@ -1255,7 +1251,6 @@ impl TestClient {
     }
 
     /// Drain pending commits for one conversation's MLS group.
-    #[allow(dead_code)]
     pub(crate) async fn process_commits_for(&self, channel_id: &str) {
         self.activate();
         let _: serde_json::Value = invoke(
@@ -1386,7 +1381,6 @@ impl TestClient {
     }
 
     /// Another text channel; all channels share the group's one MLS group.
-    #[allow(dead_code)]
     pub(crate) async fn create_channel(&self, group_id: &str, name: &str) -> String {
         let ch: serde_json::Value = self
             .invoke_json(

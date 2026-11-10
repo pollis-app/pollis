@@ -16,7 +16,7 @@ import {
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { semantic } from "../theme/tokens";
-import { drillIn, settingsPage } from "../lib/transitions";
+import { drillIn } from "../lib/transitions";
 import { ThemeProvider, useThemeRerender } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge, invoke } from "../lib/native";
@@ -298,64 +298,64 @@ export default function RootLayout() {
               <Stack.Screen name="media" />
               <Stack.Screen name="vault" />
               <Stack.Screen name="user/[id]" />
-              <Stack.Screen name="report" options={settingsPage} />
+              <Stack.Screen name="report" options={drillIn} />
               <Stack.Screen
                 name="self/preferences"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/user-settings"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/security"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/security-events"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/link-device"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/blocked"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/change-email"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/saved"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/diagnostics"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/change-pin"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/biometric-unlock"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen name="dev/client-policy" options={{ animation: "none" }} />
-              <Stack.Screen name="approve-device" options={settingsPage} />
-              <Stack.Screen name="approve-history-transfer" options={settingsPage} />
+              <Stack.Screen name="approve-device" options={drillIn} />
+              <Stack.Screen name="approve-history-transfer" options={drillIn} />
               {/* After setup, like an auth step: no swipe back into initializing. */}
               <Stack.Screen name="history-offer" options={{ animation: "fade", gestureEnabled: false }} />
               <Stack.Screen
                 name="self/history-transfer"
-                options={settingsPage}
+                options={drillIn}
               />
               <Stack.Screen
                 name="self/delete-account"
-                options={settingsPage}
+                options={drillIn}
               />
             </RootStack>
             {/* A message link's Copy / Open sheet and the IDN confirm. */}

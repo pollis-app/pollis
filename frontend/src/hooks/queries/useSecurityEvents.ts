@@ -15,7 +15,7 @@ export const securityEventQueryKeys = {
 };
 
 /** Rows on the Security page before "View all" (#1548). */
-export const SECURITY_EVENTS_PREVIEW = 3;
+const SECURITY_EVENTS_PREVIEW = 3;
 
 /** Rows per page on the Security events page (#1548). */
 const PAGE_SIZE = 25;

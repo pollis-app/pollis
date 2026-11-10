@@ -97,12 +97,12 @@ const ScreenBleedContext = React.createContext(0);
 // True under a <Screen>: a nested <Screen> must not avoid the keyboard again.
 const KeyboardAvoidedContext = React.createContext(false);
 
-export function useScreenBleed(): number {
+function useScreenBleed(): number {
   return React.useContext(ScreenBleedContext);
 }
 
 /** A full-screen-width hairline, even inside the centred column. The parent must not clip. */
-export function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
+function BleedHairline({ edge }: { edge: "top" | "bottom" }) {
   const bleed = useScreenBleed();
   return (
     <View
@@ -225,7 +225,7 @@ function tintGlyph(node: React.ReactNode, color: string): React.ReactNode {
 export const InSheetContext = React.createContext(false);
 
 // Opt-in touch-down activation (#1529; rules in lib/pressIn.ts). Never on a scroller row or with a long press.
-export function usePressIn(
+function usePressIn(
   onPress: (() => void) | undefined,
   enabled: boolean | undefined,
 ): { onPress?: () => void; onPressIn?: () => void; onPressOut?: () => void } {
@@ -322,8 +322,6 @@ export function IconButton({
     </Pressable>
   );
 }
-
-export const HeaderAction = IconButton;
 
 // Top bar for every screen. Leave out `title` for a back-only bar.
 export function Header({
@@ -610,8 +608,6 @@ export function Chip({
     </Pressable>
   );
 }
-
-export const Pill = Chip;
 
 // Text button. `loading` disables it and shows a spinner, so it cannot be submitted twice.
 export function Button({
@@ -1178,7 +1174,7 @@ export function Toggle({
 }
 
 // 24pt checkbox; without `onPress` it is a silent visual (see <CheckRow>).
-export function Checkbox({
+function Checkbox({
   checked,
   onPress,
   testID,

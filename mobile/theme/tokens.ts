@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import { compositeOver } from "./composite";
 import { deriveTheme, type Theme } from "./derive";
 import { DEFAULT_BACKGROUND_HEX } from "./accents";
 import { loadBootAccent } from "./accentStore";
@@ -23,14 +22,6 @@ export function setAccentRgb(rgb: string) {
 export function setBackgroundRgb(rgb: string) {
   _bgRgb = rgb;
   _theme = deriveTheme(_accentRgb, _bgRgb);
-}
-
-export function setAccentHex(hex: string) {
-  setAccentRgb(hexToRgbTriplet(hex));
-}
-
-export function setBackgroundHex(hex: string) {
-  setBackgroundRgb(hexToRgbTriplet(hex));
 }
 
 export function currentAccentHex(): string {
@@ -58,38 +49,11 @@ export function hexToRgbTriplet(hex: string): string {
   return `${r}, ${g}, ${b}`;
 }
 
-export function rgbTripletToHex(rgb: string): string {
+function rgbTripletToHex(rgb: string): string {
   const [r, g, b] = rgb.split(",").map((n) => parseInt(n.trim(), 10));
   const to = (n: number) => n.toString(16).padStart(2, "0");
   return `#${to(r)}${to(g)}${to(b)}`;
 }
-
-// Translucent accent tier. Prefer the opaque semantic tokens.
-export const t = (alpha: number) => `rgba(${_accentRgb}, ${alpha})`;
-
-// The same tier pre-composited over the background: OPAQUE (#1193).
-export const tOpaque = (alpha: number) => compositeOver(_accentRgb, alpha, _bgRgb);
-
-export const palette = {
-  get bg() {
-    return _theme.bg;
-  },
-  get accent() {
-    return _theme.accent;
-  },
-  // Deprecated: use semantic.panel.
-  get bg2() {
-    return _theme.panel;
-  },
-  // Deprecated: use semantic.raised.
-  get bg3() {
-    return _theme.raised;
-  },
-  // Deprecated: no third hue exists; this is the accent (see derive.ts).
-  get danger() {
-    return _theme.danger;
-  },
-};
 
 export const semantic = {
   /* ── Current names ── */

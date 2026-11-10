@@ -84,7 +84,7 @@ import {
 import { I18nManager, View } from "react-native";
 import { semantic } from "../theme/tokens";
 
-export const ICON_STROKE = 1.75;
+const ICON_STROKE = 1.75;
 
 type P = { size?: number; color?: string };
 
@@ -213,8 +213,6 @@ export const Icon = {
   check: wrap(Check, 12),
   checkCheck: wrap(CheckCheck, 12),
 };
-
-export type IconName = keyof typeof Icon;
 
 // So a control can tell an icon element it may recolour from a composed node.
 const ICON_COMPONENTS: ReadonlySet<unknown> = new Set<unknown>(Object.values(Icon));

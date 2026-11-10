@@ -17,10 +17,10 @@ import { audioSetMuted, audioSetSpeaking, isMuted } from './participantAudio';
 import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
 import { COALESCED_GATE_COMMANDS, predictGate, type GateCommand } from './gatePredict';
 
-export const VOICE_DEVICES_KEY = 'pollis:voice-devices';
+const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
 /** Mirrors the `VoiceEvent` enum in `pollis-core/src/commands/voice.rs`. */
-export type VoiceEvent =
+type VoiceEvent =
   | {
       type: 'participant_joined';
       identity: string;
@@ -51,7 +51,7 @@ export type VoiceEvent =
   | { type: 'disconnected'; error?: { kind: string; detail?: string } | null };
 
 /** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
-export interface JoinTimings {
+interface JoinTimings {
   channel_id: string;
   jwt_mint_ms: number;
   /** MLS resolve + catch-up + exporter-secret derivation, before the connect. */
@@ -66,16 +66,16 @@ export interface JoinTimings {
 }
 
 /** What the user wants the session to be. `null` means "no voice session". */
-export interface VoiceIntent {
+interface VoiceIntent {
   channelId: string;
   groupId: string | null;
   /** The other user in a 1:1 call (`call-*` room); its E2EE key derives from the DM's MLS group. */
   counterpartyUserId?: string | null;
 }
 
-export type VoicePhase = 'idle' | 'joining' | 'joined' | 'leaving';
+type VoicePhase = 'idle' | 'joining' | 'joined' | 'leaving';
 
-export interface VoiceSessionState {
+interface VoiceSessionState {
   phase: VoicePhase;
   channelId: string | null;
   groupId: string | null;

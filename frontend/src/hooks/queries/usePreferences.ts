@@ -48,7 +48,7 @@ export function normalizeOverlayMode(v: string | undefined | null): OverlayMode 
 }
 
 /** Coerce to a known `VoiceInputMode`; unknown/absent → `voice_activity`. */
-export function normalizeVoiceInputMode(v: string | undefined | null): VoiceInputMode {
+function normalizeVoiceInputMode(v: string | undefined | null): VoiceInputMode {
   return v === "push_to_talk" ? v : VOICE_INPUT_MODE_DEFAULT;
 }
 
@@ -156,7 +156,7 @@ export function clampRemoteUserVolume(v: number): number {
 }
 
 /** Defaults must match `voice_apm::ApmConfig::default` in src-tauri. */
-export const APM_DEFAULTS = {
+const APM_DEFAULTS = {
   mic_boost_db: 0,
   auto_gain_control: true,
   agc_target_dbfs: 6,

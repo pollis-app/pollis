@@ -32,8 +32,3 @@ pub async fn set_vault_message_pinned(id: String, pinned: bool, user_id: String,
 pub async fn delete_vault_message(id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::vault::delete_vault_message(id, user_id, &state).await
 }
-
-#[tauri::command]
-pub async fn search_vault_messages(query: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<VaultMessage>> {
-    pollis_core::commands::vault::search_vault_messages(query, user_id, &state).await
-}

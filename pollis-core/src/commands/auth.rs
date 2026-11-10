@@ -639,26 +639,6 @@ pub async fn verify_email_change(
     Ok(())
 }
 
-/// Dev-only: bypass OTP and log in directly with an email address.
-/// Returns an error in release builds so this can never be used in production.
-pub async fn dev_login(
-    _state: &Arc<AppState>,
-    _email: String,
-) -> Result<UserProfile> {
-    #[cfg(not(debug_assertions))]
-    {
-        let _ = (_state, _email);
-        return Err(crate::error::Error::Other(anyhow::anyhow!("dev_login is not available in release builds")));
-    }
-
-    #[cfg(debug_assertions)]
-    {
-        let profile = dev_login_dispatch(_state, _email).await?;
-        crate::diag!("[auth] dev_login: logged in as {}", profile.id);
-        Ok(profile)
-    }
-}
-
 /// This device's stable `device_id`, or `None` if not registered this process (#140).
 pub async fn get_device_id(state: &Arc<AppState>) -> Result<Option<String>> {
     Ok(state.device_id.lock().await.clone())

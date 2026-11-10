@@ -1,8 +1,8 @@
 // Pure colour derivation from exactly TWO bases, accent and background.
 
-export type Rgb = [number, number, number];
+type Rgb = [number, number, number];
 
-export function parseColor(input: string): Rgb {
+function parseColor(input: string): Rgb {
   const s = input.trim();
   if (s.startsWith("#")) {
     const h = s.slice(1);
@@ -16,18 +16,18 @@ export function parseColor(input: string): Rgb {
   return [parts[0], parts[1], parts[2]];
 }
 
-export function toHex(c: Rgb): string {
+function toHex(c: Rgb): string {
   const to = (n: number) =>
     Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
   return `#${to(c[0])}${to(c[1])}${to(c[2])}`;
 }
 
-export function toRgba(c: Rgb, alpha: number): string {
+function toRgba(c: Rgb, alpha: number): string {
   return `rgba(${c.map((n) => Math.round(n)).join(", ")}, ${alpha})`;
 }
 
 /** Same as CSS `color-mix(in srgb, a weight%, b)`. */
-export function mix(a: Rgb, b: Rgb, weight: number): Rgb {
+function mix(a: Rgb, b: Rgb, weight: number): Rgb {
   return [
     a[0] * weight + b[0] * (1 - weight),
     a[1] * weight + b[1] * (1 - weight),
@@ -38,15 +38,15 @@ export function mix(a: Rgb, b: Rgb, weight: number): Rgb {
 const WHITE: Rgb = [255, 255, 255];
 const BLACK: Rgb = [0, 0, 0];
 
-export function lighten(bg: Rgb, amount: number): Rgb {
+function lighten(bg: Rgb, amount: number): Rgb {
   return mix(WHITE, bg, amount);
 }
 
-export function darken(bg: Rgb, amount: number): Rgb {
+function darken(bg: Rgb, amount: number): Rgb {
   return mix(BLACK, bg, amount);
 }
 
-export function luminance(c: Rgb): number {
+function luminance(c: Rgb): number {
   const lin = c.map((v) => {
     const s = Math.round(v) / 255;
     return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);

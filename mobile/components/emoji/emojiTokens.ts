@@ -11,14 +11,14 @@
  */
 
 /** A parsed custom-emoji reference. */
-export interface EmojiTokenSegment {
+interface EmojiTokenSegment {
   kind: "emoji";
   shortcode: string;
   contentHash: string;
 }
 
 /** A run of ordinary text between (or around) tokens. */
-export interface TextSegment {
+interface TextSegment {
   kind: "text";
   text: string;
 }
@@ -64,10 +64,4 @@ export function splitEmojiSegments(text: string): EmojiSegment[] {
     segments.push({ kind: "text", text });
   }
   return segments;
-}
-
-/** True when `text` carries at least one custom-emoji reference. */
-export function hasEmojiTokens(text: string): boolean {
-  // A fresh regex: the module-level one is stateful because of /g.
-  return /<:[a-z0-9_]{2,32}:[0-9a-f]{64}>/.test(text);
 }

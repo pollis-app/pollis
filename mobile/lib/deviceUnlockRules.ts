@@ -8,7 +8,7 @@ export const DEVICE_UNLOCK_SERVICE = "pollis.deviceUnlock";
  * The iOS keychain group the Notification Service Extension shares. The device key must NEVER
  * be written there: the extension runs with no user present.
  */
-export const SHARED_KEYCHAIN_SUFFIX = ".com.pollis.shared";
+const SHARED_KEYCHAIN_SUFFIX = ".com.pollis.shared";
 
 /** SecureStore keys allow only `[A-Za-z0-9._-]`; a user id that does not fit gets no key. */
 export function deviceKeyName(userId: string): string | null {

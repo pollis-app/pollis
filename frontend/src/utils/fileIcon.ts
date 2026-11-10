@@ -6,7 +6,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 // Extension → MIME for the composer and R2 public downloads.
-export const EXT_MIME: Record<string, string> = {
+const EXT_MIME: Record<string, string> = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
   gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", avif: "image/avif",
   mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",

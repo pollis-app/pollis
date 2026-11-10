@@ -15,7 +15,7 @@ export type ButtonColors = {
   label: string;
 };
 
-export function controlFill(theme: Theme, surface: ControlSurface = "base"): string {
+function controlFill(theme: Theme, surface: ControlSurface = "base"): string {
   return surface === "raised" ? theme.high : theme.raised;
 }
 
@@ -31,7 +31,7 @@ export function controlDisabled(
 }
 
 /** A disabled PRIMARY keeps its identity (review6 #10): dimmed accent fill, light `text` label. */
-export function disabledPrimary(theme: Theme): { fill: string; fg: string } {
+function disabledPrimary(theme: Theme): { fill: string; fg: string } {
   return { fill: theme.accentDisabled, fg: theme.text };
 }
 

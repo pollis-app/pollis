@@ -17,19 +17,6 @@ export async function uploadAvatar(
   return { upload_url: '', object_key: result.key, public_url: result.url };
 }
 
-export async function uploadGroupIcon(
-  groupId: string,
-  file: File,
-): Promise<PresignedUploadResponse> {
-  const data = new Uint8Array(await file.arrayBuffer());
-  const result = await invoke<{ key: string; url: string }>('upload_public_file', {
-    prefix: `group-icons/${groupId}`,
-    data: Array.from(data),
-    contentType: file.type || 'image/png',
-  });
-  return { upload_url: '', object_key: result.key, public_url: result.url };
-}
-
 function sniffImageMime(bytes: Uint8Array): string | null {
   if (bytes.length >= 8 &&
     bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
@@ -75,7 +62,7 @@ export async function getFileDownloadUrl(key: string): Promise<string> {
 }
 
 /// Media command args (#1382); throws without a key scope so nothing is decrypted under a guess.
-export function mediaArgs(attachment: MessageAttachment) {
+function mediaArgs(attachment: MessageAttachment) {
   if (!attachment.key_scope) {
     throw new Error('attachment is unavailable');
   }
@@ -106,7 +93,7 @@ export async function saveAttachmentAs(attachment: MessageAttachment): Promise<b
 }
 
 /// Download + decrypt an attachment into a blob URL.
-export async function downloadAndDecryptMedia(attachment: MessageAttachment): Promise<string> {
+async function downloadAndDecryptMedia(attachment: MessageAttachment): Promise<string> {
   const bytes = await invoke<number[]>('download_media', mediaArgs(attachment));
   const mimeType = attachment.content_type;
   const blob = new Blob([new Uint8Array(bytes)], mimeType ? { type: mimeType } : undefined);

@@ -4,7 +4,7 @@ import * as Notifications from "expo-notifications";
 import * as TaskManager from "expo-task-manager";
 import { pickDismissals, readDismissPayload, type Presented } from "./dismiss";
 
-export const DISMISS_TASK = "pollis-dismiss-read-notifications";
+const DISMISS_TASK = "pollis-dismiss-read-notifications";
 
 export async function dismissHandles(handles: readonly string[]): Promise<number> {
   if (handles.length === 0) {

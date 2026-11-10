@@ -1,11 +1,4 @@
 // PORT of frontend/src/utils/mentions.ts; pollis-core/src/commands/messages/send.rs is the source of truth for both.
-export function mentionsAll(content: string): boolean {
-  return content.split(/\s+/).some((word) => {
-    // The same predicate the Rust matcher uses.
-    const trimmed = word.replace(/[^\p{L}\p{N}@]+$/u, "");
-    return trimmed.toLowerCase() === "@all";
-  });
-}
 
 // Mirrors `is_mention_body_char()` in send.rs.
 const MENTION_BODY = /[\p{L}\p{N}_.-]/u;
@@ -42,13 +35,6 @@ export function findMentions(text: string): MentionMatch[] {
     });
   }
   return out;
-}
-
-/** Lowercased usernames named in `text`, excluding `@all`. Mirrors `mention_tokens()`. */
-export function mentionTokens(text: string): string[] {
-  return findMentions(text)
-    .map((m) => m.name)
-    .filter((n) => n !== "all");
 }
 
 export interface MentionQuery {
@@ -95,7 +81,7 @@ export interface MentionCandidate {
   avatarUrl?: string | null;
 }
 
-export const MENTION_SUGGESTION_LIMIT = 8;
+const MENTION_SUGGESTION_LIMIT = 8;
 
 /** Prefix matches first, then alphabetical. Never widens the pool beyond visible members. */
 export function rankMentionCandidates(

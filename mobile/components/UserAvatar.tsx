@@ -14,7 +14,7 @@ function points(size: Size): number {
 }
 
 /** The local file to draw for `userId` at `px`, or null for the letter avatar. */
-export function useAvatarUri(
+function useAvatarUri(
   userId: string | null | undefined,
   avatarKey: string | null | undefined,
   px: number,

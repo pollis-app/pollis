@@ -34,11 +34,6 @@ pub async fn verify_email_change(state: State<'_, Arc<AppState>>, user_id: Strin
 }
 
 #[tauri::command]
-pub async fn dev_login(state: State<'_, Arc<AppState>>, _email: String) -> Result<UserProfile> {
-    pollis_core::commands::auth::dev_login(&state, _email).await
-}
-
-#[tauri::command]
 pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserProfile>> {
     pollis_core::commands::auth::get_session(&state).await
 }

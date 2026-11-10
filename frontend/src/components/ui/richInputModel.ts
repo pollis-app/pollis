@@ -26,7 +26,7 @@ function splitValue(text: string): ValueSegment[] {
 }
 
 /** Anchored: exactly one token and nothing else. */
-export function isEmojiToken(text: string): boolean {
+function isEmojiToken(text: string): boolean {
   return /^<:[a-z0-9_]{2,32}:[0-9a-f]{64}>$/.test(text);
 }
 

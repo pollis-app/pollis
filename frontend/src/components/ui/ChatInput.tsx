@@ -14,7 +14,6 @@ import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
 import { getFileIcon, mimeFromName } from "../../utils/fileIcon";
 import { blurhashFromUrl, captureVideoPoster } from "../../utils/imageProcessing";
 import { SensitiveCover } from "../Media/SensitiveCover";
-import { formatFileSize } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { dropTargetStore } from "../../stores/dropTargetStore";
 import { getDraft, setDraft } from "../../utils/drafts";
@@ -44,7 +43,7 @@ import { probeRender } from "../../utils/renderProbe";
 import { usePressActivation } from "../../hooks/usePressActivation";
 
 /** Where a queued attachment's bytes are: a user's own file (never delete) or bytes staged in backend memory (no temp file). */
-export type AttachmentSource =
+type AttachmentSource =
   | { kind: "path"; path: string }
   | { kind: "staged"; id: string };
 
@@ -62,7 +61,7 @@ export interface Attachment {
   blurhash?: string;
 }
 
-export function stagedIdOf(attachment: Attachment): string | null {
+function stagedIdOf(attachment: Attachment): string | null {
   return attachment.source?.kind === "staged" ? attachment.source.id : null;
 }
 

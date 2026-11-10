@@ -3,7 +3,7 @@
 import type { StandardEmoji } from "./emojiData";
 import type { EmojiAnnotationRow } from "./annotations/index";
 
-export interface EmojiAnnotation {
+interface EmojiAnnotation {
   readonly name: string;
   readonly keywords: readonly string[];
 }

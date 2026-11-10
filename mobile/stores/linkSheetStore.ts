@@ -3,7 +3,7 @@
 import { makeAutoObservable } from "mobx";
 import type { LinkTarget } from "../lib/links";
 
-export type LinkSheetMode = "confirm" | "menu";
+type LinkSheetMode = "confirm" | "menu";
 
 class LinkSheetStore {
   target: LinkTarget | null = null;

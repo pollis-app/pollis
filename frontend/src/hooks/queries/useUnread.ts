@@ -5,7 +5,7 @@ import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 
 /** Mirrors `pollis_core::commands::messages::UnreadCount`. */
-export interface UnreadCount {
+interface UnreadCount {
   conversation_id: string;
   count: number;
 }
@@ -20,7 +20,7 @@ async function readUnreadCounts(userId: string | null): Promise<UnreadCount[]> {
 }
 
 /** Conversations with something unread; the rest are absent. */
-export function useUnreadCounts(userId: string | null) {
+function useUnreadCounts(userId: string | null) {
   return useQuery({
     queryKey: unreadQueryKeys.counts(userId),
     queryFn: () => readUnreadCounts(userId),

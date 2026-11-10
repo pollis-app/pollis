@@ -15,7 +15,7 @@ export interface RelayServingConfig {
 }
 
 /** `waiting` = consented but a condition is unmet (see `hold`). */
-export type RelayServingState = "off" | "serving" | "waiting" | "unsupported";
+type RelayServingState = "off" | "serving" | "waiting" | "unsupported";
 
 /** Mirrors Rust `RelayServingHold`. */
 export type RelayServingHold =
@@ -49,7 +49,7 @@ export const RELAY_SERVING_DEFAULTS: RelayServingConfig = {
 };
 
 /** Backend → frontend push whenever the state or a platform signal changes. */
-export const RELAY_SERVING_EVENT = "relay-serving-status";
+const RELAY_SERVING_EVENT = "relay-serving-status";
 
 const RELAY_SERVING_KEY = ["relay-serving", "status"] as const;
 
@@ -97,7 +97,7 @@ export function useRelayServingStatus() {
 }
 
 /** Apply `config` live; resolves with the settled status, rejects without a relay surface. */
-export async function applyRelayServing(
+async function applyRelayServing(
   config: RelayServingConfig,
 ): Promise<RelayServingStatus> {
   return invoke<RelayServingStatus>("set_relay_serving", { config });

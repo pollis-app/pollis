@@ -94,13 +94,6 @@ export interface Message {
   rejected?: boolean;
 }
 
-export interface ReplyPreview {
-  message_id: string;
-  author_username: string;
-  content_snippet: string;
-  timestamp: number;
-}
-
 export interface DMConversation {
   id: string; // ULID (conversation_id)
   user1_id: string; // user_id
@@ -122,15 +115,6 @@ export interface MessageQueueItem {
   retry_count: number;
   created_at: number;
   updated_at: number;
-}
-
-export interface Profile {
-  id: string; // Clerk user ID
-  user_id: string; // Local User ID (links to users table)
-  avatar_url?: string;
-  last_used_at: number;
-  created_at: number;
-  biometric_enabled: boolean;
 }
 
 export interface PresignedUploadResponse {
@@ -284,27 +268,18 @@ export interface AudioDevice {
   kind: 'input' | 'output';
 }
 
-export interface UserAlias {
-  id: string;
-  user_id: string; // User who owns this alias
-  group_id: string; // Per-user, per-group display name (required)
-  name: string; // Display name in this group
-  avatar_hash?: string; // R2 object key for group-specific avatar
-  created_at: number;
-}
-
 export * from "./blocks";
 
 // Account-key transparency (#330), mirrors pollis-core/src/commands/transparency.rs. Advisory only.
 
-export interface AccountKeyVersion {
+interface AccountKeyVersion {
   identity_version: number;
   seq: number;
   account_id_pub: string; // lowercase hex
   included: boolean; // did its inclusion proof verify against the signed head
 }
 
-export interface AccountReport {
+interface AccountReport {
   user_id: string;
   found: boolean;
   sth_tree_size: number;
@@ -340,7 +315,7 @@ export type BuildVerifyStatus =
   | "mismatch"
   | "unavailable";
 
-export interface ReleaseArtifact {
+interface ReleaseArtifact {
   platform: string; // darwin | windows | linux
   arch: string; // aarch64 | x86_64
   bundle: string; // dmg | app | nsis | appimage | deb | rpm
@@ -356,7 +331,7 @@ export interface ReleaseArtifact {
 }
 
 // Mirrors Rust `Toolchain` (`verifiable_log_builder::binaries`).
-export interface Toolchain {
+interface Toolchain {
   rustc: string; // e.g. "1.96.0", or "unknown" pre-#939
   node: string;
   pnpm: string;
@@ -365,7 +340,7 @@ export interface Toolchain {
   source_date_epoch: number; // Unix seconds — the tag commit's timestamp
 }
 
-export interface ReleaseReport {
+interface ReleaseReport {
   release_tag: string;
   found: boolean;
   sth_tree_size: number;

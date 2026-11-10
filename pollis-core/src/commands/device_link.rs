@@ -226,11 +226,6 @@ pub async fn create_device_link(state: &Arc<AppState>, user_id: String, pin: Str
     Ok(DeviceLinkHandle { link_id, qr_payload, expires_at: resp.expires_at })
 }
 
-/// Where the link stands, with the request's tag verified when there is one.
-pub async fn poll_device_link(state: &Arc<AppState>, user_id: String, link_id: String) -> Result<DeviceLinkStatus> {
-    Ok(verified_status(state, &user_id, &link_id).await?.0)
-}
-
 /// Wait until the link leaves the state the caller last saw (`since`, the
 /// `state` tag of a [`DeviceLinkStatus`]), then return the new status.
 pub async fn await_device_link(
@@ -272,7 +267,7 @@ enum ApproverCheck {
     ScannedKey([u8; 32]),
 }
 
-/// [`poll_device_link`] plus, when approvable, the request facts the wrap
+/// The link's status plus, when approvable, the request facts the wrap
 /// needs — read and verified in one pass so approval wraps to exactly the key
 /// whose tag was checked.
 async fn verified_status(

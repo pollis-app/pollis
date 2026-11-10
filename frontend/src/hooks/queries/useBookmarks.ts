@@ -24,7 +24,7 @@ export type PermalinkTarget = {
   message_id: string | null;
 };
 
-export const bookmarkQueryKeys = {
+const bookmarkQueryKeys = {
   all: ["bookmarks"] as const,
   saved: ["bookmarks", "saved"] as const,
 };

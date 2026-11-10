@@ -40,7 +40,11 @@ export function activeLocale(): string {
   return i18n.resolvedLanguage || i18n.language || DEFAULT_LANGUAGE;
 }
 
-/** Uppercase translated copy; bare `toUpperCase()` is wrong in Turkish and a no-op in Arabic. */
+/**
+ * Uppercase translated copy; bare `toUpperCase()` is wrong in Turkish and a no-op in Arabic.
+ * Nothing uppercases copy today, but mobile/CLAUDE.md names this as the only way to, so it stays.
+ * @public
+ */
 export function upper(value: string): string {
   return localeUpperCase(value, activeLocale());
 }

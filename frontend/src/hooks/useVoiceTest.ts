@@ -10,13 +10,13 @@ type VoiceTestEvent =
   | { type: "playback_started" }
   | { type: "playback_finished" };
 
-export type VoiceTestPhase =
+type VoiceTestPhase =
   | "idle"
   | "mic_listening"
   | "recording"
   | "playing";
 
-export type TonePreset = "sweep" | "chime";
+type TonePreset = "sweep" | "chime";
 
 type LevelListener = (peak: number, rms: number) => void;
 

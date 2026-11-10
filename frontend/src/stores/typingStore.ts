@@ -1,7 +1,7 @@
 import { makeAutoObservable } from "mobx";
 
 // Receiver-side TTL, for senders that drop offline mid-keystroke.
-export const TYPING_TTL_MS = 6000;
+const TYPING_TTL_MS = 6000;
 
 // Sender re-emit cadence; below TYPING_TTL_MS.
 export const TYPING_REFRESH_MS = 3000;

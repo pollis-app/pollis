@@ -81,9 +81,6 @@ pub fn known_magic(bytes: &[u8]) -> Option<&'static str> {
 
 #[derive(Clone, Debug)]
 pub struct Needle {
-    /// The corpus file it belongs to (`None` for account-wide secrets).
-    #[allow(dead_code)]
-    pub file: Option<usize>,
     /// Human-readable description — never the needle's bytes.
     pub what: String,
     pub secret: bool,
@@ -109,7 +106,7 @@ impl Scanner {
     }
 
     /// Add a 32-byte (or other) secret in every encoding it could be stored in.
-    pub fn add_secret(&mut self, bytes: &[u8], file: Option<usize>, what: &str) {
+    pub fn add_secret(&mut self, bytes: &[u8], what: &str) {
         let std = base64::engine::general_purpose::STANDARD;
         let std_np = base64::engine::general_purpose::STANDARD_NO_PAD;
         let url_np = base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -122,7 +119,7 @@ impl Scanner {
             (url_np.encode(bytes).into_bytes(), "base64url"),
         ];
         for (p, form) in forms {
-            self.add(p, Needle { file, what: format!("{what} ({form})"), secret: true });
+            self.add(p, Needle { what: format!("{what} ({form})"), secret: true });
         }
     }
 

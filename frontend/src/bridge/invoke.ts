@@ -24,7 +24,7 @@ export interface InvokeOptions {
 let deviceRevokedHandler: (() => void | Promise<void>) | null = null;
 let deviceRevokedRunning = false;
 
-export function isDeviceRevokedError(error: unknown): boolean {
+function isDeviceRevokedError(error: unknown): boolean {
   const message =
     typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
   // Exactly `device_revoked`, or suffixed after ": "; mere mentions don't count.
@@ -67,7 +67,7 @@ export function deviceWasRevoked(): void {
 let upgradeRequiredHandler: (() => void | Promise<void>) | null = null;
 let upgradeRequiredRunning = false;
 
-export function isUpgradeRequiredError(error: unknown): boolean {
+function isUpgradeRequiredError(error: unknown): boolean {
   const message =
     typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
   return message === "upgrade_required" || message.endsWith(": upgrade_required");

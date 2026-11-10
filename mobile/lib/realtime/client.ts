@@ -36,7 +36,7 @@ function ensureGlobals(registerGlobals: () => void): void {
 }
 
 /** Mint a LiveKit token via the DS; `null` on failure (realtime unavailable). */
-export async function fetchRealtimeToken(
+async function fetchRealtimeToken(
   room: string,
 ): Promise<{ token: string; url: string } | null> {
   try {

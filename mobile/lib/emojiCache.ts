@@ -3,7 +3,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { invoke } from "./native";
 
-export const EMOJI_DIR = `${FileSystem.cacheDirectory ?? ""}pollis-emoji/`;
+const EMOJI_DIR = `${FileSystem.cacheDirectory ?? ""}pollis-emoji/`;
 
 // One in-flight promise per hash; failures are not cached.
 const inFlight = new Map<string, Promise<string>>();

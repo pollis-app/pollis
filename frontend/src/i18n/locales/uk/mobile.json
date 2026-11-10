@@ -559,9 +559,6 @@
     "withUnread_other": "{{label}}, {{count}} непрочитаних"
   },
   "thread": {},
-  "timeAgo": {
-    "now": "зараз"
-  },
   "ui": {
     "backTo": "Назад: {{name}}",
     "imageUnavailable": "Зображення недоступне",

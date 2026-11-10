@@ -215,12 +215,12 @@ pub fn build(dir: &Path, sizes: &[u64], media_dir: Option<&Path>, seed: u64) -> 
 
 /// Needles: sample windows, name tokens and plaintext SHA-256s (hex and raw).
 pub fn add_needles(scanner: &mut Scanner, files: &[SoakFile]) {
-    for (i, f) in files.iter().enumerate() {
+    for f in files {
         for (what, bytes) in &f.samples {
-            scanner.add(bytes.clone(), Needle { file: Some(i), what: format!("{} plaintext {what}", f.label), secret: false });
+            scanner.add(bytes.clone(), Needle { what: format!("{} plaintext {what}", f.label), secret: false });
         }
-        scanner.add(f.token.clone().into_bytes(), Needle { file: Some(i), what: format!("{} filename", f.label), secret: false });
-        scanner.add(f.sha_hex().into_bytes(), Needle { file: Some(i), what: format!("{} plaintext sha256 (hex)", f.label), secret: false });
-        scanner.add(f.sha256.to_vec(), Needle { file: Some(i), what: format!("{} plaintext sha256 (raw)", f.label), secret: false });
+        scanner.add(f.token.clone().into_bytes(), Needle { what: format!("{} filename", f.label), secret: false });
+        scanner.add(f.sha_hex().into_bytes(), Needle { what: format!("{} plaintext sha256 (hex)", f.label), secret: false });
+        scanner.add(f.sha256.to_vec(), Needle { what: format!("{} plaintext sha256 (raw)", f.label), secret: false });
     }
 }

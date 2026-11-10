@@ -15,11 +15,6 @@ pub async fn create_device_link(state: State<'_, Arc<AppState>>, user_id: String
 }
 
 #[tauri::command]
-pub async fn poll_device_link(state: State<'_, Arc<AppState>>, user_id: String, link_id: String) -> Result<DeviceLinkStatus> {
-    pollis_core::commands::device_link::poll_device_link(&state, user_id, link_id).await
-}
-
-#[tauri::command]
 pub async fn await_device_link(state: State<'_, Arc<AppState>>, user_id: String, link_id: String, since: String) -> Result<DeviceLinkStatus> {
     pollis_core::commands::device_link::await_device_link(&state, user_id, link_id, since).await
 }
