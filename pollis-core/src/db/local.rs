@@ -847,6 +847,67 @@ mod tests {
         );
     }
 
+    /// RUSTSEC-2026-0459 / CVE-2026-119375 (#1797): SQLite before 3.54.0 can hand back uninitialized page-cache memory.
+    ///
+    /// It needs a database opened beside a `-wal` whose page size differs. `libsqlite3-sys` 0.39.1 still builds
+    /// `bundled-sqlcipher` from SQLite 3.53.4, so this holds only while the workspace's `sqlcipher-src` patch applies.
+    /// It asks the library that actually linked, on every platform, so a patch that silently stops applying fails here.
+    #[test]
+    fn the_linked_sqlite_has_the_wal_page_size_fix() {
+        let conn = Connection::open_in_memory().expect("open");
+        let sqlite: String = conn
+            .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+            .expect("sqlite_version()");
+        let parts: Vec<u32> = sqlite
+            .split('.')
+            .map(|p| p.parse().expect("numeric version"))
+            .collect();
+        assert!(
+            parts.as_slice() >= [3, 54, 0].as_slice(),
+            "linked SQLite is {sqlite}, older than 3.54.0 (RUSTSEC-2026-0459). Is the `sqlcipher-src` \
+             [patch] in the workspace Cargo.toml still applying?"
+        );
+        assert!(rusqlite::version_number() >= 3_054_000, "sqlite3_libversion_number() disagrees");
+    }
+
+    /// Existing users' databases were written by SQLCipher 4.6.1, and the upgrade must not strand them.
+    ///
+    /// The `pollis-sqlcipher` interop fixtures are exactly such files, written by this module's SQLCipher before #1797.
+    /// Reading them back proves the new build still opens the old format, with the raw-key shape `open` uses.
+    #[test]
+    fn a_database_written_by_the_previous_sqlcipher_still_opens() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../pollis-sqlcipher/tests/fixtures");
+        for (name, key_pragma) in [
+            ("openssl-passphrase.db", format!("PRAGMA key = '{FIXTURE_PASSPHRASE}'")),
+            (
+                "openssl-rawkey.db",
+                format!("PRAGMA key = \"x'{}'\"", hex::encode(FIXTURE_RAW_KEY)),
+            ),
+        ] {
+            // SQLCipher journals even on reads, so work on a copy.
+            let path = dir.path().join(name);
+            std::fs::copy(fixtures.join(name), &path).expect("copy fixture");
+            let conn = Connection::open(&path).expect("open fixture");
+            conn.execute_batch(&key_pragma).expect("apply key");
+            let count: i64 = conn
+                .query_row("SELECT count(*) FROM interop", [], |row| row.get(0))
+                .unwrap_or_else(|e| panic!("{name}: the upgraded SQLCipher cannot read it: {e}"));
+            assert_eq!(count, FIXTURE_ROWS, "{name}");
+            let last: String = conn
+                .query_row("SELECT body FROM interop WHERE id = ?1", [FIXTURE_ROWS], |row| row.get(0))
+                .expect("read last row");
+            assert_eq!(last, fixture_body(FIXTURE_ROWS), "{name}");
+            let check: String = conn
+                .query_row("PRAGMA cipher_integrity_check", [], |row| row.get(0))
+                .optional()
+                .expect("cipher_integrity_check")
+                .unwrap_or_else(|| "ok".to_owned());
+            assert_eq!(check, "ok", "{name}: page HMACs do not verify");
+        }
+    }
+
     /// The whitepaper's §7.0 provider table is a build outcome; on macOS an `OPENSSL_DIR` silently switches CommonCrypto to OpenSSL.
     ///
     /// Ask `PRAGMA cipher_provider`, so the documented and compiled providers agree.

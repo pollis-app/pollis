@@ -32,6 +32,14 @@ openmls_traits = { git = "https://github.com/openmls/openmls", rev = "34222ef632
 openmls_rust_crypto = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
 openmls_basic_credential = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
 openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+# Also mirrors the root: SQLCipher 4.20.0 / SQLite 3.54.1 for RUSTSEC-2026-0459
+# (#1797). See patches/sqlcipher-src/Cargo.toml.
+sqlcipher-src = { path = "../patches/sqlcipher-src" }
+
+# Mirrors the root too: without it openmls's unused `openmls_sqlite_storage`
+# pins rusqlite 0.37 and cannot resolve beside pollis-core's 0.41 (#1797).
+[patch."https://github.com/openmls/openmls"]
+openmls_sqlite_storage = { path = "../patches/openmls-sqlite-storage" }
 
 [dependencies]
 libfuzzer-sys = "0.4"

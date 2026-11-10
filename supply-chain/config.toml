@@ -41,12 +41,15 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.openmls_sqlite_storage]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.openmls_test]
 audit-as-crates-io = true
 
 [policy.openmls_traits]
+audit-as-crates-io = true
+
+[policy.sqlcipher-src]
 audit-as-crates-io = true
 
 [[exemptions.aead]]
@@ -912,8 +915,9 @@ criteria = "safe-to-deploy"
 notes = "No longer in the lockfile (#1303 dropped libsql's replication stack, its last user), but kept: it is the base the imported delta audits for hashbrown 0.15.5 / 0.17.0 chain from."
 
 [[exemptions.hashlink]]
-version = "0.9.1"
+version = "0.12.2"
 criteria = "safe-to-deploy"
+notes = "Comes with rusqlite 0.41 (#1797, RUSTSEC-2026-0459). Statement-cache LRU map; no unsafe of its own beyond hashbrown's."
 
 [[exemptions.hax-lib]]
 version = "0.3.7"
@@ -1311,8 +1315,9 @@ version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
-version = "0.28.0"
+version = "0.39.1"
 criteria = "safe-to-deploy"
+notes = "Bumped from 0.35 for RUSTSEC-2026-0459 (#1797). Its bundled-sqlcipher source comes from sqlcipher-src, which the workspace patches to SQLCipher 4.20.0 / SQLite 3.54.1."
 
 [[exemptions.libwebrtc]]
 version = "0.3.52"
@@ -1651,11 +1656,6 @@ notes = "Same openmls-repo rev; no independent review performed. This is the Rus
 version = "0.1.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
 criteria = "safe-to-deploy"
 notes = "Same openmls-repo rev; no independent review performed. Proc-macro crate (derive helpers for openmls's own wire (de)serialization) — compile-time only, not linked into the shipped binary's runtime, but still part of what the pinned rev builds."
-
-[[exemptions.openmls_sqlite_storage]]
-version = "0.2.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
-criteria = "safe-to-deploy"
-notes = "Same openmls-repo rev; no independent review performed. Resolves in this Cargo.lock as a sibling crate in the same git workspace; exempted for completeness alongside openmls_memory_storage rather than assumed unused without re-checking."
 
 [[exemptions.openmls_test]]
 version = "0.2.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
@@ -2059,13 +2059,19 @@ criteria = "safe-to-deploy"
 version = "0.9.10"
 criteria = "safe-to-deploy"
 
+[[exemptions.rsqlite-vfs]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "wasm32-only dependency of rusqlite 0.41 (via sqlite-wasm-rs); never built for a target Pollis ships (#1797)."
+
 [[exemptions.rtrb]]
 version = "0.3.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusqlite]]
-version = "0.31.0"
+version = "0.41.1"
 criteria = "safe-to-deploy"
+notes = "Bumped from 0.37 for RUSTSEC-2026-0459 (#1797), the first release on libsqlite3-sys 0.39."
 
 [[exemptions.rustc-hash]]
 version = "2.1.2"
@@ -2348,6 +2354,16 @@ criteria = "safe-to-deploy"
 [[exemptions.sponge-cursor]]
 version = "0.1.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.sqlcipher-src]]
+version = "419.0.6+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2"
+criteria = "safe-to-deploy"
+notes = "patches/sqlcipher-src: crates.io sqlcipher-src 420.0.0 (sha256 fd6b5280ed2593d07b2816ec531821c15c306903bcca224716f1fbcc2bbfedfe) with only Cargo.toml's version changed, to meet libsqlite3-sys 0.39.1's =419.0.6 pin and get SQLite 3.54.1 (RUSTSEC-2026-0459, #1797). Source only: the SQLCipher amalgamation every client build compiles. Not independently reviewed."
+
+[[exemptions.sqlite-wasm-rs]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+notes = "wasm32-only dependency of rusqlite 0.41; never built for a target Pollis ships (#1797)."
 
 [[exemptions.stable_deref_trait]]
 version = "1.2.1"

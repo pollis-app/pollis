@@ -112,8 +112,9 @@ async-trait = "0.1"
 # `bundled_bindings` (rusqlite calls it `modern_sqlite`) is what makes the
 # linked mode usable: libsqlite3-sys then takes its declarations from its own
 # `sqlcipher/bindgen_bundled_version.rs` rather than running bindgen over a
-# header we would have to ship. `pollis-sqlcipher/vendor/` holds the matching
-# amalgamation and PROVENANCE.md explains how the two are kept in step.
+# header we would have to ship. `pollis-sqlcipher` compiles the amalgamation
+# from the same `sqlcipher-src` crate those bindings were generated for, so the
+# two move together (its Cargo.toml says how).
 #
 # NOTHING in a Windows build may enable `libsqlite3-sys/bundled*` — cargo unions
 # features, so one crate asking for `bundled-sqlcipher` puts a SECOND sqlite3 in
@@ -310,7 +311,7 @@ webrtc-audio-processing = { version = "2", features = ["bundled"], optional = tr
 # See the note above the [dependencies] table — mobile vendors OpenSSL,
 # desktop links the system one.
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
-rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl", "functions"] }
+rusqlite = { version = "0.41", features = ["bundled-sqlcipher-vendored-openssl", "functions"] }
 # `db::local`'s disposal path needs `O_NOFOLLOW`, whose value is per-platform,
 # so libc has to be present on EVERY unix target rather than only the desktop
 # ones the table further down covers.
@@ -351,7 +352,7 @@ jni = "0.21"
 # declarations that linked mode would otherwise want a header for. Feature
 # union across the workspace must never add a `bundled*` here, so the desktop
 # entry below excludes Windows and src-tauri's dev-dependency is target-gated.
-rusqlite = { version = "0.37", features = ["sqlcipher", "modern_sqlite", "functions"] }
+rusqlite = { version = "0.41", features = ["sqlcipher", "modern_sqlite", "functions"] }
 # What `-l sqlcipher` above resolves to: the SQLCipher amalgamation built with
 # `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT` and a crypto provider written against the
 # RustCrypto crates this graph already has, so no OpenSSL enters the image
@@ -422,7 +423,7 @@ libc = "0.2"
 # Linux + macOS only. Windows is excluded on purpose and gets plain `bundled`
 # in its own table above — see the long note above the [dependencies] table.
 [target.'cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))'.dependencies]
-rusqlite = { version = "0.37", features = ["bundled-sqlcipher", "functions"] }
+rusqlite = { version = "0.41", features = ["bundled-sqlcipher", "functions"] }
 
 # Shared capture-helper wire protocol. Both the Linux and macOS capture
 # helpers are subprocesses speaking this; this is the parent-side decoder.

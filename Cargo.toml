@@ -25,6 +25,12 @@ members = [
 # or the pinned-stable release path. It also carries its own `[workspace]` table.
 exclude = [
     "fuzz",
+    # Stand-ins swapped in by the [patch] tables below. Excluded so a
+    # `--workspace` build does not compile them as members: the openmls one is a
+    # deliberate `compile_error!`, and sqlcipher-src is vendored upstream code
+    # with its own lints and tests.
+    "patches/openmls-sqlite-storage",
+    "patches/sqlcipher-src",
 ]
 
 [workspace.package]
@@ -125,3 +131,20 @@ openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34
 # (#1320). This stand-in reports none. See patches/device-info/src/lib.rs; the
 # guard is pollis-core/tests/livekit_join_sends_no_device_model.rs.
 device-info = { path = "patches/device-info" }
+# RUSTSEC-2026-0459 (#1797): crates.io sqlcipher-src 420.0.0 (SQLCipher 4.20.0
+# on SQLite 3.54.1, which fixes it), relabelled 419.0.6 to meet libsqlite3-sys
+# 0.39.1's `=419.0.6` pin. Without it every SQLCipher build (all of ours) would
+# still compile SQLite 3.53.4. See patches/sqlcipher-src/Cargo.toml for the
+# provenance check; delete it once a libsqlite3-sys release takes 420.
+sqlcipher-src = { path = "patches/sqlcipher-src" }
+
+# openmls's own SQLite storage provider is an OPTIONAL dependency of openmls
+# (`sqlite-provider`, which nothing here enables), but cargo resolves it anyway,
+# and at the pinned rev it requires `rusqlite = "0.37"`. Because libsqlite3-sys
+# links `sqlite3`, that unused edge pinned the whole workspace to libsqlite3-sys
+# 0.35 and blocked the fix for RUSTSEC-2026-0459 (#1797). The stand-in drops the
+# edge and refuses to compile if anything ever enables it; see
+# patches/openmls-sqlite-storage/src/lib.rs. Remove it when the openmls rev moves
+# to one whose `openmls_sqlite_storage` takes our rusqlite.
+[patch."https://github.com/openmls/openmls"]
+openmls_sqlite_storage = { path = "patches/openmls-sqlite-storage" }

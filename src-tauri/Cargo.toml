@@ -230,10 +230,10 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphic
 # with pollis-core's, so they must agree with pollis-core's per-target choice or
 # a Windows test build ends up with two SQLCipher builds in one image.
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
+rusqlite = { version = "0.41", features = ["bundled-sqlcipher"] }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]
-rusqlite = { version = "0.37", features = ["sqlcipher", "modern_sqlite"] }
+rusqlite = { version = "0.41", features = ["sqlcipher", "modern_sqlite"] }
 # Supplies the `sqlcipher` library the feature above only declares. It reaches
 # this link through pollis-core anyway; naming it here keeps the pair visible
 # together, so nobody removes one and leaves the other dangling.

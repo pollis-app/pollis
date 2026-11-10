@@ -2,12 +2,12 @@
 ** The slice of the LibTomCrypt API that SQLCipher's LibTomCrypt crypto
 ** provider actually calls — and nothing else.
 **
-** `vendor/sqlite3.c` is the stock SQLCipher amalgamation. Compiled with
+** `sqlcipher-src`'s `sqlcipher.c` is the stock SQLCipher amalgamation. Compiled with
 ** -DSQLCIPHER_CRYPTO_LIBTOMCRYPT it selects `crypto_libtomcrypt.c`, whose only
 ** contact with the outside world is `#include <tomcrypt.h>` plus the ~20
 ** symbols declared below. This header, and the Rust implementations in
 ** `src/abi.rs` that back it, are that contact surface. The amalgamation itself
-** is byte-identical to upstream (see vendor/PROVENANCE.md) — there is no patch
+** is byte-identical to upstream (see patches/sqlcipher-src/Cargo.toml) — there is no patch
 ** to audit, only this file.
 **
 ** It is deliberately NOT libtomcrypt. Every primitive resolves to the same
@@ -58,7 +58,7 @@ extern const struct ltc_cipher_descriptor cipher_descriptor[];
 extern const struct ltc_hash_descriptor sha1_desc;
 extern const struct ltc_hash_descriptor sha256_desc;
 extern const struct ltc_hash_descriptor sha512_desc;
-extern const struct ltc_cipher_descriptor rijndael_desc;
+extern const struct ltc_cipher_descriptor aes_desc;
 extern const struct ltc_prng_descriptor fortuna_desc;
 
 /* Opaque handles; the payload is a Rust-owned allocation. */
@@ -92,6 +92,9 @@ int fortuna_add_entropy(const unsigned char *in, unsigned long inlen, prng_state
 int fortuna_ready(prng_state *prng);
 unsigned long fortuna_read(unsigned char *out, unsigned long outlen, prng_state *prng);
 int fortuna_done(prng_state *prng);
+
+/* The system RNG SQLCipher 4.19+ seeds Fortuna from. Also the OS CSPRNG. */
+unsigned long rng_get_bytes(unsigned char *out, unsigned long outlen, void (*callback)(void));
 
 int hmac_init(hmac_state *hmac, int hash, const unsigned char *key, unsigned long keylen);
 int hmac_process(hmac_state *hmac, const unsigned char *in, unsigned long inlen);

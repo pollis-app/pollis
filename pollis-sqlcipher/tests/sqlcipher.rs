@@ -146,8 +146,15 @@ fn the_linked_library_is_our_sqlcipher() {
         db.query_one("PRAGMA cipher_provider")
     );
 
+    // RUSTSEC-2026-0459 (#1797): SQLite before 3.54.0 can hand back uninitialized
+    // page-cache memory for a database opened beside a `-wal` of another page size.
     let sqlite = unsafe { CStr::from_ptr(sqlite3_libversion()) }.to_string_lossy().into_owned();
-    assert_eq!(sqlite, "3.46.1", "vendor/sqlite3.c is not the version PROVENANCE.md records");
+    let parts: Vec<u32> = sqlite.split('.').map(|p| p.parse().expect("numeric version")).collect();
+    assert!(
+        parts.as_slice() >= [3, 54, 0].as_slice(),
+        "the SQLCipher this crate compiled is on SQLite {sqlite}, older than 3.54.0 \
+         (RUSTSEC-2026-0459): is the workspace's `sqlcipher-src` patch still applying?"
+    );
 }
 
 /// Write a distinctive string, close, and inspect the bytes on disk.
