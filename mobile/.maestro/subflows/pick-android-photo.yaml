@@ -1,0 +1,27 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Select the photo tile at INDEX in Android's photo picker and require the
+# selection bar to read COUNT afterwards (pick-six-photos-android.yaml says
+# why). The picker's tiles keep their "Photo taken on …" label when selected,
+# so INDEX names the same tile before and after.
+- tapOn:
+    text: "Photo taken on.*"
+    index: ${INDEX}
+- extendedWaitUntil:
+    visible:
+      text: "${COUNT} photos or videos selected"
+    timeout: 3000
+    optional: true
+# The count did not move: the picker dropped the tap. Tap that tile once more.
+- runFlow:
+    when:
+      notVisible:
+        text: "${COUNT} photos or videos selected"
+    commands:
+      - tapOn:
+          text: "Photo taken on.*"
+          index: ${INDEX}
+- extendedWaitUntil:
+    visible:
+      text: "${COUNT} photos or videos selected"
+    timeout: 5000
