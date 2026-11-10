@@ -717,6 +717,7 @@ would be one a compromised renderer calls with `~/.ssh/id_rsa`:
 | `commands::pathscope::pick_open_paths` | the OS open/folder picker, driven from Rust |
 | `commands::pathscope::pick_save_path` | the OS save panel, driven from Rust |
 | `pathscope::remember_dropped` | the `DragDrop` window event in `run()`, with the paths the OS put in it |
+| `read_clipboard_files` (lib.rs) | a paste: the files the OS clipboard holds as a typed file list (`text/uri-list`, Finder `NSURL`s, `CF_HDROP`), existing regular files only, never from plain text (#1794) |
 
 The renderer's `bridge/dialog.ts` calls the two `pick_*` commands; `dialog:*` is
 no longer in `src-tauri/capabilities/default.json`, so `plugin:dialog|open` is
@@ -782,7 +783,8 @@ Regenerate with:
 sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 ```
 
-- **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image`
+- **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image`, `read_clipboard_text`, `app_handles_paste`, `write_clipboard_text`. The clipboard commands are `async` and run their OS work through `clipboard::off_main` (blocking pool + hard timeout): a sync command runs on the main thread, which on Linux is the GTK/WebKit thread, and an X11 clipboard owner may answer late or never (#1794). On X11 they read through `clipboard::x11`, which asks the owner for `TARGETS` first and only requests what it offers, and accepts Steam's `text/uri-list` that is typed `UTF8_STRING`. `read_clipboard_image` refuses frames over 64 MP.
+  - **App-owned paste on X11.** WebKitGTK's own paste asks the clipboard owner for targets it never offered (`org.webkitgtk.WebKit.custom-pasteboard-data`, `text/plain;charset=utf-8`, …) and waits ~30 s (GTK3's idle abort) on each one left unanswered. Steam's "Copy to clipboard" leaves them all unanswered, so the page froze before any paste handler ran. When `app_handles_paste` is true (X11 only), `frontend/src/utils/appPaste.ts` intercepts Ctrl+V, Ctrl+Shift+V and Shift+Insert at window keydown (capture phase), so WebKit never reads. It fetches the text with `read_clipboard_text` (`clipboard::x11::read_text`: offered targets only, INCR supported, 16 MiB cap, 5 s limit) and dispatches a synthetic `paste` event carrying it to the focused field, or uses `insertText` where no handler takes it. The composer's file and image fallback runs on that event as on a native paste. The WebKit context menu's Paste item is swapped for one that runs the same path (`reroute_context_menu_paste`). Real-app proof: `node e2e/run.js clipboard-x11` (Xvfb + fake owner).
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
 - **`auth`** — `delete_account`, `dev_login`, `get_device_id`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
@@ -832,7 +834,7 @@ Prose above covers roughly half of these; this index covers all of them, so a na
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
 
-**`(root)`** (4) — `hide_window`, `read_clipboard_files`, `read_clipboard_image`, `write_clipboard_text`
+**`(root)`** (6) — `hide_window`, `read_clipboard_files`, `read_clipboard_image`, `read_clipboard_text`, `app_handles_paste`, `write_clipboard_text`
 
 **`media_permissions`** (4) — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
 

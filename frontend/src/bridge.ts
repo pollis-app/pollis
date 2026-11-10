@@ -52,6 +52,8 @@ export {
 export {
   readClipboardFiles,
   readClipboardImage,
+  readClipboardText,
+  appHandlesPaste,
   writeClipboardText,
 } from "./bridge/clipboard";
 

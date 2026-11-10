@@ -29,6 +29,7 @@ Both `.spec.js` and `.spec.ts` are picked up by the one config.
 | `bookmarks.spec.ts` | Saved messages + permalinks in BOTH skins: the saved list, an honest "not on this device" placeholder, channel/DM permalink jumps, and an unresolvable permalink that leaks nothing |
 | `emoji.spec.ts` | Custom emoji in BOTH skins: the picker mounts the real standard set (≥100 cells, not the old hardcoded eight), search narrows it, a pick splices in AT THE CARET rather than appending, and a `<:name:hash>` token renders as an image while a malformed one stays literal |
 | `invite-links.spec.ts` | Shareable invite links in BOTH skins: a created link is shown once with its bounds, copy puts exactly it on the clipboard, no list view can hand the token back, and revoking retires the row and takes its card away; the section carries no `>`/`[…]` terminal decoration and the link wraps rather than scrolling |
+| `clipboard-paste.spec.ts` | Composer paste fallback (#1794): a paste with no file on the event (a Steam copy on X11) reads the OS clipboard once; a zero-byte file item falls through to that read; a slow clipboard leaves the composer typable and repeat pastes don't pile up; on X11 the app owns Ctrl+V / Shift+Insert (text into the composer, a Steam file list attaches, a held read neither freezes nor piles up) |
 | `update-page.spec.ts` | Software Update, managed-install branch: the package-manager command renders in the shared `CodeSnippet` and its copy button puts exactly that command on the clipboard |
 | `incoming-call-takeover.spec.ts` | Incoming-call takeover (#1639) in BOTH skins: a ringing DM call replaces the screen, the invite itself pre-warms the real call room (hovering Accept mints nothing more), declining or the caller cancelling returns the user with their draft intact, and the Notifications toggle turns the takeover off while the status-bar alert stays |
 | `voice-controls.spec.ts` | Push-to-talk + deafen in BOTH skins: the four `data-mic-state` values are drawn distinctly (push-to-talk-idle must not look muted), deafened is tellable from both, and the settings input-mode toggle reaches the preference and the gate |
@@ -61,6 +62,7 @@ entry point (see below):
 | script | what it proves | needs DS? | needs Turso? |
 |---|---|---|---|
 | `smoke.js` | app launches, login screen renders | no | no |
+| `clipboard-x11.js` | #1794: real app under `GDK_BACKEND=x11` on a private Xvfb, fake clipboard owner that never answers targets it doesn't offer (Steam); Ctrl+V leaves the page live, pastes text, and pastes 300 KB over INCR. Needs `Xvfb` | no | no |
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes | yes (writable) |
 | `invalid-otp.js` | a wrong OTP code is rejected with an inline error, doesn't advance | yes | yes (writable) |
 | `restart-persistence.js` | single client; account survives a full app restart on the same data dir (no blank re-signup) | yes | yes (writable) |

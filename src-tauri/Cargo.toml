@@ -217,6 +217,14 @@ libc = "0.2"
 # Optional — pulled in by `native-shell` via `dep:webkit2gtk`. Only used by
 # run()'s Linux WebRTC-settings hook, which is itself native-shell-gated.
 webkit2gtk = { version = "2", features = ["v2_38"], optional = true }
+# The bounded X11 clipboard reader in `clipboard.rs` (#1794). Already in the
+# graph through arboard, same 0.13; pure-Rust connection, no libxcb.
+x11rb = "0.13"
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+# `Get::file_list` (text/uri-list on Wayland, CF_HDROP on Windows) for the paste
+# fallback; the clipboard plugin wraps the same arboard but doesn't expose it.
+arboard = { version = "3", features = ["wayland-data-control"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"

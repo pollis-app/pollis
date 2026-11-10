@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } from "react";
+import React, { useState, useRef, useCallback, useEffect, useImperativeHandle, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   dialogOpen,
@@ -18,6 +18,7 @@ import { formatFileSize } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { dropTargetStore } from "../../stores/dropTargetStore";
 import { getDraft, setDraft } from "../../utils/drafts";
+import { createOsPasteReader, pastedFiles, type OsPasteDeps } from "../../utils/clipboardPaste";
 import {
   mentionsAll,
   mentionQueryAt,
@@ -642,36 +643,26 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   };
 
   // True when the paste was a file and the text path must not run.
+  // WebKit hides OS file-manager copies, and WebKitGTK hides clipboard images and
+  // Steam's mistyped uri-list (#1794): read them through the bounded Rust commands.
+  const osPasteDepsRef = useRef<OsPasteDeps | null>(null);
+  osPasteDepsRef.current = {
+    readFiles: readClipboardFiles,
+    readImage: readClipboardImage,
+    onPaths: (paths) => { void handlePaths(paths); },
+    onFile: (file) => { void handleBrowserFile(file); },
+  };
+  const readOsPaste = useMemo(() => createOsPasteReader(() => osPasteDepsRef.current!), []);
+
   const handlePaste = useCallback((e: React.ClipboardEvent): boolean => {
-    const items = e.clipboardData.items;
-    let hasFiles = false;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].kind === "file") {
-        const file = items[i].getAsFile();
-        if (file) { handleBrowserFile(file); hasFiles = true; }
-      }
-    }
-    if (hasFiles) {
+    const files = pastedFiles(e.clipboardData.items);
+    if (files.length > 0) {
+      files.forEach((file) => { void handleBrowserFile(file); });
       return true;
     }
-
-    // WebKit hides OS file-manager copies; read them via the Rust clipboard command.
-    readClipboardFiles().then((paths) => {
-      if (paths.length > 0) {
-        handlePaths(paths);
-        return;
-      }
-      // WebKitGTK doesn't expose clipboard images as files; read PNG bytes from the OS.
-      readClipboardImage().then((bytes) => {
-        if (bytes) {
-          handleBrowserFile(
-            new File([bytes], "pasted-image.png", { type: "image/png" }),
-          );
-        }
-      }).catch(() => { /* no image on clipboard */ });
-    }).catch(() => { /* clipboard unreadable */ });
+    void readOsPaste();
     return false;
-  }, [handleBrowserFile, handlePaths]);
+  }, [handleBrowserFile, readOsPaste]);
 
   const toggleSensitive = useCallback((id: string) => {
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, sensitive: !a.sensitive } : a)));

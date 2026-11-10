@@ -10,6 +10,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { appStore } from "./stores/appStore";
 import { voiceSession } from "./voice";
 import { audioLevels } from "./voice/audioLevels";
+import { appHandlesPaste, readClipboardText } from "./bridge";
+import { installAppPaste } from "./utils/appPaste";
 
 // Platform tag for CSS (e.g. macOS already rounds corners).
 const ua = navigator.userAgent;
@@ -21,6 +23,15 @@ const platformTag = /Mac OS X/.test(ua)
       ? "linux"
       : "unknown";
 document.documentElement.dataset.platform = platformTag;
+
+// On X11 the app reads pastes itself: WebKitGTK's own paste can hang on the clipboard owner (#1794).
+appHandlesPaste()
+  .then((handles) => {
+    if (handles) {
+      installAppPaste(readClipboardText);
+    }
+  })
+  .catch(() => {});
 
 if (import.meta.env.VITE_PLAYWRIGHT === 'true') {
   (window as any).__pollisStore = appStore;
