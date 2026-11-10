@@ -6094,6 +6094,7 @@ dependencies = [
  "aes-gcm",
  "aho-corasick",
  "anyhow",
+ "arboard",
  "axum 0.7.9",
  "base64 0.22.1",
  "chrono",
@@ -6138,6 +6139,7 @@ dependencies = [
  "url",
  "webkit2gtk",
  "windows-sys 0.59.0",
+ "x11rb",
  "zeroize",
 ]
 

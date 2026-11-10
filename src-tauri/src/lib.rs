@@ -6,6 +6,7 @@ pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
 pub mod pathscope;
+pub mod clipboard;
 #[cfg(feature = "native-shell")]
 pub mod tray;
 
@@ -111,102 +112,141 @@ fn show_on_reopen(app: &tauri::AppHandle) {
     }
 }
 
-/// Clipboard file paths. macOS Finder uses `public.file-url`, which `read_text()` can't see, hence `osascript`.
+/// Bounds on each clipboard command (#1794); the window never waits on any of them.
+#[cfg(feature = "native-shell")]
+const CLIPBOARD_FILES_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+#[cfg(feature = "native-shell")]
+const CLIPBOARD_IMAGE_LIMIT: std::time::Duration = std::time::Duration::from_secs(6);
+#[cfg(feature = "native-shell")]
+const CLIPBOARD_WRITE_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Files copied in a file manager (or by Steam), as paths the composer may attach.
+/// `async` on purpose: a sync command runs on the main thread, which on Linux is
+/// the GTK/WebKit thread, and an X11 clipboard owner can take seconds or forever
+/// to answer (#1794). Pasted paths come from the OS clipboard, which only a copy
+/// gesture fills, so they are admitted to `pathscope` like a drop.
 #[cfg(feature = "native-shell")]
 #[tauri::command]
-fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = &app; // suppress unused warning
-        let output = std::process::Command::new("osascript")
-            .arg("-e")
-            .arg(concat!(
-                "use framework \"AppKit\"\n",
-                "set pb to current application's NSPasteboard's generalPasteboard()\n",
-                "set urls to pb's readObjectsForClasses:{current application's NSURL} options:(missing value)\n",
-                "if urls is missing value then return \"\"\n",
-                "set paths to {}\n",
-                "repeat with u in urls\n",
-                "if (u's isFileURL()) as boolean then\n",
-                "set end of paths to (u's |path|()) as text\n",
-                "end if\n",
-                "end repeat\n",
-                "set AppleScript's text item delimiters to linefeed\n",
-                "return paths as text",
-            ))
-            .output();
-
-        return match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                stdout
-                    .lines()
-                    .map(|l| l.trim())
-                    .filter(|l| !l.is_empty())
-                    .map(|l| l.to_string())
-                    .collect()
-            }
-            Err(_) => vec![],
-        };
+async fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
+    let reader = app.clone();
+    let paths = clipboard::off_main(CLIPBOARD_FILES_LIMIT, move || {
+        Some(clipboard::admissible_files(os_clipboard_paths(&reader)))
+    })
+    .await
+    .unwrap_or_default();
+    if let Some(scope) = app.try_state::<crate::pathscope::PathScope>() {
+        crate::pathscope::remember_dropped(&scope, &paths);
     }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        use tauri_plugin_clipboard_manager::ClipboardExt;
-        let Ok(text) = app.clipboard().read_text() else {
-            return vec![];
-        };
-        text.lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .filter_map(|line| {
-                let url = url::Url::parse(line).ok()?;
-                if url.scheme() != "file" { return None; }
-                let path = url.to_file_path().ok()?;
-                Some(path.to_string_lossy().into_owned())
-            })
-            .collect()
+    // The fs plugin keeps its own allowlist; the preview reads through it.
+    if let Some(fs) = tauri_plugin_fs::FsExt::try_fs_scope(&app) {
+        for path in &paths {
+            let _ = fs.allow_file(path);
+        }
     }
+    paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// macOS Finder uses `public.file-url`, which `read_text()` can't see, hence `osascript`.
+#[cfg(all(feature = "native-shell", target_os = "macos"))]
+fn os_clipboard_paths(_app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(concat!(
+            "use framework \"AppKit\"\n",
+            "set pb to current application's NSPasteboard's generalPasteboard()\n",
+            "set urls to pb's readObjectsForClasses:{current application's NSURL} options:(missing value)\n",
+            "if urls is missing value then return \"\"\n",
+            "set paths to {}\n",
+            "repeat with u in urls\n",
+            "if (u's isFileURL()) as boolean then\n",
+            "set end of paths to (u's |path|()) as text\n",
+            "end if\n",
+            "end repeat\n",
+            "set AppleScript's text item delimiters to linefeed\n",
+            "return paths as text",
+        ))
+        .output();
+    let Ok(out) = output else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect()
+}
+
+/// Only a typed file list, never plain text (see `clipboard::paths_from_uri_list`).
+/// X11: our own bounded reader, which asks only for targets the owner offers and
+/// accepts Steam's mistyped `text/uri-list`. Wayland and Windows: arboard's file list.
+#[cfg(all(feature = "native-shell", not(target_os = "macos")))]
+fn os_clipboard_paths(_app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    if clipboard::is_x11_session() {
+        return clipboard::x11::read_offer(CLIPBOARD_FILES_LIMIT, true)
+            .and_then(|offer| offer.uri_list)
+            .map(|bytes| clipboard::paths_from_uri_list(&bytes))
+            .unwrap_or_default();
+    }
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.get().file_list())
+        .unwrap_or_default()
 }
 
 /// Clipboard image as PNG bytes, returned rather than written to temp so it never touches disk.
+/// Off the main thread and bounded (#1794); an image past `MAX_IMAGE_PIXELS` is refused.
 #[cfg(feature = "native-shell")]
 #[tauri::command]
 async fn read_clipboard_image(app: tauri::AppHandle) -> tauri::ipc::Response {
+    let png = clipboard::off_main(CLIPBOARD_IMAGE_LIMIT, move || clipboard_png(&app))
+        .await
+        .unwrap_or_default();
+    tauri::ipc::Response::new(png)
+}
+
+#[cfg(feature = "native-shell")]
+fn clipboard_png(app: &tauri::AppHandle) -> Option<Vec<u8>> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
-    let empty = || tauri::ipc::Response::new(Vec::<u8>::new());
-
-    let Ok(image) = app.clipboard().read_image() else {
-        return empty();
-    };
-
-    let width = image.width();
-    let height = image.height();
-    let rgba = image.rgba().to_vec();
-
-    let Some(buffer) = image::RgbaImage::from_raw(width, height, rgba) else {
-        return empty();
-    };
-
-    let mut png = std::io::Cursor::new(Vec::new());
-    if buffer
-        .write_to(&mut png, image::ImageFormat::Png)
-        .is_err()
+    // X11: don't make arboard wait out its 4 s timeout on an owner with no PNG.
+    #[cfg(target_os = "linux")]
+    if clipboard::is_x11_session()
+        && !clipboard::x11::read_offer(CLIPBOARD_IMAGE_LIMIT, false).is_some_and(|o| o.has_png)
     {
-        return empty();
+        return None;
     }
 
-    tauri::ipc::Response::new(png.into_inner())
+    let image = app.clipboard().read_image().ok()?;
+    let (width, height) = (image.width(), image.height());
+    if !clipboard::image_within_cap(u64::from(width), u64::from(height)) {
+        return None;
+    }
+    let buffer = image::RgbaImage::from_raw(width, height, image.rgba().to_vec())?;
+    let mut png = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new_with_quality(
+        &mut png,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::Adaptive,
+    );
+    buffer.write_with_encoder(encoder).ok()?;
+    Some(png)
 }
 
 /// Via the clipboard plugin: `navigator.clipboard` is unreliable on WebKitGTK (#854).
+/// `async` + bounded: the plugin's one mutex may be held by a slow read (#1794).
 #[cfg(feature = "native-shell")]
 #[tauri::command]
-fn write_clipboard_text(app: tauri::AppHandle, text: String) -> bool {
-    use tauri_plugin_clipboard_manager::ClipboardExt;
-
-    app.clipboard().write_text(text).is_ok()
+async fn write_clipboard_text(app: tauri::AppHandle, text: String) -> bool {
+    clipboard::off_main(CLIPBOARD_WRITE_LIMIT, move || {
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        Some(app.clipboard().write_text(text).is_ok())
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// Cmd+W: hide on macOS, close elsewhere.
