@@ -70,9 +70,9 @@ async fn vault_media_soak() {
         .expect("vault secrets");
     let db_key = alice.db_key().await.expect("unlocked");
     let mut scanner = base.clone_unbuilt();
-    scanner.add_secret(&account.account_seed, None, "account identity key seed");
-    scanner.add_secret(&account.root_key, None, "Vault file root key");
-    scanner.add_secret(&db_key, None, "local DB key");
+    scanner.add_secret(&account.account_seed, "account identity key seed");
+    scanner.add_secret(&account.root_key, "Vault file root key");
+    scanner.add_secret(&db_key, "local DB key");
     let set_scanner = |s: &Scanner| {
         let built = s.clone_unbuilt().build();
         world.ds_tap.set_scanner(built.clone());
@@ -171,8 +171,8 @@ async fn vault_media_soak() {
         let sec = pollis_core::commands::vault::test_hooks::vault_file_secrets(&alice.state, &alice.user_id, &file_id)
             .await
             .expect("file secrets");
-        scanner.add_secret(&sec.file_key, Some(i), &format!("{} file key", f.label));
-        scanner.add_secret(&sec.file_nonce, Some(i), &format!("{} file nonce", f.label));
+        scanner.add_secret(&sec.file_key, &format!("{} file key", f.label));
+        scanner.add_secret(&sec.file_nonce, &format!("{} file nonce", f.label));
         built = set_scanner(&scanner);
 
         let (status, object) = operator_get(&world.http, &cfg.s3, &key).await;
