@@ -58,6 +58,7 @@ on:
       - 'scripts/emoji-shortcodes.json'
       - 'scripts/ci-free-disk.sh'
       - 'scripts/ci-apt-retries.sh'
+      - 'scripts/ci-apt-install.sh'
       - 'scripts/install-clang.sh'
       - '.github/workflows/mls-tests.yml'
   workflow_dispatch:
@@ -75,17 +76,30 @@ on:
   # step's env fallbacks) so deep-churn divergence gets soaked every night; a
   # failure fails the job red and uploads the failing op sequence as a durable
   # artifact for one-step promotion to a deterministic regression.
+  #
+  # A red or cancelled nightly is triaged by mls-nightly-triage.yml: it re-runs
+  # a run whose job never got a runner, and otherwise files (or comments on) the
+  # "Nightly MLS tests failing" issue.
+  #
+  # Minute 23, not 0: GitHub queues every top-of-the-hour schedule at once, and
+  # the `0 7` runs started seven to eight hours late (14:00-15:30 UTC), which put
+  # the macOS job into the US-daytime macOS capacity squeeze (#1803).
   schedule:
-    - cron: "0 7 * * *"
+    - cron: "23 7 * * *"
 
 permissions:
   contents: read
   # dorny/paths-filter reads the PR's changed-file list via the API (no checkout).
   pull-requests: read
 
+# Keyed on the event as well as the ref. The nightly runs on `main`, and with a
+# ref-only group the next push to `main` cancelled it: on 2026-11-07 a merge at
+# 13:46 killed the 13:43 nightly three minutes in (#1803). Pushes and PR updates
+# still supersede their own earlier runs; a nightly is never cancelled by
+# anything but a person.
 concurrency:
-  group: mls-tests-${{ github.ref }}
-  cancel-in-progress: true
+  group: mls-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
   # Seconds-cheap gatekeeper: decide whether the heavy Rust job needs to run.
@@ -155,6 +169,8 @@ jobs:
               - 'scripts/ci-free-disk.sh'
             aptretries:
               - 'scripts/ci-apt-retries.sh'
+            aptinstall:
+              - 'scripts/ci-apt-install.sh'
             clang:
               - 'scripts/install-clang.sh'
       - name: Decide whether the heavy Rust gate must run
@@ -167,18 +183,19 @@ jobs:
           SHORTCODES: ${{ steps.filter.outputs.shortcodes }}
           FREEDISK: ${{ steps.filter.outputs.freedisk }}
           APTRETRIES: ${{ steps.filter.outputs.aptretries }}
+          APTINSTALL: ${{ steps.filter.outputs.aptinstall }}
           CLANG: ${{ steps.filter.outputs.clang }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
             # A real Rust change, an edit to this workflow itself, or a file
             # Rust compiles in from an otherwise-exempt directory.
             if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ] || [ "$RUNBOOK" = "true" ] || [ "$SHORTCODES" = "true" ] \
-              || [ "$FREEDISK" = "true" ] || [ "$APTRETRIES" = "true" ] || [ "$CLANG" = "true" ]; then
+              || [ "$FREEDISK" = "true" ] || [ "$APTRETRIES" = "true" ] || [ "$APTINSTALL" = "true" ] || [ "$CLANG" = "true" ]; then
               echo "run_tests=true" >> "$GITHUB_OUTPUT"
             else
               echo "run_tests=false" >> "$GITHUB_OUTPUT"
             fi
-            echo "rust=$FILTERED harness=$HARNESS runbook=$RUNBOOK shortcodes=$SHORTCODES ci-scripts=$FREEDISK/$APTRETRIES/$CLANG"
+            echo "rust=$FILTERED harness=$HARNESS runbook=$RUNBOOK shortcodes=$SHORTCODES ci-scripts=$FREEDISK/$APTRETRIES/$APTINSTALL/$CLANG"
           else
             # workflow_dispatch / schedule / any non-PR trigger: always run the
             # full gate (the marathon step keys off event_name inside the job).
@@ -265,10 +282,11 @@ jobs:
       - name: Fail fast on a stalled apt mirror
         run: bash scripts/ci-apt-retries.sh
 
+      # ci-apt-install.sh bounds the download and moves off a trickling mirror
+      # (the 2026-11-06 nightly spent 39 minutes here, #1803).
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          bash scripts/ci-apt-install.sh \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
@@ -540,10 +558,11 @@ jobs:
       - name: Fail fast on a stalled apt mirror
         run: bash scripts/ci-apt-retries.sh
 
+      # ci-apt-install.sh bounds the download and moves off a trickling mirror
+      # (the 2026-11-06 nightly spent 39 minutes here, #1803).
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          bash scripts/ci-apt-install.sh \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
@@ -638,10 +657,15 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.run_tests == 'true' }}
     runs-on: macos-latest
+    # Measured from the job's START, so queueing for a runner does not count
+    # (an unacquired job is dropped by GitHub after 15 minutes either way, and
+    # mls-nightly-triage.yml re-runs it). A warm run takes ~3.5 min.
     timeout-minutes: 25
     env:
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
+      # cargo's default is 3 quick retries per download.
+      CARGO_NET_RETRY: "10"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -660,6 +684,25 @@ jobs:
           # Only `main` WRITES the cache; PR branches restore from it. The repo
           # has been over GitHub's 10 GiB cache budget before (#759).
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Downloads in their own step, so a network failure cannot read as a test
+      # failure. On #1799 this job restored no cache (the repo is routinely over
+      # its 10 GiB cache budget) and the test step exited 101 six seconds in,
+      # far too soon to have compiled anything, and with no Cargo change between
+      # that push and the green one after it (#1803). A cold job downloads every
+      # crate and the openmls git dependency; this retries that as a unit.
+      - name: Fetch crates
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo fetch; then
+              exit 0
+            fi
+            echo "::warning::cargo fetch attempt $attempt failed"
+            sleep $((attempt * 20))
+          done
+          echo "::error::cargo fetch failed three times; this is the network, not the at-rest tests."
+          exit 1
 
       # Deliberately NO OpenSSL provisioning, and nothing here may add any: on
       # Apple targets `libsqlite3-sys` picks CommonCrypto only when it finds no
@@ -701,9 +744,6 @@ jobs:
     needs: [changes, tests, flows, macos-at-rest]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    # Only for the nightly-failure issue below.
-    permissions:
-      issues: write
     steps:
       - name: Evaluate gate
         env:
@@ -756,30 +796,7 @@ jobs:
           echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT flows=$FLOWS_RESULT macos=$MACOS_RESULT) — failing closed."
           exit 1
 
-      # A red nightly reaches nobody on its own: no PR is waiting on it, and the
-      # marathon runs only here (#1765). Open one tracking issue, or comment on
-      # it if it is still open, so the owner is notified every failing night.
-      - name: File the nightly failure
-        if: ${{ failure() && github.event_name == 'schedule' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          # The repo belongs to an org, which cannot be assigned; a person can.
-          NIGHTLY_OWNER: actuallydan
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TESTS_RESULT: ${{ needs.tests.result }}
-          FLOWS_RESULT: ${{ needs.flows.result }}
-          MACOS_RESULT: ${{ needs.macos-at-rest.result }}
-        run: |
-          title="Nightly MLS tests failing"
-          body="The scheduled \`mls-tests\` run failed on ${GITHUB_SHA::8}: $RUN_URL
-
-          tests (incl. the marathon soak) = $TESTS_RESULT, flows = $FLOWS_RESULT, macos-at-rest = $MACOS_RESULT.
-          A marathon failure uploads \`marathon-failing-op-sequence\`; promote it per docs/machine-checked-correctness-design.md §5.4."
-          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
-            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
-          else
-            gh issue create --title "$title" --body "$body" --assignee "$NIGHTLY_OWNER"
-          fi
+      # A red nightly is reported by mls-nightly-triage.yml, not here: it runs
+      # after the whole run has finished, so it can re-run a job that never got
+      # a runner instead of filing it, and it reads each job's own failure
+      # annotation into the issue (#1803).

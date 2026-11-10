@@ -139,7 +139,10 @@ also runs on Rust pushes to `main` so its cache is rewritten on merge rather tha
 once a night. The other fixed sinks: the unconditional "Free disk space" step
 (2-6 min per Linux job; `scripts/ci-free-disk.sh` now cleans only below 40 GB
 free, and the runners have ~90 GB), stalled apt mirror fetches (33 min on one
-flows shard; `scripts/ci-apt-retries.sh` sets a 30 s timeout with retries), and
+flows shard; `scripts/ci-apt-retries.sh` sets a 30 s timeout with retries) and
+trickling ones (39 min on the 2026-11-06 nightly at 10-40 KB/s, which no
+timeout catches; `scripts/ci-apt-install.sh` bounds the download at 5 min and
+then moves the job's apt sources to `archive.ubuntu.com`, #1803), and
 PRs that cannot affect a suite running it anyway — `mobile/**`, the root
 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` are now exempt from
 `mls-tests` and `windows-link` (nothing Rust builds or reads lives there), while
@@ -901,8 +904,14 @@ being the only repro of record for a non-seedable run. A failure raised outside
 `run_case` (the zero-loss check on client drop) prints no `op sequence` line, so
 the step falls back to proptest's `minimal failing input` block, the same Op
 vector. A red scheduled run also opens a `Nightly MLS tests failing` issue
-assigned to the owner, or comments on it while it is open (`gate` job, #1765):
-the nightly was red for a week before anyone noticed.
+assigned to the owner, or comments on it while it is open (#1765): the nightly
+was red for a week before anyone noticed. Since #1803 that is
+`mls-nightly-triage.yml` (`scripts/ci-nightly-triage.sh`), which runs after the
+run finishes: a job that never got a runner (the 11-04 and 11-10 `macos-at-rest`
+losses) is re-run up to three attempts instead of filed, and the issue names
+each non-green job with its failure annotation (timeout, runner loss, error).
+The nightly's concurrency group is keyed on the event, so a push to `main` no
+longer cancels it (11-07).
 
 ## Vault media soak (#1491)
 

@@ -60,7 +60,11 @@ if ! command -v "clang++-${CLANG_MAJOR}" >/dev/null 2>&1; then
   keyring="/usr/share/keyrings/apt.llvm.org.gpg"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o "$tmp/llvm.asc"
+  # Retried, all errors included: on 2026-11-03 one failed DNS lookup of
+  # apt.llvm.org (`curl: (6)`) left two jobs on clang 18 and failed the nightly
+  # (#1803). `--retry` alone does not retry a resolve failure.
+  curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+    https://apt.llvm.org/llvm-snapshot.gpg.key -o "$tmp/llvm.asc"
   gpg --batch --no-default-keyring --keyring "$tmp/llvm.gpg" --import "$tmp/llvm.asc" 2>/dev/null
   got="$(gpg --batch --no-default-keyring --keyring "$tmp/llvm.gpg" --with-colons --fingerprint \
     | awk -F: '/^fpr:/ {print $10; exit}')"

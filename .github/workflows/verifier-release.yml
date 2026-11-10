@@ -64,6 +64,11 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: verifier-${{ matrix.target }}
+          # Never from a tag. A tag-scoped cache can be restored only by a re-run
+          # of that same tag, so each release wrote ~2.3 GB nothing else could
+          # read, pushed the repo past GitHub's 10 GiB cache budget and got the
+          # caches PRs and the nightly DO restore evicted (#759, #1803).
+          save-if: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
       # The tag is the only thing an auditor holding a binary can correlate
       # against, so it must be the thing the binary reports (#670). Nothing
