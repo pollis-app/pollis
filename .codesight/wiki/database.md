@@ -215,7 +215,7 @@ squatter-resolution regression), `frontend/tests/username.test.ts`,
 
 **There is exactly one writer since #910.** `pollis-core` used to carry a twin
 (`auth::resolve_or_create_user_by_email`, reached from the `#[cfg(debug_assertions)]`
-no-DS `dev_login` shortcut) that INSERTed the `users` row client-side — the one live
+no-DS dev-login shortcut) that INSERTed the `users` row client-side — the one live
 counter-example to *"Never add a client-side remote INSERT/UPDATE/DELETE — extend a DS
 endpoint"*. It is gone, along with the other two direct-to-Turso fallbacks it turned
 out to be keeping company with (`key_packages`' replenish/publish and
@@ -225,7 +225,7 @@ not trimming the address.
 
 A DS-less client is not a degraded configuration, it is a non-functional one: every
 remote write is a `POST /v1/...`, so such a client could not send a message or register
-a device either. `dev_login` now fails with that message rather than creating a local
+a device either. `DEV_EMAIL` auto-login now fails with that message rather than creating a local
 account that 401s on everything.
 
 `pollis-core/tests/no_client_side_remote_writes.rs` keeps it that way: it parses the
@@ -856,7 +856,7 @@ Global dedup for custom emoji: one row (and one R2 blob) per unique image, share
 
 One row = "group `group_id` calls this object `:shortcode:`". The PK makes a shortcode unique within its group (two members racing to add `:parrot:` cannot both win) while the same image in another group is a second row pointing at the one object.
 
-**Permissions.** *Adding* requires current membership of the target group; *removing* requires being a group admin — the creator gets no exemption (#1280), and since there is no rename/edit endpoint, remove is the only destructive verb. *Using* is broader and is the #848 rule verbatim: `user_can_use_emoji` is true when the emoji is registered to **any** group the user is currently a member of, with no conversation term at all — so a member of group A may send A's emoji in group B, and a user in neither cannot send it but still renders it. That predicate is also what fills the picker (`list_usable_emoji`), so the set offered and the set permitted cannot drift. It cannot be enforced server-side at send time — the DS never sees message content — so `prepare_emoji_text` applies it on the sender's device, degrading a disallowed token to plain `:shortcode:` rather than failing the send.
+**Permissions.** *Adding* requires current membership of the target group; *removing* requires being a group admin — the creator gets no exemption (#1280), and since there is no rename/edit endpoint, remove is the only destructive verb. *Using* is broader and is the #848 rule verbatim: `user_can_use_emoji` is true when the emoji is registered to **any** group the user is currently a member of, with no conversation term at all — so a member of group A may send A's emoji in group B, and a user in neither cannot send it but still renders it. That predicate is also what fills the picker (`list_usable_emoji`), so the set offered and the set permitted cannot drift. It cannot be enforced server-side at send time — the DS never sees message content — so it belongs on the sender's device: `prepare_emoji_text` degrades a disallowed token to plain `:shortcode:` rather than failing the send. Nothing calls it on send yet (#1808), so today the rule is not enforced.
 
 **Bounds.** There is deliberately **no per-group cap** (#848 is explicit). The bound is per-person: `EMOJI_MAX_PER_USER` (1000) rows per creator across all groups, which with the 48 KiB object ceiling caps one account's worst-case storage at 48 MiB — and usually far less, since their second copy of a popular emoji costs a row and no bytes.
 

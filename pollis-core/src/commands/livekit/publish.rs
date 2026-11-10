@@ -334,42 +334,6 @@ pub async fn publish_typing(
     Ok(())
 }
 
-/// Publish a bare `new_message` wake-up (§5) after a send.
-pub async fn publish_ping(
-    room_id: String,
-    channel_id: Option<String>,
-    conversation_id: Option<String>,
-    state: &Arc<AppState>,
-) -> Result<()> {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(&room_id).map(|(r, _)| Arc::clone(r))
-    };
-
-    let room = match room {
-        // Not connected to this room yet — silently skip rather than error.
-        None => return Ok(()),
-        Some(r) => r,
-    };
-
-    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::new_message_payload(
-        channel_id.as_deref(),
-        conversation_id.as_deref(),
-    ))
-    .map_err(Error::Serde)?;
-
-    room.local_participant()
-        .publish_data(DataPacket {
-            payload,
-            reliable: true,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_data: {e}")))?;
-
-    Ok(())
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct StartCallResult {
     pub call_id: String,

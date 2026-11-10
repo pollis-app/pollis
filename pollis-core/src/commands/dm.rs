@@ -276,55 +276,6 @@ pub async fn get_dm_channel(
     }
 }
 
-pub async fn add_user_to_dm_channel(
-    dm_channel_id: String,
-    user_id: String,
-    added_by: String,
-    state: &Arc<AppState>,
-) -> Result<()> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let body = pollis_api::profile::AddDmMemberBody {
-        dm_channel_id: dm_channel_id.clone(),
-        user_id,
-        added_by: added_by.clone(),
-        added_at: now,
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
-
-    // Reconcile adds the new member's devices to the MLS tree.
-    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-        state, &dm_channel_id, &added_by,
-    ).await {
-        crate::diag!("[mls] add_user_to_dm_channel: reconcile: {e}");
-    }
-
-    Ok(())
-}
-
-pub async fn remove_user_from_dm_channel(
-    dm_channel_id: String,
-    user_id: String,
-    requester_id: String,
-    state: &Arc<AppState>,
-) -> Result<()> {
-    // Only the creator or the user themselves may remove a member (enforced by the DS).
-    let body = pollis_api::profile::RemoveDmMemberBody {
-        dm_channel_id: dm_channel_id.clone(),
-        user_id,
-        requester_id: requester_id.clone(),
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
-
-    // Reconcile removes the member's leaves from the MLS tree.
-    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-        state, &dm_channel_id, &requester_id,
-    ).await {
-        crate::diag!("[mls] remove_user_from_dm_channel: reconcile: {e}");
-    }
-
-    Ok(())
-}
-
 pub async fn leave_dm_channel(
     dm_channel_id: String,
     user_id: String,

@@ -607,7 +607,7 @@ A presigned URL authorises one operation on one key for a short window, so a bin
 
 ### 9.4 Avatars and group icons
 
-These use `upload_file` / `download_file` and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url` or `groups.icon_url` can fetch the image without authentication. 
+These use `upload_public_file` (group icons) and `upload_avatar` (profile photos) and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url` or `groups.icon_url` can fetch the image without authentication. 
 ---
 
 ## 10. Real-Time Media (LiveKit)

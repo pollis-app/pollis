@@ -1264,9 +1264,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return true;
     }
 
-    case 'sync_read_cursors':
-      return 0;
-
     case 'refresh_read_cursors': {
       const moved: string[] = [];
       for (const [id, at] of Object.entries(store.readElsewhere)) {
@@ -1845,7 +1842,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         });
     }
 
-    case 'save_message':
     case 'toggle_saved_message': {
       const { messageId } = args as { messageId: string };
       const existing = store.bookmarks.findIndex((b) => b.message_id === messageId);
@@ -2299,10 +2295,8 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_prekey_bundle':
     case 'rotate_signed_prekey':
     case 'replenish_one_time_prekeys':
-    case 'upload_file':
     case 'upload_public_file':
     case 'download_file':
-    case 'get_livekit_token':
       return null;
 
     default:

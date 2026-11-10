@@ -142,11 +142,6 @@ pub async fn mark_conversation_read(conversation_id: String, user_id: String, st
 }
 
 #[tauri::command]
-pub async fn sync_read_cursors(user_id: String, state: State<'_, Arc<AppState>>) -> Result<usize> {
-    pollis_core::commands::messages::sync_read_cursors(user_id, &state).await
-}
-
-#[tauri::command]
 pub async fn refresh_read_cursors(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<String>> {
     pollis_core::commands::messages::refresh_read_cursors(user_id, &state).await
 }
@@ -174,9 +169,4 @@ pub async fn get_message_retention(state: State<'_, Arc<AppState>>) -> Result<i6
 #[tauri::command]
 pub async fn set_message_retention(days: i64, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::messages::set_message_retention(days, &state).await
-}
-
-#[tauri::command]
-pub async fn run_message_eviction(state: State<'_, Arc<AppState>>) -> Result<usize> {
-    pollis_core::commands::messages::run_message_eviction(&state).await
 }

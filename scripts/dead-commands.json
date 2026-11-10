@@ -1,1 +1,15 @@
-{ "_comment": ["Exemptions for scripts/dead-commands.mjs: commands that look uncalled but are not."], "exempt": {} }
+{
+  "_comment": [
+    "Exemptions for scripts/dead-commands.mjs: commands that look uncalled but are not, or are kept on purpose.",
+    "An entry skips the command in every category, so give the exact reason and the ticket that removes it."
+  ],
+  "exempt": {
+    "prepare_emoji_text": "The sender-side check for the #848 emoji use rule, documented as enforced but never called (#1808). Kept until send and edit apply it inside pollis-core; then delete it.",
+    "delete_group": "Registered on desktop for parity debt: mobile deletes groups, desktop has no UI for it yet (scripts/feature-parity.json known_debt.mobile_only).",
+    "get_dm_channel": "Registered on desktop for parity debt: mobile reads one DM, desktop does not yet (scripts/feature-parity.json known_debt.mobile_only).",
+    "list_known_accounts": "Mobile bridge arm kept for parity debt: desktop's account picker uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
+    "read_messages_after": "Mobile bridge arm kept for parity debt: desktop's jump-to-message paging uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
+    "read_messages_around": "Mobile bridge arm kept for parity debt: desktop's jump-to-message uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
+    "rebuild_search_index": "Mobile bridge arm kept for parity debt: desktop's Preferences offers the rebuild, mobile does not yet (scripts/feature-parity.json known_debt.desktop_only)."
+  }
+}

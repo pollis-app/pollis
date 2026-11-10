@@ -9,21 +9,6 @@ use crate::state::AppState;
 pub use pollis_core::commands::livekit::*;
 
 #[tauri::command]
-pub async fn get_livekit_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<pollis_core::commands::livekit::LivekitCredential> {
-    pollis_core::commands::livekit::get_livekit_token(room_name, identity, display_name, &state).await
-}
-
-#[tauri::command]
-pub async fn get_livekit_view_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<pollis_core::commands::livekit::LivekitCredential> {
-    pollis_core::commands::livekit::get_livekit_view_token(room_name, identity, display_name, &state).await
-}
-
-#[tauri::command]
-pub async fn get_livekit_url(state: State<'_, Arc<AppState>>) -> Result<String> {
-    pollis_core::commands::livekit::get_livekit_url(&state).await
-}
-
-#[tauri::command]
 pub async fn subscribe_realtime(on_event: tauri::ipc::Channel<pollis_core::realtime::RealtimeEvent>, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::livekit::subscribe_realtime(std::sync::Arc::new(crate::sink::ChannelSink(on_event)), &state).await
 }
@@ -31,11 +16,6 @@ pub async fn subscribe_realtime(on_event: tauri::ipc::Channel<pollis_core::realt
 #[tauri::command]
 pub async fn connect_rooms(room_ids: Vec<String>, user_id: String, username: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::livekit::connect_rooms(room_ids, user_id, username, &state).await
-}
-
-#[tauri::command]
-pub async fn publish_ping(room_id: String, channel_id: Option<String>, conversation_id: Option<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
-    pollis_core::commands::livekit::publish_ping(room_id, channel_id, conversation_id, &state).await
 }
 
 #[tauri::command]

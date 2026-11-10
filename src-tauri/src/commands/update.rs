@@ -18,11 +18,6 @@ pub async fn clear_update_required(state: State<'_, Arc<AppState>>) -> Result<()
     pollis_core::commands::update::clear_update_required(&state).await
 }
 
-#[tauri::command]
-pub async fn is_update_required(state: State<'_, Arc<AppState>>) -> Result<bool> {
-    pollis_core::commands::update::is_update_required(&state).await
-}
-
 /// See `pollis_core::commands::update::UpdateCheckPlan`.
 #[tauri::command]
 pub async fn get_update_check_plan(state: State<'_, Arc<AppState>>) -> Result<UpdateCheckPlan> {

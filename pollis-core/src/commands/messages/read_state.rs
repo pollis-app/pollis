@@ -471,12 +471,6 @@ fn schedule_read_cursor_push(state: &Arc<AppState>, user_id: &str) {
     });
 }
 
-/// Pull the other devices' read positions, merge them, and push the result if it adds anything.
-/// Returns how many local cursors moved (the launch path's shape).
-pub async fn sync_read_cursors(user_id: String, state: &Arc<AppState>) -> Result<usize> {
-    Ok(converge_read_cursors(state, &user_id).await?.len())
-}
-
 /// Re-sync on focus, resume, a realtime reconnect, or the DS's `read_cursors_changed` nudge
 /// (#1628): the same converge, returning the conversations read elsewhere so the caller can
 /// refetch unread counts, clear an alert for them and dismiss their notifications.

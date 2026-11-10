@@ -9,11 +9,6 @@ use crate::state::AppState;
 pub use pollis_core::commands::bookmarks::*;
 
 #[tauri::command]
-pub async fn save_message(message_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
-    pollis_core::commands::bookmarks::save_message(message_id, &state).await
-}
-
-#[tauri::command]
 pub async fn unsave_message(message_id: String, state: State<'_, Arc<AppState>>) -> Result<bool> {
     pollis_core::commands::bookmarks::unsave_message(message_id, &state).await
 }

@@ -17,10 +17,6 @@ pub async fn clear_update_required(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-pub async fn is_update_required(state: &Arc<AppState>) -> Result<bool> {
-    Ok(state.update_required.load(Ordering::Relaxed))
-}
-
 /// How the auto-updater is allowed to reach `cdn.pollis.com` right now.
 /// `tauri-plugin-updater` uses its own `reqwest` client, bypassing the relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

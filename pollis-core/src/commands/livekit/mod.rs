@@ -16,7 +16,7 @@ pub(crate) use identity::{
     pin_local_identity, resolve_participant, resolve_participants,
 };
 
-pub use legacy::{get_livekit_token, get_livekit_url, get_livekit_view_token, LivekitCredential};
+pub use legacy::{get_livekit_token, LivekitCredential};
 pub use participants::{
     list_voice_participants, list_voice_room_counts, VoiceParticipantInfo, VoiceRoomCount,
 };
@@ -24,7 +24,7 @@ pub use publish::{
     cancel_call, dismiss_call_on_my_devices, publish_deleted_message_to_room,
     publish_edited_message_to_room, publish_join_requests_changed_to_room,
     publish_member_role_changed_to_room,
-    publish_membership_changed_to_room, publish_new_message_to_room, publish_ping,
+    publish_membership_changed_to_room, publish_new_message_to_room,
     publish_to_room_server, publish_to_user_inbox, publish_typing, publish_voice_presence,
     publish_voice_roster_changed,
     start_call, StartCallResult,

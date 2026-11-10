@@ -27,6 +27,7 @@
     "get_emoji_path": "Mobile counterpart of desktop's get_emoji_url.",
     "resolve_livekit_identities": "Mobile runs LiveKit in JS (data-only), so it resolves the per-room participant pseudonyms (#836) of a data packet's sender through this bridge call, e.g. for typing (#1635). Desktop resolves the same pseudonyms inside pollis-core's realtime loop, so it has no bridge call.",
     "get_livekit_token": "Mobile's LiveKit data-only connection; desktop's counterpart is connect_rooms.",
+    "list_group_channels": "Mobile's group panel re-reads one group's channels; desktop reads every group's channels in one list_user_groups_with_channels call. Same data and the same members-only check (#917). Desktop only appeared to call it through a dead services/api.ts wrapper, removed in #1763.",
     "bundle_export": "Mobile packages export_archive output into one file for the share sheet; desktop writes the archive to a picked folder.",
     "accept_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code.",
     "finish_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code.",
@@ -73,7 +74,6 @@
       "get_public_file_url",
       "get_relay_serving_status",
       "list_known_accounts",
-      "list_messages",
       "process_pending_commits",
       "publish_typing",
       "read_messages_after",
@@ -92,7 +92,8 @@
     ],
     "mobile_only": [
       "delete_group",
-      "get_dm_channel"
+      "get_dm_channel",
+      "poll_enrollment_status"
     ],
     "missing_from_cli": [
       "accept_group_invite",
@@ -130,7 +131,6 @@
       "leave_dm_channel",
       "leave_group",
       "list_blocked_users",
-      "list_group_channels",
       "list_group_emoji",
       "list_group_invite_links",
       "list_peer_verifications",
