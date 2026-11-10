@@ -1,0 +1,25 @@
+[package]
+name = "sqlcipher-src"
+# SQLCipher X.Y.Z is (100X+Y).Z.n, where n counts our own republishes of that release.
+version = "420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2"
+edition = "2021"
+rust-version = "1.81"
+description = "The SQLCipher amalgamation for native and wasm32 builds, with a libtomcrypt provider for targets without a system crypto library"
+license = "MIT AND BSD-3-Clause AND blessing AND WTFPL"
+keywords = ["sqlite", "sqlcipher", "encryption", "amalgamation", "wasm"]
+categories = ["database", "development-tools::build-utils"]
+readme = "README.md"
+repository = "https://github.com/LucaCappelletti94/sqlcipher-src"
+include = ["/src", "/sqlcipher", "/tests", "/README.md", "/LICENSE"]
+
+[lints.rust]
+missing_docs = "forbid"
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "warn"
