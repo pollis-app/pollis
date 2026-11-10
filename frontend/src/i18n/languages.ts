@@ -36,11 +36,11 @@ export function supportedLanguageCodes(): string[] {
   return registry.map((l) => l.code);
 }
 
-export function languageOption(code: string): LanguageOption | undefined {
+function languageOption(code: string): LanguageOption | undefined {
   return registry.find((l) => l.code === code);
 }
 
-export function isSupportedLanguage(code: string | null | undefined): boolean {
+function isSupportedLanguage(code: string | null | undefined): boolean {
   return !!code && registry.some((l) => l.code === code);
 }
 

@@ -8,7 +8,7 @@ import type {
   SelfAuditReport,
 } from "../../types";
 
-export const transparencyQueryKeys = {
+const transparencyQueryKeys = {
   selfAudit: (userId: string | null) => ["selfAuditAccountKey", userId] as const,
   peerAudit: (peerUserId: string) => ["peerAuditAccountKey", peerUserId] as const,
 };

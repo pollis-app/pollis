@@ -152,7 +152,7 @@ export type HistoryTransferHint =
   | "completed";
 
 /** The nudges after which the transfer is over (the local run learns it on its next status read). */
-export function isTerminalHint(event: HistoryTransferHint): boolean {
+function isTerminalHint(event: HistoryTransferHint): boolean {
   return event === "declined" || event === "cancelled" || event === "completed";
 }
 

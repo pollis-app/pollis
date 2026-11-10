@@ -14,7 +14,7 @@ import { PressButton } from "../ui/PressButton";
 const LEARN_ON_DEVICE_SEARCH_URL = "https://pollis.com/learn#on-device-search";
 
 /** Slices the snippet by Rust's UTF-16 ranges: no regex, no innerHTML. */
-export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) => {
+const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) => {
   const parts = useMemo(() => {
     const out: { text: string; mark: boolean }[] = [];
     let cursor = 0;

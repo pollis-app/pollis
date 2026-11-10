@@ -3,7 +3,7 @@ import { makeAutoObservable } from "mobx";
 import type { CameraSource } from "./types";
 
 /** Settings camera preview (#434), separate from the in-call `CameraState`; off by default. */
-export type CameraPreviewState =
+type CameraPreviewState =
   | { kind: "loading" }
   | { kind: "empty" }
   | { kind: "idle"; deviceId: string }

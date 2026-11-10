@@ -17,19 +17,12 @@ export interface ParsedCombo {
 }
 
 /** Normalize a KeyboardEvent.key to the canonical token used in combos. */
-export function normalizeKey(key: string): string {
+function normalizeKey(key: string): string {
   // Space can't survive the trimmed "+"-joined format, so spell it out.
   if (key === " ") {
     return "space";
   }
   return key.toLowerCase();
-}
-
-/** Modifier `KeyboardEvent.key` values, normalized. */
-const MODIFIER_KEYS = new Set(["control", "meta", "alt", "shift"]);
-
-export function isModifierKey(key: string): boolean {
-  return MODIFIER_KEYS.has(normalizeKey(key));
 }
 
 export function parseCombo(combo: string): ParsedCombo {

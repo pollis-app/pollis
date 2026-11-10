@@ -4,7 +4,7 @@
 // `frontend/src/utils/diagnosticsReport.ts` (mobile imports no frontend code). Import-free for node tests.
 
 /** Most characters of log the preview and the clipboard carry. */
-export const RECENT_LOG_CHARS = 48_000;
+const RECENT_LOG_CHARS = 48_000;
 
 export interface RecentReport {
   /** Header + the newest whole lines, oldest of them first. */

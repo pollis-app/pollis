@@ -75,7 +75,7 @@ export type VoiceState =
   | { kind: 'leaving'; channelId: string };
 
 /** A transient device/source enumeration (`kind: 'enumerating'`, added by the share/camera actions); drawn as busy. */
-export function isEnumerating(state: { kind: string }): boolean {
+function isEnumerating(state: { kind: string }): boolean {
   return state.kind === 'enumerating';
 }
 
@@ -184,10 +184,6 @@ export function shareOf(s: VoiceState): ShareState {
   return s.kind === 'joined' ? s.share : { kind: 'idle' };
 }
 
-export function isShareActive(s: VoiceState): boolean {
-  return s.kind === 'joined' && s.share.kind === 'active';
-}
-
 export function cameraOf(s: VoiceState): CameraState {
   return s.kind === 'joined' ? s.camera : { kind: 'idle' };
 }
@@ -196,6 +192,3 @@ export function gateOf(s: VoiceState): VoiceGateState {
   return s.kind === 'joined' || s.kind === 'joining' ? s.gate : VOICE_GATE_INITIAL;
 }
 
-export function isCameraActive(s: VoiceState): boolean {
-  return s.kind === 'joined' && s.camera.kind === 'active';
-}

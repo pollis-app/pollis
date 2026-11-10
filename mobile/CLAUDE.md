@@ -1173,7 +1173,7 @@ app/
   self/*               preferences, user-settings, security, link-device, blocked, saved, …
 components/
   ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
-                       ListRow, ActionRow, Group, Card, Field, Avatar, Chip/Pill,
+                       ListRow, ActionRow, Group, Card, Field, Avatar, Chip,
                        Badge, Button, Toggle, Dot, Divider, BottomAction, Body
   chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
   icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
@@ -1925,8 +1925,8 @@ no react-native) and the accent presets in `theme/accents.ts`.
   the neutrals, the accent mixed into them for tint, the accent at an alpha for
   hairlines. No other hex may appear in UI code. Defaults: accent `#fabf5a`
   (brand amber), background `#0a0907`. Both are runtime-configurable
-  (`setAccentRgb/Hex`, `setBackgroundRgb/Hex`; `<ThemeProvider>` holds them and
-  `useTheme()` re-renders subscribers). `palette.*`, `semantic.*` and the
+  (`setAccentRgb`, `setBackgroundRgb`; `<ThemeProvider>` holds them and
+  `useTheme()` re-renders subscribers). `semantic.*` and the
   `type.*` colours are getters over the live derived theme.
 - **The saved accent paints the first frame (#1447).** The synced
   `accent_hex` preference lands only after sign-in and a DS round trip, so

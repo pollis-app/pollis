@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { invoke } from "../../bridge";
 import type { SearchCursor, SearchPage, SearchSort } from "../../types";
 
-export const searchQueryKeys = {
+const searchQueryKeys = {
   search: (query: string, conversationId: string | null, sort: SearchSort | null) =>
     ["search-messages", query, conversationId, sort] as const,
 };

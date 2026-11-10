@@ -33,7 +33,8 @@ test("the file name is a UTC stamp", () => {
 });
 
 test("mobile's copy of the rule matches the desktop one", () => {
-  const strip = (s: string) => s.slice(s.indexOf("export const RECENT_LOG_CHARS"));
+  // Whether each side exports a name is its own business (Knip drops unused exports); the rule is the text.
+  const strip = (s: string) => s.slice(s.search(/^(?:export )?const RECENT_LOG_CHARS/m)).replace(/^export /gm, "");
   const desktop = readFileSync(new URL("../src/utils/diagnosticsReport.ts", import.meta.url), "utf8");
   const mobile = readFileSync(new URL("../../mobile/lib/diagnosticsReport.ts", import.meta.url), "utf8");
   assert.equal(strip(mobile), strip(desktop));

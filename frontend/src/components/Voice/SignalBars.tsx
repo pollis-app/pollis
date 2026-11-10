@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { VoiceConnectionQuality } from "../../types";
 
 /** The drawn class for a quality; `unknown` (no event yet) is dim, never a confident "excellent". */
-export function signalClass(q: VoiceConnectionQuality | undefined): "unknown" | "good" | "fair" | "poor" {
+function signalClass(q: VoiceConnectionQuality | undefined): "unknown" | "good" | "fair" | "poor" {
   switch (q) {
     case "excellent":
       return "good";

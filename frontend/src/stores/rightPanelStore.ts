@@ -10,7 +10,7 @@ function openKey(userId: string | null | undefined): string {
 }
 
 /** This device's answer for `userId`, or null (fall back to the seed). */
-export function loadDeviceRightPanelOpen(
+function loadDeviceRightPanelOpen(
   userId: string | null | undefined,
 ): boolean | null {
   try {
@@ -27,7 +27,7 @@ export function loadDeviceRightPanelOpen(
   }
 }
 
-export function saveDeviceRightPanelOpen(
+function saveDeviceRightPanelOpen(
   userId: string | null | undefined,
   open: boolean,
 ): void {

@@ -18,7 +18,7 @@ export type ShortcutCommandId =
   | "voice.toggleCamera"
   | "voice.toggleScreenShare";
 
-export type ShortcutCategory =
+type ShortcutCategory =
   | "Application"
   | "Navigation"
   | "Search"

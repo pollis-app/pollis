@@ -94,7 +94,7 @@ export interface SafetyNumberInfo {
   qr_payload: string;
 }
 
-export interface PeerVerificationEntry {
+interface PeerVerificationEntry {
   peer_user_id: string;
   verified: boolean;
   key_changed: boolean;
@@ -105,7 +105,7 @@ export const peerVerificationKeys = {
 };
 
 /// Every TOFU-pinned peer's flags in one round-trip; invalidated on `KeyChanged` and `set_contact_verified`.
-export function usePeerVerifications() {
+function usePeerVerifications() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: peerVerificationKeys.all,
@@ -167,7 +167,7 @@ export function usePeerVerificationMap(): Map<string, PeerVerificationState> {
   }, [peerVerifications]);
 }
 
-export const safetyQueryKeys = {
+const safetyQueryKeys = {
   number: (peerUserId: string | null) => ["safety", "number", peerUserId] as const,
 };
 

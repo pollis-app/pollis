@@ -9,9 +9,9 @@ import type { CustomEmoji } from "../hooks/queries/useEmoji";
 /** Wider than a custom shortcode on purpose: gemoji has `:+1:`, `:-1:`, `:e-mail:`. */
 const SHORTCODE_BODY = /[A-Za-z0-9_+-]/;
 
-export const SHORTCODE_MIN_QUERY = 2;
+const SHORTCODE_MIN_QUERY = 2;
 
-export const SHORTCODE_SUGGESTION_LIMIT = 8;
+const SHORTCODE_SUGGESTION_LIMIT = 8;
 
 export interface ShortcodeEntry {
   shortcode: string;

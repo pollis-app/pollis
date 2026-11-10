@@ -4,7 +4,7 @@ import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import type { CustomEmoji } from "../../types";
 
-export const emojiQueryKeys = {
+const emojiQueryKeys = {
   all: ["emoji"] as const,
   // Every emoji the user may send: the picker and the permission rule.
   usable: (userId: string | null) => ["emoji", "usable", userId] as const,

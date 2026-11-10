@@ -26,7 +26,7 @@ export interface EmojiImageState {
 }
 
 /** Retry delays after a failed resolve (#1562); finite, no polling. */
-export const EMOJI_RETRY_DELAYS_MS = [2_000, 10_000, 30_000] as const;
+const EMOJI_RETRY_DELAYS_MS = [2_000, 10_000, 30_000] as const;
 
 export function useEmojiImage(contentHash: string): EmojiImageState {
   const [url, setUrl] = useState<string | null>(null);

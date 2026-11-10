@@ -12,7 +12,7 @@ import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { appStore } from "../../stores/appStore";
 
 // Routes that open inside the detail pane on regular width; others push full screen.
-export const PANE_PATHS = [
+const PANE_PATHS = [
   "/chat/thread",
   "/conversation/info",
   "/conversation/pins",
@@ -37,9 +37,9 @@ export type PaneEntry = {
   params: PaneParams;
 };
 
-export type NavHref = string | { pathname: string; params?: PaneParams };
+type NavHref = string | { pathname: string; params?: PaneParams };
 
-export type PaneApi = {
+type PaneApi = {
   push: (pathname: PanePath, params: PaneParams) => void;
   replace: (pathname: PanePath, params: PaneParams) => void;
   back: () => void;

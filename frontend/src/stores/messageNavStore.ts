@@ -7,7 +7,7 @@ import {
 } from "../utils/messageNav";
 
 /** Callbacks lent by the one navigable `MessageList`; they read live state. */
-export interface MessageNavContext {
+interface MessageNavContext {
   /** Rendered, navigable message ids, oldest → newest. */
   orderedIds: () => string[];
   /** The action bar of one message, in visual order, from the rendered DOM. */

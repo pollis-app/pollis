@@ -2,7 +2,7 @@ import { invoke, discardStagedAttachment } from "../bridge";
 import { blurhashFromUrl } from "./imageProcessing";
 import type { Attachment } from "../components/ui/ChatInput";
 
-export type MediaUploadResult = {
+type MediaUploadResult = {
   key: string;
   url: string;
   filename: string;

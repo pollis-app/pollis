@@ -37,7 +37,7 @@ export function setBackgroundLightness(l: number): void {
   emit();
 }
 
-export function isBackgroundLight(): boolean {
+function isBackgroundLight(): boolean {
   initFromDom();
   return currentBgL > 50;
 }

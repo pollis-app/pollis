@@ -1,5 +1,5 @@
 import { makeAutoObservable } from 'mobx';
-import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant, ClientPolicyStatus } from '../types';
+import type { AppState, User, Group, Channel, MessageQueueItem, VoiceParticipant, ClientPolicyStatus } from '../types';
 import type { ShareAudioState, VoiceState, VoiceGateState } from '../types/voice-state';
 import { VOICE_GATE_INITIAL, voiceCounterpartyUserId } from '../types/voice-state';
 import { userIdFromVoiceIdentity } from '../voice/identity';

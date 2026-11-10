@@ -17,7 +17,7 @@ import {
 import { ReactionAddButton } from "./ReactionAddButton";
 import { PressButton } from "../ui/PressButton";
 
-export type CopyLinkState = "idle" | "copied" | "failed";
+type CopyLinkState = "idle" | "copied" | "failed";
 
 interface MessageActionsProps {
   messageId: string;

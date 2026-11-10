@@ -12,7 +12,7 @@ import { useApproveHistoryTransfer, useDeclineHistoryTransfer } from "../../hook
 
 const PIN_LENGTH = 4;
 
-export function addedDate(iso: string | null | undefined): string | null {
+function addedDate(iso: string | null | undefined): string | null {
   const ms = parseServerTimestamp(iso ?? null);
   if (ms === null) {
     return null;

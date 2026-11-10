@@ -21,6 +21,21 @@
     // Runtime of the uniffi-generated bindings in modules/pollis-native.
     "@ubjs/core",
     // CLI that generates those bindings (scripts and the native build call it).
-    "uniffi-bindgen-react-native"
+    "uniffi-bindgen-react-native",
+    // Knip's Expo plugin expects it whenever app.json sets userInterfaceStyle. The app is
+    // dark-only and draws its own background, so it is not installed: adding it is a native
+    // module, i.e. a store build, for no visible change.
+    "expo-system-ui",
+    // Build- and test-time tooling that the `expo` package already ships and pins. Requiring
+    // expo's own copy keeps the plugin and the tests on the exact version prebuild runs;
+    // a direct dependency could resolve to a second, different version.
+    "@expo/plist",
+    "@expo/prebuild-config",
+    "@expo/config-plugins",
+    "@expo/code-signing-certificates",
+    // tests/deep-link-decode.test.ts deliberately loads the copies expo-router resolves
+    // (query-string 7 and the patched decode-uri-component 0.2.2), not direct ones.
+    "query-string",
+    "decode-uri-component"
   ]
 }

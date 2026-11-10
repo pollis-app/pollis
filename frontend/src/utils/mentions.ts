@@ -49,13 +49,6 @@ export function findMentions(text: string): MentionMatch[] {
   return out;
 }
 
-/** Lowercased usernames in `text`, excluding `@all`; mirrors `mention_tokens()`. */
-export function mentionTokens(text: string): string[] {
-  return findMentions(text)
-    .map((m) => m.name)
-    .filter((n) => n !== "all");
-}
-
 /** An in-progress `@…` the caret is sitting inside. */
 export interface MentionQuery {
   /** Index of the '@'. */
@@ -107,7 +100,7 @@ export interface MentionCandidate {
 }
 
 /** Max suggestions shown at once, matching Slack's composer list depth. */
-export const MENTION_SUGGESTION_LIMIT = 8;
+const MENTION_SUGGESTION_LIMIT = 8;
 
 /** Candidates matching `query`: prefix before substring, then alphabetical. Never widens the pool. */
 export function rankMentionCandidates(

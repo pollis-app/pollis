@@ -1,4 +1,4 @@
-// Native bridge seam: the one place the app talks to the Rust core. Falls back to the mock registry until initializeNativeBridge().
+// Native bridge seam: the one place the app talks to the Rust core. Every invoke() fails until initializeNativeBridge().
 
 import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
@@ -7,48 +7,28 @@ import { plainBridgeError } from "./bridgeError";
 import { noticeDeviceRevoked } from "../deviceRevoked";
 import { noticeUpgradeRequired } from "../clientPolicy";
 
-export interface NativeBridge {
+interface NativeBridge {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
-}
-
-type MockHandler = (args?: Record<string, unknown>) => unknown | Promise<unknown>;
-const mockHandlers = new Map<string, MockHandler>();
-
-/** Register a mock for a command; mocks always take precedence. Returns a disposer. */
-export function registerMockCommand(cmd: string, handler: MockHandler): () => void {
-  mockHandlers.set(cmd, handler);
-  return () => {
-    mockHandlers.delete(cmd);
-  };
 }
 
 // Why `initializeNativeBridge` failed, surfaced instead of "no handler".
 let initFailure: string | null = null;
 
 const defaultBridge: NativeBridge = {
-  async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-    const mock = mockHandlers.get(cmd);
-    if (mock) {
-      return (await mock(args)) as T;
-    }
+  async invoke<T>(cmd: string): Promise<T> {
     if (initFailure) {
       throw new Error(`[pollis-native] the core did not start: ${initFailure}`);
     }
     throw new Error(
       `[pollis-native] invoke("${cmd}") has no handler. ` +
-        `Call initializeNativeBridge() at app startup, or register a mock via ` +
-        `registerMockCommand("${cmd}", …) for development.`,
+        `Call initializeNativeBridge() at app startup.`,
     );
   },
 };
 
-/** Routes invoke() into pollis-core's dispatcher. Registered mocks still win. */
+/** Routes invoke() into pollis-core's dispatcher. */
 const pollisNativeBridge: NativeBridge = {
   async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-    const mock = mockHandlers.get(cmd);
-    if (mock) {
-      return (await mock(args)) as T;
-    }
     const argsJson = args ? JSON.stringify(args) : "{}";
     let resultJson: string;
     try {
@@ -69,12 +49,7 @@ const pollisNativeBridge: NativeBridge = {
 
 let currentBridge: NativeBridge = defaultBridge;
 
-/** Swap the underlying bridge (tests). */
-export function setNativeBridge(bridge: NativeBridge): void {
-  currentBridge = bridge;
-}
-
-export interface InitConfig {
+interface InitConfig {
   // The client holds NO credential (#987, #393): only non-secret endpoints.
   r2Endpoint?: string;
   r2PublicUrl?: string;
@@ -119,7 +94,7 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     throw failure;
   }
   initFailure = null;
-  setNativeBridge(pollisNativeBridge);
+  currentBridge = pollisNativeBridge;
   initialized = true;
 }
 

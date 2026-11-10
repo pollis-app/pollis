@@ -2,7 +2,7 @@
 
 import { invoke } from "./invoke";
 
-export interface DialogFilter {
+interface DialogFilter {
   name: string;
   extensions: string[];
 }

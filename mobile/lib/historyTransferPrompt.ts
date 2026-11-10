@@ -50,7 +50,7 @@ export function claimInline(requesterDeviceId: string): () => void {
   };
 }
 
-export function isClaimedInline(requesterDeviceId: string): boolean {
+function isClaimedInline(requesterDeviceId: string): boolean {
   return inlineClaims.has(requesterDeviceId);
 }
 

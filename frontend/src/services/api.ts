@@ -1,5 +1,5 @@
 import { invoke, type Channel as ChannelOf } from '../bridge';
-import type { User, Group, Channel, Message, AccountsIndex } from '../types';
+import type { User, Group, Channel, AccountsIndex } from '../types';
 
 export async function requestOTP(email: string): Promise<void> {
   await invoke('request_otp', { email });
@@ -144,7 +144,7 @@ export interface DeviceOfferHandle {
   expires_at: number;
 }
 
-export type DeviceOfferWait =
+type DeviceOfferWait =
   | { state: 'signed_in'; profile: RawUserProfile }
   | { state: 'expired' };
 
@@ -196,10 +196,6 @@ export interface PendingEnrollmentRequest {
 
 export async function startDeviceEnrollment(userId: string): Promise<EnrollmentHandle> {
   return invoke('start_device_enrollment', { userId });
-}
-
-export async function pollEnrollmentStatus(requestId: string): Promise<EnrollmentStatus> {
-  return invoke('poll_enrollment_status', { requestId });
 }
 
 /** Resolves at the request's terminal state (#874); Rust owns the fetching, backoff and TTL. */
@@ -342,7 +338,7 @@ export async function listUserDevices(userId: string): Promise<DeviceInfo[]> {
 // Copy message history between this account's own devices (#1735). Mirrors pollis-core's history_transfer types.
 
 export type HistoryTransferVia = 'link' | 'sibling';
-export type HistoryTransferRole = 'source' | 'receiver';
+type HistoryTransferRole = 'source' | 'receiver';
 export type HistoryTransferState =
   | 'awaiting_approval'
   | 'transferring'
@@ -440,18 +436,6 @@ export async function isCurrentDeviceRegistered(userId: string): Promise<boolean
   return invoke('is_current_device_registered', { userId });
 }
 
-export interface UserProfileData {
-  id: string;
-  username?: string;
-  preferred_name?: string;
-  phone?: string;
-  avatar_url?: string;
-}
-
-export async function getUserProfile(userId: string): Promise<UserProfileData | null> {
-  return invoke('get_user_profile', { userId });
-}
-
 export async function updateUserProfile(
   userId: string,
   username?: string,
@@ -466,10 +450,6 @@ export async function updateUserProfile(
     phone: phone ?? null,
     avatarUrl: avatarUrl ?? null,
   });
-}
-
-export async function searchUserByUsername(username: string): Promise<UserProfileData | null> {
-  return invoke('search_user_by_username', { username });
 }
 
 import { deriveSlug } from '../utils/urlRouting';
@@ -525,26 +505,6 @@ export async function listUserGroups(userId: string): Promise<Group[]> {
   return (groups || []).map(toGroup);
 }
 
-// #917: members-only in Rust, so the caller's id is passed.
-export async function listChannels(groupId: string, requesterId: string): Promise<Channel[]> {
-  const channels = await invoke<RawChannel[]>('list_group_channels', { groupId, requesterId });
-  return (channels || []).map(toChannel);
-}
-
-export async function createGroup(name: string, description: string, ownerId: string): Promise<Group> {
-  const g = await invoke<RawGroup>('create_group', { name, description: description || null, ownerId });
-  return toGroup(g);
-}
-
-export async function createChannel(groupId: string, name: string, description: string, creatorId: string, channelType: 'text' | 'voice' = 'text'): Promise<Channel> {
-  const c = await invoke<RawChannel>('create_channel', { groupId, name, description: description || null, channelType, creatorId });
-  return toChannel(c);
-}
-
-export async function joinGroup(groupId: string, userId: string): Promise<void> {
-  await invoke('invite_to_group', { groupId, userId });
-}
-
 export async function updateGroupIcon(groupId: string, iconUrl: string): Promise<void> {
   const session = await getSession();
   if (!session) {
@@ -557,64 +517,4 @@ export async function updateGroupIcon(groupId: string, iconUrl: string): Promise
     description: null,
     iconUrl,
   });
-}
-
-export async function updateGroup(groupId: string, name: string, description: string): Promise<void> {
-  const session = await getSession();
-  if (!session) {
-    throw new Error('No session');
-  }
-  await invoke('update_group', {
-    groupId,
-    requesterId: session.user.id,
-    name: name || null,
-    description: description || null,
-    iconUrl: null,
-  });
-}
-
-type RawMessage = {
-  id: string;
-  conversation_id: string;
-  sender_id: string;
-  content?: string;
-  reply_to_id?: string;
-  sent_at: string;
-};
-
-function toMessage(m: RawMessage): Message {
-  return {
-    id: m.id,
-    channel_id: undefined,
-    conversation_id: m.conversation_id,
-    sender_id: m.sender_id,
-    ciphertext: new Uint8Array(),
-    nonce: new Uint8Array(),
-    content_decrypted: m.content || '',
-    reply_to_message_id: m.reply_to_id,
-    is_pinned: false,
-    created_at: new Date(m.sent_at).getTime(),
-    delivered: true,
-    status: 'sent' as const,
-  };
-}
-
-export async function listMessages(conversationId: string, limit = 50): Promise<Message[]> {
-  const messages = await invoke<RawMessage[]>('list_messages', { conversationId, limit });
-  return (messages || []).map(toMessage);
-}
-
-export async function sendMessage(
-  conversationId: string,
-  senderId: string,
-  content: string,
-  replyToId?: string,
-): Promise<Message> {
-  const m = await invoke<RawMessage>('send_message', {
-    conversationId,
-    senderId,
-    content,
-    replyToId: replyToId ?? null,
-  });
-  return toMessage(m);
 }

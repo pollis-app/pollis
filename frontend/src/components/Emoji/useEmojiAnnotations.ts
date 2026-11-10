@@ -33,7 +33,7 @@ function stackLocale(language: string): string {
   return normalizeLanguage(language) ?? DEFAULT_LANGUAGE;
 }
 
-export async function loadEmojiAnnotationStack(language: string): Promise<EmojiAnnotationStack> {
+async function loadEmojiAnnotationStack(language: string): Promise<EmojiAnnotationStack> {
   const locale = stackLocale(language);
   const cached = resolvedStacks.get(locale);
   if (cached) {

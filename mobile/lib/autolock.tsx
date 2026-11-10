@@ -50,7 +50,7 @@ function coerceMinutes(raw: string | null): number | null {
   return minutes;
 }
 
-export async function loadAutoLockMinutes(): Promise<number | null> {
+async function loadAutoLockMinutes(): Promise<number | null> {
   if (cacheLoaded) {
     return cachedMinutes;
   }
@@ -64,7 +64,7 @@ export async function loadAutoLockMinutes(): Promise<number | null> {
   return cachedMinutes;
 }
 
-export async function persistAutoLockMinutes(
+async function persistAutoLockMinutes(
   minutes: number | null,
 ): Promise<void> {
   cachedMinutes = minutes;

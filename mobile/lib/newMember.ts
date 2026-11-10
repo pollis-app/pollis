@@ -1,7 +1,7 @@
 // The "new" tag for a week after `joined_at` (#1506). Everything from NEW_MEMBER_WINDOW_MS down is pinned equal to desktop's copy.
 
 /** How long after joining a member's messages carry the tag. */
-export const NEW_MEMBER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const NEW_MEMBER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Tolerance for a message stamped slightly before `joined_at` by a sender

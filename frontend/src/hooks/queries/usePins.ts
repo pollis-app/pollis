@@ -19,7 +19,7 @@ export interface PinnedMessage {
   sent_at: string;
 }
 
-export const pinQueryKeys = {
+const pinQueryKeys = {
   all: ["pins"] as const,
   conversation: (conversationId: string | null) =>
     ["pins", conversationId] as const,

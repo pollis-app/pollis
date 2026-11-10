@@ -3,7 +3,7 @@
 import { useWindowDimensions } from "react-native";
 
 // Above a Split-View half (~507–678pt), so that stays `compact`.
-export const REGULAR_MIN_WIDTH = 700;
+const REGULAR_MIN_WIDTH = 700;
 
 export type LayoutClass = "compact" | "regular";
 

@@ -23,10 +23,6 @@ export function setShortcutOverrides(next: OverrideMap): void {
   }
 }
 
-export function getShortcutOverrides(): Readonly<OverrideMap> {
-  return overrides;
-}
-
 export function subscribeShortcutOverrides(fn: () => void): () => void {
   subscribers.add(fn);
   return () => {

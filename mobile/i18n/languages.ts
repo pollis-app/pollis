@@ -28,7 +28,7 @@ export function languageOption(code: string): LanguageOption | undefined {
   return SUPPORTED_LANGUAGES.find((l) => l.code === code);
 }
 
-export function isSupportedLanguage(code: string | null | undefined): boolean {
+function isSupportedLanguage(code: string | null | undefined): boolean {
   return !!code && SUPPORTED_LANGUAGES.some((l) => l.code === code);
 }
 

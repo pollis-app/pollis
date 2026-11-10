@@ -1,12 +1,12 @@
 /** `<:shortcode:content_hash>` wire grammar (#848); must agree with pollis-core `parse_emoji_tokens`. Malformed runs stay text; the alphabets can't carry markup. */
 
-export interface EmojiTokenSegment {
+interface EmojiTokenSegment {
   kind: "emoji";
   shortcode: string;
   contentHash: string;
 }
 
-export interface TextSegment {
+interface TextSegment {
   kind: "text";
   text: string;
 }
@@ -45,9 +45,4 @@ export function splitEmojiSegments(text: string): EmojiSegment[] {
     segments.push({ kind: "text", text });
   }
   return segments;
-}
-
-export function hasEmojiTokens(text: string): boolean {
-  // Fresh regex: the module one is stateful (/g).
-  return /<:[a-z0-9_]{2,32}:[0-9a-f]{64}>/.test(text);
 }

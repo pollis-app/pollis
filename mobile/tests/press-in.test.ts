@@ -127,7 +127,7 @@ test("the shared primitives take pressIn and keep onPress for screen readers", (
     assert.ok(ui.includes(call), `ui.tsx must call ${call}`);
   }
   // The hook always hands Pressable an onPress (TalkBack's path).
-  const hook = ui.slice(ui.indexOf("export function usePressIn"), ui.indexOf("export function PressInPressable"));
+  const hook = ui.slice(ui.indexOf("function usePressIn("), ui.indexOf("export function PressInPressable"));
   assert.match(hook, /if \(!enabled \|\| !onPress \|\| !pressInSupported\(Platform\.OS, inSheet\)\) \{\s*return \{ onPress \};/);
   assert.match(hook, /onPress: \(\) => g\.onPress\(run\)/);
   // Navigation never plays a haptic (mobile/CLAUDE.md).
@@ -213,7 +213,7 @@ test("sending, destructive and confirming controls stay on release", () => {
   assert.doesNotMatch(seek, /\bpressIn\b/);
   // Toggles and confirms never take it.
   const ui = read("components/ui.tsx");
-  for (const fn of ["export function Toggle(", "export function Checkbox(", "export function CheckRow("]) {
+  for (const fn of ["export function Toggle(", "function Checkbox(", "export function CheckRow("]) {
     const start = ui.indexOf(fn);
     const body = ui.slice(start, ui.indexOf("\n}\n", start));
     assert.doesNotMatch(body, /pressIn/i, `${fn} must stay on release`);

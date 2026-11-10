@@ -47,7 +47,7 @@ const COMBINING_MARKS =
  * needle and every haystack, so the fold never has to be exact — only
  * consistent.
  */
-export function foldForSearch(value: string): string {
+function foldForSearch(value: string): string {
   return value.toLowerCase().normalize("NFD").replace(COMBINING_MARKS, "");
 }
 

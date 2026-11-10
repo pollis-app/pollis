@@ -8,7 +8,7 @@ const SHORTCODE_BODY = /[A-Za-z0-9_+-]/;
 /** Shortest query that opens the list (Discord's rule). */
 export const SHORTCODE_MIN_QUERY = 2;
 
-export const SHORTCODE_SUGGESTION_LIMIT = 8;
+const SHORTCODE_SUGGESTION_LIMIT = 8;
 
 export interface ShortcodeEntry {
   shortcode: string;
