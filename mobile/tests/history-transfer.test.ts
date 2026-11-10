@@ -290,8 +290,8 @@ test("a wake-up during a run that comes back paused runs once more, not once per
   const done = runner.kick("T1");
   void runner.kick("T1");
   void runner.kick("T1");
+  // Both runs answer paused; the second only starts because of the wake-ups that landed during the first.
   gates[0].resolve(transfer({ state: "paused" }));
-  await new Promise((r) => setTimeout(r, 0));
   gates[1].resolve(transfer({ state: "paused" }));
   await done;
   assert.equal(n, 2);
@@ -376,32 +376,43 @@ test("mobile copy never says plaintext, E2EE or passcode", () => {
   assert.match(text, /message history/);
 });
 
+// Drains every queued promise continuation. Nothing below waits on wall-clock time (#1785): the stubs answer
+// at once or when the test says so, so one setImmediate turn is enough for the runner to go quiet.
+const settle = () => new Promise<void>((r) => setImmediate(r));
+
 test("while a run is in flight the progress long poll streams snapshots, and stops when it ends", async () => {
   const gate = deferred<HistoryTransfer>();
+  // The poll that is still out when the run ends; its answer must be dropped.
+  const lastPoll = deferred<HistoryTransfer>();
   const seen: number[] = [];
+  const runningAtProgress: boolean[] = [];
   const sinces: (string | null)[] = [];
   let polls = 0;
   const runner = createTransferRunner({
     run: () => gate.promise,
-    watch: async (_id, since) => {
+    watch: (_id, since) => {
       sinces.push(since);
       polls += 1;
-      await new Promise((r) => setTimeout(r, 1));
-      return transfer({ rows_done: polls * 10, updated_at: `t${polls}` });
+      if (polls < 3) {
+        return Promise.resolve(transfer({ rows_done: polls * 10, updated_at: `t${polls}` }));
+      }
+      // Two snapshots have streamed; the run ends while the third poll is waiting.
+      gate.resolve(transfer({ state: "completed", rows_done: 999 }));
+      return lastPoll.promise;
     },
-    onProgress: (t) => seen.push(t.rows_done),
+    onProgress: (t) => {
+      seen.push(t.rows_done);
+      runningAtProgress.push(runner.running().includes("T1"));
+    },
   });
-  const done = runner.kick("T1");
-  await new Promise((r) => setTimeout(r, 20));
-  gate.resolve(transfer({ state: "completed", rows_done: 999 }));
-  await done;
-  const after = polls;
-  await new Promise((r) => setTimeout(r, 10));
-  assert.ok(seen.length >= 2, "progress arrived while running");
-  assert.deepEqual(seen, [...seen].sort((a, b) => a - b), "in order");
-  assert.equal(sinces[0], null);
-  assert.equal(sinces[1], "t1", "each poll passes the last updated_at");
-  assert.ok(polls <= after + 1, "no polling after the run ended");
+  await runner.kick("T1");
+  assert.deepEqual(runner.running(), []);
+  lastPoll.resolve(transfer({ rows_done: 30, updated_at: "t3" }));
+  await settle();
+  assert.deepEqual(seen, [10, 20], "progress arrived while running, in order");
+  assert.deepEqual(runningAtProgress, [true, true]);
+  assert.deepEqual(sinces, [null, "t1", "t2"], "each poll passes the last updated_at");
+  assert.equal(polls, 3, "no polling after the run ended");
 });
 
 test("a terminal snapshot from the long poll ends the stream", async () => {
@@ -415,8 +426,9 @@ test("a terminal snapshot from the long poll ends the stream", async () => {
     },
   });
   const done = runner.kick("T1");
-  await new Promise((r) => setTimeout(r, 10));
+  await settle();
   assert.equal(polls, 1);
+  assert.deepEqual(runner.running(), ["T1"], "the run is still in flight, so only the snapshot stopped the polls");
   gate.resolve(transfer({ state: "cancelled" }));
   await done;
 });
