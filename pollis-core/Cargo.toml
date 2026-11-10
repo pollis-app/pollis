@@ -129,7 +129,6 @@ ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 # in #668. `ed25519-dalek` stays for the classic MLS suite's leaf keys and the
 # DS request-auth device key, both of which remain Ed25519 until #669.
 ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
-curve25519-dalek = "4"
 hkdf = "0.12"
 # History transfer's hybrid key agreement (#1735): ML-KEM-768 + X25519 combined
 # through HKDF. Already in the lock (openmls's HPKE backend); no RNG needed from
@@ -184,7 +183,6 @@ pollis-device-cert = { path = "../pollis-device-cert" }
 # pollis-delivery — which must not depend on pollis-core — builds its test
 # databases from the same definitions rather than hand-rolled partial ones.
 pollis-schema = { path = "../pollis-schema" }
-dotenvy = "0.15"
 thiserror = "1"
 zeroize = { version = "1", features = ["derive"] }
 # RNNoise (Rust port) — runs as a pre-APM NS stage when the user enables
