@@ -119,6 +119,76 @@ const CLIPBOARD_FILES_LIMIT: std::time::Duration = std::time::Duration::from_sec
 const CLIPBOARD_IMAGE_LIMIT: std::time::Duration = std::time::Duration::from_secs(6);
 #[cfg(feature = "native-shell")]
 const CLIPBOARD_WRITE_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(feature = "native-shell")]
+const CLIPBOARD_TEXT_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// True when the renderer must take over Ctrl+V and read the clipboard through
+/// `read_clipboard_text` (#1794). On X11, WebKitGTK's own paste asks the owner for
+/// targets it never offered and waits ~30 s on each one left unanswered, which
+/// Steam's "Copy to clipboard" does: the page is dead before any paste handler runs.
+#[cfg(feature = "native-shell")]
+#[tauri::command]
+async fn app_handles_paste() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        clipboard::is_x11_session()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+/// Clipboard text for the renderer's own paste (see `app_handles_paste`); `None`
+/// when the clipboard holds no text. Off the main thread and bounded (#1794).
+#[cfg(feature = "native-shell")]
+#[tauri::command]
+async fn read_clipboard_text(app: tauri::AppHandle) -> Option<String> {
+    clipboard::off_main(CLIPBOARD_TEXT_LIMIT, move || os_clipboard_text(&app)).await
+}
+
+/// Swap WebKit's Paste items for one that runs the renderer's paste
+/// (`window.__pollisAppPaste`, installed when `app_handles_paste` is true).
+#[cfg(all(feature = "native-shell", target_os = "linux"))]
+fn reroute_context_menu_paste(view: &webkit2gtk::WebView, menu: &webkit2gtk::ContextMenu) {
+    use webkit2gtk::{gio, ContextMenuAction, ContextMenuExt, ContextMenuItemExt, WebViewExt};
+
+    let is_paste = |item: &webkit2gtk::ContextMenuItem| {
+        matches!(item.stock_action(), ContextMenuAction::Paste | ContextMenuAction::PasteAsPlainText)
+    };
+    let items = menu.items();
+    let Some(position) = items.iter().position(is_paste) else {
+        return;
+    };
+    for item in items.iter().filter(|item| is_paste(item)) {
+        menu.remove(item);
+    }
+    let action = gio::SimpleAction::new("pollis-paste", None);
+    let view = view.clone();
+    action.connect_activate(move |_, _| {
+        view.evaluate_javascript(
+            "window.__pollisAppPaste && window.__pollisAppPaste()",
+            None,
+            None,
+            None::<&gio::Cancellable>,
+            |_| {},
+        );
+    });
+    // GTK's own translated "Paste", as its text fields show it.
+    let label = webkit2gtk::glib::dgettext(Some("gtk30"), "_Paste");
+    let item = webkit2gtk::ContextMenuItem::from_gaction(&action, &label, None);
+    menu.insert(&item, position as i32);
+}
+
+#[cfg(feature = "native-shell")]
+fn os_clipboard_text(app: &tauri::AppHandle) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if clipboard::is_x11_session() {
+        return clipboard::x11::read_text(CLIPBOARD_TEXT_LIMIT);
+    }
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().read_text().ok()
+}
 
 /// Files copied in a file manager (or by Steam), as paths the composer may attach.
 /// `async` on purpose: a sync command runs on the main thread, which on Linux is
@@ -392,6 +462,14 @@ pub fn run() {
                         settings.set_enable_webrtc(true);
                         settings.set_enable_media_stream(true);
                     }
+                    // Right-click Paste is WebKit's own read too (#1794): on X11, route it to
+                    // the renderer's paste, as Ctrl+V is (`app_handles_paste`).
+                    if clipboard::is_x11_session() {
+                        webview.inner().connect_context_menu(|view, menu, _event, _hit| {
+                            reroute_context_menu_paste(view, menu);
+                            false
+                        });
+                    }
                 });
             }
 
@@ -401,6 +479,8 @@ pub fn run() {
             hide_window,
             read_clipboard_files,
             read_clipboard_image,
+            read_clipboard_text,
+            app_handles_paste,
             write_clipboard_text,
             tray::tray_set_unread,
             tray::tray_set_close_to_tray,

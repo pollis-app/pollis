@@ -23,3 +23,13 @@ export async function readClipboardImage(): Promise<Uint8Array<ArrayBuffer> | nu
 export async function writeClipboardText(text: string): Promise<boolean> {
   return invoke<boolean>("write_clipboard_text", { text });
 }
+
+/** Clipboard text, or null; a bounded Rust read (#1794). */
+export async function readClipboardText(): Promise<string | null> {
+  return invoke<string | null>("read_clipboard_text");
+}
+
+/** True when the app must read pastes itself: on X11, WebKitGTK's own paste can hang on the clipboard owner (#1794). */
+export async function appHandlesPaste(): Promise<boolean> {
+  return invoke<boolean>("app_handles_paste");
+}

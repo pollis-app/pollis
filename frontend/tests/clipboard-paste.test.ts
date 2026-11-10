@@ -117,7 +117,7 @@ test("results go to the composer's latest handlers, not the ones from when the r
 
 test("every clipboard command runs off the main thread (async), never a sync command", () => {
   const lib = readFileSync(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
-  for (const name of ["read_clipboard_files", "read_clipboard_image", "write_clipboard_text"]) {
+  for (const name of ["read_clipboard_files", "read_clipboard_image", "read_clipboard_text", "app_handles_paste", "write_clipboard_text"]) {
     assert.match(lib, new RegExp(`async fn ${name}\\(`), `${name} must be async`);
     assert.doesNotMatch(lib, new RegExp(`\\n\\s*fn ${name}\\(`), `${name} must not be sync`);
   }

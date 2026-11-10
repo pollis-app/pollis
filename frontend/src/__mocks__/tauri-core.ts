@@ -495,11 +495,12 @@ const invokeCounts: Record<string, number> = {};
   }
 };
 
-// What `read_clipboard_files` / `read_clipboard_image` return (#1794); empty by default.
-const osClipboard: { files: string[]; image: number[] } = { files: [], image: [] };
-(window as any).__setOsClipboard = (next: { files?: string[]; image?: number[] }) => {
+// What `read_clipboard_files` / `_image` / `_text` return (#1794); empty by default.
+const osClipboard: { files: string[]; image: number[]; text: string | null } = { files: [], image: [], text: null };
+(window as any).__setOsClipboard = (next: { files?: string[]; image?: number[]; text?: string | null }) => {
   osClipboard.files = next.files ?? [];
   osClipboard.image = next.image ?? [];
+  osClipboard.text = next.text ?? null;
 };
 
 /** Reply gating (#1040): `__tauriHold(cmd)` parks replies until `__tauriRelease(cmd)`. */
@@ -2285,6 +2286,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'read_clipboard_image':
       return new Uint8Array(osClipboard.image);
+
+    case 'read_clipboard_text':
+      return osClipboard.text;
+
+    // X11's app-owned paste (#1794); a spec opts in with `window.__pollisAppHandlesPaste = true` before load.
+    case 'app_handles_paste':
+      return (window as any).__pollisAppHandlesPaste === true;
 
     case 'search_user_by_username':
     case 'invite_to_group':

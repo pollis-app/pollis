@@ -28,5 +28,13 @@ fn main() {
         paths,
         offer.as_ref().map(|o| o.has_png)
     );
+    // New: bounded text read (the app's own paste on X11).
+    let t = Instant::now();
+    let text = clipboard::x11::read_text(Duration::from_secs(5));
+    println!(
+        "NEW text   x11::read_text        {:>6.2}s -> {:?}",
+        t.elapsed().as_secs_f64(),
+        text.map(|s| if s.len() > 40 { format!("{} bytes", s.len()) } else { s })
+    );
     println!("x11 session detected: {}", clipboard::is_x11_session());
 }

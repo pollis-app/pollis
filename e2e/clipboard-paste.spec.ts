@@ -111,3 +111,54 @@ test("an empty clipboard pastes nothing and breaks nothing", async ({ page }) =>
   await page.keyboard.type("hello");
   await expect(page.getByTestId("message-input")).toContainText("hello");
 });
+
+// X11 (#1794): WebKitGTK's own paste can hang on the clipboard owner, so the app takes
+// Ctrl+V itself: a bounded text read, then a paste event the composer handles as usual.
+async function bootAppPaste(page: Page) {
+  await page.addInitScript(() => {
+    (window as any).__pollisAppHandlesPaste = true;
+  });
+  await boot(page);
+  await page.getByTestId("message-input").click();
+}
+
+test("X11: Ctrl+V reads the clipboard text through the app and the composer gets it", async ({ page }) => {
+  await bootAppPaste(page);
+  await page.evaluate(() => (window as any).__setOsClipboard({ text: "pasted by the app" }));
+  await page.keyboard.press("Control+V");
+  await expect(page.getByTestId("message-input")).toContainText("pasted by the app");
+  expect(await invokes(page, "read_clipboard_text")).toBe(1);
+  await expect(page.getByTestId("composer-attachment")).toHaveCount(0);
+});
+
+test("X11: Shift+Insert is taken over too", async ({ page }) => {
+  await bootAppPaste(page);
+  await page.evaluate(() => (window as any).__setOsClipboard({ text: "shift insert" }));
+  await page.keyboard.press("Shift+Insert");
+  await expect(page.getByTestId("message-input")).toContainText("shift insert");
+});
+
+test("X11: a Steam copy (a file list, no text) attaches the file on Ctrl+V", async ({ page }) => {
+  await bootAppPaste(page);
+  await page.evaluate(() => (window as any).__setOsClipboard({ files: ["/home/someone/.steam/screenshots/shot.png"] }));
+  await page.keyboard.press("Control+V");
+  await expect(page.getByTestId("composer-attachment")).toHaveCount(1);
+  expect(await invokes(page, "read_clipboard_text")).toBe(1);
+  expect(await invokes(page, "read_clipboard_files")).toBe(1);
+});
+
+test("X11: while a slow owner holds the text read, the composer types and Ctrl+V doesn't pile up", async ({ page }) => {
+  await bootAppPaste(page);
+  await page.evaluate(() => (window as any).__setOsClipboard({ text: "late" }));
+  await page.evaluate(() => (window as any).__tauriHold("read_clipboard_text"));
+  await page.keyboard.press("Control+V");
+  await page.keyboard.press("Control+V");
+  await page.keyboard.press("Control+V");
+  expect(await invokes(page, "read_clipboard_text")).toBe(1);
+
+  await page.keyboard.type("typing ");
+  await expect(page.getByTestId("message-input")).toContainText("typing");
+
+  await page.evaluate(() => (window as any).__tauriRelease("read_clipboard_text"));
+  await expect(page.getByTestId("message-input")).toContainText("late");
+});

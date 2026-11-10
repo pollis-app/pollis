@@ -116,14 +116,19 @@ pub mod x11 {
 
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{
-        Atom, AtomEnum, ConnectionExt, CreateWindowAux, EventMask, WindowClass,
+        Atom, AtomEnum, ConnectionExt, CreateWindowAux, EventMask, GetPropertyReply, Property,
+        WindowClass,
     };
     use x11rb::protocol::Event;
     use x11rb::rust_connection::RustConnection;
     use x11rb::NONE;
 
     /// File lists are short; anything bigger is not one.
-    const MAX_REPLY_BYTES: u32 = 256 * 1024;
+    const MAX_FILE_LIST_BYTES: u32 = 256 * 1024;
+    /// Generous for a paste into a text field.
+    const MAX_TEXT_BYTES: u32 = 16 * 1024 * 1024;
+    /// Text targets in order of preference; `STRING` is Latin-1 (ICCCM).
+    const TEXT_TARGETS: [&str; 4] = ["UTF8_STRING", "text/plain;charset=utf-8", "STRING", "text/plain"];
 
     pub struct Reader {
         conn: RustConnection,
@@ -186,7 +191,7 @@ pub mod x11 {
             if owner == NONE {
                 return Vec::new();
             }
-            let Some((_, bytes)) = self.convert(self.targets) else {
+            let Some((_, bytes)) = self.convert(self.targets, 64 * 1024) else {
                 return Vec::new();
             };
             bytes
@@ -197,40 +202,71 @@ pub mod x11 {
 
         /// Ask the owner to convert CLIPBOARD to `target`; returns (type, bytes).
         /// Accepts whatever type the owner writes: callers validate the bytes.
-        /// Gives up at the deadline, on a refusal, or on an INCR transfer.
-        pub fn convert(&self, target: Atom) -> Option<(Atom, Vec<u8>)> {
+        /// Gives up at the deadline, on a refusal, or past `max_bytes` (INCR included).
+        pub fn convert(&self, target: Atom, max_bytes: u32) -> Option<(Atom, Vec<u8>)> {
             self.conn.delete_property(self.window, self.property).ok()?;
             self.conn
                 .convert_selection(self.window, self.clipboard, target, self.property, x11rb::CURRENT_TIME)
                 .ok()?;
             self.conn.flush().ok()?;
-            while Instant::now() < self.deadline {
-                let Some(event) = self.conn.poll_for_event().ok()? else {
-                    std::thread::sleep(Duration::from_millis(2));
-                    continue;
-                };
-                let Event::SelectionNotify(notify) = event else {
-                    continue;
-                };
-                if notify.requestor != self.window || notify.target != target {
-                    continue;
+            let notify = loop {
+                match self.next_event()? {
+                    Event::SelectionNotify(n) if n.requestor == self.window && n.target == target => break n,
+                    _ => continue,
                 }
-                if notify.property == NONE {
-                    return None;
-                }
-                let reply = self
-                    .conn
-                    .get_property(true, self.window, self.property, AtomEnum::ANY, 0, MAX_REPLY_BYTES / 4)
-                    .ok()?
-                    .reply()
-                    .ok()?;
-                // INCR is for transfers far larger than any file list; not worth supporting.
-                if reply.type_ == self.incr || reply.bytes_after > 0 {
-                    return None;
-                }
-                return Some((reply.type_, reply.value));
+            };
+            if notify.property == NONE {
+                return None;
             }
-            // The owner never answered: the exact case that used to freeze the window.
+            // Deleting the property (`true`) is also INCR's "send the next chunk".
+            let reply = self.take_property(max_bytes)?;
+            if reply.type_ == self.incr {
+                return self.read_incr(max_bytes);
+            }
+            Some((reply.type_, reply.value))
+        }
+
+        /// ICCCM INCR: the owner writes chunks; each delete asks for the next; an empty one ends it.
+        fn read_incr(&self, max_bytes: u32) -> Option<(Atom, Vec<u8>)> {
+            let mut data = Vec::new();
+            loop {
+                match self.next_event()? {
+                    Event::PropertyNotify(p)
+                        if p.window == self.window && p.atom == self.property && p.state == Property::NEW_VALUE => {}
+                    _ => continue,
+                }
+                let chunk = self.take_property(max_bytes)?;
+                if chunk.value.is_empty() {
+                    return Some((chunk.type_, data));
+                }
+                if data.len() + chunk.value.len() > max_bytes as usize {
+                    return None;
+                }
+                data.extend_from_slice(&chunk.value);
+            }
+        }
+
+        /// Read and delete our property; `None` when it holds more than `max_bytes`.
+        fn take_property(&self, max_bytes: u32) -> Option<GetPropertyReply> {
+            let reply = self
+                .conn
+                .get_property(true, self.window, self.property, AtomEnum::ANY, 0, max_bytes.div_ceil(4))
+                .ok()?
+                .reply()
+                .ok()?;
+            self.conn.flush().ok()?;
+            (reply.bytes_after == 0).then_some(reply)
+        }
+
+        /// The next event, or `None` at the deadline: the owner never answered,
+        /// the exact case that used to freeze the window.
+        fn next_event(&self) -> Option<Event> {
+            while Instant::now() < self.deadline {
+                if let Some(event) = self.conn.poll_for_event().ok()? {
+                    return Some(event);
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
             None
         }
     }
@@ -259,11 +295,35 @@ pub mod x11 {
         let offered = reader.offered();
         let atom_offered = |name: &str| reader.atom(name).filter(|a| offered.contains(a));
         let uri_list = if want_files {
-            atom_offered("text/uri-list").and_then(|a| reader.convert(a)).map(|(_, b)| b)
+            atom_offered("text/uri-list").and_then(|a| reader.convert(a, MAX_FILE_LIST_BYTES)).map(|(_, b)| b)
         } else {
             None
         };
         Some(Offer { uri_list, has_png: atom_offered("image/png").is_some() })
+    }
+
+    /// The clipboard's text, from the first text target the owner offers; `None` if it offers none.
+    /// This replaces WebKitGTK's own paste on X11, which asks every owner for targets it
+    /// never offered and waits ~30 s on each one an owner like Steam leaves unanswered.
+    pub fn read_text(limit: Duration) -> Option<String> {
+        let reader = Reader::connect(limit)?;
+        let offered = reader.offered();
+        let (name, atom) = TEXT_TARGETS
+            .iter()
+            .find_map(|name| reader.atom(name).filter(|a| offered.contains(a)).map(|a| (*name, a)))?;
+        let (_, bytes) = reader.convert(atom, MAX_TEXT_BYTES)?;
+        Some(super::decode_text(name == "STRING", &bytes))
+    }
+}
+
+/// Clipboard text bytes as a string: `latin1` for X11's `STRING`, else UTF-8 (lossy).
+/// A trailing NUL, which some owners append, is not part of the text.
+pub fn decode_text(latin1: bool, bytes: &[u8]) -> String {
+    let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+    if latin1 {
+        bytes.iter().map(|&b| char::from(b)).collect()
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
     }
 }
 
@@ -342,6 +402,14 @@ mod tests {
         assert!(!image_within_cap(0, 100));
         assert!(!image_within_cap(100_000, 100_000));
         assert!(!image_within_cap(u64::MAX, u64::MAX));
+    }
+
+    #[test]
+    fn clipboard_text_decodes_utf8_and_latin1() {
+        assert_eq!(decode_text(false, "héllo ✓".as_bytes()), "héllo ✓");
+        assert_eq!(decode_text(true, &[b'h', 0xe9, b'l']), "hél");
+        assert_eq!(decode_text(false, b"text\0"), "text");
+        assert_eq!(decode_text(false, &[b'a', 0xff, b'b']), "a\u{fffd}b");
     }
 
     #[tokio::test]
