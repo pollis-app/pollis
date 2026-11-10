@@ -515,6 +515,14 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   in the right pane (`screen-chat`, no `btn-back`) and the pages it opens
   (info, members, settings, thread, profile) push inside that pane. Flows that
   tap `btn-back` to leave a conversation mark it `optional: true`.
+- **Android photo picker, several photos:** a tile tap can be reported done
+  and select nothing (the grid redrawing under a sync, or a tile for a photo
+  MediaStore no longer holds). `subflows/pick-six-photos-android.yaml`
+  therefore waits for the grid to be listed and still, taps each tile through
+  `pick-android-photo.yaml`, which checks the selection bar's
+  "<n> photos or videos selected" after every tap (one retry if it did not
+  move), and asserts "6 photos or videos selected" before the caller taps
+  Done (#1716).
 - **iPad photo picker:** a popover drawn out of process, so its cells, Sort
   and Filter menu and ✓ are not in the hierarchy and text taps find nothing.
   `maestro-run.sh` passes `IPAD=1` on the iPad, and every flow that picks

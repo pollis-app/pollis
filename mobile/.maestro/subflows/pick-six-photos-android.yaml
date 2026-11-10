@@ -1,23 +1,67 @@
 appId: ${MAESTRO_APP_ID}
 ---
-# Select the six newest photos in Android's photo picker (multi-select). Its
-# thumbnails are labelled "Photo taken on <date>"; the first two rows are
-# always on screen, the third sits under the selection bar.
-- tapOn:
-    text: "Photo taken on.*"
-    index: 0
-- tapOn:
-    text: "Photo taken on.*"
-    index: 1
-- tapOn:
-    text: "Photo taken on.*"
-    index: 2
-- tapOn:
-    text: "Photo taken on.*"
-    index: 3
-- tapOn:
-    text: "Photo taken on.*"
-    index: 4
-- tapOn:
-    text: "Photo taken on.*"
-    index: 5
+# Select the six newest photos in Android's photo picker (multi-select), and
+# prove all six are selected before the caller taps Done (#1716).
+#
+# Its thumbnails are labelled "Photo taken on <date>", newest first, and a
+# selected one gains a "Selected" child. Once anything is selected a bar
+# appears at the bottom whose count reads "<n> photos or videos selected"
+# (the same wording for one). With the "This app will only have access to the
+# photos you select" banner above the grid (shown on every open; its Dismiss
+# did not take an adb tap), the first two rows hold the six; the third
+# sits under the selection bar.
+#
+# A tap can land and select nothing: the grid redraws when the
+# `maestro-media.sh watch` sync lists a fresh seed, and a tile the picker
+# lists for a photo MediaStore no longer holds cannot be selected. Maestro
+# still reports such a tap as done, so the old six blind taps "passed" with
+# nothing selected and the flow died later, in the app, on a missing card.
+# So: wait until the six are listed and the screen is still, then check the
+# count after every tap. A tap whose count did not move is retried once
+# (only while the count is still one short), and the count must be right
+# before the next tile is touched.
+#
+# Callers whose library holds more than six photos should first wait for the
+# tile behind the newest six (composer-attachments waits for index 6), so a
+# late sync cannot move the grid mid-pick.
+- extendedWaitUntil:
+    visible:
+      text: "Photo taken on.*"
+      index: 5
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    file: pick-android-photo.yaml
+    env:
+      INDEX: "0"
+      COUNT: "1"
+- runFlow:
+    file: pick-android-photo.yaml
+    env:
+      INDEX: "1"
+      COUNT: "2"
+- runFlow:
+    file: pick-android-photo.yaml
+    env:
+      INDEX: "2"
+      COUNT: "3"
+- runFlow:
+    file: pick-android-photo.yaml
+    env:
+      INDEX: "3"
+      COUNT: "4"
+- runFlow:
+    file: pick-android-photo.yaml
+    env:
+      INDEX: "4"
+      COUNT: "5"
+- runFlow:
+    file: pick-android-photo.yaml
+    env:
+      INDEX: "5"
+      COUNT: "6"
+- assertVisible:
+    text: "6 photos or videos selected"
+- assertVisible:
+    text: "Done"

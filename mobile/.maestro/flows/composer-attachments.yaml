@@ -233,7 +233,10 @@ tags:
 - waitForAnimationToEnd:
     timeout: 5000
 # Android's picker lists `addMedia` files only once `maestro-media.sh watch`
-# has synced it (#1769), a second or two; wait for the sixth photo first.
+# has synced it (#1769), a second or two. The library also holds this flow's
+# first image, so wait for the SEVENTH photo: only then are all six seeds
+# listed above it, and no late sync moves the grid while the subflow picks
+# (#1716). The subflow asserts all six are selected before Done.
 - runFlow:
     when:
       platform: Android
@@ -241,7 +244,7 @@ tags:
       - extendedWaitUntil:
           visible:
             text: "Photo taken on.*"
-            index: 5
+            index: 6
           timeout: 20000
       - runFlow: ../subflows/pick-six-photos-android.yaml
 # iPad: the picker takes only point taps (ipad-pick-photos.yaml).
@@ -275,8 +278,9 @@ tags:
     direction: LEFT
 - waitForAnimationToEnd:
     timeout: 3000
-# A card past the first screenful is now in view. (Android's picker can
-# drop one of the six taps, so this checks the fifth, not the sixth.)
+# A card past the first screenful is now in view, and all six arrived.
 - assertVisible:
     id: "composer-attachment-4"
+- assertVisible:
+    id: "composer-attachment-5"
 - takeScreenshot: composer-attachments-07-several-scrolled
