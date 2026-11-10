@@ -495,6 +495,13 @@ const invokeCounts: Record<string, number> = {};
   }
 };
 
+// What `read_clipboard_files` / `read_clipboard_image` return (#1794); empty by default.
+const osClipboard: { files: string[]; image: number[] } = { files: [], image: [] };
+(window as any).__setOsClipboard = (next: { files?: string[]; image?: number[] }) => {
+  osClipboard.files = next.files ?? [];
+  osClipboard.image = next.image ?? [];
+};
+
 /** Reply gating (#1040): `__tauriHold(cmd)` parks replies until `__tauriRelease(cmd)`. */
 const heldReplies = new Map<string, Array<() => void>>();
 const lastInvokeArgs: Record<string, unknown> = {};
@@ -2272,8 +2279,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
+    // The OS clipboard the paste fallback reads (#1794); `window.__setOsClipboard` fills it.
+    case 'read_clipboard_files':
+      return [...osClipboard.files];
+
     case 'read_clipboard_image':
-      return new Uint8Array();
+      return new Uint8Array(osClipboard.image);
 
     case 'search_user_by_username':
     case 'invite_to_group':
