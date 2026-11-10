@@ -1,10 +1,13 @@
 name: Dead code
 
-# Advisory dead-code report. Nothing here fails a PR: every analysis step is
-# continue-on-error and writes its findings to the job summary, because the first
-# run of each tool lands on a backlog (see docs/dead-code.md) and a red check on
-# every unrelated PR would just get ignored. Promote a step to a gate (drop
-# continue-on-error) once its backlog is cleared.
+# Dead-code gate. The backlog the first run found was cleared in #1763, so Knip,
+# dead-commands.mjs --strict and cargo-machete now fail the PR on a new finding.
+# Each step still writes its output to the job summary. A false positive is
+# recorded where docs/dead-code.md says, never silenced here. cargo-udeps stays
+# advisory: it runs on demand and has known false positives without `media`.
+#
+# The steps pipe into `tee`, so they run under bash with pipefail: without it the
+# pipeline's status would be tee's, and a finding would pass.
 #
 # Why these tools and not rustc/tsc alone:
 #   - rustc's dead_code lint never flags an unused `pub` item, and never flags a
@@ -27,6 +30,7 @@ on:
       - "pollis-tui/**"
       - "**/Cargo.toml"
       - "scripts/dead-commands.*"
+      - "scripts/knip-mobile.jsonc"
       - ".github/workflows/dead-code.yml"
   workflow_dispatch:
 
@@ -60,38 +64,45 @@ jobs:
         working-directory: mobile
 
       # Registered commands that nothing calls. Pure Node, reads the repo.
+      # Fails on any command that is registered and uncalled and not exempt.
       - name: Dead commands
-        continue-on-error: true
+        shell: bash
         run: |
           {
             echo '### Dead commands'
             echo '```'
-            node scripts/dead-commands.mjs
+            rc=0
+            node scripts/dead-commands.mjs --strict || rc=$?
             echo '```'
+            exit $rc
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The version is pinned: an unpinned `dlx` would run whatever was published
       # last, in a job that has the repo checked out.
       - name: Knip (desktop renderer)
-        continue-on-error: true
         working-directory: frontend
+        shell: bash
         run: |
           {
             echo '### Knip: frontend'
             echo '```'
-            pnpm dlx knip@6.44.1 || true
+            rc=0
+            pnpm dlx knip@6.44.1 || rc=$?
             echo '```'
+            exit $rc
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Knip (mobile)
-        continue-on-error: true
         working-directory: mobile
+        shell: bash
         run: |
           {
             echo '### Knip: mobile'
             echo '```'
-            pnpm dlx knip@6.44.1 --config ../scripts/knip-mobile.jsonc || true
+            rc=0
+            pnpm dlx knip@6.44.1 --config ../scripts/knip-mobile.jsonc || rc=$?
             echo '```'
+            exit $rc
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
   rust:
@@ -111,13 +122,15 @@ jobs:
         run: cargo install cargo-machete --locked --version 0.9.2
 
       - name: cargo-machete
-        continue-on-error: true
+        shell: bash
         run: |
           {
             echo '### cargo-machete'
             echo '```'
-            cargo machete || true
+            rc=0
+            cargo machete || rc=$?
             echo '```'
+            exit $rc
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Exact dependency check. On demand only: it needs nightly and compiles the workspace
