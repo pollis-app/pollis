@@ -538,9 +538,6 @@
     "withUnread_other": "{{label}}, {{count}} unread"
   },
   "thread": {},
-  "timeAgo": {
-    "now": "now"
-  },
   "ui": {
     "backTo": "Back to {{name}}",
     "imageUnavailable": "Image unavailable",

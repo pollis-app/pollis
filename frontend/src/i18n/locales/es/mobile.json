@@ -527,9 +527,6 @@
     "withUnread_other": "{{label}}, {{count}} sin leer"
   },
   "thread": {},
-  "timeAgo": {
-    "now": "ahora"
-  },
   "ui": {
     "backTo": "Volver a {{name}}",
     "imageUnavailable": "Imagen no disponible",
