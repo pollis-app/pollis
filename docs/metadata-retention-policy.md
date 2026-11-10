@@ -53,6 +53,15 @@ so a device offline for a month silently lost mail. That contradicted invariant 
 `docs/backend-core-invariants.md`, which requires retention bounded by the slowest member device and
 specifies **no TTL**.
 
+**Removed members do not pin (#1778).** "Current" is literal: a device whose user has been removed from
+the conversation stops counting toward the floor the moment the membership row goes. Mail sealed to it
+before the removal that it never fetched can then be collected once the remaining members read past it.
+This is deliberate. A removed member has no in-app path to the conversation, so nothing it could read is
+withheld. If the member is later re-added, that pre-removal mail is treated like mail sent before they
+first joined: rejoining does not bring it back, and no placeholder is shown for it. Pinning envelopes for
+removed devices would keep ciphertext around for people who are no longer in the conversation, which this
+policy exists to avoid.
+
 **Device-staleness bound (#720).** Since #720 the floor is bounded by member watermarks **and** by device
 *liveness*: a member device that has not **reported** a watermark within a configured window
 (`POLLIS_DS_WATERMARK_STALE_MONTHS`, **12 months** — the code default since #1486, and set explicitly in
