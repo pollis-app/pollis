@@ -670,9 +670,11 @@ jobs:
           set -uo pipefail
           # Captured rather than streamed so the assertions below can read it —
           # and printed before the exit check, so a failure still leaves the log
-          # in the job output instead of an empty red step.
-          out="$(cargo test -p pollis-core --lib --no-default-features -- db::local::tests:: 2>&1)"
-          rc=$?
+          # in the job output instead of an empty red step. `|| rc=$?`, not a
+          # bare assignment: Actions runs `bash -e`, which exits on a failing
+          # `out="$(...)"` before the echo, and the log came out empty (#1797).
+          rc=0
+          out="$(cargo test -p pollis-core --lib --no-default-features -- db::local::tests:: 2>&1)" || rc=$?
           echo "$out"
           if [ "$rc" -ne 0 ]; then
             echo "::error::db::local tests failed on macOS"

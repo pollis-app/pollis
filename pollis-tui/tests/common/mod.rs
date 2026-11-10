@@ -609,3 +609,21 @@ impl TestClient {
         self.finish_enrollment().await;
     }
 }
+
+/// Link shim: the one SQLite API `rusqlite` 0.41 references that libsql's SQLite lacks (#1797).
+///
+/// These binaries run the real DS in-process, so they link libsql's SQLite (required for its
+/// `libsql_*` calls) beside pollis-core's SQLCipher, and only one may serve the process. Before #1797
+/// libsql's copy satisfied every reference on its own. rusqlite 0.41 also references
+/// `sqlite3_set_errmsg` (SQLite 3.51), which only SQLCipher defines, so SQLCipher's whole object came
+/// in too: two SQLites in one process. Defining it here keeps SQLCipher's object out. Pollis never
+/// calls it, so it aborts. Full reasoning beside the same shim in `src-tauri/src/test_harness.rs`.
+#[no_mangle]
+pub extern "C" fn sqlite3_set_errmsg(
+    _db: *mut std::ffi::c_void,
+    _code: std::ffi::c_int,
+    _msg: *const std::ffi::c_char,
+) -> std::ffi::c_int {
+    eprintln!("sqlite3_set_errmsg called in a pollis-tui test, where libsql's SQLite has no such API");
+    std::process::abort()
+}

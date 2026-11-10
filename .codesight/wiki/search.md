@@ -289,7 +289,7 @@ separate, larger ticket.
 | Keep `LIKE`, fix only the UI | 40–57 ms full scan at 100k and growing, no ranking, and it matches R2 keys and content hashes. |
 | `trigram` tokenizer | Two-character CJK queries return nothing — fatal for Mandarin. |
 | ICU tokenizer | `SQLITE_ENABLE_ICU` is not compiled in; linking ICU on five platforms costs MB for what bigrams get free. |
-| Custom FTS5 tokenizer | rusqlite 0.37 exposes no FTS5 tokenizer API — raw unsafe FFI. |
+| Custom FTS5 tokenizer | rusqlite 0.41 exposes no FTS5 tokenizer API — raw unsafe FFI. |
 | FTS writes at each Rust call site | Ten write sites; a missed one loses index rows silently. |
 | Tantivy / a separate index | A second store to keep in sync, and a plaintext index on disk **outside** SQLCipher. |
 | Bumping `LOCAL_SCHEMA_VERSION` | Wipes every user's local DB including MLS state. |

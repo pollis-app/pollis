@@ -1,7 +1,7 @@
 //! The C ABI declared by `include/tomcrypt.h`, implemented over RustCrypto.
 //!
 //! Every function here is called only by SQLCipher's LibTomCrypt crypto
-//! provider, compiled into `vendor/sqlite3.c`.
+//! provider, compiled from `sqlcipher-src`'s `sqlcipher.c` by `build.rs`.
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_ulong, c_void};
@@ -23,7 +23,7 @@ const AES_BLOCK: usize = 16;
 const HASH_SHA1: c_int = 0;
 const HASH_SHA256: c_int = 1;
 const HASH_SHA512: c_int = 2;
-const CIPHER_RIJNDAEL: c_int = 0;
+const CIPHER_AES: c_int = 0;
 
 #[repr(C)]
 pub struct HashDescriptor {
@@ -57,7 +57,7 @@ unsafe impl Sync for PrngDescriptor {}
 static NAME_SHA1: &[u8] = b"sha1\0";
 static NAME_SHA256: &[u8] = b"sha256\0";
 static NAME_SHA512: &[u8] = b"sha512\0";
-static NAME_RIJNDAEL: &[u8] = b"rijndael\0";
+static NAME_AES: &[u8] = b"aes\0";
 static NAME_FORTUNA: &[u8] = b"fortuna\0";
 
 #[allow(non_upper_case_globals)]
@@ -71,7 +71,7 @@ pub static hash_descriptor: [HashDescriptor; 3] = [
 #[allow(non_upper_case_globals)]
 #[no_mangle]
 pub static cipher_descriptor: [CipherDescriptor; 1] = [CipherDescriptor {
-    name: NAME_RIJNDAEL.as_ptr() as *const c_char,
+    name: NAME_AES.as_ptr() as *const c_char,
     min_key_length: 16,
     // SQLCipher derives its page key length from this field, so it is what
     // makes the cipher AES-256 rather than AES-128.
@@ -96,8 +96,8 @@ pub static sha512_desc: HashDescriptor =
 
 #[allow(non_upper_case_globals)]
 #[no_mangle]
-pub static rijndael_desc: CipherDescriptor = CipherDescriptor {
-    name: NAME_RIJNDAEL.as_ptr() as *const c_char,
+pub static aes_desc: CipherDescriptor = CipherDescriptor {
+    name: NAME_AES.as_ptr() as *const c_char,
     min_key_length: 16,
     max_key_length: 32,
     block_length: AES_BLOCK as c_int,
@@ -137,7 +137,7 @@ pub unsafe extern "C" fn find_hash(name: *const c_char) -> c_int {
 /// `name` must be a valid NUL-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn find_cipher(name: *const c_char) -> c_int {
-    lookup(name, &[(NAME_RIJNDAEL, CIPHER_RIJNDAEL)])
+    lookup(name, &[(NAME_AES, CIPHER_AES)])
 }
 
 /// # Safety
@@ -230,6 +230,27 @@ pub unsafe extern "C" fn fortuna_done(prng: *mut PrngState) -> c_int {
         (*prng).started = 0;
     }
     CRYPT_OK
+}
+
+/// libtomcrypt's system RNG, which SQLCipher (4.19+) reads to seed Fortuna.
+///
+/// Fortuna here is already the OS CSPRNG, so this is the same source. SQLCipher
+/// fails activation unless it gets every byte it asked for.
+///
+/// # Safety
+/// `out` must be writable for `len` bytes. `_callback` is never called.
+#[no_mangle]
+pub unsafe extern "C" fn rng_get_bytes(
+    out: *mut u8,
+    len: c_ulong,
+    _callback: Option<unsafe extern "C" fn()>,
+) -> c_ulong {
+    if out.is_null() || len == 0 {
+        return 0;
+    }
+    let buf = std::slice::from_raw_parts_mut(out, len as usize);
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, buf);
+    len
 }
 
 enum HmacKind {
@@ -406,7 +427,7 @@ pub unsafe extern "C" fn cbc_start(
     _num_rounds: c_int,
     cbc: *mut SymmetricCbcHandle,
 ) -> c_int {
-    if cbc.is_null() || iv.is_null() || key.is_null() || cipher != CIPHER_RIJNDAEL {
+    if cbc.is_null() || iv.is_null() || key.is_null() || cipher != CIPHER_AES {
         return CRYPT_ERROR;
     }
     if keylen < 0 {
@@ -697,7 +718,7 @@ mod tests {
         let mut handle = SymmetricCbcHandle { state: std::ptr::null_mut() };
         unsafe {
             assert_eq!(
-                cbc_start(CIPHER_RIJNDAEL, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle),
+                cbc_start(CIPHER_AES, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle),
                 CRYPT_OK
             );
             assert_eq!(
@@ -719,7 +740,7 @@ mod tests {
         let mut handle = SymmetricCbcHandle { state: std::ptr::null_mut() };
         unsafe {
             assert_eq!(
-                cbc_start(CIPHER_RIJNDAEL, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle),
+                cbc_start(CIPHER_AES, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle),
                 CRYPT_OK
             );
             assert_eq!(
@@ -740,15 +761,15 @@ mod tests {
     #[test]
     fn registry_reports_aes_256_cbc() {
         unsafe {
-            assert_eq!(find_cipher(NAME_RIJNDAEL.as_ptr() as *const c_char), CIPHER_RIJNDAEL);
+            assert_eq!(find_cipher(NAME_AES.as_ptr() as *const c_char), CIPHER_AES);
             assert_eq!(find_hash(NAME_SHA512.as_ptr() as *const c_char), HASH_SHA512);
             assert_eq!(find_hash(c"md5".as_ptr()), -1);
-            assert_eq!(register_cipher(&rijndael_desc), CIPHER_RIJNDAEL);
+            assert_eq!(register_cipher(&aes_desc), CIPHER_AES);
             assert_eq!(register_hash(&sha512_desc), HASH_SHA512);
             assert_eq!(register_prng(&fortuna_desc), 0);
         }
-        assert_eq!(cipher_descriptor[CIPHER_RIJNDAEL as usize].max_key_length, 32);
-        assert_eq!(cipher_descriptor[CIPHER_RIJNDAEL as usize].block_length, 16);
+        assert_eq!(cipher_descriptor[CIPHER_AES as usize].max_key_length, 32);
+        assert_eq!(cipher_descriptor[CIPHER_AES as usize].block_length, 16);
         assert_eq!(hash_descriptor[HASH_SHA512 as usize].hashsize, 64);
         assert_eq!(hash_descriptor[HASH_SHA256 as usize].hashsize, 32);
         assert_eq!(hash_descriptor[HASH_SHA1 as usize].hashsize, 20);
@@ -778,9 +799,9 @@ mod tests {
         let mut handle = SymmetricCbcHandle { state: std::ptr::null_mut() };
         unsafe {
             assert_eq!(cbc_start(42, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle), CRYPT_ERROR);
-            assert_eq!(cbc_start(CIPHER_RIJNDAEL, iv.as_ptr(), key.as_ptr(), 7, 0, &mut handle), CRYPT_ERROR);
+            assert_eq!(cbc_start(CIPHER_AES, iv.as_ptr(), key.as_ptr(), 7, 0, &mut handle), CRYPT_ERROR);
             assert_eq!(
-                cbc_start(CIPHER_RIJNDAEL, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle),
+                cbc_start(CIPHER_AES, iv.as_ptr(), key.as_ptr(), 32, 0, &mut handle),
                 CRYPT_OK
             );
             let src = [0u8; 17];
@@ -870,6 +891,19 @@ mod tests {
             assert_eq!(fortuna_done(&mut prng), CRYPT_OK);
         }
         assert_ne!(a, [0u8; 32], "the PRNG returned all zeroes");
+        assert_ne!(a, b, "two reads returned identical bytes");
+    }
+
+    #[test]
+    fn rng_get_bytes_fills_the_whole_buffer_from_the_os() {
+        let mut a = [0u8; 64];
+        let mut b = [0u8; 64];
+        unsafe {
+            assert_eq!(rng_get_bytes(a.as_mut_ptr(), 64, None), 64);
+            assert_eq!(rng_get_bytes(b.as_mut_ptr(), 64, None), 64);
+            assert_eq!(rng_get_bytes(std::ptr::null_mut(), 64, None), 0);
+        }
+        assert_ne!(a, [0u8; 64], "the RNG returned all zeroes");
         assert_ne!(a, b, "two reads returned identical bytes");
     }
 }

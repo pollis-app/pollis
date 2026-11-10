@@ -199,9 +199,16 @@ allow = [
 ]
 # Below this SPDX-match confidence a license is treated as unknown (fails).
 confidence-threshold = 0.9
-# Per-crate license exceptions go here (crate = specific license). Empty: the
-# allow-list above already covers every third-party crate in the graph.
-exceptions = []
+# Per-crate license exceptions (crate = specific license), for licenses that are
+# fine in one crate but should not be allowed graph-wide.
+exceptions = [
+    # sqlcipher-src (#1797) carries the SQLCipher amalgamation, and SQLite's
+    # `blessing` public-domain dedication comes with it. Its `WTFPL` covers the
+    # bundled libtomcrypt sources, which no build of ours compiles: native
+    # SQLCipher uses CommonCrypto/OpenSSL, and Windows' pollis-sqlcipher backs
+    # the libtomcrypt API with RustCrypto.
+    { crate = "sqlcipher-src", allow = ["blessing", "WTFPL"] },
+]
 
 # Our workspace crates have no `license` field (they are the proprietary Pollis
 # application, never published). Assert that truthfully as a custom LicenseRef so
@@ -276,12 +283,9 @@ name = "pollis-schema"
 expression = "LicenseRef-proprietary"
 license-files = []
 
-# The crate itself is ours; `vendor/sqlite3.c` inside it is the SQLCipher
-# amalgamation (SQLite: public domain; SQLCipher: BSD-3-Clause © Zetetic LLC),
-# recorded with its provenance and hash in
-# `pollis-sqlcipher/vendor/PROVENANCE.md`. cargo-deny reads crate metadata, not
-# vendored sources, so this entry describes the crate and that file describes
-# what it carries.
+# The crate itself is ours. The SQLCipher amalgamation it compiles (SQLite:
+# public domain; SQLCipher: BSD-3-Clause © Zetetic LLC) comes from the
+# `sqlcipher-src` crate, whose license cargo-deny checks on its own.
 [[licenses.clarify]]
 name = "pollis-sqlcipher"
 expression = "LicenseRef-proprietary"
@@ -351,6 +355,9 @@ skip = [
     { name = "getrandom", version = "0.3.4" },
     { name = "hashbrown", version = "0.12.3" },
     { name = "hashbrown", version = "0.15.5" },
+    # wasm32 only: rusqlite 0.41 -> sqlite-wasm-rs 0.5 -> rsqlite-vfs 0.1. Never
+    # built for any target we ship (#1797).
+    { name = "hashbrown", version = "0.16.1" },
     { name = "heck", version = "0.4.1" },
     { name = "hkdf", version = "0.12.4" },
     { name = "hmac", version = "0.12.1" },

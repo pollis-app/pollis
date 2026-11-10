@@ -1,0 +1,19 @@
+# Stand-in for openmls's `openmls_sqlite_storage` 0.2.0 at the pinned openmls
+# rev, swapped in by the `[patch."https://github.com/openmls/openmls"]` entry in
+# the workspace Cargo.toml. Read src/lib.rs for why.
+#
+# The name, version and feature names must match the upstream crate at that rev,
+# or the patch stops applying (cargo then warns that the patch was not used, and
+# the resolver fails on two `links = "sqlite3"` crates again).
+[package]
+name = "openmls_sqlite_storage"
+version = "0.2.0"
+edition = "2021"
+description = "Pollis stand-in for openmls_sqlite_storage: never built; exists so its rusqlite pin leaves the lockfile"
+license = "MIT"
+publish = false
+
+[features]
+extensions-draft = []
+draft-ietf-mls-pq-ciphersuites = []
+virtual-clients-draft = ["extensions-draft"]

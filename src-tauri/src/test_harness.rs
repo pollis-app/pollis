@@ -451,3 +451,28 @@ async fn wipe_tables(conn: &libsql::Connection, tables: &[&str]) -> Result<()> {
     }
     Ok(())
 }
+
+/// Link shim: the one SQLite API `rusqlite` 0.41 references that libsql's SQLite lacks (#1797).
+///
+/// This harness runs the real DS in-process, so its binaries link libsql's SQLite (a 3.47 fork, required
+/// for its `libsql_*` calls) beside pollis-core's SQLCipher. Both define every `sqlite3_*` symbol and
+/// only one may be linked. `db::local::sqlcipher_is_linked` documents that libsql's copy serves the
+/// whole process here, so the client database in these tests is plaintext, and until #1797 that held
+/// by itself. rusqlite 0.41 also references `sqlite3_set_errmsg` (SQLite 3.51), which only SQLCipher
+/// defines, so the linker pulled SQLCipher's whole object in too: two SQLites in one process, a
+/// duplicate-symbol error under rust-lld and a silent mix of the two under ld64.
+///
+/// Defined in this crate, the reference resolves here and SQLCipher's object is never extracted.
+/// Pollis never calls it (rusqlite reaches it only through `Connection::set_errmsg` and custom
+/// collations, neither of which Pollis uses), so it aborts rather than pretend. If SQLCipher's object
+/// is ever pulled in for another reason, this definition collides with it and the Linux link fails,
+/// which is the alarm we want. Same shim in `pollis-tui/tests/common/mod.rs`.
+#[no_mangle]
+pub extern "C" fn sqlite3_set_errmsg(
+    _db: *mut std::ffi::c_void,
+    _code: std::ffi::c_int,
+    _msg: *const std::ffi::c_char,
+) -> std::ffi::c_int {
+    eprintln!("sqlite3_set_errmsg called in a test-harness binary, where libsql's SQLite has no such API");
+    std::process::abort()
+}
