@@ -56,11 +56,11 @@
       "reason": "Real-time media (voice, video, screenshare) is desktop-only by product decision; mobile is LiveKit data-only (CLAUDE.md)."
     },
     {
-      "match": "^tray_|^hide_window$|^terminal_|_terminal_enabled$|^detect_managed_install$|^detect_read_only_location$|^get_update_check_plan$|^mark_update_required$|^pick_(open|save)_path|^save_media_to_path$|clipboard|^play_sfx$",
+      "match": "^tray_|^hide_window$|^terminal_|_terminal_enabled$|^detect_managed_install$|^detect_read_only_location$|^get_update_check_plan$|^mark_update_required$|^pick_(open|save)_path|^save_media_to_path$|clipboard|^app_handles_paste$|^play_sfx$",
       "scopes": [
         "desktop_only"
       ],
-      "reason": "Desktop shell: window chrome, tray, embedded terminal, the self-updater, native file pickers and the clipboard. Mobile uses the OS share sheet and store updates instead."
+      "reason": "Desktop shell: window chrome, tray, embedded terminal, the self-updater, native file pickers and the clipboard (including X11's app-owned paste, #1794). Mobile uses the OS share sheet and store updates instead."
     }
   ],
   "known_debt": {
