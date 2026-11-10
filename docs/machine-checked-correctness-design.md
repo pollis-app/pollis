@@ -433,7 +433,7 @@ soak/OSS-Fuzz failure
 
 Track A is now wired into CI. The marathon soak
 (`model_marathon_convergence`, `src-tauri/tests/flows/model.rs`) runs on a
-**nightly `schedule:`** in `.github/workflows/mls-tests.yml` (07:00 UTC) at a
+**nightly `schedule:`** in `.github/workflows/mls-tests.yml` (07:23 UTC) at a
 meaningful size — **`MARATHON_OPS=500`, `MARATHON_ACTORS=8`** — in addition to
 the existing manual `workflow_dispatch`. The scheduled run has no dispatch
 inputs, so the step's `${{ github.event.inputs.marathon_ops || '500' }}` /

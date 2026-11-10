@@ -1,0 +1,47 @@
+# Reports a red or cancelled nightly `mls-tests.yml` run, after it has finished
+# (#1803). The logic and its reasons live in scripts/ci-nightly-triage.sh:
+#   - a job that never got a runner (GitHub drops it after 15 minutes; it hit
+#     `macos-at-rest` on 2026-11-04 and 11-10) is re-run, up to three attempts,
+#     and nothing is filed;
+#   - anything else opens the "Nightly MLS tests failing" issue, or comments on
+#     it if it is still open, naming each non-green job and why it stopped.
+#
+# This used to be a step in `gate`, which cannot do either: a run cannot re-run
+# its own jobs while it is still in progress, and `gate` saw only each job's
+# result (`cancelled`), not the reason.
+#
+# `workflow_run` always executes the copy of this file on the default branch,
+# against a run whose event was `schedule` on `main`, so it never runs PR code.
+name: MLS nightly triage
+
+on:
+  workflow_run:
+    workflows: ["MLS & delivery tests"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  triage:
+    if: ${{ github.event.workflow_run.event == 'schedule' && github.event.workflow_run.conclusion != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # `gh run rerun --failed` on a run with an unplaced job.
+      actions: write
+      # The tracking issue.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci-nightly-triage.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Re-run a runner loss, or file the failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: bash scripts/ci-nightly-triage.sh
