@@ -105,35 +105,15 @@ jobs:
             exit 1
           fi
 
-      # 3. The public accepted-loss count must match CLAUDE.md. #720 added a third
-      #    and the page said two — a promise that had quietly stopped being true.
-      - name: Accepted-loss count on /learn matches CLAUDE.md
-        run: |
-          set -euo pipefail
-          if grep -q "Exactly three acceptable losses" CLAUDE.md; then
-            want="Three"; wrong="Two"
-          elif grep -q "Exactly two acceptable losses" CLAUDE.md; then
-            want="Two"; wrong="Three"
-          else
-            echo "::error::could not read the accepted-loss count from CLAUDE.md"
-            exit 1
-          fi
-          page="$(curl -fsSL -m 30 "$SITE/learn")"
-          if [ -z "$page" ]; then
-            echo "::error::/learn returned an empty body — check the redirect (curl needs -L)."
-            exit 1
-          fi
-          if [[ "$page" == *"$wrong kinds of loss are expected"* ]]; then
-            echo "::error::/learn still says '$wrong kinds of loss are expected' but CLAUDE.md says $want."
-            echo "::error::  A user-facing promise that stopped being true is worse than an awkward"
-            echo "::error::  paragraph. Deploy the site, or fix the page."
-            exit 1
-          fi
-          if [[ "$page" != *"$want kinds of loss are expected"* ]]; then
-            echo "::error::/learn does not state the accepted-loss count at all — the section moved or broke."
-            exit 1
-          fi
-          echo "✓ /learn states $want accepted losses, matching CLAUDE.md"
+      # 3. Every public number or policy value on the DEPLOYED site matches the code
+      #    that makes it true (#1722). scripts/facts.json declares each fact once;
+      #    this checks its website/** copies against the live pages (the repo copies
+      #    are checked on every PR by scripts-check.yml). It absorbed the bespoke
+      #    accepted-loss step: #720 made the losses three and /learn said two, a
+      #    promise that had quietly stopped being true. A failure here on a fact the
+      #    PR check passes means the site lags main: deploy it.
+      - name: Public facts on the deployed site match the code (#1722)
+        run: node ./scripts/check-facts.mjs --deployed "$SITE"
 
       # 4. security.txt stays RFC 9116 valid (#877).
       #

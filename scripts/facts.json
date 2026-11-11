@@ -1,0 +1,763 @@
+{
+  "_comment": [
+    "THE registry of every public number or policy value, tied to the code or config that makes it true (#1722).",
+    "",
+    "Checked by scripts/check-facts.mjs: on every PR in the repo (scripts-check.yml), and daily against the",
+    "DEPLOYED website (website-verify.yml --deployed). Values like these change rarely, and when one does nobody",
+    "greps the website for it: /learn said 'two kinds of loss' for weeks after #720 made it three.",
+    "",
+    "Each fact:",
+    "  value_from  {file, pattern} (or a list of them, which must all agree, e.g. a code default and the prod",
+    "              wrangler var): the first capture group is the value. Arithmetic (15 * 60) and number words",
+    "              (three) are evaluated; divide / multiply convert units; map renames a string; type: string",
+    "              keeps it verbatim; measure: length counts the capture's characters, count: <regex> its matches. Prod config",
+    "              (pollis-delivery/wrangler.prod.jsonc) is the public truth.",
+    "  unit        for messages only.",
+    "  words       false when the value must not be written as a word (ML-KEM-768 is never 'seven hundred').",
+    "  asserted_in [{file, pattern, status?, note?}]: every place we state it. {value} expands to the value in",
+    "              every form (12, twelve, Twelve; 10000, 10,000). Patterns match the text with HTML tags and",
+    "              entities removed, Markdown ** removed, and all whitespace collapsed to one space.",
+    "  status      ok (default) | disputed. Disputed problems are warnings that print both values and never fail.",
+    "              It is for a legal or policy page that disagrees with code (#1720 'Policy vs code'): neither",
+    "              side is automatically right, so the owner decides. Set it on one assertion, not the fact,",
+    "              when only that copy disagrees.",
+    "",
+    "An assertion fails when its pattern states a different value (stale copy) and when it is not found at all",
+    "(the text moved or was reworded, so the fact is no longer anchored). Rewording public copy therefore means",
+    "re-anchoring its pattern here, in the same PR."
+  ],
+  "facts": {
+    "accepted-loss-count": {
+      "value_from": { "file": "CLAUDE.md", "pattern": "Exactly (\\w+) acceptable losses" },
+      "unit": "accepted kinds of message loss",
+      "asserted_in": [
+        { "file": "website/learn.html", "pattern": "{value} kinds of loss are expected" },
+        { "file": "website/retention.html", "pattern": "This is one of the {value} kinds of message loss Pollis accepts" },
+        { "file": "learn/manim/scripts/joining-leaving.md", "pattern": "{value} kinds of loss are acceptable" },
+        { "file": "learn/manim/scenes/joining_leaving.py", "pattern": "Exactly {value} kinds of loss are acceptable" },
+        { "file": "docs/backend-core-invariants.md", "pattern": "the accepted losses stay exactly the {value} in" },
+        { "file": "docs/backend-core-invariants.md", "pattern": "only ever classifies the {value} acceptable losses" }
+      ]
+    },
+
+    "watermark-stale-months": {
+      "value_from": [
+        { "file": "pollis-delivery/wrangler.prod.jsonc", "pattern": "\"POLLIS_DS_WATERMARK_STALE_MONTHS\": \"(\\d+)\"" },
+        { "file": "pollis-delivery/src/messages.rs", "pattern": "DEFAULT_WATERMARK_STALE_MODIFIER: &str = \"-(\\d+) months\"" }
+      ],
+      "unit": "months",
+      "asserted_in": [
+        { "file": "CLAUDE.md", "pattern": "past `POLLIS_DS_WATERMARK_STALE_MONTHS` \\({value}\\)" },
+        { "file": "website/retention.html", "pattern": "A member device that has not checked in for {value} months stops holding envelopes" },
+        { "file": "website/privacy.html", "pattern": "a device that has not checked in for {value} months stops" },
+        { "file": "website/learn.html", "pattern": "We set the window at {value} months" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\(`POLLIS_DS_WATERMARK_STALE_MONTHS`, {value} months — the code default" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "N is decided: {value} months" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "N = {value} months" },
+        { "file": "docs/backend-core-invariants.md", "pattern": "`POLLIS_DS_WATERMARK_STALE_MONTHS` \\({value} months, configured\\)" },
+        { "file": "docs/backend-core-invariants.md", "pattern": "set to {value} months\\) stops" },
+        { "file": ".codesight/wiki/database.md", "pattern": "`POLLIS_DS_WATERMARK_STALE_MONTHS` \\({value} months — the code default since #1486" },
+        { "file": "docs/operational-continuity.md", "pattern": "\\| {value} months\\+ \\| The #720 device-staleness clock" }
+      ]
+    },
+
+    "security-event-retention-days": {
+      "value_from": { "file": "pollis-delivery/src/messages.rs", "pattern": "\"POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS\"\\)[\\s\\S]*?unwrap_or\\((\\d+)\\)" },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "website/retention.html", "pattern": "identity reset {value} days\\. Long enough to investigate" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\| {value} days since #762 \\(`POLLIS_DS_SECURITY_EVENT_RETENTION" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "`security_event` retention: {value} days" }
+      ]
+    },
+
+    "push-token-retention-days": {
+      "value_from": { "file": "pollis-delivery/src/messages.rs", "pattern": "\"POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS\"\\)[\\s\\S]*?unwrap_or\\((\\d+)\\)" },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "website/retention.html", "pattern": "{value} days since the device last refreshed" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "{value} days since last refresh \\(#762, `POLLIS_DS_PUSH_TOKEN" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "`push_token` reap: {value} days since last refresh" }
+      ]
+    },
+
+    "media-cache-cap-mib": {
+      "value_from": { "file": "pollis-core/src/commands/r2.rs", "pattern": "MEDIA_CACHE_MAX_BYTES: u64 = ([\\d *]+);", "divide": 1048576 },
+      "unit": "MiB",
+      "asserted_in": [
+        { "file": "website/retention.html", "pattern": "Encrypted, capped at {value} MiB, least recently used evicted first" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "is capped at {value} MiB, and is LRU-evicted" }
+      ]
+    },
+
+    "error-log-retention-hours": {
+      "value_from": { "file": "pollis-schema/migrations/000035_ds_error_log.sql", "pattern": "WHERE at < NEW\\.at - (\\d+)", "divide": 3600 },
+      "unit": "hours",
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "{value} hours and at most \\d+ rows" }
+      ]
+    },
+
+    "error-log-max-rows": {
+      "value_from": { "file": "pollis-schema/migrations/000035_ds_error_log.sql", "pattern": "OR id <= NEW\\.id - (\\d+);" },
+      "unit": "rows",
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\d+ hours and at most {value} rows" }
+      ]
+    },
+
+    "push-receipt-max-age-hours": {
+      "value_from": { "file": "pollis-delivery/src/push.rs", "pattern": "PUSH_TICKET_MAX_AGE_SECS: i64 = ([\\d *]+);", "divide": 3600 },
+      "unit": "hours",
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "and {value} hours at most \\(Expo keeps receipts no longer\\)" }
+      ]
+    },
+
+    "ratelimit-prune-threshold": {
+      "value_from": { "file": "pollis-delivery/src/ratelimit.rs", "pattern": "const PRUNE_THRESHOLD: usize = ([\\d_]+);" },
+      "unit": "entries",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "past {value} entries" }
+      ]
+    },
+
+    "ratelimit-client-hash-bytes": {
+      "value_from": { "file": "pollis-delivery/src/ratelimit.rs", "pattern": "const CLIENT_HASH_BYTES: usize = (\\d+);" },
+      "unit": "bytes",
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\({value} bytes of the HMAC, hex\\)" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "`IpKey` — {value} bytes of HMAC-SHA256" }
+      ]
+    },
+
+    "pin-max-failed-attempts": {
+      "value_from": { "file": "pollis-core/src/commands/pin.rs", "pattern": "pub const MAX_FAILED_ATTEMPTS: u32 = (\\d+);" },
+      "unit": "wrong PINs",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "after {value} wrong guesses the app deletes the keys" },
+        { "file": "website/security.html", "pattern": "Inside the app, {value} wrong tries delete the encrypted keys" },
+        { "file": "website/device-security.html", "pattern": "The app's {value}-attempt limit" },
+        { "file": "docs/security-whitepaper.md", "pattern": "`MAX_FAILED_ATTEMPTS = {value}`" },
+        { "file": "docs/security-whitepaper.md", "pattern": "The {value}th wrong PIN" },
+        { "file": "docs/security-whitepaper.md", "pattern": "plus the {value}-attempt ceiling" },
+        { "file": "docs/security-whitepaper.md", "pattern": "the {value}-attempt wipe" },
+        { "file": "docs/security-whitepaper.md", "pattern": "Local, per user: {value} attempts, then the wrapped keys are deleted" },
+        { "file": "docs/security-explained.md", "pattern": "After {value} wrong attempts on the device" },
+        { "file": "docs/security-simple.md", "pattern": "after {value} wrong guesses the device deletes the keys" }
+      ]
+    },
+
+    "pin-length-digits": {
+      "value_from": { "file": "pollis-core/src/commands/pin.rs", "pattern": "if pin\\.len\\(\\) != (\\d+) \\|\\|" },
+      "unit": "digits",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "and pick a {value}-digit PIN" },
+        { "file": "website/security.html", "pattern": "you use a {value}-digit PIN instead" },
+        { "file": "website/device-security.html", "pattern": "every {value}-digit PIN can be tried" },
+        { "file": "docs/security-whitepaper.md", "pattern": "PIN format: {value} ASCII digits" },
+        { "file": "docs/security-whitepaper.md", "pattern": "Pollis has a {value}-digit PIN" },
+        { "file": "docs/security-explained.md", "pattern": "{value} digits are enough because of Argon2id" },
+        { "file": "docs/security-simple.md", "pattern": "and pick a {value}-digit PIN" }
+      ]
+    },
+
+    "pin-argon2-memory-mib": {
+      "value_from": { "file": "pollis-core/src/commands/pin.rs", "pattern": "const ARGON2_M_COST_KIB: u32 = ([\\d *]+);", "divide": 1024 },
+      "unit": "MiB",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "Pollis tunes it to {value} MiB of memory" },
+        { "file": "docs/security-whitepaper.md", "pattern": "`m_cost = {value} MiB`" },
+        { "file": "docs/security-explained.md", "pattern": "Pollis tunes it to use {value} megabytes of memory" }
+      ]
+    },
+
+    "pin-argon2-iterations": {
+      "value_from": { "file": "pollis-core/src/commands/pin.rs", "pattern": "const ARGON2_T_COST: u32 = (\\d+);" },
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "`t_cost = {value}`" }
+      ]
+    },
+
+    "pin-argon2-parallelism": {
+      "value_from": { "file": "pollis-core/src/commands/pin.rs", "pattern": "const ARGON2_P_COST: u32 = (\\d+);" },
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "`p_cost = {value}`" }
+      ]
+    },
+
+    "otp-length-digits": {
+      "value_from": { "file": "pollis-delivery/src/otp.rs", "pattern": "format!\\(\"\\{:0(\\d+)\\}\", OsRng\\.gen_range" },
+      "unit": "digits",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "uses a {value}-digit code sent by email" },
+        { "file": "website/privacy.html", "pattern": "Signing in emails you a {value}-digit one-time" },
+        { "file": "docs/security-whitepaper.md", "pattern": "{value} digits from `OsRng`" },
+        { "file": "docs/security-whitepaper.md", "pattern": "\\| OTP \\| {value} digits \\|" },
+        { "file": "website/subprocessors.html", "pattern": "Your email address and {value}-digit one-time code" }
+      ]
+    },
+
+    "otp-ttl-minutes": {
+      "value_from": { "file": "pollis-delivery/src/otp.rs", "pattern": "^\\s*ttl_secs: (\\d+),", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "TTL {value} minutes; deleted on first successful verification" },
+        { "file": "docs/security-whitepaper.md", "pattern": "as a salted hash; {value}-min TTL" }
+      ]
+    },
+
+    "otp-resend-throttle-seconds": {
+      "value_from": { "file": "pollis-delivery/src/otp.rs", "pattern": "resend_throttle_secs: (\\d+)," },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "{value} s between sends to one address" },
+        { "file": "docs/security-whitepaper.md", "pattern": "{value} s resend throttle" }
+      ]
+    },
+
+    "otp-codes-per-window": {
+      "value_from": { "file": "pollis-delivery/src/otp.rs", "pattern": "max_sends_per_window: (\\d+)," },
+      "unit": "codes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "at most {value} codes per TTL window" },
+        { "file": "docs/security-whitepaper.md", "pattern": "throttle, {value} codes per window" }
+      ]
+    },
+
+    "otp-wrong-codes-before-lockout": {
+      "value_from": { "file": "pollis-delivery/src/otp.rs", "pattern": "max_attempts: (\\d+)," },
+      "unit": "wrong codes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "after {value} wrong codes the mailbox" },
+        { "file": "docs/security-whitepaper.md", "pattern": "lockout after {value} wrong codes" }
+      ]
+    },
+
+    "otp-lockout-minutes": {
+      "value_from": { "file": "pollis-delivery/src/otp.rs", "pattern": "lockout_secs: (\\d+),", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "is locked for {value} minutes" },
+        { "file": "docs/security-whitepaper.md", "pattern": "and a {value}-minute mailbox lockout" }
+      ]
+    },
+
+    "device-key-cache-ttl-seconds": {
+      "value_from": { "file": "pollis-delivery/src/auth.rs", "pattern": "DEVICE_KEY_CACHE_TTL_SECS: i64 = (\\d+);" },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "scripts/suspend-account.sh", "pattern": "up to DEVICE_KEY_CACHE_TTL_SECS \\({value}s\\)" },
+        { "file": ".codesight/wiki/database.md", "pattern": "up to `DEVICE_KEY_CACHE_TTL_SECS`, {value}s\\)" }
+      ]
+    },
+
+    "reports-per-day": {
+      "value_from": { "file": "pollis-delivery/src/reports.rs", "pattern": "pub const REPORTS_PER_DAY: i64 = (\\d+);" },
+      "unit": "reports per reporter per day",
+      "asserted_in": [
+        { "file": ".codesight/wiki/commands.md", "pattern": "more than {value} reports per reporter per day" }
+      ]
+    },
+
+    "enrollment-code-length": {
+      "value_from": { "file": "pollis-core/src/commands/device_enrollment.rs", "pattern": "^const SAS_LEN: usize = (\\d+);" },
+      "unit": "characters",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "Both screens show an {value}-character code" },
+        { "file": "website/security.html", "pattern": "\\({value} characters from 32 symbols is" },
+        { "file": "website/learn.html", "pattern": "The new device shows an {value}-character code" },
+        { "file": "website/learn.html", "pattern": "the new device shows an {value}-character code and you type it" },
+        { "file": "docs/security-whitepaper.md", "pattern": "It derives an {value}-character verification code" },
+        { "file": "docs/security-whitepaper.md", "pattern": "The {value}-character width matters" },
+        { "file": "docs/security-whitepaper.md", "pattern": "{value} Crockford base32 characters \\(40 bits\\)" },
+        { "file": "docs/security-explained.md", "pattern": "turns its public half into an {value}-character code" },
+        { "file": "docs/security-explained.md", "pattern": "produces the same {value} characters" }
+      ]
+    },
+
+    "enrollment-code-bits": {
+      "value_from": { "file": "pollis-core/src/commands/device_enrollment.rs", "pattern": "^const SAS_LEN: usize = (\\d+);", "multiply": 5 },
+      "unit": "bits (5 per Crockford base32 character)",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "characters from 32 symbols is {value} bits\\)" },
+        { "file": "docs/security-whitepaper.md", "pattern": "onto the Crockford base32 alphabet, {value} bits" },
+        { "file": "docs/security-whitepaper.md", "pattern": "costs ~2\\^{value} keygens" },
+        { "file": "docs/security-whitepaper.md", "pattern": "Crockford base32 characters \\({value} bits\\)" }
+      ]
+    },
+
+    "enrollment-request-ttl-minutes": {
+      "value_from": { "file": "pollis-core/src/commands/device_enrollment.rs", "pattern": "const ENROLLMENT_TTL_SECS: i64 = ([\\d *]+);", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "`pending`, {value}-minute TTL\\)" },
+        { "file": "docs/security-whitepaper.md", "pattern": "inside the {value}-minute TTL" },
+        { "file": "docs/security-whitepaper.md", "pattern": "within the request's {value}-minute TTL" }
+      ]
+    },
+
+    "secret-key-length": {
+      "value_from": { "file": "pollis-core/src/commands/account_identity.rs", "pattern": "const SECRET_KEY_BODY_CHARS: usize = (\\d+);" },
+      "unit": "characters",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "The {value} random characters give" },
+        { "file": "docs/security-whitepaper.md", "pattern": "The Secret Key is {value} Crockford base32 characters" },
+        { "file": "docs/security-explained.md", "pattern": "{value} random characters give" }
+      ]
+    },
+
+    "secret-key-bits": {
+      "value_from": { "file": "pollis-core/src/commands/account_identity.rs", "pattern": "const SECRET_KEY_BODY_CHARS: usize = (\\d+);", "multiply": 5 },
+      "unit": "bits (5 per Crockford base32 character)",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "random characters give {value} bits of entropy" },
+        { "file": "docs/security-whitepaper.md", "pattern": "dashed every 5 characters: {value} bits" },
+        { "file": "docs/security-whitepaper.md", "pattern": "a {value}-bit random secret needs no stretching" },
+        { "file": "docs/security-explained.md", "pattern": "random characters give {value} bits of entropy" }
+      ]
+    },
+
+    "device-link-qr-ttl-seconds": {
+      "value_from": { "file": "pollis-delivery/src/links.rs", "pattern": "pub const LINK_TTL_SECS: u64 = (\\d+);" },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "sets a {value}-second, single-use lifetime" }
+      ]
+    },
+
+    "device-offer-ttl-seconds": {
+      "value_from": { "file": "pollis-delivery/src/links.rs", "pattern": "pub const OFFER_TTL_SECS: u64 = (\\d+);" },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "the {value}-second, single-accept code" }
+      ]
+    },
+
+    "safety-number-blocks": {
+      "value_from": { "file": "pollis-core/src/commands/safety.rs", "pattern": "then (\\d+)×5 digits", "multiply": 2 },
+      "unit": "blocks of five digits (two parties)",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "shown as {value} blocks of five digits" },
+        { "file": "docs/security-explained.md", "pattern": "shown as {value} blocks of five digits" }
+      ]
+    },
+
+    "safety-number-digits": {
+      "value_from": { "file": "pollis-core/src/commands/safety.rs", "pattern": "then (\\d+)×5 digits", "multiply": 10 },
+      "unit": "digits (two parties × 6 blocks × 5)",
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "shares a {value}-digit number derived with SHA-512" },
+        { "file": "website/faq.html", "pattern": "Signal-style {value}-digit safety numbers" },
+        { "file": "docs/security-explained.md", "pattern": "has a {value}-digit number derived from both account keys" }
+      ]
+    },
+
+    "safety-number-iterations": {
+      "value_from": { "file": "pollis-core/src/commands/safety.rs", "pattern": "const FP_ITERATIONS: usize = (\\d+);" },
+      "words": false,
+      "asserted_in": [
+        { "file": "website/faq.html", "pattern": "SHA-512\\^{value}" }
+      ]
+    },
+
+    "message-padding-floor-bytes": {
+      "value_from": { "file": "pollis-core/src/commands/messages/framing.rs", "pattern": "const MIN_BUCKET: usize = (\\d+);" },
+      "unit": "bytes",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "with a {value}-byte floor" },
+        { "file": "website/faq.html", "pattern": "everything up to {value} bytes collapses to one size" }
+      ]
+    },
+
+    "message-padding-overhead-percent": {
+      "value_from": { "file": "pollis-core/src/commands/messages/framing.rs", "pattern": "worst-case padding overhead to ~(\\d+)%" },
+      "unit": "% worst case",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "about {value}% worst-case overhead" },
+        { "file": "website/faq.html", "pattern": "worst-case overhead about {value}%" }
+      ]
+    },
+
+    "attachment-chunk-mib": {
+      "value_from": { "file": "pollis-core/src/commands/r2.rs", "pattern": "^const CHUNK_SIZE: usize = ([\\d *]+);", "divide": 1048576 },
+      "unit": "MiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "AES-256-GCM in {value} MiB chunks" },
+        { "file": "website/faq.html", "pattern": "tag per {value} MiB chunk" },
+        { "file": "website/faq.html", "pattern": "sealed in {value} MiB chunks" },
+        { "file": "docs/security-whitepaper.md", "pattern": "tag per {value} MiB chunk" },
+        { "file": "docs/security-whitepaper.md", "pattern": "AES-256-GCM over {value} MiB chunks" }
+      ]
+    },
+
+    "attachment-tag-bytes": {
+      "value_from": { "file": "pollis-core/src/commands/r2.rs", "pattern": "^const TAG_SIZE: usize = (\\d+);" },
+      "unit": "bytes",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/faq.html", "pattern": "plus a {value}-byte tag per" },
+        { "file": "docs/security-whitepaper.md", "pattern": "plus one {value}-byte tag per" }
+      ]
+    },
+
+    "local-retention-options-days": {
+      "value_from": { "file": "pollis-core/src/db/local.rs", "pattern": "ALLOWED_RETENTION_DAYS: \\[i64; \\d+\\] = \\[0, ([\\d, ]+)\\];", "map": {"30, 90, 365": "30, 90 or 365"} },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "website/learn.html", "pattern": "retention window \\({value} days\\)" }
+      ]
+    },
+
+    "livekit-participant-token-minutes": {
+      "value_from": { "file": "pollis-delivery/src/broker.rs", "pattern": "pub const LIVEKIT_TOKEN_TTL_SECS: u64 = ([\\d *]+);", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "{value}-minute participant tokens" }
+      ]
+    },
+
+    "livekit-admin-token-minutes": {
+      "value_from": { "file": "pollis-delivery/src/broker.rs", "pattern": "exp: now \\+ (\\d+),", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "and {value}-minute admin tokens" }
+      ]
+    },
+
+    "voice-key-grace-seconds": {
+      "value_from": { "file": "pollis-core/src/commands/voice_key_ring.rs", "pattern": "pub const VOICE_KEY_SLOT_GRACE_SECS: u64 = (\\d+);" },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "for a {value}-second grace period" }
+      ]
+    },
+
+    "mls-self-update-interval-days": {
+      "value_from": { "file": "pollis-core/src/commands/mls/self_update.rs", "pattern": "SELF_UPDATE_INTERVAL: chrono::Duration = chrono::Duration::days\\((\\d+)\\);" },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "has not committed for {value} days plus" },
+        { "file": "docs/security-whitepaper.md", "pattern": "launch sweep \\({value} days \\+ up to" }
+      ]
+    },
+
+    "mls-self-update-jitter-days": {
+      "value_from": { "file": "pollis-core/src/commands/mls/self_update.rs", "pattern": "SELF_UPDATE_JITTER: chrono::Duration = chrono::Duration::days\\((\\d+)\\);" },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "jitter of up to {value} days" },
+        { "file": "docs/security-whitepaper.md", "pattern": "up to {value} days jitter" }
+      ]
+    },
+
+    "mls-self-updates-per-sweep": {
+      "value_from": { "file": "pollis-core/src/commands/mls/self_update.rs", "pattern": "MAX_SELF_UPDATES_PER_SWEEP: usize = (\\d+);" },
+      "unit": "groups per sweep",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "at most {value} groups per sweep" }
+      ]
+    },
+
+    "history-transfer-unacked-chunks": {
+      "value_from": [
+        { "file": "pollis-delivery/src/history_transfer.rs", "pattern": "^pub const WINDOW: i64 = (\\d+);" },
+        { "file": "pollis-core/src/commands/history_transfer/engine.rs", "pattern": "^const WINDOW: i64 = (\\d+);" }
+      ],
+      "unit": "unacknowledged chunks",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "It holds at most {value} unacknowledged sealed chunks" }
+      ]
+    },
+
+    "history-transfer-chunk-mib": {
+      "value_from": { "file": "pollis-delivery/src/history_transfer.rs", "pattern": "pub const MAX_SEALED_BYTES: usize = ([\\d *]+);", "divide": 1048576 },
+      "unit": "MiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "chunk count and sizes, up to {value} MiB each" }
+      ]
+    },
+
+    "history-transfer-accepted-hours": {
+      "value_from": { "file": "pollis-delivery/src/history_transfer.rs", "pattern": "pub const ACCEPTED_TTL_SECS: i64 = ([\\d *]+);", "divide": 3600 },
+      "unit": "hours",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "keeps an accepted transfer {value} h after its last activity" }
+      ]
+    },
+
+    "history-transfer-request-skew-minutes": {
+      "value_from": { "file": "pollis-core/src/commands/history_transfer/mod.rs", "pattern": "REQUEST_FRESH_PAST_SECS: i64 = ([\\d *]+);", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "a fresh time \\(±{value} min\\)" }
+      ]
+    },
+
+    "history-transfer-pin-shortcut-minutes": {
+      "value_from": { "file": "pollis-core/src/commands/history_transfer/mod.rs", "pattern": "LINK_SHORTCUT_SECS: u64 = ([\\d *]+);", "divide": 60 },
+      "unit": "minutes",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "in this unlocked session less than {value} minutes ago" }
+      ]
+    },
+
+    "mls-ciphersuite": {
+      "value_from": { "file": "pollis-core/src/commands/mls/provider.rs", "pattern": "Ciphersuite::(MLS_128_MLKEM\\w+);", "type": "string" },
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "\\| Name \\| `{value}` \\|" }
+      ]
+    },
+
+    "mls-kem-ml-kem-parameter": {
+      "value_from": { "file": "pollis-core/src/commands/mls/provider.rs", "pattern": "Ciphersuite::MLS_128_MLKEM(\\d+)X25519_\\w+;" },
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "Key agreement is X25519 combined with ML-KEM-{value}" },
+        { "file": "website/security.html", "pattern": "key agreement also uses ML-KEM-{value}" },
+        { "file": "website/learn.html", "pattern": "ML-KEM-{value}, a key exchange designed to resist quantum" },
+        { "file": "docs/security-whitepaper.md", "pattern": "hybrid X25519 \\+ ML-KEM-{value} KEM" },
+        { "file": "docs/security-whitepaper.md", "pattern": "\\| KEM \\| X-Wing: X25519 \\+ ML-KEM-{value} \\(FIPS 203\\) \\|" },
+        { "file": "README.md", "pattern": "plus ML-KEM-{value} \\(FIPS 203\\)" },
+        { "file": "docs/store-listing.md", "pattern": "X25519 \\+ ML-KEM-{value} hybrid key agreement" }
+      ]
+    },
+
+    "mls-aead": {
+      "value_from": { "file": "pollis-core/src/commands/mls/provider.rs", "pattern": "Ciphersuite::MLS_128_MLKEM\\d+X25519_([A-Z0-9]+)_SHA\\d+_\\w+;", "map": {"CHACHA20POLY1305": "ChaCha20-Poly1305", "AES256GCM": "AES-256-GCM", "AES128GCM": "AES-128-GCM"} },
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "turns that secret into keys\\. {value} encrypts the message" },
+        { "file": "website/learn.html", "pattern": "Pollis's group messages use {value}\\." },
+        { "file": "docs/security-whitepaper.md", "pattern": "\\| AEAD \\| {value} \\|" },
+        { "file": "README.md", "pattern": "MLS for channels \\({value} AEAD\\)" },
+        { "file": "docs/store-listing.md", "pattern": "MLS \\(RFC 9420 — {value}, HKDF-SHA-" }
+      ]
+    },
+
+    "mls-hash": {
+      "value_from": { "file": "pollis-core/src/commands/mls/provider.rs", "pattern": "Ciphersuite::MLS_128_MLKEM\\d+X25519_[A-Z0-9]+_SHA(\\d+)_\\w+;" },
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "HKDF-SHA{value} turns that secret into keys" },
+        { "file": "website/learn.html", "pattern": "SHA-{value} inside MLS" },
+        { "file": "docs/security-whitepaper.md", "pattern": "\\| Hash / KDF \\| SHA-{value} / HKDF-SHA\\d+ \\|" },
+        { "file": "docs/store-listing.md", "pattern": "ChaCha20-Poly1305, HKDF-SHA-{value}, X25519" }
+      ]
+    },
+
+    "mls-signature-ml-dsa-parameter": {
+      "value_from": { "file": "pollis-core/src/commands/mls/provider.rs", "pattern": "Ciphersuite::MLS_128_MLKEM\\d+X25519_[A-Z0-9]+_SHA\\d+_MLDSA(\\d+);" },
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "ML-DSA-{value} is the signature scheme a device uses" },
+        { "file": "website/learn.html", "pattern": "ML-DSA-{value} rather than" },
+        { "file": "website/faq.html", "pattern": "signed with the device's ML-DSA-{value} key" },
+        { "file": "docs/security-explained.md", "pattern": "So Pollis signs with ML-DSA-{value}, NIST's FIPS 204" },
+        { "file": "docs/store-listing.md", "pattern": "hybrid key agreement, ML-DSA-{value} signatures" },
+        { "file": "CLAUDE.md", "pattern": "`ds_post\\*` = device-signed ML-DSA-{value} `X-Pollis-\\*` headers" }
+      ]
+    },
+
+    "ml-dsa-44-public-key-bytes": {
+      "value_from": [
+        { "file": "pollis-device-cert/src/lib.rs", "pattern": "pub const MLDSA44_PUB_LEN: usize = (\\d+);" },
+        { "file": "verifiable-log/src/sth.rs", "pattern": "pub const STH_PUB_LEN: usize = (\\d+);" }
+      ],
+      "unit": "bytes",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "and a public key {value} bytes against 32" },
+        { "file": "docs/security-whitepaper.md", "pattern": "`users\\.account_id_pub` \\(BLOB, {value} bytes\\)" },
+        { "file": "docs/security-whitepaper.md", "pattern": "ML-DSA-44 device pub \\({value} bytes\\)" },
+        { "file": "docs/security-whitepaper.md", "pattern": "[Aa]n ML-DSA-44 public key is {value} bytes" },
+        { "file": "docs/security-explained.md", "pattern": "a public key is {value} bytes instead of 32" },
+        { "file": "docs/transparency.md", "pattern": "ML-DSA-44 public key \\({value} bytes, 2624 hex chars\\)" },
+        { "file": "docs/verify-transparency-log.md", "pattern": "\\(hex, {value} bytes;" },
+        { "file": "README.md", "pattern": "Pinned public key \\(ML-DSA-44, {value} bytes\\)" }
+      ]
+    },
+
+    "ml-dsa-44-signature-bytes": {
+      "value_from": [
+        { "file": "pollis-device-cert/src/lib.rs", "pattern": "pub const MLDSA44_SIG_LEN: usize = (\\d+);" },
+        { "file": "verifiable-log/src/sth.rs", "pattern": "pub const STH_SIG_LEN: usize = (\\d+);" }
+      ],
+      "unit": "bytes",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/security.html", "pattern": "an ML-DSA-44 signature is {value} bytes against" },
+        { "file": "docs/security-whitepaper.md", "pattern": "base64 of a {value}-byte signature" },
+        { "file": "docs/security-whitepaper.md", "pattern": "Signatures are ML-DSA-44, {value} bytes" },
+        { "file": "docs/security-whitepaper.md", "pattern": "and a signature {value} bytes \\(Ed25519: 64\\)" },
+        { "file": "docs/security-explained.md", "pattern": "and a signature {value} bytes instead of 64" }
+      ]
+    },
+
+    "relay-placement-rotation-hours": {
+      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"rotation_interval_hours\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
+      "unit": "hours",
+      "asserted_in": [
+        { "file": "website/subprocessors.html", "pattern": "Each node's region is redrawn at random every {value} hours" }
+      ]
+    },
+
+    "relay-pool-floor": {
+      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"node_floor\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
+      "unit": "nodes",
+      "asserted_in": [
+        { "file": "website/subprocessors.html", "pattern": "Floor of {value} nodes" }
+      ]
+    },
+
+    "relay-pool-cap": {
+      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"node_max\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
+      "unit": "nodes",
+      "asserted_in": [
+        { "file": "website/subprocessors.html", "pattern": "hard cap of {value}, bounded by" }
+      ]
+    },
+
+    "relay-pool-budget-usd": {
+      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"monthly_budget_usd\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
+      "unit": "USD per month",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/subprocessors.html", "pattern": "bounded by a \\${value}/month budget" }
+      ]
+    },
+
+    "relay-control-plane-region": {
+      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"primary_region\" \\{[\\s\\S]*?default\\s*=\\s*\"([a-z0-9-]+)\"", "type": "string" },
+      "asserted_in": [
+        { "file": "website/subprocessors.html", "pattern": "In {value}\\. It sees every relay's IP" },
+        { "file": "website/subprocessors.html", "pattern": "four US regions; control plane {value}" }
+      ]
+    },
+
+    "transparency-publisher-stall-hours": {
+      "value_from": { "file": "docs/operational-continuity.md", "pattern": "Owner, publisher red or absent > (\\d+)h:" },
+      "unit": "hours",
+      "asserted_in": [
+        { "file": "website/continuity.html", "pattern": "treats a publisher stall longer than {value} hours as a correctness incident" }
+      ]
+    },
+
+    "transparency-publisher-stall-ack-days": {
+      "value_from": { "file": "docs/operational-continuity.md", "pattern": "Owner, cannot be fixed within (\\d+) days:" },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "website/continuity.html", "pattern": "any stall not fixed within {value} days on" }
+      ]
+    },
+
+    "sth-key-rotation-overlap-days": {
+      "value_from": { "file": "docs/sth-signing-key-custody.md", "pattern": "Wait out the overlap window so the fleet updates\\. \\*\\*Minimum (\\d+) days\\*\\*" },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "website/assurance.html", "pattern": "The custody design calls for at least {value} days with both keys pinned" },
+        { "file": "docs/sth-signing-key-custody.md", "pattern": "≥ {value} days; the number is unset until the next rotation" }
+      ]
+    },
+
+    "android-sideload-cert-sha256": {
+      "value_from": { "file": "mobile/store/android-sideload-cert.sha256", "pattern": "^([0-9a-f]{64})$", "type": "string" },
+      "asserted_in": [
+        { "file": "website/android.html", "pattern": "Signing certificate SHA-256 {value} Certificate" }
+      ]
+    },
+
+    "store-app-store-subtitle-length": {
+      "value_from": { "file": "docs/store-listing.md", "pattern": "### App Store subtitle \\(30 chars max\\)\\s+> `([^`]+)`", "measure": "length" },
+      "unit": "characters",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/store-listing.md", "pattern": "> `End-to-end encrypted messaging` Exactly {value} characters\\." }
+      ]
+    },
+
+    "store-play-short-description-length": {
+      "value_from": { "file": "docs/store-listing.md", "pattern": "### Play short description \\(80 chars max\\)\\s+> `([^`]+)`", "measure": "length" },
+      "unit": "characters",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/store-listing.md", "pattern": "never leave your devices\\.` {value} characters\\." }
+      ]
+    },
+
+    "store-app-store-keywords-length": {
+      "value_from": { "file": "docs/store-listing.md", "pattern": "### App Store keywords \\(100 chars max, comma-separated\\)\\s+> `([^`]+)`", "measure": "length" },
+      "unit": "characters",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/store-listing.md", "pattern": "dm,message,channels` {value} characters\\." }
+      ]
+    },
+
+    "relay-region-count": {
+      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"region_state_map\" \\{[\\s\\S]*?default = \\{([^}]*)\\}", "count": "\"[a-z]+-[a-z]+-\\d+\"\\s*=" },
+      "unit": "US regions",
+      "asserted_in": [
+        { "file": "website/subprocessors.html", "pattern": "{value} US regions \\(Virginia, Ohio, California, Oregon\\)" },
+        { "file": "website/subprocessors.html", "pattern": "Nodes across {value} US regions" }
+      ]
+    },
+
+    "push-notification-fixed-title": {
+      "value_from": { "file": "pollis-delivery/src/push.rs", "pattern": "fn generic_message\\([\\s\\S]*?\"title\": \"([^\"]+)\",", "type": "string" },
+      "asserted_in": [
+        { "file": "website/privacy.html", "pattern": "A push notification carries fixed text \\(\"{value}\"\\)" },
+        { "file": "website/subprocessors.html", "pattern": "push token, fixed text \\(\"{value}\"\\)" },
+        { "file": "website/android.html", "pattern": "The notification is a fixed \"{value}\" with no sender" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "carries a fixed title and body \\(\"{value}\" /" }
+      ]
+    },
+
+    "push-notification-fixed-body": {
+      "value_from": { "file": "pollis-delivery/src/push.rs", "pattern": "fn generic_message\\([\\s\\S]*?\"body\": \"([^\"]+)\",", "type": "string" },
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\(\"New message\" / \"{value}\"\\)" }
+      ]
+    },
+
+    "mls-key-package-pool": {
+      "value_from": { "file": "pollis-core/src/commands/mls/key_packages.rs", "pattern": "pub\\(super\\) const POOL_TARGET: i64 = (\\d+);" },
+      "unit": "KeyPackages per device",
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "publishes the new device's `device_cert` and {value} `KeyPackage`s" },
+        { "file": "docs/security-whitepaper.md", "pattern": "Each device keeps {value} KeyPackages published" },
+        { "file": "docs/security-whitepaper.md", "pattern": "`TARGET = {value}`" }
+      ]
+    },
+
+    "ml-dsa-44-public-key-hex-chars": {
+      "value_from": [
+        { "file": "pollis-device-cert/src/lib.rs", "pattern": "pub const MLDSA44_PUB_LEN: usize = (\\d+);", "multiply": 2 },
+        { "file": "verifiable-log/src/sth.rs", "pattern": "pub const STH_PUB_LEN: usize = (\\d+);", "multiply": 2 }
+      ],
+      "unit": "hex characters",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/transparency.md", "pattern": "ML-DSA-44 public key \\(1312 bytes, {value} hex chars\\)" }
+      ]
+    },
+
+    "minimum-user-age": {
+      "value_from": { "file": "docs/store-listing.md", "pattern": "`ageRatingOverrideV2 = (\\w+)`", "map": {"THIRTEEN_PLUS": 13, "SIXTEEN_PLUS": 16, "EIGHTEEN_PLUS": 18} },
+      "unit": "years",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/privacy.html", "pattern": "Pollis is not directed at children under {value}" },
+        { "file": "docs/store-listing.md", "pattern": "\\(\\*?\\*?{value}\\+\\*?\\*?, the minimum the owner will accept\\)" }
+      ]
+    }
+  }
+}
