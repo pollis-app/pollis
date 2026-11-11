@@ -48,6 +48,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*example.com/pollis-e2e/links.*"
     timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
 - hideKeyboard
 - takeScreenshot: message-links-01-sent
 
@@ -110,6 +111,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*xn--bcher-kva.example.*"
     timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
 - hideKeyboard
 - tapOn: ".*xn--bcher-kva.example.*"
 - extendedWaitUntil:
@@ -141,6 +143,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*avascript:alert.*"
     timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
 - hideKeyboard
 - tapOn: ".*avascript:alert.*"
 - assertNotVisible:
