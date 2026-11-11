@@ -119,6 +119,16 @@ fn looks_like_ip(token: &str) -> bool {
     if bare.parse::<std::net::IpAddr>().is_ok() || token.parse::<std::net::SocketAddr>().is_ok() {
         return true;
     }
+    // A URL whose host is a literal: `http://203.0.113.7:8080/path`, as a
+    // reqwest error prints it (#1751). The `//` hides the first octet from the
+    // octet scan below.
+    if let Some((_, rest)) = bare.split_once("://") {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        if !host.is_empty() && looks_like_ip(host) {
+            return true;
+        }
+    }
     // `fe80::1%en0` — a scoped IPv6 literal.
     if let Some((addr, _zone)) = bare.split_once('%') {
         if addr.parse::<std::net::Ipv6Addr>().is_ok() {
@@ -195,6 +205,17 @@ mod tests {
         assert_eq!(scrub("connect 10.0.0.1:443 refused"), "connect [redacted] refused");
         assert_eq!(scrub("peer [2001:db8::1] gone"), "peer [redacted] gone");
         assert_eq!(scrub("host ip-10-0-0-12 down"), "host [redacted] down");
+    }
+
+    #[test]
+    fn an_ip_hosted_url_is_removed_but_a_named_one_survives() {
+        assert_eq!(
+            redact_ip_literals("error sending request for url (http://203.0.113.7:7880/twirp/x)"),
+            "error sending request for url ([redacted])"
+        );
+        assert_eq!(redact_ip_literals("https://user@[2001:db8::1]:443/"), "[redacted]");
+        let named = "error sending request for url (https://rtc.pollis.com/twirp/livekit.RoomService/SendData)";
+        assert_eq!(redact_ip_literals(named), named);
     }
 
     #[test]
