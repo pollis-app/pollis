@@ -1546,7 +1546,11 @@ jobs:
   # policy change about shipping and is not what this fixes.
   attest-and-log:
     needs: [release, provenance]
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: on 2026-11-11 ubuntu-latest moved to the 26.04
+    # image, whose apt could not resolve any Ubuntu archive host for over an hour,
+    # failing every attest of v1.19.9 at "Install extraction tooling". The
+    # release's build jobs on ubuntu-24.04 installed packages fine.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       # Needed only to dispatch transparency-publish at the end of this job.
