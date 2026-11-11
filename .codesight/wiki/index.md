@@ -11,7 +11,7 @@ Start here. Navigate to the article you need.
 - [UI Components](./ui.md) — React component inventory
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
-- [Drift sweeps](./sweeps.md) — Checks that keep published docs, commands and facts true to the code (epic #1720): CLI invocations (#1721), the facts registry `scripts/facts.json` (#1722)
+- [Drift sweeps](./sweeps.md) — Checks that keep published docs, commands and facts true to the code (epic #1720): CLI invocations (#1721), the facts registry `scripts/facts.json` (#1722), the public-claims ledger `scripts/claims.json` + `/sweep-claims` (#1723)
 - [Safety & Verification](./safety.md) — Signal-style safety numbers, TOFU pinning, group MITM defence (refs #277)
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
 - [Windows Dev VM](./windows-vm.md) — `scripts/windows-vm.sh`: local Windows 11 ARM64 VM in Docker (colima nested virt + dockur/windows-arm) for fast Windows testing

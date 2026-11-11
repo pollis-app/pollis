@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "When each drift-sweep dimension was last swept (epic #1720). `sha` is the commit the sweep verified against;",
+    "a sweep re-checks only what changed in `git diff <sha>..HEAD`. `by` names the procedure that ran it.",
+    "claims: scripts/claims.json, swept with /sweep-claims (.claude/skills/sweep-claims/SKILL.md); `node scripts/claims-impact.mjs --ledger` lists what is due.",
+    "Other dimensions (#1728) add their own entry when their lane lands."
+  ],
+  "claims": {
+    "sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+    "date": "2026-11-11",
+    "by": "manual"
+  }
+}

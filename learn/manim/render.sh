@@ -5,7 +5,8 @@
 #   <slug>.mp4   H.264 (universal fallback)
 #   <slug>.webm  VP9   (smaller, preferred by <source> order)
 #   <slug>.jpg   poster frame (first frame)
-# The .vtt caption track is authored by hand from learn/manim/scripts/<slug>.md
+# The .vtt caption track is generated from learn/manim/scripts/<slug>.md by
+# `node scripts/check-learn-sync.mjs --write`
 # (timed to the scene beats) and is NOT generated here.
 #
 # Usage:  learn/manim/render.sh <SceneClass> <slug> [quality]
@@ -48,4 +49,4 @@ ffmpeg -y -loglevel error -ss "$ts" -i "$out/$slug.mp4" -frames:v 1 "$out/$slug.
 
 echo "✓ wrote:"
 ls -la "$out/$slug".{mp4,webm,jpg}
-echo "  reminder: hand-author $out/$slug.vtt from learn/manim/scripts/$slug.md"
+echo "  next: upload mp4/webm/jpg to R2 under a new name (docs/deployments.md → /learn section); captions come from node scripts/check-learn-sync.mjs --write"
