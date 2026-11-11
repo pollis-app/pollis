@@ -17,16 +17,17 @@
  *     entities, `**` and whitespace normalised, as check-facts.mjs does) — a
  *     reworded claim is a new claim and must be re-verified;
  *   - every doc in `audited_docs` has at least one claim, and every claim's doc
- *     is listed there (the audit's coverage cannot silently shrink);
- *   - every doc and anchor is inside scripts-check.yml's pull_request `paths:`,
- *     or a PR that touches only that file would skip this check.
+ *     is listed there (the audit's coverage cannot silently shrink).
  * A ledger with no claims fails: an empty file must not be a silent pass.
+ *
+ * Run by hand, never in CI: /sweep-claims and the pre-release sweep run it
+ * (a sweep check reports drift; it does not gate merges).
  *
  * `status: "disputed"` claims (a legal or policy page that disagrees with code,
  * #1720) are anchored like any other; they print as warnings so they stay visible.
  *
  * Usage:
- *   node scripts/check-claims.mjs                      the repo (scripts-check.yml)
+ *   node scripts/check-claims.mjs                      the repo
  *   --root <dir> / --claims <file>                     check another tree (the self-test)
  *   --list-files                                       print every doc the ledger reads
  */
@@ -34,7 +35,7 @@
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalize, globToRe, pullRequestPaths } from "./lib/doc-text.mjs";
+import { normalize, globToRe } from "./lib/doc-text.mjs";
 
 const args = process.argv.slice(2);
 function arg(name) {
@@ -143,14 +144,6 @@ function anchorExists(a) {
   return existsSync(p);
 }
 
-/** A representative path for a glob, for testing it against the workflow's path filters. */
-function sampleOf(a) {
-  if (!isGlob(a)) {
-    return a;
-  }
-  return a.replace(/\*\*\/?/g, "x/").replace(/\*/g, "x").replace(/\?/g, "x").replace(/\/+$/, "/x");
-}
-
 function main() {
   if (!existsSync(CLAIMS)) {
     console.error(`${CLAIMS}: not found.`);
@@ -169,7 +162,7 @@ function main() {
 
   if (args.includes("--list-files")) {
     // Everything the ledger reads, so the self-test can copy just that into a scratch tree.
-    const files = new Set([...audited, "scripts/facts.json", ".github/workflows/scripts-check.yml"]);
+    const files = new Set([...audited, "scripts/facts.json"]);
     for (const c of claims) {
       files.add(c.doc);
       [].concat(c.also_rendered_in ?? []).forEach((f) => files.add(f));
@@ -202,7 +195,6 @@ function main() {
 
   const seen = new Set();
   const perDoc = new Map();
-  const touched = new Set();
   let anchorsChecked = 0;
   let quotesChecked = 0;
   let disputed = 0;
@@ -247,7 +239,6 @@ function main() {
 
     if (typeof c.doc === "string") {
       perDoc.set(c.doc, (perDoc.get(c.doc) ?? 0) + 1);
-      touched.add(c.doc);
       if (!audited.includes(c.doc)) {
         fail(id, `doc ${c.doc} is not in audited_docs`, "add it to audited_docs, or fix the doc path");
       }
@@ -267,7 +258,6 @@ function main() {
     }
 
     for (const r of [].concat(c.also_rendered_in ?? [])) {
-      touched.add(r);
       if (readRepo(r) === null) {
         fail(id, `also_rendered_in ${r} does not exist`, "fix the path or drop it");
       }
@@ -279,7 +269,6 @@ function main() {
     }
     for (const a of anchors) {
       anchorsChecked++;
-      touched.add(a);
       if (typeof a !== "string" || a.startsWith("/") || a.includes("..")) {
         fail(id, `anchor ${JSON.stringify(a)} is not a repo-relative path or glob`);
         continue;
@@ -309,23 +298,6 @@ function main() {
       fail(undefined, `audited doc ${d} does not exist`, "remove it from audited_docs or fix the path");
     } else if (!perDoc.get(d)) {
       fail(undefined, `audited doc ${d} has no claims`, "an audited doc with nothing recorded means the audit coverage shrank");
-    }
-  }
-
-  const wf = ".github/workflows/scripts-check.yml";
-  const wfText = readRepo(wf);
-  if (wfText !== null) {
-    const globs = pullRequestPaths(wfText);
-    if (globs.length === 0) {
-      fail(undefined, `could not read the pull_request paths filter in ${wf}`, "has the workflow's shape changed?");
-    } else {
-      const res = globs.map(globToRe);
-      for (const t of [...touched].sort()) {
-        if (typeof t === "string" && !res.some((r) => r.test(sampleOf(t)))) {
-          fail(undefined, `${t} is read by scripts/claims.json but no pull_request path in ${wf} matches it`,
-            "add a path for it to both pull_request and push, or a PR changing only that file skips this check");
-        }
-      }
     }
   }
 

@@ -13,11 +13,11 @@
 #   - an unknown `fact` id, a bad kind and a duplicate id fail;
 #   - an empty ledger fails;
 #   - an audited doc with no claims left fails;
-#   - a claim doc outside scripts-check.yml's paths filter fails;
 #   - a /learn caption cue or transcript paragraph that drifts from its
 #     narration script fails, and `--write` brings it back in sync.
 #
-# Run: ./scripts/test-check-claims.sh   (no arguments, no network)
+# Run by hand (not in CI; sweep checks never gate a merge):
+#   ./scripts/test-check-claims.sh   (no arguments, no network)
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -36,7 +36,7 @@ copy_in() {
 }
 while IFS= read -r f; do copy_in "$f"; done < <(node "$repo/scripts/check-claims.mjs" --list-files)
 for f in scripts/check-claims.mjs scripts/check-learn-sync.mjs scripts/lib/doc-text.mjs scripts/claims.json \
-         scripts/facts.json .github/workflows/scripts-check.yml website/learn.html; do
+         scripts/facts.json website/learn.html; do
   copy_in "$f"
 done
 for f in "$repo"/learn/manim/scripts/*.md "$repo"/website/learn/media/*.vtt; do copy_in "${f#"$repo"/}"; done
@@ -180,13 +180,6 @@ t="$(fresh_tree orphan-doc)"
 edit_ledger "$t" 'doc = d["claims"][0]["doc"]; d["claims"] = [c for c in d["claims"] if c["doc"] != doc]'
 run "$t"
 if [ "$rc" -ne 0 ] && [[ "$out" == *"has no claims"* ]]; then ok "an audited doc with no claims left fails"; else bad "orphaned audited doc should fail: $out"; fi
-
-t="$(fresh_tree trigger)"
-mutate "$t/.github/workflows/scripts-check.yml" '      - "docs/**"' '      - "docs-nothing/**"'
-run "$t"
-if [ "$rc" -ne 0 ] && [[ "$out" == *"docs/"*"no pull_request path"* ]]; then
-  ok "a claim file outside the workflow's paths filter fails"
-else bad "uncovered trigger path should fail: $out"; fi
 
 echo "check-learn-sync.mjs:"
 

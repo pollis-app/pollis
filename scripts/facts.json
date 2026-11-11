@@ -31,7 +31,7 @@
       "value_from": { "file": "CLAUDE.md", "pattern": "Exactly (\\w+) acceptable losses" },
       "unit": "accepted kinds of message loss",
       "asserted_in": [
-        { "file": "website/learn.html", "pattern": "{value} kinds of loss are expected" },
+        { "file": "website/learn.html", "pattern": "{value} kinds of loss are (?:expected|acceptable)" },
         { "file": "website/retention.html", "pattern": "This is one of the {value} kinds of message loss Pollis accepts" },
         { "file": "learn/manim/scripts/joining-leaving.md", "pattern": "{value} kinds of loss are acceptable" },
         { "file": "learn/manim/scenes/joining_leaving.py", "pattern": "Exactly {value} kinds of loss are acceptable" },
@@ -270,7 +270,8 @@
         { "file": "website/security.html", "pattern": "Both screens show an {value}-character code" },
         { "file": "website/security.html", "pattern": "\\({value} characters from 32 symbols is" },
         { "file": "website/learn.html", "pattern": "The new device shows an {value}-character code" },
-        { "file": "website/learn.html", "pattern": "the new device shows an {value}-character code and you type it" },
+        { "file": "website/learn.html", "pattern": "the new device shows an {value}-character code, you type it" },
+        { "file": "learn/manim/scripts/recovery.md", "pattern": "the new device shows an {value}-character code" },
         { "file": "docs/security-whitepaper.md", "pattern": "It derives an {value}-character verification code" },
         { "file": "docs/security-whitepaper.md", "pattern": "The {value}-character width matters" },
         { "file": "docs/security-whitepaper.md", "pattern": "{value} Crockford base32 characters \\(40 bits\\)" },

@@ -10,10 +10,11 @@ argument-hint: "[--since <ref>] [--dry-run]"
 material says about how Pollis works: the exact sentence (`locator.quote` in
 `doc`), what it claims, the code that makes it true (`anchors`), the lines it
 was checked against (`evidence`) and the commit it was verified at
-(`verified_sha`). CI (`scripts/check-claims.mjs`, in `scripts-check.yml`)
-already fails when an anchor is deleted or a quoted sentence is reworded. This
-skill handles the other half: code that still exists but now behaves
-differently. Everything you need is in this file; read the repo's `CLAUDE.md`
+(`verified_sha`). None of this runs in CI or gates a merge: sweep checks are
+run by hand, by this skill and before a release. `scripts/check-claims.mjs`
+catches an anchor that was deleted and a quoted sentence that was reworded;
+`scripts/claims-impact.mjs` catches code that still exists but changed under a
+claim. Everything you need is in this file; read the repo's `CLAUDE.md`
 first for the vocabulary rules it references.
 
 ## 0. Ground rules
@@ -35,14 +36,17 @@ first for the vocabulary rules it references.
 ## 1. What is due
 
 ```bash
+node scripts/check-claims.mjs                      # validate: schema, anchors exist, quotes still present
+node scripts/check-learn-sync.mjs                  # /learn captions + transcripts match their scripts
 node scripts/claims-impact.mjs --ledger            # since scripts/sweep-ledger.json → claims.sha
 node scripts/claims-impact.mjs --since <ref>       # or since a ref you were given
 node scripts/claims-impact.mjs --ledger --json     # machine-readable, with the changed files per claim
 ```
 
-The output is grouped by doc: each claim id, its one-line statement, and the
-changed files that hit its anchors. If it lists nothing, skip to step 5 (bump
-the ledger) and stop. With `--dry-run`, stop after step 2 and report the list
+Every claim `check-claims.mjs` names (a deleted anchor, a reworded quote) is
+due as well. The impact output is grouped by doc: each claim id, its one-line
+statement, and the changed files that hit its anchors. If nothing is due, skip
+to step 5 (bump the ledger) and stop. With `--dry-run`, stop after step 2 and report the list
 and your verdicts without editing anything.
 
 ## 2. Re-verify each due claim (the rubric)
@@ -77,9 +81,13 @@ code yourself before applying it; subagents are confidently wrong sometimes.
   text (the strings in `learn/manim/scenes/<slug_with_underscores>.py`) is
   wrong, edit the scene and re-render that topic once
   (`learn/manim/render.sh <SceneClass> <slug> m`, toolchain in
-  `learn/README.md`), then upload the mp4/webm/jpg under a NEW file name to R2
-  as `docs/deployments.md` → "/learn section" describes, and point the
-  `<video>` at it. If you cannot install the toolchain, say so plainly in the PR.
+  `learn/README.md`; on macOS `brew install pkgconf pango` first). Copy the
+  outputs to a directory under NEW names (`<slug>-r<ticket>.{mp4,webm,jpg}`),
+  point the `<video>`/`poster` in `learn.html` at them, and publish them with
+  `learn/manim/publish.sh <dir>` before the website is deployed. Uploading is a
+  production write: if you may not do it, keep the files outside the worktree
+  and list the command in the PR. If you cannot install the toolchain, say so
+  plainly in the PR.
 - For every claim you touched, update its `locator.quote` to the new exact
   sentence, `claim`, `anchors` and `evidence` if they moved, and set
   `verified_sha` to the commit you verified against (`git rev-parse HEAD` before
@@ -94,7 +102,7 @@ code yourself before applying it; subagents are confidently wrong sometimes.
 node scripts/check-claims.mjs        # ledger valid, anchors exist, quotes present
 node scripts/check-learn-sync.mjs    # /learn copies match their scripts
 node scripts/check-facts.mjs         # numbers
-./scripts/test-check-claims.sh       # the checker still goes red when it should
+./scripts/test-check-claims.sh       # only if you changed a checker: it still goes red when it should
 ```
 
 ## 5. Bump the ledger

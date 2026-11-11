@@ -24,8 +24,8 @@ The narration script (`scripts/<slug>.md`) is the **single source of truth** for
 the `.vtt`, the on-page transcript, and future voiceover. Its beat timings match
 the `hold_until(...)` calls in the scene, so the video is paced to be *read*, not
 just watched. Edit the script, then run `node scripts/check-learn-sync.mjs --write`.
-CI (`scripts-check.yml`) fails if a caption cue or a transcript paragraph differs
-from its beat (#1723).
+Run without `--write`, it fails if a caption cue or a transcript paragraph differs
+from its beat (#1723); `/sweep-claims` runs it.
 
 ## Toolchain
 
@@ -59,7 +59,8 @@ The `.mp4`/`.webm`/`.jpg` live on **R2** and are served from
 `https://cdn.pollis.com/learn/media/…`. #697 moved them out of git, where they
 took up 77 MB of the clone. The upload steps and their traps are in
 `docs/deployments.md` → "`/learn` section". Objects are cached immutably, so a
-re-render needs a new file name. The `.vtt` caption tracks stay in git and
+re-render needs a new file name. `learn/manim/publish.sh <dir>` uploads them (new keys only) and checks
+the CDN serves them; run it before deploying the page that points at them. The `.vtt` caption tracks stay in git and
 deploy with the page.
 
 ## Conventions (so every topic feels like one section)

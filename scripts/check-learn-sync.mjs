@@ -15,7 +15,7 @@
  * whitespace.
  *
  * Usage:
- *   node scripts/check-learn-sync.mjs            check (scripts-check.yml)
+ *   node scripts/check-learn-sync.mjs            check (by hand; /sweep-claims runs it, CI does not)
  *   node scripts/check-learn-sync.mjs --write    rewrite every .vtt cue and transcript <p> from the scripts
  *   --root <dir>                                 check another tree (the self-test)
  *
@@ -143,8 +143,10 @@ function writeVtt(path, beats) {
 
 function writeTranscript(page, slug, beats) {
   const r = transcriptRange(page, slug);
-  const indent = (/\n([ \t]*)<p/.exec(page.slice(r.start, r.end)) ?? [, "            "])[1];
-  const closeIndent = (/\n([ \t]*)$/.exec(page.slice(r.start, r.end)) ?? [, indent.slice(2)])[1];
+  // Indent from the transcript <div>'s own line, so the output is stable whatever was there before.
+  const lineStart = page.lastIndexOf("\n", r.start - 1) + 1;
+  const closeIndent = /^[ \t]*/.exec(page.slice(lineStart))[0];
+  const indent = closeIndent + "  ";
   const paras = beats.map((b) => {
     const html = escapeHtml(b.md).replace(EMPHASIS, "$1<em>$2</em>");
     return wrap(html, 96, `${indent}<p>`, `${indent}  `) + "</p>";
