@@ -38,6 +38,11 @@ FROM chef AS build
 # Compile ONLY the dependencies. This is the cache-friendly layer — invalidated
 # only when the dependency graph (recipe.json) changes, not on an ordinary code change.
 COPY --from=planner /src/recipe.json recipe.json
+# The [patch] stand-ins (#1799) live outside the workspace, so cargo-chef's
+# recipe carries no skeleton for them and `cook` cannot resolve the graph
+# without the real directories. They change rarely; copying them here costs
+# the cook cache only when a stand-in itself changes.
+COPY patches/ patches/
 RUN cargo chef cook --release -p pollis-delivery --recipe-path recipe.json
 # Now the real source; only first-party crates recompile against the already-built deps.
 COPY . .
