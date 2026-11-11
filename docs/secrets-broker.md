@@ -133,7 +133,9 @@ Display names are resolved through `/v1/livekit/identities` instead. See
 the SFU can and cannot still correlate.
 
 Env: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` — all three required,
-else `503`. The secret is never logged.
+else `503`. The secret is never logged. Optional `LIVEKIT_API_URL` (an `https://`
+base) redirects only the DS's own server-side LiveKit calls (Twirp, health check,
+probe); clients always get `LIVEKIT_URL` (#1751).
 
 ### `POST /v1/livekit/send-data`
 

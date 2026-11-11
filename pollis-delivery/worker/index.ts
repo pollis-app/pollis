@@ -39,6 +39,8 @@ const SECRET_KEYS = [
   "LIVEKIT_API_KEY",
   "LIVEKIT_API_SECRET",
   "LIVEKIT_URL",
+  // #1751: optional server-only base for the DS's own LiveKit calls; unset uses LIVEKIT_URL.
+  "LIVEKIT_API_URL",
   "R2_S3_ENDPOINT",
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_KEY",

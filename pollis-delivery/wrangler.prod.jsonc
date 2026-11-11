@@ -79,6 +79,7 @@
     { "binding": "LIVEKIT_API_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_LIVEKIT_API_KEY" },
     { "binding": "LIVEKIT_API_SECRET", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_LIVEKIT_API_SECRET" },
     { "binding": "LIVEKIT_URL", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_LIVEKIT_URL" },
+    { "binding": "LIVEKIT_API_URL", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_LIVEKIT_API_URL" },
     { "binding": "R2_S3_ENDPOINT", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_R2_S3_ENDPOINT" },
     { "binding": "R2_ACCESS_KEY_ID", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_R2_ACCESS_KEY_ID" },
     { "binding": "R2_SECRET_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_PROD_R2_SECRET_KEY" },

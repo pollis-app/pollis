@@ -227,6 +227,18 @@ Every Twirp `RoomService` call (`SendData`, `RemoveParticipant`,
 It uses its own client from `util::livekit_post`, kept apart from the shared one
 so it can be thrown away:
 
+- **Which URL.** Server-side calls (every Twirp call, the check, the probe) go
+  to `BrokerConfig::livekit_api_base`: the optional DS env `LIVEKIT_API_URL`
+  (an `https://` base, e.g. a Cloudflare Tunnel hostname) when set, else
+  `LIVEKIT_URL` with `wss`→`https` (`twirp_base`). Clients are still handed
+  `LIVEKIT_URL`, unchanged. LiveKit counts as configured only when key, secret
+  and `LIVEKIT_URL` are set; `LIVEKIT_API_URL` alone configures nothing. It
+  exists because Cloudflare Container egress to the LiveKit box is dropped
+  upstream of the box, by the hosting provider's network, so the DS reaches
+  the box through a tunnel on a separate API hostname. Unit tests in
+  `broker.rs`; `tests/livekit_send_data.rs`
+  `server_side_calls_use_livekit_api_url_when_set` proves the routing.
+
 - **Budgets.** Connecting (DNS + TCP + TLS) gets `LIVEKIT_CONNECT_TIMEOUT` = 2 s.
   Each attempt gets `Upstream::LiveKit` = 6 s. LiveKit itself takes about 3.1 s
   to answer `SendData` for a room nobody is in (its "no response from servers"
@@ -274,8 +286,11 @@ so it can be thrown away:
   `client_resets` and latencies, plus `last_ok_at` / `last_failure_at`,
   `verdict` (the same effective verdict as `/health/livekit`),
   `verdict_source` (`calls`, `check` or `none`) and the newest `check`
-  (`at`, `ok`, `ms`, `phase`, `status`). With `?probe=1` it also times each leg from
-  inside the container: `dns` (address counts only), `tcp_connect`,
+  (`at`, `ok`, `ms`, `phase`, `status`). Top level, `api_base_source`
+  (`LIVEKIT_API_URL` or `LIVEKIT_URL`) says which base the server-side calls
+  use, and `api_host` is its hostname (`null` for an IP literal, which is never
+  reported). With `?probe=1` it also times each leg from
+  inside the container, against that same base: `dns` (address counts only), `tcp_connect`,
   `tcp_connect_port_80` (the same address's port 80: 443 failing while 80
   connects is a port-level block, both failing is the whole address dropping
   this container's traffic),
