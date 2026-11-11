@@ -173,6 +173,30 @@ pub async fn record(
     response
 }
 
+/// Whether the caller runs inside a routed request (whose failure, if any, the
+/// [`record`] middleware will log). A `tokio::spawn`ed task does not inherit it.
+pub fn in_request() -> bool {
+    CAPTURED.try_with(|_| ()).is_ok()
+}
+
+/// Log a failure no request will answer for (#1751): a DS-originated LiveKit
+/// nudge runs in a spawned task after its request already succeeded, so the
+/// middleware never sees it. `route` names the upstream call (it must start
+/// with `/`). Same scrubbing, bounds and write budget as a request row.
+pub fn record_background(state: &AppState, route: &str, status: u16, error: &str, detail: &str) {
+    let now = crate::util::now_unix();
+    if !state.error_log.take(now) {
+        return;
+    }
+    let row = FailedRequest::new(now, None, "POST", route, status, Some(error), &[detail.to_string()]);
+    let db = Arc::clone(&state.db);
+    tokio::spawn(async move {
+        if let Err(e) = insert(&db, &row).await {
+            tracing::debug!("ds_error_log insert skipped: {e:#}");
+        }
+    });
+}
+
 /// Read the JSON `error` out of a small error body, returning an identical response.
 async fn take_error_text(response: Response) -> (Response, Option<String>) {
     use axum::body::HttpBody as _;

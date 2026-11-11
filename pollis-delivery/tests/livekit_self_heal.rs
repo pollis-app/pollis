@@ -68,8 +68,6 @@ async fn a_sustained_failure_turns_the_health_signal_red() {
         .with_broker_config(livekit_broker(&refused_url().await))
         .with_metrics_token(Some(TOKEN.into()));
 
-    assert_eq!(get(&state, "/health/livekit", None).await, (StatusCode::OK, serde_json::json!({ "livekit": "idle" })));
-
     let payload = serde_json::json!({ "type": "inbox_refresh" });
     for _ in 0..pollis_delivery::livekit::DEGRADED_AFTER {
         let err = room_send_data(&state, "inbox-alice", &payload).await.unwrap_err();
@@ -85,6 +83,7 @@ async fn a_sustained_failure_turns_the_health_signal_red() {
     assert_eq!(status, StatusCode::OK);
     let counts = &body["counts"];
     assert_eq!(counts["verdict"], "degraded");
+    assert_eq!(counts["verdict_source"], "calls", "judged by the real calls, not a check");
     assert_eq!(counts["failures"]["connect"], pollis_delivery::livekit::DEGRADED_AFTER);
     assert_eq!(counts["consecutive_failures"], pollis_delivery::livekit::DEGRADED_AFTER);
     assert_eq!(counts["last_failure"], "SendData connect");
@@ -113,7 +112,7 @@ async fn the_probe_times_each_leg_and_names_no_address() {
     let (status, body) = get(&state, "/v1/ops/livekit?probe=1", Some(TOKEN)).await;
     assert_eq!(status, StatusCode::OK);
     let probe = &body["probe"];
-    for leg in ["dns", "tcp_connect", "https_fresh", "list_rooms", "send_data_empty_room"] {
+    for leg in ["dns", "tcp_connect", "tcp_connect_port_80", "https_fresh", "list_rooms", "send_data_empty_room"] {
         assert!(probe[leg]["ms"].is_u64(), "{leg} is timed: {probe}");
     }
     assert_eq!(probe["dns"]["v4"], 1);
@@ -122,4 +121,112 @@ async fn the_probe_times_each_leg_and_names_no_address() {
     assert!(!text.contains("127.0.0.1"), "the probe must not print an address: {text}");
     // The probe is not traffic: it must not mask or fake an outage.
     assert_eq!(body["counts"]["ok"], 0);
+}
+
+async fn error_rows(state: &AppState) -> Vec<serde_json::Value> {
+    // The row is written off the response path; give the spawned insert a moment.
+    for _ in 0..50 {
+        let (status, body) = get(state, "/v1/ops/errors", Some(TOKEN)).await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = body["errors"].as_array().cloned().unwrap_or_default();
+        if !rows.is_empty() {
+            return rows;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    Vec::new()
+}
+
+/// #1751, the second time: on dev the container could not even open a TCP
+/// connection to LiveKit, yet `/health/livekit` said `idle` and the counts were
+/// all zero, because nothing had called LiveKit since the container woke. With
+/// no real call in the window, reading the signal must find the outage itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_outage_is_found_when_the_signal_is_read() {
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), false)
+        .with_broker_config(livekit_broker(&refused_url().await))
+        .with_metrics_token(Some(TOKEN.into()));
+
+    assert_eq!(
+        get(&state, "/health/livekit", None).await,
+        (StatusCode::SERVICE_UNAVAILABLE, serde_json::json!({ "livekit": "degraded" }))
+    );
+    let (_, body) = get(&state, "/v1/ops/livekit", Some(TOKEN)).await;
+    let counts = &body["counts"];
+    assert_eq!(counts["verdict"], "degraded");
+    assert_eq!(counts["verdict_source"], "check");
+    assert_eq!(counts["check"]["ok"], false);
+    assert_eq!(counts["check"]["phase"], "connect");
+    // A check is not traffic: the call counts stay untouched.
+    assert_eq!(counts["consecutive_failures"], 0);
+    assert!(counts["failures"].as_object().unwrap().is_empty());
+
+    // And the 503 is a row in the operator's failed-request log.
+    let rows = error_rows(&state).await;
+    assert!(
+        rows.iter().any(|r| r["route"] == "/health/livekit" && r["status"] == 503),
+        "{rows:?}"
+    );
+}
+
+/// A healthy LiveKit reads `ok` with no traffic at all, and however often the
+/// signal is read, LiveKit sees at most one check per TTL.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_healthy_livekit_reads_ok_and_the_check_is_cached() {
+    let (url, accepted, _) = livekit_with_a_dead_pooled_connection().await;
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), false)
+        .with_broker_config(livekit_broker(&url))
+        .with_metrics_token(Some(TOKEN.into()));
+
+    for _ in 0..5 {
+        assert_eq!(
+            get(&state, "/health/livekit", None).await,
+            (StatusCode::OK, serde_json::json!({ "livekit": "ok" }))
+        );
+    }
+    let (_, body) = get(&state, "/v1/ops/livekit", Some(TOKEN)).await;
+    assert_eq!(body["counts"]["verdict_source"], "check");
+    assert_eq!(body["counts"]["check"]["ok"], true);
+    assert_eq!(
+        accepted.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "six reads, one connection: the check is cached"
+    );
+}
+
+/// The nudges the DS sends on its own (enrollment approval prompts, inbox
+/// refreshes, history-transfer events) run after their request already
+/// answered 2xx. During #1751 their failures appeared nowhere an operator
+/// looks; they must land in the failed-request log as their own rows.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_background_nudge_failure_lands_in_the_failed_request_log() {
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), false)
+        .with_broker_config(livekit_broker(&refused_url().await))
+        .with_metrics_token(Some(TOKEN.into()));
+
+    let bg = state.clone();
+    let err = tokio::spawn(async move {
+        room_send_data(&bg, "inbox-alice", &serde_json::json!({ "type": "enrollment_requested" })).await
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(err.contains("connect"), "{err}");
+
+    let rows = error_rows(&state).await;
+    let row = rows
+        .iter()
+        .find(|r| r["route"] == "/twirp/livekit.RoomService/SendData")
+        .unwrap_or_else(|| panic!("no background row: {rows:?}"));
+    // A connect failure is a timeout-class failure: 504, as the request path answers it.
+    assert_eq!(row["status"], 504);
+    assert!(row["error"].as_str().unwrap().contains("2 attempts"), "{row}");
+    let detail = row["detail"].as_str().unwrap();
+    assert!(detail.contains("phase=connect"), "{detail}");
+    let text = row.to_string();
+    assert!(!text.contains("inbox-alice"), "no room name in the row: {text}");
+    assert!(!text.contains("127.0.0.1"), "no address in the row: {text}");
 }

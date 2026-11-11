@@ -12,6 +12,13 @@
 //! on the way in, one `warn!` on the way out, `GET /health/livekit` answers 503
 //! while it lasts, and `GET /v1/ops/livekit` has the counts. Nothing here names
 //! a room, a user or an address.
+//!
+//! **Not blind when quiet.** The counts live in memory and a quiet DS (dev
+//! sleeps after 10 idle minutes) has none, so on its own the signal read
+//! `idle` straight through an outage. When no real call landed within
+//! [`WINDOW_SECS`], reading either endpoint runs one [`check`]: a fresh
+//! connection's `GET /`, at most once per [`CHECK_TTL_SECS`], one at a time.
+//! It runs because someone asked, never on a timer.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -34,6 +41,8 @@ pub const DEGRADED_AFTER: u32 = 5;
 pub const WINDOW_SECS: u64 = 600;
 /// Attempts per call: the first, plus one on a fresh connection.
 pub const MAX_ATTEMPTS: u8 = 2;
+/// How long one [`check`] answers for, so readers cost LiveKit one request a minute at most.
+pub const CHECK_TTL_SECS: u64 = 60;
 /// Largest LiveKit answer read; a roster is far smaller.
 const MAX_BODY_BYTES: usize = 256 * 1024;
 
@@ -236,12 +245,56 @@ fn note_failure(state: &AppState, failure: &TwirpFailure) {
         detail = %failure.detail,
         "livekit call failed"
     );
+    // A DS-originated nudge (enrollment prompt, inbox refresh, history
+    // transfer) runs after its request already answered 2xx, so no request
+    // row would ever show it: #1751's approval prompts failed that way,
+    // unseen. Log it as its own row, named by the upstream call.
+    if !crate::error_log::in_request() {
+        let status = if failure.is_timeout() { 504 } else { 502 };
+        crate::error_log::record_background(
+            state,
+            &format!("/twirp/livekit.RoomService/{}", failure.method),
+            status,
+            &failure.to_string(),
+            &format!(
+                "background nudge, no request waiting: phase={} consecutive={consecutive} {}",
+                failure.phase.name(),
+                failure.detail
+            ),
+        );
+    }
 }
 
 /// Outcome counts for the DS → LiveKit path since the process started.
 #[derive(Clone, Default)]
 pub struct LiveKitHealth {
     inner: Arc<Mutex<Inner>>,
+    /// One [`check`] at a time; the others wait for its answer.
+    checking: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// The result of one [`check`].
+#[derive(Debug, Clone)]
+pub struct Check {
+    pub at: u64,
+    pub ok: bool,
+    pub ms: u64,
+    /// Where it died, when it did.
+    pub phase: Option<&'static str>,
+    /// LiveKit's status, when it answered.
+    pub status: Option<u16>,
+}
+
+impl Check {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "at": self.at,
+            "ok": self.ok,
+            "ms": self.ms,
+            "phase": self.phase,
+            "status": self.status,
+        })
+    }
 }
 
 #[derive(Default)]
@@ -260,6 +313,7 @@ struct Inner {
     last_failure_at: Option<u64>,
     last_failure: Option<String>,
     degraded_since: Option<u64>,
+    last_check: Option<Check>,
 }
 
 /// What `GET /health/livekit` reports.
@@ -331,6 +385,15 @@ impl LiveKitHealth {
         })
     }
 
+    /// The newest [`check`], if it is younger than [`CHECK_TTL_SECS`].
+    fn fresh_check(&self, now: u64) -> Option<Check> {
+        self.with(|h| {
+            h.last_check
+                .clone()
+                .filter(|c| now.saturating_sub(c.at) < CHECK_TTL_SECS)
+        })
+    }
+
     pub fn record_retry(&self) {
         self.with(|h| h.retries += 1);
     }
@@ -376,6 +439,7 @@ impl LiveKitHealth {
                 "max_ok_ms": h.max_ok_ms,
                 "last_failure_at": h.last_failure_at,
                 "last_failure": h.last_failure,
+                "check": h.last_check.as_ref().map(Check::json),
             })
         })
     }
@@ -389,12 +453,93 @@ fn verdict_name(v: Verdict) -> &'static str {
     }
 }
 
+/// What the verdict was judged by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// Real calls within [`WINDOW_SECS`].
+    Calls,
+    /// No real call in the window, so a [`check`] decided.
+    Check,
+    /// Neither: LiveKit is not configured.
+    None,
+}
+
+impl Source {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Source::Calls => "calls",
+            Source::Check => "check",
+            Source::None => "none",
+        }
+    }
+}
+
+/// The verdict the endpoints report: real calls when there are any in the
+/// window, else a [`check`] (cached [`CHECK_TTL_SECS`]). `Idle` only when
+/// LiveKit is not configured at all.
+pub async fn effective_verdict(state: &AppState) -> (Verdict, Source) {
+    let passive = state.livekit_health.verdict(crate::util::now_unix());
+    if passive != Verdict::Idle {
+        return (passive, Source::Calls);
+    }
+    match check(state).await {
+        Some(c) if c.ok => (Verdict::Ok, Source::Check),
+        Some(_) => (Verdict::Degraded, Source::Check),
+        None => (Verdict::Idle, Source::None),
+    }
+}
+
+/// One fresh-connection `GET /` (LiveKit answers "OK"), unless a check younger
+/// than [`CHECK_TTL_SECS`] already answered. Single-flight: concurrent readers
+/// share one request. Not counted as a call; kept as `check` in the counts. A
+/// failure logs one `warn!`, which lands in the reading request's
+/// `/v1/ops/errors` row when the endpoint answers 503.
+pub async fn check(state: &AppState) -> Option<Check> {
+    let health = &state.livekit_health;
+    if let Some(c) = health.fresh_check(crate::util::now_unix()) {
+        return Some(c);
+    }
+    let _one_at_a_time = health.checking.lock().await;
+    if let Some(c) = health.fresh_check(crate::util::now_unix()) {
+        return Some(c);
+    }
+    let (_, _, url) = state.broker.livekit_ready()?;
+    let base = crate::broker::twirp_base(url);
+    let started = Instant::now();
+    let outcome = send_once(crate::util::livekit_probe_get(&format!("{base}/"))).await;
+    let ms = started.elapsed().as_millis() as u64;
+    let at = crate::util::now_unix();
+    let result = match outcome {
+        Ok(reply) => Check {
+            at,
+            ok: reply.status.is_success(),
+            ms,
+            phase: (!reply.status.is_success()).then_some(Phase::Status.name()),
+            status: Some(reply.status.as_u16()),
+        },
+        Err((phase, detail)) => {
+            tracing::warn!(
+                upstream = "livekit",
+                phase = phase.name(),
+                ms,
+                detail = %detail,
+                "livekit check failed: no DS -> LiveKit call in the window, and a fresh connection got no answer"
+            );
+            Check { at, ok: false, ms, phase: Some(phase.name()), status: None }
+        }
+    };
+    health.with(|h| h.last_check = Some(result.clone()));
+    Some(result)
+}
+
 /// `GET /health/livekit` — open, like `/health`: `ok` / `idle` (200) or `degraded` (503).
 ///
-/// Passive: it reads the record of real calls and never calls LiveKit itself,
-/// so polling it costs LiveKit nothing. One word, no counts.
+/// Judged by real calls when there were any in the last [`WINDOW_SECS`];
+/// otherwise by a [`check`], so it costs LiveKit at most one request per
+/// [`CHECK_TTL_SECS`] however often it is read. `idle` now means only "LiveKit
+/// is not configured". One word, no counts.
 pub async fn health(State(state): State<AppState>) -> Response {
-    let verdict = state.livekit_health.verdict(crate::util::now_unix());
+    let (verdict, _) = effective_verdict(&state).await;
     let status = if verdict == Verdict::Degraded {
         StatusCode::SERVICE_UNAVAILABLE
     } else {
@@ -422,10 +567,15 @@ pub async fn ops(
     if !crate::bearer_token_matches(&headers, expected) {
         return crate::error::AuthRejection::Unauthorized.into_response();
     }
+    let (verdict, source) = effective_verdict(&state).await;
     let now = crate::util::now_unix();
+    let mut counts = state.livekit_health.snapshot(now);
+    // The calls-only verdict would say `idle` through a quiet outage.
+    counts["verdict"] = verdict_name(verdict).into();
+    counts["verdict_source"] = source.name().into();
     let mut out = serde_json::json!({
         "now": now,
-        "counts": state.livekit_health.snapshot(now),
+        "counts": counts,
     });
     if q.probe.as_deref().is_some_and(|p| p == "1" || p == "true") {
         out["probe"] = probe(&state).await;
@@ -486,6 +636,24 @@ pub async fn probe(state: &AppState) -> serde_json::Value {
         out.insert(
             "tcp_connect".into(),
             match tcp {
+                Ok(Ok(_)) => serde_json::json!({ "ok": true, "ms": ms }),
+                Ok(Err(e)) => step_err(ms, &e),
+                Err(_) => serde_json::json!({ "ok": false, "ms": ms, "error": "timed out" }),
+            },
+        );
+        // The same host's port 80 (nginx's plain vhost). Port 443 failing while
+        // 80 connects is a port-level block; both failing is the whole address
+        // dropping this container's traffic (#1751).
+        let started = Instant::now();
+        let tcp80 = tokio::time::timeout(
+            crate::util::LIVEKIT_CONNECT_TIMEOUT,
+            tokio::net::TcpStream::connect(std::net::SocketAddr::new(addr.ip(), 80)),
+        )
+        .await;
+        let ms = started.elapsed().as_millis() as u64;
+        out.insert(
+            "tcp_connect_port_80".into(),
+            match tcp80 {
                 Ok(Ok(_)) => serde_json::json!({ "ok": true, "ms": ms }),
                 Ok(Err(e)) => step_err(ms, &e),
                 Err(_) => serde_json::json!({ "ok": false, "ms": ms, "error": "timed out" }),

@@ -246,26 +246,48 @@ so it can be thrown away:
   `SendData: livekit timed out after 6s [2 attempts, 12004ms]`. A retry that
   succeeds logs "first attempt failed, a fresh connection succeeded", which
   means a dead pooled connection.
+- **Background nudges get their own row.** A nudge the DS sends on its own
+  (enrollment approval prompts, inbox refreshes, history-transfer events) runs
+  in a spawned task after its request already answered 2xx, so no request row
+  would show its failure. Outside a request, `note_failure` writes a row itself
+  (`error_log::record_background`): route `/twirp/livekit.RoomService/<method>`,
+  status 504 (connect/timeout) or 502, `detail` starting "background nudge".
+  Same scrubbing and write budget as request rows.
 - **Degraded.** `DEGRADED_AFTER` = 5 failures in a row with no success between
   them counts as an outage: one `error!` "livekit degraded" when it starts, and
   one `warn!` "livekit recovered" when it ends.
 - **`GET /health/livekit`** is open, like `/health` (on dev it is behind the dev
-  gate). It answers one word: `ok` or `idle` with 200, `degraded` with 503. It
-  only reads the record of real calls and never calls LiveKit itself. This is
-  the hook for `status.pollis.com` (archon).
+  gate). It answers one word: `ok` with 200, `degraded` with 503 (`idle`, 200,
+  only when LiveKit is not configured). When real calls landed in the last
+  10 minutes it judges by them. When none did, it runs a **check**
+  (`livekit::check`): one `GET /` on a fresh, unpooled connection, cached
+  `CHECK_TTL_SECS` = 60 s and single-flight, so readers cost LiveKit at most
+  one request a minute. The check runs only when someone reads the signal,
+  never on a timer. It exists because the counts live in memory: a quiet or
+  freshly-woken DS had none, and on 2026-11-11 dev answered `idle` while its
+  container could not open a TCP connection to LiveKit at all. A failed check
+  logs one `warn!`, and the 503 is a `/v1/ops/errors` row. This is the hook
+  for `status.pollis.com` and archon's Overview.
 - **`GET /v1/ops/livekit`** needs the operator token. It shows the in-memory
   counts since the process started: `ok`, `ok_on_retry`, `failures` by phase,
   `failures_last_10m`, `consecutive_failures`, `degraded_since`, `retries`,
-  `client_resets` and latencies. With `?probe=1` it also times each leg from
+  `client_resets` and latencies, plus `last_ok_at` / `last_failure_at`,
+  `verdict` (the same effective verdict as `/health/livekit`),
+  `verdict_source` (`calls`, `check` or `none`) and the newest `check`
+  (`at`, `ok`, `ms`, `phase`, `status`). With `?probe=1` it also times each leg from
   inside the container: `dns` (address counts only), `tcp_connect`,
+  `tcp_connect_port_80` (the same address's port 80: 443 failing while 80
+  connects is a port-level block, both failing is the whole address dropping
+  this container's traffic),
   `https_fresh` (a no-pool client), `list_rooms`, and `send_data_empty_room`
   (a random `pollis-ds-probe-*` room, so it reaches no one). The probe is not
   recorded in the counts. No output names a room, user or address.
 
 `tests/livekit_dead_connection.rs` holds a pooled connection open but silent.
 The next nudge must be delivered on a fresh connection, and it fails with
-`MAX_ATTEMPTS = 1`. `tests/livekit_self_heal.rs` pins the degraded signal and
-the operator view.
+`MAX_ATTEMPTS = 1`. `tests/livekit_self_heal.rs` pins the degraded signal, the
+check (a quiet outage reads `degraded`; a quiet healthy LiveKit reads `ok` with
+one connection for many reads), the background-nudge row and the operator view.
 
 ## Why R2 presign has no per-object READ authz — and what it does gate
 
