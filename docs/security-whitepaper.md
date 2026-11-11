@@ -674,7 +674,7 @@ LiveKit data packets carry application events: `new_message` (a wake-up; the cip
 The DS throttles at two scopes:
 
 - **Per mailbox** (`pollis-delivery/src/otp.rs`): 30 s resend throttle, 3 codes per window, and a 15-minute mailbox lockout after 5 wrong codes (§4).
-- **Per client IP** (`pollis-delivery/src/ratelimit.rs`): fixed windows over the unauthenticated OTP endpoints, keyed on `CF-Connecting-IP`. This covers a client spraying requests across many addresses to email-bomb mailboxes or burn Resend quota, which the per-mailbox limit cannot.
+- **Per client IP** (`pollis-delivery/src/ratelimit.rs`): fixed windows over the unauthenticated OTP endpoints, keyed on a hash of the client IP: the edge Worker strips every IP header and forwards only `X-Pollis-Client-Bucket` (an HMAC of the IP), which the DS hashes again under a per-process key. No plain IP reaches the DS (`docs/metadata-retention-policy.md`). This covers a client spraying requests across many addresses to email-bomb mailboxes or burn Resend quota, which the per-mailbox limit cannot.
 - Resend's own reputation and per-key limits sit underneath both.
 
 ### 11.2 PIN attempt rate limiting
