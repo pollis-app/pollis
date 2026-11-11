@@ -1,0 +1,25 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Wait until the message just sent has settled: no row still "sending", and
+# none left "Not sent". A send that hit a transient DS connection error stays
+# failed until something wakes the outbox (it never retries on a timer), and
+# its Retry / Discard block makes the row taller, which moves the row's centre,
+# where a text selector taps, off the text. So press Retry once if it shows,
+# as outbox.yaml does, and require the row to settle.
+- extendedWaitUntil:
+    notVisible: ".*, sending"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "btn-retry-message-.*"
+    commands:
+      - tapOn:
+          id: "btn-retry-message-.*"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-retry-message-.*"
+    timeout: 60000
+- extendedWaitUntil:
+    notVisible: ".*, sending"
+    timeout: 30000
