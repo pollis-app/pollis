@@ -36,6 +36,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalize, lineOf } from "./lib/doc-text.mjs";
 
 const args = process.argv.slice(2);
 function arg(name) {
@@ -132,83 +133,6 @@ function parseStated(s, value) {
 
 // ── Reading text ─────────────────────────────────────────────────────────────
 
-const ENTITIES = { "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'",
-  "&mdash;": "—", "&ndash;": "–", "&rsquo;": "’", "&lsquo;": "‘", "&hellip;": "…", "&times;": "×", "&plusmn;": "±" };
-
-/**
- * The text an assertion pattern is matched against, with a map back to the
- * original offset (for `file:line`). HTML loses its tags and entities, Markdown
- * its `**`, and every run of whitespace becomes one space, so a sentence that
- * wraps differently, or gains a <strong>, still matches.
- */
-function normalize(raw, isHtml) {
-  let out = "";
-  const map = [];
-  let i = 0;
-  let pendingSpace = false;
-  const push = (s, at) => {
-    if (pendingSpace && out.length && !out.endsWith(" ")) {
-      out += " ";
-      map.push(at);
-    }
-    pendingSpace = false;
-    for (const ch of s) {
-      out += ch;
-      map.push(at);
-    }
-  };
-  while (i < raw.length) {
-    const c = raw[i];
-    if (isHtml && c === "<") {
-      const close = raw.indexOf(">", i);
-      if (close !== -1) {
-        const tag = raw.slice(i, close + 1);
-        if (/^<(script|style)\b/i.test(tag)) {
-          const end = raw.toLowerCase().indexOf(`</${tag.slice(1).match(/^\w+/)[0].toLowerCase()}`, close);
-          i = end === -1 ? raw.length : end;
-          continue;
-        }
-        // Block-level boundaries read as whitespace; inline tags (<strong>) vanish.
-        if (/^<\/?(p|div|li|ul|ol|br|h\d|tr|td|th|table|section|figure|figcaption|pre|blockquote)\b/i.test(tag)) {
-          pendingSpace = true;
-        }
-        i = close + 1;
-        continue;
-      }
-    }
-    if (isHtml && c === "&") {
-      const m = /^&(#\d+|#x[0-9a-f]+|[a-z]+);/i.exec(raw.slice(i, i + 10));
-      if (m) {
-        let ch = ENTITIES[m[0]];
-        if (ch === undefined && m[1][0] === "#") {
-          ch = String.fromCodePoint(m[1][1] === "x" ? parseInt(m[1].slice(2), 16) : parseInt(m[1].slice(1), 10));
-        }
-        if (ch !== undefined) {
-          if (/\s/.test(ch)) {
-            pendingSpace = true;
-          } else {
-            push(ch, i);
-          }
-          i += m[0].length;
-          continue;
-        }
-      }
-    }
-    if (!isHtml && c === "*" && raw[i + 1] === "*") {
-      i += 2;
-      continue;
-    }
-    if (/\s/.test(c)) {
-      pendingSpace = true;
-      i += 1;
-      continue;
-    }
-    push(c, i);
-    i += 1;
-  }
-  return { text: out, map };
-}
-
 const fileCache = new Map();
 function readRepo(rel) {
   if (!fileCache.has(rel)) {
@@ -216,16 +140,6 @@ function readRepo(rel) {
     fileCache.set(rel, existsSync(p) ? readFileSync(p, "utf8") : null);
   }
   return fileCache.get(rel);
-}
-
-function lineOf(raw, offset) {
-  let n = 1;
-  for (let i = 0; i < offset && i < raw.length; i++) {
-    if (raw[i] === "\n") {
-      n++;
-    }
-  }
-  return n;
 }
 
 // ── Values ───────────────────────────────────────────────────────────────────

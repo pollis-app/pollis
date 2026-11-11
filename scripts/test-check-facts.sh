@@ -34,7 +34,7 @@ while IFS= read -r f; do
   mkdir -p "$work/pristine/$(dirname "$f")"
   cp "$repo/$f" "$work/pristine/$f"
 done < <(node "$repo/scripts/check-facts.mjs" --list-files)
-for f in scripts/check-facts.mjs scripts/facts.json .github/workflows/scripts-check.yml; do
+for f in scripts/check-facts.mjs scripts/lib/doc-text.mjs scripts/facts.json .github/workflows/scripts-check.yml; do
   mkdir -p "$work/pristine/$(dirname "$f")"
   cp "$repo/$f" "$work/pristine/$f"
 done
