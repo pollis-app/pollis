@@ -212,6 +212,9 @@ pr_mode() {
   [ -n "$files" ] && echo "  note: new migration(s). Prod applies them on the first DS deploy or desktop release, whichever runs first."
   files="$(git diff --name-only "$base" "$head" -- frontend/src mobile/app mobile/components mobile/hooks pollis-tui/src 2>/dev/null)"
   [ -n "$files" ] && echo "  parity: client code changed; run node scripts/feature-parity.mjs --since $(git rev-parse --short "$base")"
+  # #1723: public claims (scripts/claims.json) whose anchors this PR touched.
+  files="$(node scripts/claims-impact.mjs --since "$base" --head "$head" --summary 2>/dev/null)"
+  case "$files" in "0 "*|"") ;; *) echo "  claims: $files" ;; esac
   exit 0
 }
 
@@ -295,6 +298,8 @@ if [ "$MODE" != brief ]; then
   fi
   wv="$(with_timeout 20 gh run list -R "$REPO_SLUG" -w website-verify.yml -L1 --json conclusion,createdAt -q '.[0] | "\(.conclusion) (\(.createdAt))"' 2>/dev/null)"
   echo "Live-site doc checks (website-verify.yml, last run): ${wv:-unknown}"
+  # #1723: public claims whose anchors changed since the last claims sweep (scripts/sweep-ledger.json).
+  echo "Public claims since the last claims sweep: $(node scripts/claims-impact.mjs --ledger --head "$REF" --summary 2>/dev/null || echo unknown)"
   echo
   echo "Feature parity across desktop, mobile and CLI: node scripts/feature-parity.mjs"
 fi

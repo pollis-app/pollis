@@ -104,7 +104,8 @@
         <h3 class="doc-sub-title">Your existing history on that device: yes, if they get past the PIN</h3>
         <p>
           Revocation only affects the future. It cannot delete anything on a machine you no longer hold. There is
-          <strong>no remote wipe</strong>, and even a cooperative device's sign-out leaves local data in place.
+          <strong>no remote wipe you can force</strong>: if the device goes online with Pollis again, it learns it was revoked and
+          deletes its own local data, but someone holding it can simply keep it offline.
         </p>
         <p>
           Messages on the device sit in a database encrypted with AES-256. Its key is sealed under a key derived
@@ -116,6 +117,14 @@
           tried in under an hour. The app's ten-attempt limit stops someone typing at the screen, not someone
           working offline on a copy of the disk. If they cannot read the keychain, the database is just ciphertext
           and the history is safe.
+        </p>
+        <p>
+          On a phone, rich notifications change this. While Notification content shows names or messages (the
+          default), the app keeps a copy of the database key that the PIN does not protect, so it can show previews
+          while locked; anyone who can run code as Pollis on the unlocked phone can open the history without the
+          PIN. Choose <strong>Nothing</strong> to make the PIN the only key again. A computer with no system keychain
+          keeps the sealed key in a file bound to that machine instead, which stops a copied file but not a full copy
+          of the disk.
         </p>
         <p>
           So <strong>change your computer's login password and make sure full-disk encryption is on.</strong>

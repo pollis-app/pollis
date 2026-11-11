@@ -19,3 +19,24 @@ Checks that keep what we publish true to what the code does (epic #1720). Each s
 - **Self-test:** `scripts/test-check-facts.sh` copies every file the registry reads (`check-facts.mjs --list-files`) into a temp tree and proves a code change, a copy change, a reworded copy, a renamed constant, disagreeing sources, and an empty registry each fail, and that a disputed fact only warns.
 - **Adding a fact:** add it to `facts.json` with every copy you can find (`grep` the number and its word form across `website/`, `learn/`, `docs/`, `README.md`, `CLAUDE.md`), and run `node scripts/check-facts.mjs`.
 - **Not covered:** numbers that are history, not policy (leaf counts on a given date, past review dates), arithmetic in prose (log₂ of a group size), third-party limits (store character caps, Play's tester rules), and claims with no code or config behind them (the transparency-report cadence, the disclosure window in `SECURITY.md`). Judgment claims belong to the claims audit (#1723).
+
+## Claims (#1723)
+
+- **Ledger:** `scripts/claims.json` records every falsifiable claim the public material makes about how Pollis works (the docs in its `audited_docs`: the `/learn` scripts and page, the security whitepaper, `security-explained`/`-simple`, the verify, transparency, reproducibility and continuity docs, the store copy, and every public `website/` page). Each claim has the exact sentence (`locator.quote` in `doc`), a normalised `claim`, a `kind` (`security|behaviour|process|number|cli`), `anchors` (the paths or globs whose change could make it false), `evidence` (the `path:line` it was checked against), an optional `fact` (the `facts.json` id for a number), a `status` (`verified|unverifiable|disputed`, with a `note` for the last two) and `verified_sha`. The baseline audit was #1723.
+- **Validator:** `node scripts/check-claims.mjs`, run by hand by `/sweep-claims` and before a release. It is a sweep check, so it is **not in CI and never gates a merge**. It fails on:
+  - a schema error, an unknown `fact`, an audited doc with no claims, or an empty ledger;
+  - an anchor path or glob that matches no file (the code was deleted or moved: re-anchor and re-verify);
+  - a `locator.quote` that no longer appears in its doc (the copy was reworded: re-verify).
+
+  Quotes are matched on the same normalised text as `check-facts.mjs` (`scripts/lib/doc-text.mjs`). Disputed claims (policy pages that disagree with code, #1720) print as warnings.
+- **Impact:** `node scripts/claims-impact.mjs --since <ref>` (or `--ledger`) lists the claims whose anchors changed in `git diff <ref>..HEAD`, grouped by doc. `--summary` gives the one line `scripts/release-impact.sh` prints, per PR and (in the full report) since the last claims sweep.
+- **Sweep:** `/sweep-claims` (`.claude/skills/sweep-claims/SKILL.md`) re-verifies only the due claims with the audit rubric, fixes them, then bumps `verified_sha` and `scripts/sweep-ledger.json` → `claims`.
+- **/learn copies:** the narration script `learn/manim/scripts/<slug>.md` is the source of truth for a topic's words. `scripts/check-learn-sync.mjs` (by hand, with the validator) fails when a caption cue or an on-page transcript paragraph differs from its script beat. The caption track is `website/learn/media/<slug>.vtt`, now kept in git and served from pollis.com. `--write` regenerates the captions and the transcript from the scripts. The #1723 audit found all three copies had drifted apart since July. The videos themselves stay on `cdn.pollis.com`.
+- **Self-test:** `scripts/test-check-claims.sh` copies what the ledger reads into a temp tree. It proves that each of these fails:
+  - a deleted anchor file, or a glob anchor with every match deleted;
+  - a reworded quote;
+  - an unknown fact or kind, or a duplicate id;
+  - an empty ledger, or an orphaned audited doc.
+
+  It also proves that `/learn` drift fails and that `--write` repairs it. Run it locally after changing a checker; it is not in CI either.
+- **Not covered:** `.codesight/wiki/` and runbooks (kept current by the CLAUDE.md rule), internal design docs (`docs/*-design.md`, `ARCHITECTURE.md`), and marketing tone.

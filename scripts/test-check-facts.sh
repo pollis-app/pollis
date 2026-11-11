@@ -34,7 +34,7 @@ while IFS= read -r f; do
   mkdir -p "$work/pristine/$(dirname "$f")"
   cp "$repo/$f" "$work/pristine/$f"
 done < <(node "$repo/scripts/check-facts.mjs" --list-files)
-for f in scripts/check-facts.mjs scripts/facts.json .github/workflows/scripts-check.yml; do
+for f in scripts/check-facts.mjs scripts/lib/doc-text.mjs scripts/facts.json .github/workflows/scripts-check.yml; do
   mkdir -p "$work/pristine/$(dirname "$f")"
   cp "$repo/$f" "$work/pristine/$f"
 done
@@ -91,9 +91,9 @@ run "$t"
 # The second sentence on /learn still anchors the fact, so rewording one copy passes;
 # rewording every copy must not.
 if [ "$rc" -eq 0 ]; then ok "rewording one of two anchored copies still passes"; else bad "rewording one of two copies should pass: $out"; fi
-mutate "$t/website/learn.html" "What we do promise is narrow and firm. Three kinds of loss are expected" "What we do promise is narrow and firm. There are three kinds of expected loss"
+mutate "$t/website/learn.html" "kinds of loss are acceptable: messages" "kinds of acceptable loss: messages"
 run "$t"
-if [ "$rc" -ne 0 ] && [[ "$out" == *"[accepted-loss-count] assertion /{value} kinds of loss are expected/ not found"* ]]; then
+if [ "$rc" -ne 0 ] && [[ "$out" == *"[accepted-loss-count] assertion /{value} kinds of loss are (?:expected|acceptable)/ not found"* ]]; then
   ok "reworded copy fails as unanchored"
 else bad "reworded copy should fail as not found: $out"; fi
 

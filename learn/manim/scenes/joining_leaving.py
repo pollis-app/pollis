@@ -224,8 +224,8 @@ class JoiningLeaving(Scene):
         laptop = card(4.6, 1.4, "Your laptop", "its own keys, its own leaf",
                       color=OK, title_color=OK).move_to([3.4, 1.5, 0])
         self.play(FadeIn(phone), FadeIn(laptop))
-        nolink = Text("Nothing is copied between them, a key that travels is a key "
-                      "that can be stolen on the way", color=MUTED).scale(0.38)
+        nolink = Text("Group keys are never copied between them; only your account key "
+                      "travels, once, sealed", color=MUTED).scale(0.38)
         nolink.move_to([0, 0.35, 0])
         self.play(FadeIn(nolink))
         self.hold_until(132)
@@ -234,7 +234,7 @@ class JoiningLeaving(Scene):
                       "an add-commit, exactly like adding a person",
                       color=AMBER, title_color=AMBER).move_to([0, -1.1, 0])
         self.play(FadeIn(newlap))
-        empty = Text("Its history before today: empty. Same boundary, same reason.",
+        empty = Text("Its history before today: empty, unless you copy it across.",
                      color=DANGER).scale(0.46).move_to([0, -2.5, 0])
         self.play(FadeIn(empty))
         self.hold_until(140)
@@ -262,8 +262,8 @@ class JoiningLeaving(Scene):
             Text("The server holds nothing", color=MUTED).scale(0.32),
             Text("A new device starts empty", color=MUTED).scale(0.32),
             Text("= Your old messages live on", color=OK).scale(0.34),
-            Text("Your old device, and nowhere", color=OK).scale(0.34),
-            Text("Else. That cost is real.", color=OK).scale(0.34),
+            Text("Your own devices, and nowhere else.", color=OK).scale(0.34),
+            Text("Copy them across, device to device.", color=OK).scale(0.34),
         ).arrange(DOWN, buff=0.16).move_to(b.get_center())
 
         self.play(FadeIn(a), FadeIn(a_t))
@@ -275,7 +275,7 @@ class JoiningLeaving(Scene):
 
         promise = VGroup(
             Text("Exactly three kinds of loss are acceptable:", color=FG).scale(0.44),
-            Text("Before you joined · a new device starts empty · every device quiet 1yr+",
+            Text("Before you joined · a new device starts empty · mail for a device quiet 1yr+",
                  color=MUTED).scale(0.36),
             Text("Everything else must work. Anything else missing is a BUG.",
                  color=OK).scale(0.46),

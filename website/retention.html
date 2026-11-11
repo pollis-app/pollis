@@ -49,7 +49,7 @@
       </div>
 
       <div class="doc-explainer">
-        Pollis stores <strong>no message text anywhere</strong>. The servers hold routing metadata: which
+        Pollis's servers store <strong>no message text</strong>. They hold routing metadata: which
         conversations exist, who belongs to them, when envelopes were written, and how the encryption state
         evolved.
         <br /><br />
@@ -165,7 +165,7 @@
           <p>
             <strong>Your encryption commits in a conversation that outlives you.</strong> A group's encryption
             history is a chain that remaining members walk to catch up, and removing links from the middle would
-            strand them. Those entries last as long as the conversation and are deleted with it. They contain no
+            strand them. Those entries last at most as long as the conversation (older ones are pruned once members have caught up) and are deleted with it. They contain no
             message content and, in the published ledger, no lasting identifier for you.
           </p>
           <p>

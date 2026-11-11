@@ -1,0 +1,6 @@
+# Rendered /learn video artifacts live on R2 (cdn.pollis.com/learn/media/, #697), not in git.
+# learn/manim/render.sh writes them here; upload them as docs/deployments.md describes.
+# The .vtt caption tracks ARE committed: scripts/check-learn-sync.mjs generates and checks them.
+*.mp4
+*.webm
+*.jpg

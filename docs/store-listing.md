@@ -40,9 +40,9 @@ Exactly 30 characters.
 
 ### Play short description (80 chars max)
 
-> `Private, end-to-end encrypted messaging. Your keys never leave your devices.`
+> `Private, end-to-end encrypted messaging. Only your devices can read your keys.`
 
-76 characters.
+78 characters.
 
 ### Full description (both stores; App Store limit 4000, Play limit 4000)
 
@@ -58,7 +58,7 @@ Exactly 30 characters.
 > • Encryption on every message, file and reaction, always on, with no special mode to switch on
 > • Post-quantum protection (ML-KEM and ML-DSA) on top of MLS
 > • Your phone and your computer together: add a device by scanning a QR code
-> • Notifications that never include your message or who sent it
+> • Notifications built on your phone: our servers never see your message or who sent it
 > • Safety numbers to confirm who you're talking to, backed by a public transparency log
 >
 > WHAT YOU DON'T GET
@@ -290,7 +290,7 @@ names, or codes.
 4. **Security screen** — device list + safety-number/key verification (the E2EE proof point;
    `mobile/app/self/security.tsx`). Caption: "Verify who you're talking to."
 5. **Sign-in flow** — the email → one-time-code screen. Caption: "Sign in with an email and a
-   one-time code. Your keys never leave your devices."
+   one-time code. Only your devices can read your keys."
 
 For iPad/tablet shots, reuse screens 1, 2, and 4 (iPad rotates freely per `app.json`, so
 landscape is acceptable there).
@@ -361,7 +361,7 @@ real data.
 > If the app asks to approve this new device, choose "Use recovery key" and enter
 > `[recovery key]`.
 > Pollis is end-to-end encrypted messaging. To try it: create a group, open its channel, and
-> send a message; or open Self → Security to see devices, safety numbers, and account deletion.
+> send a message; or open Self → Security to see devices and account deletion, or a direct message's info → "You & <name>" for its safety number.
 > To report or block: long-press any message from another person → Report, or open a person's
 > profile → Report / Block User. Reports go to support@pollis.com and are reviewed within 24
 > hours; abusive accounts are suspended.
@@ -397,14 +397,14 @@ of Signal, open source, with no ads, tracking or data sale.
 **3. Setup and main features.** Sign in with the review account below (email + fixed code; no
 email is sent). If asked to approve a new device, choose "Use recovery key" and enter the key
 in the notes. Then: Groups → Create Group → open a channel → send a message; Direct → New
-message; Search; Self → Preferences / Security (devices, safety numbers, export, account
-deletion). Report: long-press another person's message → Report, or their profile → Report;
+message; Search; Self → Preferences / Security (devices, export, account
+deletion); a DM's info → "You & <name>" (safety numbers). Report: long-press another person's message → Report, or their profile → Report;
 Block from the same places. Nothing else (sample files, hardware) is needed.
 
 **4. External services** (none sees message content):
 - Turso (libSQL) — database for account metadata and encrypted message envelopes.
-- Our own Delivery Service (pollis-delivery, on Cloudflare Containers) — the only server the
-  app talks to for data; routes encrypted messages and checks device signatures.
+- Our own Delivery Service (pollis-delivery, on Cloudflare Containers) — the server the
+  app talks to for all account and message data; routes encrypted messages, checks device signatures, and issues the short-lived links the app uses to fetch encrypted attachments from R2.
 - Cloudflare R2 — storage for encrypted attachments.
 - Resend — sends the one-time sign-in codes by email.
 - LiveKit — realtime "new message" signalling (data only; no audio or video on mobile).

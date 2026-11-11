@@ -140,7 +140,7 @@
           <p>
             Skipping the Play Store does not skip Google's push service. Notifications while Pollis is closed
             are relayed through Expo's push service to Firebase Cloud Messaging, so they need Google Play services
-            on the phone. The notification is a fixed "New message" with no sender and no content. Without Play
+            on the phone. What Google and Expo carry is only a random handle, never the sender or the message. Your phone then fetches and decrypts the message itself and, by default, shows who sent it and what they said; Preferences &rarr; Notification content can change that to the name only or nothing. Without Play
             services, messages still arrive, but only when you open the app.
           </p>
         </div>
@@ -159,10 +159,11 @@
         <ul>
           <li>Uninstall the copy you have, then install the other one.</li>
           <li>
-            <strong>Your message history on that phone does not carry over.</strong> The new install is a new
-            device, and a new device starts empty: there is no key backup and no server-side copy of your
-            history, by design. Messages are still on your other devices, and everything sent from now on
-            arrives normally.
+            <strong>Your message history does not come with the app.</strong> The new install is a new
+            device, and there is no key backup and no server-side copy of your history, by design. If you
+            sign it in by approving it from another of your devices, you can copy your message history
+            across from that device, approved there with your PIN. Otherwise it starts empty. Everything
+            sent from now on arrives normally.
           </li>
           <li>
             The uninstalled copy stays listed among your devices. Remove it from another device under
@@ -176,7 +177,7 @@
       <section class="doc-section">
         <h2 class="doc-section-title">Updates are manual</h2>
         <p>
-          This build does not update itself and does not check for updates. To update, come back to this page,
+          Small updates to the app's screens and features arrive on their own: Pollis checks for them when it starts and only runs ones signed by us. A new APK is never installed for you, and if your version becomes too old to use, Pollis says so and links back here. To update, come back to this page,
           download the new APK, check it the same way, and open it. It installs over the existing copy and keeps
           your data, because it is signed with the same certificate.
         </p>

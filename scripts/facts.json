@@ -31,7 +31,7 @@
       "value_from": { "file": "CLAUDE.md", "pattern": "Exactly (\\w+) acceptable losses" },
       "unit": "accepted kinds of message loss",
       "asserted_in": [
-        { "file": "website/learn.html", "pattern": "{value} kinds of loss are expected" },
+        { "file": "website/learn.html", "pattern": "{value} kinds of loss are (?:expected|acceptable)" },
         { "file": "website/retention.html", "pattern": "This is one of the {value} kinds of message loss Pollis accepts" },
         { "file": "learn/manim/scripts/joining-leaving.md", "pattern": "{value} kinds of loss are acceptable" },
         { "file": "learn/manim/scenes/joining_leaving.py", "pattern": "Exactly {value} kinds of loss are acceptable" },
@@ -233,7 +233,7 @@
       "unit": "wrong codes",
       "asserted_in": [
         { "file": "docs/security-whitepaper.md", "pattern": "after {value} wrong codes the mailbox" },
-        { "file": "docs/security-whitepaper.md", "pattern": "lockout after {value} wrong codes" }
+        { "file": "docs/security-whitepaper.md", "pattern": "lockout on the next wrong code once {value} have failed" }
       ]
     },
 
@@ -270,7 +270,8 @@
         { "file": "website/security.html", "pattern": "Both screens show an {value}-character code" },
         { "file": "website/security.html", "pattern": "\\({value} characters from 32 symbols is" },
         { "file": "website/learn.html", "pattern": "The new device shows an {value}-character code" },
-        { "file": "website/learn.html", "pattern": "the new device shows an {value}-character code and you type it" },
+        { "file": "website/learn.html", "pattern": "the new device shows an {value}-character code, you type it" },
+        { "file": "learn/manim/scripts/recovery.md", "pattern": "the new device shows an {value}-character code" },
         { "file": "docs/security-whitepaper.md", "pattern": "It derives an {value}-character verification code" },
         { "file": "docs/security-whitepaper.md", "pattern": "The {value}-character width matters" },
         { "file": "docs/security-whitepaper.md", "pattern": "{value} Crockford base32 characters \\(40 bits\\)" },
@@ -499,7 +500,7 @@
       "value_from": { "file": "pollis-core/src/commands/history_transfer/mod.rs", "pattern": "REQUEST_FRESH_PAST_SECS: i64 = ([\\d *]+);", "divide": 60 },
       "unit": "minutes",
       "asserted_in": [
-        { "file": "docs/security-whitepaper.md", "pattern": "a fresh time \\(±{value} min\\)" }
+        { "file": "docs/security-whitepaper.md", "pattern": "a fresh time \\(at most {value} min old" }
       ]
     },
 
@@ -689,7 +690,7 @@
       "unit": "characters",
       "words": false,
       "asserted_in": [
-        { "file": "docs/store-listing.md", "pattern": "never leave your devices\\.` {value} characters\\." }
+        { "file": "docs/store-listing.md", "pattern": "Only your devices can read your keys\\.` {value} characters\\." }
       ]
     },
 
@@ -716,7 +717,6 @@
       "asserted_in": [
         { "file": "website/privacy.html", "pattern": "A push notification carries fixed text \\(\"{value}\"\\)" },
         { "file": "website/subprocessors.html", "pattern": "push token, fixed text \\(\"{value}\"\\)" },
-        { "file": "website/android.html", "pattern": "The notification is a fixed \"{value}\" with no sender" },
         { "file": "docs/metadata-retention-policy.md", "pattern": "carries a fixed title and body \\(\"{value}\" /" }
       ]
     },
@@ -732,7 +732,7 @@
       "value_from": { "file": "pollis-core/src/commands/mls/key_packages.rs", "pattern": "pub\\(super\\) const POOL_TARGET: i64 = (\\d+);" },
       "unit": "KeyPackages per device",
       "asserted_in": [
-        { "file": "docs/security-whitepaper.md", "pattern": "publishes the new device's `device_cert` and {value} `KeyPackage`s" },
+        { "file": "docs/security-whitepaper.md", "pattern": "publishes the new device's `device_cert`, {value} one-time `KeyPackage`s" },
         { "file": "docs/security-whitepaper.md", "pattern": "Each device keeps {value} KeyPackages published" },
         { "file": "docs/security-whitepaper.md", "pattern": "`TARGET = {value}`" }
       ]

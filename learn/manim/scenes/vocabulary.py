@@ -97,7 +97,7 @@ class Vocabulary(Scene):
         k2 = Text(REAL_KEY[32:], font=MONO, color=AMBER).scale(0.44)
         k2.next_to(k, DOWN, buff=0.25)
         self.play(FadeIn(k), FadeIn(k2))
-        real = Text("(That's a real one, the key our transparency log signs with)",
+        real = Text("(That's a real one, a key our transparency log used to sign with)",
                     color=MUTED).scale(0.36).next_to(k2, DOWN, buff=0.3)
         self.play(FadeIn(real))
         self.hold_until(8)

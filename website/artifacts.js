@@ -163,7 +163,7 @@ function renderDesktop(data) {
     (vTag(version) ? esc(vTag(version)) : "version unknown") +
     "</span>" +
     "</div>" +
-    '<p class="art-card-desc">The full Tauri desktop client. Signed installer per platform.</p>' +
+    '<p class="art-card-desc">The full Tauri desktop client. Code-signed installers for macOS and Windows; Linux packages are checked by hash.</p>' +
     '<div class="art-links">' +
     links +
     "</div>";

@@ -54,7 +54,7 @@ LIVE_SIZE = 60
 # STALE: this is the log's retired Ed25519 key. The log now signs with
 # ML-DSA-44 (#668) and the new 2624-hex-char key does not fit this layout —
 # these scenes need re-rendering with an elided key once rotation completes.
-PINNED_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
+PINNED_KEY = "56ab128f3f10107382802e69d3de8659d0127c711feb9c849f5b213c6f2d0af3"
 
 
 def panel(width, height, color=LINE):
@@ -139,11 +139,11 @@ class ReadingTheDashboards(Scene):
 
     # ── Scene 2 (0:40–1:20), one row, decoded ──────────────────────────────
     def beat_row(self):
-        head = Text("One row = one piece of a release", color=AMBER).scale(0.55)
+        head = Text("One row = one file of a release", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
-        row = Text("darwin   aarch64   dmg   payload   774c8f…ea92   774c8f…ea92   [included ✓]",
+        row = Text("Pollis_aarch64.dmg   darwin/aarch64   774c8f…ea92   [In log: PASS]",
                    font=MONO, color=FG).scale(0.36).move_to([0, 2.0, 0])
         box = RoundedRectangle(corner_radius=0.06, width=row.width + 0.5,
                                height=row.height + 0.35, stroke_color=LINE,
@@ -151,13 +151,10 @@ class ReadingTheDashboards(Scene):
         self.play(FadeIn(box), FadeIn(row))
 
         parts = VGroup(
-            tag("platform", MUTED),
-            tag("arch", MUTED),
-            tag("bundle", MUTED),
-            tag("layer → topic 10", AMBER),
-            tag("payload hash", MUTED),
-            tag("artifact hash", MUTED),
-            tag("inclusion tick → topic 8", OK),
+            tag("file name", MUTED),
+            tag("platform / arch", MUTED),
+            tag("payload hash → topic 10", AMBER),
+            tag("in-log badge → topic 8", OK),
         ).arrange(DOWN, buff=0.14).scale(0.82).move_to([-3.6, -0.55, 0])
         for p in parts:
             self.play(FadeIn(p, shift=RIGHT * 0.12), run_time=0.22)
@@ -172,8 +169,8 @@ class ReadingTheDashboards(Scene):
         ).arrange(DOWN, buff=0.2, aligned_edge=LEFT).move_to([3.0, -0.4, 0])
         for c in climb:
             self.play(FadeIn(c, shift=UP * 0.1), run_time=0.35)
-        meaning = Text("A tick is not a box someone checked, "
-                       "it's a proof that was recomputed, and held",
+        meaning = Text("A badge is not a box someone ticked, "
+                       "it's a proof our publish job recomputed, and held",
                        color=OK).scale(0.42).move_to([0, -2.8, 0])
         self.play(FadeIn(meaning))
         self.hold_until(70)

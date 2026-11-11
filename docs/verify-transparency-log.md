@@ -1,11 +1,16 @@
 # Verify the Pollis transparency log yourself
 
 Pollis publishes an append-only [transparency log](./transparency.md) of every MLS
-commit, every account identity-key version and every released binary. This guide
+commit, every account identity-key version, every desktop release and every mobile
+over-the-air update. (The terminal client, the Android APK and the store builds are
+signed, but not yet in the log.) This guide
 shows how to check it yourself: that the server has not forked, rolled back or
 rewritten any of it.
 
-The verifier trusts the log's ML-DSA-44 public key and nothing else. Signed tree
+The verifier trusts two keys compiled into it and nothing else: the log's ML-DSA-44
+signing key, and an offline root key that can vouch for a further signing key through
+a root-signed key set (`/v1/key-set.json`). A key set the root did not sign is a
+failure. Signed tree
 heads and Merkle proofs are checked against that key; the server, the database and
 the host serving the files are not trusted. If any byte is altered, a signature or
 proof check fails and the tool exits non-zero.
@@ -15,7 +20,9 @@ production, or a dev server you run yourself.
 
 `pollis-verify` checks the served key against a key compiled into the binary and
 refuses to continue if they differ. A hostile host therefore cannot swap in its own
-key and sign a forged history. To verify a log you run yourself, signed with your
+key and sign a forged history for `group`, `account` or `release`, or for the commit
+log in `remote`. (`remote` does not yet pin-check the account-key and binaries
+trees' own key; use `account` and `release` for those.) To verify a log you run yourself, signed with your
 own key, set `POLLIS_VERIFY_PINNED_KEYS_HEX` to that key (hex, 1312 bytes;
 comma-separate several). It adds to the compiled key rather than replacing it, and
 only you can set it. Leave it unset for production.
@@ -53,8 +60,9 @@ for release builds or `(source build)` for local ones.
 pollis-verify remote <base-url>
 ```
 
-This fetches all three trees and checks, for each: that the served key is the
-pinned key, every STH signature, that `latest.json` matches the newest STH, that no
+This fetches all three trees and checks that the commit log's served key is the
+pinned key (`remote` checks the account-key and binaries trees against the key
+they serve; `account` and `release` pin-check them), and, for each tree: every STH signature, that `latest.json` matches the newest STH, that no
 two heads equivocate, that the entries replay to each signed root, and every
 inclusion and consistency proof. A passing run prints one `PASS` line per check and
 exits `0` (output shortened; numbers are illustrative):
@@ -118,7 +126,8 @@ pollis-verify remote <base-url> && echo "log is intact" || echo "VERIFICATION FA
 the log is newer than the binary, it says *"your pollis-verify is too old for this
 log — upgrade it"* and exits `2`. That is not evidence of tampering; install a newer
 `pollis-verify-v*` release. Binaries built before this check existed cannot report
-skew: against a newer log, `remote` still passes but `group` reports `Found: no`.
+skew: `group` reports `Found: no` against a newer log, and `remote` fails on the
+retired commit-log tree like every `pollis-verify` older than `v0.10.0`.
 If in doubt, upgrade.
 
 ## 3. Verify one conversation: `pollis-verify group`
@@ -129,7 +138,7 @@ pollis-verify group <base-url> <conversation-id>
 
 The id is the opaque MLS conversation id (a ULID such as
 `01KP443BSBXS3W1SZNTV5MXQ9C`), not a group name; the log contains no names. Only
-members know it: leaves carry per-window pseudonyms, and `group` re-derives them
+members (and the server, which already holds it) know it: leaves carry per-window pseudonyms, and `group` re-derives them
 from the real id.
 
 `group` verifies the latest STH signature first, selects the conversation's
@@ -224,13 +233,15 @@ pollis-verify account <base-url> <user-id> --json
 ```
 
 The desktop app runs the same verifier: `self_audit_account_key` for your own key
-and `audit_peer_account_key` for a contact you have verified.
+and `audit_peer_account_key` for a contact, against the key your device first saw for
+them.
 
 ## 5. Verify a release: `pollis-verify release`
 
 The binaries tree has one leaf per release artifact layer. `payload` is the
 reproducible bytes with signing material normalized out; `signed` is the file users
-download. The two are linked by a shared `payload_sha256`.
+download; `exe` is the main executable as installed, which the app's own "Verify this
+build" check hashes. They are linked by a shared `payload_sha256`.
 
 ```bash
 pollis-verify release <base-url> <tag>
@@ -298,8 +309,10 @@ no update published for it gets `204 No Content` and has nothing to check.
 
 ## 6. Fully offline: `monitor verify`
 
-To avoid trusting the network during verification, download a signed bundle once
-and verify it locally. A bundle holds the public key, the STHs, the full ordered
+To avoid trusting the network during verification, verify a signed bundle locally.
+verify.pollis.com does not publish one: build it with the
+[`builder`](../verifiable-log-builder/README.md) from a log you run, or use
+`monitor gen-example`. A bundle holds the public key, the STHs, the full ordered
 entries and the proofs in one JSON file.
 
 ```bash
@@ -412,9 +425,11 @@ and shows its commit chain. The browser runs the `pollis-verify group` checks it
 proofs for that conversation's entries from `https://verify.pollis.com/v1/commit-log-2/`, refuses a
 served key that is not the pinned one, verifies the ML-DSA-44 head signature, every
 inclusion proof and the commit-log invariant, and produces the same `GroupReport` the
-CLI does. No server computes the verdict. You still trust the page's code as served
+CLI does, except that it trusts only its built-in key and does not read the root-signed
+key set (`/v1/key-set.json`) that the CLI also checks. No server computes the verdict. You still trust the page's code as served
 by pollis.com and the pinned crypto libraries it loads (`@noble/post-quantum`,
-`@noble/hashes`, each pinned by an SRI hash). For a verdict that rests only on code
+`@noble/hashes` and `@noble/curves`, each pinned by an SRI hash that a browser
+without import-map integrity support does not enforce). For a verdict that rests only on code
 you chose to run, use `pollis-verify` or `monitor` on your own machine.
 
 ## Run the pipeline locally

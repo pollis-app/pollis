@@ -104,7 +104,7 @@ class Recovery(Scene):
         sk_note = Text("Shown once. Write it down like a house deed.",
                        color=MUTED).scale(0.36).move_to([3.4, -1.2, 0])
         self.play(FadeIn(pin_note), FadeIn(sk_note))
-        example = note("A3-9XK4Q-7MTP2-R6WHD-3JYFN-B8QVS-5LZCE", AMBER,
+        example = note("A3-9XK4Q-7MTP2-R6WHD-3JYFN-B8QVS-5MZCE", AMBER,
                        w=8.4, h=0.7, scale=0.34, mono=True).move_to([0, -2.7, 0])
         self.play(FadeIn(example))
         self.hold_until(25)
@@ -144,7 +144,7 @@ class Recovery(Scene):
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         a = card(-3.4, 1.2, "Approve from another device",
-                 "compare a 6-digit code, and they agree privately",
+                 "type its 8-character code, and they agree privately",
                  color=OK, title_color=OK, w=6.2, h=1.6)
         b = card(3.4, 1.2, "Or use your Secret Key",
                  "the same recovery, without a second device",
@@ -155,7 +155,7 @@ class Recovery(Scene):
         joined = note("The new device then joins every group you are in",
                       FG, w=8.6, h=0.8, scale=0.36).move_to([0, -0.9, 0])
         self.play(FadeIn(joined))
-        empty = Text("It starts from today forward, with no old history (that is Topic 4).",
+        empty = Text("It starts from today forward, unless you copy your history across (Topic 4).",
                      color=MUTED).scale(0.38).move_to([0, -2.1, 0])
         self.play(FadeIn(empty))
         self.hold_until(85)
