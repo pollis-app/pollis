@@ -77,7 +77,9 @@
   },
   "pnpm": {
     "overrides": {
-      "node-forge": "^1.4.2"
+      "node-forge": "^1.4.3",
+      "glob@>=13.0.0 <14.0.0": "^14.0.3",
+      "minimatch@>=10.0.0 <11.0.1": "^11.0.1"
     },
     "patchedDependencies": {
       "decode-uri-component@0.2.2": "patches/decode-uri-component@0.2.2.patch",

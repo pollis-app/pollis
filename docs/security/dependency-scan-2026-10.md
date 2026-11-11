@@ -62,7 +62,7 @@ only fix is a new major (or none exists):
 |---|---|---|
 | sharp 0.34 | wrangler → miniflare (local `wrangler dev` only) | 0.35 (next wrangler) |
 | esbuild 0.27 | wrangler (dev-server file read) | 0.28 (next wrangler) |
-| extract-zip, basic-ftp 5, deepmerge-ts 5, fast-xml-parser 4, http-cache-semantics | e2e → webdriverio 8 | webdriverio 9 / none |
+| extract-zip, basic-ftp 5, deepmerge-ts 5, http-cache-semantics | e2e → webdriverio 8 | webdriverio 9 / none |
 | braces 3.0.3, postcss-selector-parser 6 | tailwindcss 3 (build) | none / tailwind 4 |
 
 The desktop renderer's runtime dependencies have no advisories.
@@ -106,10 +106,26 @@ Still open, each with its reason:
 | `lru` 0.12 | `ratatui` 0.28, in the TUI only. The fix is lru 0.16 (a ratatui upgrade). |
 | `glib` 0.18 | GTK3 via Tauri on Linux. The fix is 0.20 (gtk4-rs), which Tauri does not use. |
 | `libsql-sqlite3-parser` 0.13 | no fix released. The DS and pollis-schema only parse our own migrations and queries. |
-| `basic-ftp`, `extract-zip` ×2, `deepmerge-ts`, `fast-xml-parser` | e2e → webdriverio 8 (the tauri-driver WebDriver scenarios). The fix is webdriverio 10, a two-major bump of test tooling. |
-| `glob` 10 (GHSA-3g3m-2fjr-6pw4), `minimatch` 9 (GHSA-g3hv-75wg-m249) | also e2e → webdriverio 8. The fixes are glob 14 and minimatch 11, new majors outside the same-major override rule. Neither is reachable: the glob bug needs an `AbortSignal`, the minimatch one an attacker-supplied pattern. The tree's minimatch 3 and 5 lack the vulnerable `optimizationLevel` code. |
+| `basic-ftp`, `extract-zip` ×2, `deepmerge-ts` | e2e → webdriverio 8 (the tauri-driver WebDriver scenarios). The fix is webdriverio 10, a two-major bump of test tooling. |
 | mobile `zod` 3, `deepmerge` | build-time Expo CLI / config loading, pinned by SDK 57. Neither is in the app bundle (checked against the `expo export` source map). zod's fix is 4.x, outside `@expo/cli`'s `^3.25.76`; deepmerge has no fixed release. |
-| mobile `glob` 13, `minimatch` 10 (same two advisories) | build-time Expo CLI / config / fingerprint. Every SDK 57 release still asks for glob ^13 and minimatch ^10. A cross-major override would feed `@expo/fingerprint`, which computes the OTA `runtimeVersion`, so it waits for the SDK bump. Unreachable for the same reasons as above. |
+
+**Follow-up, 2026-11** (Dependabot alerts #246–#252). These are now fixed by
+overrides that cross a major, each checked against its only consumers:
+
+- `fast-xml-parser` 4 → 5.12 (root): edgedriver 5 only calls
+  `new XMLParser().parse()`, unchanged in 5.x.
+- `glob` 10 → 14 and `minimatch` 9 → 11 (root, e2e → webdriverio 8):
+  `@wdio/config` and `archiver-utils` only call `glob.sync()`, webdriverio
+  only `minimatch(url, pattern)`. glob must move with minimatch, because
+  glob 10–13 read minimatch's RegExp sets, which minimatch 11 removed.
+  webdriverio 10 would not have fixed it alone: its archiver 8 →
+  readdir-glob 3 still asks for minimatch ^10.
+- `glob` 13 → 14 and `minimatch` 10 → 11 (mobile, `@expo/fingerprint`
+  0.20.15, pinned exactly by `@expo/cli`): it only uses `glob()`,
+  `Minimatch#match`, `.pattern` and `.negate`. The iOS and Android
+  fingerprints (the OTA `runtimeVersion`) are byte-identical before and
+  after, so no runtime moves.
+- `node-forge` 1.4.3 (mobile, `@expo/cli`): same-major floor raised.
 
 ## Server images (`trivy image --severity HIGH,CRITICAL`)
 

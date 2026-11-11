@@ -8,12 +8,16 @@ ignoredBuiltDependencies:
   - sharp
   - workerd
 
-# Security floors for transitive deps (vulnerability scan, 2026-10). Every
-# override stays inside the major the parent already asked for, so no parent
-# gets an API it did not request. Advisories whose only fix is a new major
-# (fast-xml-parser 4, deepmerge-ts 5, basic-ftp 5, extract-zip, glob 10,
-# minimatch, all via e2e → webdriverio 8) are test tooling only and are left
-# for their parent's next release; see
+# Security floors for transitive deps (vulnerability scan, 2026-10). An
+# override normally stays inside the major the parent already asked for, so no
+# parent gets an API it did not request. The last three are the exceptions,
+# each checked against its only consumers (all e2e → webdriverio 8, test
+# tooling): edgedriver only calls `new XMLParser().parse()`, unchanged in
+# fast-xml-parser 5; @wdio/config and archiver-utils only call `glob.sync()`,
+# and webdriverio only `minimatch(url, pattern)`, both unchanged in glob 14 /
+# minimatch 11. glob and minimatch move together: glob 10 reads minimatch's
+# RegExp sets, which minimatch 11 removed. deepmerge-ts 5, basic-ftp 5 and
+# extract-zip still wait for webdriverio's next release; see
 # docs/security/dependency-scan-2026-10.md.
 overrides:
   undici@>=7.0.0 <7.30.1: ^7.30.1
@@ -31,3 +35,6 @@ overrides:
   '@babel/core@>=7.0.0 <7.29.6': ^7.29.6
   seroval@>=1.0.0 <1.6.11: ~1.6.12
   seroval-plugins@>=1.0.0 <1.6.11: ~1.6.12
+  fast-xml-parser@<5.12.0: ^5.12.0
+  glob@>=10.0.0 <14.0.0: ^14.0.3
+  minimatch@>=7.0.0 <11.0.1: ^11.0.1
