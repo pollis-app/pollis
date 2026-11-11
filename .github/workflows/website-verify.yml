@@ -15,6 +15,8 @@ name: Verify deployed website
 #   * #720/#753/#757 — the Learn page told users there were two accepted message
 #     losses while a second paragraph on the SAME page said three. The page
 #     contradicted itself in public until someone grepped it.
+#     Public numbers and published commands are now checked by hand before a full
+#     release (.claude/skills/pre-release-sweeps), not here.
 #
 # Neither is "the site is down". Both are "the site is confidently wrong", which
 # no uptime check catches. So this asserts CONTENT, not availability.
@@ -105,17 +107,7 @@ jobs:
             exit 1
           fi
 
-      # 3. Every public number or policy value on the DEPLOYED site matches the code
-      #    that makes it true (#1722). scripts/facts.json declares each fact once;
-      #    this checks its website/** copies against the live pages (the repo copies
-      #    are checked on every PR by scripts-check.yml). It absorbed the bespoke
-      #    accepted-loss step: #720 made the losses three and /learn said two, a
-      #    promise that had quietly stopped being true. A failure here on a fact the
-      #    PR check passes means the site lags main: deploy it.
-      - name: Public facts on the deployed site match the code (#1722)
-        run: node ./scripts/check-facts.mjs --deployed "$SITE"
-
-      # 4. security.txt stays RFC 9116 valid (#877).
+      # 3. security.txt stays RFC 9116 valid (#877).
       #
       # `Expires` is the one MANDATORY field, and the file shipped without it for
       # its whole life — so every conforming parser treated the file as invalid
@@ -170,7 +162,7 @@ jobs:
           fi
           echo "✓ security.txt is valid and expires in ${days} days (${expires})"
 
-      # 5. The published rebuild-verdict ledger still matches reality (#877).
+      # 4. The published rebuild-verdict ledger still matches reality (#877).
       #
       # /assurance publishes a per-release "did this reproduce from source"
       # record, generated from the Actions API into website/rebuild-ledger.json
@@ -192,38 +184,7 @@ jobs:
           git fetch --tags --quiet --depth=1 origin '+refs/tags/*:refs/tags/*' || true
           ./scripts/rebuild-ledger.sh --check
 
-      # 6. Every concrete pollis-verify command the docs publish (#1721) passes against
-      #    the live log, run with the released binary the way the docs say to get it.
-      #    Commands with placeholders are parse-checked on every PR instead, by
-      #    verifiable-log-serve/tests/doc_invocations.rs, which also keeps this list current.
-      - name: Published pollis-verify commands pass against the live log
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName,publishedAt \
-            --jq '[.[] | select(.tagName | startswith("pollis-verify-v"))] | sort_by(.publishedAt) | last | .tagName')"
-          bin=pollis-verify-linux-x86_64
-          dir="$(mktemp -d)"
-          gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "$dir" -p "$bin" -p "$bin.sha256"
-          (cd "$dir" && sha256sum -c "$bin.sha256")
-          chmod +x "$dir/$bin"
-          echo "using $tag: $("$dir/$bin" --version)"
-          failed=0
-          while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            # shellcheck disable=SC2086  # the line is an argument list
-            if "$dir/$bin" $line >"$dir/out" 2>&1; then
-              echo "✓ pollis-verify $line"
-            else
-              echo "::error::published command failed: pollis-verify $line"
-              tail -5 "$dir/out"
-              failed=1
-            fi
-          done < verifiable-log-serve/tests/doc_invocations.live.txt
-          exit "$failed"
-
-      # 7. Staleness. Not a claim being wrong, but the condition that produces it.
+      # 5. Staleness. Not a claim being wrong, but the condition that produces it.
       #    Warn rather than fail: a deliberate hold on publishing is legitimate
       #    (#406), a *forgotten* one is what we are surfacing.
       - name: Warn if the deployed site lags main

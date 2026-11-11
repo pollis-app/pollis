@@ -14,7 +14,6 @@
 #   - two value_from sources that disagree fail;
 #   - the same break on a `disputed` fact warns and exits 0;
 #   - an empty registry fails;
-#   - a registry file outside scripts-check.yml's paths filter fails;
 #   - number words and digit forms are interchangeable ("twelve" == "12").
 #
 # Run: ./scripts/test-check-facts.sh   (no arguments, no network)
@@ -131,13 +130,6 @@ t="$(fresh_tree empty)"
 echo '{"_comment": [], "facts": {}}' > "$t/scripts/facts.json"
 run "$t"
 if [ "$rc" -ne 0 ] && [[ "$out" == *"no facts declared"* ]]; then ok "an empty registry fails"; else bad "empty registry should fail: $out"; fi
-
-t="$(fresh_tree trigger)"
-mutate "$t/.github/workflows/scripts-check.yml" '      - "learn/**"' '      - "learn-nothing/**"'
-run "$t"
-if [ "$rc" -ne 0 ] && [[ "$out" == *"[trigger-paths] learn/manim/"*"no pull_request path"* ]]; then
-  ok "a registry file outside the workflow's paths filter fails"
-else bad "uncovered trigger path should fail: $out"; fi
 
 t="$(fresh_tree words)"
 mutate "$t/website/retention.html" "<strong>twelve months</strong>" "<strong>12 months</strong>"

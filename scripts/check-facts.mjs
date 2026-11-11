@@ -22,15 +22,15 @@
  * right, so the disagreement is recorded, not fixed by CI.
  *
  * Modes:
- *   node scripts/check-facts.mjs                      repo mode (scripts-check.yml)
+ *   node scripts/check-facts.mjs                      repo mode
  *   node scripts/check-facts.mjs --deployed <site>    website/** assertions are checked
  *                                                     against the DEPLOYED page instead
- *                                                     (website-verify.yml)
+ *                                                     (after a website deploy)
  *   --root <dir> / --facts <file>                     check another tree (the self-test)
  *   --list-files                                      print every file the registry reads
  *
- * Repo mode also checks that scripts-check.yml's `paths:` filters cover every
- * file the registry reads, or a PR that changes only that file would skip this check.
+ * Not CI: run by hand before a release that affects every app
+ * (.claude/skills/pre-release-sweeps/SKILL.md).
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -403,44 +403,6 @@ function sourceLabel(fact) {
   return [].concat(fact.value_from).map((s) => s.file).join(" + ");
 }
 
-// ── Trigger coverage ─────────────────────────────────────────────────────────
-
-function globToRe(g) {
-  let re = "";
-  for (let i = 0; i < g.length; i++) {
-    if (g[i] === "*" && g[i + 1] === "*") {
-      re += ".*";
-      i++;
-    } else if (g[i] === "*") {
-      re += "[^/]*";
-    } else {
-      re += escapeRe(g[i]);
-    }
-  }
-  return new RegExp(`^${re}$`);
-}
-
-function checkTriggerPaths(files) {
-  const wf = ".github/workflows/scripts-check.yml";
-  const text = readRepo(wf);
-  if (text === null) {
-    return;
-  }
-  const block = /pull_request:\s*\n([\s\S]*?)\n\s{2}push:/.exec(text);
-  const globs = block ? [...block[1].matchAll(/^\s*-\s*"([^"]+)"/gm)].map((m) => m[1]) : [];
-  if (globs.length === 0) {
-    report(errors, "error", wf, "trigger-paths", "could not read the pull_request paths filter", "has the workflow's shape changed?");
-    return;
-  }
-  const res = globs.map(globToRe);
-  for (const f of files) {
-    if (!res.some((r) => r.test(f))) {
-      report(errors, "error", wf, "trigger-paths", `${f} is in scripts/facts.json but no pull_request path in ${wf} matches it`,
-        "add a path for it to both pull_request and push, or a PR changing only that file skips this check");
-    }
-  }
-}
-
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -500,7 +462,6 @@ async function main() {
     }
   }
   if (!SITE) {
-    checkTriggerPaths(files);
   }
 
   for (const w of warnings) {

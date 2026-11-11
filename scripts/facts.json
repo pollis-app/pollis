@@ -2,8 +2,8 @@
   "_comment": [
     "THE registry of every public number or policy value, tied to the code or config that makes it true (#1722).",
     "",
-    "Checked by scripts/check-facts.mjs: on every PR in the repo (scripts-check.yml), and daily against the",
-    "DEPLOYED website (website-verify.yml --deployed). Values like these change rarely, and when one does nobody",
+    "Checked by scripts/check-facts.mjs, by hand before a release that affects every app (the pre-release-sweeps",
+    "skill): the repo, then the DEPLOYED website (--deployed). Not in CI. Values like these change rarely, and when one does nobody",
     "greps the website for it: /learn said 'two kinds of loss' for weeks after #720 made it three.",
     "",
     "Each fact:",
