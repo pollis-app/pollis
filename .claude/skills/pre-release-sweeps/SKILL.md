@@ -41,22 +41,29 @@ a public doc. If the concrete-command list is stale, regenerate it with
 `UPDATE_DOC_INVOCATIONS=1` on the same command and commit the result.
 
 Then run the concrete commands against the live log with the released binary.
-They replay the log, so expect 10–15 minutes in total; run it in the background
-and do not put a short timeout on each command:
+`remote` replays the whole log and takes several minutes; the rest take seconds.
+Run it under bash as written (zsh does not split `$line` into arguments, so every
+command would fail), in the background, without a short per-command timeout:
 
 ```bash
+bash <<'SWEEP'
+set -uo pipefail
 tag="$(gh release list --limit 100 --json tagName,publishedAt \
   --jq '[.[] | select(.tagName | startswith("pollis-verify-v"))] | sort_by(.publishedAt) | last | .tagName')"
-dir="$(mktemp -d)"; bin=pollis-verify-macos-arm64   # linux: pollis-verify-linux-x86_64
+# linux: pollis-verify-linux-x86_64; Intel mac: pollis-verify-macos-x86_64
+bin=pollis-verify-macos-arm64
+dir="$(mktemp -d)"
 gh release download "$tag" -D "$dir" -p "$bin" -p "$bin.sha256"
 (cd "$dir" && shasum -a 256 -c "$bin.sha256") && chmod +x "$dir/$bin"
 while IFS= read -r line; do
   [ -n "$line" ] || continue
-  "$dir/$bin" $line >/dev/null 2>&1 && echo "ok   $line" || echo "FAIL $line"
+  read -ra args <<<"$line"
+  if "$dir/$bin" "${args[@]}" >/dev/null 2>&1; then echo "ok   $line"; else echo "FAIL $line"; fi
 done < verifiable-log-serve/tests/doc_invocations.live.txt
+rm -rf "$dir"
+SWEEP
 ```
 
-(Check `gh release view "$tag"` for the exact asset name on your platform.)
 
 ## 3. Installer environment variables (#1721)
 
