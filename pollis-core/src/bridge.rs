@@ -562,9 +562,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(device_enrollment::start_device_enrollment(&state()?, user_id).await?)
         }
-        "poll_enrollment_status" => {
+        // One awaited call (#1809): the core backs off and stops at the request's TTL, so the
+        // app never polls. Args camelCase, as desktop's.
+        "await_enrollment_approval" => {
             let request_id: String = arg(&args, "requestId")?;
-            ok(device_enrollment::poll_enrollment_status(&state()?, request_id).await?)
+            ok(device_enrollment::await_enrollment_approval(&state()?, request_id).await?)
         }
         // History transfer (#1735). Args camelCase, as desktop's.
         "list_history_transfer_sources" => {
@@ -1620,6 +1622,8 @@ mod tests {
             "get_avatar_path",
             "upload_avatar",
             "remove_avatar",
+            // #1809
+            "await_enrollment_approval",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }

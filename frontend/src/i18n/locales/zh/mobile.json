@@ -28,6 +28,7 @@
       "starting": "正在开始…",
       "useRecoveryKey": "使用安全密钥",
       "verificationCode": "验证码",
+      "waitFailed": "无法检查批准状态。请检查网络连接，然后重试。",
       "waiting": "等待批准…"
     },
     "initializing": {

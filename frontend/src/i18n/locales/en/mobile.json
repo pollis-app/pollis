@@ -28,6 +28,7 @@
       "starting": "Starting…",
       "useRecoveryKey": "Use recovery key",
       "verificationCode": "Verification code",
+      "waitFailed": "Couldn't check for approval. Check your connection, then try again.",
       "waiting": "Waiting for approval…"
     },
     "initializing": {

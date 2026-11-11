@@ -9,15 +9,16 @@ import { AuthError } from "../../components/auth/AuthError";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
 import {
   useStartEnrollment,
-  useEnrollmentStatus,
+  useAwaitEnrollmentApproval,
   useRecoverWithSecretKey,
   type EnrollmentHandle,
   noteEnrollmentApprover,
 } from "../../hooks/queries";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
+import { isEnrollmentRequestLive } from "../../lib/enrollmentWait";
 import { useThemeRerender } from "../../components/theme";
 
-type Mode = "chooser" | "polling" | "recovery";
+type Mode = "chooser" | "waiting" | "recovery";
 
 export default function Enrollment() {
   useThemeRerender();
@@ -37,25 +38,37 @@ export default function Enrollment() {
   // Slow, and must not run twice.
   const recovering = useSubmitLock();
   const starting = useSubmitLock();
-  const status = useEnrollmentStatus(
-    mode === "polling" ? handle?.request_id ?? null : null,
-  );
+  // One awaited call per request, never a poll (#1809); it ends on an answer, an error or the deadline.
+  const wait = useAwaitEnrollmentApproval(mode === "waiting" ? handle : null);
+  const outcome = wait.outcome;
 
   // On approval go to PIN-create; finalize needs the local DB, which only `set_pin` opens.
   useEffect(() => {
-    if (status.data?.status === "approved") {
-      noteEnrollmentApprover(status.data.approved_by_device_id);
+    if (outcome?.kind === "approved") {
+      noteEnrollmentApprover(outcome.approvedByDeviceId);
       router.replace("/(auth)/pin");
     }
-    if (status.data?.status === "rejected") {
-      setError(t("auth.enrollment.rejected"));
-    }
-    if (status.data?.status === "expired") {
-      setError(t("auth.enrollment.expired"));
+    if (outcome?.kind === "error") {
+      console.warn("[enrollment] approval wait failed:", outcome.message);
     }
     // router is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status.data?.status]);
+  }, [outcome]);
+
+  // The wait ended without an approval: say why and offer Try again. Nothing retries on its own.
+  // A failed check reads in plain words; the core's error goes to the log, not the screen.
+  const waitError =
+    outcome?.kind === "rejected"
+      ? t("auth.enrollment.rejected")
+      : outcome?.kind === "expired"
+        ? t("auth.enrollment.expired")
+        : outcome?.kind === "error"
+          ? t("auth.enrollment.waitFailed")
+          : null;
+  const waitEnded = waitError !== null;
+  // Rejected or expired: the code on screen is dead. After a failed check it still stands.
+  const requestOver = outcome?.kind === "rejected" || outcome?.kind === "expired";
+  const shownError = error ?? (mode === "waiting" ? waitError : null);
 
   useEffect(() => {
     if (isLinked && !autoStarted.current) {
@@ -73,12 +86,26 @@ export default function Enrollment() {
     start.mutate(undefined, {
       onSuccess: (h) => {
         setHandle(h);
-        setMode("polling");
+        setMode("waiting");
       },
       onError: (e) =>
         setError((e as Error).message || t("auth:enroll.startFailed")),
       onSettled: starting.end,
     });
+  };
+
+  // A failed await on a request that is still open waits on it again; anything else needs a new request.
+  const onTryAgain = () => {
+    if (
+      outcome?.kind === "error" &&
+      handle &&
+      isEnrollmentRequestLive(handle.expires_at, Date.now())
+    ) {
+      setError(null);
+      wait.retry();
+      return;
+    }
+    onStart();
   };
 
   const onRecover = () => {
@@ -96,17 +123,17 @@ export default function Enrollment() {
   };
 
   const title =
-    mode === "polling" && isLinked
+    mode === "waiting" && isLinked
       ? t("auth:link.awaitingTitle")
-      : mode === "polling"
+      : mode === "waiting"
         ? t("auth.enrollment.pollingTitle")
         : mode === "recovery"
           ? t("auth.enrollment.recoveryTitle")
           : t("auth.enrollment.chooserTitle");
   const intro =
-    mode === "polling" && isLinked
+    mode === "waiting" && isLinked
       ? t("auth:link.awaitingIntro")
-      : mode === "polling"
+      : mode === "waiting"
         ? t("auth.enrollment.pollingIntro")
         : mode === "recovery"
           ? t("auth.enrollment.recoveryIntro")
@@ -156,9 +183,11 @@ export default function Enrollment() {
           </View>
         ) : null}
 
-        {mode === "polling" && handle && isLinked ? waiting("linked-awaiting-approval") : null}
+        {mode === "waiting" && handle && isLinked && !waitEnded
+          ? waiting("linked-awaiting-approval")
+          : null}
 
-        {mode === "polling" && handle && !isLinked ? (
+        {mode === "waiting" && handle && !isLinked && !requestOver ? (
           <View style={{ gap: 20 }}>
             <Card
               style={{
@@ -183,7 +212,7 @@ export default function Enrollment() {
                 {handle.verification_code}
               </Text>
             </Card>
-            {waiting()}
+            {waitEnded ? null : waiting()}
           </View>
         ) : null}
 
@@ -202,7 +231,7 @@ export default function Enrollment() {
           </View>
         ) : null}
 
-        {error ? <AuthError message={error} /> : null}
+        {shownError ? <AuthError testID="text-enroll-error" message={shownError} /> : null}
       </Body>
       {mode === "recovery" ? (
         <BottomAction>
@@ -229,8 +258,19 @@ export default function Enrollment() {
             {t("common:actions.back")}
           </Button>
         </BottomAction>
-      ) : mode === "polling" ? (
+      ) : mode === "waiting" ? (
         <BottomAction>
+          {waitEnded ? (
+            <Button
+              testID="btn-enroll-try-again"
+              full
+              variant="primary"
+              onPress={onTryAgain}
+              loading={starting.busy}
+            >
+              {t("auth:enroll.tryAgain")}
+            </Button>
+          ) : null}
           <Button
             testID="btn-enroll-cancel"
             variant="subtle"

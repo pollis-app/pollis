@@ -28,6 +28,7 @@
       "starting": "Démarrage…",
       "useRecoveryKey": "Utiliser la clé secrète",
       "verificationCode": "Code de vérification",
+      "waitFailed": "Impossible de vérifier l'approbation. Vérifiez votre connexion, puis réessayez.",
       "waiting": "En attente d'approbation…"
     },
     "initializing": {

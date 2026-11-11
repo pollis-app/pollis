@@ -1,21 +1,20 @@
 // Device enrollment hooks: the new device's side and the approving device's.
 
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
+import {
+  waitForEnrollment,
+  type EnrollmentStatus,
+  type EnrollmentWaitOutcome,
+} from "../../lib/enrollmentWait";
 
 export interface EnrollmentHandle {
   request_id: string;
   verification_code: string;
   expires_at: string;
-}
-
-export type EnrollmentStatusKind = "pending" | "approved" | "rejected" | "expired";
-export interface EnrollmentStatus {
-  status: EnrollmentStatusKind;
-  // The device that approved this one (#1735), when the core reports it; the history offer's default source.
-  approved_by_device_id?: string | null;
 }
 
 /// No verification code on purpose (#1096): the approver types the one shown on the new device.
@@ -27,7 +26,6 @@ export interface PendingEnrollmentRequest {
 }
 
 export const enrollmentQueryKeys = {
-  status: (requestId: string | null) => ["enrollment", "status", requestId] as const,
   pending: (userId: string | null) => ["enrollment", "pending", userId] as const,
 };
 
@@ -45,27 +43,37 @@ export function useStartEnrollment() {
   });
 }
 
-/** Polls every 3s while pending; stops on a terminal state. */
-export function useEnrollmentStatus(requestId: string | null) {
-  return useQuery({
-    queryKey: enrollmentQueryKeys.status(requestId),
-    queryFn: async (): Promise<EnrollmentStatus> => {
-      if (!requestId) {
-        throw new Error("No request");
-      }
-      return await invoke<EnrollmentStatus>("poll_enrollment_status", {
-        requestId,
-      });
-    },
-    enabled: !!requestId,
-    refetchInterval: (q) => {
-      const data = q.state.data as EnrollmentStatus | undefined;
-      if (!data || data.status === "pending") {
-        return 3_000;
-      }
-      return false;
-    },
-  });
+/**
+ * The new device's wait for approval (#1809): one awaited `await_enrollment_approval` per
+ * request and attempt, never a poll. `retry` starts a fresh await on the same request.
+ * Unmounting, a new handle or a retry cancels the wait; a late answer is ignored.
+ */
+export function useAwaitEnrollmentApproval(handle: EnrollmentHandle | null) {
+  const [attempt, setAttempt] = useState(0);
+  const [settled, setSettled] = useState<{
+    handle: EnrollmentHandle;
+    attempt: number;
+    outcome: EnrollmentWaitOutcome;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!handle) {
+      return;
+    }
+    return waitForEnrollment({
+      requestId: handle.request_id,
+      expiresAt: handle.expires_at,
+      call: (requestId) =>
+        invoke<EnrollmentStatus>("await_enrollment_approval", { requestId }),
+      onSettle: (outcome) => setSettled({ handle, attempt, outcome }),
+    });
+  }, [handle, attempt]);
+
+  const outcome =
+    settled && settled.handle === handle && settled.attempt === attempt
+      ? settled.outcome
+      : null;
+  return { outcome, retry: () => setAttempt((a) => a + 1) };
 }
 
 export function useFinalizeEnrollment() {

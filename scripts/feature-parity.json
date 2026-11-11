@@ -67,7 +67,6 @@
   "known_debt": {
     "desktop_only": [
       "audit_peer_account_key",
-      "await_enrollment_approval",
       "catch_up_all_mls_groups",
       "get_message_retention",
       "get_overlay_mode",
@@ -92,12 +91,12 @@
     ],
     "mobile_only": [
       "delete_group",
-      "get_dm_channel",
-      "poll_enrollment_status"
+      "get_dm_channel"
     ],
     "missing_from_cli": [
       "accept_group_invite",
       "approve_join_request",
+      "await_enrollment_approval",
       "block_user",
       "cancel_device_link",
       "claim_device_link",
