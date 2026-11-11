@@ -40,10 +40,10 @@ Every row is held by one person. The last column is what a *user* loses, not wha
 
 | Asset | Where it lives | What it does | If it is lost |
 |---|---|---|---|
-| GitHub `pollis-app/pollis` | GitHub | Source, all CI, releases, the published status + incident record | No releases, no CI gates, no published record. The source already in the world stays (PolyForm Noncommercial) |
+| GitHub `pollis-app/pollis` | GitHub | Source, all CI, releases | No releases, no CI gates. The source already in the world stays (PolyForm Noncommercial) |
 | Doppler (`pollis/prd`) | Doppler | Source of truth for service secrets; synced to GitHub Actions and the Wrangler Secrets Store | Every secret below must be reissued from its own provider |
 | `TAURI_SIGNING_PRIVATE_KEY` (+ password) | GitHub secret | Signs the auto-updater manifests | **The worst single loss.** The matching public key is compiled into every shipped client (`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`), so no future build can ever be accepted as an update by an already-installed app. Every user would have to reinstall by hand |
-| `STH_SIGNING_KEY` | GitHub secret, backed up in Doppler | Signs all three transparency trees | The log cannot be republished. Rotating to a new key is **not** cleanly recoverable — see §5 |
+| `STH_SIGNING_KEY` | GitHub secret, backed up in Doppler | Signs all three transparency trees | The log cannot be republished until the offline root (#754) signs a key set naming a new signer, which installed clients accept without an update. A *leaked* key is harder: the key set cannot revoke today's compiled-in signer, so retiring it takes a release — see §5 |
 | Apple: `APPLE_CERTIFICATE`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_PASSWORD` | GitHub secrets / Apple Developer | macOS signing + notarization; the App Store Connect record | No new macOS builds. Installed apps keep working; notarization of *existing* builds is already done |
 | Azure Trusted Signing: `AZURE_CLIENT_ID/SECRET/TENANT_ID`, `AZURE_CERT_PROFILE` | GitHub secrets / Azure | Windows installer signing | No new Windows builds; SmartScreen warnings return for anything signed another way |
 | Cloudflare account | Cloudflare | DNS for `pollis.com`, `api`, `cdn`, `verify`; Pages (website); Workers + containers (the DS, whose front-door Worker also serves the OTA updates at `api.pollis.com/updates/`); R2 (releases + the served transparency tree + mobile OTA updates under `ota/`) | **Everything user-facing stops.** This is the single largest concentration |
@@ -52,8 +52,9 @@ Every row is held by one person. The last column is what a *user* loses, not wha
 | LiveKit + `VPS_SSH_KEY` | Own VPS | Voice/video/screenshare SFU | Calls stop. Text messaging is unaffected |
 | Resend | Resend | Sends the email OTP | **Nobody can sign in or add a device.** Existing sessions keep working |
 | `AUR_SSH_KEY` | GitHub secret / AUR | Publishes the Arch package | The AUR package goes stale. Already best-effort by design |
-| `POLLIS_SIDELOAD_*` (Android sideload keystore + passwords) | Doppler `prd_prod` → GitHub secrets; keystore also at `~/.pollis/pollis-sideload.jks` on the release workstation | Signs the APK pollis.com offers outside Google Play (`mobile-apk-release.yml`); its certificate is pinned in `mobile/store/android-sideload-cert.sha256` and on pollis.com/android | Same shape as the updater key, for sideloaded Android installs: Android accepts an update only from the certificate already installed, so no future APK can update an existing sideload install. Every such user would have to uninstall (losing on-device history) and reinstall. Play installs are unaffected — Google holds their app-signing key |
+| `POLLIS_SIDELOAD_*` (Android sideload keystore + passwords) | Doppler `prd_prod` → GitHub secrets; keystore also at `~/.pollis/pollis-sideload.jks` on the release workstation | Signs the APK pollis.com offers outside Google Play (`mobile-apk-release.yml`); its certificate is pinned in `mobile/store/android-sideload-cert.sha256` and on pollis.com/android | Same shape as the updater key, for sideloaded Android installs: Android accepts an update only from the certificate already installed, so no future APK can update an existing sideload install. Every such user would have to uninstall (losing on-device history, unless they copy it back from another of their enrolled devices, #1735) and reinstall. Play installs are unaffected — Google holds their app-signing key |
 | `OTA_CODE_SIGNING_KEY` (mobile OTA, #1250) | Doppler `prd_prod` → the `ota-signing` GitHub environment only; offline copy in 1Password | Signs every over-the-air JS update and rollback directive (`mobile-ota-release.yml`). Its certificate is compiled into every OTA-capable mobile build | Same shape as the updater key, for JS only: no new OTA update or rollback can be signed for builds that pin its certificate, so fixes reach those phones only through store/APK releases. Nothing breaks — phones keep running what they have, and store builds still ship. A *leaked* key is worse than a lost one: see `docs/signing-key-compromise-runbook.md` → "OTA code-signing key" |
+| Offline transparency root key (#754) | Offline, never in CI or Doppler | Signs the key sets that name which keys may sign the log; its public half is pinned in every client (`PINNED_LOG_ROOT_KEYS`) | No new log signer can be authorised without a client release, so a lost `STH_SIGNING_KEY` becomes final again. **Leaked:** see `docs/signing-key-compromise-runbook.md` → "If the ROOT is compromised" |
 | `POLLIS_OVERLAY_DIRECTORY_KEY` | GitHub secret | Signs the relay directory | Clients reject a directory nobody can re-sign; the overlay stops being usable |
 | Expo/EAS, APNs key, FCM service account | EAS (held by EAS, not by this repo) | Mobile push | Push stops on every mobile install (TestFlight, Play testing tracks, sideload APK) until the credential is reissued with `eas credentials` |
 | Play **upload key** (`pollis-upload.jks`) | Owner's workstation (`~/.pollis/`), passwords in `~/.gradle/gradle.properties` (`POLLIS_UPLOAD_*`) | Signs the Android App Bundle uploaded to Play | No new Play uploads until Google resets it. Play App Signing holds the key users' installs trust, so a reset (Play Console → App integrity → request upload key reset) changes nothing on devices. **No backup copy is recorded**: losing the workstation means that reset. **Leaked:** the holder can sign bundles Play would accept from us, but still needs Play Console or the service account to upload one; request the reset at once — see `docs/signing-key-compromise-runbook.md` |
@@ -62,8 +63,9 @@ Every row is held by one person. The last column is what a *user* loses, not wha
 
 **Two observations a reader should draw from that table.** First, the failures are mostly *availability*
 and *distribution*, not confidentiality: no row above can read a message, because the servers never hold
-plaintext or private message keys. Second, the two rows whose loss is genuinely unrecoverable — the
-updater key and the log signing key — are both **signing** keys whose public halves are pinned inside
+plaintext or private message keys. (A *stolen* updater, OTA or sideload signing key is the exception: it can
+sign a build that installed apps accept and that runs where messages are decrypted, which is why custody matters.) Second, the rows whose loss is genuinely unrecoverable — the
+updater key, and for their builds the sideload and OTA keys — are **signing** keys whose public halves are pinned inside
 software already installed on other people's machines. Pinning is what makes them strong and what makes
 losing them final.
 
@@ -74,7 +76,7 @@ Assume the operator stops, everything keeps auto-paying, and nobody intervenes.
 | When | What happens | Visible to a user? |
 |---|---|---|
 | Immediately | Nothing. Messages deliver; the DS keeps serving; the site stays up | No |
-| Within ~2 days | The daily transparency publish stops. New account keys and commits stop being anchored | Only to someone checking the publisher's run history (§4) |
+| From its first failure | The daily transparency publish runs unattended until a run first fails (an expired token, a database or toolchain error); nobody re-runs it, so from then on new account keys and commits stop being anchored | Only to someone checking the publisher's run history (§4) |
 | Within ~2 days | `status.pollis.com` keeps probing and keeps reporting the DS as up, because it is — an abandoned service and a healthy one look identical from the outside until something expires | No; a live status page is not evidence anyone is operating the service |
 | ~60 days | GitHub disables scheduled workflows on an inactive repository. Every cron in this repo stops, including the ones above | Same as above, silently more so |
 | Months | Apple/Azure signing credentials lapse on their own renewal cycles. No new signed builds are possible even with the keys | Only on the next release that never comes |
@@ -161,12 +163,13 @@ In order, assuming they have somehow obtained the accounts (**→ #723** — not
    `docs/signing-key-compromise-runbook.md`.
 
 **The structural problem, which a successor must be told rather than discover.**
-`docs/sth-signing-key-custody.md` §3 records it: the same key signs the *binaries* tree, and the pinned
-log key is a `const` in the client. So re-pinning a new log key requires shipping a client update — and
-the mechanism a user has for verifying a client update is the binaries tree, signed by the key being
-retired. **Recovering from a compromised or lost log key currently requires trusting the thing the
-compromise undermines.** The fix is the anchor split, decided and tracked in **#754**, and until it lands
-nothing may describe a log-key compromise as cleanly recoverable — including this document.
+`docs/sth-signing-key-custody.md` §3 records the original problem: the same key signs the *binaries* tree, and the
+pinned log key is a `const` in the client, so re-pinning a new log key meant a client update verified by the key
+being retired. The anchor split (**#754**, landed in #806) fixes the *loss* case: clients also pin an **offline
+root**, and a root-signed key set can name a new signer with no client release. Two gaps remain
+(`docs/signing-key-compromise-runbook.md`): a key set adds signers but cannot revoke a compiled-in one, so
+**retiring today's signer after a compromise still takes a release verified by the binaries tree it signs**; and
+the root is a third singly-held key whose own compromise has no in-band recovery.
 
 ## 6. What is deferred to #723, explicitly
 
@@ -197,7 +200,8 @@ Each is either already enforced by CI or is a one-line ask. Nothing aspirational
       alongside the service status it already publishes.
 - [ ] **A second holder for the two pinned signing keys.** The single highest-value continuity action
       available, and it needs a person to hold them (**→ #723**).
-- [ ] **The anchor split (#754)**, without which a log-key loss is not cleanly recoverable (§5).
+- [x] **The anchor split (#754, built in #806).** A lost log key is recoverable by a root-signed key set; retiring a
+      compromised compiled-in signer still needs a release (§5).
 - [ ] **Independent witness/gossip monitoring (#763)**, without which "no alarm" means "nobody looked".
 
 ## Related

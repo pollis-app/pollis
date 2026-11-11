@@ -94,7 +94,7 @@ grounds that it had not hit the non-determinism macOS did. That turned out to be
 false: it failed the v1.8.3 release twice in a row, with a **different** hash each
 time.
 
-On **every** platform the digest is published as a `*.payload-sha256` release-asset
+On **both signed** platforms the digest is published as a `*.payload-sha256` release-asset
 sidecar that `scripts/attest-binaries.sh` reads back as `payload_sha256`. The attest
 job never hashes a signed artifact for the payload leaf (it opens the signed
 artifact only to reach the installed executable for the `exe` leaf).
@@ -231,8 +231,11 @@ not link `libsql`, so there is nothing for a token to authenticate.)
   Both of `rebuild-verify.yml`'s runs failed on exactly this while these documents
   described independent Linux reproduction as a working, shipped property.
   `scripts/check-build-recipe.py` now fails CI whenever the three hand-maintained
-  lists disagree — `option_env!` in `config.rs`, the release job's exports, and the
-  rebuilder's recipe — so the gap cannot silently reopen. Both directory values are
+  lists drift apart — every value the release job exports must be in the rebuilder's
+  recipe, and every recipe entry must be an `option_env!` key in `config.rs` — so the
+  gap cannot silently reopen. (`config.rs` also reads `POLLIS_OVERLAY`,
+  `POLLIS_OVERLAY_RELAY` and `POLLIS_OVERLAY_RELAY_CERT`; the release leaves them unset,
+  so they bake as absent on both sides.) Both directory values are
   public by construction (the key is the *verification* half; the private half never
   leaves the minting script), so publishing them in the recipe costs nothing.
 - **The recipe is also the ceiling of a build job's environment.** The same
@@ -274,13 +277,13 @@ not link `libsql`, so there is nothing for a token to authenticate.)
   actionable signal was `strings` set-difference between the shipped and rebuilt
   binaries, which named `LOG_DB_TOKEN` directly.
 
-- **`LOG_DB_TOKEN` is published in the recipe, and that costs nothing.** It is a
-  read-only bearer token to the commit-log DB, and it is compiled into every shipped
-  binary — it was recovered from the public `v1.8.4` AppImage with `strings` while
-  diagnosing the above. Anyone who downloads Pollis already holds it, so publishing it
-  as a repository variable adds no exposure that shipping the binary did not. Scoping
-  it out of the client remains the better end state (see below); until then, publishing
-  it is what makes the reproduction claim true for everyone rather than for us alone.
+- **`LOG_DB_TOKEN` was published in the recipe while the client baked it (history).**
+  It was a read-only bearer token to the commit-log DB, compiled into every binary
+  before #987 — it was recovered from the public `v1.8.4` AppImage with `strings` while
+  diagnosing the above — so publishing it as a repository variable added no exposure
+  that shipping the binary had not. #987 then removed it from the client and from the
+  recipe entirely (see "NO baked credentials remain" below); current releases neither
+  bake nor need it.
 - **C/C++ build paths are remapped too.** `--remap-path-prefix` is a *rustc* flag and
   does not reach C/C++ compiled by build scripts through `cc-rs`, so v1.8.4 shipped
   with `/home/runner/.cargo/.../cxx-1.0.194/src/cxx.cc` embedded. Both the release and
@@ -297,9 +300,9 @@ not link `libsql`, so there is nothing for a token to authenticate.)
   `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are no longer read anywhere in the
   client — media upload (R2) and LiveKit token minting now go through the Delivery
   Service / broker, not the shipped binary — so they are **no longer compiled in**.
-  (The desktop-release workflow still exports `R2_SECRET_KEY` and
-  `LIVEKIT_API_SECRET` into the build env, but the client no longer reads them, so
-  they are dead build-env vars; that workflow cleanup is out of scope here.) This
+  (The desktop-release workflow went on exporting `R2_SECRET_KEY` and
+  `LIVEKIT_API_SECRET` into every build job's env with no consumer; both are gone
+  now, and the recipe-ceiling check above keeps them out.) This
   closes what was the single largest secretless-reproduction gap.
 - **NO baked credentials remain (#987).** This bullet used to name two: the
   publishable read-only `TURSO_TOKEN`, and the optional observability
@@ -484,7 +487,7 @@ release into a pinned container. Until then, treat a Linux payload rebuild of an
 ### 7. Native C/C++ dependencies (`webrtc-sys` / `libwebrtc`, `webrtc-audio-processing-sys`) — best-effort
 These vendored C/C++ builds (clang, meson, ninja, VAAPI wrappers) are the
 least-controlled inputs: native compilers embed paths (mitigated by
-`--remap-path-prefix`) and can vary across patch versions. `meson>=1.3` is a
+`-ffile-prefix-map`, the C/C++ counterpart of `--remap-path-prefix`) and can vary across patch versions. `meson>=1.3` is a
 **floor, not a pin**. These are the most likely single source of a
 non-reproducing byte in the Linux payload; the honest position is
 "reproducible **modulo** this audited set of vendored native builds," and the

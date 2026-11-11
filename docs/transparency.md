@@ -1,7 +1,8 @@
 # Key Transparency: the Pollis verifiable log
 
 Pollis publishes an append-only transparency log of every MLS commit, every account
-identity-key version and every released binary, so that anyone can check that the
+identity-key version, every desktop release and every mobile over-the-air update (the
+terminal client, the Android APK and the store builds are signed but not yet logged), so that anyone can check that the
 server has not rewritten a conversation's history or swapped someone's key. This
 document covers the threat, the trust model, the components and the design
 decisions. To run the verifier against the live log, see
@@ -34,8 +35,10 @@ sees it.
 
 ## Trust model
 
-A verifier trusts the log's ML-DSA-44 public key. It checks signed tree heads and
-Merkle proofs against that key, and trusts nothing else: not the server, not the
+A verifier trusts the log's ML-DSA-44 public key, plus any signing key that the
+log's offline root key authorises in the root-signed key set (`/v1/key-set.json`,
+#754, #1454); both the signing key and the root key are compiled in. It checks signed
+tree heads and Merkle proofs against those keys, and trusts nothing else: not the server, not the
 Turso database, not the host serving the files, not the network.
 
 The files can be served from any CDN, bucket or compromised machine. Changing one
@@ -218,7 +221,7 @@ already signed.
 
 ### Why no user-facing check was affected
 
-No Pollis app checks the commit-log tree. The desktop and mobile apps audit the
+No Pollis app checks the commit-log tree. The desktop app audits the
 account-key tree (`self_audit_account_key`, `audit_peer_account_key`) and the
 binaries tree (`verify_own_build`), and both stayed consistent throughout. So no
 user saw an alarm, and no message, key or verdict in any app depended on the forked
@@ -404,7 +407,9 @@ pre-#701 binary behaves like this:
 | `group` | wrong: reports `Found: no` for a conversation that is present | It decodes leaves as the old `CommitLeaf`, which requires `conversation_id`. Pseudonymous leaves fail to decode, the error is swallowed, and nothing is selected. |
 | `account`, `release` | unaffected | Separate trees; neither the manifest nor the leaf encoding changed. |
 
-Old binaries cannot be fixed, but the next format change will not repeat this.
+Since the commit-log reset (#1579), these binaries, like every `pollis-verify` older
+than `v0.10.0`, also fail `remote` on the retired tree. Old binaries cannot be fixed,
+but the next format change will not repeat this.
 Served manifests now carry `format_version` (`verifiable_log_serve::bundle::FORMAT_VERSION`,
 currently `2`), and `pollis-verify` reads it before anything else:
 
@@ -450,7 +455,7 @@ On replay, the binaries tree enforces three rules over the whole tree:
 - **Monotonic releases**: once a newer tag has appeared, an older tag cannot appear
   again.
 - **Payload/signed pairing**: every `layer:"signed"` leaf (a signed or notarized,
-  non-reproducible wrapper) must have an earlier `layer:"payload"` leaf with the
+  non-reproducible wrapper) and every `layer:"exe"` leaf (the installed main executable) must have an earlier `layer:"payload"` leaf with the
   same `payload_sha256`, so the reproducible content of every signed artifact is
   itself logged.
 
@@ -461,9 +466,10 @@ correctly signed.
 ### Mobile OTA updates in the binaries tree (#1250)
 
 An over-the-air update replaces the mobile app's JS — the code that handles
-plaintext — without a store review, so it is logged exactly like a release,
-**before** it goes live (`mobile-ota-release.yml` appends, then flips the live
-pointer). It uses the same frozen `BinaryRecord`; nothing in the leaf contract or
+plaintext — without a store review, so it is logged exactly like a release:
+`mobile-ota-release.yml` appends its leaves to the publisher's records **before** it
+goes live, then flips the live pointer and runs the publish that signs a head over
+them, so `pollis-verify release` can check it a few minutes after it is live. It uses the same frozen `BinaryRecord`; nothing in the leaf contract or
 the verifier changed:
 
 | field | value |
@@ -525,7 +531,7 @@ The custody options, design and step-by-step ceremony are in
 follow it, not this summary. The last rotation was #732, which replaced the
 original seed with new key material.
 
-Two steps are easy to get wrong:
+Three steps are easy to get wrong:
 
 - Dispatch `transparency-publish.yml` with **`full_resync: true`**. Re-signed
   artifacts are the same byte length as the ones they replace, so the default

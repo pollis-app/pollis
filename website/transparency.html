@@ -331,8 +331,8 @@
       <div class="kt-header">
         <h1 class="kt-title">Key Transparency</h1>
         <p class="kt-subtitle">
-          Check that no one, including us, has secretly added, removed, or rewritten a conversation's
-          history. Enter a conversation ID to see the proof.
+          Check that no one, including us, has secretly added, removed, or rewritten the membership
+          and key changes in a conversation's history. Enter a conversation ID to see the proof.
         </p>
       </div>
 
@@ -346,7 +346,7 @@
         (tags <code>pollis-verify-v*</code>, <a
           href="https://github.com/pollis-app/pollis/blob/main/docs/verify-transparency-log.md"
           target="_blank" rel="noopener noreferrer">guide here</a>).
-        The only thing you have to trust is the log's pinned public key. It is an ML-DSA-44 (post-quantum) key,
+        With <code>pollis-verify</code>, the only thing you have to trust is the log's pinned public key; this page also asks you to trust its own code. It is an ML-DSA-44 (post-quantum) key,
         so its signatures over past history stay trustworthy even against a future quantum computer. It is published on the
         <a href="artifacts.html">artifacts page</a>, in the <code>pollis-verify</code> release body, and compiled into
         every app build.
