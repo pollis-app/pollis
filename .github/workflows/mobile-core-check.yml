@@ -398,9 +398,12 @@ jobs:
         working-directory: mobile
         run: pnpm install --ignore-workspace --frozen-lockfile
 
+      # Pinned: an unpinned `dlx` takes whatever `latest` is that minute, and
+      # expo-doctor 1.21.7 (2026-11-11) shipped without its @expo/env
+      # dependency, which failed this job on every PR. Bump it by hand.
       - name: expo-doctor
         working-directory: mobile
-        run: pnpm dlx expo-doctor
+        run: pnpm dlx expo-doctor@1.21.6
 
       # Node's own runner over the pure modules under mobile/hooks — no Expo,
       # no device, no RN renderer, so it belongs in the cheap job rather than
