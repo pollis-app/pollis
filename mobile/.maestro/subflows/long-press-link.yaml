@@ -1,0 +1,53 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Long-press the message link whose text matches ${LINK} until its link sheet
+# (`sheet-link`) opens. The caller asserts the sheet afterwards.
+#
+# A long press right after the message settles (the row is still laying out,
+# the keyboard is still going away) sometimes does not register: the iPad Pro
+# 13-inch (M5) missed one in the 1.0.34 release gate (#1813), and
+# long-press-message.yaml retries for the same reason. So wait for the screen
+# to settle, then try up to 3 times. Unrolled like long-press-message.yaml,
+# since `repeat: times:` did not reliably iterate there.
+- extendedWaitUntil:
+    visible: ${LINK}
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - longPressOn: ${LINK}
+      - extendedWaitUntil:
+          visible:
+            id: "sheet-link"
+          timeout: 4000
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - longPressOn: ${LINK}
+      - extendedWaitUntil:
+          visible:
+            id: "sheet-link"
+          timeout: 4000
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - longPressOn: ${LINK}
+      - extendedWaitUntil:
+          visible:
+            id: "sheet-link"
+          timeout: 4000
+          optional: true

@@ -51,7 +51,10 @@ tags:
 - hideKeyboard
 - takeScreenshot: message-links-01-sent
 
-- longPressOn: ".*example.com/pollis-e2e/links.*"
+- runFlow:
+    file: ../subflows/long-press-link.yaml
+    env:
+      LINK: ".*example.com/pollis-e2e/links.*"
 - extendedWaitUntil:
     visible:
       id: "sheet-link"
@@ -65,15 +68,38 @@ tags:
 - assertVisible:
     id: "btn-link-copy"
 - takeScreenshot: message-links-02-link-sheet
+# "Copied" shows for 2 s only. On Android a tap returns after its settle wait,
+# 3 to 4 s, so the label had gone before a plain assert ran (#1813): tap
+# without the settle wait, then poll for the label.
 - tapOn:
     id: "btn-link-copy"
-- assertVisible: "Copied"
+    waitToSettleTimeoutMs: 0
+- extendedWaitUntil:
+    visible: "Copied"
+    timeout: 1500
 - tapOn:
     id: "btn-link-close"
 - extendedWaitUntil:
     notVisible:
       id: "sheet-link"
     timeout: 5000
+# The outcome that lasts: the system clipboard holds the link. Paste it into
+# the composer through the system's own Paste (Maestro's pasteText pastes
+# only what its copyTextFrom took, never the system clipboard), check it,
+# then clear the composer for the next step.
+- tapOn:
+    id: "input-composer"
+- longPressOn:
+    id: "input-composer"
+- tapOn: "Paste"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+      text: "https://example.com/pollis-e2e/links/check-that-a-long-address-wraps-across-several-lines-of-the-message-body\\?with=query&and=more"
+    timeout: 5000
+- takeScreenshot: message-links-02b-pasted
+- eraseText: 200
+- hideKeyboard
 
 # A punycode host: a tap asks first and shows the ASCII host.
 - tapOn:
@@ -125,7 +151,10 @@ tags:
 
 # Last, so nothing has to come back from the browser: Open hands the link to
 # the system browser and Pollis leaves the foreground.
-- longPressOn: ".*example.com/pollis-e2e/links.*"
+- runFlow:
+    file: ../subflows/long-press-link.yaml
+    env:
+      LINK: ".*example.com/pollis-e2e/links.*"
 - extendedWaitUntil:
     visible:
       id: "sheet-link"
