@@ -68,7 +68,7 @@ LIVE_SIG = "f5e206e902c156604ed91a2bd101ae63468946f6989a116e18554ca70bf1ba45"
 # STALE: this is the log's retired Ed25519 key. The log now signs with
 # ML-DSA-44 (#668) and the new 2624-hex-char key does not fit this layout —
 # these scenes need re-rendering with an elided key once rotation completes.
-PINNED_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
+PINNED_KEY = "56ab128f3f10107382802e69d3de8659d0127c711feb9c849f5b213c6f2d0af3"
 
 # Same toy leaves as Topic 7, so the reader recognises the tree.
 LEAVES = ["id:ariel", "id:boris", "id:chen", "id:diego",

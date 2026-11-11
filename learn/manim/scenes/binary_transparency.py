@@ -126,7 +126,7 @@ class BinaryTransparency(Scene):
 
         self.play(FadeOut(VGroup(app, gate, pass_, inside, still, line)))
         turn = VGroup(
-            Text("So we publish the fingerprint of every release, in public.",
+            Text("So we publish the fingerprint of every desktop release and mobile update.",
                  color=FG).scale(0.5),
             Text('The question stops being  "did Pollis sign this?"', color=MUTED).scale(0.45),
             Text('And becomes  "is this the app they gave EVERYONE,', color=AMBER).scale(0.5),

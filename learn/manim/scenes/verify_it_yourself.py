@@ -54,7 +54,7 @@ LIVE_SIZE = 60
 # STALE: this is the log's retired Ed25519 key. The log now signs with
 # ML-DSA-44 (#668) and the new 2624-hex-char key does not fit this layout —
 # these scenes need re-rendering with an elided key once rotation completes.
-PINNED_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
+PINNED_KEY = "56ab128f3f10107382802e69d3de8659d0127c711feb9c849f5b213c6f2d0af3"
 
 # Verbatim from the real run (trimmed to fit the frame).
 RUN_LINES = [

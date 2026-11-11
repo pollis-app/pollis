@@ -249,7 +249,7 @@ class ThreatModel(Scene):
             Text("RED, outside what any messenger defends", color=DANGER).scale(0.42),
             Text("Someone holding your unlocked device · our own bugs",
                  color=MUTED).scale(0.32),
-            Text("· A new device starts empty: there is no key backup (topic 4)",
+            Text("· A new device starts empty unless you copy from your old one (topic 4)",
                  color=MUTED).scale(0.32),
         ).arrange(DOWN, buff=0.1).move_to(red.get_center())
 

@@ -189,8 +189,8 @@ for (const slug of slugs) {
   } else {
     copies.push([vttPath, vttCues(readFileSync(join(ROOT, vttPath), "utf8"))]);
   }
-  if (!page.includes(`src="learn/media/${slug}.vtt"`)) {
-    errors.push(`${PAGE}: the ${slug} <track> does not load learn/media/${slug}.vtt — the page must serve the caption file this repo checks`);
+  if (!page.includes(`src="/learn/media/${slug}.vtt"`)) {
+    errors.push(`${PAGE}: the ${slug} <track> does not load /learn/media/${slug}.vtt — the page must serve the caption file this repo checks`);
   }
   const paras = transcriptParas(page, slug);
   if (paras === null) {

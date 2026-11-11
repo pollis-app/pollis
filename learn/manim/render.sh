@@ -33,7 +33,8 @@ echo "▶ rendering $scene_class from $src at -q$q (no audio)"
 "$manim" "-q$q" --format=mp4 --disable_caching "$src" "$scene_class" -o "$slug"
 
 # Manim drops the mp4 under media/videos/<file>/<res>/<slug>.mp4 — find the newest.
-mp4="$(find "$here/media/videos" -name "${slug}.mp4" -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+# `ls -t` rather than GNU find's -printf, so this also runs on macOS (BSD find).
+mp4="$(find "$here/media/videos" -name "${slug}.mp4" -exec ls -t {} + | head -1)"
 [ -n "$mp4" ] || { echo "render produced no mp4"; exit 1; }
 
 cp "$mp4" "$out/$slug.mp4"

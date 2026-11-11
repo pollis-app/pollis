@@ -211,9 +211,9 @@ class MerkleTrees(Scene):
 
         # Swap to the REAL live root.
         real = VGroup(
-            Text("The real thing, right now:", color=MUTED).scale(0.4),
+            Text("The real thing, when this was made:", color=MUTED).scale(0.4),
             Text(LIVE_ROOT[:32] + "…", font=MONO, color=AMBER).scale(0.42),
-            Text(f"Binaries log · {LIVE_SIZE} entries · verify.Pollis.Com",
+            Text(f"Binaries log · {LIVE_SIZE} entries · verify.pollis.com",
                  color=MUTED).scale(0.36),
         ).arrange(DOWN, buff=0.14)
         real.move_to(root_label.get_center()).shift([0, 0.25, 0])
@@ -341,9 +341,9 @@ class MerkleTrees(Scene):
 
         turn = VGroup(
             Text("What it removes is the ability to change the list quietly.", color=OK).scale(0.5),
-            Text("Showing one list to you and another to someone else, impossible.",
+            Text("Showing one list to you and another to someone else: caught on compare.",
                  color=MUTED).scale(0.4),
-            Text("Or changing it later, impossible.", color=MUTED).scale(0.4),
+            Text("Or changing it later: caught the same way.", color=MUTED).scale(0.4),
         ).arrange(DOWN, buff=0.22).shift([0, -0.6, 0])
         self.play(FadeIn(turn, shift=UP * 0.2))
         self.wait(1.2)
