@@ -48,20 +48,26 @@ export default function Enrollment() {
       noteEnrollmentApprover(outcome.approvedByDeviceId);
       router.replace("/(auth)/pin");
     }
+    if (outcome?.kind === "error") {
+      console.warn("[enrollment] approval wait failed:", outcome.message);
+    }
     // router is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outcome]);
 
   // The wait ended without an approval: say why and offer Try again. Nothing retries on its own.
+  // A failed check reads in plain words; the core's error goes to the log, not the screen.
   const waitError =
     outcome?.kind === "rejected"
       ? t("auth.enrollment.rejected")
       : outcome?.kind === "expired"
         ? t("auth.enrollment.expired")
         : outcome?.kind === "error"
-          ? outcome.message || t("auth:enroll.errorHeading")
+          ? t("auth.enrollment.waitFailed")
           : null;
   const waitEnded = waitError !== null;
+  // Rejected or expired: the code on screen is dead. After a failed check it still stands.
+  const requestOver = outcome?.kind === "rejected" || outcome?.kind === "expired";
   const shownError = error ?? (mode === "waiting" ? waitError : null);
 
   useEffect(() => {
@@ -181,7 +187,7 @@ export default function Enrollment() {
           ? waiting("linked-awaiting-approval")
           : null}
 
-        {mode === "waiting" && handle && !isLinked && !waitEnded ? (
+        {mode === "waiting" && handle && !isLinked && !requestOver ? (
           <View style={{ gap: 20 }}>
             <Card
               style={{
@@ -206,7 +212,7 @@ export default function Enrollment() {
                 {handle.verification_code}
               </Text>
             </Card>
-            {waiting()}
+            {waitEnded ? null : waiting()}
           </View>
         ) : null}
 

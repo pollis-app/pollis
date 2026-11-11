@@ -28,6 +28,7 @@
       "starting": "Iniciando…",
       "useRecoveryKey": "Usar la clave secreta",
       "verificationCode": "Código de verificación",
+      "waitFailed": "No se pudo comprobar la aprobación. Revisa tu conexión y vuelve a intentarlo.",
       "waiting": "Esperando aprobación…"
     },
     "initializing": {

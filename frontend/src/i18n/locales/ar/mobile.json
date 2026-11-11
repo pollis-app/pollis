@@ -28,6 +28,7 @@
       "starting": "جارٍ البدء…",
       "useRecoveryKey": "استخدام المفتاح السري",
       "verificationCode": "رمز التحقق",
+      "waitFailed": "تعذّر التحقق من الموافقة. تحقّق من اتصالك، ثم أعد المحاولة.",
       "waiting": "بانتظار الموافقة…"
     },
     "initializing": {

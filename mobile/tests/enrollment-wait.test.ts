@@ -175,4 +175,6 @@ test("the enrollment screen awaits once and never polls", () => {
   assert.match(screen, /outcome\?\.kind === "approved"[\s\S]*?router\.replace\("\/\(auth\)\/pin"\)/);
   assert.match(screen, /testID="btn-enroll-try-again"[\s\S]*?onPress=\{onTryAgain\}/);
   assert.match(screen, /isEnrollmentRequestLive\(handle\.expires_at, Date\.now\(\)\)[\s\S]*?wait\.retry\(\)/);
+  // A failed check shows plain copy, never the core's raw error (#1668).
+  assert.match(screen, /outcome\?\.kind === "error"\s*\?\s*t\("auth\.enrollment\.waitFailed"\)/);
 });
