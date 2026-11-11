@@ -324,6 +324,11 @@ expects at `~6.0.3`. Things worth knowing:
   `node_modules` and destroys the install (see "Project isolation" above). Edit
   the versions in `package.json` by hand, then
   `npx -y pnpm@10.25.0 install --ignore-workspace`.
+- **The doctor itself is pinned** (`pnpm dlx expo-doctor@<version>` in
+  `mobile-core-check.yml`). Unpinned, the job ran whatever `latest` was that
+  minute, and expo-doctor 1.21.7 shipped without its `@expo/env` dependency
+  (`Cannot find module '@expo/env'`), which failed the job on every PR. Move the
+  pin by hand, after checking the new version starts.
 
 `app.json` carries **no** `newArchEnabled` / `android.edgeToEdgeEnabled` — both are
 unconditional defaults since SDK 55 / RN 0.83 and were dropped from the config
