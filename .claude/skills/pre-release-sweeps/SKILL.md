@@ -1,6 +1,6 @@
 ---
 name: pre-release-sweeps
-description: One-off drift sweeps for Pollis, run by hand before a release that affects every app (desktop, mobile, CLI, DS, website together). Checks that every public number agrees with the code (#1722), every published pollis-verify command parses and runs against the live log (#1721), and the installers' documented env vars match what they read. Not CI; never gates a merge. Use before a full release, or when asked to "run the sweeps".
+description: One-off drift sweeps for Pollis, run by hand before a release that affects every app (desktop, mobile, CLI, DS, website together). Checks that every public number agrees with the code (#1722), every published pollis-verify command parses and runs against the live log (#1721), the installers' documented env vars match what they read, and every audited public claim is still anchored and re-verified where its code changed (#1723). Not CI; never gates a merge. Use before a full release, or when asked to "run the sweeps".
 argument-hint: "[--deployed-only]"
 ---
 
@@ -71,7 +71,22 @@ SWEEP
 python3 scripts/check-install-env.py
 ```
 
-## 4. After the website deploy
+## 4. Public claims (#1723)
+
+```bash
+node scripts/check-claims.mjs          # ledger valid, every anchor exists, every quoted sentence still present
+node scripts/check-learn-sync.mjs      # /learn captions and transcripts match their narration scripts
+./scripts/test-check-claims.sh         # only if the claims tooling itself changed
+node scripts/claims-impact.mjs --since "$(jq -r .claims.sha scripts/sweep-ledger.json)"
+```
+
+`claims-impact` lists every public claim whose anchored code changed since the
+last claims sweep. If it lists any, run `/sweep-claims`
+(`.claude/skills/sweep-claims/SKILL.md`): it re-verifies just those claims,
+fixes the copy, and bumps `verified_sha` and the ledger. Disputed policy-page
+claims only warn; list them for Dan, never edit the policy pages.
+
+## 5. After the website deploy
 
 Once `website-deploy.yml` has run for the release, check the live pages:
 
