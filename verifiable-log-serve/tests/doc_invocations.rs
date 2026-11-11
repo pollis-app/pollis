@@ -5,8 +5,10 @@
 //! `<pre>` in HTML, and whole files elsewhere (scripts, workflows, string literals). Prose that
 //! merely names the tool is not a command. Placeholders (`<id>`, `$TAG`, `{tag}`) parse as dummy
 //! values; invocations without any are concrete and are listed in `doc_invocations.live.txt`,
-//! which `website-verify.yml` runs against the live log.
+//! which the pre-release sweep (`.claude/skills/pre-release-sweeps`) runs against the live log.
 //!
+//! Not part of CI: these read the docs, so they run before a full release with
+//! `cargo test -p verifiable-log-serve --test doc_invocations -- --include-ignored`.
 //! Regenerate the list with `UPDATE_DOC_INVOCATIONS=1 cargo test -p verifiable-log-serve --test doc_invocations`.
 
 use clap::{CommandFactory, Parser};
@@ -287,6 +289,7 @@ fn subcommands() -> BTreeSet<String> {
 }
 
 #[test]
+#[ignore = "pre-release sweep (#1721), not CI"]
 fn every_published_invocation_parses_against_the_shipped_cli() {
     let root = repo_root();
     let invocations = extract(&root);
@@ -319,6 +322,7 @@ fn every_published_invocation_parses_against_the_shipped_cli() {
 }
 
 #[test]
+#[ignore = "pre-release sweep (#1721), not CI"]
 fn every_subcommand_and_flag_is_shown_in_public_docs() {
     let root = repo_root();
     let public: Vec<Invocation> = extract(&root)
@@ -356,6 +360,7 @@ fn every_subcommand_and_flag_is_shown_in_public_docs() {
 }
 
 #[test]
+#[ignore = "pre-release sweep (#1721), not CI"]
 fn the_live_list_matches_the_docs() {
     let root = repo_root();
     let mut live: BTreeSet<String> = BTreeSet::new();

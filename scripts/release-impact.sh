@@ -87,8 +87,8 @@ TLOG=(verifiable-log-serve verifiable-log-builder verifiable-log pollis-relay
       pollis-device-cert pollis-libsql-connector Cargo.lock key-set.json)
 LIVEKIT=(livekit)
 WEBSITE=(website)
-# Internal sources that public pages are reconciled against (website-verify.yml
-# checks the live site against these).
+# Internal sources that public pages are reconciled against (the pre-release sweeps
+# check the live site against these).
 DOC_SOURCES=(docs/metadata-retention-policy.md docs/operational-continuity.md
              mobile/store/android-sideload-cert.sha256 key-set.json README.md
              website/rebuild-ledger.json)
