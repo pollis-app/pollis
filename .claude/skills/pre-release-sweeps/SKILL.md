@@ -40,7 +40,9 @@ parse against the shipped CLI, and every subcommand and flag must be shown in
 a public doc. If the concrete-command list is stale, regenerate it with
 `UPDATE_DOC_INVOCATIONS=1` on the same command and commit the result.
 
-Then run the concrete commands against the live log with the released binary:
+Then run the concrete commands against the live log with the released binary.
+They replay the log, so expect 10–15 minutes in total; run it in the background
+and do not put a short timeout on each command:
 
 ```bash
 tag="$(gh release list --limit 100 --json tagName,publishedAt \
