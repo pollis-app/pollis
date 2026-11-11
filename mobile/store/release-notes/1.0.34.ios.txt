@@ -1,0 +1,3 @@
+Fixes and improvements
+• Signing in on a new phone: if approval from your other device runs out, is declined or can't be checked, the screen now says why and offers Try again.
+• The app's built-in database is updated to the latest version.
