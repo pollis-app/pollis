@@ -869,20 +869,25 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.sig
             pollis-*-linux.toolchain.json
 
-  # Software Bill of Materials, one per release (#877).
+  # Software Bill of Materials, one per release (#877), plus its VEX (#1832).
   #
-  # Nothing in the repo produced an SBOM before this: a reader asking "what is
-  # actually inside the binary I just installed" had no answer, and neither did we
-  # when a CVE lands in a transitive crate. Syft catalogues BOTH ecosystems in one
-  # pass — `Cargo.lock` for the Rust half, `pnpm-lock.yaml` for the renderer — and
-  # emits CycloneDX 1.6 JSON.
+  # scripts/oss-inventory.mjs builds both from the lockfiles at the tag commit,
+  # scoped to what the desktop app ships: `cargo tree -e normal,no-proc-macro`
+  # from src-tauri and the capture helpers over the four release targets, and the
+  # renderer's production npm tree. (Until #1832 this was Syft over the whole
+  # repo, which listed every workspace crate's dependencies and the mobile app's
+  # npm tree too.) It is the same generator every other product's
+  # oss-evidence.yml run uses, so the four SBOMs are comparable.
   #
-  # It reads the LOCKFILES at the tag commit, not a built artifact, and that is
-  # the honest scope: every release job builds `--locked` / `--frozen-lockfile`,
-  # so the lockfiles at this commit ARE the dependency set that got compiled. What
-  # it does not capture is the vendored C/C++ inside build scripts (webrtc-sys,
-  # webrtc-audio-processing-sys) — that is stated in docs/verifiable-builds-design.md
-  # rather than silently implied away.
+  # Lockfile scope is the honest one: every release job builds `--locked` /
+  # `--frozen-lockfile`, so these lockfiles ARE the dependency set that got
+  # compiled. What it does not capture is the vendored C/C++ inside build scripts
+  # (webrtc-sys, webrtc-audio-processing-sys) — stated in
+  # docs/verifiable-builds-design.md rather than silently implied away.
+  #
+  # The VEX states, for each advisory deny.toml ignores that reaches this app,
+  # why it does not affect it (supply-chain/vex.json), so a customer's scanner
+  # agrees with our triage.
   #
   # This job deliberately has no `needs:` on the build jobs — it depends only on
   # the source tree, so it runs in parallel and cannot delay a release.
@@ -892,20 +897,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Pinned to an exact version, not a floating major: an SBOM is a claim about
-      # what shipped, so the tool that generates it is part of the recipe. (The
-      # v1.9.1 provenance loss came from assuming a floating tag existed.)
-      - name: Generate CycloneDX SBOM (Rust + JS)
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          path: .
-          format: cyclonedx-json
-          output-file: pollis-${{ github.ref_name }}.cdx.json
-          # This job publishes the SBOM itself (release asset + R2 + provenance
-          # subject); the action's own release-upload path would race the
-          # `release` job for the same asset name.
-          upload-artifact: false
-          upload-release-assets: false
+          node-version: "20"
+
+      # cargo tree only; the toolchain is the release's pin (rust-toolchain.toml).
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          toolchain: 1.96.0
+
+      # The renderer's tree only, and no install scripts: the generator reads
+      # package.json and licence files.
+      - name: Install renderer dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter ./frontend...
+
+      - name: Generate CycloneDX SBOM, OpenVEX and summary
+        run: |
+          set -euo pipefail
+          node scripts/oss-inventory.mjs desktop --version "${GITHUB_REF_NAME}" --out-dir oss
+          # The SBOM's long-standing release name (install.sh, the artifacts
+          # page and the provenance subject all use it); same bytes.
+          cp "oss/pollis-desktop-${GITHUB_REF_NAME}.cdx.json" "pollis-${GITHUB_REF_NAME}.cdx.json"
+          cp "oss/pollis-desktop-${GITHUB_REF_NAME}.vex.json" "pollis-${GITHUB_REF_NAME}.vex.json"
 
       # An empty or component-less SBOM is worse than none — it looks like a
       # published dependency graph and asserts nothing. Fail rather than ship it.
@@ -917,18 +932,22 @@ jobs:
           echo "SBOM components: ${n}"
           if [ "${n:-0}" -lt 100 ]; then
             echo "::error::SBOM lists only ${n} components — the Rust and JS lockfiles"
-            echo "::error::  together resolve to far more than that, so the catalogers"
-            echo "::error::  did not run over the tree. Publishing it would be a false claim."
+            echo "::error::  together resolve to far more than that, so the generator"
+            echo "::error::  did not see the tree. Publishing it would be a false claim."
             exit 1
           fi
           jq -e '.bomFormat == "CycloneDX"' "$f" >/dev/null
+          jq -e '."@context" == "https://openvex.dev/ns/v0.2.0"' "pollis-${GITHUB_REF_NAME}.vex.json" >/dev/null
 
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pollis-sbom
           if-no-files-found: error
-          path: pollis-*.cdx.json
+          path: |
+            pollis-*.cdx.json
+            pollis-*.vex.json
+            oss/
 
   apply-migrations:
     needs: [build-macos, build-windows, build-linux]
@@ -1038,11 +1057,23 @@ jobs:
           # #877: the SBOM and the per-platform build-recipe sidecars, published
           # next to the installers they describe. install.sh and any auditor
           # resolve them by the same version-pinned path as the installer.
-          SBOM=$(find artifacts/pollis-sbom -name "*.cdx.json" | head -1)
-          aws s3 cp "$SBOM" "s3://pollis/releases/${VERSION}/pollis-${VERSION}.cdx.json" --endpoint-url "${ENDPOINT}" --content-type "application/json"
+          aws s3 cp "artifacts/pollis-sbom/pollis-${VERSION}.cdx.json" "s3://pollis/releases/${VERSION}/pollis-${VERSION}.cdx.json" --endpoint-url "${ENDPOINT}" --content-type "application/json"
+          # #1832: the VEX for that SBOM, next to it.
+          aws s3 cp "artifacts/pollis-sbom/pollis-${VERSION}.vex.json" "s3://pollis/releases/${VERSION}/pollis-${VERSION}.vex.json" --endpoint-url "${ENDPOINT}" --content-type "application/json"
           for tc in $(find artifacts -name "*.toolchain.json"); do
             aws s3 cp "$tc" "s3://pollis/releases/${VERSION}/$(basename "$tc")" --endpoint-url "${ENDPOINT}" --content-type "application/json"
           done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # #1832: the same SBOM and VEX under releases/oss/desktop/, with the
+      # summary.json pollis.com/open-source reads (latest.json), as every other
+      # product publishes through oss-evidence.yml. Confirms the CDN serves it.
+      - name: Publish open-source evidence
+        run: scripts/publish-oss-evidence.sh desktop "${GITHUB_REF_NAME}" artifacts/pollis-sbom/oss
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
@@ -1235,7 +1266,7 @@ jobs:
           # certificate, SBOM and recipe together are a few hundred KB per
           # release. Keeping them forever is free; deleting them silently
           # falsified a claim already written into an append-only log.
-          KEEP_SUFFIXES='\.intoto\.jsonl$|\.sig$|\.pem$|\.cdx\.json$|\.toolchain\.json$|\.payload-sha256$'
+          KEEP_SUFFIXES='\.intoto\.jsonl$|\.sig$|\.pem$|\.cdx\.json$|\.vex\.json$|\.toolchain\.json$|\.payload-sha256$'
           for v in "${VERSIONS[@]}"; do
             if ! grep -qxF "$v" <<< "$KEEP_SET"; then
               echo "Pruning installers from s3://pollis/releases/$v/ (evidence retained)"
@@ -1286,6 +1317,7 @@ jobs:
             artifacts/pollis-windows/**/*.payload-sha256
             artifacts/pollis-*/**/*.toolchain.json
             artifacts/pollis-sbom/*.cdx.json
+            artifacts/pollis-sbom/*.vex.json
           # #877: the release body was GitHub's auto-generated PR-title list and
           # nothing else — the ONE unattested link in a chain where every other
           # step carries a signature, a provenance attestation and a
@@ -1425,7 +1457,7 @@ jobs:
           # would need a new `Layer::Sbom` in the frozen BinaryRecord contract and
           # a `pollis-verify` release ahead of it — see the follow-up note in
           # docs/verifiable-builds-design.md.)
-          cp "$(find artifacts/pollis-sbom -name '*.cdx.json' | head -1)" "prov/pollis-${VERSION}.cdx.json"
+          cp "artifacts/pollis-sbom/pollis-${VERSION}.cdx.json" "prov/pollis-${VERSION}.cdx.json"
           echo "staged provenance subjects:"
           ls -1 prov
 

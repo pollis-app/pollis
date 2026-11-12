@@ -1,0 +1,145 @@
+name: Open-source evidence
+
+# One product release's open-source evidence (#1832): a CycloneDX SBOM of the
+# third-party code it ships, an OpenVEX statement of the advisories we have
+# triaged as not affecting it, and a summary.json index, all from
+# scripts/oss-inventory.mjs, published to
+# cdn.pollis.com/releases/oss/<product>/<version>/ and read by
+# pollis.com/open-source.
+#
+# Called at the end of each release pipeline, so nothing ships without it:
+#   cli     cli-release.yml          (after publish-cli)
+#   mobile  mobile-apk-release.yml   (after publish; a `mobile-v*` tag)
+#   ds      delivery-deploy-prod.yml (after the deploy is live)
+# Desktop publishes the same files from desktop-release.yml itself, because its
+# SBOM is also a SLSA provenance subject there.
+#
+# Dispatch it by hand to publish a release the automatic path did not cover:
+# an iOS-only App Store release (no `mobile-v*` tag, so no APK run), or a
+# backfill of a release cut before this workflow existed. The generator always
+# comes from this workflow's own commit (today's triage in supply-chain/vex.json)
+# and describes the tree at `ref`.
+on:
+  workflow_call:
+    inputs:
+      product:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      product:
+        type: choice
+        options: [mobile, cli, ds, desktop]
+        required: true
+      ref:
+        description: "Git ref the release was built from (tag or full SHA)"
+        required: true
+      version:
+        description: "Published version: v1.2.3 (desktop/cli), v1.0.34 (mobile), the full SHA (ds)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oss-evidence-${{ inputs.product }}
+  cancel-in-progress: false
+
+jobs:
+  # No secrets in this job: it installs and reads a third-party tree.
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check inputs
+        env:
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          case "$PRODUCT" in desktop | mobile | cli | ds) ;; *) echo "::error::bad product"; exit 1 ;; esac
+          [[ "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::bad version"; exit 1; }
+
+      - name: Checkout the generator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: tool
+          persist-credentials: false
+
+      - name: Checkout ${{ inputs.ref }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          path: src
+          persist-credentials: false
+
+      # cargo tree reads the pinned toolchain from src/rust-toolchain.toml;
+      # rustup installs it on first use.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # Only the product's own npm projects, without install scripts: the
+      # generator reads package.json and licence files, it runs nothing.
+      - name: Install the product's npm dependencies
+        env:
+          PRODUCT: ${{ inputs.product }}
+        working-directory: src
+        run: |
+          set -euo pipefail
+          case "$PRODUCT" in
+            desktop) pnpm install --frozen-lockfile --ignore-scripts --filter ./frontend... ;;
+            ds) pnpm install --frozen-lockfile --ignore-scripts --filter ./pollis-delivery... ;;
+            mobile) (cd mobile && pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts) ;;
+            cli) ;;
+          esac
+
+      - name: Generate SBOM, VEX and summary
+        env:
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ inputs.version }}
+        run: node tool/scripts/oss-inventory.mjs "$PRODUCT" --root src --version "$VERSION" --out-dir out
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: oss-evidence-${{ inputs.product }}
+          if-no-files-found: error
+          path: out/
+
+  publish:
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the publish script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: oss-evidence-${{ inputs.product }}
+          path: out
+
+      # The R2 write key is step-scoped, as in every release workflow.
+      - name: Publish to R2 and confirm the CDN serves it
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ inputs.version }}
+        run: scripts/publish-oss-evidence.sh "$PRODUCT" "$VERSION" out
