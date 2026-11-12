@@ -1,0 +1,7 @@
+New
+• Videos in chats show a still frame from the video, or a placeholder with a play button, instead of an empty tile.
+• Direct messages are listed by latest activity, with the newest at the top.
+• Self now lists the open source licenses the app uses.
+
+Fixes
+• An image or video that failed to load now appears as soon as the same file loads elsewhere in the app.
