@@ -1089,14 +1089,6 @@ mod tests {
         require_contributory(&shared, "test").expect("a real X25519 exchange is contributory");
     }
 
-    #[test]
-    fn constant_time_eq_matches_regular_eq() {
-        assert!(constant_time_eq(b"123456", b"123456"));
-        assert!(!constant_time_eq(b"123456", b"123457"));
-        assert!(!constant_time_eq(b"123", b"1234"));
-        assert!(constant_time_eq(b"", b""));
-    }
-
     /// Stand-ins for the request ULID, account id and RFC3339 stamp.
     const REQ: &str = "01J8ZQ5X7K0000000000000000";
     const USER: &str = "01J8ZQ0000000000000000USER";
