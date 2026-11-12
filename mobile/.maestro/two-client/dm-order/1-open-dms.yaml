@@ -17,12 +17,11 @@ tags:
     id: "input-user-search"
 - inputText: "${PEER_A_HANDLE}"
 - pressKey: Enter
+# This peer's row, not the previous search's result still on screen.
 - extendedWaitUntil:
-    visible:
-      id: "row-user-.*"
+    visible: "Start DM with @${PEER_A_HANDLE}"
     timeout: 20000
-- tapOn:
-    id: "row-user-.*"
+- tapOn: "Start DM with @${PEER_A_HANDLE}"
 - extendedWaitUntil:
     visible:
       id: "input-composer"
@@ -49,12 +48,11 @@ tags:
     id: "input-user-search"
 - inputText: "${PEER_B_HANDLE}"
 - pressKey: Enter
+# This peer's row, not the previous search's result still on screen.
 - extendedWaitUntil:
-    visible:
-      id: "row-user-.*"
+    visible: "Start DM with @${PEER_B_HANDLE}"
     timeout: 20000
-- tapOn:
-    id: "row-user-.*"
+- tapOn: "Start DM with @${PEER_B_HANDLE}"
 - extendedWaitUntil:
     visible:
       id: "input-composer"
