@@ -22,6 +22,9 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
+[policy.libsql]
+audit-as-crates-io = true
+
 [policy.openmls]
 audit-as-crates-io = true
 
@@ -904,11 +907,6 @@ criteria = "safe-to-deploy"
 version = "0.18.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.h2]]
-version = "0.3.27"
-criteria = "safe-to-deploy"
-notes = "No independent review performed. HTTP/2 implementation, reached only transitively via libsql -> hyper 0.14 (`http2` feature; see the RUSTSEC-2026-0258 [advisories] entry in deny.toml for the reachability analysis: this is an outbound client to Turso only, which since #1303 negotiates HTTP/1.1 only through `pollis-libsql-connector`, never the DS's untrusted-facing listener, which runs axum 0.8 on hyper 1.9 without h2). Widely used (the de facto Rust HTTP/2 crate, underlies most of the hyper ecosystem); exempted on that ecosystem-maturity basis, not a line-by-line read."
-
 [[exemptions.half]]
 version = "2.7.1"
 criteria = "safe-to-deploy"
@@ -1006,12 +1004,12 @@ criteria = "safe-to-deploy"
 [[exemptions.hyper]]
 version = "0.14.32"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. Pulled in transitively by libsql's hrana client (outbound client to Turso only; see the h2 0.3 note above for why this line never faces untrusted input). Exempted on the strength of hyperium/hyper's status as the standard Rust HTTP implementation, not a source read."
+notes = "No independent review performed. Pulled in transitively by libsql's hrana client (outbound client to Turso only; built without `http2`, #1847, and dialled through `pollis-libsql-connector`, which negotiates HTTP/1.1 only, #1303, so this line never faces untrusted input). Exempted on the strength of hyperium/hyper's status as the standard Rust HTTP implementation, not a source read."
 
 [[exemptions.hyper]]
 version = "1.9.0"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. This is the version on the surface that DOES face untrusted input: pollis-delivery's axum 0.8 listener runs on hyper 1.9 (per the RUSTSEC-2026-0258 [advisories] note above), and reqwest's outbound HTTPS client (DS API calls, LiveKit) also resolves to this line. Higher-stakes than the 0.14 line above for that reason; exempted on hyperium's maturity/maintenance track record, not a line-by-line read — a real audit of this crate would be a better use of first-party review time than most others in this file."
+notes = "No independent review performed. This is the version on the surface that DOES face untrusted input: pollis-delivery's axum 0.8 listener runs on hyper 1.9, and reqwest's outbound HTTPS client (DS API calls, LiveKit) also resolves to this line. Higher-stakes than the 0.14 line above for that reason; exempted on hyperium's maturity/maintenance track record, not a line-by-line read — a real audit of this crate would be a better use of first-party review time than most others in this file."
 
 [[exemptions.hyper-rustls]]
 version = "0.27.9"
@@ -1292,7 +1290,7 @@ criteria = "safe-to-deploy"
 [[exemptions.libsql]]
 version = "0.10.0"
 criteria = "safe-to-deploy"
-notes = "No independent review performed. libsql 0.10 (#1303 moved from 0.9.30), built with `default-features = false` so only `core` + `remote` (the hrana HTTP client) compile in — no replication/sync/tls; TLS to Turso goes through `pollis-libsql-connector` on rustls 0.23. Server-side only (DS + commit-log tooling); the client links no libsql (#987). Exempted on the same basis as the 0.9 line it replaces, not a source read."
+notes = "No independent review performed. libsql 0.10 (#1303 moved from 0.9.30), built with `default-features = false` so only `core` + `remote` (the hrana HTTP client) compile in — no replication/sync/tls; TLS to Turso goes through `pollis-libsql-connector` on rustls 0.23. Server-side only (DS + commit-log tooling); the client links no libsql (#987). Built from patches/libsql (#1847): the crates.io 0.10.0 source (sha256 d6bca1704194048f0f0bbc8a8e05ba85c0c67628b03bd59346dd2fdd946a1588) with only `http2` dropped from its hyper 0.14 features, so h2 is not linked. Exempted on the same basis as the 0.9 line it replaces, not a source read."
 
 [[exemptions.libsql-ffi]]
 version = "0.10.0"

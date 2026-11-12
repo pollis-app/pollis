@@ -136,8 +136,10 @@ and no connector, libsql panics on the first remote query ("you must provide
 your own http connector"). `pollis-libsql-connector/tests/connector.rs` pins the
 contract: verified chain + name, untrusted CA and wrong name refused, `http`
 plain, other schemes refused, and a real libsql remote handle completing the
-handshake through it. h2 0.3 is still linked (libsql declares hyper 0.14 with
-`http2`) but never negotiated — see the RUSTSEC-2026-0258 note in `deny.toml`.
+handshake through it. libsql itself comes from `patches/libsql` (#1847): the
+crates.io 0.10.0 source with `http2` dropped from its hyper 0.14 features, so no
+h2 crate is linked at all. Delete the patch when a libsql release moves to
+hyper 1.x.
 
 ### users
 - `id` TEXT PK

@@ -28,9 +28,10 @@ exclude = [
     # Stand-ins swapped in by the [patch] tables below. Excluded so a
     # `--workspace` build does not compile them as members: the openmls one is a
     # deliberate `compile_error!`, and sqlcipher-src is vendored upstream code
-    # with its own lints and tests.
+    # with its own lints and tests (as is libsql).
     "patches/openmls-sqlite-storage",
     "patches/sqlcipher-src",
+    "patches/libsql",
 ]
 
 [workspace.package]
@@ -137,6 +138,12 @@ device-info = { path = "patches/device-info" }
 # still compile SQLite 3.53.4. See patches/sqlcipher-src/Cargo.toml for the
 # provenance check; delete it once a libsqlite3-sys release takes 420.
 sqlcipher-src = { path = "patches/sqlcipher-src" }
+# #1847: crates.io libsql 0.10.0 with `http2` removed from its hyper 0.14
+# features, which takes h2 0.3 out of the graph. Every remote handle speaks
+# HTTP/1.1 to Turso through pollis-libsql-connector anyway (#1303). See
+# patches/libsql/Cargo.toml for the provenance check; delete it once a libsql
+# release moves to hyper 1.x or drops hyper's `http2` feature.
+libsql = { path = "patches/libsql" }
 
 # openmls's own SQLite storage provider is an OPTIONAL dependency of openmls
 # (`sqlite-provider`, which nothing here enables), but cargo resolves it anyway,
