@@ -1,0 +1,103 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# VIDEO POSTERS (#1837), part 2 of 2 — driven by scripts/maestro-video-posters.sh.
+# Part 1 is ../pins/1-open-dm.yaml (sign up, open a DM with the peer). The
+# peer has since sent two videos: one with a poster (the envelope's `pv`, as a
+# current client sends it) and one without (a build from before #1837). Both
+# tiles must show a still frame: the first from `pv`, the second decoded here
+# from the downloaded file. Then this device sends a video of its own, and the
+# script waits for the peer to find a JPEG `pv` in it.
+# No relaunch: the session from part 1 is still on screen.
+
+# Leave and re-open the conversation so its ingest runs whether or not a
+# realtime wake arrived.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: ".*video from an older sender.*"
+    timeout: 90000
+
+# ── The peer's poster draws from the envelope ───────────────────────────
+- extendedWaitUntil:
+    visible:
+      id: "video-poster-pv"
+    timeout: 30000
+# ── The older sender's video: a frame decoded on this device ────────────
+- extendedWaitUntil:
+    visible:
+      id: "video-poster-local"
+    timeout: 60000
+- assertNotVisible:
+    id: "video-poster-placeholder"
+- takeScreenshot: video-posters-01-received
+
+# ── This device sends a video; the composer card shows its frame ────────
+- addMedia:
+    - "../../fixtures/composer-video.mp4"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- runFlow:
+    when:
+      true: ${IPAD == "1"}
+    file: ../../subflows/ipad-pick-photos.yaml
+    env:
+      CELLS: "1"
+      CONFIRM: "1"
+- runFlow:
+    when:
+      true: ${IPAD != "1"}
+    commands:
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - tapOn: "Sort and Filter"
+            - tapOn: "Added"
+            - waitForAnimationToEnd:
+                timeout: 3000
+      - tapOn:
+          text: "Video(,| taken on) .*"
+          index: 0
+      - tapOn:
+          text: "(?i)(add|done).*"
+          optional: true
+- extendedWaitUntil:
+    visible:
+      id: "composer-attachment-0"
+    timeout: 10000
+# The frame is decoded as the card mounts; give it a moment so it rides along.
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: video-posters-02-composer
+- repeat:
+    while:
+      visible:
+        id: "strip-attachments"
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+- assertNotVisible:
+    id: "strip-attachments"
+- extendedWaitUntil:
+    notVisible:
+      id: "row-message-pending-.*"
+    timeout: 120000
+- takeScreenshot: video-posters-03-sent

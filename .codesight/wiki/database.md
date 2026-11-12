@@ -1354,7 +1354,8 @@ envelope, so the loss shows in the conversation instead of vanishing. See
 - `position` INTEGER NOT NULL CHECK ≥ 0 — PK is (`message_id`, `position`)
 - `filename`, `content_type` TEXT NOT NULL
 - `data` BLOB NOT NULL — the attachment's plaintext bytes
-- `blurhash` TEXT, `width` / `height` INTEGER — renderer-computed metadata (a video's poster); the upload's own values win
+- `blurhash` TEXT, `width` / `height` INTEGER — a video's poster blurhash and size, from the client's frame (#1837) or the renderer; the upload's own values win
+- `poster` TEXT — a video's bounded poster JPEG, base64 (#1837), written into both envelopes as `pv`. Added through `ADDITIVE_COLUMNS`, so a row queued by an older build has none ([media-server.md → Video posters](media-server.md#video-posters-1837))
 - `sensitive` INTEGER NOT NULL DEFAULT 0 CHECK IN (0, 1) — marked sensitive in the composer (#1568); written into both envelopes as `sens: true`. Added through `ADDITIVE_COLUMNS`, so a row queued by an older build reads as not sensitive
 
 Attachment bytes an unsent message still has to upload, each written in its own
