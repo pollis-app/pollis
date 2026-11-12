@@ -42,32 +42,6 @@ ignore = [
     # or operated on. Drop when openmls moves to elliptic-curve 0.14 (#1419).
     { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing leaks; fix is 0.7.6, unreachable under elliptic-curve 0.13 (openmls_rust_crypto); no P-256/P-384/k256 secret is ever used: MLS is MLKEM768X25519+MLDSA44; #1419" },
 
-    # h2 0.3 accepts and queues empty DATA frames without limit (unbounded
-    # memory, or a panic on length overflow). Low severity. The fix is h2
-    # 0.4.16; there is no 0.3 backport, and 0.3.27 is the last 0.3 release.
-    #
-    # h2 0.3 enters through exactly one edge — libsql's hrana client (libsql ->
-    # hyper 0.14 with its `http2` feature -> h2 0.3; libsql 0.10 still declares
-    # hyper 0.14 that way, and #1303 dropped the tonic 0.11 path by building
-    # libsql without its `replication`/`sync`/`tls` defaults) — and #987 removed
-    # every other one: `pollis-core` and the shipping `pollis` binary now link no
-    # database driver at all, which `pollis-core/tests/no_client_side_remote_
-    # reads.rs` holds shut. What remains is server-side: `pollis-delivery` and
-    # `pollis-schema`'s migration runner, which ARE the database clients.
-    #
-    # Not reachable as stated. The flaw is a peer flooding an HTTP/2 connection;
-    # every h2 0.3 instance here is an OUTBOUND CLIENT to Turso over TLS, so the
-    # only peer that can send those frames is Turso itself or a broken TLS
-    # session. Since #1303 it is not even negotiated: every remote libsql
-    # handle dials through `pollis-libsql-connector`, which offers ALPN
-    # `http/1.1` only and never reports an h2 connection, so hyper 0.14 speaks
-    # HTTP/1.1 to Turso and the h2 code is linked but dead. The DS's inbound listener — the surface untrusted peers actually
-    # reach — is axum 0.8 on hyper 1.9, which is not built with h2 at all (see
-    # `cargo tree -p pollis-delivery -i h2`: hyper 1.9 does not appear).
-    #
-    # Drop this entry when libsql moves to hyper 1.x.
-    { id = "RUSTSEC-2026-0258", reason = "h2 0.3 empty-DATA-frame DoS; no 0.3 backport (fix is 0.4.16); linked only into libsql's outbound client to Turso, which negotiates HTTP/1.1 only (#1303), never on the DS's inbound listener (hyper 1.9, no h2)" },
-
     # #454 carried NINE libcrux ignores in two clusters. #668 removed both, and
     # neither by re-arguing reachability — the crates left the graph:
     #

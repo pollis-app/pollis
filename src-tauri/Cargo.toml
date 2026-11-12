@@ -140,7 +140,7 @@ dotenvy = "0.15"
 # remote read and write is a signed POST to the Delivery Service. libsql
 # survives here solely for src/test_harness.rs and tests/flows.rs, where the
 # harness stands up a process-local "remote" the DS reads from. Making it
-# optional is what keeps `libsql` — and the h2 0.3 / hyper 0.14 stack it drags
+# optional is what keeps `libsql` — and the hyper 0.14 stack it drags
 # behind it — out of the graph a user actually installs.
 libsql = { version = "0.10", default-features = false, features = ["core", "remote"], optional = true }
 anyhow = "1"

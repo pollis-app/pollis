@@ -9,15 +9,6 @@
       "aliases": [],
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The timing leaks are in arithmetic on secret NIST P-256/P-384 or secp256k1 keys. Pollis never creates or uses such a key: MLS runs on ML-KEM-768+X25519 with ML-DSA-44 (legacy groups X25519/Ed25519). crypto-bigint 0.5 is linked through elliptic-curve 0.13 but its secret-dependent paths are never called with a secret."
-    },
-    {
-      "id": "RUSTSEC-2026-0258",
-      "ecosystem": "cargo",
-      "package": "h2",
-      "affected": ["<0.4.16"],
-      "aliases": ["GHSA-q83h-524g-xf6h"],
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flaw lets an HTTP/2 peer flood a connection with empty DATA frames. h2 0.3 is linked only into libsql's outbound client to the database, and that client offers ALPN http/1.1 only, so no HTTP/2 connection is ever negotiated. The Delivery Service's inbound listener (hyper 1.x) is built without HTTP/2."
     }
   ]
 }
