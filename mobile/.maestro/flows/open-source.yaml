@@ -50,7 +50,7 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "text-open-source-license"
-      text: "MPL-2.0"
+      text: ".*MPL-2.0"
     timeout: 5000
 - assertVisible:
     id: "text-open-source-text"

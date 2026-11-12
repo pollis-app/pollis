@@ -35,13 +35,14 @@ export default function OpenSourceLicense() {
         {notices && pkg ? (
           <>
             <View style={{ gap: space.xs }}>
-              <Text style={ty.secondary}>
+              {/* Android flattens nested Text, so the testID sits on the whole line. */}
+              <Text testID="text-open-source-version" style={ty.secondary}>
                 <Text style={{ color: semantic.dim }}>{t("openSource.versionLabel")}: </Text>
-                <Text testID="text-open-source-version">{pkg.version}</Text>
+                {pkg.version}
               </Text>
-              <Text style={ty.secondary}>
+              <Text testID="text-open-source-license" style={ty.secondary}>
                 <Text style={{ color: semantic.dim }}>{t("openSource.licenseLabel")}: </Text>
-                <Text testID="text-open-source-license">{pkg.license}</Text>
+                {pkg.license}
               </Text>
               <Text style={ty.secondary}>
                 <Text style={{ color: semantic.dim }}>{t("openSource.sourceLabel")}: </Text>
