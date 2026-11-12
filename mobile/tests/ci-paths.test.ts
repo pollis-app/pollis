@@ -103,7 +103,7 @@ test("every top-level mobile/ entry is classified as native, JS or non-shipping"
   const js = new Set(["app", "components", "hooks", "lib", "stores", "theme", "i18n", "types", "index.ts", "metro.config.js", "tsconfig.json"]);
   const nonShipping = new Set(["tests", "scripts", ".maestro", "CLAUDE.md", "TEST-PLAN.md", ".env.example", "android-env.sh", "ios-sim.log", "store", "modules"]);
   for (const entry of readdirSync(mobile)) {
-    if (["node_modules", "android", "ios", ".expo", "dist", "build", ".env", ".env.development"].includes(entry) || entry.startsWith(".env")) {
+    if (["node_modules", "android", "ios", ".expo", "dist", "build", "generated", ".env", ".env.development"].includes(entry) || entry.startsWith(".env")) {
       continue;
     }
     const path = `mobile/${entry}`;

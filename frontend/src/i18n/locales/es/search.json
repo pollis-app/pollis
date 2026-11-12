@@ -50,7 +50,9 @@
     "arcadeName": "Arcade",
     "arcadeKeywords": "arcade juego asteroides nave disparar huevo de pascua jugar",
     "vaultName": "Baúl",
-    "vaultKeywords": "baúl vault notas personales almacenamiento privado cifrado archivos"
+    "vaultKeywords": "baúl vault notas personales almacenamiento privado cifrado archivos",
+    "openSourceName": "Licencias de código abierto",
+    "openSourceKeywords": "código abierto licencias licencia terceros atribución avisos créditos bibliotecas paquetes dependencias legal copyright open source"
   },
   "page": {
     "title": "Buscar"

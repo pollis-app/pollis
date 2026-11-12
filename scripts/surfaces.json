@@ -763,6 +763,18 @@
       "url": "https://pollis.com/.well-known/security.txt",
       "checked_by": []
     },
+    "website/open-source": {
+      "kind": "website-page",
+      "about": "Open-source inventory: each product's SBOM, VEX and licence summary (#1832)",
+      "source": "website/open-source.html",
+      "rendered": [
+        "website/open-source.js"
+      ],
+      "url": "https://pollis.com/open-source.html",
+      "checked_by": [
+        "claims"
+      ]
+    },
     "website/subprocessors": {
       "kind": "website-page",
       "about": "Subprocessors (policy page: flag-only)",
@@ -801,6 +813,7 @@
   "internal": {
     "CLAUDE.md": "agent instructions",
     "ARCHITECTURE.md": "internal architecture notes",
+    "supply-chain/license-texts/README.md": "notes for the oss-inventory generator's vendored SPDX texts (#1832)",
     "docs/backend-core-invariants.md": "internal design (failure taxonomy)",
     "docs/ci-trust.md": "internal CI design",
     "docs/dead-code.md": "internal tooling",

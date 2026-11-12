@@ -50,7 +50,9 @@
     "arcadeName": "街机",
     "arcadeKeywords": "街机 游戏 小行星 飞船 射击 彩蛋 arcade game asteroids ship shoot easter egg play",
     "vaultName": "保险库",
-    "vaultKeywords": "保险库 vault 笔记 个人 存储 私密 加密 文件 收藏"
+    "vaultKeywords": "保险库 vault 笔记 个人 存储 私密 加密 文件 收藏",
+    "openSourceName": "开源许可",
+    "openSourceKeywords": "开源 许可 许可证 第三方 署名 声明 致谢 库 软件包 依赖 法律 版权 open source licenses"
   },
   "page": {
     "title": "搜索"

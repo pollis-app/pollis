@@ -31,6 +31,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: delivery-prod
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      deployed: ${{ steps.guard.outputs.ok }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -253,3 +256,17 @@ jobs:
       - name: Verify the client-policy URL reached the container (#1611)
         if: steps.guard.outputs.ok == 'true'
         run: ./scripts/verify-client-policy.sh https://api.pollis.com
+
+  # #1832: the Delivery Service's SBOM, VEX and summary at
+  # cdn.pollis.com/releases/oss/ds/<sha>/, versioned by the SHA /version reports.
+  oss-evidence:
+    needs: deploy
+    if: needs.deploy.outputs.deployed == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/oss-evidence.yml
+    with:
+      product: ds
+      ref: ${{ needs.deploy.outputs.sha }}
+      version: ${{ needs.deploy.outputs.sha }}
+    secrets: inherit

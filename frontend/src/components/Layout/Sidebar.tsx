@@ -155,8 +155,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     { id: "shortcuts", label: t("sidebar.keyBindings"), icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
     { id: "update", label: t("sidebar.softwareUpdate"), icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];
-  // Diagnostics has no sidebar row but is a settings page.
-  const isOnAnySettings = isOnSettingsHub || pathname === "/diagnostics" || settingsItems.some((s) => s.isActive);
+  // Diagnostics and the open source licences have no sidebar row but are settings pages.
+  const isOnAnySettings =
+    isOnSettingsHub ||
+    pathname === "/diagnostics" ||
+    pathname === "/open-source" ||
+    pathname.startsWith("/open-source/") ||
+    settingsItems.some((s) => s.isActive);
 
   return (
     <aside

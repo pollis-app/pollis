@@ -1,0 +1,18 @@
+{
+  "_comment": "JS licence gate (#1832), run by `node scripts/oss-inventory.mjs check-licenses` in supply-chain.yml. The allow-list is deny.toml's [licenses] allow (shared with Rust) plus the extras below, each observed in a shipped npm tree. `packages` overrides one package whose manifest has no valid SPDX licence: `license` is what we reviewed it to be, `license_found` what its package.json said, so a changed manifest re-opens the review.",
+  "allow": [
+    {
+      "license": "OFL-1.1",
+      "reason": "SIL Open Font License: the bundled fonts (@fontsource/*, @expo-google-fonts/geist). Permits bundling with software; its one condition, shipping the licence, is met by the in-app Open source licenses page."
+    },
+    {
+      "license": "Python-2.0",
+      "reason": "Permissive (PSF). argparse, reached through Expo's tooling dependencies of the `expo` package."
+    },
+    {
+      "license": "CC-BY-4.0",
+      "reason": "Attribution-only data licence: caniuse-lite's browser table, reached through Expo's tooling. Attribution is met by the in-app Open source licenses page."
+    }
+  ],
+  "packages": []
+}

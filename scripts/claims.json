@@ -44,6 +44,7 @@
     "website/index.html",
     "website/learn.html",
     "website/legal-requests.html",
+    "website/open-source.html",
     "website/privacy.html",
     "website/retention.html",
     "website/security.html",
@@ -19265,20 +19266,22 @@
       "doc": "website/assurance.html",
       "locator": {
         "heading": "Where this guarantee ends",
-        "quote": "Neither gate covers JavaScript or vendored C/C++."
+        "quote": "JavaScript is licence-checked only, and vendored C/C++ is in neither gate."
       },
-      "claim": "cargo-deny/vet cover Rust only; JS is in the SBOM, not vetted.",
+      "claim": "cargo-deny/vet cover Rust; shipped npm packages are licence-gated (#1832) and in the SBOM, but not vetted or advisory-gated; vendored C/C++ is in neither.",
       "kind": "process",
       "anchors": [
         ".github/workflows/supply-chain.yml",
-        ".github/workflows/desktop-release.yml"
+        ".github/workflows/desktop-release.yml",
+        "scripts/oss-inventory.mjs"
       ],
       "evidence": [
-        ".github/workflows/supply-chain.yml:63",
-        ".github/workflows/desktop-release.yml:898"
+        ".github/workflows/supply-chain.yml:82",
+        ".github/workflows/supply-chain.yml:118",
+        "scripts/oss-inventory.mjs:788"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "3300d4fbe6b800153a6d13f0ebd21938a883eb15",
       "also_rendered_in": []
     },
     {
@@ -21516,6 +21519,99 @@
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
+    },
+    {
+      "id": "website-open-source-01",
+      "doc": "website/open-source.html",
+      "locator": {
+        "heading": "Open source",
+        "quote": "Every release of every product publishes three files, produced by the release pipeline from the lockfiles the release was built with:"
+      },
+      "also_rendered_in": [
+        "website/open-source.js"
+      ],
+      "claim": "Each product's release pipeline generates and publishes its SBOM, VEX and summary from the release's lockfiles.",
+      "kind": "process",
+      "anchors": [
+        ".github/workflows/oss-evidence.yml",
+        ".github/workflows/desktop-release.yml",
+        ".github/workflows/cli-release.yml",
+        ".github/workflows/mobile-apk-release.yml",
+        ".github/workflows/delivery-deploy-prod.yml",
+        "scripts/oss-inventory.mjs",
+        "scripts/publish-oss-evidence.sh"
+      ],
+      "evidence": [
+        ".github/workflows/desktop-release.yml:1075",
+        ".github/workflows/cli-release.yml:506",
+        ".github/workflows/mobile-apk-release.yml:551",
+        ".github/workflows/delivery-deploy-prod.yml:267"
+      ],
+      "status": "verified",
+      "note": "An iOS-only App Store release has no mobile-v tag and is published by dispatching oss-evidence.yml (mobile-release skill step 6).",
+      "verified_sha": "3300d4fbe6b800153a6d13f0ebd21938a883eb15"
+    },
+    {
+      "id": "website-open-source-02",
+      "doc": "website/open-source.html",
+      "locator": {
+        "heading": "How it is kept current",
+        "quote": "A pull request that adds a Rust crate or an npm package under a licence not on the allow-list fails CI."
+      },
+      "claim": "CI fails a PR that adds a Rust crate or a shipped npm package whose licence is not on the allow-list.",
+      "kind": "process",
+      "anchors": [
+        ".github/workflows/supply-chain.yml",
+        "deny.toml",
+        "supply-chain/js-licenses.json",
+        "scripts/oss-inventory.mjs"
+      ],
+      "evidence": [
+        ".github/workflows/supply-chain.yml:118",
+        "scripts/oss-inventory.mjs:788"
+      ],
+      "status": "verified",
+      "verified_sha": "3300d4fbe6b800153a6d13f0ebd21938a883eb15"
+    },
+    {
+      "id": "website-open-source-03",
+      "doc": "website/open-source.html",
+      "locator": {
+        "heading": "How it is kept current",
+        "quote": "That reasoning becomes a VEX statement, and CI fails if the VEX and the triage list ever disagree."
+      },
+      "claim": "Every vulnerability deny.toml ignores has a statement in supply-chain/vex.json, enforced in CI.",
+      "kind": "process",
+      "anchors": [
+        ".github/workflows/supply-chain.yml",
+        "supply-chain/vex.json",
+        "deny.toml",
+        "scripts/oss-inventory.mjs"
+      ],
+      "evidence": [
+        ".github/workflows/supply-chain.yml:92",
+        "scripts/oss-inventory.mjs:894"
+      ],
+      "status": "verified",
+      "verified_sha": "3300d4fbe6b800153a6d13f0ebd21938a883eb15"
+    },
+    {
+      "id": "website-open-source-04",
+      "doc": "website/open-source.html",
+      "locator": {
+        "heading": "How it is kept current",
+        "quote": "The desktop SBOM is a subject of the release's SLSA provenance, recorded in Sigstore's public log; see"
+      },
+      "claim": "The desktop SBOM is a SLSA provenance subject.",
+      "kind": "security",
+      "anchors": [
+        ".github/workflows/desktop-release.yml"
+      ],
+      "evidence": [
+        ".github/workflows/desktop-release.yml:1460"
+      ],
+      "status": "verified",
+      "verified_sha": "3300d4fbe6b800153a6d13f0ebd21938a883eb15"
     }
   ]
 }

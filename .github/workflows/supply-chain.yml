@@ -2,12 +2,14 @@ name: Supply Chain
 
 # Dependency-supply-chain gate for the machine-checked-correctness program
 # (#452, M0). cargo-deny enforces advisories / licenses / bans / sources;
-# cargo-vet enforces per-crate review provenance. Both are metadata-only — no
+# cargo-vet enforces per-crate review provenance; since #1832 the npm trees the
+# products ship are licence-gated too, and supply-chain/vex.json must agree with
+# deny.toml's ignores. Both are metadata-only — no
 # crate compilation, so this job needs no native build deps and stays fast.
 # A new/bumped crate that trips an advisory, an unlisted license, an untrusted
 # source, or an unvetted review now fails the PR.
 
-# Only what cargo-deny / cargo-vet read: manifests, the lockfile, their config
+# Only what the gates read: manifests, the lockfiles, their config
 # and the vet store. A new advisory against an unchanged lockfile is caught by
 # the weekly run instead of by whichever unrelated PR happened to run next.
 on:
@@ -20,6 +22,14 @@ on:
       - '.cargo/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/supply-chain.yml'
+      # #1832: the JS licence gate's inputs.
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'frontend/package.json'
+      - 'pollis-delivery/package.json'
+      - 'mobile/package.json'
+      - 'mobile/pnpm-lock.yaml'
+      - 'scripts/oss-inventory.mjs'
   push:
     branches: [main]
     paths:
@@ -30,6 +40,14 @@ on:
       - '.cargo/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/supply-chain.yml'
+      # #1832: the JS licence gate's inputs.
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'frontend/package.json'
+      - 'pollis-delivery/package.json'
+      - 'mobile/package.json'
+      - 'mobile/pnpm-lock.yaml'
+      - 'scripts/oss-inventory.mjs'
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
@@ -66,3 +84,36 @@ jobs:
       # --locked: verify against the committed lockfile + pinned import audits.
       - name: cargo vet
         run: cargo vet --locked
+
+      # #1832: every vulnerability deny.toml ignores has a VEX statement in
+      # supply-chain/vex.json (what customers' scanners read), and every
+      # statement is still ignored, against the advisory DB cargo deny just
+      # fetched.
+      - name: VEX agrees with deny.toml
+        run: node scripts/oss-inventory.mjs check-vex
+
+  # #1832: cargo-deny gates Rust licences; this gates the npm packages each
+  # product ships (desktop renderer, mobile app, DS Worker) against the same
+  # allow-list plus supply-chain/js-licenses.json.
+  js-licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.25.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # No install scripts: the gate reads package.json and licence files only.
+      - name: Install the shipped npm trees
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --ignore-scripts --filter ./frontend... --filter ./pollis-delivery...
+          (cd mobile && pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts)
+
+      - name: JS licence gate
+        run: node scripts/oss-inventory.mjs check-licenses

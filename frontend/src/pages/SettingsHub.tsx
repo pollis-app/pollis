@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { Palette, User, ShieldCheck, Volume2, Keyboard, Stethoscope } from "lucide-react";
+import { Palette, User, ShieldCheck, Volume2, Keyboard, Stethoscope, Scale } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -72,6 +72,15 @@ export const SettingsHubPage: React.FC = observer(() => {
       description: t("hub.diagnosticsDescription"),
       action: () => navigate({ to: "/diagnostics" }),
       testId: "menu-item-diagnostics",
+      activateOn: "press",
+    },
+    {
+      id: "open-source",
+      label: t("hub.openSourceLabel"),
+      icon: <Scale size={14} />,
+      description: t("hub.openSourceDescription"),
+      action: () => navigate({ to: "/open-source" }),
+      testId: "menu-item-open-source",
       activateOn: "press",
     },
   ];

@@ -50,7 +50,9 @@
     "arcadeName": "Arcade",
     "arcadeKeywords": "arcade jeu astéroïdes vaisseau tirer easter egg jouer",
     "vaultName": "Coffre",
-    "vaultKeywords": "coffre vault notes personnelles stockage privé chiffré fichiers"
+    "vaultKeywords": "coffre vault notes personnelles stockage privé chiffré fichiers",
+    "openSourceName": "Licences open source",
+    "openSourceKeywords": "open source licences licence tiers attribution mentions crédits bibliothèques paquets dépendances légal copyright"
   },
   "page": {
     "title": "Recherche"

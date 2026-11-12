@@ -162,6 +162,18 @@ export const r = {
   pill: 999,
 };
 
+// Corners for one row of a virtualised grouped list: the first row rounds its
+// top, the last its bottom, so the rows read as one card (a FlatList cannot
+// sit inside <Group>).
+export function groupedRowCorners(index: number, last: number) {
+  return {
+    borderTopLeftRadius: index === 0 ? r.lg : 0,
+    borderTopRightRadius: index === 0 ? r.lg : 0,
+    borderBottomLeftRadius: index === last ? r.lg : 0,
+    borderBottomRightRadius: index === last ? r.lg : 0,
+  };
+}
+
 export const space = { xs: 6, sm: 8, md: 10, lg: 12, xl: 14, xxl: 16, xxxl: 20 };
 
 // iOS has no generic "monospace" alias.

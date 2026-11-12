@@ -56,6 +56,8 @@
     "vaultKeywords": "vault note to self notes personal storage private encrypted files drive locker safe",
     "diagnosticsName": "Diagnostics",
     "diagnosticsKeywords": "diagnostics log logs debug support troubleshoot report problem error",
+    "openSourceName": "Open Source Licenses",
+    "openSourceKeywords": "open source licenses license third party attribution notices credits libraries packages dependencies legal copyright",
     "copyHistoryName": "Copy Message History",
     "copyHistoryKeywords": "copy message history transfer backfill old messages devices sync move phone computer"
   },

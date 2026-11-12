@@ -539,3 +539,18 @@ jobs:
               starts with empty history.
             - There is no auto-update. Check <https://pollis.com/android> for
               new versions.
+
+  # #1832: the mobile app's SBOM, VEX and summary at
+  # cdn.pollis.com/releases/oss/mobile/. A `mobile-v*` tag marks the commit the
+  # store builds of that version came from too (the mobile-release skill); an
+  # iOS-only release dispatches oss-evidence.yml by hand instead.
+  oss-evidence:
+    needs: [build, publish]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/oss-evidence.yml
+    with:
+      product: mobile
+      ref: ${{ github.sha }}
+      version: v${{ needs.build.outputs.version }}
+    secrets: inherit
