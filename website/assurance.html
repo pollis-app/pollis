@@ -274,8 +274,9 @@
                   inbound listener, which is hyper 1.9 and does not use it.</td></tr>
               <tr><td><code>RUSTSEC-2026-0194</code><br /><code>RUSTSEC-2026-0195</code></td>
                 <td class="doc-td-dim"><code>quick-xml</code></td>
-                <td class="doc-td-dim">Every vulnerable instance is build-time code generation or dev-only. No
-                  runtime path parses untrusted XML.</td></tr>
+                <td class="doc-td-dim">Two instances are build-time code generation. The two the desktop app ships never parse untrusted XML:
+                  Windows notifications only escape text with it, and on macOS it reads only the app's own signed
+                  Info.plist.</td></tr>
             </tbody>
           </table>
         </div>

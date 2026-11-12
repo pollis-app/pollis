@@ -57,7 +57,7 @@
         known advisories against those packages that we have checked and found do not affect the product, with the
         reason; and a <strong>summary</strong> of both, which this page shows.
         <br /><br />
-        Each app also lists every package with its full licence text under Settings → Open source licenses.
+        The desktop and mobile apps also list every package with its full licence text: Settings → Open Source Licenses on desktop, Self → Open source licenses on mobile.
       </div>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -97,7 +97,7 @@ trivy sbom --vex pollis-desktop-v1.20.0.vex.json pollis-desktop-v1.20.0.cdx.json
           <li>
             <strong>Licences are checked on every change.</strong> A pull request that adds a Rust crate or an npm
             package under a licence not on the allow-list fails CI. The list is permissive licences, plus MPL-2.0,
-            which applies per file. Strong copyleft licences such as the GPL are not on it.
+            which applies per file, and the SIL Open Font License for bundled fonts. Strong copyleft licences such as the GPL are not on it.
           </li>
           <li>
             <strong>Advisories are checked on every change and weekly.</strong> A new RustSec advisory against a
