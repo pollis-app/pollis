@@ -79,15 +79,20 @@ ignore = [
     { id = "RUSTSEC-2026-0258", reason = "h2 0.3 empty-DATA-frame DoS; no 0.3 backport (fix is 0.4.16); linked only into libsql's outbound client to Turso, which negotiates HTTP/1.1 only (#1303), never on the DS's inbound listener (hyper 1.9, no h2)" },
 
     # quick-xml DoS (quadratic attribute scan / unbounded namespace alloc).
-    # Requires attacker-controlled XML. Every vulnerable instance in our tree is
-    # BUILD- or DEV-time only, never parsing untrusted runtime input:
+    # Requires attacker-controlled XML. No instance parses untrusted input:
     #   0.30.0  -> xcb build-dep (X11 protocol XML descriptions, build time)
-    #   0.37.5, 0.38.4 -> dev-dependencies only (test/tooling)
     #   0.39.2  -> wayland-scanner proc-macro (Wayland protocol codegen, build time)
-    # No runtime XML attack surface reaches these; the shipped app never feeds
-    # them hostile input. Parents pin <0.41 so no in-place bump is possible.
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
+    #   0.37.5  -> tauri-winrt-notification (Windows toasts), SHIPPED in the
+    #              desktop app, but it calls only `quick_xml::escape::escape` to
+    #              build the toast XML; it never parses XML.
+    #   0.38.4  -> plist (tauri, tauri-utils), SHIPPED in the desktop app; at
+    #              runtime it parses only the app's own signed Info.plist (tauri's
+    #              macOS restart path), never input from the network or users.
+    # #1832 found the two shipped instances (this note had called them
+    # dev-only); the verdict stands, and supply-chain/vex.json states it to
+    # customers. Parents pin <0.41 so no in-place bump is possible.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml: build-time (xcb/wayland-scanner) or, in the desktop app, escape-only (winrt toasts) / own signed Info.plist only (plist); no untrusted-XML path; parents pin <0.41" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml: build-time (xcb/wayland-scanner) or, in the desktop app, escape-only (winrt toasts) / own signed Info.plist only (plist); no untrusted-XML path; parents pin <0.41" },
 
     # #454 carried NINE libcrux ignores in two clusters. #668 removed both, and
     # neither by re-arguing reachability — the crates left the graph:

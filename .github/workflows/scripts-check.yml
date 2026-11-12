@@ -146,6 +146,11 @@ jobs:
       - name: Action-pin check catches each mutable shape
         run: ./scripts/test-check-action-pins.sh
 
+      # #1832: the open-source generator's licence logic (the JS gate trusts it),
+      # its VEX version ranges and its npm walk. The runner's own Node runs it.
+      - name: oss-inventory unit tests
+        run: node --test scripts/test-oss-inventory.mjs
+
       # And that the same checker refuses a credential in a release build job's
       # environment. The account-wide R2 write key and the LiveKit API secret sat
       # in every build job's $GITHUB_ENV — readable by every build.rs, proc-macro,
