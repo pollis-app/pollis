@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-12T00:34:57Z",
+  "generated_at": "2026-11-12T00:35:36Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
@@ -23,8 +23,8 @@
       "event": "workflow_dispatch",
       "run_id": "43117782803",
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/43117782803",
-      "classification": null,
-      "evidence": null
+      "classification": "false_red",
+      "evidence": "No comparison was performed: the rebuild was never attempted. v1.19.9's release run went red in attest-and-log during the 2026-11-11 ubuntu.com DNS outage, so its leaves were only written by the attest-release.yml backfill at 16:57 UTC, after that day's 14:42 transparency-publish. This dispatch found v1.19.9 absent from the binaries tree and stopped at verify-log-inclusion, as designed. After a manual transparency-publish (43124687727) put it in the tree, run 43126114035 rebuilt the Linux AppImage and reproduced the logged payload."
     },
     {
       "tag": "v1.19.9",
