@@ -24,7 +24,7 @@
  *     --list            the dimensions, their lanes, checkers and procedures
  *     --bump <dims> [--by <name>] [--at <ref>]   record a finished sweep: set each comma-separated dimension's ledger
  *                       entry to <ref> (default: where HEAD left origin/main, since PRs are squash-merged), today
- *     --root <dir>      run against another tree (the self-test)
+ *     --root <dir>      run against another tree (the self-test); --list-files prints what the registry check reads
  * Exit status: 1 if a checker or the registry check failed, 2 on bad usage, else 0. --summary always exits 0.
  */
 
@@ -50,7 +50,7 @@ for (let i = 0; i < argv.length; i++) {
     positional.push(a);
   }
 }
-const KNOWN_FLAGS = new Set([...VALUE_FLAGS, "--quick", "--no-checks", "--summary", "--json", "--list", "--help", "-h"]);
+const KNOWN_FLAGS = new Set([...VALUE_FLAGS, "--list-files", "--quick", "--no-checks", "--summary", "--json", "--list", "--help", "-h"]);
 for (const k of Object.keys(opts)) {
   if (!KNOWN_FLAGS.has(k)) {
     usage(`unknown flag ${k}`);
@@ -884,6 +884,25 @@ if (opts["--list"]) {
     const l = ledger[d.id];
     console.log(`${" ".repeat(24)}last swept: ${l ? `${l.sha.slice(0, 8)} ${l.date} by ${l.by}` : "never"}   procedure: /pre-release-sweeps § ${d.id}`);
   }
+  process.exit(0);
+}
+
+// --list-files: every file the registry check reads (the self-test copies exactly these)
+if (opts["--list-files"]) {
+  const pats = [
+    ...(surfaces?.registration?.globs ?? []),
+    ...Object.values(surfaces?.content ?? {}).flatMap(contentFiles),
+    ...Object.keys(surfaces?.internal ?? {}),
+    ...Object.values(surfaces?.features ?? {}).flatMap((f) => f.paths ?? []),
+  ];
+  const fixed = [SURFACES_PATH, LEDGER_PATH, "scripts/claims.json", "scripts/facts.json"];
+  const out = new Set(fixed.filter(exists));
+  for (const f of tracked()) {
+    if (matchesAny(pats, f) && exists(f)) {
+      out.add(f);
+    }
+  }
+  console.log([...out].sort().join("\n"));
   process.exit(0);
 }
 
