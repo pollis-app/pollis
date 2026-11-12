@@ -10,7 +10,7 @@ import { useSegments } from "expo-router";
 import { isRoomOpen, subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import { catchUpTargets, roomCatchUpTarget } from "../lib/messageWake";
-import { dmQueryKeys, refreshDMActivity, useDMChannels } from "./queries/useDMChannels";
+import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
 import { groupQueryKeys, useUserGroupsWithChannels } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
 import {
@@ -86,20 +86,13 @@ export function useInboxRealtime() {
           if (!id) {
             break;
           }
-          const kind = event.channel_id ? "channel" : "dm";
-          // A message sent or received moves its DM to the top (#1838).
-          void ingestRef.current(id, kind).then(() =>
-            kind === "dm" ? refreshDMActivity(qc, userId, [id]) : undefined,
-          );
+          void ingestRef.current(id, event.channel_id ? "channel" : "dm");
           break;
         }
         case "realtime_reconnected": {
           const target = roomCatchUpTarget(event.room, groupsRef.current, dmsRef.current);
           if (target) {
-            // What the outage held back moves its DM too (#1838).
-            void ingestRef.current(target.id, target.kind).then(() =>
-              target.kind === "dm" ? refreshDMActivity(qc, userId, [target.id]) : undefined,
-            );
+            void ingestRef.current(target.id, target.kind);
           }
           void flushOutbox(qc);
           // #1628: reads made elsewhere during the outage; their nudge was lost too.
@@ -233,9 +226,6 @@ export function useInboxRealtime() {
         catchUpTargets(groupsRef.current, dmsRef.current),
         (id, kind) => ingestRef.current(id, kind),
         () => invoke("reconcile_backstop_all", { userId: resumedUser }),
-      ).then(() =>
-        // What arrived while away re-sorts the DM list (#1838).
-        refreshDMActivity(qcRef.current, resumedUser, dmsRef.current.map((d) => d.id)),
       );
       void flushOutbox(qcRef.current);
     });
@@ -260,9 +250,6 @@ export function useInboxRealtime() {
       catchUpTargets(groupsRef.current, dmsRef.current),
       (id, kind) => ingestRef.current(id, kind),
       () => invoke("reconcile_backstop_all", { userId: landedUser }),
-    ).then(() =>
-      // What arrived while the app was closed re-sorts the DM list (#1838).
-      refreshDMActivity(qcRef.current, landedUser, dmsRef.current.map((d) => d.id)),
     );
   }, [inApp, groupsLoaded, dmsLoaded, signedInId]);
 

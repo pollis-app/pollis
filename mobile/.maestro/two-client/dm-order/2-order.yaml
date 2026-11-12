@@ -11,6 +11,15 @@ tags:
 # 3. The device sends into B, now the older one: back on the list, B is on top
 #    again, for the sender.
 
+# Bring the app forward if the wait for the peers left it behind, unlocking if so.
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
 - tapOn:
     id: "tab-direct"
 - extendedWaitUntil:

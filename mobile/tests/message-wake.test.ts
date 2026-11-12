@@ -18,10 +18,7 @@ test("a wake ingests and re-reads Rust's counts; it never bumps a badge or reads
     realtime.indexOf('case "new_message"'),
     realtime.indexOf('case "realtime_reconnected"'),
   );
-  assert.match(wake, /const kind = event\.channel_id \? "channel" : "dm";/);
-  assert.match(wake, /ingestRef\.current\(id, kind\)/);
-  // The DM list's re-sort after it (#1838) reads only the order, never a badge.
-  assert.match(wake, /refreshDMActivity\(qc, userId, \[id\]\)/);
+  assert.match(wake, /ingestRef\.current\(id, event\.channel_id \? "channel" : "dm"\)/);
   assert.doesNotMatch(wake, /incrementUnread|read_last_messages/);
   assert.doesNotMatch(read("stores/appStore.ts"), /incrementUnread/);
   // The ingest itself re-reads the counts.

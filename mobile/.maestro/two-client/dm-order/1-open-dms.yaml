@@ -21,7 +21,21 @@ tags:
 - extendedWaitUntil:
     visible: "Start DM with @${PEER_A_HANDLE}"
     timeout: 20000
-- tapOn: "Start DM with @${PEER_A_HANDLE}"
+- tapOn:
+    id: "row-user-.*"
+# On Android the first tap can land while the search's keyboard is closing; tap again if so.
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 8000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "row-user-.*"
+    commands:
+      - tapOn:
+          id: "row-user-.*"
 - extendedWaitUntil:
     visible:
       id: "input-composer"
@@ -52,7 +66,21 @@ tags:
 - extendedWaitUntil:
     visible: "Start DM with @${PEER_B_HANDLE}"
     timeout: 20000
-- tapOn: "Start DM with @${PEER_B_HANDLE}"
+- tapOn:
+    id: "row-user-.*"
+# On Android the first tap can land while the search's keyboard is closing; tap again if so.
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 8000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "row-user-.*"
+    commands:
+      - tapOn:
+          id: "row-user-.*"
 - extendedWaitUntil:
     visible:
       id: "input-composer"

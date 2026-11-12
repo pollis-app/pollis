@@ -16,7 +16,7 @@ import type { MessageAttachment } from "../../types";
 import { searchQueryKeys } from "./useSearch";
 import { refreshUnread } from "./useUnread";
 import { keyChangeNoticeKeys } from "./useSafety";
-import { bumpDMActivity } from "./useDMChannels";
+import { bumpDMActivity, refreshDMActivity } from "./useDMChannels";
 import { aliasAttachment } from "../../lib/media/viewer";
 import {
   outgoingAttachments,
@@ -797,6 +797,11 @@ export function useIngestConversation() {
         });
         queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
         queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+        // What the ingest stored moves its DM to the top at once (#1838); the persisted feed
+        // covers rows stored by other paths (Android's push fetch).
+        if (kind === "dm") {
+          void refreshDMActivity(queryClient, userId, [conversationId]);
+        }
         // Any ingest may have re-pinned a changed key (#1605); the notices are local, so cheap.
         queryClient.invalidateQueries({ queryKey: keyChangeNoticeKeys.all });
         // Badges come from Rust's counts after every ingest, never a local bump (#1628).
