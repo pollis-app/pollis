@@ -733,9 +733,15 @@
         "facts"
       ]
     },
+    "website/copy.js": {
+      "kind": "website-asset",
+      "about": "The site's one copy-to-clipboard button (data-copy / data-copy-from), used by the index install commands and published hashes and the artifacts page's copy chips (#1731)",
+      "source": "website/copy.js",
+      "checked_by": []
+    },
     "website/script.js": {
       "kind": "website-asset",
-      "about": "Shared page script on every website page (copy chips, nav)",
+      "about": "Shared page script on every website page (the DotMatrix background animation)",
       "source": "website/script.js",
       "checked_by": []
     },
